@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "http://127.0.0.1:9090/context7/mcp"
+    }
+  }
+}

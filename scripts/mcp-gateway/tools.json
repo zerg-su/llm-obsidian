@@ -1,0 +1,3 @@
+{
+  "_comment": "Version pins for PyPI children installed via `uv tool install` (mcp-gateway.sh sync-tools / update). The base install has none: context7 is a hosted url-child with no local process. Add entries as {\"<pypi-package>\": {\"version\": \"X.Y.Z\"}} when you add uv-tool-based stdio children."
+}
