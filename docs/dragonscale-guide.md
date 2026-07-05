@@ -1,6 +1,6 @@
 # DragonScale Memory Guide
 
-DragonScale Memory — опциональное расширение `claude-obsidian`. Добавляет conservative-helpers для log rollups, стабильных адресов страниц, lint'а duplicate-страниц, frontier topic-suggestion. Начните с [docs/install-guide.md](./install-guide.md). Для design-спеки и rationale — [wiki/concepts/DragonScale Memory.md](../wiki/concepts/DragonScale%20Memory.md).
+DragonScale Memory — опциональное расширение `llm-obsidian`. Добавляет conservative-helpers для log rollups, стабильных адресов страниц, lint'а duplicate-страниц, frontier topic-suggestion. Начните с [README](../README.ru.md). Для design-спеки и rationale — [wiki/concepts/DragonScale Memory.md](../wiki/concepts/DragonScale%20Memory.md).
 
 Эта страница близка к shipped-поведению в `v1.6.0`. Объясняет что setup создаёт, что каждый механизм фактически делает, что ему нужно, и как безопасно его отключить без удаления репо.
 

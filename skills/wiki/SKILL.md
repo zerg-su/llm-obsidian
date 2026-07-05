@@ -39,7 +39,7 @@ Full skill catalog and trigger phrasebook: [[daily-pipeline-guide]] sections «S
 
 ## SCAFFOLD operation (vault bootstrap)
 
-Trigger: user describes what a new vault is for (NOT this existing claude-obsidian vault — that's already scaffolded).
+Trigger: user describes what a new vault is for (NOT this existing llm-obsidian vault — that's already scaffolded).
 
 Steps:
 
@@ -102,8 +102,6 @@ NOT for: general coding questions, things already in current project files.
 
 ## See also
 
-- [[daily-pipeline-guide]] — full workflow + skill catalog
-- [[2026-05-22-claude-obsidian-optimization-review-iter-2]] — iter-2 implementation summary
 - `references/modes.md` — 6 vault modes for SCAFFOLD operation
 - `references/css-snippets.md` — visual customization
 - `references/git-setup.md` — git initialization

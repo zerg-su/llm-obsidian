@@ -24,7 +24,7 @@ related:
 
 # Wiki Index
 
-Last updated: 2026-04-26 | Контекст: чистый русский fork плагина
+Last updated: 2026-07-05 | Контекст: свежий вольт из шаблона llm-obsidian
 
 Navigation: [[overview]] | [[log]] | [[hot]] | [[dashboard]] | [[Wiki Map]] | [[getting-started]]
 
@@ -67,6 +67,13 @@ Navigation: [[overview]] | [[log]] | [[hot]] | [[dashboard]] | [[Wiki Map]] | [[
 
 - [[meta/dashboard]] — live Dataview-запросы по всему вольту
 - [[Wiki Map]] — визуальная карта вольта (canvas)
+
+---
+
+## Рабочие папки
+
+Листинги генерятся автоматически (reindex `--folder-indexes`) в `_index.md` каждой папки:
+[[concepts/_index|concepts]] · [[entities/_index|entities]] · [[sources/_index|sources]] · [[comparisons/_index|comparisons]] · [[questions/_index|questions]] · [[runbooks/_index|runbooks]] · [[decisions/_index|decisions]] · [[goals/_index|goals]] · [[routines/_index|routines]] · [[daily/_index|daily]] · [[plans/_index|plans]] · [[folds/_index|folds]]
 
 ---
 
