@@ -1,0 +1,77 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x .claude/hooks/skill-router.sh ] && .claude/hooks/skill-router.sh || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x .claude/hooks/command-capture.sh ] && .claude/hooks/command-capture.sh || true"
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x .claude/hooks/plan-capture.sh ] && .claude/hooks/plan-capture.sh || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f wiki/hot.md ] && cat wiki/hot.md || true"
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x .claude/hooks/session-nudge.sh ] && .claude/hooks/session-nudge.sh || true"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f wiki/hot.md ] && cat wiki/hot.md || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x .claude/hooks/stop.sh ] && .claude/hooks/stop.sh || true"
+          }
+        ]
+      }
+    ]
+  }
+}

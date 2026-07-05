@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "description": "Single source of truth for the UserPromptSubmit skill-router. skill_rules: regex patterns -> soft skill hints. agent_rules: same for custom sub-agents (empty in the base install).",
+  "skill_rules": [
+    {
+      "skill": "save",
+      "patterns": [
+        "(?i)\\b(сохрани|зафайл(ь|и)|зафайли|file (this|that)|save (this|that))\\b",
+        "(?i)\\bзапиши (это|в вольт|в вики)\\b",
+        "(?i)\\bдобавь в (вольт|вики)\\b"
+      ],
+      "hint": null
+    },
+    {
+      "skill": "close",
+      "patterns": [
+        "(?i)\\b/close\\b",
+        "(?i)\\bсохрани и (закрой|выйди|заверши)\\b",
+        "(?i)\\bзаверши сесси",
+        "(?i)\\bзакрой сесси",
+        "(?i)\\bсейв и клоуз\\b",
+        "(?i)\\bsave and (close|exit|quit)\\b",
+        "(?i)\\bclose (the )?session\\b"
+      ],
+      "hint": "Run /save (as-is) then gracefully /exit THIS cmux surface; commit preserved by Stop hook, other sessions untouched"
+    },
+    {
+      "skill": "dispatch",
+      "patterns": [
+        "(?i)\\bпараллельн(о|ую) задач(у|а)\\b",
+        "(?i)\\b/?(dispatch|task[- ]?split)\\b",
+        "(?i)\\bworktree\\b",
+        "(?i)\\bразверни задачу\\b",
+        "(?i)\\bспавн (задачу|task)\\b",
+        "(?i)\\b(сделай )?диспатч\\b"
+      ],
+      "hint": "Short resolve only, deep work — в task-split'е"
+    },
+    {
+      "skill": "wiki-query",
+      "patterns": [
+        "(?i)\\bчто (ты )?знаешь про\\b",
+        "(?i)\\bquery:\\b",
+        "(?i)\\bпоищи в вики\\b",
+        "(?i)\\bпосмотри в вольт\\b"
+      ],
+      "hint": null
+    },
+    {
+      "skill": "find-session",
+      "patterns": [
+        "(?i)\\bнайди\\s+похож\\w*\\s+сесси\\w*\\b",
+        "(?i)\\bбыло\\s+(ли\\s+)?подобн\\w*\\b",
+        "(?i)\\b(прошл|похож)\\w*\\s+сесси\\w*\\b",
+        "(?i)\\bsimilar past (task|session)\\b",
+        "(?i)\\b/?find[- ]?session\\b",
+        "(?i)\\bcontext from earlier\\b",
+        "(?i)\\bearlier sessions?\\b",
+        "(?i)\\b(контекст из )?прошл\\w+ сесси\\w*\\b"
+      ],
+      "hint": "Boring retrieval: wiki sessions: + history.jsonl + session-to-pages.jsonl"
+    },
+    {
+      "skill": "draft",
+      "patterns": [
+        "(?i)\\bсформируй\\s+(\\d+\\s+вариант\\w*\\s+)?ответ\\w*\\b",
+        "(?i)\\bкак\\s+(можно\\s+)?ответить\\b",
+        "(?i)\\bdraft\\s+(a |the )?(reply|comment|response|answer|message|note|ответ|комментарий)\\b",
+        "(?i)\\bпомоги\\s+(ответить|написать ответ)\\b",
+        "(?i)\\b(сформируй|подготовь)\\s+\\d*\\s*(вариант\\w*\\s+)?(ответ\\w*|коммент\\w*)\\b"
+      ],
+      "hint": "Communication ADVISOR — 2-3 варианта drafts + историч-штрихи; user пушит сам"
+    },
+    {
+      "skill": "daily",
+      "patterns": [
+        "(?i)\\bстатус за день\\b",
+        "(?i)\\bстатус для трекера\\b",
+        "(?i)\\bdaily status\\b"
+      ],
+      "hint": null
+    },
+    {
+      "skill": "journal",
+      "patterns": [
+        "(?i)\\b/?journal\\b",
+        "(?i)\\bдневник\\b",
+        "(?i)\\bоткрой\\s+(сегодняшний\\s+)?дневник\\b",
+        "(?i)\\bплан\\s+на\\s+(сегодня|завтра|послезавтра|понедельник|вторник|сред[уы]|четверг|пятниц[уы]|суббот[уы]|воскресенье|\\d)",
+        "(?i)\\bзапиши\\s+на\\s+(завтра|послезавтра|\\d|понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)",
+        "(?i)\\bнапомни\\s+(в|на)\\s+\\S",
+        "(?i)\\bперенеси\\s+невыполненное\\b",
+        "(?i)\\bотметь\\b.{1,40}\\bсделанн",
+        "(?i)\\bjournal\\s+(plan|remind|today|check|sessions)\\b",
+        "(?i)\\b(plan|remind)\\s+(for\\s+)?(tomorrow|today)\\b",
+        "(?i)\\bcarry\\s*over\\b",
+        "(?i)\\bкарт\\w*\\s+сесси\\w*\\b",
+        "(?i)\\bкакие\\s+сесси\\w*\\b.{0,20}\\bсегодня\\b"
+      ],
+      "hint": "Date-keyed journal wiki/daily/ (Планы/Напоминания/Инциденты/Сделано). Modes: today/plan/remind/check. Dateless 'remind me to' → /backlog; ситуативное 'что сегодня' → /morning; EOD-статус → /daily"
+    },
+    {
+      "skill": "backlog",
+      "patterns": [
+        "(?i)\\bне\\s+забы(ть|вать|л)\\b",
+        "(?i)\\bхочу\\s+запомнить\\b",
+        "(?i)\\bв\\s+TODO[:\\s]",
+        "(?i)\\bбэклог\\b",
+        "(?i)\\bbacklog\\b",
+        "(?i)\\bremind me to\\b",
+        "(?i)\\bбыло бы хорошо\\b"
+      ],
+      "hint": "Single file wiki/backlog.md, append-only. Modes: add/list/promote. Promote chains into /save (wiki goal/question) or drop"
+    },
+    {
+      "skill": "wiki-ingest",
+      "patterns": [
+        "(?i)\\bingest (this|section|<|/)\\b",
+        "(?i)\\bзагрузи (источник|это в вики)\\b",
+        "(?i)\\bобработай (этот|это) (файл|источник)\\b",
+        "(?i)\\bразбери и зафайль\\b"
+      ],
+      "hint": null
+    },
+    {
+      "skill": "learn",
+      "patterns": [
+        "(?i)\\b/learn\\b",
+        "(?i)\\bучимся\\b",
+        "(?i)\\bдавай (по)?учиться\\b",
+        "(?i)\\bквиз(?:а|ы)? по\\b",
+        "(?i)\\bпроверь меня\\b",
+        "(?i)\\bпрогресс обучени",
+        "(?i)\\bquiz me\\b",
+        "(?i)\\bstudy module\\b",
+        "(?i)\\bмодул[ьея] [AB]\\d\\b"
+      ],
+      "hint": "Интерактивный тьютор AI Architect Curriculum (wiki/learning/): study/quiz/practice/progress"
+    },
+    {
+      "skill": "distill-runbook",
+      "patterns": [
+        "(?i)\\b/?distill[- ]?runbook\\b",
+        "(?i)\\bранбук из (сессии|команд)\\b",
+        "(?i)\\bсделай ранбук из\\b",
+        "(?i)\\bдистиллируй ранбук\\b",
+        "(?i)\\bсохрани команды сессии\\b",
+        "(?i)\\brunbook from (this )?session\\b",
+        "(?i)\\bsave session commands\\b"
+      ],
+      "hint": "Session command-log → human-executable runbook (AI-outage resilience). Шум фильтруется, гочи из failed команд"
+    }
+  ],
+  "agent_rules": []
+}
