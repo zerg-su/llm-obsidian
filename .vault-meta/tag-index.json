@@ -1,0 +1,138 @@
+{
+  "agent-memory": [
+    "wiki/concepts/Persistent Wiki Artifact.md"
+  ],
+  "ai-researcher": [
+    "wiki/entities/Andrej Karpathy.md"
+  ],
+  "architecture": [
+    "wiki/concepts/DragonScale Memory.md"
+  ],
+  "backlog": [
+    "wiki/concepts/cherry-picks.md"
+  ],
+  "brand": [
+    "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "cherry-picks": [
+    "wiki/concepts/cherry-picks.md"
+  ],
+  "comparison": [
+    "wiki/comparisons/Wiki vs RAG.md"
+  ],
+  "compatibility": [
+    "wiki/concepts/DragonScale on macOS.md"
+  ],
+  "concept": [
+    "wiki/concepts/Compounding Knowledge.md",
+    "wiki/concepts/DragonScale Memory.md",
+    "wiki/concepts/Hot Cache.md",
+    "wiki/concepts/LLM Wiki Pattern.md",
+    "wiki/concepts/_index.md"
+  ],
+  "context": [
+    "wiki/concepts/Hot Cache.md"
+  ],
+  "dashboard": [
+    "wiki/meta/dashboard.md"
+  ],
+  "design": [
+    "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "diagrams": [
+    "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "dragonscale": [
+    "wiki/concepts/DragonScale on macOS.md"
+  ],
+  "entity": [
+    "wiki/entities/Andrej Karpathy.md",
+    "wiki/entities/_index.md"
+  ],
+  "fractal": [
+    "wiki/concepts/DragonScale Memory.md"
+  ],
+  "hot-cache": [
+    "wiki/hot.md"
+  ],
+  "index": [
+    "wiki/comparisons/_index.md",
+    "wiki/concepts/_index.md",
+    "wiki/entities/_index.md",
+    "wiki/index.md",
+    "wiki/meta/_index.md",
+    "wiki/sources/_index.md"
+  ],
+  "install": [
+    "wiki/concepts/DragonScale on macOS.md"
+  ],
+  "knowledge-management": [
+    "wiki/comparisons/Wiki vs RAG.md",
+    "wiki/concepts/Compounding Knowledge.md",
+    "wiki/concepts/DragonScale Memory.md",
+    "wiki/concepts/Hot Cache.md",
+    "wiki/concepts/LLM Wiki Pattern.md",
+    "wiki/concepts/Persistent Wiki Artifact.md"
+  ],
+  "llm": [
+    "wiki/concepts/LLM Wiki Pattern.md"
+  ],
+  "llm-obsidian": [
+    "wiki/concepts/cherry-picks.md"
+  ],
+  "llm-wiki": [
+    "wiki/comparisons/Wiki vs RAG.md",
+    "wiki/concepts/Persistent Wiki Artifact.md",
+    "wiki/concepts/Query-Time Retrieval.md",
+    "wiki/concepts/Source-First Synthesis.md"
+  ],
+  "macos": [
+    "wiki/concepts/DragonScale on macOS.md"
+  ],
+  "memory": [
+    "wiki/concepts/DragonScale Memory.md"
+  ],
+  "meta": [
+    "wiki/concepts/_index.md",
+    "wiki/entities/_index.md",
+    "wiki/getting-started.md",
+    "wiki/hot.md",
+    "wiki/index.md",
+    "wiki/meta/dashboard.md",
+    "wiki/overview.md",
+    "wiki/sources/_index.md"
+  ],
+  "obsidian": [
+    "wiki/concepts/LLM Wiki Pattern.md"
+  ],
+  "onboarding": [
+    "wiki/getting-started.md"
+  ],
+  "overview": [
+    "wiki/overview.md"
+  ],
+  "person": [
+    "wiki/entities/Andrej Karpathy.md"
+  ],
+  "product-roadmap": [
+    "wiki/concepts/cherry-picks.md"
+  ],
+  "provenance": [
+    "wiki/concepts/Source-First Synthesis.md"
+  ],
+  "rag": [
+    "wiki/concepts/Query-Time Retrieval.md"
+  ],
+  "retrieval": [
+    "wiki/concepts/Query-Time Retrieval.md"
+  ],
+  "source": [
+    "wiki/sources/_index.md"
+  ],
+  "svg": [
+    "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "synthesis": [
+    "wiki/concepts/Source-First Synthesis.md"
+  ]
+}
