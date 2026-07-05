@@ -1,0 +1,163 @@
+# Obsidian
+# workspace.json is intentionally tracked — ships with pre-configured graph view
+# .obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/plugins/*/data.json
+!.obsidian/plugins/calendar/data.json
+!.obsidian/plugins/thino/data.json
+
+# Excalidraw main.js is 8MB — downloaded by setup-vault.sh, not tracked in git
+.obsidian/plugins/obsidian-excalidraw-plugin/main.js
+
+# Large binary assets — add your own images to _attachments/images/
+# Uncomment the line below to exclude images from git (recommended for large vaults)
+# _attachments/images/
+.smart-connections/
+.obsidian-git-data
+.trash/
+
+# System
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+
+# Local secrets
+.env
+.env.local
+*.local.md
+
+# Private keys and credentials (defense-in-depth, catches accidental drops)
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+credentials*
+secrets.y*ml
+auth.json
+
+# Personal files dropped into vault root by Obsidian (don't commit these)
+WIKI*.md
+PROMPT.md
+Welcome.md
+*.tmp.*
+Obsidian vault*
+Untitled.canvas
+Cosmic Brain*.gif
+Cosmic Brain*.png
+Untitled *.canvas
+Untitled.base
+*.base
+# Track our committed dashboard.base (Bases dashboard shipped with the vault)
+!wiki/meta/dashboard.base
+
+# Scratch canvases and personal vault files
+Banana Images.canvas
+Demo Images.canvas
+*Images.canvas
+
+# Daily notes created by Calendar plugin
+????-??-??.md
+
+# Video and large media files
+*.mkv
+*.mp4
+*.mov
+*.avi
+
+# Transcripts (copyright — do not commit)
+*Trascipt*.txt
+*Transcript*.txt
+
+# Personal images dropped in vault root
+cosmic code.png
+_attachments/code-genesis.png
+_attachments/neural-voyager.png
+_attachments/the-frontier.png
+
+# Excalidraw drawings (personal, user-specific)
+Excalidraw/
+
+# Loose brand/personal GIFs and images in vault root (not _attachments/)
+Claude SEO*.gif
+Claude SEO*.png
+
+# Private Skool Hub assets — not for public repos
+_attachments/images/skool-hub/
+
+# Archive of old versions (cosmic-brain, GIF assets)
+claude-obsidian-archive/
+
+# User-specific attachments
+_attachments/
+
+# Claude Code per-machine local settings (user-specific overrides; project-level
+# settings live in .claude/settings.json which IS tracked)
+.claude/settings.local.json
+
+# DragonScale runtime lockfiles and local caches (flock + embedding cache; state files like counter.txt and thresholds.json ARE tracked)
+.vault-meta/.address.lock
+.vault-meta/.tiling.lock
+.vault-meta/tiling-cache.json
+.vault-meta/tiling-cache.*.tmp
+.vault-meta/router-hits.jsonl
+.vault-meta/router-hits.jsonl.1
+# Command-capture log (sanitized, but commands stay out of git anyway)
+.vault-meta/command-log.jsonl
+.vault-meta/command-log.jsonl.1
+# Stop-hook latency telemetry (local timings, rotated by the hook itself)
+.vault-meta/stop-hook-latency.jsonl
+.vault-meta/stop-hook-latency.jsonl.1
+.vault-meta/.vault-write.lock
+# Stop-hook cross-session lock + sparse BM25 index (derived, rebuilt per Stop)
+.vault-meta/.stop-hook.lock
+.vault-meta/.bm25.lock
+.vault-meta/bm25/
+# Local auto-commit opt-out flag (per-machine, never ship via someone's commit)
+.vault-meta/auto-commit.disabled
+
+# DevOps-specific secret containers (defense-in-depth for MG vault)
+# Terraform state can hold plaintext secrets even if the .tf files don't
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+# Auto-applied tfvars often contain credentials; require explicit opt-in via review
+*.auto.tfvars
+*.auto.tfvars.json
+# Kubeconfig and cluster credentials
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+# Ansible vault, SOPS, age, sealed-secrets artifacts
+*.vault
+*.sops.yaml
+*.sops.yml
+*.enc.yaml
+*.enc.yml
+*.age
+# AWS / GCP / Azure local credentials
+.aws/credentials
+.aws/config
+gcloud-credentials*.json
+azure-credentials*.json
+# Helm secrets
+charts/*/secrets.yaml
+secrets/
+# Generic dotenv variants
+.env*
+!.env.example
+!.env.sample

@@ -1,0 +1,5 @@
+{"q": "REPLACE ME: a question as you would actually ask it", "expect": ["wiki/concepts/LLM Wiki Pattern.md"], "note": "template: expect = vault-relative paths, hit when ANY appears in top-10"}
+{"q": "какой паттерн лежит в основе этой вики", "expect": ["wiki/concepts/LLM Wiki Pattern.md"], "note": "example: RU paraphrase of a concept page"}
+{"q": "why does a wiki compound in value over time", "expect": ["wiki/concepts/Compounding Knowledge.md"], "note": "example: EN paraphrase"}
+{"q": "механизмы памяти dragonscale фолды адреса", "expect": ["wiki/concepts/DragonScale Memory.md"], "note": "example: keyword query with entities"}
+{"q": "кто такой карпаты", "expect": ["wiki/entities/Andrej Karpathy.md"], "note": "example: entity lookup. Grow this file as your vault grows: add queries AFTER any ranking tuning (held-out discipline) and run make bench-retrieval"}

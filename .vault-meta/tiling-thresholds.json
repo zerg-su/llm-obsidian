@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "model": "bge-m3",
+  "bands": {
+    "error": 0.92,
+    "review": 0.85
+  },
+  "calibrated": false,
+  "notes": "Default bands for bge-m3, transferred from a ~330-page bilingual (RU/EN) vault calibration (39 labeled pairs, 2026-07-05): error 0.92 catches copy-paste near-duplicates, review 0.85 sits at the similarity distribution knee. Bands are a property of the embedding model SCALE, so they transfer reasonably between vaults of the same model, but recalibrate once your vault passes ~100 pages: run tiling-check --report, label the review-band pairs (duplicate / intentional / related), and adjust so the error band isolates true duplicates. If you switch embedding models, recalibration is MANDATORY (score distributions differ wildly between models)."
+}
