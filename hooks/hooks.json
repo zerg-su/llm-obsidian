@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/stop.sh ] && .claude/hooks/stop.sh || true"
+            "command": "mkdir -p .vault-meta; [ -x .claude/hooks/stop.sh ] && LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1 .claude/hooks/stop.sh > .vault-meta/stop-hook-last.log 2>&1 || true"
           }
         ]
       }

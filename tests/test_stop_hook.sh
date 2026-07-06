@@ -20,6 +20,20 @@ pass=0; fail=0; failures=()
 ok()  { pass=$((pass+1)); printf '  OK   %s\n' "$1"; }
 bad() { fail=$((fail+1)); failures+=("$1: $2"); printf '  FAIL %s — %s\n' "$1" "$2"; }
 
+# ---------- case 0: plugin Stop hook must run under Codex ----------
+python3 - "$REPO_ROOT/hooks/hooks.json" <<'PY' >/dev/null 2>&1
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+cmd = data["hooks"]["Stop"][0]["hooks"][0]["command"]
+assert "LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1" in cmd
+assert "CODEX_THREAD_ID" not in cmd
+assert "CODEX_CI" not in cmd
+assert "CODEX_MANAGED_BY_NPM" not in cmd
+assert "stop-hook-last.log" in cmd
+assert ">" in cmd
+PY
+[[ "$?" == "0" ]] && ok "json-codex-stop-enabled" || bad "json-codex-stop-enabled" "Stop hook still no-ops under Codex"
+
 # flock binary (same fallback chain as the hook itself)
 FLOCK_BIN="$(command -v flock 2>/dev/null || true)"
 [ -z "$FLOCK_BIN" ] && [ -x /opt/homebrew/opt/util-linux/bin/flock ] && FLOCK_BIN=/opt/homebrew/opt/util-linux/bin/flock

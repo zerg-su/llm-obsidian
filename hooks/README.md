@@ -2,9 +2,12 @@
 
 Plugin hooks for the llm-obsidian wiki vault. All hooks are defined in `hooks.json`; the scripts live in `.claude/hooks/`.
 
-These hooks are Claude Code specific. Codex uses the generated `.codex-plugin/`
-skill package and does not run `.claude/hooks/`; every shell hook has a
-`CODEX_THREAD_ID`/parent-process guard so an accidental Codex launch no-ops.
+Most hooks are Claude Code specific and keep a Codex guard. The `Stop` hook is
+the exception: Codex plugin hooks also use it for the turn-end reindex and
+auto-commit pipeline, so `hooks.json` runs `stop.sh` with
+`LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`. Codex requires hook stdout to be empty or
+JSON, so the plugin command redirects `stop.sh` output to
+`.vault-meta/stop-hook-last.log`.
 
 ## Events
 
@@ -23,7 +26,7 @@ skill package and does not run `.claude/hooks/`; every shell hook has a
 - **One commit per turn.** Earlier generations auto-committed per `Write|Edit` tool call; the `Stop` hook replaced that: cleaner history, indexes regenerate once, and the flock closes the race between parallel sessions.
 - **Hooks never fail the turn.** Every entry is wrapped in `[ -x ... ] && ... || true`; scripts exit 0 even on internal errors.
 - **Non-vault sessions are safe.** Every hook feature-detects the vault (`wiki/hot.md`, script presence), so installing the plugin globally does not break other projects.
-- **Codex sessions are safe.** Hooks exit immediately when `CODEX_THREAD_ID` or a Codex parent process is detected. Regression tests can opt back in with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`.
+- **Codex sessions are safe.** Prompt/session/tool hooks exit immediately when `CODEX_THREAD_ID` or a Codex parent process is detected. `Stop` intentionally opts back in with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1` so Codex saves wiki changes at turn end too; its output is captured in `.vault-meta/stop-hook-last.log` instead of stdout.
 
 ## Known Issue: Plugin Hooks STDOUT Bug
 

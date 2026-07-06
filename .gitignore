@@ -119,6 +119,7 @@ _attachments/
 # Stop-hook latency telemetry (local timings, rotated by the hook itself)
 .vault-meta/stop-hook-latency.jsonl
 .vault-meta/stop-hook-latency.jsonl.1
+.vault-meta/stop-hook-last.log
 .vault-meta/.vault-write.lock
 # Stop-hook cross-session lock + sparse BM25 index (derived, rebuilt per Stop)
 .vault-meta/.stop-hook.lock

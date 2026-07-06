@@ -63,13 +63,15 @@ compact status/cmux segment; `scripts/codex-limit-monitor.py --install` installs
 7. Validation: `scripts/validate-vault.py --summary` (caps, frontmatter,
    plans lifecycle). Tests: `make test` (hermetic, no network).
 
-## Write path (what happens on turn end in Claude Code)
+## Write path (what happens on turn end)
 
-The Claude Code Stop hook (`.claude/hooks/stop.sh`) reindexes `.vault-meta/`, rebuilds
-the BM25 index, refreshes dense embeddings incrementally, backs up agent
-memory, and auto-commits `wiki/ .raw/ .vault-meta/ .claude-memory/` under an
-flock (parallel sessions do not collide). Other agents can run the same
-script manually after writing pages.
+The Stop hook (`.claude/hooks/stop.sh`, registered through `hooks/hooks.json`)
+reindexes `.vault-meta/`, rebuilds the BM25 index, refreshes dense embeddings
+incrementally, backs up agent memory, and auto-commits
+`wiki/ .raw/ .vault-meta/ .claude-memory/` under an flock (parallel sessions do
+not collide). Claude Code runs it through the normal hook layer; Codex plugin
+hooks run the same script with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`. Other agents
+can run the same script manually after writing pages.
 
 Use `./scripts/current-session-id.sh` for provenance. It returns
 `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, then `unknown`.
