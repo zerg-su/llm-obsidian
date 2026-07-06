@@ -38,7 +38,7 @@ tags:
   - daily
 status: evergreen
 sessions:
-  - <CLAUDE_CODE_SESSION_ID>
+  - <SESSION_ID>
 ---
 
 # <DATE>
@@ -103,7 +103,7 @@ Parse the request into one mode. Free-form phrasing must work without exact synt
    mkdir -p "$DIR"
    ```
    If `$PAGE` does not exist, create it from the skeleton (substitute `<DATE>`=`$TODAY`,
-   `<CLAUDE_CODE_SESSION_ID>`=`$CLAUDE_CODE_SESSION_ID`). If it exists, leave content.
+   `<SESSION_ID>`=`./scripts/current-session-id.sh` output). If it exists, leave content.
 
 2. **Carryover.** Find the most recent PRIOR date page that has unchecked `- [ ]`
    lines under `## Планы` (scan back up to ~5 days so Monday picks up Friday):
@@ -151,7 +151,8 @@ Trigger: "на завтра X", "запиши на 3 мая X", "напомни 
      free-form). Defaults to today's page unless a date is given.
    - Dedup: skip if an identical-text item already exists in that section (Планы /
      Напоминания only).
-4. **Bump** the target page `updated:` to today's date and add `$CLAUDE_CODE_SESSION_ID`
+4. **Bump** the target page `updated:` to today's date and add the current session id
+   from `./scripts/current-session-id.sh`
    to `sessions:` if absent.
 5. **Confirm** one line: `→ wiki/daily/2026/05/2026-05-03.md · Планы · "<text>"`.
 

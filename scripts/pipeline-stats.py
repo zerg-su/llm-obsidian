@@ -86,7 +86,7 @@ def iter_jsonl(path: Path):
 
 
 def base_name(raw: str) -> str:
-    """Strip plugin prefix: 'claude-obsidian:save' -> 'save'."""
+    """Strip plugin prefix: 'llm-obsidian:save' -> 'save'."""
     return raw.split(":")[-1].strip().lstrip("/")
 
 

@@ -148,7 +148,7 @@ peer and an interested outsider.
      **Never** put `## Сессии` into the clipboard or any external write-up — it is
      internal navigation.
 7. **Bump frontmatter** of both files: on the date page — `updated` and add
-   `$CLAUDE_CODE_SESSION_ID` to `sessions:`; in `Daily Status Log.md` — `last_done`
+   current session id from `./scripts/current-session-id.sh` to `sessions:`; in `Daily Status Log.md` — `last_done`
    and `updated` = the entry date (otherwise the fields go stale).
 8. **Copy to clipboard.** Copy the **full** bullet list (from `## Сделано`) to the
    clipboard so the user can paste it wherever they report status. Write to a temp

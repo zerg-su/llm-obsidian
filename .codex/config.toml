@@ -1,0 +1,10 @@
+
+
+# BEGIN LLM-OBSIDIAN CODEX MCP (managed by scripts/mcp-gateway/codex-sync.py)
+# Source of truth: .mcp.json or .mcp.json.example plus .mcp-profiles/*.json.
+# Secrets stay in ~/.config/mcp-gateway/secrets.env behind the gateway.
+
+[mcp_servers.context7]
+url = "http://127.0.0.1:9090/context7/mcp"
+
+# END LLM-OBSIDIAN CODEX MCP

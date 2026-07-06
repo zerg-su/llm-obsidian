@@ -48,14 +48,14 @@ If no obvious plan block exists, ask the user to paste the plan or specify what 
 Run a single batched `Bash` call to gather:
 
 ```bash
-echo "session=${CLAUDE_CODE_SESSION_ID:-unknown}"
+echo "session=$(./scripts/current-session-id.sh)"
 echo "cwd=$PWD"
 echo "ts=$(date '+%Y-%m-%d-%H%M%S')"
 echo "date=$(date '+%Y-%m-%d')"
 ./scripts/allocate-address.sh
 ```
 
-- `session` — from `$CLAUDE_CODE_SESSION_ID` env (always set in Claude Code 2.x); fallback `unknown`.
+- `session` — from `./scripts/current-session-id.sh` (`CLAUDE_CODE_SESSION_ID` in Claude Code, `CODEX_THREAD_ID` in Codex); fallback `unknown`.
 - `cwd` — current working directory of this Claude session.
 - `ts` / `date` — timestamps.
 - DragonScale address — last line of stdout (`c-NNNNNN`).
@@ -141,7 +141,7 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 |---|---|
 | No plan discussed in this conversation | Ask user to paste / describe what to save. Do not invent content. |
 | Multiple plan candidates | Ask user which one (offer first H1 of each). |
-| `CLAUDE_CODE_SESSION_ID` not set | Use `manual-<YYYYMMDDHHMMSS>` so the field is never empty. |
+| current session id is `unknown` | Use `manual-<YYYYMMDDHHMMSS>` so the field is never empty. |
 | `wiki/plans/` directory missing | Create it (`mkdir -p wiki/plans`) and proceed. |
 | `allocate-address.sh` fails | Write file without `address:` field; tell user; wiki lint will flag it later. |
 | Plan content empty (e.g., user said "save plan" with nothing discussed) | Refuse — ask user to provide plan first. |

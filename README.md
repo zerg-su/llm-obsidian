@@ -4,7 +4,7 @@
 
 🇷🇺 **Читайте по-русски: [README.ru.md](README.ru.md)**
 
-Based on [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) by AgriciDaniel (an implementation of Andrej Karpathy's *LLM Wiki* pattern), heavily reworked: the retrieval stack, write path, hooks and MCP integration were redesigned and battle-tested for months as the daily working memory of a DevOps engineer before being extracted into this generic release. Claude Code is the supported agent today; the scripts are agent-agnostic and a Codex adapter is on the roadmap — which is why this is *llm*-obsidian, not *claude*-obsidian.
+Based on [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) by AgriciDaniel (an implementation of Andrej Karpathy's *LLM Wiki* pattern), heavily reworked: the retrieval stack, write path, hooks and MCP integration were redesigned and battle-tested for months as the daily working memory of a DevOps engineer before being extracted into this generic release. Claude Code and Codex CLI are supported first-class agents — which is why this is *llm*-obsidian, not *claude*-obsidian.
 
 ---
 
@@ -39,7 +39,7 @@ DragonScale Memory (fold rollups, deterministic `c-NNNNNN` page addresses, seman
 
 ## Quick start
 
-Requirements: macOS (Linux mostly works, launchd bits are macOS-only), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code), Python 3.9+, git. Optional: [ollama](https://ollama.com) for semantic retrieval (recommended), cmux for parallel tasks.
+Requirements: macOS (Linux mostly works, launchd bits are macOS-only), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) or Codex CLI, Python 3.9+, git. Optional: [ollama](https://ollama.com) for semantic retrieval (recommended), cmux for parallel tasks.
 
 ```bash
 # 1. Get the vault
@@ -109,13 +109,23 @@ Adding your own servers is a config edit (stdio children with `command`/`args`/`
 
 One caveat to know upfront: the gateway saves processes, RAM and cold starts — it does **not** shrink tool schemas in your context. Keep heavy, rarely-used servers in `.mcp-profiles/` (see the README there) and load them per-session with `claude --mcp-config`.
 
+For Codex, mirror the gateway HTTP pointers into TOML:
+
+```bash
+scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
+```
+
+This writes repo-local `.codex/config.toml`, removes duplicate llm-obsidian MCP
+servers from `~/.codex/config.toml`, and writes optional profile overlays such as
+`~/.codex/llm-obsidian-mcp.config.toml`.
+
 ## Skills
 
 | Group | Skills |
 |---|---|
 | Wiki core | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
 | Productivity | `/journal` (date-keyed planner), `/daily` (end-of-day status), `/backlog` (capture inbox), `/find-session`, `/draft` (reply advisor), `/distill-runbook` (session commands → copy-paste runbook), `/learn` (tutor over your notes), `/save-plan` |
-| Orchestration (needs cmux) | `/dispatch`, `/reap`, `/reap-send` |
+| Orchestration (needs cmux) | `/dispatch`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Reference | `obsidian-markdown`, `obsidian-bases` |
 
 A `UserPromptSubmit` router suggests the right skill from regex rules in `.claude/skill-rules.json` (soft hints, never mandatory); `session-nudge` surfaces overdue maintenance (lint age, fold due, stale backups, a skill-of-the-day tip).
@@ -130,9 +140,52 @@ make test          # address allocator, tiling, boundary, vault-write/validate,
 make test-gateway  # MCP gateway management layer (offline, fake MCP server)
 ```
 
+## Codex CLI
+
+Codex uses a generated local plugin marketplace instead of legacy skill symlinks:
+
+```bash
+python3 scripts/codex-adapter.py --apply
+scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
+codex plugin marketplace add "$(pwd)"
+codex plugin add llm-obsidian@llm-obsidian-codex
+```
+
+Start a new Codex thread after installing or updating. Invoke skills explicitly
+as `$llm-obsidian:save`, `$llm-obsidian:wiki-query`, `$llm-obsidian:close`, etc.
+Claude Code hooks remain Claude-specific; Codex can use the same skills and
+scripts, but does not run `.claude/hooks/`.
+
+Codex limit helpers are bundled too:
+
+```bash
+python3 scripts/codex-limit-monitor.py --install
+codex-limit-status --scope recent --once
+.codex/codex-limits-status.py --with-pct --compact
+```
+
+For cmux status integration, register `.codex/update-cmux-limits.sh` from your
+Codex `SessionStart`, `UserPromptSubmit`, and `Stop` hooks.
+
+## DCG Guard
+
+The repo ships a portable Destructive Command Guard policy and installer:
+
+```bash
+bin/setup-dcg.sh          # install dcg if missing, config, Codex + Claude hooks
+bin/setup-dcg.sh --check  # report local drift without writing
+bash scripts/dcg-test-suite.sh
+```
+
+The policy lives in `config/dcg/config.toml`; hook template in
+`.github/hooks/dcg.json`. The installer backs up existing hook/config files with
+`.bak-dcg-*` suffixes and merges only the `PreToolUse`/`Bash` dcg entry. The
+smoke suite validates the repo policy in an isolated temporary HOME by default;
+set `DCG_TEST_USE_USER_CONFIG=1` to test the machine's live allowlist/config.
+
 ## Roadmap
 
-- **Codex adapter**: the scripts are already agent-agnostic; port the hook layer (`hooks.json` is Claude Code specific) and validate the skill contracts under Codex.
+- **Codex hook parity**: skills and MCP sync are supported; the automatic Claude hook layer (`SessionStart`, `PostToolUse`, `Stop`) remains Claude Code specific.
 - RU localization of skill bodies (currently EN — measurably better instruction-following; RU trigger words already work).
 - More example MCP servers in the gateway config.
 - Generic ports of the remaining incubator skills (morning briefing, commit digest, verification gates, debug discipline).

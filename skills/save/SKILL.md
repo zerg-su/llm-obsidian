@@ -115,7 +115,7 @@ If vault-write exits 2 (cap violation), it names the reason (e.g. Active Threads
 After the batch returns:
 
 - **Confirm**: "Saved as [[Note Title]] in wiki/[folder]/."
-- **Runbook nudge**: if this session ran a meaningful shell procedure (≥10 non-trivial successful commands in `.vault-meta/command-log.jsonl` for the current session — spot-check with `grep -c "$CLAUDE_SESSION_ID" .vault-meta/command-log.jsonl` mentally, no need for exact counts) and no runbook was filed, append one line: «В сессии была содержательная shell-процедура — /distill-runbook может сделать из неё ранбук.»
+- **Runbook nudge**: if this session ran a meaningful shell procedure (≥10 non-trivial successful commands in `.vault-meta/command-log.jsonl` for the current session — spot-check with `SESSION_ID=$(./scripts/current-session-id.sh); grep -c "$SESSION_ID" .vault-meta/command-log.jsonl` mentally, no need for exact counts) and no runbook was filed, append one line: «В сессии была содержательная shell-процедура — /distill-runbook может сделать из неё ранбук.»
 
 ---
 
@@ -136,7 +136,7 @@ tags:
   - <relevant-tag>
 status: developing
 sessions:                       # provenance — required (see feedback_session_id_in_frontmatter)
-  - <CLAUDE_CODE_SESSION_ID>    # substitute real value, NOT the literal template
+  - <SESSION_ID>                # substitute ./scripts/current-session-id.sh output, NOT the literal template
 related:
   - "[[Any Wiki Page Mentioned]]"
 sources:
@@ -146,9 +146,9 @@ sources:
 
 How to get session ID inside the skill:
 ```bash
-echo "$CLAUDE_CODE_SESSION_ID"
+./scripts/current-session-id.sh
 ```
-If the var is empty (rare), record `unknown` and flag it in the body so future
+If the script returns `unknown` (rare), record `unknown` and flag it in the body so future
 reindex pass catches it.
 
 For `question` type, add:

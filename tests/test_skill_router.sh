@@ -5,6 +5,7 @@
 # Each case: prompt → expected outcome (substring in output, or empty).
 # Exits non-zero on first failure.
 set -uo pipefail
+export LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"

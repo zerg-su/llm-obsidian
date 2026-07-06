@@ -26,6 +26,17 @@ Pattern:
 
    (`--strict-mcp-config` would use ONLY the profile instead.)
 
+   For Codex, first mirror the profiles into TOML:
+
+   ```bash
+   scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
+   codex --profile llm-obsidian-<name>
+   ```
+
+   The default base profile is written as `~/.codex/llm-obsidian-mcp.config.toml`;
+   each `.mcp-profiles/<name>.json` becomes
+   `~/.codex/llm-obsidian-<name>.config.toml`.
+
 Gotchas:
 
 - `--mcp-config` is variadic: `claude --mcp-config file.json "prompt"` parses

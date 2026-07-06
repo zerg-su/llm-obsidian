@@ -1,0 +1,20 @@
+{
+  "name": "llm-obsidian-codex",
+  "interface": {
+    "displayName": "llm-obsidian Codex"
+  },
+  "plugins": [
+    {
+      "name": "llm-obsidian",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

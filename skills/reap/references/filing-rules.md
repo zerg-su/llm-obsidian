@@ -31,10 +31,12 @@ updated: YYYY-MM-DD
 tags:
   - <relevant-tag>
 status: <active|developing|...>
-sessions:                          # provenance chain: dispatch origin → executor → reap
+sessions:                          # provenance chain: dispatch origin -> executor -> reap
   - <ORIGIN_SESSION_from_task-meta> # only if .task-meta.json present and different from current
-  - <EXEC_SESSION_from_summary>     # task-Claude executor (Wiki Summary `session:` field), if present
-  - <CLAUDE_CODE_SESSION_ID>        # current reap-session
+  - <EXEC_SESSION_from_summary>     # task-agent executor (Wiki Summary `session:` field), if present
+  - <SESSION_ID>                    # current reap-session from ./scripts/current-session-id.sh
+executor_runtime: <claude|codex>    # from .task-meta.json runtime, if present
+executor_model: <model>             # from .task-meta.json model, if present/non-empty
 suggested_agents:                  # from .task-meta.json (if present)
   - <agent-name-1>
   - <agent-name-2>

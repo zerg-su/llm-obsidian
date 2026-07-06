@@ -1,7 +1,7 @@
 # llm-obsidian Makefile
 # Test runner entry points for DragonScale and vault tooling.
 
-.PHONY: test test-address test-tiling test-boundary test-vault test-stop-hook test-bm25 test-bench test-router test-gateway bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test test-address test-tiling test-boundary test-vault test-stop-hook test-bm25 test-bench test-router test-gateway test-codex-adapter test-dcg-assets bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -15,11 +15,13 @@ help:
 	@echo "  make test-bench       retrieval-bench metrics/degradation tests (python, no ollama)"
 	@echo "  make test-router      skill-router prompt matching suite (shell)"
 	@echo "  make test-gateway     MCP gateway config invariants (shell, offline)"
+	@echo "  make test-codex-adapter Codex plugin packaging generator tests"
+	@echo "  make test-dcg-assets  dcg config/hooks and Codex limit helper checks"
 	@echo "  make bench-retrieval  LIVE retrieval quality benchmark (requires ollama)"
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-address test-tiling test-boundary test-vault test-stop-hook test-bm25 test-bench test-router
+test: test-address test-tiling test-boundary test-vault test-stop-hook test-bm25 test-bench test-router test-gateway test-codex-adapter test-dcg-assets
 	@echo ""
 	@echo "All tests passed."
 
@@ -58,6 +60,14 @@ test-router:
 test-gateway:
 	@echo "=== test_mcp_gateway.sh ==="
 	@bash tests/test_mcp_gateway.sh
+
+test-codex-adapter:
+	@echo "=== test_codex_adapter.sh ==="
+	@bash tests/test_codex_adapter.sh
+
+test-dcg-assets:
+	@echo "=== test_dcg_assets.sh ==="
+	@bash tests/test_dcg_assets.sh
 
 bench-retrieval:
 	@python3 scripts/retrieval-bench.py --verbose

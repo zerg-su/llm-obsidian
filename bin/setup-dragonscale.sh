@@ -23,7 +23,7 @@ cd "$VAULT"
 # ── 1. Verify required artifacts that ship with the plugin ───────────────────
 for required in "scripts/allocate-address.sh" "scripts/tiling-check.py" "skills/wiki-fold/SKILL.md"; do
   if [ ! -e "$required" ]; then
-    echo "ERR: missing $required. Reinstall the claude-obsidian plugin." >&2
+    echo "ERR: missing $required. Reinstall the llm-obsidian plugin." >&2
     exit 1
   fi
 done
@@ -64,7 +64,7 @@ if [ ! -f .raw/.manifest.json ]; then
 {
   "version": 1,
   "created": "DRAGONSCALE_SETUP",
-  "description": "Ingest delta tracker and address map for the claude-obsidian vault. Do not hand-edit; wiki-ingest maintains this.",
+  "description": "Ingest delta tracker and address map for the llm-obsidian vault. Do not hand-edit; wiki-ingest maintains this.",
   "sources": {},
   "address_map": {}
 }

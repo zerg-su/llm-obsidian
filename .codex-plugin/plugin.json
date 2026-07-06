@@ -1,0 +1,41 @@
+{
+  "name": "llm-obsidian",
+  "version": "1.0.0",
+  "description": "LLM-powered self-organizing second brain for Obsidian: wiki companion skills, local hybrid retrieval (ollama bge-m3 + BM25), DragonScale memory mechanisms, MCP HTTP gateway, parallel task orchestration.",
+  "author": "zerg-su (based on claude-obsidian by AgriciDaniel)",
+  "homepage": "https://github.com/zerg-su/llm-obsidian",
+  "repository": "https://github.com/zerg-su/llm-obsidian",
+  "license": "MIT",
+  "keywords": [
+    "obsidian",
+    "second-brain",
+    "wiki",
+    "pkm",
+    "llm",
+    "mcp",
+    "retrieval",
+    "russian",
+    "macos",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "llm-obsidian",
+    "shortDescription": "Obsidian LLM wiki workflows for Codex",
+    "longDescription": "A self-organizing Obsidian vault companion for Codex: ingest sources, query accumulated knowledge, file session notes, lint wiki health, and maintain DragonScale-style long-term memory.",
+    "developerName": "zerg-su",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Ingest this source into the wiki",
+      "What do we know about this topic?",
+      "Save this session into the vault"
+    ],
+    "brandColor": "#5B6CFF",
+    "screenshots": []
+  }
+}

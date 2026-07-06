@@ -58,7 +58,7 @@ Do not read the wiki for general programming questions — only when you need
 vault-specific context (prior decisions, research notes, runbooks).
 
 **READ-ONLY.** Do not Edit/Write anything under `<vault-root>/`.
-Any vault change goes through the wiki Claude (`/reap` after your summary)
+Any vault change goes through the wiki agent (`/reap` after your summary)
 — otherwise you race the vault's Stop-hook autocommit.
 
 ## Working rules
@@ -133,7 +133,8 @@ Ready to start? If something needs adjusting — say so.
 Then **wait for an explicit "yes / go / ok / start" from the user**.
 "Good" / "interesting" / "I see" is NOT approval — it is a reaction; keep waiting.
 
-After approval — work as usual, commit as you go, finish with `/reap-send`.
+After approval — work as usual, commit as you go, finish with `/reap-send`
+(Claude) or `$llm-obsidian:reap-send` / natural trigger `reap-send` (Codex).
 
 If a fork appears mid-work that materially changes the plan (a new
 out-of-scope item, an unexpected risk, a big design choice) — stop, explain,
@@ -144,9 +145,10 @@ within one task) — your call.
 
 ## Finalization
 
-When the task is complete, invoke `/reap-send`. It assembles the
+When the task is complete, invoke `/reap-send` (Claude) or `$llm-obsidian:reap-send` /
+natural trigger `reap-send` (Codex). It assembles the
 `## Wiki Summary` block, writes it to `./.task-summary.md`, and via
-`cmux send` triggers `/reap` in the left wiki split — the wiki Claude
+`cmux send` triggers `/reap` or `$llm-obsidian:reap` in the left wiki split — the wiki agent
 automatically picks it up and files it into the vault.
 
 The block format:
@@ -156,8 +158,8 @@ The block format:
 
 type: <session|decision|runbook|incident|service-update|repo-touch>
 title: <the wiki page title, exactly as it will appear in the filename>
-session: <your $CLAUDE_CODE_SESSION_ID — the executor session; the wiki
-          Claude appends it to the provenance of the result page and plan page>
+session: <your SESSION_ID from <vault-root>/scripts/current-session-id.sh;
+          the wiki agent appends it to the provenance of the result page and plan page>
 
 <content in declarative present tense, with [[wikilinks]] to adjacent pages>
 ```
@@ -170,9 +172,9 @@ Types:
 - `service-update` — updated the status of an existing service page, target `wiki/services/<title>.md`
 - `repo-touch` — updated a repo page (or creates a stub), target `wiki/repos/<title>.md`
 
-Fallback: if `/reap-send` is unavailable — just print the block into the chat
+Fallback: if `/reap-send` / `$llm-obsidian:reap-send` is unavailable — just print the block into the chat
 as markdown. The user switches to the wiki split and says `/reap` by hand;
-the wiki Claude reads it via `cmux read-screen --surface <id>` from `.task-cmux-surface`.
+the wiki agent reads it via `cmux read-screen --surface <id>` from `.task-cmux-surface`.
 ```
 
 (Generate via the Write tool, not echo through Bash — the template is long.)

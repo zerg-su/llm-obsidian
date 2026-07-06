@@ -28,6 +28,9 @@ expect_exit() { # name got want
 expect_grep() { # name file pattern
   grep -qF -- "$3" "$2" && ok "$1" || bad "$1" "pattern not found: $3"
 }
+expect_nogrep() { # name file pattern
+  grep -qF -- "$3" "$2" && bad "$1" "unexpected pattern found: $3" || ok "$1"
+}
 
 OUT="$SANDBOX/out.txt"
 
@@ -36,6 +39,7 @@ echo "A. syntax"
 bash -n "$GW/mcp-gateway.sh" 2>"$OUT"; expect_exit "A1 mcp-gateway.sh bash -n" "$?" 0
 python3 -c "import ast; ast.parse(open('$GW/smoke.py').read())" 2>"$OUT"; expect_exit "A2 smoke.py parses" "$?" 0
 python3 -c "import ast; ast.parse(open('$GW/update-pins.py').read())" 2>"$OUT"; expect_exit "A3 update-pins.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/codex-sync.py').read())" 2>"$OUT"; expect_exit "A4 codex-sync.py parses" "$?" 0
 
 # ---------- B. update-pins pure functions ----------
 echo "B. update-pins pure functions"
@@ -199,6 +203,71 @@ touch "$SANDBOX/home/Library/LaunchAgents/io.llm-obsidian.mcp-gateway.plist"
 HOME="$SANDBOX/home" PATH="$SANDBOX/bin:$PATH" bash "$SANDBOX/gwcopy/mcp-gateway.sh" doctor >"$OUT" 2>&1
 expect_exit "G8 provisioned -> exit 0" "$?" 0
 expect_grep "G9 all OK footer" "$OUT" "--- all OK"
+
+# ---------- H. codex-sync sandbox ----------
+echo "H. codex-sync sandbox"
+mkdir -p "$SANDBOX/codex-repo/.codex" "$SANDBOX/codex-repo/.mcp-profiles" "$SANDBOX/codex-home"
+cat > "$SANDBOX/codex-repo/.mcp.json.example" <<'EOF'
+{"mcpServers": {
+  "context7": {"type": "http", "url": "http://127.0.0.1:9090/context7/mcp"}
+}}
+EOF
+cat > "$SANDBOX/codex-repo/.mcp-profiles/research.json" <<'EOF'
+{"mcpServers": {
+  "paper-search": {"type": "http", "url": "http://127.0.0.1:9090/paper-search/mcp"}
+}}
+EOF
+cat > "$SANDBOX/codex-repo/.codex/config.toml" <<'EOF'
+[tui]
+status_line = ["project-name"]
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+
+[mcp_servers.paper-search]
+command = "uvx"
+args = ["paper-search-mcp"]
+EOF
+cat > "$SANDBOX/codex-home/config.toml" <<'EOF'
+model = "gpt-5.5"
+
+[mcp_servers.node_repl]
+command = "/x/node_repl"
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+EOF
+chmod 600 "$SANDBOX/codex-home/config.toml"
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --check >"$OUT" 2>&1
+expect_exit "H1 --check reports drift" "$?" 1
+expect_grep "H2 check mentions repo config" "$OUT" "$SANDBOX/codex-repo/.codex/config.toml"
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --apply >"$OUT" 2>&1
+expect_exit "H3 --apply exits 0" "$?" 0
+expect_grep "H4 backup reported" "$OUT" "backup dir:"
+python3 - "$SANDBOX/codex-home" "$SANDBOX/codex-repo/.codex" >"$OUT" 2>&1 <<'PYEOF'
+import pathlib, stat, sys
+home = pathlib.Path(sys.argv[1])
+repo_codex = pathlib.Path(sys.argv[2])
+backups = sorted((home / "backups").glob("llm-obsidian-codex-sync-*"))
+assert backups, "no backup dir"
+assert stat.S_IMODE(backups[-1].stat().st_mode) == 0o700
+assert stat.S_IMODE((home / "config.toml").stat().st_mode) == 0o600
+assert not list(home.glob("*.config.toml.tmp.*"))
+assert not list(repo_codex.glob("*.config.toml.tmp.*"))
+print("BACKUP_MODE_OK")
+PYEOF
+expect_grep "H5 backup dir private and atomic cleanup" "$OUT" "BACKUP_MODE_OK"
+expect_grep "H6 repo has gateway context7" "$SANDBOX/codex-repo/.codex/config.toml" "url = \"http://127.0.0.1:9090/context7/mcp\""
+expect_nogrep "H7 repo default excludes profile server" "$SANDBOX/codex-repo/.codex/config.toml" "paper-search"
+expect_grep "H8 global keeps node_repl" "$SANDBOX/codex-home/config.toml" "[mcp_servers.node_repl]"
+expect_nogrep "H9 global removes legacy context7" "$SANDBOX/codex-home/config.toml" "@upstash/context7-mcp"
+expect_grep "H10 default profile has context7" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" "context7/mcp"
+expect_grep "H11 extra profile has paper-search" "$SANDBOX/codex-home/llm-obsidian-research.config.toml" "paper-search/mcp"
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --check >"$OUT" 2>&1
+expect_exit "H12 second --check clean" "$?" 0
+expect_grep "H13 no changes message" "$OUT" "codex-sync: no changes"
 
 # ---------- summary ----------
 echo

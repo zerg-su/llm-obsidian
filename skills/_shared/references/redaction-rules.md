@@ -27,7 +27,7 @@ Used by any skill that publishes content outside the personal vault (issue track
 - `[[2026-05-18-...]]` → выкусить полностью или заменить на нейтральное «связанный incident» (без ссылки).
 - `c-NNNNNN` адреса — выкусить.
 - `wiki/<path>` — выкусить.
-- Personal session-IDs / `${CLAUDE_CODE_SESSION_ID}` — выкусить.
+- Personal session/thread IDs / `${CLAUDE_CODE_SESSION_ID}` / `${CODEX_THREAD_ID}` — выкусить.
 - Credentials / tokens / API keys — выкусить ВСЕГДА, заменить на `<REDACTED>`.
 - Internal hostnames / private IPs (`nas.local`, `10.0.0.x`) — заменить на нейтральное описание («storage host») если аудитория их не знает.
 - Personal names — только с согласия и когда важно для context'а.

@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
-# claude-obsidian: multi-agent skill installer
-# Symlinks the skills/ directory into each AI agent's expected location.
+# llm-obsidian: multi-agent skill installer
+# Wires the skills directory into each AI agent's expected location.
 # Idempotent: safe to run multiple times.
 #
 # Supported agents:
 #   - Claude Code    : auto-discovered via .claude-plugin/ (no symlink needed)
-#   - Codex CLI      : symlink to ~/.codex/skills/claude-obsidian
-#   - OpenCode       : symlink to ~/.opencode/skills/claude-obsidian
-#   - Gemini CLI     : symlink to ~/.gemini/skills/claude-obsidian
+#   - Codex CLI      : repo Codex plugin marketplace + MCP mirror
+#   - OpenCode       : symlink to ~/.opencode/skills/llm-obsidian
+#   - Gemini CLI     : symlink to ~/.gemini/skills/llm-obsidian
 #   - Cursor         : symlink to .cursor/skills (in repo)
 #   - Windsurf       : symlink to .windsurf/skills (in repo)
 #
 # Bootstrap files (AGENTS.md, GEMINI.md, .cursor/rules/, .windsurf/rules/,
 # .github/copilot-instructions.md) are already committed in the repo.
-# This script just wires up the skills directory.
+# This script wires up Codex-native packaging and legacy skill symlinks for
+# agents that do not consume the repo plugin marketplace.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/skills"
+CODEX_MARKETPLACE="llm-obsidian-codex"
 
 if [ ! -d "$SKILLS_DIR" ]; then
-  echo "ERROR: $SKILLS_DIR does not exist. Are you running this from the claude-obsidian repo?"
+  echo "ERROR: $SKILLS_DIR does not exist. Are you running this from the llm-obsidian repo?"
   exit 1
 fi
 
@@ -57,18 +59,43 @@ link_if_missing() {
   echo -e "${GREEN}[$agent_name] linked: $dest -> $target${NC}"
 }
 
-echo "claude-obsidian: multi-agent skill installer"
+echo "llm-obsidian: multi-agent skill installer"
 echo "Repo: $REPO_ROOT"
 echo
 
-# Codex CLI
-link_if_missing "$SKILLS_DIR" "$HOME/.codex/skills/claude-obsidian" "Codex CLI"
+# Codex CLI: plugin marketplace is canonical. A historical symlink can cause
+# duplicate skills, so leave it untouched but make the state visible.
+echo "Codex CLI"
+if [ -x "$REPO_ROOT/scripts/codex-adapter.py" ]; then
+  python3 "$REPO_ROOT/scripts/codex-adapter.py" --apply
+fi
+if [ -x "$REPO_ROOT/scripts/mcp-gateway/mcp-gateway.sh" ]; then
+  "$REPO_ROOT/scripts/mcp-gateway/mcp-gateway.sh" codex-sync --apply || \
+    echo -e "${YELLOW}[Codex CLI] MCP sync failed; run scripts/mcp-gateway/mcp-gateway.sh codex-sync --check for details.${NC}"
+fi
+LEGACY_CODEX_LINK="$HOME/.codex/skills/llm-obsidian"
+if [ -L "$LEGACY_CODEX_LINK" ] && [ "$(readlink "$LEGACY_CODEX_LINK")" = "$SKILLS_DIR" ]; then
+  echo -e "${YELLOW}[Codex CLI] legacy skill symlink still exists: $LEGACY_CODEX_LINK. Plugin install is canonical; remove the symlink manually if duplicate skills appear.${NC}"
+fi
+if command -v codex >/dev/null 2>&1 && [ "${CODEX_SKIP_PLUGIN_INSTALL:-0}" != "1" ]; then
+  codex plugin marketplace add "$REPO_ROOT" >/dev/null 2>&1 || true
+  if codex plugin add "llm-obsidian@$CODEX_MARKETPLACE" >/dev/null 2>&1; then
+    echo -e "${GREEN}[Codex CLI] installed llm-obsidian@$CODEX_MARKETPLACE${NC}"
+  else
+    echo -e "${YELLOW}[Codex CLI] could not install llm-obsidian@$CODEX_MARKETPLACE; inspect with: codex plugin list${NC}"
+  fi
+elif ! command -v codex >/dev/null 2>&1; then
+  echo -e "${YELLOW}[Codex CLI] codex command not found; generated repo files only.${NC}"
+else
+  echo -e "${GRAY}[Codex CLI] plugin install skipped by CODEX_SKIP_PLUGIN_INSTALL=1${NC}"
+fi
+echo
 
 # OpenCode
-link_if_missing "$SKILLS_DIR" "$HOME/.opencode/skills/claude-obsidian" "OpenCode"
+link_if_missing "$SKILLS_DIR" "$HOME/.opencode/skills/llm-obsidian" "OpenCode"
 
 # Gemini CLI
-link_if_missing "$SKILLS_DIR" "$HOME/.gemini/skills/claude-obsidian" "Gemini CLI"
+link_if_missing "$SKILLS_DIR" "$HOME/.gemini/skills/llm-obsidian" "Gemini CLI"
 
 # Cursor (workspace-local)
 link_if_missing "$SKILLS_DIR" "$REPO_ROOT/.cursor/skills" "Cursor"
@@ -81,7 +108,8 @@ echo -e "${GREEN}Done.${NC} Bootstrap files (AGENTS.md, GEMINI.md, .cursor/rules
 echo
 echo "To verify each agent picks up the skills:"
 echo "  - Claude Code: open the project, type /wiki"
-echo "  - Codex CLI:   codex --list-skills | grep claude-obsidian"
+echo "  - Codex CLI:   codex plugin list | grep llm-obsidian"
+echo "                 start a new Codex thread after install; invoke explicitly as \$llm-obsidian:save"
 echo "  - Cursor:      open the project, ask 'what skills do you have?'"
 echo "  - Windsurf:    open in Cascade, ask the same"
 echo "  - Gemini CLI:  gemini --list-skills (if supported)"

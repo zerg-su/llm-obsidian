@@ -171,7 +171,7 @@ updated: 2026-05-23
 status: living
 tags: [backlog, todo, capture]
 sessions:
-  - id: ${CLAUDE_CODE_SESSION_ID}
+  - id: <SESSION_ID>
     date: 2026-05-23
 ---
 

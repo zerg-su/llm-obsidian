@@ -2,6 +2,10 @@
 
 Plugin hooks for the llm-obsidian wiki vault. All hooks are defined in `hooks.json`; the scripts live in `.claude/hooks/`.
 
+These hooks are Claude Code specific. Codex uses the generated `.codex-plugin/`
+skill package and does not run `.claude/hooks/`; every shell hook has a
+`CODEX_THREAD_ID`/parent-process guard so an accidental Codex launch no-ops.
+
 ## Events
 
 | Event | Script | Purpose |
@@ -19,6 +23,7 @@ Plugin hooks for the llm-obsidian wiki vault. All hooks are defined in `hooks.js
 - **One commit per turn.** Earlier generations auto-committed per `Write|Edit` tool call; the `Stop` hook replaced that: cleaner history, indexes regenerate once, and the flock closes the race between parallel sessions.
 - **Hooks never fail the turn.** Every entry is wrapped in `[ -x ... ] && ... || true`; scripts exit 0 even on internal errors.
 - **Non-vault sessions are safe.** Every hook feature-detects the vault (`wiki/hot.md`, script presence), so installing the plugin globally does not break other projects.
+- **Codex sessions are safe.** Hooks exit immediately when `CODEX_THREAD_ID` or a Codex parent process is detected. Regression tests can opt back in with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`.
 
 ## Known Issue: Plugin Hooks STDOUT Bug
 

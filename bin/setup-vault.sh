@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-obsidian vault setup script
+# llm-obsidian vault setup script
 # Run this ONCE before opening Obsidian for the first time.
 # Usage: bash bin/setup-vault.sh [optional: /path/to/vault]
 # Default: uses the directory where this script lives (the vault root)
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULT="${1:-$(dirname "$SCRIPT_DIR")}"
 OBSIDIAN="$VAULT/.obsidian"
 
-echo "Setting up claude-obsidian vault at: $VAULT"
+echo "Setting up llm-obsidian vault at: $VAULT"
 
 # ── 1. Create directories ─────────────────────────────────────────────────────
 mkdir -p "$OBSIDIAN/snippets"

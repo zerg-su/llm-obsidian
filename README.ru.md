@@ -4,7 +4,7 @@
 
 🇬🇧 **Read in English: [README.md](README.md)**
 
-Основано на [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) от AgriciDaniel (реализации паттерна *LLM Wiki* Андрея Карпатого) и серьёзно переработано: retrieval-стек, write path, хуки и MCP-интеграция были перепроектированы и месяцами обкатывались в бою как ежедневная рабочая память DevOps-инженера, прежде чем превратиться в этот generic-релиз. Поддерживаемый агент на сегодня: Claude Code; сами скрипты агент-агностичны, а адаптер под Codex в roadmap. Отсюда и имя: *llm*-obsidian, а не *claude*-obsidian.
+Основано на [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) от AgriciDaniel (реализации паттерна *LLM Wiki* Андрея Карпатого) и серьёзно переработано: retrieval-стек, write path, хуки и MCP-интеграция были перепроектированы и месяцами обкатывались в бою как ежедневная рабочая память DevOps-инженера, прежде чем превратиться в этот generic-релиз. Поддерживаемые агенты: Claude Code и Codex CLI. Отсюда и имя: *llm*-obsidian, а не *claude*-obsidian.
 
 ---
 
@@ -39,7 +39,7 @@ DragonScale Memory (fold-роллапы, детерминированные ад
 
 ## Быстрый старт
 
-Требования: macOS (Linux в основном работает, launchd-части только для macOS), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code), Python 3.9+, git. Опционально: [ollama](https://ollama.com) для семантического retrieval (рекомендуется), cmux для параллельных задач.
+Требования: macOS (Linux в основном работает, launchd-части только для macOS), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) или Codex CLI, Python 3.9+, git. Опционально: [ollama](https://ollama.com) для семантического retrieval (рекомендуется), cmux для параллельных задач.
 
 ```bash
 # 1. Забираем вольт
@@ -110,13 +110,23 @@ scripts/mcp-gateway/mcp-gateway.sh health    # настоящий MCP handshake 
 
 Одна оговорка, которую стоит знать заранее: гейтвей экономит процессы, RAM и холодные старты, но **не** уменьшает tool-схемы в вашем контексте. Тяжёлые и редко используемые серверы держите в `.mcp-profiles/` (см. README там) и подгружайте per-session через `claude --mcp-config`.
 
+Для Codex синхронизируйте HTTP pointers в TOML:
+
+```bash
+scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
+```
+
+Команда пишет repo-local `.codex/config.toml`, убирает дубли llm-obsidian MCP из
+`~/.codex/config.toml` и создаёт optional profile overlays вроде
+`~/.codex/llm-obsidian-mcp.config.toml`.
+
 ## Скиллы
 
 | Группа | Скиллы |
 |---|---|
 | Ядро вики | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
 | Продуктивность | `/journal` (планировщик по датам), `/daily` (статус в конце дня), `/backlog` (capture-inbox), `/find-session`, `/draft` (советник по ответам), `/distill-runbook` (команды сессии → copy-paste runbook), `/learn` (тьютор по вашим заметкам), `/save-plan` |
-| Оркестрация (нужен cmux) | `/dispatch`, `/reap`, `/reap-send` |
+| Оркестрация (нужен cmux) | `/dispatch`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Справочные | `obsidian-markdown`, `obsidian-bases` |
 
 Роутер на `UserPromptSubmit` подсказывает подходящий скилл по regex-правилам из `.claude/skill-rules.json` (мягкие подсказки, никогда не mandatory); `session-nudge` поднимает просроченный maintenance (возраст линта, назревший fold, устаревшие бэкапы, совет skill-of-the-day).
@@ -131,9 +141,52 @@ make test          # аллокатор адресов, tiling, boundary, vault-
 make test-gateway  # management-слой MCP-гейтвея (офлайн, фейковый MCP-сервер)
 ```
 
+## Codex CLI
+
+Codex использует сгенерированный local plugin marketplace, а не legacy symlink:
+
+```bash
+python3 scripts/codex-adapter.py --apply
+scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
+codex plugin marketplace add "$(pwd)"
+codex plugin add llm-obsidian@llm-obsidian-codex
+```
+
+После установки/обновления начните новый Codex thread. Явный вызов скиллов:
+`$llm-obsidian:save`, `$llm-obsidian:wiki-query`, `$llm-obsidian:close` и т.д.
+Claude Code hooks остаются Claude-specific; Codex использует те же skills и
+scripts, но не исполняет `.claude/hooks/`.
+
+Хелперы для Codex limits тоже лежат в репо:
+
+```bash
+python3 scripts/codex-limit-monitor.py --install
+codex-limit-status --scope recent --once
+.codex/codex-limits-status.py --with-pct --compact
+```
+
+Для cmux status integration зарегистрируйте `.codex/update-cmux-limits.sh` в
+Codex hooks `SessionStart`, `UserPromptSubmit` и `Stop`.
+
+## DCG Guard
+
+В репо есть portable policy и installer для Destructive Command Guard:
+
+```bash
+bin/setup-dcg.sh          # ставит dcg если его нет, конфиг, Codex + Claude hooks
+bin/setup-dcg.sh --check  # показывает drift без записи файлов
+bash scripts/dcg-test-suite.sh
+```
+
+Policy лежит в `config/dcg/config.toml`, hook-template — в
+`.github/hooks/dcg.json`. Installer делает backup существующих hook/config
+файлов с суффиксом `.bak-dcg-*` и merge'ит только `PreToolUse`/`Bash` запись dcg.
+Smoke-suite по умолчанию проверяет repo policy в изолированном временном HOME;
+для проверки live allowlist/config используйте `DCG_TEST_USE_USER_CONFIG=1`.
+
 ## Roadmap
 
-- **Codex-адаптер**: скрипты уже агент-агностичны; осталось портировать hook-слой (`hooks.json` специфичен для Claude Code) и провалидировать контракты скиллов под Codex.
+- **Codex hook parity**: skills и MCP sync поддержаны; автоматический Claude hook layer (`SessionStart`, `PostToolUse`, `Stop`) остаётся Claude Code specific.
 - RU-локализация тел скиллов (сейчас EN: инструкции выполняются измеримо лучше; русские trigger-слова уже работают).
 - Больше примеров MCP-серверов в конфиге гейтвея.
 - Generic-порты оставшихся инкубаторных скиллов (утренний брифинг, дайджест коммитов, verification gates, debug-дисциплина).

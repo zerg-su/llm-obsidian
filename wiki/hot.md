@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-06
 tags:
   - meta
   - hot-cache
@@ -33,6 +33,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-07-06: [[Dispatch Reap Live Smoke gpt-5.5]] - live Codex gpt-5.5 dispatch/reap-send smoke filed (`c-000004`)
 - 2026-07-05: вольт инициализирован из шаблона llm-obsidian v1.0.0
 
 ## Active Threads

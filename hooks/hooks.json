@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -x .claude/hooks/skill-router.sh ] && .claude/hooks/skill-router.sh || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/skill-router.sh ] && .claude/hooks/skill-router.sh || true"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -x .claude/hooks/command-capture.sh ] && .claude/hooks/command-capture.sh || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/command-capture.sh ] && .claude/hooks/command-capture.sh || true"
           }
         ]
       },
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -x .claude/hooks/plan-capture.sh ] && .claude/hooks/plan-capture.sh || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/plan-capture.sh ] && .claude/hooks/plan-capture.sh || true"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -f wiki/hot.md ] && cat wiki/hot.md || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -f wiki/hot.md ] && cat wiki/hot.md || true"
           }
         ]
       },
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -x .claude/hooks/session-nudge.sh ] && .claude/hooks/session-nudge.sh || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/session-nudge.sh ] && .claude/hooks/session-nudge.sh || true"
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -f wiki/hot.md ] && cat wiki/hot.md || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -f wiki/hot.md ] && cat wiki/hot.md || true"
           }
         ]
       }
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -x .claude/hooks/stop.sh ] && .claude/hooks/stop.sh || true"
+            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/stop.sh ] && .claude/hooks/stop.sh || true"
           }
         ]
       }

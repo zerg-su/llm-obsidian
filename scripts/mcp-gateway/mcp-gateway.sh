@@ -274,8 +274,13 @@ PYEOF
       exit "$rc"
     fi
     ;;
+  codex-sync)
+    # Sync Codex MCP TOML from .mcp.json/.mcp-profiles. Dry-run by default.
+    shift
+    python3 "$SCRIPT_DIR/codex-sync.py" "$@"
+    ;;
   *)
-    echo "usage: mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|update [--check|--yes] [name...]|sync-tools|doctor|logs [n]}"
+    echo "usage: mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|update [--check|--yes] [name...]|sync-tools|codex-sync [--check|--apply]|doctor|logs [n]}"
     exit 1
     ;;
 esac

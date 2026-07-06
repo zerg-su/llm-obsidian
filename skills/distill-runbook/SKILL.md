@@ -18,9 +18,10 @@ the vault's insurance policy for «ИИ отключился».
 
 1. Get the current session's commands:
    ```bash
-   grep "$CLAUDE_SESSION_ID" .vault-meta/command-log.jsonl
+   SESSION_ID=$(./scripts/current-session-id.sh)
+   grep "$SESSION_ID" .vault-meta/command-log.jsonl
    ```
-   If the env var is empty, take the tail of the file and confirm the range
+   If the helper returns `unknown`, take the tail of the file and confirm the range
    with the user («команды с HH:MM по HH:MM — они?»).
 2. **Filter noise** (drop): pure navigation/inspection (`cd`, `ls`, `pwd`,
    `cat`, `head`, `tail`, `grep`, `find`, `echo`, `which`, `wc`), repeated

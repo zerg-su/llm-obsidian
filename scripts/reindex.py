@@ -15,7 +15,7 @@ Reads simple frontmatter (key/value, flow-lists, block-lists, sessions sub-keys)
 Pure stdlib — no pyyaml dependency.
 
 Skips: log.md (linear, not indexed), _templates/, files without frontmatter,
-session ids that are literally "${CLAUDE_CODE_SESSION_ID}" (template leftover).
+session ids that are literal environment templates (e.g. "${CLAUDE_CODE_SESSION_ID}").
 
 Run from repo root: ./scripts/reindex.py
 """
@@ -38,7 +38,7 @@ META = REPO_ROOT / ".vault-meta"
 SKIP_PATHS = {"log.md", "_templates"}
 
 ADDRESS_RX = re.compile(r"^c-\d{6}$")
-SID_TEMPLATE = "${CLAUDE_CODE_SESSION_ID}"
+SID_TEMPLATES = {"${CLAUDE_CODE_SESSION_ID}", "${CODEX_THREAD_ID}"}
 
 
 def atomic_write(path: Path, text: str) -> None:
@@ -142,9 +142,9 @@ def extract_sessions(fm: dict[str, Any]) -> list[str]:
     if isinstance(raw, list):
         for item in raw:
             sid = item.get("id") if isinstance(item, dict) else item
-            if isinstance(sid, str) and sid and sid != SID_TEMPLATE:
+            if isinstance(sid, str) and sid and sid not in SID_TEMPLATES:
                 out.append(sid)
-    elif isinstance(raw, str) and raw != SID_TEMPLATE:
+    elif isinstance(raw, str) and raw not in SID_TEMPLATES:
         out.append(raw)
     return out
 

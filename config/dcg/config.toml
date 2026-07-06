@@ -1,0 +1,169 @@
+# dcg configuration for AI coding agents
+# https://github.com/Dicklesworthstone/destructive_command_guard
+#
+# DevOps-oriented default. Core packs are listed explicitly so the policy is
+# easy to audit and portable between Claude Code, Codex CLI, and similar agents.
+
+[general]
+color = "auto"
+verbose = false
+
+# Append-only blocked-command log for later debugging.
+log_file = "~/.local/share/dcg/blocked.log"
+
+# Let dcg repair supported agent hook registration when the host rewrites it.
+self_heal_hook = true
+
+#-------------------------------------------------------------
+# PACKS
+#-------------------------------------------------------------
+
+[packs]
+enabled = [
+    "core.filesystem",
+    "core.git",
+
+    # IaC
+    "infrastructure.terraform",
+    "infrastructure.ansible",
+
+    # Cloud
+    "cloud.aws",
+
+    # API
+    "apigateway.aws",
+
+    # Storage
+    "storage.s3",
+
+    # Kubernetes
+    "kubernetes.kubectl",
+    "kubernetes.helm",
+    "kubernetes.kustomize",
+
+    # Databases
+    "database.postgresql",
+    "database.mongodb",
+    "database.redis",
+
+    # Containers
+    "containers.docker",
+    "containers.podman",
+
+    # System
+    "system.disk",
+    "system.permissions",
+    "system.services",
+
+    # Remote / SSH
+    "remote.rsync",
+    "remote.scp",
+    "remote.ssh",
+
+    # CI/CD
+    "cicd.gitlab_ci",
+    "cicd.github_actions",
+    "cicd.jenkins",
+
+    # Secrets
+    "secrets.aws_secrets",
+    "secrets.vault",
+
+    # Platform
+    "platform.github",
+    "platform.gitlab",
+
+    # DNS
+    "dns.cloudflare",
+
+    # Load balancers
+    "loadbalancer.elb",
+    "loadbalancer.haproxy",
+    "loadbalancer.nginx",
+
+    # Messaging
+    "messaging.kafka",
+    "messaging.rabbitmq",
+    "messaging.sqs_sns",
+
+    # Monitoring
+    "monitoring.prometheus",
+    "monitoring.pagerduty",
+
+    # Search
+    "search.elasticsearch",
+    "search.opensearch",
+
+    # Backup
+    "backup.rclone",
+    "backup.restic",
+
+    # Extra git guardrails
+    "strict_git",
+
+    # Package managers (npm unpublish, cargo yank, etc.)
+    "package_managers",
+]
+
+disabled = []
+
+#-------------------------------------------------------------
+# POLICY: severity defaults (critical/high -> deny, medium -> warn, low -> log)
+#-------------------------------------------------------------
+
+[policy]
+# default_mode intentionally unset; dcg applies severity defaults.
+
+[policy.packs]
+# Pack-level overrides can be added here.
+
+[policy.rules]
+# Rule-level overrides can be added here.
+
+#-------------------------------------------------------------
+# GIT BRANCH AWARENESS
+#-------------------------------------------------------------
+
+[git_awareness]
+enabled = true
+protected_branches = ["main", "master", "release/*"]
+protected_strictness = "all"
+relaxed_branches = ["feature/*", "experiment/*", "sandbox/*"]
+relaxed_strictness = "critical"
+default_strictness = "high"
+show_branch_in_output = true
+warn_if_not_git = false
+
+#-------------------------------------------------------------
+# INTERACTIVE: disabled for unattended agent safety.
+#-------------------------------------------------------------
+
+[interactive]
+enabled = false
+verification = "code"
+timeout_seconds = 5
+code_length = 4
+max_attempts = 3
+disable_in_ci = true
+allow_non_tty_fallback = true
+
+#-------------------------------------------------------------
+# HEREDOC SCANNING
+#-------------------------------------------------------------
+
+[heredoc]
+enabled = true
+timeout_ms = 50
+fallback_on_parse_error = true
+fallback_on_timeout = true
+
+#-------------------------------------------------------------
+# CUSTOM OVERRIDES
+#-------------------------------------------------------------
+
+[overrides]
+# Additional blocks beyond packs. Keep pushes human-owned by default; this is
+# intentionally broader than strict_git's force/main-branch checks.
+block = [
+    { pattern = "git\\b.*?\\bpush\\b", reason = "Only the human user should push branches/remotes from an agent workflow" },
+]
