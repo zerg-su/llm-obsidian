@@ -68,6 +68,7 @@ assert plugin["name"] == "llm-obsidian"
 assert plugin["skills"] == "./skills/"
 assert plugin["interface"]["displayName"] == "llm-obsidian"
 assert market["name"] == "llm-obsidian-codex"
+assert market["plugins"][0]["name"] == "llm-obsidian"
 assert market["plugins"][0]["source"]["path"] == "./"
 print("SHAPE_OK")
 PYEOF
@@ -75,6 +76,35 @@ expect_grep "C1 generated shape" "$OUT" "SHAPE_OK"
 python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --check >"$OUT" 2>&1
 expect_exit "C2 second check clean" "$?" 0
 expect_grep "C3 no changes message" "$OUT" "codex-adapter: no changes"
+
+echo "D. fork plugin names"
+python3 - "$FIX" >"$OUT" 2>&1 <<'PYEOF'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+path = root / ".claude-plugin/plugin.json"
+data = json.loads(path.read_text())
+data["name"] = "llm-obsidian-swarm"
+data["homepage"] = "https://github.com/zerg-su/llm-obsidian-swarm"
+data["repository"] = "https://github.com/zerg-su/llm-obsidian-swarm"
+path.write_text(json.dumps(data, indent=2) + "\n")
+print("FORK_SOURCE_OK")
+PYEOF
+expect_grep "D1 fork source updated" "$OUT" "FORK_SOURCE_OK"
+python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --apply >"$OUT" 2>&1
+expect_exit "D2 fork apply exits 0" "$?" 0
+python3 - "$FIX" >"$OUT" 2>&1 <<'PYEOF'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+plugin = json.loads((root / ".codex-plugin/plugin.json").read_text())
+market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
+assert plugin["name"] == "llm-obsidian-swarm"
+assert plugin["interface"]["displayName"] == "llm-obsidian-swarm"
+assert market["name"] == "llm-obsidian-swarm-codex"
+assert market["interface"]["displayName"] == "llm-obsidian-swarm Codex"
+assert market["plugins"][0]["name"] == "llm-obsidian-swarm"
+print("FORK_SHAPE_OK")
+PYEOF
+expect_grep "D3 fork generated shape" "$OUT" "FORK_SHAPE_OK"
 
 echo
 echo "codex-adapter tests: $pass passed, $fail failed"

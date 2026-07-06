@@ -206,7 +206,10 @@ expect_grep "G9 all OK footer" "$OUT" "--- all OK"
 
 # ---------- H. codex-sync sandbox ----------
 echo "H. codex-sync sandbox"
-mkdir -p "$SANDBOX/codex-repo/.codex" "$SANDBOX/codex-repo/.mcp-profiles" "$SANDBOX/codex-home"
+mkdir -p "$SANDBOX/codex-repo/.codex" "$SANDBOX/codex-repo/.mcp-profiles" "$SANDBOX/codex-repo/.claude-plugin" "$SANDBOX/codex-home"
+cat > "$SANDBOX/codex-repo/.claude-plugin/plugin.json" <<'EOF'
+{"name": "llm-obsidian", "version": "1.0.0", "description": "test"}
+EOF
 cat > "$SANDBOX/codex-repo/.mcp.json.example" <<'EOF'
 {"mcpServers": {
   "context7": {"type": "http", "url": "http://127.0.0.1:9090/context7/mcp"}
@@ -268,6 +271,17 @@ expect_grep "H11 extra profile has paper-search" "$SANDBOX/codex-home/llm-obsidi
 python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --check >"$OUT" 2>&1
 expect_exit "H12 second --check clean" "$?" 0
 expect_grep "H13 no changes message" "$OUT" "codex-sync: no changes"
+
+mkdir -p "$SANDBOX/fork-repo/.codex" "$SANDBOX/fork-repo/.mcp-profiles" "$SANDBOX/fork-repo/.claude-plugin" "$SANDBOX/fork-home"
+cp "$SANDBOX/codex-repo/.mcp.json.example" "$SANDBOX/fork-repo/.mcp.json.example"
+cp "$SANDBOX/codex-repo/.mcp-profiles/research.json" "$SANDBOX/fork-repo/.mcp-profiles/research.json"
+cat > "$SANDBOX/fork-repo/.claude-plugin/plugin.json" <<'EOF'
+{"name": "llm-obsidian-swarm", "version": "1.0.0", "description": "test fork"}
+EOF
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/fork-repo" --codex-home "$SANDBOX/fork-home" --apply >"$OUT" 2>&1
+expect_exit "H14 fork apply exits 0" "$?" 0
+expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-swarm-mcp.config.toml" "context7/mcp"
+expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-swarm-research.config.toml" "paper-search/mcp"
 
 # ---------- summary ----------
 echo

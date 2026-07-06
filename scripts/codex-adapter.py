@@ -23,9 +23,6 @@ from pathlib import Path
 from typing import Any
 
 
-MARKETPLACE_NAME = "llm-obsidian-codex"
-
-
 @dataclass(frozen=True)
 class DesiredFile:
     path: Path
@@ -50,8 +47,9 @@ def load_claude_plugin(repo_root: Path) -> dict[str, Any]:
 
 def codex_plugin_text(repo_root: Path) -> str:
     src = load_claude_plugin(repo_root)
+    plugin_name = src["name"]
     plugin = {
-        "name": src["name"],
+        "name": plugin_name,
         "version": src["version"],
         "description": src["description"],
         "author": src.get("author"),
@@ -61,7 +59,7 @@ def codex_plugin_text(repo_root: Path) -> str:
         "keywords": [*src.get("keywords", []), "codex"],
         "skills": "./skills/",
         "interface": {
-            "displayName": "llm-obsidian",
+            "displayName": plugin_name,
             "shortDescription": "Obsidian LLM wiki workflows for Codex",
             "longDescription": (
                 "A self-organizing Obsidian vault companion for Codex: ingest "
@@ -83,15 +81,17 @@ def codex_plugin_text(repo_root: Path) -> str:
     return json_text({k: v for k, v in plugin.items() if v is not None})
 
 
-def marketplace_text() -> str:
+def marketplace_text(repo_root: Path) -> str:
+    src = load_claude_plugin(repo_root)
+    plugin_name = src["name"]
     payload = {
-        "name": MARKETPLACE_NAME,
+        "name": f"{plugin_name}-codex",
         "interface": {
-            "displayName": "llm-obsidian Codex",
+            "displayName": f"{plugin_name} Codex",
         },
         "plugins": [
             {
-                "name": "llm-obsidian",
+                "name": plugin_name,
                 "source": {
                     "source": "local",
                     "path": "./",
@@ -110,7 +110,7 @@ def marketplace_text() -> str:
 def desired_files(repo_root: Path) -> list[DesiredFile]:
     return [
         DesiredFile(repo_root / ".codex-plugin" / "plugin.json", codex_plugin_text(repo_root)),
-        DesiredFile(repo_root / ".agents" / "plugins" / "marketplace.json", marketplace_text()),
+        DesiredFile(repo_root / ".agents" / "plugins" / "marketplace.json", marketplace_text(repo_root)),
     ]
 
 
