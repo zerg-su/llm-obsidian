@@ -126,7 +126,7 @@ scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
 |---|---|
 | Ядро вики | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
 | Продуктивность | `/journal` (планировщик по датам), `/daily` (статус в конце дня), `/backlog` (capture-inbox), `/find-session`, `/draft` (советник по ответам), `/distill-runbook` (команды сессии → copy-paste runbook), `/learn` (тьютор по вашим заметкам), `/save-plan` |
-| Оркестрация (нужен cmux) | `/dispatch`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
+| Оркестрация (нужен cmux) | `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Справочные | `obsidian-markdown`, `obsidian-bases` |
 
 Роутер на `UserPromptSubmit` подсказывает подходящий скилл по regex-правилам из `.claude/skill-rules.json` (мягкие подсказки, никогда не mandatory); `session-nudge` поднимает просроченный maintenance (возраст линта, назревший fold, устаревшие бэкапы, совет skill-of-the-day).
@@ -153,7 +153,8 @@ codex plugin add llm-obsidian@llm-obsidian-codex
 ```
 
 После установки/обновления начните новый Codex thread. Явный вызов скиллов:
-`$llm-obsidian:save`, `$llm-obsidian:wiki-query`, `$llm-obsidian:close` и т.д.
+`$llm-obsidian:save`, `$llm-obsidian:wiki-query`,
+`$llm-obsidian:review-dispatch`, `$llm-obsidian:close` и т.д.
 Claude Code hooks остаются Claude-specific; Codex использует те же skills и
 scripts, но не исполняет `.claude/hooks/`.
 

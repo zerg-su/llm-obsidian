@@ -66,6 +66,11 @@ Any vault change goes through the wiki agent (`/reap` after your summary)
 - CWD: <worktree-path>
 - Target repo: <repo-path>
 - Base branch: <base-branch>, your branch: task/<task_name>
+- Codex skill environment: <codex-home/profile or inherited>
+- Wiki reap RPC: <wiki-reap-command>
+- Review gate: <review-skill>
+- Review send: <review-send-skill>
+- Review defaults: Claude reviewer `opus`, Codex reviewer `gpt-5.5`
 - Commit as you go, as usual. If push is blocked by permission rules — that
   is intended; do not try to bypass it with `--no-verify` or other hacks.
 - Commit messages — in this repo's style (`git log --oneline -15` for a sample).
@@ -133,8 +138,8 @@ Ready to start? If something needs adjusting — say so.
 Then **wait for an explicit "yes / go / ok / start" from the user**.
 "Good" / "interesting" / "I see" is NOT approval — it is a reaction; keep waiting.
 
-After approval — work as usual, commit as you go, finish with `/reap-send`
-(Claude) or `$llm-obsidian:reap-send` / natural trigger `reap-send` (Codex).
+After approval — work as usual, commit as you go, then use the cross-model
+review gate below before `/reap-send`.
 
 If a fork appears mid-work that materially changes the plan (a new
 out-of-scope item, an unexpected risk, a big design choice) — stop, explain,
@@ -143,13 +148,60 @@ within one task) — your call.
 
 <!-- END BRANCH B -->
 
+## Cross-model review gate
+
+When the task is complete, local checks have passed, and you have done your own
+self-review, ask the user:
+
+```text
+Implementation done. Run cross-model review before reap-send? Default: light. Options: light / full / skip.
+```
+
+If the user answers simply "yes / ok / run review", run light mode:
+`<review-skill>` with `--light` through the skill, or directly:
+`python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py start --light`.
+If the user explicitly asks for full/deep/high-risk review, public API review,
+security-sensitive review, or operationally risky review, run full mode without
+`--light`.
+
+The reviewer opens in a neighboring cmux split on the opposite model:
+Codex executor -> Claude reviewer (`opus`), Claude executor -> Codex reviewer
+(`gpt-5.5`). The reviewer writes `.task-review.md`, invokes
+`<review-send-skill>`, and stays open.
+
+When the callback returns:
+
+1. Read `.task-review.md`.
+2. Write `.task-review-resolution.md`: mark each finding as `applied`,
+   `rejected`, or `out-of-scope`, with a short reason.
+3. Apply only clearly correct, in-scope fixes. Ask before changing public
+   behavior, data migrations, operational contracts, or anything out of scope.
+4. If you applied reviewer findings, call `<review-skill> verify` through the
+   skill, or directly:
+   `python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py verify`.
+   This sends the implementation back to the SAME reviewer split; do not open a
+   new cmux split. In light mode with no applied findings, verify is optional.
+5. Wait for `.task-review-verify.md`, evaluate unresolved items, and do your own
+   final review with the other model's opinion in mind.
+6. After reviewer approve/verify, commit any remaining non-handoff changes. Use
+   the repo's normal commit discipline: explicit file list only; do not commit
+   `.task-*`, `.wiki-*`, `.review-*`, `.obsidian/workspace*.json`, or UI/runtime
+   state. Never push. If there is nothing to commit, record
+   `Commit: no changes` in the summary.
+7. Show the user a summary: what the other model found, what you applied or
+   rejected, checks run, and the commit hash or `Commit: no changes`. Do not
+   close the reviewer split yet.
+8. Only after the user confirms the result is acceptable, run
+   `<review-skill> finish`, then proceed to `/reap-send`.
+
 ## Finalization
 
-When the task is complete, invoke `/reap-send` (Claude) or `$llm-obsidian:reap-send` /
-natural trigger `reap-send` (Codex). It assembles the
+If the user skipped review or review already passed, invoke `/reap-send`
+(Claude) or `<reap-send-skill>` / natural trigger `reap-send` (Codex). It assembles the
 `## Wiki Summary` block, writes it to `./.task-summary.md`, and via
-`cmux send` triggers `/reap` or `$llm-obsidian:reap` in the left wiki split — the wiki agent
-automatically picks it up and files it into the vault.
+`cmux send` triggers `/reap` or the exact command stored in
+`./.wiki-reap-command` in the left wiki split — the wiki agent automatically
+picks it up and files it into the vault.
 
 The block format:
 
@@ -164,6 +216,12 @@ session: <your SESSION_ID from <vault-root>/scripts/current-session-id.sh;
 <content in declarative present tense, with [[wikilinks]] to adjacent pages>
 ```
 
+If cross-model review ran, add one body line:
+`Cross-model review: <not run | passed | fixes applied | blocked>`.
+If a post-review commit was created, add:
+`Commit: <hash> <message>`; if everything was already committed,
+`Commit: no changes`.
+
 Types:
 - `session` — general summary of what the task accomplished, filed in `wiki/meta/sessions/`
 - `decision` — an architectural decision was made, filed in `wiki/decisions/`
@@ -172,8 +230,9 @@ Types:
 - `service-update` — updated the status of an existing service page, target `wiki/services/<title>.md`
 - `repo-touch` — updated a repo page (or creates a stub), target `wiki/repos/<title>.md`
 
-Fallback: if `/reap-send` / `$llm-obsidian:reap-send` is unavailable — just print the block into the chat
-as markdown. The user switches to the wiki split and says `/reap` by hand;
+Fallback: if `/reap-send` / `<reap-send-skill>` is unavailable — just print the
+block into the chat as markdown. The user switches to the wiki split and says
+the command from `./.wiki-reap-command` by hand, with the task name appended;
 the wiki agent reads it via `cmux read-screen --surface <id>` from `.task-cmux-surface`.
 ```
 

@@ -125,7 +125,7 @@ servers from `~/.codex/config.toml`, and writes optional profile overlays such a
 |---|---|
 | Wiki core | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
 | Productivity | `/journal` (date-keyed planner), `/daily` (end-of-day status), `/backlog` (capture inbox), `/find-session`, `/draft` (reply advisor), `/distill-runbook` (session commands → copy-paste runbook), `/learn` (tutor over your notes), `/save-plan` |
-| Orchestration (needs cmux) | `/dispatch`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
+| Orchestration (needs cmux) | `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Reference | `obsidian-markdown`, `obsidian-bases` |
 
 A `UserPromptSubmit` router suggests the right skill from regex rules in `.claude/skill-rules.json` (soft hints, never mandatory); `session-nudge` surfaces overdue maintenance (lint age, fold due, stale backups, a skill-of-the-day tip).
@@ -152,7 +152,8 @@ codex plugin add llm-obsidian@llm-obsidian-codex
 ```
 
 Start a new Codex thread after installing or updating. Invoke skills explicitly
-as `$llm-obsidian:save`, `$llm-obsidian:wiki-query`, `$llm-obsidian:close`, etc.
+as `$llm-obsidian:save`, `$llm-obsidian:wiki-query`,
+`$llm-obsidian:review-dispatch`, `$llm-obsidian:close`, etc.
 Claude Code hooks remain Claude-specific; Codex can use the same skills and
 scripts, but does not run `.claude/hooks/`.
 

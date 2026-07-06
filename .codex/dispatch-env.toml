@@ -1,0 +1,9 @@
+[codex_dispatch]
+codex_home = "~/.codex"
+profile = "llm-obsidian-mcp"
+reap_skill = "$llm-obsidian:reap"
+reap_send_skill = "$llm-obsidian:reap-send"
+review_skill = "$llm-obsidian:review-dispatch"
+review_send_skill = "$llm-obsidian:review-send"
+codex_review_model = "gpt-5.5"
+claude_review_model = "opus"

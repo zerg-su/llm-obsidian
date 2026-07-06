@@ -32,7 +32,8 @@ reload skills from `/skills` when the host offers that action. Existing threads
 keep the skill registry they were started with.
 
 Explicit Codex skill invocation uses `$plugin:skill`, for example
-`$llm-obsidian:save`, `$llm-obsidian:wiki-query`, or `$llm-obsidian:reap`.
+`$llm-obsidian:save`, `$llm-obsidian:wiki-query`,
+`$llm-obsidian:review-dispatch`, or `$llm-obsidian:reap`.
 Claude-style `/save` and `/wiki` phrases remain in skill descriptions, but
 Codex CLI slash commands are a separate UI namespace.
 

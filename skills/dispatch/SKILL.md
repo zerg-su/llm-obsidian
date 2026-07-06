@@ -82,6 +82,51 @@ Exactly one hit — take that path. Several — list the candidates and wait for
 
 **d) Ambiguous** — list candidates, wait for the user's choice.
 
+### 1.2b Resolve the Codex skill environment
+
+For `runtime=codex` or review-gate, do **not** rely blindly on the parent
+process' `CODEX_HOME`. Installed Codex plugins are scoped to `CODEX_HOME`, so
+inheriting the wrong home mixes work and personal skills. Resolve the task
+agent's Codex environment before echo-confirm:
+
+1. Prefer `<repo-path>/.codex/dispatch-env.toml` if the target repo provides it.
+2. Otherwise use `<vault-root>/.codex/dispatch-env.toml` from the repo where
+   `/dispatch` is running.
+3. If neither exists, inherit the current `CODEX_HOME` only as a fallback and
+   mark it clearly in the echo-confirm.
+
+Supported TOML shape:
+
+```toml
+[codex_dispatch]
+codex_home = "~/.codex"
+profile = "llm-obsidian-mcp"
+reap_skill = "$llm-obsidian:reap"
+reap_send_skill = "$llm-obsidian:reap-send"
+review_skill = "$llm-obsidian:review-dispatch"
+review_send_skill = "$llm-obsidian:review-send"
+codex_review_model = "gpt-5.5"
+claude_review_model = "opus"
+```
+
+- `codex_home` is expanded with `~` and must already exist before spawning.
+- `profile` is optional and is passed as `--profile <name>` inside that
+  `CODEX_HOME`.
+- `reap_skill` is written into `.wiki-reap-command` so task-side `/reap-send`
+  does not hardcode a plugin prefix.
+- `reap_send_skill` is written into `.task-reap-send-skill` and mentioned in
+  `.task-prompt.md`.
+- `review_skill` is written into `.task-review-skill` and mentioned in
+  `.task-prompt.md`.
+- `review_send_skill` is written into `.task-review-send-skill`, so the
+  reviewer split can callback the executor without guessing plugin namespace.
+- `codex_review_model` / `claude_review_model` set reviewer defaults:
+  Codex = `gpt-5.5`, Claude = `opus`.
+
+If `codex_home` is configured but the directory is missing — stop before
+creating the split and tell the user to bootstrap that Codex home. Do not create
+or install plugins into a Codex home implicitly during dispatch.
+
 ### 1.3 Resolve the branch
 
 - An existing branch was named → `git -C <repo> branch --list <branch>` to verify. Not local — `git -C <repo> branch -a --list "*<branch>*"` to check remotes. Not anywhere — ask.
@@ -153,6 +198,11 @@ Parsing as:
   worktree:    ~/Projects/worktrees/my-blog-blog-dark-mode
   runtime:     codex (explicit)
   model:       gpt-5-codex
+  codex home:  ~/.codex
+  codex profile: llm-obsidian-mcp
+  wiki reap:   $llm-obsidian:reap
+  review:      $llm-obsidian:review-dispatch
+  review send: $llm-obsidian:review-send
   plan:        wiki/plans/2026-07-03-113935-<slug>.md (approved in this session)
   wiki context:
     - [[Blog]] — main page about the blog setup
@@ -237,10 +287,23 @@ WIKI_RUNTIME=claude
 echo "$SURFACE_ID" > <worktree-path>/.task-cmux-surface    # task agent (right split)
 echo "$WIKI_SURFACE" > <worktree-path>/.wiki-cmux-surface   # wiki agent (left split, for /reap-send RPC)
 echo "$WIKI_RUNTIME" > <worktree-path>/.wiki-agent-runtime  # claude|codex, for the right RPC command
+echo "<reap_skill without task argument>" > <worktree-path>/.wiki-reap-command
+echo "<reap_send_skill>" > <worktree-path>/.task-reap-send-skill
+echo "<review_skill>" > <worktree-path>/.task-review-skill
+echo "<review_send_skill>" > <worktree-path>/.task-review-send-skill
 ```
 
 `.task-cmux-surface` is needed by `/reap` (wiki-side fetch via read-screen, fallback when `.task-summary.md` is missing).
-`.wiki-cmux-surface` and `.wiki-agent-runtime` are needed by `/reap-send` (task-side RPC trigger: Claude receives `/reap`, Codex receives `$llm-obsidian:reap`).
+`.wiki-cmux-surface` and `.wiki-agent-runtime` are needed by `/reap-send` (task-side RPC trigger: Claude receives `/reap`; Codex receives the command stored in `.wiki-reap-command`).
+`.wiki-reap-command` stores the environment-specific Codex skill command, for
+example `$llm-obsidian:reap`. This is safer than guessing from
+`WIKI_RUNTIME=codex`, because plugin namespaces depend on `CODEX_HOME`.
+`.task-review-skill` stores the environment-specific review command, for
+example `$llm-obsidian:review-dispatch`, so the task agent can run cross-model
+review before `/reap-send`.
+`.task-review-send-skill` stores the reviewer-side callback command, for
+example `$llm-obsidian:review-send`, so the review split can return findings to
+the executor split.
 
 **Additionally** — write `<worktree-path>/.task-meta.json` with the **origin-session binding** for multi-session safety:
 
@@ -261,6 +324,14 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "target_repo": "<repo-path>",
   "branch": "task/<task_name>",
   "base_branch": "<base-branch>",
+  "codex_home": "<absolute CODEX_HOME path or null>",
+  "codex_profile": "<profile name or null>",
+  "wiki_reap_command": "<reap_skill without task argument>",
+  "reap_send_skill": "<reap_send_skill>",
+  "review_skill": "<review_skill>",
+  "review_send_skill": "<review_send_skill>",
+  "codex_review_model": "gpt-5.5",
+  "claude_review_model": "opus",
   "model": "<model or null for codex configured default>",
   "plan_file": <"/abs/path/to/wiki/plans/<file>.md" | null>,
   "suggested_agents": [<from Phase 1.6, JSON array of {"name", "hint"}>]
@@ -270,7 +341,7 @@ EOF
 
 Why `.task-meta.json`:
 - `origin_session` — `/reap` compares it with current `./scripts/current-session-id.sh`; on mismatch (the wiki agent restarted between dispatch and reap, or another session runs reap) — WARNING and an explicit confirm before filing. Does not block, but stays visible. See Edge case 6.
-- `wiki_runtime` — `/reap-send` selects the correct RPC command: `/reap` for Claude, `$llm-obsidian:reap` for Codex.
+- `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
 - `executor_runtime` / `runtime` / `model` — `/reap` preserves executor provenance in result-page frontmatter and echo output (`runtime` stays as a legacy alias for old consumers).
 - `suggested_agents` — `/reap` can add them to the saved page's frontmatter or use them for cross-refs.
 - `plan_file` — on mode=final `/reap` closes the plan via `plan_close` (vault-write): `status: executed` + a link to the result + the exec session (closing the loop plan → execution → result).
@@ -286,10 +357,14 @@ WORKTREE_Q=$(printf '%q' "$WORKTREE")
 if [ "$RUNTIME" = "codex" ]; then
     MODEL_ARG=""
     [ -n "$MODEL" ] && MODEL_ARG=" --model $(printf '%q' "$MODEL")"
-    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; codex --cd $WORKTREE_Q$MODEL_ARG \"\$(cat .task-prompt.md)\""
+    PROFILE_ARG=""
+    [ -n "${CODEX_PROFILE:-}" ] && PROFILE_ARG=" --profile $(printf '%q' "$CODEX_PROFILE")"
+    CODEX_ENV=""
+    [ -n "${TASK_CODEX_HOME:-}" ] && CODEX_ENV="CODEX_HOME=$(printf '%q' "$TASK_CODEX_HOME") "
+    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; ${CODEX_ENV}codex --cd $WORKTREE_Q$PROFILE_ARG$MODEL_ARG \"\$(cat .task-prompt.md)\""
 else
     [ -z "$MODEL" ] && MODEL="opus"
-    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; claude --model $(printf '%q' "$MODEL") \"\$(cat .task-prompt.md)\""
+    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; claude --permission-mode auto --model $(printf '%q' "$MODEL") \"\$(cat .task-prompt.md)\""
 fi
 cmux send-key --surface "$SURFACE_ID" Enter
 ```
@@ -336,7 +411,8 @@ Spawned task split:
 
 Switch to the right split and continue there. When the task is done —
 ask the task agent for a `## Wiki Summary` block and come back to the
-wiki agent with `/reap <task_name>` or `$llm-obsidian:reap <task_name>`.
+wiki agent with `/reap <task_name>` or the command from `.wiki-reap-command`
+with `<task_name>` appended.
 ```
 
 ---

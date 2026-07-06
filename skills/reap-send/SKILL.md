@@ -34,7 +34,7 @@ wiki agent (vault repo)                task agent (worktree)
                                        /reap-send  ◄── this skill
                                        ├─ assemble the summary
                                        ├─ write .task-summary.md
-                                       └─ cmux send --surface <wiki> "/reap" or "$llm-obsidian:reap"
+                                       └─ cmux send --surface <wiki> "/reap" or .wiki-reap-command
                                                               │
 /reap (triggers automatically)  ◄──────────────────────────────┘
 ├─ Read .task-summary.md
@@ -134,11 +134,12 @@ Wait for "yes". Do not send without confirmation.
 
 `Write ./.task-summary.md` with the full block (including the `## Wiki Summary` header). The file is the single source of truth for the wiki agent. If the file already exists (a repeated /reap-send) — overwrite silently (the latest version always wins).
 
-### 2.3 Read the wiki-surface ID and the task name
+### 2.3 Read the wiki-surface ID, reap command, and task name
 
 ```bash
 WIKI_SURFACE=$(cat .wiki-cmux-surface)
 WIKI_RUNTIME=$(cat .wiki-agent-runtime 2>/dev/null || true)
+WIKI_REAP_COMMAND=$(cat .wiki-reap-command 2>/dev/null || true)
 [ -n "$WIKI_RUNTIME" ] || WIKI_RUNTIME=claude
 TASK_NAME=$(head -1 .task-prompt.md | sed -n 's/^# Task: *//p')
 ```
@@ -150,7 +151,9 @@ If `WIKI_SURFACE` or `TASK_NAME` is empty — stop, tell the user that `.task-pr
 ### 2.4 RPC: cmux send the /reap command into the wiki split
 
 ```bash
-if [ "$WIKI_RUNTIME" = "codex" ]; then
+if [ -n "$WIKI_REAP_COMMAND" ]; then
+  RPC="$WIKI_REAP_COMMAND $TASK_NAME"
+elif [ "$WIKI_RUNTIME" = "codex" ]; then
   RPC="\$llm-obsidian:reap $TASK_NAME"
 else
   RPC="/reap $TASK_NAME"
@@ -159,7 +162,7 @@ cmux send --surface "$WIKI_SURFACE" "$RPC"
 cmux send-key --surface "$WIKI_SURFACE" Enter
 ```
 
-`cmux send` types text into the pty terminal of the split. The agent there interprets it as user input. The slash/skill command `/reap <task-name>` or `$llm-obsidian:reap <task-name>` is handled by the client and launches the skill with an explicit argument — the wiki agent will NOT resolve via `wiki/log.md` (which could land on the wrong task if more dispatches / saves happened after ours).
+`cmux send` types text into the pty terminal of the split. The agent there interprets it as user input. The slash/skill command `/reap <task-name>` or the plugin-qualified command from `.wiki-reap-command` is handled by the client and launches the skill with an explicit argument — the wiki agent will NOT resolve via `wiki/log.md` (which could land on the wrong task if more dispatches / saves happened after ours).
 
 **Gotcha**: if the wiki agent is mid-turn on other work, `/reap` lands in the input buffer and fires after the current turn. That is normal — but if the user is actively chatting with the wiki agent, better warn them.
 

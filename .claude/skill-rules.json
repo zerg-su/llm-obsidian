@@ -37,6 +37,27 @@
       "hint": "Short resolve only, deep work — в task-split'е"
     },
     {
+      "skill": "review-dispatch",
+      "patterns": [
+        "(?i)\\b/?review[- ]?dispatch\\b",
+        "(?i)\\bcross[- ]?model review\\b",
+        "(?i)\\blight cross[- ]?model review\\b",
+        "(?i)\\bревью другой моделью\\b",
+        "(?i)\\bл[её]гк\\w* ревью\\b"
+      ],
+      "hint": "Cross-model review gate for dispatch task-splits; light by default, full on high-risk changes"
+    },
+    {
+      "skill": "review-send",
+      "patterns": [
+        "(?i)\\b/?review[- ]?send\\b",
+        "(?i)\\bsend review back\\b",
+        "(?i)\\breturn review to executor\\b",
+        "(?i)\\bотправь ревью\\b"
+      ],
+      "hint": "Reviewer-side callback to executor; validates that only review handoff files changed"
+    },
+    {
       "skill": "wiki-query",
       "patterns": [
         "(?i)\\bчто (ты )?знаешь про\\b",
