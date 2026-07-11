@@ -1,14 +1,134 @@
-# llm-obsidian
+<p align="center">
+  <img src="docs/assets/llm-obsidian-banner.png" alt="Two terminal agents exchanging work through an obsidian knowledge vault" width="100%">
+</p>
 
-**A self-organizing second brain for Obsidian, operated by an LLM agent.** Your assistant builds and maintains a structured, cross-linked wiki out of your conversations, sources and decisions — and then actually *finds* things in it, in Russian or English, fully locally.
+# LLM Obsidian
+
+**One durable working environment for Claude Code and Codex CLI: shared memory, shared skills, bounded orchestration, and cross-model review.** It turns conversations, sources, plans, and decisions into a structured Obsidian wiki, then makes that knowledge available to the next agent session instead of starting from zero.
 
 🇷🇺 **Читайте по-русски: [README.ru.md](README.ru.md)**
 
-Based on [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) by AgriciDaniel (an implementation of Andrej Karpathy's *LLM Wiki* pattern), heavily reworked: the retrieval stack, write path, hooks and MCP integration were redesigned and battle-tested for months as the daily working memory of a DevOps engineer before being extracted into this generic release. Claude Code and Codex CLI are supported first-class agents — which is why this is *llm*-obsidian, not *claude*-obsidian.
+This is deliberately not a universal agent router. Claude Code and Codex CLI are the two first-class agents; Obsidian is the durable memory; plain Python and shell scripts provide the shared mechanics. The project does not replace either CLI, emulate a provider, or bypass its account limits.
+
+The workflow grew out of months of daily use as a DevOps engineer's working memory before it was extracted from a private vault and made generic.
 
 ---
 
-## What you get
+## Why LLM Obsidian?
+
+A capable coding agent is still usually a temporary process. Its local context ends, its private memory differs from another CLI's memory, and a useful plan or review can disappear into terminal history. Running two agents side by side does not solve that by itself: they need a shared place to remember, a contract for handing work over, and a way to finish without pasting free-form text between windows.
+
+LLM Obsidian supplies that missing layer:
+
+- **Memory:** a local Markdown vault with provenance, links, retrieval, lifecycle, and transactional writes.
+- **Skills:** the same versioned workflows for capture, research, planning, review, daily work, and maintenance.
+- **Orchestration:** visible cmux task splits, isolated git worktrees, typed task contracts, watchdogs, and deterministic reap.
+- **Independent review:** Claude can implement while Codex reviews, or Codex can implement while Claude reviews.
+- **Guardrails:** validation, read-only reviewer roles, bounded verification loops, DCG, and explicit human escalation for scope or trust changes.
+
+The result is one working system with several model perspectives—not a collection of unrelated chat sessions.
+
+## Why not just Claude Code? Why not just Codex?
+
+You should still use both. LLM Obsidian is the connective tissue around them.
+
+| A single CLI is good at | The gap LLM Obsidian closes |
+|---|---|
+| Solving the task in its current context | Carrying decisions, sources, and task history into future sessions |
+| Using its own commands and extensions | Exposing one versioned skill set and one vault to both agents |
+| Reviewing its own implementation | Routing the result to a different model family with a read-only review contract |
+| Running a long task | Supervising the task in a visible split, detecting stalls, and closing it only after a validated handoff |
+| Asking for permissions as work unfolds | Moving foreseeable choices into the approved plan and escalating only material surprises |
+
+Different models fail differently. Cross-review is valuable because the reviewer did not produce the implementation and does not share all of the executor's assumptions. It raises confidence; it does not pretend to prove correctness.
+
+## Architecture at a glance
+
+```text
+VoiceInk (optional voice input)            keyboard input
+                 \                            /
+                  v                          v
+        ┌────────────── LLM Obsidian workspace ──────────────┐
+        │                                                     │
+        │   Claude Code  ⇄  typed handoffs  ⇄  Codex CLI     │
+        │         \          cmux + worktrees          /      │
+        │          └── shared skills + Obsidian vault ─┘      │
+        │                    │                                │
+        │       sparse retrieval + optional Ollama/bge-m3     │
+        │       DCG + schemas + validation + Stop pipeline    │
+        └────────────────────┬────────────────────────────────┘
+                             │
+              Claude implements → Codex reviews
+              Codex implements  → Claude reviews
+```
+
+Obsidian stores the durable state, but the automation is not locked into an Obsidian process: the canonical data is Markdown plus repository scripts. cmux is needed only for visible multi-session orchestration. Ollama is needed only for optional dense retrieval.
+
+## Cross-model review, end to end
+
+Example: Claude Code implements, Codex reviews.
+
+1. The coordinator turns the request into an approved plan and asks consequential questions before execution.
+2. `/dispatch` records a bounded task contract, creates an isolated worktree, and opens an interactive Claude Code session in a cmux split.
+3. Claude implements and runs the task-specific checks without repeatedly asking about actions already covered by the contract.
+4. `/review-dispatch` opens a read-only Codex reviewer. The callback is typed and tied to the task, review, and baseline being reviewed—not pasted terminal prose.
+5. Accepted findings return to the same executor. Verification is bounded; a scope, security, trust, or destructive-action change returns to the user.
+6. `/reap-send` validates the final summary and result provenance before the coordinator files the outcome. The cmux surface is armed to close only after the agent process exits.
+
+The reverse direction uses the same protocol: Codex implements and Claude reviews. See [model routing](docs/model-routing.md) and the [unattended pipeline runbook](docs/unattended-pipeline-operations.md).
+
+## Automatic checks before completion
+
+| Phase | What is checked |
+|---|---|
+| Dispatch | approved-plan identity, task contract, worktree metadata, generated command, role-specific permission policy |
+| Execution | supervised process state, heartbeat/progress evidence, observer-only stall notifications, explicit exit state |
+| Review | read-only reviewer mandate, task/review IDs, baseline fingerprint, callback schema, bounded verification rounds |
+| Reap | typed wiki summary, result path and hash, task provenance, terminal outcome, close-on-exit eligibility |
+| Vault Stop | transaction recovery, sparse reindex/self-heal, strict vault validation, scoped commit, fingerprinted optional dense refresh |
+
+The watchdog does not blindly kill an agent that is visibly working. It reports a possible stall first; genuinely blocking decisions return to the coordinator instead of being guessed in a background window.
+
+## Supported agents and companion components
+
+| Runtime or component | Status | Role and boundary |
+|---|---|---|
+| **Claude Code** | First-class | Coordinator, executor, or opposite-model reviewer through the official CLI and the user's own account/subscription. Provider limits remain in force. |
+| **Codex CLI** | First-class | Coordinator, executor, or opposite-model reviewer through the official CLI and the user's own access. Provider limits remain in force. |
+| **Obsidian** | Core data/UX | Local Markdown vault, links, browsing, and human editing. The files remain usable without an agent. |
+| **cmux** | Optional; required for orchestration | Visible task/reviewer splits, sockets, lifecycle tracking, and resumable interactive sessions. Core wiki skills work without it. |
+| **Ollama + `bge-m3`** | Optional local model | Dense multilingual embeddings and duplicate detection without a hosted API or per-call model fee. It uses your own disk/RAM; sparse retrieval remains complete when Ollama is absent. |
+| **DCG** | Optional, recommended | Destructive-command preflight for both CLIs. Defense in depth, not a sandbox or a proof of safety. |
+| **VoiceInk** | Optional input layer | Native macOS dictation into either CLI. Not bundled and not an agent integration. |
+| **Gemini CLI and other agents** | Not supported today | A future adapter is possible only after it reaches the same skill, contract, review, and test guarantees. No compatibility is claimed now. |
+
+Model names change faster than the workflow. Defaults, subscription-only routes, and explicit overrides are documented in [docs/model-routing.md](docs/model-routing.md) rather than advertised as permanent provider support.
+
+## Design principles
+
+- **Durable files over hidden memory.** Important context is inspectable, diffable, and portable.
+- **Plan once, execute within bounds.** Predictable choices happen before dispatch; unattended sessions inherit only that mandate.
+- **Different model, independent review.** The reviewer is advisory and read-only; the executor owns fixes and commits.
+- **Typed contracts over terminal paste.** IDs, hashes, schemas, and explicit terminal states make handoffs auditable.
+- **Local-first retrieval.** The mandatory path needs no embedding API; dense retrieval is an optional local enhancement.
+- **Fail closed at trust boundaries.** Invalid callbacks, changed baselines, missing provenance, or auth-route drift do not silently continue.
+- **The user owns external effects.** Pushes, deployments, credentials, destructive actions, and material scope changes are not inferred.
+
+## Security and trust
+
+LLM Obsidian **does not bypass Claude, Codex, or any provider's subscriptions, rate limits, authentication, safety controls, or terms**. You install and authenticate the official CLIs yourself. Subscription-only Claude review routes reject API/provider overrides rather than silently spending an API key; model overrides remain explicit.
+
+Reviewers are launched with read-only mandates. Secrets for MCP services live outside the repository. Vault writes use optimistic hashes and a recovery journal. DCG blocks known destructive shell patterns before execution, while the CLI sandbox/approval policy and the human-approved task contract remain separate layers. No guardrail eliminates model error, so cross-review and tests improve assurance but never turn generated work into a guarantee.
+
+## Real workflows
+
+- **Ship a change while away from the terminal:** approve the plan, dispatch one bounded implementation, receive opposite-model review, and return to a validated result instead of a chain of permission prompts.
+- **Build a durable technical memory:** ingest docs and decisions, retrieve them by RU/EN concepts, and preserve session provenance for later agents.
+- **Research without contaminating the vault context:** fetch sources in an isolated session, synthesize networklessly, then write through one vault transaction.
+- **Operate by voice:** dictate prompts into Claude Code or Codex with [VoiceInk](https://github.com/beingpax/VoiceInk), while the same skills and safety gates still apply.
+- **Run a personal operations loop:** journal plans, capture backlog items, generate daily summaries, find prior sessions, and distill shell history into human-executable runbooks.
+
+## Core capabilities
 
 - **A wiki that grows itself.** `ingest <path|URL>` turns raw material into 8-15 cross-linked typed pages; `/save` files insights from any conversation; `/autoresearch` runs autonomous research loops; every approved plan is auto-captured into `wiki/plans/`.
 - **Retrieval that is measured, not vibed.** H2/H3 sections are bounded to 800 words with 100-word overlap, ranked sparsely, and deduplicated to the best heading/snippet per page; optional local `bge-m3` joins through RRF. A 48-query RU/EN goldset is half held out, and `make bench-retrieval` rejects hit@5/MRR regressions over 0.02.
@@ -39,7 +159,7 @@ DragonScale Memory (fold rollups, deterministic `c-NNNNNN` page addresses, seman
 
 ## Quick start
 
-Requirements: macOS (Linux mostly works, launchd bits are macOS-only), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) or Codex CLI, Python 3.9+, git. Optional: [ollama](https://ollama.com) for semantic retrieval (recommended), cmux for parallel tasks.
+Requirements: macOS (the maintained and tested target), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) or Codex CLI, Python 3.9+, and git. Optional: [Ollama](https://ollama.com) for semantic retrieval, [cmux](https://github.com/wandb/cmux) for parallel tasks, DCG for destructive-command checks, and VoiceInk for voice input. Linux and Windows ports may be feasible, but this project does not currently test or support them.
 
 ```bash
 # 1. Get the vault
@@ -113,6 +233,12 @@ ingest ~/Downloads/some-article.pdf     # source -> structured wiki pages
 /backlog add не забыть продлить домен   # one-line capture inbox
 lint the wiki                           # health check: orphans, dead links, duplicates
 ```
+
+### Optional voice input with VoiceInk
+
+[VoiceInk](https://github.com/beingpax/VoiceInk) is a native macOS voice-to-text app that can dictate directly into a terminal, so it works equally well in front of Claude Code or Codex. It is a companion input tool, not a dependency or a privileged integration with LLM Obsidian.
+
+VoiceInk's source is available under GPL-3.0 and can be built locally without a subscription. Its maintainer's prebuilt distribution has its own trial/license and support benefits. VoiceInk currently requires macOS 14.4 or later; follow its repository for current installation and licensing details.
 
 ## MCP HTTP gateway
 
@@ -219,12 +345,22 @@ The policy lives in `config/dcg/config.toml`; hook template in
 smoke suite validates the repo policy in an isolated temporary HOME by default;
 set `DCG_TEST_USE_USER_CONFIG=1` to test the machine's live allowlist/config.
 
+## Limitations
+
+- **macOS is the only maintained and exercised platform.** cmux, launchd services, status-line integration, and the unattended lifecycle are tested there. Other platforms are a porting opportunity, not a support claim.
+- **Claude Code and Codex CLI are the only first-class agents.** Host hook capabilities differ; consult the [runtime capability matrix](docs/runtime-capabilities.md).
+- **cmux is required for dispatch/review orchestration.** The vault, retrieval, writing, and most productivity skills work without it.
+- **Ollama is optional, not invisible.** Dense retrieval consumes local RAM/disk and needs a downloaded model; sparse retrieval is the supported fallback.
+- **Cross-review is bounded assurance, not formal verification.** A second model can still miss defects or share the same wrong premise.
+- **No cloud model is bundled or made free.** You bring the official CLI access and subscriptions required by the routes you choose.
+
 ## Roadmap
 
-- **Codex prompt/tool hook parity**: skills, MCP sync, shared scripts, and the safe `Stop` pipeline are supported; `SessionStart`, `UserPromptSubmit`, and `PostToolUse` remain host-specific.
-- RU localization of skill bodies (currently EN — measurably better instruction-following; RU trigger words already work).
-- More example MCP servers in the gateway config.
-- Generic ports of the remaining incubator skills (morning briefing, commit digest, verification gates, debug discipline).
+- Close safe Codex prompt/tool hook parity gaps where the host exposes equivalent lifecycle events.
+- Publish more end-to-end macOS acceptance fixtures and operational examples.
+- Expand RU documentation while keeping one canonical tested behavior contract.
+- Add more example MCP profiles without loading rarely used tool schemas into every session.
+- Explore Linux and other-agent adapters only when they can preserve typed handoffs, permission boundaries, lifecycle supervision, and hermetic tests.
 
 ## Credits & license
 
