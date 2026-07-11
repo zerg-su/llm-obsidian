@@ -18,7 +18,7 @@ With the gateway you run 1 gateway + M children per machine, constant no matter 
 
 ## Architecture
 
-The gateway is [TBXark/mcp-proxy](https://github.com/TBXark/mcp-proxy): one Go binary that spawns stdio children and/or proxies remote URL children, exposing each at its own HTTP route. It runs as a single launchd service, `io.llm-obsidian.mcp-gateway`, listening on `127.0.0.1:9090` (override with `MCP_GATEWAY_PORT`; binary path with `MCP_PROXY_BIN`; label with `MCP_GATEWAY_LABEL`).
+The gateway is [TBXark/mcp-proxy](https://github.com/TBXark/mcp-proxy): one Go binary that spawns stdio children and/or proxies remote URL children, exposing each at its own HTTP route. It runs as a single launchd service, `io.llm-obsidian.mcp-gateway`. The canonical local port is `MCP_GATEWAY_PORT` in the ignored `runtime.env` (default template: 9090); binary path and launchd label can still be overridden with `MCP_PROXY_BIN` and `MCP_GATEWAY_LABEL`.
 
 **Route mapping rule.** One name is used in four places and must match exactly:
 
@@ -51,40 +51,43 @@ A **stdio child**: the gateway spawns and owns the process. And a **url child**:
 }
 ```
 
-**Secrets indirection.** `config.json` is committed to git and contains no secrets, only `${VAR}` placeholders (in `env` and `headers` alike). `mcp-gateway.sh run` sources `~/.config/mcp-gateway/secrets.env` (plain `KEY=value` lines, chmod 600, never committed) into the environment, and mcp-proxy expands the placeholders from env. `doctor` derives the required key list from `config.json` and tells you what is missing.
+**Secrets indirection.** The committed `config.json.example` contains no secrets, only `${VAR}` placeholders (in `env` and `headers` alike); its ignored local copy is `config.json`. `mcp-gateway.sh run` sources `~/.config/mcp-gateway/secrets.env` (plain `KEY=value` lines, chmod 600, never committed) into the environment, and mcp-proxy expands the placeholders from env. `doctor` derives the required key list from `config.json` and tells you what is missing.
 
-**Version pins.** npm children are pinned inside their `args` (`package@X.Y.Z`). PyPI children are installed as real binaries via `uv tool install` (no uvx nanny process, no network at start); their pins and `--with` constraints live in `tools.json`. Never edit versions by hand: `mcp-gateway.sh update` does the registry lookup, per-package confirmation, install, restart, and smoke.
+**Version pins.** The gateway binary itself is pinned by platform URL and SHA-256 in `mcp-proxy.lock.json`; bootstrap verifies the archive before extracting and records a checksum provenance marker beside the installed binary. npm children are pinned inside their `args` (`package@X.Y.Z`). PyPI children are installed as real binaries via `uv tool install` (no uvx nanny process, no network at start); their pins and `--with` constraints live in `tools.json`. Never edit versions by hand: `mcp-gateway.sh update` does the registry lookup, per-package confirmation, install, restart, and smoke.
 
 ## Install
 
 From a bare macOS machine:
 
 ```bash
-# 1. mcp-proxy binary
-mkdir -p ~/.local/bin
-# Download the release asset for your platform from
-#   https://github.com/TBXark/mcp-proxy/releases
-# save it as ~/.local/bin/mcp-proxy, then:
-chmod +x ~/.local/bin/mcp-proxy
+bin/setup-clean-machine.sh --skip-vault
+```
 
-# 2. Gateway config (lives in git, holds no secrets)
-cd scripts/mcp-gateway
-cp config.json.example config.json
+That preserves existing server entries, materializes the canonical port in local
+gateway/client config, installs the exact locked `mcp-proxy` artifact when the
+installed provenance does not match, and syncs Codex MCP TOML. The manual
+equivalent is:
+
+```bash
+# 1. Exact locked mcp-proxy binary (download + checksum + version verification)
+python3 scripts/mcp-gateway/install-proxy.py \
+  --lock scripts/mcp-gateway/mcp-proxy.lock.json \
+  --dest ~/.local/bin/mcp-proxy
+
+# 2. Canonical port + derived local gateway/client JSON
+cp scripts/mcp-gateway/runtime.env.example scripts/mcp-gateway/runtime.env
+scripts/mcp-gateway/mcp-gateway.sh sync-config --apply
 
 # 3. Secrets file (never committed)
 mkdir -p ~/.config/mcp-gateway
-cp secrets.env.example ~/.config/mcp-gateway/secrets.env
+cp scripts/mcp-gateway/secrets.env.example ~/.config/mcp-gateway/secrets.env
 chmod 600 ~/.config/mcp-gateway/secrets.env
 
 # 4. Flagship child: context7 (library documentation MCP) needs exactly one key.
 #    Get a free key from the https://context7.com dashboard and fill in the
 #    CONTEXT7_API_KEY= line in ~/.config/mcp-gateway/secrets.env
 
-# 5. Point Claude Code at the gateway
-cd ../..   # repo root
-cp .mcp.json.example .mcp.json
-
-# 6. Pre-flight, install, verify
+# 5. Pre-flight, install, verify
 scripts/mcp-gateway/mcp-gateway.sh doctor    # lists every missing piece with a fix hint
 scripts/mcp-gateway/mcp-gateway.sh install   # pins + launchd plist + bootstrap + autostart
 scripts/mcp-gateway/mcp-gateway.sh health    # real MCP handshake against the first child
@@ -95,7 +98,7 @@ New Claude Code sessions in the repo pick the servers up from `.mcp.json` automa
 ## Commands reference
 
 ```
-mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|update [--check|--yes] [name...]|sync-tools|doctor|logs [n]}
+mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|schema-check|schema-lock --apply|update [--check|--yes] [name...]|sync-tools|sync-config [--check|--apply]|codex-sync [--check|--apply]|doctor|logs [n]}
 ```
 
 | Command | What it does |
@@ -108,10 +111,27 @@ mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|upda
 | `status` | Loaded + pid + per-route liveness (cheap 404 check, under a second, no handshake). |
 | `health` | Full MCP handshake (initialize + tools/list) against the first configured child (canary). |
 | `smoke [server]` | Handshake every endpoint, or one server / comma-separated list. |
+| `schema-check` | Compare live tool names/schema hashes with the reviewed lock; no descriptions are stored. |
+| `schema-lock --apply` | Explicitly accept the complete live MCP schema inventory after review. |
 | `update [--check\|--yes] [name...]` | Registry lookup current -> latest, per-package confirm; on apply: restart + smoke. |
 | `sync-tools` | Install every `tools.json` pin via `uv tool install` (fresh machine, or after cleaning uv). |
+| `sync-config [--check\|--apply]` | Check or materialize the `runtime.env` port in gateway and default client JSON. |
+| `codex-sync [--check\|--apply]` | Mirror HTTP client pointers and repo-shipped runtime profiles into Codex TOML. |
 | `doctor` | Read-only pre-flight: binaries, uv pins, secrets keys, AWS profiles, plist. |
 | `logs [n]` | Tail `~/Library/Logs/mcp-gateway.{out,err}.log`. |
+
+`codex-sync --apply` also installs the tracked `.codex/profiles/*.toml` layers
+as `$CODEX_HOME/llm-obsidian-<name>.config.toml` with a private backup:
+
+- `default`: high reasoning, on-request approvals;
+- `deep`: max reasoning for exceptional tasks;
+- `reviewer-readonly`: read-only, no web/apps/memory;
+- `wiki-write`: high reasoning, workspace writes, no web.
+
+The trusted repo config selects `high` for ordinary direct sessions, so direct
+and MCP-profile launches no longer silently differ. Protected research uses an
+even narrower per-run `CODEX_HOME` generated by `research-isolation.py`; it does
+not inherit these profiles, MCP servers, plugins, or apps.
 
 ## Adding a server
 
@@ -133,7 +153,7 @@ mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|upda
    ```json
    "search": { "type": "http", "url": "http://127.0.0.1:9090/search/mcp" }
    ```
-5. **Verify:** `mcp-gateway.sh restart`, then `mcp-gateway.sh smoke search`, then `mcp-gateway.sh doctor`.
+5. **Synchronize and verify:** `mcp-gateway.sh sync-config --apply`, then `restart`, `smoke search`, and `doctor`.
 
 If the server ships an oversized tool set, trim it at the gateway with the optional per-child `options.toolFilter` (`mode: "allow"` keeps only the listed tools; `mode: "block"` drops them):
 
@@ -190,5 +210,6 @@ Each logical child keeps its own route and `mcp__<name>__*` prefix, so permissio
 - **Huge tool sets eat context regardless of transport.** Trim at the gateway with `toolFilter`, or move the server into a profile so only sessions that need it pay the schema cost ([.mcp-profiles/README.md](../.mcp-profiles/README.md)).
 - **npx/uvx cold starts.** A first boot after cleaning package caches can take minutes, and `smoke` will FAIL on children that are still warming up; `status` warns when the gateway is younger than ~3 minutes. Prefer pinned `uv tool install` binaries for PyPI children: no wrapper process, no network at start, and updates go through `mcp-gateway.sh update` only.
 - **Shell env vars are invisible to launchd.** Keys exported from fish or zsh config never reach the service. That is exactly why the `run` wrapper sources `~/.config/mcp-gateway/secrets.env` itself instead of relying on your shell (or on the plist) to provide the environment.
+- **Do not export a second gateway port in shell startup files.** Edit `runtime.env`, then run `sync-config --apply`; startup rejects a `config.json` whose listener port disagrees with that file.
 - **Routes answer on both `/<name>/` and `/<name>/mcp`** (subtree routing). Use `/<name>/mcp` in client configs.
 - **Children are shared state.** One process serves every session; any server that keeps per-connection state (an active connection selected via a tool call, a cache, a login) shares it across all terminals. For a single user this is usually a feature, but keep it in mind.

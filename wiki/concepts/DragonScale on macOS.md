@@ -1,9 +1,9 @@
 ---
 type: concept
-address: c-000000
+address: c-000005
 title: "DragonScale on macOS"
 created: 2026-04-26
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - dragonscale
   - macos
@@ -14,6 +14,8 @@ related:
   - "[[DragonScale Memory]]"
   - "[[index]]"
 sources: []
+sessions:
+  - public-template-v2
 ---
 
 # DragonScale on macOS

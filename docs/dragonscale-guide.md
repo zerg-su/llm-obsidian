@@ -50,19 +50,9 @@ bash bin/setup-dragonscale.sh /path/to/vault
 
 Если опустить путь, использует repo-root inferred из `bin/`.
 
-### Universal prerequisite: flock
+### Universal prerequisite: Python 3
 
-`flock` — universal prerequisite. Mechanism 2 использует напрямую в `scripts/allocate-address.sh` для guard `.vault-meta/.address.lock`. Mechanism 3 использует flock из Python для guard `.vault-meta/.tiling.lock` вокруг cache I/O.
-
-Quick check:
-
-```bash
-command -v flock
-```
-
-Если ничего не выводит — установить `flock` до того как полагаться на DragonScale. На Linux обычно уже есть. На macOS обычно из `util-linux` (см. [wiki/concepts/DragonScale on macOS.md](../wiki/concepts/DragonScale%20on%20macOS.md)).
-
-Если `flock` отсутствует, setup всё ещё может создавать файлы, но address-allocator и tiling-cache path не reliable. Считать это блокером.
+Mechanism 2 и cache-lock Mechanism 3 используют stdlib `fcntl.flock`; внешний бинарник `flock` и пакет `util-linux` не нужны. Публичный `scripts/allocate-address.sh` остаётся стабильной shell-обёрткой над `allocate-address.py`, поэтому вызовы skills не меняются. На Windows `fcntl` недоступен; toolkit ориентирован на macOS/Linux.
 
 ### Mechanism 3 дополнительные prerequisites: python3, ollama, bge-m3
 
@@ -200,19 +190,19 @@ python3 ./scripts/boundary-score.py --top 5
 
 ### Что делает
 
-Fold-оператор — log-rollup. Читает most-recent `2^k` записей из `wiki/log.md` и produces extractive fold-страницу под `wiki/folds/`.
+Fold-оператор — deterministic log-rollup. Каждая operation-log запись получает SHA-256 по canonical text. Helper берёт самые старые `2^k` IDs, которых ещё нет в `entry_ids` существующих `wiki/folds/*.md`.
 
-Fold аддитивен. Не удаляет, не двигает, не переписывает child-записи. Fold extractive. Каждое outcome и тема в output должны быть traceable до child-log-записи.
+Fold аддитивен: не удаляет, не двигает и не переписывает children. Extract берётся из первой meaningful строки каждой записи. Fold-operation записи исключены из входа, поэтому flat folds не начинают рекурсивно поглощать собственный audit trail.
 
 Текущий shipped-скилл намеренно narrow. Поддерживает flat-fold над raw log-записями. Hierarchical fold-of-folds поведение остаётся вне scope текущего скилла, даже если concept-spec обсуждает stacked-folds.
 
-Fold-ID детерминистичен для given-range:
+Fold-ID содержит boundary hashes:
 
 ```text
-fold-k{K}-from-{EARLIEST-DATE}-to-{LATEST-DATE}-n{COUNT}
+fold-k{K}-{OLDEST-ID[:12]}-{NEWEST-ID[:12]}-n{COUNT}
 ```
 
-Это даёт structural-идемпотентность. Если exact-fold уже существует, скилл должен остановиться вместо записи дубликата.
+Это даёт structural-идемпотентность без mutable counter. Удаление fold page намеренно снова делает её entry IDs необработанными.
 
 ### Когда использовать
 
@@ -229,36 +219,36 @@ fold-k{K}-from-{EARLIEST-DATE}-to-{LATEST-DATE}-n{COUNT}
 Пример команды:
 
 ```text
-fold the log, dry-run k=3
+python3 scripts/fold-log.py status --json
+python3 scripts/fold-log.py
 ```
 
-Это запрашивает dry-run над `2^3 = 8` записями.
+Default batch — `2^6 = 64`. Для явного maintenance-прогона можно передать `--k 3`; partial batch не создаётся.
 
 ### Dry-run vs commit-режим
 
-Dry-run — default и stdout-only. Это важно потому что в репо есть PostToolUse-хук для writes.
+Dry-run — default и stdout-only.
 
 В dry-run режиме:
 
 - ни один файл не записывается
 - ни один auto-commit-хук не триггерится
-- получаете proposed fold-content в terminal-output
+- получаете полностью детерминированный fold-content в terminal-output
 
 В commit-режиме:
 
 - fold-страница записывается в `wiki/folds/`
-- `wiki/index.md` обновляется
 - `wiki/log.md` получает новую fold-запись
 
-Скилл-доки ожидают три отдельные write-операции в commit-режиме, так что три auto-commit'а от хука нормальны.
+Fold page и log entry land через одну `vault-write.py` transaction; folder index регенерирует Stop.
 
 Пример commit-команды:
 
 ```text
-fold the log, commit k=3
+python3 scripts/fold-log.py --commit
 ```
 
-Запустить dry-run сначала. Commit только если fold-content выглядит правильно.
+Запустить dry-run сначала. Commit только после явного подтверждения пользователя.
 
 Чтобы отключить Mechanism 1 без uninstall DragonScale, перестать invoke `wiki-fold`. Существующие fold-страницы могут оставаться в вольте, или можно удалить вручную.
 
@@ -290,7 +280,10 @@ Helper имеет три real modes:
 ./scripts/allocate-address.sh --rebuild
 ```
 
-Default-mode reserves и печатает next-address. `--peek` read-only. `--rebuild` recomputes counter из highest observed `c-NNNNNN`.
+Default-mode reserves и печатает next-address. `--peek` read-only. `--rebuild`
+поднимает counter минимум до highest observed `c-NNNNNN` + 1, но никогда не
+уменьшает уже валидный counter: зарезервированные или удалённые addresses не
+переиспользуются.
 
 Пример команды:
 
@@ -302,9 +295,9 @@ Default-mode reserves и печатает next-address. `--peek` read-only. `--r
 
 `wiki-ingest` enables address-assignment только когда `./scripts/allocate-address.sh` executable и `./.vault-meta` существует. Если оба условия true, новые non-meta страницы получают `address:` во frontmatter. Если нет, ingest продолжается без addresses.
 
-`wiki-lint` enables address-validation только когда `./scripts/allocate-address.sh` executable и `./.vault-meta/address-counter.txt` существует. Если эти условия true, lint проверяет address-формат, uniqueness, counter-consistency против `--peek`, missing-addresses на post-rollout страницах, address-map consistency в `.raw/.manifest.json`.
+`wiki-lint` enables address-validation только когда `./scripts/allocate-address.sh` executable и `./.vault-meta/address-counter.txt` существует. Если эти условия true, lint проверяет address-формат, uniqueness, counter-consistency против `--peek`, missing-addresses на post-rollout страницах, address-map consistency в `.raw/.manifest.json`. `peek` обязан быть больше любого наблюдаемого address; gaps выше `highest + 1` допустимы и репортятся как warning, потому что reservation может пережить неуспешную запись или удаление страницы.
 
-Single-writer rule важен здесь. Allocator использует `flock`, но ingest-скилл всё ещё говорит Phase 2 single-writer-only. Не запускайте параллельные ингесты из multiple-сессий или sub-агентов которые assign addresses.
+Single-writer rule важен здесь. Allocator сериализует counter через `fcntl`, но не сериализует запись самих страниц. Не запускайте параллельные ингесты из multiple-сессий или sub-агентов которые пишут один и тот же page path.
 
 Одно hard-rule из skill-доков стоит повторить. Никогда не редактировать `.vault-meta/address-counter.txt` напрямую. Mutate только через `scripts/allocate-address.sh`.
 
@@ -466,7 +459,7 @@ Helper suggests. Пользователь всё ещё decides.
 
 ### Single-writer rule
 
-DragonScale assumes single-writer для address-assignment пути. Allocator flock-guarded, что защищает counter от simple-races. Не превращает всю вики в safe multi-writer систему.
+Allocator `fcntl`-guarded и безопасен для параллельных reservations, но writers всё равно должны использовать optimistic hashes и не менять один page path одновременно.
 
 Ingest-скилл явный здесь. Не запускать параллельные ингесты из multiple Claude-сессий или sub-агентов которые assign addresses.
 
@@ -491,23 +484,9 @@ DragonScale задизайнен feature-detected, не assumed.
 
 ## Troubleshooting
 
-### Missing flock
+### Address lock busy
 
-Если `flock` отсутствует, fix this first. Симптомы могут включать unsafe address-allocation path или tiling-cache path который не может правильно lock.
-
-Check:
-
-```bash
-command -v flock
-```
-
-Если отсутствует, установить package который provides его для вашей системы, потом rerun:
-
-```bash
-bash bin/setup-dragonscale.sh
-```
-
-Не workaround editing `.vault-meta/address-counter.txt` напрямую.
+Allocator ждёт `.vault-meta/.address.lock` до пяти секунд. Если он возвращает `ERR: could not acquire...`, дождитесь завершения другого writer и повторите вызов. Не обходите lock прямым редактированием `.vault-meta/address-counter.txt`; при подозрении на drift используйте `./scripts/allocate-address.sh --rebuild`.
 
 macOS-specific подсказки: см. [`wiki/concepts/DragonScale on macOS.md`](../wiki/concepts/DragonScale%20on%20macOS.md).
 

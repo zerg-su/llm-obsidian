@@ -41,7 +41,7 @@ Before validating anything, classify the page:
 
 2. **Uniqueness check**: no two pages share the same address value. Report both paths.
 
-3. **Counter consistency**: `./scripts/allocate-address.sh --peek` returns the next counter value. Every observed `c-NNNNNN` must satisfy `NNNNNN < peek_value`. Violation = counter drift.
+3. **Counter consistency**: `./scripts/allocate-address.sh --peek` returns the next counter value. Every observed `c-NNNNNN` must satisfy `NNNNNN < peek_value`. Violation = counter drift. A `peek_value` greater than `highest_observed + 1` is a permitted reservation/deletion gap (warning only), not an error and not a reason to reuse an address.
 
 4. **Post-rollout enforcement**: every page classified as "post-rollout (must have address)" that LACKS the `address:` field is a lint **error**, not informational. This prevents the silent-regression path where a new page skips address assignment.
 
@@ -83,4 +83,3 @@ Lint only observes. Do NOT auto-assign missing addresses during lint. Assignment
 ```
 
 ---
-

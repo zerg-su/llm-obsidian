@@ -1,0 +1,8 @@
+{
+  "project": "zsviczian/obsidian-excalidraw-plugin",
+  "version": "2.22.0",
+  "asset": {
+    "url": "https://github.com/zsviczian/obsidian-excalidraw-plugin/releases/download/2.22.0/main.js",
+    "sha256": "8f7d5dc538228020805a255db9615ba2fdb82a9c0e6081f1b37ee7c2750ab37e"
+  }
+}

@@ -30,6 +30,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts" "$TMP/wiki"
 cp "$ALLOC" "$TMP/scripts/allocate-address.sh"
+cp "$VAULT_ROOT/scripts/allocate-address.py" \
+   "$VAULT_ROOT/scripts/vault_schema.py" "$TMP/scripts/"
 chmod +x "$TMP/scripts/allocate-address.sh"
 cd "$TMP"
 
@@ -100,6 +102,12 @@ address: c-999999
 EOF
 REBUILT=$(./scripts/allocate-address.sh --rebuild 2>&1)
 assert_eq "code-block ignored, rebuild to 1" "Counter rebuilt: next = 1" "$REBUILT"
+
+# --- Test 9: rebuild never reuses a reserved/deleted address gap ---
+echo "50" > .vault-meta/address-counter.txt
+PRESERVED=$(./scripts/allocate-address.sh --rebuild 2>&1)
+assert_eq "counter-ahead rebuild preserves monotonicity" "Counter preserved: next = 50" "$PRESERVED"
+assert_eq "counter-ahead value preserved" "50" "$(cat .vault-meta/address-counter.txt)"
 
 # --- Summary ---
 echo ""

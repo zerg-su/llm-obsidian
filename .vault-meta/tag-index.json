@@ -17,8 +17,14 @@
   "cherry-picks": [
     "wiki/concepts/cherry-picks.md"
   ],
-  "comparison": [
-    "wiki/comparisons/Wiki vs RAG.md"
+  "claude": [
+    "wiki/concepts/Unattended Pipeline.md"
+  ],
+  "cmux": [
+    "wiki/concepts/Unattended Pipeline.md"
+  ],
+  "codex": [
+    "wiki/concepts/Unattended Pipeline.md"
   ],
   "compatibility": [
     "wiki/concepts/DragonScale on macOS.md"
@@ -51,6 +57,9 @@
   ],
   "fractal": [
     "wiki/concepts/DragonScale Memory.md"
+  ],
+  "guide": [
+    "wiki/meta/daily-pipeline-guide.md"
   ],
   "hot-cache": [
     "wiki/hot.md"
@@ -98,6 +107,7 @@
     "wiki/getting-started.md",
     "wiki/hot.md",
     "wiki/index.md",
+    "wiki/meta/daily-pipeline-guide.md",
     "wiki/meta/dashboard.md",
     "wiki/overview.md",
     "wiki/sources/_index.md"
@@ -107,6 +117,9 @@
   ],
   "onboarding": [
     "wiki/getting-started.md"
+  ],
+  "orchestration": [
+    "wiki/concepts/Unattended Pipeline.md"
   ],
   "overview": [
     "wiki/overview.md"
@@ -121,10 +134,18 @@
     "wiki/concepts/Source-First Synthesis.md"
   ],
   "rag": [
+    "wiki/comparisons/Wiki vs RAG.md",
     "wiki/concepts/Query-Time Retrieval.md"
   ],
   "retrieval": [
+    "wiki/comparisons/Wiki vs RAG.md",
     "wiki/concepts/Query-Time Retrieval.md"
+  ],
+  "review": [
+    "wiki/concepts/Unattended Pipeline.md"
+  ],
+  "skills": [
+    "wiki/meta/daily-pipeline-guide.md"
   ],
   "source": [
     "wiki/sources/_index.md"

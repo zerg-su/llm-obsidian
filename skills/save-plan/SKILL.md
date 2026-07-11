@@ -6,7 +6,7 @@ description: >
   "запиши план", "сохрани план", "зафайл план", "файлы план в вики".
   Use when the user wants to persist a plan WITHOUT executing it.
   Orthogonal to ExitPlanMode (which is auto-captured by the plan-capture hook).
-allowed-tools: Read Write Bash Glob
+allowed-tools: Read Bash Glob
 ---
 
 # save-plan: Save A Discussed Plan To The Wiki
@@ -93,6 +93,9 @@ type: plan
 title: "<title>"
 address: <c-NNNNNN>
 session_id: <session>
+sessions:
+  - id: <session>
+    date: <date>
 source_cwd: "<cwd>"
 status: pending
 created: <date>
@@ -107,13 +110,13 @@ tags:
 <plan content verbatim, exactly as discussed in chat>
 ```
 
-### 5. Write the file
+### 5. Create through the vault writer
 
 Filename: `wiki/plans/<ts>-<slug>.md` (relative to the project root).
 
 If file already exists (rare same-second collision), append `-1`, `-2`, etc.
 
-Use the **Write tool** (not Bash redirect — Write triggers the vault's autocommit hook).
+Send one `pages:[{op:"create", ...}]` payload to `scripts/vault-write.py` with `actor:"save-plan"` and the full JSON-escaped Markdown. A collision returns exit 4; choose the next suffix and retry. Do not use Write/Edit on the page directly.
 
 ### 6. Confirm to user
 
@@ -133,7 +136,7 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 - Tag `manual-save` distinguishes manual saves from hook-captured (`ExitPlanMode`-approved). Both have `type: plan`.
 - `status: pending` always at creation. User updates manually to `executed` / `abandoned` later via Obsidian.
 - `session_id` is the Claude Code session UUID, suitable for grep-lookup in `~/.claude/projects/<encoded-cwd>/sessions/<id>.jsonl` for full transcript.
-- Plans are not auto-committed by this skill; the vault's Stop-hook autocommit handles it at the end of the turn.
+- Plans enter the same validated mutation path as every other wiki page; the Stop hook handles the scoped commit.
 
 ## Edge cases
 
@@ -143,7 +146,7 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 | Multiple plan candidates | Ask user which one (offer first H1 of each). |
 | current session id is `unknown` | Use `manual-<YYYYMMDDHHMMSS>` so the field is never empty. |
 | `wiki/plans/` directory missing | Create it (`mkdir -p wiki/plans`) and proceed. |
-| `allocate-address.sh` fails | Write file without `address:` field; tell user; wiki lint will flag it later. |
+| `allocate-address.sh` fails | Stop and report; strict schema forbids creating a post-rollout plan without its reserved address. |
 | Plan content empty (e.g., user said "save plan" with nothing discussed) | Refuse — ask user to provide plan first. |
 
 ## Schema reference

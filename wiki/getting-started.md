@@ -2,7 +2,7 @@
 type: meta
 title: "Getting Started"
 created: 2026-04-26
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - meta
   - onboarding
@@ -13,6 +13,8 @@ related:
   - "[[LLM Wiki Pattern]]"
   - "[[Wiki vs RAG]]"
   - "[[Wiki Map]]"
+sessions:
+  - public-template-v2
 ---
 
 # С чего начать в llm-obsidian

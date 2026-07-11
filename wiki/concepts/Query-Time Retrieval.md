@@ -3,7 +3,7 @@ type: concept
 address: c-000002
 title: "Query-Time Retrieval"
 created: 2026-04-24
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - rag
   - retrieval
@@ -14,6 +14,8 @@ related:
   - "[[LLM Wiki Pattern]]"
   - "[[Persistent Wiki Artifact]]"
   - "[[Source-First Synthesis]]"
+sessions:
+  - public-template-v2
 ---
 
 # Query-Time Retrieval

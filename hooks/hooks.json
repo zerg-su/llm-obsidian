@@ -2,11 +2,11 @@
   "hooks": {
     "UserPromptSubmit": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/skill-router.sh ] && .claude/hooks/skill-router.sh || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" router || true",
+            "timeout": 10
           }
         ]
       }
@@ -17,7 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/command-capture.sh ] && .claude/hooks/command-capture.sh || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" command-capture || true",
+            "timeout": 10
           }
         ]
       },
@@ -26,49 +27,43 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/plan-capture.sh ] && .claude/hooks/plan-capture.sh || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" plan-capture || true",
+            "timeout": 30
           }
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -f wiki/hot.md ] && cat wiki/hot.md || true"
-          }
-        ]
-      },
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -x .claude/hooks/session-nudge.sh ] && .claude/hooks/session-nudge.sh || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" session-start || true",
+            "timeout": 15
           }
         ]
       }
     ],
     "PostCompact": [
       {
-        "matcher": "",
+        "matcher": "manual|auto",
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}\" != \"1\" ] && [ -n \"${CODEX_THREAD_ID:-}${CODEX_CI:-}${CODEX_MANAGED_BY_NPM:-}\" ] && exit 0; [ -f wiki/hot.md ] && cat wiki/hot.md || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" post-compact || true",
+            "timeout": 10
           }
         ]
       }
     ],
     "Stop": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p .vault-meta; [ -x .claude/hooks/stop.sh ] && LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1 .claude/hooks/stop.sh > .vault-meta/stop-hook-last.log 2>&1 || true"
+            "command": "HOOK_ROOT=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}\"; if [ ! -x \"$HOOK_ROOT/hooks/run-hook.sh\" ]; then CANDIDATE=\"${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}\"; if [ -x \"$CANDIDATE/hooks/run-hook.sh\" ] && [ -f \"$CANDIDATE/.claude-plugin/plugin.json\" ] && [ -f \"$CANDIDATE/scripts/vault-write.py\" ] && [ -d \"$CANDIDATE/wiki\" ]; then HOOK_ROOT=\"$CANDIDATE\"; else HOOK_ROOT=\"\"; fi; fi; [ -x \"$HOOK_ROOT/hooks/run-hook.sh\" ] && PLUGIN_ROOT=\"$HOOK_ROOT\" CLAUDE_PLUGIN_ROOT=\"$HOOK_ROOT\" \"$HOOK_ROOT/hooks/run-hook.sh\" stop || true",
+            "timeout": 60
           }
         ]
       }

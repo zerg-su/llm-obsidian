@@ -2,7 +2,7 @@
 type: meta
 title: "Wiki Index"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - meta
   - index
@@ -20,6 +20,8 @@ related:
   - "[[Hot Cache]]"
   - "[[Compounding Knowledge]]"
   - "[[Andrej Karpathy]]"
+sessions:
+  - public-template-v2
 ---
 
 # Wiki Index

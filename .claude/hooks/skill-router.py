@@ -12,8 +12,7 @@ Behavior:
   - Up to 3 skill candidates + up to 2 agent candidates, ranked by number
     of distinct patterns matched.
   - SKILL_ROUTER_MUTE=1 → no-op (empty stdout).
-  - Logs every invocation to .vault-meta/router-hits.jsonl (no rotation yet —
-    see plan Phase 5 add-on).
+  - Logs content-free match counters to .vault-meta/router-hits.jsonl.
 """
 
 from __future__ import annotations
@@ -26,7 +25,11 @@ import time
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(
+    os.environ.get("LLM_OBSIDIAN_PROJECT_ROOT")
+    or os.environ.get("CLAUDE_PROJECT_DIR")
+    or Path(__file__).resolve().parents[2]
+).resolve()
 RULES_PATH = REPO_ROOT / ".claude" / "skill-rules.json"
 LOG_PATH = REPO_ROOT / ".vault-meta" / "router-hits.jsonl"
 
@@ -86,11 +89,27 @@ def format_agent_hint(matches: list[dict]) -> str:
     )
 
 
-def log_hit(prompt: str, skill_matches: list[dict], agent_matches: list[dict]) -> None:
+def runtime_name() -> str:
+    if os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_CI"):
+        return "codex"
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        return "claude"
+    return "unknown"
+
+
+def log_hit(payload: dict, skill_matches: list[dict], agent_matches: list[dict]) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    session = (
+        os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or os.environ.get("CODEX_THREAD_ID")
+        or payload.get("session_id")
+        or payload.get("sessionId")
+        or "unknown"
+    )
     record = {
         "ts": int(time.time()),
-        "prompt_preview": prompt[:200],
+        "runtime": runtime_name(),
+        "session": str(session),
         "skill_matches": [
             {"name": m["name"], "hits": m["hits"]} for m in skill_matches
         ],
@@ -126,7 +145,7 @@ def main() -> int:
     skill_matches = match_rules(prompt, rules.get("skill_rules", []), "skill")
     agent_matches = match_rules(prompt, rules.get("agent_rules", []), "agent")
 
-    log_hit(prompt, skill_matches, agent_matches)
+    log_hit(payload, skill_matches, agent_matches)
 
     output_parts = []
     skill_hint = format_skill_hint(skill_matches)

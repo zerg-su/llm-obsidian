@@ -3,7 +3,7 @@ type: concept
 address: c-000003
 title: "Source-First Synthesis"
 created: 2026-04-24
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - llm-wiki
   - synthesis
@@ -14,6 +14,8 @@ related:
   - "[[Compounding Knowledge]]"
   - "[[Persistent Wiki Artifact]]"
   - "[[Query-Time Retrieval]]"
+sessions:
+  - public-template-v2
 ---
 
 # Source-First Synthesis

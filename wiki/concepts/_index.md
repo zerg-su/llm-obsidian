@@ -2,7 +2,7 @@
 type: meta
 title: "Concepts Index"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - meta
   - index
@@ -17,6 +17,8 @@ related:
   - "[[Hot Cache]]"
   - "[[Compounding Knowledge]]"
   - "[[DragonScale Memory]]"
+sessions:
+  - public-template-v2
 ---
 
 # Концепты

@@ -17,19 +17,23 @@ Rules:
 Usage:
   cat .task-summary.md | ./scripts/parse-wiki-summary.py
   ./scripts/parse-wiki-summary.py --file <path>
+  ./scripts/parse-wiki-summary.py --json-file .task-summary.json
+  ./scripts/parse-wiki-summary.py --json-file .task-summary.json --render-markdown
 
-stdout: {"type": ..., "title": ..., "session": ..., "body": ...}
+stdout: {"schema_version": 1, "type": ..., "title": ..., "session": ..., "body": ...}
 Exit codes: 0 ok, 2 invalid block, 3 usage/io error.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
 from pathlib import Path
 
-TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
+from wiki_summary_contract import TYPES, WikiSummaryError, render_markdown, validate_summary
+
 HEADER_RX = re.compile(r"^(type|title|session):\s*(.*)$")
 MARKER = "## Wiki Summary"
 
@@ -40,12 +44,32 @@ def fail(code: int, msg: str) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if "--file" in argv:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--file", type=Path, help="legacy Markdown summary input")
+    parser.add_argument("--json-file", type=Path, help="canonical v1 JSON summary input")
+    parser.add_argument("--render-markdown", action="store_true", help="render validated canonical JSON")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if args.json_file:
         try:
-            raw = Path(argv[argv.index("--file") + 1]).read_text(
+            raw_json = json.loads(args.json_file.read_text(encoding="utf-8"))
+            summary = validate_summary(raw_json, require_schema=True)
+        except (OSError, json.JSONDecodeError, WikiSummaryError) as exc:
+            return fail(2, f"invalid canonical JSON: {exc}")
+        if not summary["session"]:
+            print("parse-wiki-summary: WARN no session in canonical summary", file=sys.stderr)
+        print(render_markdown(summary) if args.render_markdown else json.dumps(summary, ensure_ascii=False))
+        return 0
+
+    if args.file:
+        try:
+            raw = args.file.read_text(
                 encoding="utf-8", errors="replace"
             )
-        except (IndexError, OSError) as e:
+        except OSError as e:
             return fail(3, f"cannot read --file: {e}")
     else:
         raw = sys.stdin.read()
@@ -77,28 +101,26 @@ def main(argv: list[str]) -> int:
             in_body = True
         body_lines.append(line)
 
-    typ = fields.get("type", "")
-    title = fields.get("title", "")
-    session = fields.get("session", "")
-
-    if typ not in TYPES:
-        return fail(2, f"type {typ!r} is not one of {sorted(TYPES)}")
-    if not title or title.startswith("<"):
-        return fail(2, f"title is empty or an unresolved placeholder: {title!r}")
-    if session.startswith("<"):
-        return fail(2, f"session is an unresolved placeholder: {session!r}")
-    if not session:
+    try:
+        summary = validate_summary(
+            {
+                "schema_version": 1,
+                "type": fields.get("type", ""),
+                "title": fields.get("title", ""),
+                "session": fields.get("session") or None,
+                "body": "\n".join(body_lines).strip("\n"),
+            }
+        )
+    except WikiSummaryError as exc:
+        return fail(2, str(exc))
+    if not summary["session"]:
         print(
             "parse-wiki-summary: WARN no session: field (old split?) — "
             "executor provenance will be missing",
             file=sys.stderr,
         )
 
-    body = "\n".join(body_lines).strip("\n")
-    print(json.dumps(
-        {"type": typ, "title": title, "session": session or None, "body": body},
-        ensure_ascii=False,
-    ))
+    print(render_markdown(summary) if args.render_markdown else json.dumps(summary, ensure_ascii=False))
     return 0
 
 

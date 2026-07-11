@@ -9,7 +9,7 @@ aliases:
   - "DragonScale Architecture"
   - "Fractal Memory"
 created: 2026-04-23
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - concept
   - knowledge-management
@@ -23,6 +23,8 @@ related:
   - "[[Hot Cache]]"
   - "[[concepts/_index]]"
 sources:
+sessions:
+  - public-template-v2
 ---
 
 # DragonScale Memory

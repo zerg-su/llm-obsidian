@@ -1,4 +1,6 @@
-
+model_reasoning_effort = "high"
+approval_policy = "on-request"
+approvals_reviewer = "auto_review"
 
 # BEGIN LLM-OBSIDIAN CODEX MCP (managed by scripts/mcp-gateway/codex-sync.py)
 # Source of truth: .mcp.json or .mcp.json.example plus .mcp-profiles/*.json.

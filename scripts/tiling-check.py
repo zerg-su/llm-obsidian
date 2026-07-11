@@ -39,7 +39,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
@@ -352,7 +352,7 @@ def run_check(
             cache["embeddings"][rel] = {
                 "hash": h,
                 "embedding": emb,
-                "computed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             }
             pages.append((rel, emb))
             computed += 1
@@ -395,7 +395,8 @@ def run_check(
     out_lines: list[str] = []
     # Frontmatter so reports stay visible to reindex/retrieval (no-frontmatter
     # files are skipped by reindex.py and never reach the indexes).
-    report_date = datetime.utcnow().strftime("%Y-%m-%d")
+    now_utc = datetime.now(timezone.utc)
+    report_date = now_utc.strftime("%Y-%m-%d")
     out_lines.append("---")
     out_lines.append("type: meta")
     out_lines.append(f'title: "tiling-report-{report_date}"')
@@ -410,7 +411,7 @@ def run_check(
     out_lines.append("")
     out_lines.append("# Semantic Tiling Report")
     out_lines.append("")
-    out_lines.append(f"- generated: {datetime.utcnow().isoformat(timespec='seconds')}Z")
+    out_lines.append(f"- generated: {now_utc.isoformat(timespec='seconds').replace('+00:00', 'Z')}")
     out_lines.append(f"- model: {model}")
     out_lines.append(f"- ollama_url: {ollama_url}")
     out_lines.append(f"- thresholds: error>={error_}, review={review}-{error_}")

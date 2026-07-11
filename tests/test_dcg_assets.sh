@@ -70,7 +70,7 @@ expect_exit "C5 setup help exits 0" "$?" 0
 expect_grep "C6 setup help mentions --check" "$OUT" "--check"
 
 echo "D. portability"
-expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/kirill"
+expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/example"
 expect_no_grep "D2 cmux updater has no old repo path" "$REPO_ROOT/.codex/update-cmux-limits.sh" "claude-obsidian"
 expect_no_grep "D3 dcg hook has no absolute user path" "$REPO_ROOT/.github/hooks/dcg.json" "/Users/"
 

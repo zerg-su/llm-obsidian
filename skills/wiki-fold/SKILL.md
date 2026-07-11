@@ -1,199 +1,66 @@
 ---
 name: wiki-fold
-version: 1.0.0
-description: "Rollup of wiki log entries into meta-pages. Reads the last 2^k entries from wiki/log.md, writes a structurally-idempotent fold page to wiki/folds/ that links back to children. Extractive summarization (no invention). Dry-run by default, stdout-only; commit mode writes and accepts that the PostToolUse hook auto-commits. Triggers on: fold the log, run a fold, run wiki-fold, log rollup, roll up log entries."
-allowed-tools: Read Glob Grep Bash Write Edit
+metadata:
+  version: 2.0.0
+description: "Deterministic rollup of the oldest unprocessed operation-log entries. Entry content hashes replace the fragile fold counter; existing fold pages are the processed-ID ledger. Dry-run by default, transactional commit on explicit request. Triggers: fold the log, run a fold, wiki-fold, log rollup."
+allowed-tools: Read Bash
 ---
 
-# wiki-fold: Extractive Log Rollup
+# wiki-fold: deterministic log rollup
 
-Implements a bounded subset of Mechanism 1 from [[DragonScale Memory]]: flat fold over raw `wiki/log.md` entries. Fold-of-folds (hierarchical level-stacking) is **out of scope for this skill**; see "Scope boundary" below.
-
-A fold is **additive**: child log entries and their referenced pages are never modified, moved, or deleted. A fold is **extractive**: every outcome and theme in the output must be traceable to a specific child log entry. No invented facts, no synthesis beyond what the child entries support.
-
----
-
-## Scope boundary (explicit)
-
-This skill does **not** implement:
-- Fold-of-folds / hierarchical level stacking (DragonScale spec calls for it; deferred to a future skill).
-- Automatic triggering (folds are always human-invoked in Phase 1).
-- Semantic-tiling dedup (Mechanism 3; separate skill).
-
-It **does** implement:
-- Flat fold over raw log.md entries at a chosen batch exponent `k`.
-- Structural idempotency via a deterministic fold ID.
-- Extractive summarization with count-checking.
-
-When referring to level in frontmatter, use `batch_exponent: k` (not `level: k`), because this skill does not produce hierarchical levels.
-
----
-
-## Modes
-
-| Mode | Writes? | Invocation |
-|---|---|---|
-| **dry-run (default)** | **No Write tool calls.** Emit fold content via Bash `cat`/`heredoc` to stdout only. | `fold the log, dry-run k=3` |
-| **commit** | Uses Write/Edit tools. The Stop hook stages and auto-commits wiki changes at end of turn. Compose full content first, then sequence writes. | `fold the log, commit k=3` (only after a clean dry-run) |
-
-**Why stdout-only in dry-run**: the repo's Stop hook stages and commits *any pending wiki changes* at end of turn under a generic message. Dry-run must leave zero residue in `wiki/`. Bash stdout leaves none.
-
----
-
-## Deterministic fold ID
-
-Every fold has an ID derived from its inputs:
-
-```
-fold-k{K}-from-{EARLIEST-DATE}-to-{LATEST-DATE}-n{COUNT}
-```
-
-Example: `fold-k3-from-2026-04-10-to-2026-04-23-n8`.
-
-The filename in commit mode is `wiki/folds/{FOLD-ID}.md`. No date-of-creation in the filename. No timestamp in the title.
-
-**Duplicate detection (required)**: before emitting any output, check if `wiki/folds/{FOLD-ID}.md` already exists. If so, report "Fold already exists at wiki/folds/{FOLD-ID}.md. Use --force to overwrite, or pick a different range." and stop. This is the no-op idempotency guarantee; byte-identical content is NOT guaranteed (LLM prose varies) but the filename and scope are.
-
----
-
-## Parameters
-
-- `k` (default 4): batch exponent. Batch size = `2^k`. Typical values: k=3 (8), k=4 (16), k=5 (32).
-- `range` (optional): explicit entry range `entries 1-16`. Overrides k.
-- `--force`: overwrite an existing fold with the same ID. Default no.
-- `--commit`: write to wiki/. Without it, dry-run stdout-only.
-
-If fewer than `2^k` log entries exist, report the shortfall and stop. Do not silently fold a partial batch.
-
----
-
-## Procedure
-
-### 1. Parse log entries
-
-```
-grep -n "^## \[" wiki/log.md | head -{2^k}
-```
-
-Record for each entry: line number, date, operation, title, and the following bullet lines until the next `## [` or end-of-section.
-
-### 2. Extract child page identifiers
-
-From each entry's bullet list, extract:
-- `Location: wiki/path/to/page.md` (the primary page)
-- `[[Wikilinks]]` inline
-- `Pages created:` and `Pages updated:` lists
-
-Build a structured children list:
-```yaml
-children:
-  - date: "2026-04-23"
-    op: "save"
-    title: "DragonScale Memory v0.2 — post-adversarial-review"
-    page: "[[DragonScale Memory]]"
-  - ...
-```
-
-One record per log entry. Do not dedupe by page: if two entries both point to `[[DragonScale Memory]]`, both records appear, distinguishable by date and title.
-
-### 3. Read referenced pages (bounded)
-
-Read only the pages that are not already captured fully in the log entry's bullets. Budget: 0-10 page reads. Hard ceiling: 15. If an entry's referenced page is missing, record `page_missing: true` and proceed.
-
-### 4. Extractive summarization with count checks
-
-Write the fold body per `references/fold-template.md`. **Rules**:
-
-- **Extractive only.** Every outcome bullet and theme bullet must cite a specific child entry (e.g., `(from 2026-04-14 session)`) or a quoted line from that entry. Do not introduce events, counts, or interpretations not present in a child entry.
-- **Log entry is the primary source.** If the log entry's bullets and the referenced meta-page disagree on a fact (e.g., a count), prefer the log-entry bullets and flag the mismatch as "source mismatch: log says X, meta says Y."
-- **Count checks.** If you write "N concept pages" or "M repos updated," grep the source entries for the number and verify. Numeric mismatches are dry-run blockers.
-- **No merging across entries without naming them.** A theme that spans multiple entries must name each contributing entry inline.
-- **Uncertainty is a feature.** If an entry is ambiguous, say "ambiguous in source: [[Entry]]" rather than picking one interpretation.
-
-### 5. Self-check before emitting
-
-Before printing output, verify:
-- Every child in `children:` frontmatter appears exactly once in the Child Entries table.
-- Every entry in the table appears in the `children:` frontmatter.
-- Every numeric claim in Key Outcomes is grep-verifiable against a child entry.
-- The fold ID is deterministic and the file does not already exist (or `--force` is set).
-
-If any check fails, abort and report the specific failure.
-
-### 6. Emit
-
-**Dry-run**: use Bash `cat <<'EOF' ... EOF` to stdout. Do not use Write. Print the fold ID and a one-line summary of what the commit step would do.
-
-**Commit** (only after user says "commit the fold"):
-1. `Write` the fold page to `wiki/folds/{FOLD-ID}.md`.
-2. `Edit` `wiki/index.md` to add the fold link under a `## Folds` section (create section if missing).
-3. `Edit` `wiki/log.md` to prepend one entry:
-   ```
-   ## [YYYY-MM-DD] fold | batch-exponent-k{K} rollup of N entries
-   - Location: wiki/folds/{FOLD-ID}.md
-   - Range: {EARLIEST-DATE} to {LATEST-DATE}
-   - Children: N log entries
-   ```
-4. **Update the fold counter** (MANDATORY — the stop.sh fold nudge reads it and
-   only this skill writes it):
-   ```bash
-   grep -c '^## \[' wiki/log.md > .vault-meta/last-fold-count.txt
-   ```
-   Without this step the WIKI_FOLD_SUGGEST hint keeps firing every turn.
-
-The Stop hook auto-commits all staged wiki changes at end of turn (one commit).
-
----
-
-## Output schema
-
-See `references/fold-template.md` for the canonical frontmatter and body layout.
-
----
+Delegate selection, IDs, rendering, and commit to `scripts/fold-log.py`. Do not summarize entries by hand and do not edit `wiki/log.md`, `wiki/index.md`, fold pages, or `.vault-meta/` directly.
 
 ## Invariants
 
-1. **Structural idempotency**: same range + same k → same fold ID → duplicate detection prevents double-writes. LLM prose may vary across runs; the *location and scope* are fixed.
-2. **Additive**: children are never modified.
-3. **Bounded reads**: 0-15 child-page reads per fold.
-4. **Extractive**: zero invented facts. Count checks enforced.
-5. **No chaining**: wiki-fold does not invoke wiki-lint, wiki-ingest, autoresearch, or save.
+- Every `## [...] operation | title` block has a SHA-256 ID over its canonical text.
+- Existing `wiki/folds/*.md` pages declare `entry_ids`; their union is the processed set.
+- A batch is the oldest `2^k` unprocessed eligible entries. Default `k=6` means 64.
+- `operation == fold` entries are never children of another flat fold.
+- The fold ID contains the first and last boundary hashes, so the same input range has the same path.
+- Children remain in `wiki/log.md`; folding is additive.
+- There is no mutable `last-fold-count.txt` counter.
 
----
+## Workflow
 
-## What NOT to do
+1. Inspect machine-derived status:
 
-- Do not use Write/Edit during dry-run. Bash stdout only.
-- Do not include the current date in the fold filename or title. Use the child entry range.
-- Do not silently dedupe children by page title. One record per log entry.
-- Do not write "emergent themes" that span entries without naming which entries contribute.
-- Do not claim byte-identical idempotency. Structural idempotency is the actual guarantee.
-- Do not suppress or bypass the PostToolUse auto-commit hook.
-- Do not update `wiki/hot.md`. Ownership stays with save/ingest skills.
+   ```bash
+   python3 scripts/fold-log.py status --json
+   ```
 
----
+   If `ready` is false, report the unprocessed count and stop.
+
+2. Run the default dry-run:
+
+   ```bash
+   python3 scripts/fold-log.py
+   ```
+
+   An explicit exponent is allowed for maintenance/testing: `--k 4` means 16 entries. Do not silently lower `k` merely to produce a partial fold.
+
+3. Show the derived fold ID, date range, boundary IDs, and child count. The dry-run is stdout-only.
+
+4. Commit only after the user explicitly asks to commit the reviewed fold:
+
+   ```bash
+   python3 scripts/fold-log.py --commit
+   ```
+
+   The helper sends the fold page and its new fold log entry through one `vault-write.py` transaction. Exit 4 means a concurrent session created the same fold; re-run status instead of forcing an overwrite.
+
+## Output
+
+The generated page contains strict frontmatter, the complete `entry_ids` ledger, a deterministic child table, operation counts, and integrity boundaries. Extracts are taken from each log entry's first meaningful line; the script invents no themes or facts.
 
 ## Reversal
 
-Committed fold reversal (three commits, land in this order):
-1. Remove the log.md fold entry.
-2. Remove the index.md entry.
-3. Delete the fold page file.
+Revert the single scoped commit. Child log entries were never changed. Do not delete a fold page alone: doing so intentionally makes its IDs unprocessed and eligible again.
 
-Or: `git revert` the three auto-commits. Child pages are untouched in either path.
+## Do not
 
----
-
-## Example dry-run sequence
-
-User: "fold the log, dry-run k=3"
-
-1. Parse `wiki/log.md` top 8 entries.
-2. Build structured children list (8 records).
-3. Read 0-10 referenced pages as needed.
-4. Produce fold ID: `fold-k3-from-2026-04-10-to-2026-04-23-n8`.
-5. Check `wiki/folds/fold-k3-from-2026-04-10-to-2026-04-23-n8.md` does not exist.
-6. Write fold body following the template.
-7. Run self-check (frontmatter/table consistency, count verification).
-8. Emit via `cat <<'EOF' ... EOF` to stdout.
-9. Report: "Dry-run complete. Fold ID: {FOLD-ID}. To commit: 'commit the fold'."
+- Do not use Write/Edit for fold artifacts.
+- Do not include a partial batch.
+- Do not use dates alone in fold IDs.
+- Do not reintroduce a fold counter.
+- Do not include fold-operation log entries as children.
+- Do not update `wiki/hot.md` for a fold.

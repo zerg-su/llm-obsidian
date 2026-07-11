@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "protocol_version": "2025-03-26",
+  "servers": {
+    "context7": {
+      "tool_count": 2,
+      "schema_sha256": "cbf0256aa9a386acb8e059995f5edaf82cc20956148f35179f6d829c58e5fe93",
+      "tools": [
+        {
+          "name": "query-docs",
+          "description_sha256": "35c9b442f015e59adce20f9b7ac976cbb549373817c184e04504d09b3eef82bf",
+          "input_schema_sha256": "e22ce2315317d32fcb64d349187281b30677e4ed2a23af18c4f0eadfebfcaeb7"
+        },
+        {
+          "name": "resolve-library-id",
+          "description_sha256": "1ed313b9c2c5767a1b5411a9b8f2cbfc2ef20751d9559a187664c4bbe15cf3db",
+          "input_schema_sha256": "05730abf6f18429219f613861ad44a3d9cc2f96b3256c5eca0865f69b3cde8db"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "enabled": false,
+  "source": "~/.claude/projects/REPLACE_WITH_PROJECT_SLUG/memory"
+}

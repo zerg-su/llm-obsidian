@@ -1,11 +1,10 @@
 ---
 name: close
-version: 1.0.0
-description: |
-  Save the session into the wiki (delegates to the save skill as-is), then gracefully /exit THIS agent process. Claude in cmux sends /exit+Enter directly. Codex in cmux makes a best-effort queued /exit (Tab) and ALWAYS prints a manual /exit fallback, because the Codex TUI does not reliably run injected slash commands. Never closes the cmux surface/tab. Non-cmux falls back to manual /exit or /archive.
-  Use when: done for now — file the session and close the agent session.
-  Triggers (EN): /close, save and close, save and exit, close the session, wrap up and exit.
-  Triggers (RU): закрой сессию, сохрани и закрой, сохрани и выйди, заверши сессию, сейв и клоуз.
+metadata:
+  version: 1.0.0
+description: >-
+  Save the current session, then exit its Claude/Codex agent process without
+  closing the cmux surface. Use for save-and-close; not for closing tabs.
 allowed-tools: Skill Read Write Edit Glob Grep AskUserQuestion Bash
 ---
 
@@ -33,7 +32,7 @@ opted into by invoking `/close`. No extra clarification battery here.
 ## Why this is a graceful exit and not a kill
 
 There is no supported way for the model to quit Claude Code mid-turn, and killing
-the process mid-turn would skip the `Stop` hook (reindex + memory-backup + git
+the process mid-turn would skip the `Stop` hook (recovery + reindex + validation + git
 autocommit) — losing the commit. So `/close` never kills anything. Instead it
 *types* `/exit` into its own terminal surface via `cmux send`. Input typed
 mid-turn is queued and runs only after the turn fully ends — i.e. after the
@@ -41,7 +40,7 @@ mid-turn is queued and runs only after the turn fully ends — i.e. after the
 
 ```
 /close turn:  run /save  →  queue "/exit" into $CMUX_SURFACE_ID  →  end turn
-Stop hook:    reindex → memory-backup → git commit            (work saved)
+Stop hook:    recover → reindex → validate → scoped commit     (work saved)
 idle:         queued /exit runs → SessionEnd → graceful shutdown
 ```
 

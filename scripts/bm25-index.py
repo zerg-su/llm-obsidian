@@ -33,6 +33,7 @@ Index schema (.vault-meta/bm25/index.json):
 
 Interfaces:
   bm25-index.py build [--quiet]     # full rebuild (cheap at this scale)
+  bm25-index.py ensure [--quiet]    # rebuild only when missing/corrupt/stale
   bm25-index.py query "text" [--top 20]
   bm25-index.py stats
 
@@ -46,6 +47,7 @@ Exit codes:
 
 import argparse
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -175,8 +177,13 @@ def build_index():
     docs = {}
     df = Counter()
     postings = defaultdict(list)
+    fingerprint = hashlib.sha256()
 
     for rel_path, text in discover_docs():
+        fingerprint.update(rel_path.encode("utf-8"))
+        fingerprint.update(b"\0")
+        fingerprint.update(text.encode("utf-8"))
+        fingerprint.update(b"\0")
         tokens = tokenize(text)
         tf = Counter(tokens)
         docs[rel_path] = {"dl": len(tokens)}
@@ -198,6 +205,7 @@ def build_index():
         "doc_count": len(docs),
         "avg_dl": avg_dl,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source_fingerprint": fingerprint.hexdigest(),
         "vocab": vocab,
         "docs": docs,
     }
@@ -225,6 +233,29 @@ def load_index_or_none():
         return idx
     except Exception:
         return None
+
+
+def source_fingerprint():
+    digest = hashlib.sha256()
+    count = 0
+    for rel_path, text in discover_docs():
+        digest.update(rel_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(text.encode("utf-8"))
+        digest.update(b"\0")
+        count += 1
+    return digest.hexdigest(), count
+
+
+def index_is_fresh(idx):
+    if not isinstance(idx, dict) or idx.get("schema_version") != 2:
+        return False
+    fingerprint, count = source_fingerprint()
+    return (
+        idx.get("source_fingerprint") == fingerprint
+        and idx.get("doc_count") == count
+        and idx.get("params") == {"k1": K1, "b": B}
+    )
 
 
 def score_query(idx, text, top_k=20):
@@ -272,6 +303,9 @@ def main():
     sp_build = sub.add_parser("build", help="Full rebuild (cheap at vault scale).")
     sp_build.add_argument("--quiet", action="store_true", help="Suppress the summary log line")
 
+    sp_ensure = sub.add_parser("ensure", help="Rebuild a missing, corrupt, or stale index.")
+    sp_ensure.add_argument("--quiet", action="store_true", help="Suppress the summary log line")
+
     sp_query = sub.add_parser("query", help="Query the index.")
     sp_query.add_argument("text", help="Query text")
     sp_query.add_argument("--top", type=int, default=20, help="Top-K results")
@@ -280,7 +314,13 @@ def main():
 
     args = parser.parse_args()
 
-    if args.cmd == "build":
+    if args.cmd in {"build", "ensure"}:
+        if args.cmd == "ensure":
+            existing = load_index_or_none()
+            if existing is not None and index_is_fresh(existing):
+                if not args.quiet:
+                    log(f"Index is fresh: {INDEX_PATH}  docs={existing['doc_count']}")
+                return EXIT_OK
         fd = acquire_lock()
         try:
             index = build_index()

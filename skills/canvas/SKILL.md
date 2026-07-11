@@ -1,8 +1,8 @@
 ---
 name: canvas
-version: 1.0.0
-description: "Visual layer of the wiki. Add images, text cards, PDFs, and wiki pages to Obsidian canvas files with auto-positioning inside zones. Slash-only since 2026-06-10 (zero usage in 2 months — unfreeze by removing disable-model-invocation)."
-disable-model-invocation: true
+metadata:
+  version: 1.0.0
+description: "Visual layer of the wiki. Add images, text cards, PDFs, and wiki pages to Obsidian canvas files with auto-positioning inside zones. Manual-only: never auto-invoke; run only when the user explicitly requests /canvas."
 allowed-tools: Read Write Edit Glob Grep AskUserQuestion
 ---
 

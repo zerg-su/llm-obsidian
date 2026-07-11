@@ -16,7 +16,9 @@
 # Robustness:
 #   - set -u, never breaks Claude (exit 0 always at end)
 #   - vault missing → silent no-op
-#   - allocate-address.sh failure → file written without address (lint will flag)
+#   - allocate-address.sh failure → writer rejects post-rollout pages and the
+#     safe last-error marker explains the failed capture
+#   - writer failure → stderr summary + content-free telemetry; hook still exits 0
 #   - No git interaction — vault picks up via next session's autocommit/manual commit
 
 set -u
@@ -35,6 +37,57 @@ fi
 VAULT="${CLAUDE_PROJECT_DIR:-$PWD}"
 PLANS_DIR="$VAULT/wiki/plans"
 ALLOC="$VAULT/scripts/allocate-address.sh"
+WRITER="$VAULT/scripts/vault-write.py"
+META_DIR="$VAULT/.vault-meta"
+ERROR_MARKER="$META_DIR/plan-capture-last-error.log"
+
+record_writer_failure() {
+  failure_code="$1"
+  failure_target="$2"
+  failure_session="$3"
+  case "$failure_code" in
+    1) failure_category="lock-or-io" ;;
+    2) failure_category="cap-violation" ;;
+    3) failure_category="bad-payload" ;;
+    4) failure_category="conflict" ;;
+    *) failure_category="unknown" ;;
+  esac
+
+  mkdir -p "$META_DIR" 2>/dev/null || true
+  marker_tmp="$ERROR_MARKER.tmp.$$"
+  {
+    printf 'timestamp=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'target=%s\n' "$failure_target"
+    printf 'exit_code=%s\n' "$failure_code"
+    printf 'category=%s\n' "$failure_category"
+  } > "$marker_tmp" 2>/dev/null && mv -f "$marker_tmp" "$ERROR_MARKER" 2>/dev/null
+  rm -f "$marker_tmp" 2>/dev/null || true
+
+  # The event schema accepts identifiers, relative vault paths, and numeric
+  # counters only. Never forward writer stderr or plan content here.
+  PYTHONPATH="$VAULT/scripts${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 - "$VAULT" "$failure_target" "$failure_session" "$failure_code" <<'PY' \
+      >/dev/null 2>&1 || true
+import sys
+from pathlib import Path
+
+from pipeline_events import emit_event
+
+root, target, session, exit_code = sys.argv[1:]
+emit_event(
+    "plan-capture",
+    actor="plan-capture-hook",
+    session=session,
+    paths=[target],
+    counts={"exit_code": int(exit_code)},
+    status="error",
+    root=Path(root),
+)
+PY
+
+  printf 'PLAN_CAPTURE_FAILED: writer exit %s (%s); see .vault-meta/plan-capture-last-error.log\n' \
+    "$failure_code" "$failure_category" >&2
+}
 
 # Not a vault (no wiki/) → silent exit
 [ -d "$VAULT/wiki" ] || exit 0
@@ -128,7 +181,8 @@ yaml_title=${title_raw//\"/\\\"}
 yaml_transcript=${transcript//\"/\\\"}
 yaml_cwd=${cwd//\"/\\\"}
 
-# Atomic write via temp file in same dir.
+# Compose the page in a private temp file, then hand page + log to the single
+# transactional writer. The hook never mutates wiki files directly.
 # Frontmatter format aligns with project convention:
 #   - `sessions: [{id, date}]` array (not single `session_id:`)
 #   - Preserves legacy `session_id:` field for backwards compatibility
@@ -154,26 +208,47 @@ tmp="$target.tmp.$$"
   echo "---"
   echo
   printf '%s\n' "$plan"
+} > "$tmp" || { rm -f "$tmp"; exit 0; }
 
-  # Append a log entry pointing back, so `wiki-fold` and friends see it.
-  log_file="$VAULT/wiki/log.md"
-  if [ -f "$log_file" ]; then
-    # Insert under header (line ~24), atomic via temp.
-    log_tmp="$log_file.tmp.$$"
-    awk -v ts="$date_today" -v slug="$slug" -v session="$session" -v addr="$addr" '
-      BEGIN { inserted = 0 }
-      /^## \[/ && inserted == 0 {
-        addr_str = (addr == "") ? "no-address" : addr
-        print "## [" ts "] save-plan | " slug " (auto-captured ExitPlanMode)"
-        print ""
-        print "- session: " session
-        print "- address: " addr_str
-        print ""
-        inserted = 1
-      }
-      { print }
-    ' "$log_file" > "$log_tmp" 2>/dev/null && mv "$log_tmp" "$log_file" 2>/dev/null || rm -f "$log_tmp"
+rel_target=${target#"$VAULT/"}
+addr_str=${addr:-no-address}
+mkdir -p "$META_DIR" 2>/dev/null || true
+payload_tmp="$META_DIR/plan-capture-payload.tmp.$$"
+writer_status=3
+if python3 - "$tmp" "$rel_target" "$date_today" "$slug" "$session" "$addr_str" <<'PY' > "$payload_tmp"
+import json
+import sys
+
+content_file, target, today, slug, session, address = sys.argv[1:]
+payload = {
+    "actor": "plan-capture-hook",
+    "session": session,
+    "pages": [{
+        "op": "create",
+        "path": target,
+        "content": open(content_file, encoding="utf-8").read(),
+    }],
+    "log_entry": (
+        f"## [{today}] save-plan | {slug} (auto-captured ExitPlanMode)\n\n"
+        f"- session: {session}\n- address: {address}"
+    ),
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+then
+  if [ -x "$WRITER" ]; then
+    "$WRITER" --file "$payload_tmp" >/dev/null 2>/dev/null
+    writer_status=$?
+  else
+    writer_status=1
   fi
-} > "$tmp" && mv "$tmp" "$target"
+fi
+rm -f "$tmp" "$payload_tmp"
+
+if [ "$writer_status" -eq 0 ]; then
+  rm -f "$ERROR_MARKER" 2>/dev/null || true
+else
+  record_writer_failure "$writer_status" "$rel_target" "$session"
+fi
 
 exit 0

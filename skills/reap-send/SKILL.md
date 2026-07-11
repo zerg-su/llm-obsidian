@@ -1,22 +1,14 @@
 ---
 name: reap-send
-description: >
-  Runs inside a task-split (created via /dispatch). The task agent assembles a
-  `## Wiki Summary` block (type/title/body), writes it to ./.task-summary.md in
-  the current CWD (the worktree), reads ./.wiki-cmux-surface for the surface ID
-  of the wiki agent on the left, reads ./.wiki-agent-runtime when present, and
-  sends the runtime-specific reap command there via `cmux send` — the
-  wiki agent wakes up automatically and files the summary into the vault. One
-  call in the task-split = a full handoff to the wiki. Requires cmux; works from
-  any CWD that contains a `.wiki-cmux-surface` file.
-  Triggers on: "/reap-send", "reap-send", "сэндь в вики", "отправь summary в вики",
-  "хэндофф в вики", "rip-send".
+description: >-
+  From a dispatch task split, validate and send its typed wiki summary back to
+  the coordinator over cmux. Requires .wiki-cmux-surface; not for normal saves.
 allowed-tools: Read Write Edit Bash
 ---
 
 # /reap-send — task-side handoff to the wiki
 
-The symmetric counterpart to /dispatch (wiki-side spawn) and /reap (wiki-side ingest). Runs from the task worktree — any CWD that contains the `.wiki-cmux-surface` file placed there by /dispatch. Requires cmux (the same dependency as /dispatch). It does not close cmux surfaces; task-agent exit is a separate `/exit`.
+The symmetric counterpart to /dispatch (wiki-side spawn) and /reap (wiki-side ingest). Runs from the task worktree — any CWD that contains the `.wiki-cmux-surface` file placed there by /dispatch. Requires cmux. It never closes a surface directly; approved unattended final reap later arms task `/exit` and close-on-process-return.
 
 ## Context: how this works in the pipeline
 
@@ -33,11 +25,12 @@ wiki agent (vault repo)                task agent (worktree)
 
                                        /reap-send  ◄── this skill
                                        ├─ assemble the summary
-                                       ├─ write .task-summary.md
+                                       ├─ write .task-summary.json
+                                       ├─ render .task-summary.md
                                        └─ cmux send --surface <wiki> "/reap" or .wiki-reap-command
                                                               │
 /reap (triggers automatically)  ◄──────────────────────────────┘
-├─ Read .task-summary.md
+├─ Read .task-summary.json
 ├─ Routing → wiki/<folder>/
 ├─ Write page + bookkeeping via vault-write
 └─ Echo cleanup proposal
@@ -49,7 +42,7 @@ wiki agent (vault repo)                task agent (worktree)
 /reap-send
 ```
 
-No arguments. The CWD must be a worktree with `.wiki-cmux-surface` and `.task-prompt.md` files (placed by `/dispatch`). New `/dispatch` also writes `.wiki-agent-runtime`; if it is absent, fallback = `claude` for old worktrees.
+No arguments. The CWD must be a worktree with `.wiki-cmux-surface` and `.task-prompt.md` files (placed by `/dispatch`). New `/dispatch` also writes `.wiki-agent-runtime` and `.wiki-reap-command`; if they are absent, fallback = `claude` for old worktrees.
 
 ---
 
@@ -72,7 +65,12 @@ The task agent should have committed already, but verify. If there are uncommitt
 git status --short
 ```
 
-If non-empty — ask the user:
+For unattended v2 tasks, ignore `.task-*`, `.review-*`, `.wiki-*`, and
+`.obsidian/workspace*.json`. If other changes remain, inspect them: explicitly
+stage and commit approved in-scope work; escalate ambiguity or scope drift to
+the coordinator. Do not wait on a routine commit prompt in the background pane.
+
+For legacy/interactive tasks, if non-empty — ask the user:
 ```
 The worktree has unsaved edits:
   <git status output>
@@ -82,18 +80,12 @@ Commit before reap-send? [y/N]
 
 Do not `git add .` silently — the user may intentionally keep something untracked (like `.task-prompt.md` itself, for that matter).
 
-### 1.3 Synthesize the Wiki Summary block
+### 1.3 Synthesize the typed Wiki Summary
 
-If the task agent has **already** printed a `## Wiki Summary` block in the conversation — take it from context. Otherwise synthesize it now per the rules in `.task-prompt.md` (the "Finalization" section):
+Create this canonical object from the completed task and `.task-prompt.md`:
 
-```
-## Wiki Summary
-
-type: <session|decision|runbook|incident|service-update|repo-touch>
-title: <Note Title>
-session: <the SESSION_ID from <vault-root>/scripts/current-session-id.sh for this task session>
-
-<body in declarative present tense, with [[wikilinks]] to adjacent pages>
+```json
+{"schema_version":1,"type":"session|decision|runbook|incident|service-update|repo-touch","title":"Note Title","session":"executor SESSION_ID","body":"declarative Markdown with [[wikilinks]]"}
 ```
 
 The `session:` field is mandatory — it is the **executor** session (distinct from both the planning session and the wiki agent's dispatch/reap sessions). The wiki agent appends it to the `sessions:` of the result page and the plan page (the provenance chain plan -> execution).
@@ -112,27 +104,43 @@ Routing help:
 
 ### 2.1 Echo-confirm to the user
 
+Read `.task-meta.json`. For v2 `interaction_policy=unattended`, validate it
+with `scripts/task_contract.py validate`, require the summary type/title to
+match `reap_policy`, and skip this echo-confirm: the upfront plan already
+authorized the handoff. Any drift stops and escalates to the coordinator.
+
+For legacy/interactive tasks, keep the gate:
+
 ```
 Ready to send:
   task:    <task-name>          ◄── from the first line of .task-prompt.md ("# Task: <name>")
   type:    <type>
   title:   <Title>
-  file:    <CWD>/.task-summary.md
+  file:    <CWD>/.task-summary.json (+ derived .md)
   RPC:     cmux send --surface <wiki-surface-id> "<runtime-specific reap command>"
 
 After this the wiki agent in the left split wakes up automatically,
-reads .task-summary.md, and files it into the vault by the /reap rules.
+reads `.task-summary.json`, and files it into the vault by the /reap rules.
 
 Send?
 ```
 
-Wait for "yes". Do not send without confirmation.
+Wait for "yes" only in interactive mode.
 
 **Why the task name is explicit**: between the dispatch and our reap-send, other dispatches / saves may have landed in `wiki/log.md`. Without an argument, `/reap` in the wiki split resolves the task name from the latest `dispatch | <name>` entry in `log.md` — often not our task. Passing `<task-name>` explicitly guarantees the wiki agent goes to the right worktree.
 
-### 2.2 Write `.task-summary.md`
+### 2.2 Write canonical JSON and render Markdown
 
-`Write ./.task-summary.md` with the full block (including the `## Wiki Summary` header). The file is the single source of truth for the wiki agent. If the file already exists (a repeated /reap-send) — overwrite silently (the latest version always wins).
+Write `./.task-summary.json`, then validate and render it:
+
+```bash
+python3 <vault-root>/scripts/parse-wiki-summary.py \
+  --json-file .task-summary.json --render-markdown > .task-summary.md
+```
+
+Exit 2 means the model-produced contract is invalid: fix the JSON before any
+callback. JSON is the source of truth; Markdown is a deterministic compatibility
+view for old reap flows and humans.
 
 ### 2.3 Read the wiki-surface ID, reap command, and task name
 
@@ -142,6 +150,8 @@ WIKI_RUNTIME=$(cat .wiki-agent-runtime 2>/dev/null || true)
 WIKI_REAP_COMMAND=$(cat .wiki-reap-command 2>/dev/null || true)
 [ -n "$WIKI_RUNTIME" ] || WIKI_RUNTIME=claude
 TASK_NAME=$(head -1 .task-prompt.md | sed -n 's/^# Task: *//p')
+INTERACTION_POLICY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("interaction_policy", "interactive"))' .task-meta.json 2>/dev/null || true)
+[ -n "$INTERACTION_POLICY" ] || INTERACTION_POLICY=interactive
 ```
 
 `.task-prompt.md` was placed by `/dispatch` and its first line is `# Task: <task-name>`. That is the authoritative source for the task name (the worktree folder name does not always match: dispatch adds a `<repo>-` prefix).
@@ -152,13 +162,20 @@ If `WIKI_SURFACE` or `TASK_NAME` is empty — stop, tell the user that `.task-pr
 
 ```bash
 if [ -n "$WIKI_REAP_COMMAND" ]; then
-  RPC="$WIKI_REAP_COMMAND $TASK_NAME"
+  REAP_BASE="$WIKI_REAP_COMMAND"
 elif [ "$WIKI_RUNTIME" = "codex" ]; then
-  RPC="\$llm-obsidian:reap $TASK_NAME"
+  REAP_BASE="\$llm-obsidian:reap"
 else
-  RPC="/reap $TASK_NAME"
+  REAP_BASE="/reap"
+fi
+# v2 unattended policy always requests the already-approved final mode.
+if [ "$INTERACTION_POLICY" = unattended ]; then
+  RPC="$REAP_BASE final $TASK_NAME"
+else
+  RPC="$REAP_BASE $TASK_NAME"
 fi
 cmux send --surface "$WIKI_SURFACE" "$RPC"
+sleep 0.2
 cmux send-key --surface "$WIKI_SURFACE" Enter
 ```
 
@@ -170,12 +187,12 @@ cmux send-key --surface "$WIKI_SURFACE" Enter
 
 ```
 Sent:
-  .task-summary.md written (<size> bytes)
+  .task-summary.json validated; .task-summary.md rendered
   <RPC> sent to wiki split <wiki-surface-id>
 
-Switch to the left split — the wiki agent will pick up
-.task-summary.md in a moment, run its echo-confirm, and file it. After
-that it will offer file/worktree cleanup; the cmux surface is not closed by reap.
+The coordinator will validate the contract and file it. Unattended final reap
+then validates the vault, arms task exit, and closes the exact task surface
+after the process returns. Worktree and branch remain.
 ```
 
 Stop; do not attempt anything in the vault yourself (it is off-limits from the task CWD by the rules).
@@ -188,14 +205,15 @@ Stop; do not attempt anything in the vault yourself (it is off-limits from the t
 2. **`cmux send` not responding** — the daemon is down. Report; do not attempt workarounds.
 3. **The wiki-surface ID is stale** (the user accidentally closed the wiki split) — `cmux send --surface <id>` returns `not_found`. Stop, report.
 4. **The task agent has not produced a summary yet and `.task-prompt.md` gives no structure hints** — ask the user interactively (type? title?), then synthesize.
-5. **Several task splits at once** — each has its own `.task-summary.md` in its own worktree; no conflict.
+5. **Several task splits at once** — each has its own `.task-summary.json` in its own worktree; no conflict.
 
 ---
 
 ## Do not
 
 - Do NOT write into the vault's `wiki/` directly (it breaks the single-writer invariant — a race with the vault's Stop-hook autocommit).
-- Do NOT delete `.task-summary.md` after sending — the wiki agent will read it.
-- Do NOT close `.task-cmux-surface` and do NOT call `cmux close-surface` — reap-send only sends RPC. Worktree cleanup remains with the wiki agent /reap and the user.
+- Do NOT delete `.task-summary.json` or its derived Markdown after sending.
+- Do NOT close `.task-cmux-surface` directly — reap-send only sends RPC. Final
+  reap owns the armed exit/close decision.
 - Do NOT try to open the vault repo if the CWD is not there — the task agent must live in the worktree.
 - Do NOT send other slash commands via cmux send (like an automatic `/save` or `/commit` in the wiki) — only `/reap`; everything else the wiki agent decides itself.

@@ -1,9 +1,11 @@
 ---
 name: wiki-query
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: >-
-  Answer questions from the wiki: hot → index → pages; synthesize with citations, file good answers back. Modes: quick/standard/deep. Read-only. Triggers: что ты знаешь про, что у нас по, поищи в вики, найди в вики, what do you know about, query:, find in wiki.
-allowed-tools: Read Glob Grep Bash WebSearch WebFetch AskUserQuestion
+  Answer from the wiki using quick, standard, or deep retrieval. Optional web
+  gaps use an isolated cmux flow; never browse in the vault-aware context.
+allowed-tools: Read Glob Grep Bash AskUserQuestion
 ---
 
 # wiki-query: Query the Wiki
@@ -20,7 +22,7 @@ Three depths. Choose based on question complexity + scope.
 |------|---------|-------|------------|---------|
 | **Quick** | `query quick: ...` or simple factual Q | hot.md + index.md only | ~1,500 | "What is X?", date lookups, quick facts |
 | **Standard** | default (no flag) | hot.md + index + 3-5 pages | ~3,000 | Most questions |
-| **Deep** | `query deep: ...` or "thorough", "comprehensive" | Full wiki + optional web (WebSearch/WebFetch) | ~8,000+ | "Compare A vs B across everything", synthesis, gap analysis |
+| **Deep** | `query deep: ...` or "thorough", "comprehensive" | Full wiki + optional isolated web supplement | ~8,000+ | "Compare A vs B across everything", synthesis, gap analysis |
 
 ---
 
@@ -40,9 +42,9 @@ Do not open individual wiki pages in quick mode.
 ## Standard Query Workflow
 
 1. **Read** `wiki/hot.md` first. It may already have the answer or directly relevant context.
-2. **Read** `wiki/index.md` to find the most relevant pages (scan for titles and descriptions).
-3. **Tag prefilter**: `./scripts/tag-search.py "<question>" --top 10` — narrow candidates via the reverse tag index (frontmatter tags are the cheapest precise relevance signal) BEFORE opening pages. Pages hit by both the index scan and tag-search are read first. exit 3 (index missing) → silently skip this step.
-4. **Read** those pages. Follow wikilinks to depth-2 for key entities. No deeper.
+2. **Retrieve sections**: `./scripts/retrieve.py "<question>" --top 5 --json`. Read the returned page + heading candidates; results are page-unique and include snippets.
+3. **Read** `wiki/index.md` only when the query is navigational or retrieval coverage looks thin. `tag-search.py` remains an optional cheap cross-check for exact tag vocabulary.
+4. **Read** the selected pages. Follow wikilinks to depth-2 for key entities. No deeper.
 5. **Synthesize** the answer in chat. Cite sources with wikilinks: `(Source: [[Page Name]])`.
 6. **Offer to file** the answer: "This analysis seems worth keeping. Should I save it as `wiki/questions/answer-name.md`?"
 7. If the question reveals a **gap**: say "I don't have enough on X. Want to find a source?"
@@ -54,7 +56,7 @@ Do not open individual wiki pages in quick mode.
 Use for synthesis questions, comparisons, or "tell me everything about X."
 
 **Pre-flight (deep only):** ask scope before running (deep mode uses tokens):
-- include WebSearch/WebFetch supplement? (defaults yes if wiki coverage thin)
+- include an isolated web supplement? (defaults yes if wiki coverage is thin)
 - file result as new wiki page after? (defaults yes)
 
 Steps:
@@ -62,25 +64,35 @@ Steps:
 1. Read `wiki/hot.md` and `wiki/index.md`.
 2. Identify all relevant sections (concepts, entities, sources, comparisons); candidates = index scan ∪ `./scripts/tag-search.py "<question>" --top 10`.
 3. Read every relevant page. No skipping.
-4. If wiki coverage is thin AND user opted in — supplement with WebSearch (queries) + WebFetch (cited URLs).
-5. Synthesize comprehensive answer with full citations (wikilinks for wiki pages, URLs for web sources).
-6. Always file the result back as a wiki page. Deep answers are too valuable to lose.
+4. If wiki coverage is thin AND the user opted in, run:
+
+   ```bash
+   python3 scripts/research-isolation.py start --flow deep-query --topic '<approved question/gap>'
+   ```
+
+   Do not call WebSearch/WebFetch in this context. The protected synthesizer
+   writes `answer.md` in its isolated workspace and remains visible in cmux.
+5. Without web supplementation, synthesize from wiki citations normally. With
+   supplementation, report the protected surface/run ID; do not paste untrusted
+   source bodies back into this coordinator context.
+6. File a deep answer only through the networkless synthesizer or a later
+   explicit save after the user has reviewed it.
 
 ---
 
-## Hybrid assist (any mode)
+## Section retrieval (any mode)
 
-Когда keyword-поиск (Grep/index) ничего не дал или вопрос наверняка перефразирован относительно текста страниц — используй гибридный поиск (RRF-fusion: dense-эмбеддинги tiling-кэша + sparse BM25 по всем страницам):
+Default retrieval ranks H2/H3 sections (800-word cap, 100-word overlap), then returns the best heading/snippet from each unique page:
 
 ```bash
-./scripts/semantic-search.py "<вопрос как есть>" --hybrid --top 5
+./scripts/retrieve.py "<вопрос как есть>" --top 5 --json
 ```
 
 Дальше Read топ-страниц как обычно. Заметки:
 
-- BM25-канал (`.vault-meta/bm25/index.json`, Stop-хук перестраивает каждый turn) покрывает ВЕСЬ `wiki/` кроме `log.md`, `_templates/`, `_index.md` — включая `meta/`, `plans/`, `folds/`, которых нет в dense-канале. Grep-fallback нужен только для `log.md`.
-- Деградации автоматические: ollama недоступен → bm25-only, BM25-индекса нет → dense-only. Ненулевой exit (оба канала мертвы) → молча вернуться к Grep, не считать ошибкой.
-- Пометки `(dense#i, bm25#j)` показывают, какой канал поднял страницу: `bm25#-` = чисто семантический хит, `dense#-` = чисто лексический (имена, версии, ID).
+- Sparse section index is mandatory and self-heals by source fingerprint. Title/tags/heading get explicit boosts.
+- Dense `bge-m3` chunks are optional. Missing/stale cache or unavailable Ollama returns exit 0 with `meta.degraded=true` and complete sparse results.
+- `semantic-search.py --hybrid` remains a compatibility wrapper around this command.
 - Если весь топ выглядит нерелевантным — ответа в вики скорее всего нет; проверь memory (MEMORY.md) и предложи `/investigate`.
 
 ---
@@ -93,7 +105,7 @@ Read the minimum needed:
 |------------|---------------|--------------|
 | hot.md | ~500 tokens | If it has the answer |
 | index.md | ~1000 tokens | If you can identify 3-5 relevant pages |
-| 3-5 wiki pages | ~300 tokens each | Usually sufficient |
+| 5 section snippets | ~300 tokens total | Select the 3-5 pages worth opening |
 | 10+ wiki pages | expensive | Only for synthesis across the entire wiki |
 
 If hot.md has the answer, respond without reading further.
@@ -176,7 +188,7 @@ status: developing
 
 Then write the answer as the page body. Include citations. Link every mentioned concept or entity.
 
-After filing, add an entry to `wiki/index.md` under Questions and append to `wiki/log.md`.
+File the answer page and its log/hot bookkeeping through one `vault-write.py` payload (`pages` + `log_entry` + `hot_bullet`). Folder `_index.md` regenerates automatically; add the answer to `wiki/index.md` only if it is a key hub, as another page operation in the same transaction. Existing pages require a hash from `vault-write.py --sha256` and `op:update`.
 
 ---
 

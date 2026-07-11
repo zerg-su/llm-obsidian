@@ -2,7 +2,7 @@
 type: meta
 title: "Dashboard"
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-07-11
 tags:
   - meta
   - dashboard
@@ -13,6 +13,8 @@ related:
   - "[[log]]"
   - "[[concepts/_index]]"
   - "[[Compounding Knowledge]]"
+sessions:
+  - public-template-v2
 ---
 
 # Wiki Dashboard

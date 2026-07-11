@@ -20,7 +20,11 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path(__file__).resolve().parents[2])
+REPO_ROOT = Path(
+    os.environ.get("LLM_OBSIDIAN_PROJECT_ROOT")
+    or os.environ.get("CLAUDE_PROJECT_DIR")
+    or Path(__file__).resolve().parents[2]
+).resolve()
 COMMAND_LOG = REPO_ROOT / ".vault-meta" / "command-log.jsonl"
 
 
@@ -30,8 +34,10 @@ def capture_command(payload: dict) -> None:
         if not cmd:
             return
         sys.path.insert(0, str(REPO_ROOT / "scripts"))
-        from lib_sanitize import sanitize
+        from lib_sanitize import residual_credential_kinds, sanitize
         clean_cmd, _ = sanitize(cmd)
+        if residual_credential_kinds(clean_cmd):
+            return
         resp = payload.get("tool_response") or {}
         record = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),

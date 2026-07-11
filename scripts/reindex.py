@@ -26,9 +26,12 @@ import json
 import os
 import re
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+from vault_schema import DATE_RX, parse_frontmatter, split_frontmatter
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -51,86 +54,6 @@ def atomic_write(path: Path, text: str) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
-
-
-def split_frontmatter(text: str) -> str | None:
-    if not text.startswith("---\n"):
-        return None
-    end = text.find("\n---", 4)
-    if end < 0:
-        return None
-    return text[4:end]
-
-
-def parse_frontmatter(block: str) -> dict[str, Any]:
-    """
-    Minimal YAML subset parser:
-      - scalars: key: value
-      - flow-list inline: key: [a, b, c]
-      - block-list: key:\n  - a\n  - b
-      - nested dict block (e.g. sessions): key:\n  - id: X\n    date: Y
-    """
-    out: dict[str, Any] = {}
-    lines = block.splitlines()
-    i = 0
-    while i < len(lines):
-        raw = lines[i]
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            i += 1
-            continue
-        # top-level: key: value or key:
-        m = re.match(r"^([A-Za-z_][\w-]*):\s*(.*)$", raw)
-        if not m:
-            i += 1
-            continue
-        key, value = m.group(1), m.group(2).strip()
-
-        if value == "":
-            # block follows: list or dict
-            items: list[Any] = []
-            i += 1
-            current_dict: dict[str, Any] | None = None
-            while i < len(lines):
-                nxt = lines[i]
-                if not nxt.startswith("  ") and nxt.strip():
-                    break
-                if not nxt.strip():
-                    i += 1
-                    continue
-                ldict = re.match(r"^\s+-\s+([A-Za-z_][\w-]*):\s*(.*)$", nxt)
-                litem = re.match(r"^\s+-\s+(.+)$", nxt)
-                kv = re.match(r"^\s{4,}([A-Za-z_][\w-]*):\s*(.*)$", nxt)
-                if ldict:
-                    current_dict = {ldict.group(1): _clean_scalar(ldict.group(2))}
-                    items.append(current_dict)
-                elif kv and current_dict is not None:
-                    current_dict[kv.group(1)] = _clean_scalar(kv.group(2))
-                elif litem:
-                    items.append(_clean_scalar(litem.group(1)))
-                    current_dict = None
-                i += 1
-            out[key] = items
-        elif value.startswith("[") and value.endswith("]"):
-            # flow list
-            inner = value[1:-1].strip()
-            if not inner:
-                out[key] = []
-            else:
-                out[key] = [_clean_scalar(p.strip()) for p in inner.split(",")]
-            i += 1
-        else:
-            out[key] = _clean_scalar(value)
-            i += 1
-    return out
-
-
-def _clean_scalar(value: str) -> str:
-    v = value.strip()
-    if (v.startswith('"') and v.endswith('"')) or (
-        v.startswith("'") and v.endswith("'")
-    ):
-        v = v[1:-1]
-    return v
 
 
 def extract_sessions(fm: dict[str, Any]) -> list[str]:
@@ -293,6 +216,7 @@ updated: {today}
 tags:
   - index
 status: evergreen
+sessions: []
 ---
 
 # {folder}/
@@ -310,8 +234,6 @@ def write_folder_indexes(pages: list[dict]) -> int:
     created from a minimal template. Files are written only when the content
     actually changed (the Stop hook runs this every turn — avoid commit churn).
     """
-    import time as _time
-
     by_folder: dict[str, list[dict]] = defaultdict(list)
     for p in pages:
         rel = Path(p["path"]).relative_to("wiki")
@@ -322,9 +244,19 @@ def write_folder_indexes(pages: list[dict]) -> int:
             continue
         by_folder[folder].append(p)
 
-    today = _time.strftime("%Y-%m-%d")
+    def latest_content_date(items: list[dict]) -> str:
+        dates = [
+            value
+            for item in items
+            for value in (item.get("updated"), item.get("created"))
+            if isinstance(value, str) and DATE_RX.fullmatch(value)
+        ]
+        return max(dates) if dates else time.strftime("%Y-%m-%d")
+
+    today = time.strftime("%Y-%m-%d")
     written = 0
     for folder, items in sorted(by_folder.items()):
+        listing_date = latest_content_date(items)
         items.sort(key=lambda p: (p.get("updated") or p.get("created") or ""), reverse=True)
         listing = []
         for p in items:
@@ -332,7 +264,11 @@ def write_folder_indexes(pages: list[dict]) -> int:
             bits = [b for b in (p.get("status"), p.get("updated")) if b]
             addr = f" `{p['address']}`" if p.get("address") else ""
             listing.append(f"- [[{stem}]] — {', '.join(bits)}{addr}")
-        block = "\n".join([AUTO_START, f"_{len(items)} pages, updated {today}_", ""] + listing + [AUTO_END])
+        block = "\n".join(
+            [AUTO_START, f"_{len(items)} pages, updated {listing_date}_", ""]
+            + listing
+            + [AUTO_END]
+        )
 
         idx_file = WIKI / folder / "_index.md"
         if idx_file.exists():
@@ -344,7 +280,7 @@ def write_folder_indexes(pages: list[dict]) -> int:
             else:
                 new_text = text.rstrip("\n") + "\n\n" + block + "\n"
         else:
-            new_text = _INDEX_TEMPLATE.format(folder=folder, today=today, block=block)
+            new_text = _INDEX_TEMPLATE.format(folder=folder, today=listing_date, block=block)
         if not idx_file.exists() or idx_file.read_text(encoding="utf-8") != new_text:
             atomic_write(idx_file, new_text)
             written += 1

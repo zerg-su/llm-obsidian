@@ -1,11 +1,10 @@
 ---
 name: dispatch
-version: 1.2.0
-description: |
-  Spawn a cmux right-split task worktree for Claude Code or Codex CLI: resolve repo, create worktree, launch requested runtime/model, hand off the latest approved plan from wiki/plans/. Pre-flight mandatory. Requires cmux.
-  Use when: a task benefits from isolation, or a ready plan should run on a cheaper model.
-  Triggers (EN): dispatch, spawn task, parallel task, task split, new worktree.
-  Triggers (RU): сделай диспатч, запусти параллельную задачу, worktree для, задиспатчь на опусе, передай план в сплит.
+metadata:
+  version: 1.2.0
+description: >-
+  Spawn an isolated Claude/Codex task worktree in a cmux split and hand it an
+  approved plan. Use for parallel/offloaded implementation; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
 
@@ -50,8 +49,16 @@ The description is free text, spoken or typed. From "add a dark-mode toggle to t
 - `branch_intent` — `new` (create `task/<task_name>` from the default branch) or the name of a specific existing branch.
 - `description` — the substantive part for the task prompt (what exactly to do and why).
 - `runtime` — `claude | codex`. From text: "for Codex / для кодекса" → `codex`; "for Claude / для клода" → `claude`. Default = current agent (`CODEX_THREAD_ID` → `codex`, otherwise `claude`).
-- `model` — model for the task agent. For `claude`, default **`opus`**; aliases: "on sonnet / на сонете" → `sonnet`, "on fable / на фейбле" → `fable`, "on opus / на опусе" → `opus`, "on haiku / на хайку" → `haiku`. For `codex`, default = configured Codex default (do not pass `--model`); if the user names a raw model id (`gpt-5-codex`, `gpt-5`, `o3`, etc.), pass it as `codex --model <raw>`.
+- `model` — model for the task agent. For `claude`, default **`opus`**
+  (currently Opus 4.8); aliases: "on sonnet / на сонете" → `sonnet`,
+  "on fable / на фейбле" → `fable` (explicit opt-in only), "on opus / на
+  опусе" → `opus`, "on haiku / на хайку" → `haiku`. For `codex`, default =
+  configured Codex default (do not pass `--model`); if the user names a raw
+  model id (`gpt-5.6-sol`, `gpt-5`, `o3`, etc.), pass it as
+  `codex --model <raw>`.
 - `plan_ref` — approved-plan handoff mode (resolved in Phase 1.4b): nothing said → auto-resolve the latest plan of the current session; "hand off plan <slug|path>" → that file; "no plan" → classic-mode forced.
+- `interaction_policy` — approved-plan dispatch defaults to `unattended`;
+  explicit "interactive" preserves compatibility gates.
 
 If something cannot be extracted from the text — ask with a single question, do not dance around it.
 
@@ -84,10 +91,10 @@ Exactly one hit — take that path. Several — list the candidates and wait for
 
 ### 1.2b Resolve the Codex skill environment
 
-For `runtime=codex` or review-gate, do **not** rely blindly on the parent
-process' `CODEX_HOME`. Installed Codex plugins are scoped to `CODEX_HOME`, so
-inheriting the wrong home mixes work and personal skills. Resolve the task
-agent's Codex environment before echo-confirm:
+For `runtime=codex`, do **not** rely on the parent process' `CODEX_HOME`.
+Installed Codex plugins are scoped to `CODEX_HOME`, so inheriting the wrong home
+mixes work and personal skills. Resolve the task agent's Codex environment
+before echo-confirm:
 
 1. Prefer `<repo-path>/.codex/dispatch-env.toml` if the target repo provides it.
 2. Otherwise use `<vault-root>/.codex/dispatch-env.toml` from the repo where
@@ -105,23 +112,29 @@ reap_skill = "$llm-obsidian:reap"
 reap_send_skill = "$llm-obsidian:reap-send"
 review_skill = "$llm-obsidian:review-dispatch"
 review_send_skill = "$llm-obsidian:review-send"
-codex_review_model = "gpt-5.5"
+codex_review_model = "gpt-5.6-sol"
 claude_review_model = "opus"
+claude_review_effort = "medium"
+interaction_policy = "unattended"
+review_mode = "light"
+max_verify_iterations = 2
+auto_close_surfaces = true
+default_reap_type = "session"
+watchdog_enabled = true
+watchdog_poll_seconds = 30
+watchdog_warn_after_seconds = 900
+watchdog_alert_after_seconds = 1200
 ```
 
 - `codex_home` is expanded with `~` and must already exist before spawning.
 - `profile` is optional and is passed as `--profile <name>` inside that
   `CODEX_HOME`.
-- `reap_skill` is written into `.wiki-reap-command` so task-side `/reap-send`
-  does not hardcode a plugin prefix.
-- `reap_send_skill` is written into `.task-reap-send-skill` and mentioned in
-  `.task-prompt.md`.
-- `review_skill` is written into `.task-review-skill` and mentioned in
-  `.task-prompt.md`.
-- `review_send_skill` is written into `.task-review-send-skill`, so the
-  reviewer split can callback the executor without guessing plugin namespace.
-- `codex_review_model` / `claude_review_model` set reviewer defaults:
-  Codex = `gpt-5.5`, Claude = `opus`.
+- Reap/review command keys are persisted into `.wiki-reap-command` and
+  `.task-*-skill` handoffs so neither runtime guesses plugin namespaces.
+- Reviewer defaults: Codex `gpt-5.6-sol`; Claude `opus` (currently Opus 4.8)
+  at medium effort. Fable is used only when explicitly requested.
+- The remaining keys define bounded review/reap/close plus an observer-only
+  15/20-minute watchdog; old metadata without the policy stays disabled.
 
 If `codex_home` is configured but the directory is missing — stop before
 creating the split and tell the user to bootstrap that Codex home. Do not create
@@ -155,8 +168,10 @@ PLAN_FILE=$(grep -l "session_id: $SESSION_ID" wiki/plans/*.md 2>/dev/null | sort
 
 (file names start with a timestamp, so sort by name = sort by time).
 
-- Found → **plan-mode**: the absolute path goes into `.task-prompt.md` (Approved plan section, see Phase 2.2) and `.task-meta.json`.
-- Not found → **classic-mode** (plan-first inside the split, the original behavior). No questions asked.
+- Found → **plan-mode**: hash the plan and write v2 unattended metadata.
+- Not found → do not spawn by default. Shape and approve the plan in the
+  coordinator, then file it with `/save-plan` (or the runtime equivalent).
+  Only explicit `interactive` / `no plan` uses classic-mode v1.
 - The user explicitly named a plan → take it from `wiki/plans/`, even if it belongs to another session (cross-window is valid — note it in the echo).
 - "No plan" → classic-mode forced.
 
@@ -203,6 +218,11 @@ Parsing as:
   wiki reap:   $llm-obsidian:reap
   review:      $llm-obsidian:review-dispatch
   review send: $llm-obsidian:review-send
+  interaction: unattended (one approved mandate)
+  review policy: light, max verify 2; blocking escalates
+  reap policy: final session → "<approved result title>"
+  surfaces:    close reviewer/task after armed process exit
+  watchdog:    observe every 30s; notify at 15m/20m; never interrupt
   plan:        wiki/plans/2026-07-03-113935-<slug>.md (approved in this session)
   wiki context:
     - [[Blog]] — main page about the blog setup
@@ -211,7 +231,9 @@ Parsing as:
 Spawn the task split?
 ```
 
-The `plan:` line shows either the resolved file (marked "approved in this session" / "from another session, named explicitly"), or `none — plan-first in the split`. A wrong auto-resolve gets caught exactly here.
+The plan, exact result type/title, review depth, forbidden actions, and surface
+policy are part of this single approval. A wrong target is corrected here
+instead of interrupting the background task later.
 
 Wait for "yes / no / edit". Do not proceed to Phase 2 without explicit consent.
 
@@ -256,6 +278,13 @@ Key template invariants (preserve them if you edit the reference):
 
 ### 2.3 Spawn a split surface in the current workspace
 
+For Codex, run `codex-sync --apply --only-profile <dispatch-profile>` after the
+upfront approval and before `new-split`. The scoped sync unions only already
+trusted global hook hashes into that profile, never changes other Codex
+profiles, and never accepts a new/conflicting hash.
+If Codex still presents hook trust, stop at startup and surface that single new
+trust decision immediately instead of letting the task appear active.
+
 Paradigm: the task agent lives as a **split surface to the right** of the wiki agent in the very same cmux workspace, **not** in a separate workspace or window. The user sees both sessions at once, switches between them as panes, and parallel tasks accumulate as extra surfaces in the same split stack.
 
 **First** — capture the wiki surface UUID **before** the new-split (in case focus shifts). Do not persist short `surface:N` refs in handoff files: refs are convenient for humans, but UUIDs are safer when tabs/surfaces are moved or closed.
@@ -295,22 +324,26 @@ echo "<review_send_skill>" > <worktree-path>/.task-review-send-skill
 
 `.task-cmux-surface` is needed by `/reap` (wiki-side fetch via read-screen, fallback when `.task-summary.md` is missing).
 `.wiki-cmux-surface` and `.wiki-agent-runtime` are needed by `/reap-send` (task-side RPC trigger: Claude receives `/reap`; Codex receives the command stored in `.wiki-reap-command`).
-`.wiki-reap-command` stores the environment-specific Codex skill command, for
-example `$llm-obsidian:reap`. This is safer than guessing from
-`WIKI_RUNTIME=codex`, because plugin namespaces depend on `CODEX_HOME`.
+`.wiki-reap-command` is the environment-specific Codex skill command to send
+back to the wiki split, for example `$llm-obsidian:reap`. This avoids
+guessing from `WIKI_RUNTIME=codex`, which is not enough to distinguish plugin
+namespaces.
 `.task-review-skill` stores the environment-specific review command, for
-example `$llm-obsidian:review-dispatch`, so the task agent can run cross-model
-review before `/reap-send`.
+example `$llm-obsidian:review-dispatch`, so the task agent can run
+cross-model review before `/reap-send`.
 `.task-review-send-skill` stores the reviewer-side callback command, for
-example `$llm-obsidian:review-send`, so the review split can return findings to
-the executor split.
+example `$llm-obsidian:review-send`, so the review split can return
+findings to the executor split.
+`.task-agent-command.json` is the shell-free argv/env handoff consumed by the
+cmux supervisor; it is runtime state, never a commit target.
 
-**Additionally** — write `<worktree-path>/.task-meta.json` with the **origin-session binding** for multi-session safety:
+**Additionally** — approved-plan mode writes v2 `.task-meta.json` with the
+origin binding and unattended mandate. Classic interactive mode keeps v1.
 
 ```bash
 cat > <worktree-path>/.task-meta.json <<EOF
 {
-  "version": 1,
+  "version": 2,
   "task_name": "<task_name>",
   "wiki_runtime": "$WIKI_RUNTIME",
   "executor_runtime": "<claude|codex>",
@@ -330,10 +363,27 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "reap_send_skill": "<reap_send_skill>",
   "review_skill": "<review_skill>",
   "review_send_skill": "<review_send_skill>",
-  "codex_review_model": "gpt-5.5",
+  "codex_review_model": "gpt-5.6-sol",
   "claude_review_model": "opus",
   "model": "<model or null for codex configured default>",
-  "plan_file": <"/abs/path/to/wiki/plans/<file>.md" | null>,
+  "plan_file": "/abs/path/to/wiki/plans/<file>.md",
+  "approved_plan_sha256": "<sha256 captured before echo-confirm>",
+  "interaction_policy": "unattended",
+  "review_policy": {
+    "mode": "light|full|skip",
+    "max_verify_iterations": 2,
+    "auto_resolve_severities": ["warning", "nit"],
+    "escalate_severities": ["blocking"]
+  },
+  "reap_policy": {
+    "mode": "final",
+    "auto_file": true,
+    "allowed_types": ["session"],
+    "title": "<exact approved wiki title>"
+  },
+  "surface_policy": {"auto_close": true},
+  "watchdog_policy": {"enabled": true, "poll_seconds": 30, "warn_after_seconds": 900, "alert_after_seconds": 1200},
+  "forbidden_actions": ["push", "deploy", "publish", "delete-worktree", "delete-branch", "expand-scope"],
   "suggested_agents": [<from Phase 1.6, JSON array of {"name", "hint"}>]
 }
 EOF
@@ -341,37 +391,30 @@ EOF
 
 Why `.task-meta.json`:
 - `origin_session` — `/reap` compares it with current `./scripts/current-session-id.sh`; on mismatch (the wiki agent restarted between dispatch and reap, or another session runs reap) — WARNING and an explicit confirm before filing. Does not block, but stays visible. See Edge case 6.
-- `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
+- `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude, or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
 - `executor_runtime` / `runtime` / `model` — `/reap` preserves executor provenance in result-page frontmatter and echo output (`runtime` stays as a legacy alias for old consumers).
 - `suggested_agents` — `/reap` can add them to the saved page's frontmatter or use them for cross-refs.
-- `plan_file` — on mode=final `/reap` closes the plan via `plan_close` (vault-write): `status: executed` + a link to the result + the exec session (closing the loop plan → execution → result).
-- `spawned_at` — for usage analysis / log rollups later.
+- `approved_plan_sha256` prevents post-approval drift; validate it with
+  `scripts/task_contract.py validate` before task work.
+- `reap_policy` binds unattended filing to one exact type/title; drift,
+  collision, or session mismatch escalates instead of filing.
+- `watchdog_policy` only observes/alerts; it never sends input, kills, or closes.
 
-Launch the task agent in the split with the pre-prompt. `new-split` does not accept `--cwd`, so `cd` is the first command. For Codex, add `--model` only when the user explicitly requested a model; otherwise let Codex use its configured default.
+Prepare the shell-free task argv from validated metadata, then send only the
+short supervisor command. `prepare-task` pins unattended Codex to
+`-a never -s workspace-write`; Claude keeps `auto`. The supervisor appends the
+prompt as one argv value, runs the watchdog, and calls lifecycle after exit.
 
 ```bash
 WORKTREE="<worktree-path>"
-RUNTIME="<claude|codex>"
-MODEL="<model-or-empty>"   # empty only for Codex configured default
+SUPERVISOR="<vault-root>/scripts/cmux_agent_supervisor.py"
 WORKTREE_Q=$(printf '%q' "$WORKTREE")
-if [ "$RUNTIME" = "codex" ]; then
-    MODEL_ARG=""
-    [ -n "$MODEL" ] && MODEL_ARG=" --model $(printf '%q' "$MODEL")"
-    PROFILE_ARG=""
-    [ -n "${CODEX_PROFILE:-}" ] && PROFILE_ARG=" --profile $(printf '%q' "$CODEX_PROFILE")"
-    CODEX_ENV=""
-    [ -n "${TASK_CODEX_HOME:-}" ] && CODEX_ENV="CODEX_HOME=$(printf '%q' "$TASK_CODEX_HOME") "
-    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; ${CODEX_ENV}codex --cd $WORKTREE_Q$PROFILE_ARG$MODEL_ARG \"\$(cat .task-prompt.md)\""
-else
-    [ -z "$MODEL" ] && MODEL="opus"
-    cmux send --surface "$SURFACE_ID" "cd $WORKTREE_Q; clear; claude --permission-mode auto --model $(printf '%q' "$MODEL") \"\$(cat .task-prompt.md)\""
-fi
+SUPERVISOR_Q=$(printf '%q' "$SUPERVISOR")
+python3 "$SUPERVISOR" prepare-task --worktree "$WORKTREE" --surface "$SURFACE_ID"
+cmux send --surface "$SURFACE_ID" "python3 $SUPERVISOR_Q run --worktree $WORKTREE_Q --kind task --surface $SURFACE_ID"
+sleep 0.2
 cmux send-key --surface "$SURFACE_ID" Enter
 ```
-
-NB: `--model` for both Claude and Codex takes exactly one value — a positional prompt after it is safe (unlike variadic flags such as `--mcp-config`, which would swallow the prompt).
-
-(`clear` wipes the shell prompt left by `new-split`; otherwise it stays in the scrollback and pollutes a future `read-screen` in `/reap`.)
 
 ### 2.4 Verify
 
@@ -409,10 +452,9 @@ Spawned task split:
   branch:    task/<task_name>
   cmux:      <surface-id> (split right of the wiki agent)
 
-Switch to the right split and continue there. When the task is done —
-ask the task agent for a `## Wiki Summary` block and come back to the
-wiki agent with `/reap <task_name>` or the command from `.wiki-reap-command`
-with `<task_name>` appended.
+The approved task now runs unattended. It returns only for a blocking/scope
+escalation; otherwise review, verify, final reap, and exact task/reviewer
+surface closure happen automatically. Branch and worktree remain local.
 ```
 
 ---

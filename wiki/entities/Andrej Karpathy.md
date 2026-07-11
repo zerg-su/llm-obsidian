@@ -5,7 +5,7 @@ entity_type: person
 role: "AI researcher, educator, founder"
 first_mentioned: "[[LLM Wiki Pattern]]"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - entity
   - person
@@ -16,6 +16,8 @@ related:
   - "[[Compounding Knowledge]]"
   - "[[entities/_index]]"
 sources:
+sessions:
+  - public-template-v2
 ---
 
 # Andrej Karpathy

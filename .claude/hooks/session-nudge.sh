@@ -6,7 +6,7 @@
 # localhost probe, no MCP, no python imports beyond stdlib one-liners.
 #
 # Checks:
-#   0. gateway-down  — MCP HTTP gateway (127.0.0.1:9090) не отвечает
+#   0. gateway-down  — MCP HTTP gateway на порту из runtime.env не отвечает
 #                      (только если гейтвей сконфигурирован на этой машине)
 #   1. lint-age      — newest wiki/meta/reports/lint-report-*.md older than 7d
 #   2. fold-due      — log entries since last fold >= 64 (same counter as stop.sh)
@@ -30,7 +30,7 @@ if [ "${LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS:-}" != "1" ]; then
   fi
 fi
 
-VAULT_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+VAULT_ROOT="${LLM_OBSIDIAN_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 NOW=$(date +%s)
 HINTS=0
 
@@ -49,8 +49,11 @@ newest_mtime() { # glob -> epoch of newest match, 0 if none
 # 0. mcp-gateway alive — only when the gateway is actually configured here
 #    (localhost TCP probe; any HTTP answer from the proxy = OK, refused = down)
 if [ -f "$HOME/.config/mcp-gateway/secrets.env" ] || [ -f "$VAULT_ROOT/scripts/mcp-gateway/config.json" ]; then
-  if ! curl -s -o /dev/null --max-time 1 "http://127.0.0.1:9090/" 2>/dev/null; then
-    hint "MCP gateway не отвечает (127.0.0.1:9090) — MCP-серверы недоступны. Запуск: scripts/mcp-gateway/mcp-gateway.sh start (диагноз: status / doctor / logs)."
+  gateway_port=$(python3 "$VAULT_ROOT/scripts/mcp-gateway/config-sync.py" --print-port 2>/dev/null || true)
+  if [[ ! "$gateway_port" =~ ^[0-9]+$ ]]; then
+    hint "MCP gateway сконфигурирован, но runtime.env отсутствует или некорректен — проверь mcp-gateway.sh doctor."
+  elif ! curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${gateway_port}/" 2>/dev/null; then
+    hint "MCP gateway не отвечает (127.0.0.1:${gateway_port}) — MCP-серверы недоступны. Запуск: scripts/mcp-gateway/mcp-gateway.sh start (диагноз: status / doctor / logs)."
   fi
 fi
 
@@ -61,14 +64,13 @@ if [ "$lint_m" -gt 0 ]; then
   [ "$age_d" -ge 7 ] && hint "wiki-lint не гонялся ${age_d} дней — consider /wiki-lint."
 fi
 
-# 2. fold-due (same logic as stop.sh, but read-only — counter не трогаем)
-LOG_FILE="$VAULT_ROOT/wiki/log.md"
-COUNTER_FILE="$VAULT_ROOT/.vault-meta/last-fold-count.txt"
-if [ -f "$LOG_FILE" ] && [ -f "$COUNTER_FILE" ]; then
-  cur=$(grep -c '^## \[' "$LOG_FILE" 2>/dev/null || echo 0)
-  last=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
-  [[ "$last" =~ ^[0-9]+$ ]] || last=0
-  [ "$cur" -ge $((last + 64)) ] && hint "log.md вырос на $((cur - last)) записей с последнего fold — consider /wiki-fold."
+# 2. fold-due (derived from entry hashes recorded by existing fold pages)
+FOLD_HELPER="$VAULT_ROOT/scripts/fold-log.py"
+if [ -f "$FOLD_HELPER" ]; then
+  fold_due=$(python3 "$FOLD_HELPER" status --json 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["unprocessed_entries"] if d["ready"] else 0)' 2>/dev/null || echo 0)
+  [[ "$fold_due" =~ ^[0-9]+$ ]] || fold_due=0
+  [ "$fold_due" -ge 64 ] && hint "log.md содержит ${fold_due} необработанных hashed entries — consider /wiki-fold."
 fi
 
 # 3. tiling-age (opt-in: only nudge if a tiling report ever existed)
@@ -78,16 +80,22 @@ if [ "$til_m" -gt 0 ]; then
   [ "$age_d" -ge 14 ] && hint "semantic tiling не гонялся ${age_d} дней (нужен ollama) — consider при следующем lint."
 fi
 
-# 4. backup staleness (memory dir vs .claude-memory/)
-#    Project dir = vault path with non-alphanumeric chars dashed (Claude Code convention).
-PROJ_SLUG=$(printf '%s' "$VAULT_ROOT" | sed 's/[^A-Za-z0-9]/-/g')
-MEM_DIR="$HOME/.claude/projects/$PROJ_SLUG/memory"
-BK_DIR="$VAULT_ROOT/.claude-memory"
-if [ -d "$MEM_DIR" ] && [ -d "$BK_DIR" ]; then
-  mem_m=$(newest_mtime "$MEM_DIR/*.md")
-  bk_m=$(newest_mtime "$BK_DIR/*.md")
-  # >1h drift = stop-hook backup явно не отработал
-  [ "$mem_m" -gt $((bk_m + 3600)) ] && hint "backup памяти отстал от memory-директории — проверь scripts/memory-backup.py (Stop-хук)."
+# 4. backup staleness. The helper owns opt-in and source resolution; the hook
+#    never guesses project or sibling-vault memory paths.
+if [ -f "$VAULT_ROOT/scripts/memory-backup.py" ]; then
+  backup_status=$(python3 "$VAULT_ROOT/scripts/memory-backup.py" --status 2>/dev/null || true)
+  backup_enabled=$(printf '%s' "$backup_status" \
+    | python3 -c 'import json,sys; print(1 if json.load(sys.stdin).get("enabled") else 0)' 2>/dev/null || echo 0)
+  backup_reason=$(printf '%s' "$backup_status" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("reason", "unknown"))' 2>/dev/null || echo unknown)
+  if [ "$backup_reason" = invalid ]; then
+    hint "backup памяти имеет некорректный opt-in конфиг — проверь scripts/memory-backup.py --status."
+  elif [ "$backup_enabled" -eq 1 ]; then
+    backup_check=$(python3 "$VAULT_ROOT/scripts/memory-backup.py" --check 2>&1)
+    backup_rc=$?
+    [ "$backup_rc" -eq 1 ] && hint "backup памяти отстал от явно настроенной memory-директории — проверь scripts/memory-backup.py: $backup_check"
+    [ "$backup_rc" -ge 2 ] && hint "backup памяти заблокирован безопасностью/конфигурацией — проверь scripts/memory-backup.py: $backup_check"
+  fi
 fi
 
 # 5. skill-of-day — ротация недоиспользуемых скиллов с конкретным кейсом.

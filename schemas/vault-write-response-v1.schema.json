@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/vault-write-response-v1.schema.json",
+  "title": "Vault write response v1",
+  "type": "object",
+  "required": ["schema_version", "transaction_id", "request_id", "status", "written_paths", "warnings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "minLength": 1},
+    "request_id": {"type": ["string", "null"]},
+    "status": {"enum": ["ok", "dry-run", "error"]},
+    "written_paths": {"type": "array", "items": {"type": "string"}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "error": {
+      "type": "object",
+      "required": ["category", "retryable", "message", "paths"],
+      "properties": {
+        "category": {"enum": ["io", "invariant", "invalid_request", "conflict", "unknown"]},
+        "retryable": {"type": "boolean"},
+        "message": {"type": "string"},
+        "paths": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

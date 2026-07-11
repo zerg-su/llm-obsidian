@@ -7,6 +7,7 @@
 #
 # Files:
 #   scripts/mcp-gateway/config.json          gateway children (copy config.json.example)
+#   scripts/mcp-gateway/runtime.env          canonical local gateway port
 #   scripts/mcp-gateway/tools.json           version pins for uv-tool children ({} if none)
 #   ~/.config/mcp-gateway/secrets.env        KEY=value lines; ${KEY} placeholders in
 #                                            config.json are expanded by mcp-proxy from env
@@ -19,19 +20,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_DIR="$HOME/.config/mcp-gateway"
 SECRETS="$CONF_DIR/secrets.env"
 CONFIG="$SCRIPT_DIR/config.json"
+RUNTIME_ENV="${MCP_GATEWAY_RUNTIME:-$SCRIPT_DIR/runtime.env}"
 PROXY_BIN="${MCP_PROXY_BIN:-$HOME/.local/bin/mcp-proxy}"
-GATEWAY_PORT="${MCP_GATEWAY_PORT:-9090}"
+GATEWAY_PORT=""
 LABEL_GW="${MCP_GATEWAY_LABEL:-io.llm-obsidian.mcp-gateway}"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 LOG_DIR="$HOME/Library/Logs"
 UID_NUM="$(id -u)"
 
 require_config() {
+  if ! GATEWAY_PORT="$(python3 "$SCRIPT_DIR/config-sync.py" --runtime-env "$RUNTIME_ENV" --print-port)"; then
+    echo "  -> cp $SCRIPT_DIR/runtime.env.example $RUNTIME_ENV" >&2
+    exit 1
+  fi
+  export MCP_GATEWAY_PORT="$GATEWAY_PORT"
   [ -f "$CONFIG" ] || {
     echo "ERROR: $CONFIG not found." >&2
     echo "  -> cp $SCRIPT_DIR/config.json.example $CONFIG   # then edit your servers" >&2
     exit 1
   }
+  if ! python3 "$SCRIPT_DIR/config-sync.py" \
+      --runtime-env "$RUNTIME_ENV" --check --gateway-only --quiet; then
+    echo "ERROR: gateway port drift; run: $0 sync-config --apply" >&2
+    exit 1
+  fi
 }
 
 load_secrets() {
@@ -78,6 +90,7 @@ PYEOF
 }
 
 write_plist() {
+  mkdir -p "$AGENTS_DIR" "$LOG_DIR"
   cat > "$AGENTS_DIR/$LABEL_GW.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -277,10 +290,31 @@ PYEOF
   codex-sync)
     # Sync Codex MCP TOML from .mcp.json/.mcp-profiles. Dry-run by default.
     shift
+    if ! python3 "$SCRIPT_DIR/config-sync.py" --runtime-env "$RUNTIME_ENV" --check --quiet; then
+      echo "ERROR: synchronize local MCP JSON first: $0 sync-config --apply" >&2
+      exit 1
+    fi
     python3 "$SCRIPT_DIR/codex-sync.py" "$@"
     ;;
+  schema-check)
+    require_config
+    python3 "$SCRIPT_DIR/schema-lock.py" --check --config "$CONFIG" --port "$GATEWAY_PORT"
+    ;;
+  schema-lock)
+    require_config
+    shift
+    python3 "$SCRIPT_DIR/schema-lock.py" "$@" --config "$CONFIG" --port "$GATEWAY_PORT"
+    ;;
+  sync-config)
+    # Materialize the runtime.env port in gateway + default MCP client JSON.
+    shift
+    if [ "$#" -eq 0 ]; then
+      set -- --check
+    fi
+    python3 "$SCRIPT_DIR/config-sync.py" --runtime-env "$RUNTIME_ENV" "$@"
+    ;;
   *)
-    echo "usage: mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|update [--check|--yes] [name...]|sync-tools|codex-sync [--check|--apply]|doctor|logs [n]}"
+    echo "usage: mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|schema-check|schema-lock --apply|update [--check|--yes] [name...]|sync-tools|sync-config [--check|--apply]|codex-sync [--check|--apply] [--only-profile name]|doctor|logs [n]}"
     exit 1
     ;;
 esac

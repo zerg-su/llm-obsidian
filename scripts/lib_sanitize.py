@@ -30,9 +30,30 @@ REDACT_RULES = [
     # generic long hex/base64-looking secrets glued to known prefixes
     (re.compile(r"\bglpat-[A-Za-z0-9_\-]{10,}\b"), "glpat-REDACTED"),
     (re.compile(r"\bglsa_[A-Za-z0-9_]{10,}\b"), "glsa_REDACTED"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "github_pat_REDACTED"),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), "gh*_REDACTED"),
     (re.compile(r"\bctx7sk-[A-Za-z0-9\-]{10,}\b"), "ctx7sk-REDACTED"),
     (re.compile(r"\bxox[bap]-[A-Za-z0-9\-]{10,}\b"), "xox*-REDACTED"),
     (re.compile(r"\bBearer\s+[A-Za-z0-9_\-\.=]{16,}"), "Bearer REDACTED"),
+]
+
+# A second, fail-closed layer for data that is about to enter a durable backup.
+# Labels are safe to log; matching secret text is deliberately never returned.
+RESIDUAL_CREDENTIAL_RULES = [
+    ("private-key", re.compile(r"-----BEGIN " r"(?:[A-Z0-9 ]+ )?PRIVATE KEY-----")),
+    ("aws-access-key", re.compile(r"\bA[KS]IA[A-Z0-9]{16}\b")),
+    ("github-token", re.compile(r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})\b")),
+    ("gitlab-token", re.compile(r"\b(?:glpat-[A-Za-z0-9_\-]{10,}|glsa_[A-Za-z0-9_]{10,})\b")),
+    ("context7-token", re.compile(r"\bctx7sk-[A-Za-z0-9\-]{10,}\b")),
+    ("slack-token", re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b")),
+    ("bearer-token", re.compile(r"(?i)\bBearer\s+(?!REDACTED\b)[A-Za-z0-9_\-.=+/]{16,}")),
+    (
+        "credential-assignment",
+        re.compile(
+            r"(?im)\b(?:token|api[_-]?key|secret|password|passwd)\s*[:=]\s*"
+            r"(?!REDACTED\b)(?:['\"][^'\"\n]{6,}['\"]|[^\s`<>{}\[\]]{6,})"
+        ),
+    ),
 ]
 
 
@@ -42,3 +63,9 @@ def sanitize(text: str) -> tuple[str, int]:
         text, n = rx.subn(repl, text)
         count += n
     return text, count
+
+
+def residual_credential_kinds(text: str) -> list[str]:
+    """Return only safe rule labels for credential-like text left after sanitize."""
+
+    return [label for label, pattern in RESIDUAL_CREDENTIAL_RULES if pattern.search(text)]

@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BM25 = ROOT / "scripts" / "bm25-index.py"
 SEM = ROOT / "scripts" / "semantic-search.py"
+RETRIEVE = ROOT / "scripts" / "retrieve.py"
+SCHEMA = ROOT / "scripts" / "vault_schema.py"
 
 
 def load_module(path, name):
@@ -71,6 +73,9 @@ def make_sandbox():
     (sb / ".vault-meta").mkdir()
     shutil.copy2(BM25, sb / "scripts" / "bm25-index.py")
     shutil.copy2(SEM, sb / "scripts" / "semantic-search.py")
+    shutil.copy2(RETRIEVE, sb / "scripts" / "retrieve.py")
+    shutil.copy2(ROOT / "scripts" / "pipeline_events.py", sb / "scripts" / "pipeline_events.py")
+    shutil.copy2(SCHEMA, sb / "scripts" / "vault_schema.py")
 
     def page(rel, title, tags, body):
         p = sb / "wiki" / rel
@@ -138,6 +143,7 @@ def test_parse_page(bm):
 def test_build_and_query(bm, sb):
     idx = bm.build_index()
     assert_true("build returns index", idx is not None)
+    assert_true("build records source fingerprint", len(idx["source_fingerprint"]) == 64)
     assert_eq("build doc_count (skips log/_index/_templates)", 4, idx["doc_count"])
     assert_true("build skips log.md", "wiki/log.md" not in idx["docs"])
     assert_true("build skips _index.md", "wiki/_index.md" not in idx["docs"])
@@ -245,6 +251,22 @@ def test_cli_and_degradations(sb):
     assert_eq("cli build exit 0", 0, r.returncode)
     assert_eq("cli build --quiet silent", "", r.stderr.strip())
 
+    before = json.loads((sb / ".vault-meta/bm25/index.json").read_text())
+    r = run_cli(sb, "bm25-index.py", "ensure", "--quiet")
+    assert_eq("cli ensure fresh exit 0", 0, r.returncode)
+    same = json.loads((sb / ".vault-meta/bm25/index.json").read_text())
+    assert_eq("cli ensure fresh no rebuild", before["updated_at"], same["updated_at"])
+
+    with (sb / "wiki/concepts/karpenter.md").open("a", encoding="utf-8") as fh:
+        fh.write("\nunique-self-heal-token\n")
+    r = run_cli(sb, "bm25-index.py", "ensure", "--quiet")
+    assert_eq("cli ensure stale rebuild exit 0", 0, r.returncode)
+    healed = json.loads((sb / ".vault-meta/bm25/index.json").read_text())
+    assert_true(
+        "cli ensure fingerprint changed",
+        healed["source_fingerprint"] != before["source_fingerprint"],
+    )
+
     r = run_cli(sb, "bm25-index.py", "query", "buildkit disk", "--top", "3")
     assert_eq("cli query exit 0", 0, r.returncode)
     assert_true("cli query finds incident", "wiki/incidents/disk-leak.md" in r.stdout)
@@ -253,31 +275,24 @@ def test_cli_and_degradations(sb):
     assert_eq("cli stats exit 0", 0, r.returncode)
     assert_eq("cli stats schema", 2, json.loads(r.stdout)["schema_version"])
 
-    # hybrid degradation: no tiling cache, bm25 present -> bm25-only, exit 0
+    # Compatibility wrapper is sparse-first and degrades explicitly when the
+    # optional section-dense cache is absent.
     r = run_cli(sb, "semantic-search.py", "buildkit disk", "--hybrid")
-    assert_eq("hybrid bm25-only exit 0", 0, r.returncode)
-    assert_true("hybrid bm25-only header", "bm25-only" in r.stdout, r.stdout)
-    assert_true("hybrid bm25-only warns dense", "bm25-only" in r.stderr, r.stderr)
+    assert_eq("wrapper sparse fallback exit 0", 0, r.returncode)
+    assert_true("wrapper sparse degraded header", "mode=sparse degraded=true" in r.stdout, r.stdout)
+    assert_true("wrapper returns best section page", "wiki/incidents/disk-leak.md" in r.stdout)
 
-    # hybrid degradation: dense fails (bogus model or no ollama), bm25 present
-    (sb / ".vault-meta" / "tiling-cache.json").write_text(json.dumps({
-        "model": "no-such-model-xyz",
-        "embeddings": {"wiki/concepts/karpenter.md": {"embedding": [0.1, 0.2], "hash": "x"}},
-    }), encoding="utf-8")
-    r = run_cli(sb, "semantic-search.py", "buildkit disk", "--hybrid")
-    assert_eq("hybrid dense-error fallback exit 0", 0, r.returncode)
-    assert_true("hybrid dense-error goes bm25-only", "bm25-only" in r.stdout, r.stdout)
-
-    # non-hybrid keeps legacy exit codes: dense failure surfaces as 3/10
-    (sb / ".vault-meta" / "tiling-cache.json").unlink()
+    # --hybrid is now optional compatibility syntax; default behavior matches.
     r = run_cli(sb, "semantic-search.py", "buildkit disk")
-    assert_eq("non-hybrid cache-missing exit 3", 3, r.returncode)
+    assert_eq("wrapper default exit 0", 0, r.returncode)
+    assert_true("wrapper default section output", "wiki/incidents/disk-leak.md" in r.stdout)
 
-    # both channels dead -> dense failure code (3)
-    shutil.rmtree(sb / ".vault-meta" / "bm25")
+    # Corrupt derived section index self-heals from the wiki.
+    section_index = sb / ".vault-meta/retrieval/index.json"
+    section_index.write_text("garbage{", encoding="utf-8")
     r = run_cli(sb, "semantic-search.py", "buildkit disk", "--hybrid")
-    assert_eq("hybrid both-dead exit 3", 3, r.returncode)
-    assert_true("hybrid both-dead names bm25", "bm25 index also unavailable" in r.stderr, r.stderr)
+    assert_eq("wrapper corrupt index self-heals", 0, r.returncode)
+    assert_true("wrapper self-heal recreates index", section_index.stat().st_size > 20)
 
 
 def main():

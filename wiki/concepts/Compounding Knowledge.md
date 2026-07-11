@@ -7,7 +7,7 @@ aliases:
   - "Knowledge Compounding"
   - "Persistent Synthesis"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - concept
   - knowledge-management
@@ -18,6 +18,8 @@ related:
   - "[[Andrej Karpathy]]"
   - "[[concepts/_index]]"
 sources:
+sessions:
+  - public-template-v2
 ---
 
 # Compounding Knowledge

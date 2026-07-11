@@ -1,5 +1,48 @@
-{"q": "REPLACE ME: a question as you would actually ask it", "expect": ["wiki/concepts/LLM Wiki Pattern.md"], "note": "template: expect = vault-relative paths, hit when ANY appears in top-10"}
-{"q": "какой паттерн лежит в основе этой вики", "expect": ["wiki/concepts/LLM Wiki Pattern.md"], "note": "example: RU paraphrase of a concept page"}
-{"q": "why does a wiki compound in value over time", "expect": ["wiki/concepts/Compounding Knowledge.md"], "note": "example: EN paraphrase"}
-{"q": "механизмы памяти dragonscale фолды адреса", "expect": ["wiki/concepts/DragonScale Memory.md"], "note": "example: keyword query with entities"}
-{"q": "кто такой карпаты", "expect": ["wiki/entities/Andrej Karpathy.md"], "note": "example: entity lookup. Grow this file as your vault grows: add queries AFTER any ranking tuning (held-out discipline) and run make bench-retrieval"}
+{"q":"какой паттерн лежит в основе LLM wiki","expect":["wiki/concepts/LLM Wiki Pattern.md"],"split":"tune"}
+{"q":"LLM wiki pattern builds a persistent interconnected wiki from raw sources","expect":["wiki/concepts/LLM Wiki Pattern.md"],"split":"heldout"}
+{"q":"почему поддерживаемое знание накапливает ценность со временем","expect":["wiki/concepts/Compounding Knowledge.md"],"split":"tune"}
+{"q":"cross links and synthesis make knowledge compound","expect":["wiki/concepts/Compounding Knowledge.md"],"split":"heldout"}
+{"q":"что такое hot cache и зачем он нужен","expect":["wiki/concepts/Hot Cache.md"],"split":"tune"}
+{"q":"recent session context cache versus permanent operation log","expect":["wiki/concepts/Hot Cache.md"],"split":"heldout"}
+{"q":"механизмы DragonScale fold адреса semantic tiling boundary research","expect":["wiki/concepts/DragonScale Memory.md"],"split":"tune"}
+{"q":"dragon curve memory architecture deterministic page addresses","expect":["wiki/concepts/DragonScale Memory.md"],"split":"heldout"}
+{"q":"почему allocator адресов работает на macOS без внешнего flock","expect":["wiki/concepts/DragonScale on macOS.md"],"split":"tune"}
+{"q":"macOS compatibility Python annotations BSD wc address allocator","expect":["wiki/concepts/DragonScale on macOS.md"],"split":"heldout"}
+{"q":"durable markdown page как единица памяти агента","expect":["wiki/concepts/Persistent Wiki Artifact.md"],"split":"tune"}
+{"q":"versioned reviewable wiki artifact between sources and questions","expect":["wiki/concepts/Persistent Wiki Artifact.md"],"split":"heldout"}
+{"q":"как отделять immutable источники от синтеза и сохранять provenance","expect":["wiki/concepts/Source-First Synthesis.md"],"split":"tune"}
+{"q":"raw source remains read only while wiki owns the synthesis","expect":["wiki/concepts/Source-First Synthesis.md"],"split":"heldout"}
+{"q":"query time retrieval формирует ответ с цитатами","expect":["wiki/concepts/Query-Time Retrieval.md"],"split":"tune"}
+{"q":"query-time retrieval finds relevant wiki sections for a future question","expect":["wiki/concepts/Query-Time Retrieval.md"],"split":"heldout"}
+{"q":"когда wiki лучше классического RAG и как их сочетать","expect":["wiki/comparisons/Wiki vs RAG.md"],"split":"tune"}
+{"q":"Wiki vs RAG compares maintained markdown knowledge with retrieved document chunks","expect":["wiki/comparisons/Wiki vs RAG.md"],"split":"heldout"}
+{"q":"гайд по стилю архитектурных SVG диаграмм","expect":["wiki/concepts/SVG Diagram Style Guide.md"],"split":"tune"}
+{"q":"how to style viewBox colors labels and arrows in SVG diagrams","expect":["wiki/concepts/SVG Diagram Style Guide.md"],"split":"heldout"}
+{"q":"кто такой Andrej Karpathy и откуда взялся LLM Wiki","expect":["wiki/entities/Andrej Karpathy.md"],"split":"tune"}
+{"q":"Andrej Karpathy pattern for raw sources generated wiki and schema","expect":["wiki/entities/Andrej Karpathy.md","wiki/concepts/LLM Wiki Pattern.md"],"split":"heldout"}
+{"q":"как начать пользоваться second brain ingest query save","expect":["wiki/getting-started.md"],"split":"tune"}
+{"q":"first steps open Obsidian bootstrap and ingest a source","expect":["wiki/getting-started.md"],"split":"heldout"}
+{"q":"обзор структуры публичного vault и его возможностей","expect":["wiki/overview.md"],"split":"tune"}
+{"q":"vault overview concepts entities sources log and dashboard","expect":["wiki/overview.md","wiki/index.md"],"split":"heldout"}
+{"q":"главная карта concepts entities sources и навигация","expect":["wiki/index.md"],"split":"tune"}
+{"q":"where is the wiki map and folder index entry point","expect":["wiki/index.md"],"split":"heldout"}
+{"q":"какие skills использовать каждый день save daily dispatch reap","expect":["wiki/meta/daily-pipeline-guide.md"],"split":"tune"}
+{"q":"skill catalog for review dispatch journal backlog and query","expect":["wiki/meta/daily-pipeline-guide.md"],"split":"heldout"}
+{"q":"unattended cmux pipeline с cross model review","expect":["wiki/concepts/Unattended Pipeline.md"],"split":"tune"}
+{"q":"unattended pipeline watchdog escalation reap gating and close on agent exit","expect":["wiki/concepts/Unattended Pipeline.md"],"split":"heldout"}
+{"q":"feature backlog идеи для развития Obsidian agent toolkit","expect":["wiki/concepts/cherry-picks.md"],"split":"tune"}
+{"q":"delta tracking multi depth query and ecosystem feature ideas","expect":["wiki/concepts/cherry-picks.md"],"split":"heldout"}
+{"q":"почему hot md не должен превращаться во второй журнал","expect":["wiki/concepts/Hot Cache.md"],"split":"tune"}
+{"q":"hard caps for recent changes active threads and narrative cache","expect":["wiki/concepts/Hot Cache.md"],"split":"heldout"}
+{"q":"boundary first autoresearch и frontier страницы","expect":["wiki/concepts/DragonScale Memory.md"],"split":"tune"}
+{"q":"fold operator semantic tiling and canonical home coverage","expect":["wiki/concepts/DragonScale Memory.md"],"split":"heldout"}
+{"q":"source-first synthesis: источник не редактируется а вывод обновляется в wiki","expect":["wiki/concepts/Source-First Synthesis.md"],"split":"tune"}
+{"q":"provenance links from maintained synthesis back to immutable evidence","expect":["wiki/concepts/Source-First Synthesis.md"],"split":"heldout"}
+{"q":"LLM wiki хранит raw sources generated pages и schema отдельно","expect":["wiki/concepts/LLM Wiki Pattern.md"],"split":"tune"}
+{"q":"compounding knowledge keeps contradictions and cross references across future questions","expect":["wiki/concepts/LLM Wiki Pattern.md","wiki/concepts/Compounding Knowledge.md"],"split":"heldout"}
+{"q":"когда сырой большой корпус оставить для RAG","expect":["wiki/comparisons/Wiki vs RAG.md"],"split":"tune"}
+{"q":"human review in Obsidian versus opaque retrieval output","expect":["wiki/comparisons/Wiki vs RAG.md"],"split":"heldout"}
+{"q":"поиск на уровне H2 H3 секций для ответа","expect":["wiki/concepts/Query-Time Retrieval.md"],"split":"tune"}
+{"q":"query-time retrieval returns a page heading and snippet instead of an opaque chunk","expect":["wiki/concepts/Query-Time Retrieval.md"],"split":"heldout"}
+{"q":"настроить ollama MCP gateway и первый ingest","expect":["wiki/getting-started.md"],"split":"tune"}
+{"q":"blocking review scope changes and external effects require a human","expect":["wiki/concepts/Unattended Pipeline.md"],"split":"heldout"}

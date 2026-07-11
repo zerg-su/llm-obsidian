@@ -1,6 +1,7 @@
 ---
 name: find-session
-version: 1.1.0
+metadata:
+  version: 1.1.0
 description: |
   Find prior Claude Code sessions matching a task: wiki sessions: frontmatter + history.jsonl, top-5 by recency x hits. Read-only.
   Triggers: найди похожую сессию, было ли подобное, find similar past task, /find-session.

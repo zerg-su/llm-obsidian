@@ -20,7 +20,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -45,14 +45,36 @@ def load_claude_plugin(repo_root: Path) -> dict[str, Any]:
     return data
 
 
+def codex_author(raw: Any) -> Optional[dict[str, Any]]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        return {"name": raw.strip()}
+    return None
+
+
+def codex_version(repo_root: Path, source_version: str) -> str:
+    """Keep an applied +codex cachebuster until the Claude base version changes."""
+
+    base = source_version.split("+", 1)[0]
+    path = repo_root / ".codex-plugin" / "plugin.json"
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")).get("version")
+    except (OSError, AttributeError, json.JSONDecodeError):
+        current = None
+    if isinstance(current, str) and current.startswith(base + "+codex."):
+        return current
+    return source_version
+
+
 def codex_plugin_text(repo_root: Path) -> str:
     src = load_claude_plugin(repo_root)
     plugin_name = src["name"]
     plugin = {
         "name": plugin_name,
-        "version": src["version"],
+        "version": codex_version(repo_root, str(src["version"])),
         "description": src["description"],
-        "author": src.get("author"),
+        "author": codex_author(src.get("author")),
         "homepage": src.get("homepage"),
         "repository": src.get("repository"),
         "license": src.get("license"),

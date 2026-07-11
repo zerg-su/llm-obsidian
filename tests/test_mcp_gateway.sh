@@ -37,9 +37,13 @@ OUT="$SANDBOX/out.txt"
 # ---------- A. syntax ----------
 echo "A. syntax"
 bash -n "$GW/mcp-gateway.sh" 2>"$OUT"; expect_exit "A1 mcp-gateway.sh bash -n" "$?" 0
-python3 -c "import ast; ast.parse(open('$GW/smoke.py').read())" 2>"$OUT"; expect_exit "A2 smoke.py parses" "$?" 0
-python3 -c "import ast; ast.parse(open('$GW/update-pins.py').read())" 2>"$OUT"; expect_exit "A3 update-pins.py parses" "$?" 0
-python3 -c "import ast; ast.parse(open('$GW/codex-sync.py').read())" 2>"$OUT"; expect_exit "A4 codex-sync.py parses" "$?" 0
+bash -n "$REPO_ROOT/bin/setup-clean-machine.sh" 2>"$OUT"; expect_exit "A2 setup-clean-machine.sh bash -n" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/smoke.py').read())" 2>"$OUT"; expect_exit "A3 smoke.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/update-pins.py').read())" 2>"$OUT"; expect_exit "A4 update-pins.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/codex-sync.py').read())" 2>"$OUT"; expect_exit "A5 codex-sync.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/config-sync.py').read())" 2>"$OUT"; expect_exit "A6 config-sync.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/install-proxy.py').read())" 2>"$OUT"; expect_exit "A7 install-proxy.py parses" "$?" 0
+python3 -c "import ast; ast.parse(open('$GW/schema-lock.py').read())" 2>"$OUT"; expect_exit "A8 schema-lock.py parses" "$?" 0
 
 # ---------- B. update-pins pure functions ----------
 echo "B. update-pins pure functions"
@@ -58,6 +62,18 @@ assert up.find_npx_spec_index(["-y"]) is None
 print("PURE_OK")
 PYEOF
 expect_grep "B1 split_spec + find_npx_spec_index" "$OUT" "PURE_OK"
+python3 - "$GW/codex-sync.py" >"$OUT" 2>&1 <<'PYEOF'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("codex_sync", sys.argv[1])
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+profile = "[hooks . state . 'global-hook:stop:0']\ntrusted_hash = 'sha256:local'\n"
+global_cfg = '[hooks.state."global-hook:stop:0"]\ntrusted_hash = "sha256:global"\n'
+merged = mod.merge_missing_hook_trust(profile, global_cfg)
+assert merged.count("trusted_hash") == 1
+assert "sha256:local" in merged and "sha256:global" not in merged
+print("HOOK_CANONICAL_OK")
+PYEOF
+expect_grep "B2 equivalent TOML hook headers dedupe" "$OUT" "HOOK_CANONICAL_OK"
 
 # ---------- C. shipped example config invariants (read-only) ----------
 echo "C. example config invariants"
@@ -65,6 +81,9 @@ python3 - "$GW" "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
 import json, re, sys
 gw, root = sys.argv[1], sys.argv[2]
 cfg = json.load(open(f"{gw}/config.json.example"))
+lock = json.load(open(f"{gw}/mcp-schema.lock.json"))
+assert set(lock["servers"]) == set(cfg["mcpServers"]), "schema lock server inventory drift"
+assert '"description":' not in json.dumps(lock), "lock must store description hashes only"
 tools = {k: v for k, v in json.load(open(f"{gw}/tools.json")).items() if not k.startswith("_")}
 for name, s in cfg["mcpServers"].items():
     assert ("url" in s) != ("command" in s), f"{name}: exactly one of url/command"
@@ -80,9 +99,89 @@ for name, entry in client["mcpServers"].items():
     assert entry["type"] == "http", f"{name}: client entries are http pointers"
     assert entry["url"].endswith(f"/{name}/mcp"), f"{name}: route path must match server name"
     assert name in cfg["mcpServers"], f"{name}: client entry has no gateway child"
+# The examples and all pinned assets are tied to explicit, reviewable inputs.
+port = int(re.search(r"^MCP_GATEWAY_PORT=(\d+)$", open(f"{gw}/runtime.env.example").read(), re.M).group(1))
+assert cfg["mcpProxy"]["addr"] == f"127.0.0.1:{port}"
+assert cfg["mcpProxy"]["baseURL"] == f"http://127.0.0.1:{port}"
+lock = json.load(open(f"{gw}/mcp-proxy.lock.json"))
+assert re.fullmatch(r"\d+\.\d+\.\d+", lock["version"])
+assert set(lock["assets"]) == {"darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"}
+for key, asset in lock["assets"].items():
+    assert f"/v{lock['version']}/" in asset["url"], (key, asset["url"])
+    assert "latest" not in asset["url"]
+    assert re.fullmatch(r"[0-9a-f]{64}", asset["sha256"])
+nudge = open(f"{root}/.claude/hooks/session-nudge.sh").read()
+assert "config-sync.py\" --print-port" in nudge
+assert 'http://127.0.0.1:9090/' not in nudge
 print("INVARIANTS_OK")
 PYEOF
 expect_grep "C1 example config consistency" "$OUT" "INVARIANTS_OK"
+
+# ---------- C2. config sync + pinned installer (offline) ----------
+echo "C2. config sync + pinned installer"
+mkdir -p "$SANDBOX/sync-gw" "$SANDBOX/sync-repo"
+cp "$GW/config.json.example" "$SANDBOX/sync-gw/config.json.example"
+cp "$REPO_ROOT/.mcp.json.example" "$SANDBOX/sync-repo/.mcp.json.example"
+printf 'MCP_GATEWAY_PORT=9191\n' > "$SANDBOX/sync-gw/runtime.env"
+python3 "$GW/config-sync.py" --gateway-dir "$SANDBOX/sync-gw" --repo-root "$SANDBOX/sync-repo" --check >"$OUT" 2>&1
+expect_exit "C2.1 missing generated configs drift" "$?" 1
+python3 "$GW/config-sync.py" --gateway-dir "$SANDBOX/sync-gw" --repo-root "$SANDBOX/sync-repo" --apply >"$OUT" 2>&1
+expect_exit "C2.2 custom port apply" "$?" 0
+expect_grep "C2.3 gateway port materialized" "$SANDBOX/sync-gw/config.json" '"addr": "127.0.0.1:9191"'
+expect_grep "C2.4 client port materialized" "$SANDBOX/sync-repo/.mcp.json" "127.0.0.1:9191/context7/mcp"
+python3 "$GW/config-sync.py" --gateway-dir "$SANDBOX/sync-gw" --repo-root "$SANDBOX/sync-repo" --check >"$OUT" 2>&1
+expect_exit "C2.5 second config check clean" "$?" 0
+printf 'MCP_GATEWAY_PORT=9192\n' > "$SANDBOX/sync-gw/runtime.env"
+python3 "$GW/config-sync.py" --gateway-dir "$SANDBOX/sync-gw" --repo-root "$SANDBOX/sync-repo" --check >"$OUT" 2>&1
+expect_exit "C2.6 runtime change detects JSON drift" "$?" 1
+python3 - "$SANDBOX/sync-gw/config.json" "$SANDBOX/sync-repo/.mcp.json" <<'PYEOF'
+import json, pathlib, sys
+for raw in sys.argv[1:]:
+    path = pathlib.Path(raw); value = json.loads(path.read_text())
+    value["custom-preserved"] = {"yes": True}
+    path.write_text(json.dumps(value))
+PYEOF
+python3 "$GW/config-sync.py" --gateway-dir "$SANDBOX/sync-gw" --repo-root "$SANDBOX/sync-repo" --apply >"$OUT" 2>&1
+expect_exit "C2.7 port update applies" "$?" 0
+expect_grep "C2.8 gateway custom fields preserved" "$SANDBOX/sync-gw/config.json" '"custom-preserved"'
+expect_grep "C2.9 client custom fields preserved" "$SANDBOX/sync-repo/.mcp.json" '"custom-preserved"'
+expect_grep "C2.10 changed port materialized" "$SANDBOX/sync-repo/.mcp.json" "127.0.0.1:9192/context7/mcp"
+
+mkdir -p "$SANDBOX/proxy-fixture"
+cat > "$SANDBOX/proxy-fixture/mcp-proxy" <<'EOF'
+#!/usr/bin/env sh
+echo 'mcp-proxy version 9.9.9'
+EOF
+chmod +x "$SANDBOX/proxy-fixture/mcp-proxy"
+python3 - "$SANDBOX" <<'PYEOF'
+import hashlib, json, pathlib, tarfile, sys
+root = pathlib.Path(sys.argv[1])
+archive = root / "proxy.tar.gz"
+binary = root / "proxy-fixture" / "mcp-proxy"
+with tarfile.open(archive, "w:gz") as tf:
+    tf.add(binary, arcname="release/mcp-proxy")
+digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+lock = {"version": "9.9.9", "assets": {"linux-amd64": {
+    "url": archive.resolve().as_uri(), "sha256": digest}}}
+(root / "proxy.lock.json").write_text(json.dumps(lock))
+PYEOF
+python3 "$GW/install-proxy.py" --lock "$SANDBOX/proxy.lock.json" --dest "$SANDBOX/bin/pinned-proxy" --platform linux-amd64 >"$OUT" 2>&1
+expect_exit "C2.11 pinned fixture installs" "$?" 0
+python3 "$GW/install-proxy.py" --lock "$SANDBOX/proxy.lock.json" --dest "$SANDBOX/bin/pinned-proxy" --platform linux-amd64 --check >"$OUT" 2>&1
+expect_exit "C2.12 provenance marker verifies" "$?" 0
+printf '\n# tamper\n' >> "$SANDBOX/bin/pinned-proxy"
+python3 "$GW/install-proxy.py" --lock "$SANDBOX/proxy.lock.json" --dest "$SANDBOX/bin/pinned-proxy" --platform linux-amd64 --check >"$OUT" 2>&1
+expect_exit "C2.13 binary tamper is detected" "$?" 1
+python3 - "$SANDBOX/proxy.lock.json" <<'PYEOF'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1]); value = json.loads(p.read_text())
+value["assets"]["linux-amd64"]["sha256"] = "0" * 64
+p.write_text(json.dumps(value))
+PYEOF
+rm -f "$SANDBOX/bin/pinned-proxy" "$SANDBOX/bin/pinned-proxy.install.json"
+python3 "$GW/install-proxy.py" --lock "$SANDBOX/proxy.lock.json" --dest "$SANDBOX/bin/pinned-proxy" --platform linux-amd64 >"$OUT" 2>&1
+expect_exit "C2.14 checksum mismatch blocks install" "$?" 1
+[[ ! -e "$SANDBOX/bin/pinned-proxy" ]] && ok "C2.15 failed verification leaves no binary" || bad "C2.15 failed verification leaves no binary" "destination exists"
 
 # ---------- D. update-pins --sync (stub uv) ----------
 echo "D. update-pins --sync (stub uv)"
@@ -164,7 +263,8 @@ expect_grep "F10 unknown server message" "$OUT" "unknown server: nonexistent"
 # ---------- G. config gating + doctor sandbox ----------
 echo "G. config gating + doctor sandbox"
 mkdir -p "$SANDBOX/home" "$SANDBOX/gwcopy"
-cp "$GW/mcp-gateway.sh" "$GW/smoke.py" "$GW/update-pins.py" "$SANDBOX/gwcopy/"
+cp "$GW/mcp-gateway.sh" "$GW/smoke.py" "$GW/update-pins.py" "$GW/config-sync.py" "$SANDBOX/gwcopy/"
+printf 'MCP_GATEWAY_PORT=9090\n' > "$SANDBOX/gwcopy/runtime.env"
 # G0: no config.json -> every command fails with the copy-example hint
 HOME="$SANDBOX/home" bash "$SANDBOX/gwcopy/mcp-gateway.sh" doctor >"$OUT" 2>&1
 expect_exit "G0 missing config -> exit 1" "$?" 1
@@ -173,7 +273,7 @@ cat > "$SANDBOX/gwcopy/tools.json" <<'EOF'
 {"plain-pkg": {"version": "1.0.0", "with": [], "python": null, "entrypoint": "plain-pkg"}}
 EOF
 cat > "$SANDBOX/gwcopy/config.json" <<EOF
-{"mcpServers": {
+{"mcpProxy": {"baseURL": "http://127.0.0.1:9090", "addr": "127.0.0.1:9090"}, "mcpServers": {
   "plain": {"command": "$SANDBOX/home/.local/bin/plain-pkg", "args": [], "env": {"AWS_PROFILE": "test-prof", "TOKEN": "\${TEST_TOKEN}"}},
   "hosted": {"url": "https://example.com/mcp", "transportType": "streamable-http"}
 }}
@@ -206,7 +306,7 @@ expect_grep "G9 all OK footer" "$OUT" "--- all OK"
 
 # ---------- H. codex-sync sandbox ----------
 echo "H. codex-sync sandbox"
-mkdir -p "$SANDBOX/codex-repo/.codex" "$SANDBOX/codex-repo/.mcp-profiles" "$SANDBOX/codex-repo/.claude-plugin" "$SANDBOX/codex-home"
+mkdir -p "$SANDBOX/codex-repo/.codex/profiles" "$SANDBOX/codex-repo/.mcp-profiles" "$SANDBOX/codex-repo/.claude-plugin" "$SANDBOX/codex-home"
 cat > "$SANDBOX/codex-repo/.claude-plugin/plugin.json" <<'EOF'
 {"name": "llm-obsidian", "version": "1.0.0", "description": "test"}
 EOF
@@ -232,8 +332,15 @@ args = ["-y", "@upstash/context7-mcp"]
 command = "uvx"
 args = ["paper-search-mcp"]
 EOF
+cat > "$SANDBOX/codex-repo/.codex/profiles/deep.toml" <<'EOF'
+model_reasoning_effort = "max"
+approval_policy = "on-request"
+EOF
 cat > "$SANDBOX/codex-home/config.toml" <<'EOF'
 model = "gpt-5.5"
+
+[tui]
+status_line = ["project-name", "five-hour-limit"]
 
 [mcp_servers.node_repl]
 command = "/x/node_repl"
@@ -241,6 +348,34 @@ command = "/x/node_repl"
 [mcp_servers.context7]
 command = "npx"
 args = ["-y", "@upstash/context7-mcp"]
+
+[hooks.state]
+
+[hooks.state."global-hook:stop:0"]
+trusted_hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+EOF
+cat > "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" <<'EOF'
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+
+# BEGIN LLM-OBSIDIAN CODEX MCP (managed by scripts/mcp-gateway/codex-sync.py)
+# Source of truth: .mcp.json or .mcp.json.example plus .mcp-profiles/*.json.
+# Secrets stay in ~/.config/mcp-gateway/secrets.env behind the gateway.
+
+[mcp_servers.context7]
+command = "npx"
+
+# Simulate Codex persisting user-owned tables before the trailing marker.
+[projects."/tmp/codex-repo"]
+trust_level = "trusted"
+
+[hooks.state]
+
+[tui]
+status_line = ["project-name", "five-hour-limit", "weekly-limit"]
+status_line_use_colors = true
+
+# END LLM-OBSIDIAN CODEX MCP
 EOF
 chmod 600 "$SANDBOX/codex-home/config.toml"
 python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --check >"$OUT" 2>&1
@@ -266,8 +401,30 @@ expect_grep "H6 repo has gateway context7" "$SANDBOX/codex-repo/.codex/config.to
 expect_nogrep "H7 repo default excludes profile server" "$SANDBOX/codex-repo/.codex/config.toml" "paper-search"
 expect_grep "H8 global keeps node_repl" "$SANDBOX/codex-home/config.toml" "[mcp_servers.node_repl]"
 expect_nogrep "H9 global removes legacy context7" "$SANDBOX/codex-home/config.toml" "@upstash/context7-mcp"
+expect_grep "H9a global keeps statusline" "$SANDBOX/codex-home/config.toml" 'status_line = ["project-name", "five-hour-limit"]'
 expect_grep "H10 default profile has context7" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" "context7/mcp"
+expect_grep "H10a profile keeps model" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" 'model = "gpt-5.6-sol"'
+expect_grep "H10b profile keeps statusline" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" 'status_line = ["project-name", "five-hour-limit", "weekly-limit"]'
+expect_grep "H10c profile keeps hooks" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" '[hooks.state]'
+expect_grep "H10c2 profile inherits trusted global hook" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" '[hooks.state."global-hook:stop:0"]'
+marker_count=$(grep -c '^# BEGIN LLM-OBSIDIAN CODEX MCP' "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml")
+[[ "$marker_count" == 1 ]] && ok "H10d profile has one managed block" || bad "H10d profile has one managed block" "got $marker_count"
 expect_grep "H11 extra profile has paper-search" "$SANDBOX/codex-home/llm-obsidian-research.config.toml" "paper-search/mcp"
+expect_grep "H11a runtime profile copied" "$SANDBOX/codex-home/llm-obsidian-deep.config.toml" 'model_reasoning_effort = "max"'
+printf '\n# unrelated-user-drift\n' >> "$SANDBOX/codex-home/llm-obsidian-deep.config.toml"
+python3 - "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" <<'PYEOF'
+import re, sys
+p=sys.argv[1]
+t=open(p).read()
+t=re.sub(r'\n\[hooks\.state\."global-hook:stop:0"\]\ntrusted_hash = "sha256:a{64}"\n', '\n', t)
+open(p, 'w').write(t)
+PYEOF
+python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" \
+  --apply --only-profile llm-obsidian-mcp >"$OUT" 2>&1
+expect_exit "H11b scoped profile apply" "$?" 0
+expect_grep "H11c scoped apply restores inherited hook" "$SANDBOX/codex-home/llm-obsidian-mcp.config.toml" '[hooks.state."global-hook:stop:0"]'
+expect_grep "H11d scoped apply preserves unrelated profile" "$SANDBOX/codex-home/llm-obsidian-deep.config.toml" '# unrelated-user-drift'
+cp "$SANDBOX/codex-repo/.codex/profiles/deep.toml" "$SANDBOX/codex-home/llm-obsidian-deep.config.toml"
 python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/codex-repo" --codex-home "$SANDBOX/codex-home" --check >"$OUT" 2>&1
 expect_exit "H12 second --check clean" "$?" 0
 expect_grep "H13 no changes message" "$OUT" "codex-sync: no changes"
@@ -276,12 +433,28 @@ mkdir -p "$SANDBOX/fork-repo/.codex" "$SANDBOX/fork-repo/.mcp-profiles" "$SANDBO
 cp "$SANDBOX/codex-repo/.mcp.json.example" "$SANDBOX/fork-repo/.mcp.json.example"
 cp "$SANDBOX/codex-repo/.mcp-profiles/research.json" "$SANDBOX/fork-repo/.mcp-profiles/research.json"
 cat > "$SANDBOX/fork-repo/.claude-plugin/plugin.json" <<'EOF'
-{"name": "llm-obsidian-swarm", "version": "1.0.0", "description": "test fork"}
+{"name": "llm-obsidian-custom", "version": "1.0.0", "description": "test fork"}
 EOF
 python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/fork-repo" --codex-home "$SANDBOX/fork-home" --apply >"$OUT" 2>&1
 expect_exit "H14 fork apply exits 0" "$?" 0
-expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-swarm-mcp.config.toml" "context7/mcp"
-expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-swarm-research.config.toml" "paper-search/mcp"
+expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-custom-mcp.config.toml" "context7/mcp"
+expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-custom-research.config.toml" "paper-search/mcp"
+
+# ---------- I. clean-machine dry run ----------
+echo "I. clean-machine dry run"
+mkdir -p "$SANDBOX/check-home"
+HOME="$SANDBOX/check-home" MCP_PROXY_BIN="$SANDBOX/check-home/bin/mcp-proxy" \
+  bash "$REPO_ROOT/bin/setup-clean-machine.sh" --check --skip-vault >"$OUT" 2>&1
+expect_exit "I1 dry run exits 0" "$?" 0
+expect_grep "I2 exact proxy version shown" "$OUT" "mcp-proxy 0.43.2"
+expect_nogrep "I3 no latest-release lookup" "$OUT" "releases/latest"
+[[ ! -e "$SANDBOX/check-home/bin/mcp-proxy" ]] && ok "I4 dry run writes no proxy" || bad "I4 dry run writes no proxy" "binary exists"
+
+mkdir -p "$SANDBOX/bash32-home"
+HOME="$SANDBOX/bash32-home" MCP_PROXY_BIN="$SANDBOX/bash32-home/bin/mcp-proxy" \
+  /bin/bash "$REPO_ROOT/bin/setup-clean-machine.sh" --check --skip-proxy >"$OUT" 2>&1
+expect_exit "I5 stock macOS bash flag-less vault path" "$?" 0
+expect_grep "I6 stock macOS bash includes vault setup" "$OUT" "bin/setup-vault.sh"
 
 # ---------- summary ----------
 echo

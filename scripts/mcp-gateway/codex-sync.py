@@ -14,9 +14,20 @@ from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback.
+    tomllib = None  # type: ignore[assignment]
+
 
 MARKER_BEGIN = "# BEGIN LLM-OBSIDIAN CODEX MCP (managed by scripts/mcp-gateway/codex-sync.py)"
 MARKER_END = "# END LLM-OBSIDIAN CODEX MCP"
+MARKER_COMMENTS = {
+    MARKER_BEGIN,
+    MARKER_END,
+    "# Source of truth: .mcp.json or .mcp.json.example plus .mcp-profiles/*.json.",
+    "# Secrets stay in ~/.config/mcp-gateway/secrets.env behind the gateway.",
+}
 
 def mcp_source_path(repo_root: Path) -> Path:
     path = repo_root / ".mcp.json"
@@ -52,6 +63,17 @@ def profile_paths(repo_root: Path) -> OrderedDict[str, Path]:
         return out
     prefix = plugin_name(repo_root)
     for path in sorted(profiles_dir.glob("*.json")):
+        out[f"{prefix}-{path.stem}"] = path
+    return out
+
+
+def runtime_profile_paths(repo_root: Path) -> OrderedDict[str, Path]:
+    out: OrderedDict[str, Path] = OrderedDict()
+    profiles_dir = repo_root / ".codex" / "profiles"
+    if not profiles_dir.is_dir():
+        return out
+    prefix = plugin_name(repo_root)
+    for path in sorted(profiles_dir.glob("*.toml")):
         out[f"{prefix}-{path.stem}"] = path
     return out
 
@@ -106,12 +128,19 @@ def managed_block(servers: OrderedDict[str, dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def strip_marked_block(text: str) -> str:
-    pattern = re.compile(
-        rf"\n?{re.escape(MARKER_BEGIN)}.*?{re.escape(MARKER_END)}\n?",
-        re.DOTALL,
+def strip_managed_comments(text: str) -> str:
+    """Remove managed marker comments without swallowing unrelated TOML.
+
+    Codex may persist new tables immediately before a trailing marker comment.
+    Treating BEGIN..END as one opaque block would then delete user-owned
+    model/hooks/tui tables on the next sync. Section filtering below removes
+    only managed mcp_servers tables.
+    """
+    return "".join(
+        line
+        for line in text.splitlines(keepends=True)
+        if line.strip() not in MARKER_COMMENTS
     )
-    return pattern.sub("\n", text)
 
 
 def section_belongs_to_managed_server(section: str, names: set[str]) -> bool:
@@ -126,7 +155,7 @@ def section_belongs_to_managed_server(section: str, names: set[str]) -> bool:
 
 
 def strip_mcp_sections(text: str, names: set[str]) -> str:
-    text = strip_marked_block(text)
+    text = strip_managed_comments(text)
     matches = list(re.finditer(r"(?m)^\[([^\]\n]+)\]\s*$", text))
     if not matches:
         return text
@@ -148,6 +177,68 @@ def strip_mcp_sections(text: str, names: set[str]) -> str:
     return cleaned.strip() + "\n"
 
 
+def toml_section_blocks(text: str) -> OrderedDict[str, str]:
+    matches = list(re.finditer(r"(?m)^\[([^\]\n]+)\]\s*$", text))
+    blocks: OrderedDict[str, str] = OrderedDict()
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        blocks[match.group(1)] = text[match.start():end].strip()
+    return blocks
+
+
+def canonical_toml_section(name: str) -> tuple[str, ...]:
+    """Normalize equivalent quoted/whitespace dotted table headers."""
+    if tomllib is not None:
+        marker = "__llm_obsidian_section_marker__"
+        try:
+            tree = tomllib.loads(f"[{name}]\n{marker} = true\n")
+
+            def find(node: object, path: tuple[str, ...]) -> tuple[str, ...] | None:
+                if not isinstance(node, dict):
+                    return None
+                if node.get(marker) is True:
+                    return path
+                for key, value in node.items():
+                    found = find(value, path + (str(key),))
+                    if found is not None:
+                        return found
+                return None
+
+            found = find(tree, ())
+            if found is not None:
+                return found
+        except Exception:
+            pass
+    return tuple(part.strip().strip("'\"") for part in name.split("."))
+
+
+def merge_missing_hook_trust(profile: str, global_config: str) -> str:
+    """Copy only already trusted, missing hook sections into a layered profile.
+
+    A profile-local ``[hooks.state]`` shadows the base table. Unioning missing
+    trusted hashes avoids a late startup prompt without accepting new or
+    conflicting hashes automatically.
+    """
+    profile_blocks = toml_section_blocks(profile)
+    global_blocks = toml_section_blocks(global_config)
+    profile_names = {canonical_toml_section(name) for name in profile_blocks}
+    missing = [
+        block
+        for name, block in global_blocks.items()
+        if canonical_toml_section(name)[:2] == ("hooks", "state")
+        and len(canonical_toml_section(name)) > 2
+        and "trusted_hash" in block
+        and canonical_toml_section(name) not in profile_names
+    ]
+    if not missing:
+        return profile
+    additions: list[str] = []
+    if ("hooks", "state") not in profile_names:
+        additions.append("[hooks.state]")
+    additions.extend(missing)
+    return profile.rstrip() + "\n\n" + "\n\n".join(additions) + "\n"
+
+
 def render_repo_config(existing: str, repo_root: Path) -> str:
     names = all_managed_names(repo_root)
     base = strip_mcp_sections(existing, names).rstrip()
@@ -159,13 +250,19 @@ def render_global_config(existing: str, repo_root: Path) -> str:
     return strip_mcp_sections(existing, all_managed_names(repo_root))
 
 
-def profile_text(repo_root: Path, profile_path: Path | None) -> str:
+def render_profile_config(
+    existing: str, repo_root: Path, profile_path: Path | None, global_config: str = ""
+) -> str:
     servers = merged_servers(repo_root, profile_path)
-    return (
-        f"# {plugin_name(repo_root)} Codex MCP profile.\n"
-        "# Generated by scripts/mcp-gateway/codex-sync.py; edit .mcp.json or .mcp-profiles/*.json instead.\n\n"
-        + managed_block(servers)
-    )
+    base = strip_mcp_sections(existing, all_managed_names(repo_root)).strip()
+    if not base:
+        base = (
+            f"# {plugin_name(repo_root)} Codex MCP profile.\n"
+            "# Generated by scripts/mcp-gateway/codex-sync.py; "
+            "edit .mcp.json or .mcp-profiles/*.json instead."
+        )
+    base = merge_missing_hook_trust(base, global_config)
+    return f"{base.rstrip()}\n\n{managed_block(servers).rstrip()}\n"
 
 
 def read_file(path: Path) -> str:
@@ -217,13 +314,23 @@ def write_with_backup(path: Path, content: str, backup_dir: Path) -> None:
 def desired_files(repo_root: Path, codex_home: Path) -> dict[Path, str]:
     repo_config = repo_root / ".codex" / "config.toml"
     global_config = codex_home / "config.toml"
+    global_existing = read_file(global_config)
     files = {
         repo_config: render_repo_config(read_file(repo_config), repo_root),
-        global_config: render_global_config(read_file(global_config), repo_root),
-        codex_home / f"{default_profile_name(repo_root)}.config.toml": profile_text(repo_root, None),
+        global_config: render_global_config(global_existing, repo_root),
     }
+    default_profile = codex_home / f"{default_profile_name(repo_root)}.config.toml"
+    files[default_profile] = render_profile_config(
+        read_file(default_profile), repo_root, None, global_existing
+    )
     for profile_name, path in profile_paths(repo_root).items():
-        files[codex_home / f"{profile_name}.config.toml"] = profile_text(repo_root, path)
+        profile_file = codex_home / f"{profile_name}.config.toml"
+        files[profile_file] = render_profile_config(
+            read_file(profile_file), repo_root, path, global_existing
+        )
+    for profile_name, source in runtime_profile_paths(repo_root).items():
+        profile_file = codex_home / f"{profile_name}.config.toml"
+        files[profile_file] = source.read_text(encoding="utf-8").rstrip() + "\n"
     return files
 
 
@@ -234,6 +341,10 @@ def main() -> int:
     mode.add_argument("--apply", action="store_true", help="write files with backups")
     parser.add_argument("--repo-root", default=Path(__file__).resolve().parents[2], type=Path)
     parser.add_argument("--codex-home", default=Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser(), type=Path)
+    parser.add_argument(
+        "--only-profile", default="",
+        help="sync only CODEX_HOME/<name>.config.toml; leave global/repo/runtime profiles untouched",
+    )
     args = parser.parse_args()
 
     if not args.check and not args.apply:
@@ -242,6 +353,11 @@ def main() -> int:
     repo_root = args.repo_root.resolve()
     codex_home = args.codex_home.expanduser().resolve()
     files = desired_files(repo_root, codex_home)
+    if args.only_profile:
+        target = codex_home / f"{args.only_profile}.config.toml"
+        if target not in files:
+            raise SystemExit(f"ERROR: unknown generated Codex profile: {args.only_profile}")
+        files = {target: files[target]}
 
     changed = []
     for path, new in files.items():

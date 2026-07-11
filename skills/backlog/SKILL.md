@@ -1,9 +1,10 @@
 ---
 name: backlog
-version: 1.1.0
+metadata:
+  version: 1.1.0
 description: >-
-  Append-only capture inbox wiki/backlog.md, one line per item. Modes: add / list (>60d WARN) / promote (→ /save as a goal/question/decision page, or drop). Not for: content that already deserves a full wiki page (/save directly). Triggers: не забыть, в TODO, бэклог, backlog add/list/promote, remind me to, было бы хорошо.
-allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
+  Append-only capture inbox wiki/backlog.md, one line per item. Modes: add / list (60d+ WARN) / promote (→ /save as a goal/question/decision page, or drop). Not for: content that already deserves a full wiki page (/save directly). Triggers: не забыть, в TODO, бэклог, backlog add/list/promote, remind me to, было бы хорошо.
+allowed-tools: Read Glob Grep Bash AskUserQuestion
 ---
 
 # /backlog — capture / list / promote
@@ -44,13 +45,9 @@ summary: upgrade the blog theme to v3
 context: (optional) — Claude greps wiki/ for a likely related page
 ```
 
-### Phase A.2: Append
+### Phase A.2: Draft the new canonical file
 
-```bash
-echo "- [$(date +%Y-%m-%d)] <slug> — <summary> — context: <link or ->" >> wiki/backlog.md
-```
-
-Or via Edit (append mode):
+Read `wiki/backlog.md`, capture its hash with `python3 scripts/vault-write.py --sha256 wiki/backlog.md`, and append the strict entry in memory:
 
 ```markdown
 - [2026-05-23] blog-theme-upgrade — upgrade the blog theme to v3 — context: [[Blog]]
@@ -62,12 +59,13 @@ Format is strict — the list-mode parser depends on it:
 - Em-dash separator (` — `) between slug / summary / context.
 - Context link is either `[[<page>]]`, or a URL, or `-` if none.
 
-### Phase A.3: Log
+If the file does not exist, allocate an address and use the skeleton below. Then send the full page and log entry in one transaction:
 
-```markdown
-# wiki/log.md (prepend on top)
-## [YYYY-MM-DD HH:MM] backlog | add — <slug>
+```json
+{"actor":"backlog","session":"<SESSION_ID>","pages":[{"op":"update","path":"wiki/backlog.md","expected_sha256":"<hash>","content":"<full updated markdown>"}],"log_entry":"## [YYYY-MM-DD HH:MM] backlog | add — <slug>"}
 ```
+
+For first creation use `op:create` and omit `expected_sha256`. Exit 4 means re-read because another capture landed first.
 
 Confirm in chat: `✓ added <slug>: <summary>` (one line).
 
@@ -139,13 +137,9 @@ For wiki targets → invoke `/save` with the scope pre-loaded from the backlog s
 
 After a successful chain completion (wiki page filed):
 
-### Phase C.3: Remove from backlog
+### Phase C.3: Remove transactionally
 
-```python
-Edit('wiki/backlog.md', old=<line>, new='')  # remove line
-```
-
-Prepend to `wiki/log.md`:
+Re-read `wiki/backlog.md` after the chained `/save`, capture its SHA-256, remove exactly the matched line in memory, and send an `op:update` page plus this `log_entry` in one `vault-write.py` payload:
 
 ```markdown
 ## [YYYY-MM-DD HH:MM] backlog | promote — <slug> → <target>

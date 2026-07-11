@@ -15,6 +15,7 @@
 .smart-connections/
 .obsidian-git-data
 .trash/
+.obsidian-backups/
 
 # System
 .DS_Store
@@ -33,6 +34,11 @@ node_modules/
 .env.local
 *.local.md
 
+# Local MCP runtime/client config generated from the tracked examples
+.mcp.json
+scripts/mcp-gateway/config.json
+scripts/mcp-gateway/runtime.env
+
 # Private keys and credentials (defense-in-depth, catches accidental drops)
 *.pem
 *.key
@@ -48,7 +54,7 @@ secrets.y*ml
 auth.json
 
 # Personal files dropped into vault root by Obsidian (don't commit these)
-WIKI*.md
+/WIKI*.md
 PROMPT.md
 Welcome.md
 *.tmp.*
@@ -93,9 +99,6 @@ Excalidraw/
 Claude SEO*.gif
 Claude SEO*.png
 
-# Private Skool Hub assets — not for public repos
-_attachments/images/skool-hub/
-
 # Archive of old versions (cosmic-brain, GIF assets)
 claude-obsidian-archive/
 
@@ -116,19 +119,36 @@ _attachments/
 # Command-capture log (sanitized, but commands stay out of git anyway)
 .vault-meta/command-log.jsonl
 .vault-meta/command-log.jsonl.1
+# Runtime-neutral operation telemetry (paths/counters only, no content)
+.vault-meta/pipeline-events.jsonl
+.vault-meta/pipeline-events.jsonl.1
+.vault-meta/.pipeline-events.lock
 # Stop-hook latency telemetry (local timings, rotated by the hook itself)
 .vault-meta/stop-hook-latency.jsonl
 .vault-meta/stop-hook-latency.jsonl.1
 .vault-meta/stop-hook-last.log
 .vault-meta/.vault-write.lock
+.vault-meta/.vault-write-journal.json
+.vault-meta/plan-capture-last-error.log
 # Stop-hook cross-session lock + sparse BM25 index (derived, rebuilt per Stop)
 .vault-meta/.stop-hook.lock
+.vault-meta/dense-refresh.pending.json
 .vault-meta/.bm25.lock
 .vault-meta/bm25/
+.vault-meta/.retrieval.lock
+.vault-meta/.dense-refresh.lock
+.vault-meta/retrieval/
 # Local auto-commit opt-out flag (per-machine, never ship via someone's commit)
 .vault-meta/auto-commit.disabled
+.vault-meta/skill-nudge-day.txt
+.vault-meta/evals/
+.vault-meta/research-runs/
+.vault-meta/daily-runs/
+.vault-meta/retrieval-quality.pending.json
+.vault-meta/retrieval-experiment.json
+.vault-meta/memory-backup.json
 
-# DevOps-specific secret containers (defense-in-depth for MG vault)
+# Infrastructure secret containers (defense-in-depth for a public template)
 # Terraform state can hold plaintext secrets even if the .tf files don't
 *.tfstate
 *.tfstate.*

@@ -29,7 +29,7 @@ sessions:
 
 **sessions field**: append-only list of agent session/thread IDs that created or modified this page. Pull current ID with `./scripts/current-session-id.sh` (`CLAUDE_CODE_SESSION_ID` in Claude Code, `CODEX_THREAD_ID` in Codex). On create, write a single-item list. On every meaningful edit, **append** the current session ID to the end of the list — never remove, replace, or reorder prior entries. Single exception: if the current session ID is already the last item (same session editing the same page repeatedly), don't duplicate it. Order is chronological by definition. Builds a full history of every session that touched the page, so future-you can reopen any of them for fuller context.
 
-Exception: `wiki/log.md` does NOT carry `sessions:` (it's a global append-only log, not a page). All other markdown pages do, including folds, meta, runbooks, incidents, decisions, etc.
+`wiki/log.md` carries the explicit legacy marker `sessions: []`; it is mutated only by `vault-write.py`. All content pages carry concrete session provenance.
 
 **status values:**
 - `seed`: exists, barely populated
@@ -111,4 +111,4 @@ page_count: 0
 4. Wikilinks in YAML fields must be quoted: `"[[Page Name]]"`.
 5. Keep `related` and `sources` as wikilinks, not plain URLs.
 6. Update `updated` every time you edit the page content.
-7. Append current session id from `./scripts/current-session-id.sh` to `sessions:` on create and on every meaningful edit. Append only — never remove or overwrite old IDs (skip only if current ID is already the last entry). The list is a chronological history of every session that touched the page. Exception: `wiki/log.md`.
+7. Append current session id from `./scripts/current-session-id.sh` to `sessions:` on create and on every meaningful edit. Append only — never remove or overwrite old IDs (skip only if current ID is already the last entry). The list is a chronological history of every session that touched the page; global log bookkeeping is handled by `vault-write.py`.

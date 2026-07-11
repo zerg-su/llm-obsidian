@@ -6,7 +6,7 @@ Detailed rules for Phase 1.5-1.6: where each type gets filed and which frontmatt
 
 | type | target path | mode |
 |---|---|---|
-| `session` | `wiki/meta/sessions/YYYY-MM-DD-<task-name>.md` | new |
+| `session` | `wiki/meta/sessions/<Title>.md` | new |
 | `decision` | `wiki/decisions/<Title>.md` | new, ADR-style |
 | `runbook` | `wiki/runbooks/<Title>.md` | new |
 | `incident` | `wiki/incidents/YYYY-MM-DD-<title-slug>.md` | new |
@@ -14,6 +14,11 @@ Detailed rules for Phase 1.5-1.6: where each type gets filed and which frontmatt
 | `repo-touch` | `wiki/repos/<title>.md` | **update existing** (if present) or new stub |
 
 The type enum is enforced by `scripts/parse-wiki-summary.py` — do not invent new types here without updating the script. If a target folder does not exist in the vault yet (e.g. `wiki/incidents/`, `wiki/services/`, `wiki/repos/`), create it on first use; the core shipped folders are concepts, entities, sources, questions, runbooks, decisions, goals, routines, daily, meta.
+
+Session filenames intentionally use the summary `Title`, not the dispatch task
+name. `reap` writes `[[Title]]` into `log.md` and `hot.md`, and Obsidian resolves
+that wikilink by filename. A dated task-name path would therefore create dead
+links unless every caller also emitted an alias.
 
 For update-mode: `Read` the existing page and merge. The body from the summary replaces the **last** `## Recent` section (if present) or is appended as a new `## <YYYY-MM-DD> <task-name>` section at the end.
 

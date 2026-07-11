@@ -1,0 +1,5 @@
+interface:
+  display_name: "Canvas"
+  short_description: "Manual-only Obsidian canvas workflows"
+policy:
+  allow_implicit_invocation: false

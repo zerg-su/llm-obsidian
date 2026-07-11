@@ -1,0 +1,5 @@
+interface:
+  display_name: "Wiki"
+  short_description: "Manual-only wiki scaffold and router"
+policy:
+  allow_implicit_invocation: false

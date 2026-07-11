@@ -1,270 +1,376 @@
 #!/usr/bin/env python3
-"""retrieval-bench.py — measure retrieval quality against a curated goldset.
+"""Quality gate for section-level retrieval.
 
-Runs every goldset query through the four retrieval channels and reports
-hit@1 / hit@5 / MRR@10 per channel. This is the measuring stick for any
-future retrieval tuning (embedding model swap, chunking, fusion weights):
-no change ships without moving these numbers.
-
-Channels (imported from sibling scripts via importlib, no code duplication):
-  tag     — scripts/tag-search.py     (frontmatter tag prefilter)
-  bm25    — scripts/bm25-index.py     (sparse lexical, whole pages)
-  dense   — scripts/semantic-search.py (tiling-cache cosine via local ollama)
-  hybrid  — RRF fusion of dense + bm25 (same as semantic-search --hybrid)
-
-Goldset: .vault-meta/retrieval-goldset.jsonl — one JSON per line:
-  {"q": "<query as the user would ask>", "expect": ["wiki/....md", ...], "note": "..."}
-A query counts as a hit when ANY of its expect paths appears in the top-K.
-Queries whose expect paths no longer exist are SKIPPED with a warning
-(fix the goldset, do not let dead pages poison the metric).
-
-Degradation: ollama unreachable -> dense/hybrid marked SKIPPED, tag/bm25
-still measured (exit 0). Missing goldset or bm25 index -> exit 3.
-
-Usage:
-    ./scripts/retrieval-bench.py [--verbose] [--report <path>]
-
-Exit codes: 0 ok, 2 usage, 3 goldset/index missing or corrupt.
+Sparse metrics are always measured.  Hybrid metrics are added when the dense
+chunk cache and Ollama query embedding are available; their absence never
+hides or skips the required sparse gate.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import argparse
+import hashlib
 import json
+import math
 import sys
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-VAULT_ROOT = Path(__file__).resolve().parent.parent
-GOLDSET = VAULT_ROOT / ".vault-meta" / "retrieval-goldset.jsonl"
-CACHE_PATH = VAULT_ROOT / ".vault-meta" / "tiling-cache.json"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import retrieve
 
+
+ROOT = Path(__file__).resolve().parents[1]
+GOLDSET = ROOT / ".vault-meta" / "retrieval-goldset.jsonl"
+BASELINE = ROOT / ".vault-meta" / "retrieval-baseline.json"
+MIN_QUERIES = 40
+MAX_REGRESSION = 0.02
 TOP_K = 10
+RECALL_K = 20
+QUALITY_PENDING = ROOT / ".vault-meta" / "retrieval-quality.pending.json"
 
 
-def load_module(filename: str, name: str):
-    path = VAULT_ROOT / "scripts" / filename
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+def goldset_hash(path: Path = GOLDSET) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_goldset() -> list[dict]:
+def load_goldset(*, allow_small: bool = False) -> list[dict]:
     if not GOLDSET.is_file():
-        print(f"goldset missing at {GOLDSET} — seed it first", file=sys.stderr)
-        sys.exit(3)
-    entries = []
-    for n, line in enumerate(GOLDSET.read_text(encoding="utf-8").splitlines(), 1):
-        line = line.strip()
-        if not line:
+        raise ValueError(f"goldset missing: {GOLDSET}")
+    entries: list[dict] = []
+    for line_number, line in enumerate(GOLDSET.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
             continue
         try:
-            d = json.loads(line)
-            assert isinstance(d["q"], str) and isinstance(d["expect"], list) and d["expect"]
-        except Exception as exc:
-            print(f"goldset line {n} unreadable: {exc}", file=sys.stderr)
-            sys.exit(3)
-        entries.append(d)
-    if not entries:
-        print("goldset is empty", file=sys.stderr)
-        sys.exit(3)
+            entry = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"goldset line {line_number}: {exc}") from exc
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("q"), str)
+            or not entry["q"].strip()
+            or not isinstance(entry.get("expect"), list)
+            or not entry["expect"]
+            or entry.get("split") not in {"tune", "heldout"}
+        ):
+            raise ValueError(
+                f"goldset line {line_number}: require q, non-empty expect, split=tune|heldout"
+            )
+        if "REPLACE ME" in entry["q"]:
+            raise ValueError(f"goldset line {line_number}: placeholder query is forbidden")
+        relevance = entry.get("relevance", {})
+        if not isinstance(relevance, dict) or any(
+            path not in entry["expect"] or not isinstance(grade, int) or not 1 <= grade <= 3
+            for path, grade in relevance.items()
+        ):
+            raise ValueError(f"goldset line {line_number}: relevance must grade expected paths 1..3")
+        sections = entry.get("expect_sections", [])
+        if not isinstance(sections, list) or any(
+            not isinstance(item, dict)
+            or item.get("path") not in entry["expect"]
+            or not isinstance(item.get("heading"), str)
+            or not item["heading"].strip()
+            or not isinstance(item.get("relevance", 1), int)
+            or not 1 <= item.get("relevance", 1) <= 3
+            for item in sections
+        ):
+            raise ValueError(f"goldset line {line_number}: invalid expect_sections")
+        entries.append(entry)
+    heldout = sum(entry["split"] == "heldout" for entry in entries)
+    if not allow_small and len(entries) < MIN_QUERIES:
+        raise ValueError(f"goldset has {len(entries)} queries; minimum is {MIN_QUERIES}")
+    if entries and heldout * 2 < len(entries):
+        raise ValueError(f"heldout split is {heldout}/{len(entries)}; require at least 50%")
     return entries
 
 
-def first_hit_rank(ranked: list[str], expect: list[str], k: int = TOP_K) -> int | None:
-    """1-based rank of the first expected path in top-k, else None."""
-    exp = set(expect)
-    for i, path in enumerate(ranked[:k], start=1):
-        if path in exp:
-            return i
+def first_hit_rank(ranked: list[str], expected: list[str], k: int = TOP_K) -> int | None:
+    wanted = set(expected)
+    for rank, path in enumerate(ranked[:k], 1):
+        if path in wanted:
+            return rank
     return None
 
 
+@dataclass
 class Metrics:
-    def __init__(self) -> None:
-        self.ranks: list[int | None] = []
+    ranks: list[int | None]
 
-    def add(self, rank: int | None) -> None:
+    def __init__(self) -> None:
+        self.ranks = []
+        self.recalls: list[float] = []
+        self.ndcgs: list[float] = []
+        self.latencies_ms: list[float] = []
+
+    def add(
+        self,
+        rank: int | None,
+        *,
+        recall: float | None = None,
+        ndcg: float | None = None,
+        latency_ms: float = 0.0,
+    ) -> None:
         self.ranks.append(rank)
+        self.recalls.append(float(rank is not None) if recall is None else recall)
+        self.ndcgs.append((1.0 / rank if rank else 0.0) if ndcg is None else ndcg)
+        self.latencies_ms.append(latency_ms)
 
     @property
     def n(self) -> int:
         return len(self.ranks)
 
     def hit_at(self, k: int) -> float:
-        if not self.ranks:
+        return (
+            sum(rank is not None and rank <= k for rank in self.ranks) / self.n
+            if self.n
+            else 0.0
+        )
+
+    def mrr(self, k: int = TOP_K) -> float:
+        return (
+            sum(1.0 / rank for rank in self.ranks if rank is not None and rank <= k) / self.n
+            if self.n
+            else 0.0
+        )
+
+    def p95_ms(self) -> float:
+        if not self.latencies_ms:
             return 0.0
-        return sum(1 for r in self.ranks if r is not None and r <= k) / len(self.ranks)
+        ordered = sorted(self.latencies_ms)
+        return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
-    def mrr(self) -> float:
-        if not self.ranks:
-            return 0.0
-        return sum(1.0 / r for r in self.ranks if r is not None) / len(self.ranks)
+    def summary(self) -> dict[str, float | int]:
+        return {
+            "n": self.n,
+            "hit_at_1": self.hit_at(1),
+            "hit_at_5": self.hit_at(5),
+            "mrr_at_10": self.mrr(),
+            "recall_at_20": sum(self.recalls) / self.n if self.n else 0.0,
+            "ndcg_at_10": sum(self.ndcgs) / self.n if self.n else 0.0,
+            "p95_ms": self.p95_ms(),
+        }
 
 
-def main() -> int:
-    argv = sys.argv[1:]
-    verbose = "--verbose" in argv
-    report_path: Path | None = None
-    if "--report" in argv:
-        try:
-            report_path = Path(argv[argv.index("--report") + 1])
-        except IndexError:
-            print("usage: retrieval-bench.py [--verbose] [--report <path>]", file=sys.stderr)
-            return 2
-    for a in argv:
-        if a not in ("--verbose", "--report") and (report_path is None or a != str(report_path)):
-            print("usage: retrieval-bench.py [--verbose] [--report <path>]", file=sys.stderr)
-            return 2
+def live_expected(entry: dict) -> list[str]:
+    return [path for path in entry["expect"] if (ROOT / path).is_file()]
 
-    goldset = load_goldset()
 
-    ts = load_module("tag-search.py", "bench_tag_search")
-    bm = load_module("bm25-index.py", "bench_bm25_index")
-    sem = load_module("semantic-search.py", "bench_semantic_search")
+def recall_at(ranked: list[str], expected: list[str], k: int = RECALL_K) -> float:
+    wanted = set(expected)
+    return len(wanted & set(ranked[:k])) / len(wanted) if wanted else 0.0
 
-    # tag channel state
-    tag_index = None
-    if ts.TAG_INDEX.is_file():
-        try:
-            tag_index = json.loads(ts.TAG_INDEX.read_text(encoding="utf-8"))
-        except Exception:
-            tag_index = None
 
-    # bm25 channel state
-    bm_idx = bm.load_index_or_none()
-    if bm_idx is None:
-        print("bm25 index missing — run ./scripts/bm25-index.py build", file=sys.stderr)
-        return 3
+def result_gain(entry: dict, result: retrieve.Result) -> int:
+    sections = entry.get("expect_sections") or []
+    if sections:
+        for item in sections:
+            if item["path"] == result.path and item["heading"] == result.heading:
+                return int(item.get("relevance", 1))
+        return 0
+    return int((entry.get("relevance") or {}).get(result.path, 1 if result.path in entry["expect"] else 0))
 
-    # dense channel state: cache + one probe embed decides availability
-    dense_ok = False
-    model = ""
-    entries: dict = {}
-    if CACHE_PATH.is_file():
-        try:
-            cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-            model = cache["model"]
-            entries = cache["embeddings"]
-            sem.embed("ping", model)
-            dense_ok = True
-        except Exception as exc:
-            print(f"dense channel unavailable ({exc}) — dense/hybrid SKIPPED", file=sys.stderr)
+
+def ndcg_at(results: list[retrieve.Result], entry: dict, k: int = TOP_K) -> float:
+    gains = [result_gain(entry, result) for result in results[:k]]
+    if entry.get("expect_sections"):
+        ideal = sorted((int(item.get("relevance", 1)) for item in entry["expect_sections"]), reverse=True)[:k]
     else:
-        print("tiling cache missing — dense/hybrid SKIPPED", file=sys.stderr)
+        grades = entry.get("relevance") or {path: 1 for path in entry["expect"]}
+        ideal = sorted((int(value) for value in grades.values()), reverse=True)[:k]
+    dcg = sum((2**gain - 1) / math.log2(rank + 1) for rank, gain in enumerate(gains, 1))
+    idcg = sum((2**gain - 1) / math.log2(rank + 1) for rank, gain in enumerate(ideal, 1))
+    return dcg / idcg if idcg else 0.0
 
-    channels = ["tag", "bm25"] + (["dense", "hybrid"] if dense_ok else [])
-    metrics = {c: Metrics() for c in channels}
-    per_query: list[dict] = []
-    skipped_queries = 0
 
-    for entry in goldset:
-        q, expect = entry["q"], entry["expect"]
-        live_expect = [p for p in expect if (VAULT_ROOT / p).is_file()]
-        if not live_expect:
-            print(f"WARN goldset query skipped (expect pages gone): {q[:60]}", file=sys.stderr)
-            skipped_queries += 1
-            continue
+def benchmark(
+    entries: list[dict], *, verbose: bool = False, sparse_only: bool = False
+) -> tuple[dict, list[dict], str | None]:
+    index, _ = retrieve.ensure_sparse()
+    dense, dense_reason = (None, "disabled by --sparse-only") if sparse_only else retrieve.load_dense(index)
+    dense_ok = False
+    if dense is not None:
+        try:
+            retrieve.embed("retrieval benchmark probe", dense["model"])
+            dense_ok = True
+            dense_reason = None
+        except Exception as exc:  # network/model errors are optional degradation
+            dense_reason = str(exc)
 
-        ranked: dict[str, list[str]] = {}
-
-        words = ts.words_of(q)
-        if tag_index is not None and words:
-            matched = ts.match_tags(words, list(tag_index.keys()))
-            ranked["tag"] = [p for p, _ in ts.rank_pages(matched, tag_index)][:TOP_K]
-        else:
-            ranked["tag"] = []
-
-        ranked["bm25"] = [p for p, _ in bm.score_query(bm_idx, q, top_k=TOP_K * 2)][:TOP_K]
-
+    channels = ["sparse"] + (["hybrid"] if dense_ok else [])
+    cohorts = {
+        channel: {"all": Metrics(), "heldout": Metrics(), "tune": Metrics()}
+        for channel in channels
+    }
+    rows: list[dict] = []
+    for entry in entries:
+        expected = live_expected(entry)
+        if not expected:
+            raise ValueError(f"goldset expect paths are all missing for query: {entry['q']}")
+        started = time.perf_counter()
+        sparse_results, _ = retrieve.retrieve(index, entry["q"], top=RECALL_K, dense_mode="off")
+        latency = {"sparse": (time.perf_counter() - started) * 1000}
+        result_sets = {"sparse": sparse_results}
         if dense_ok:
-            qvec = sem.embed(q, model)
-            dense_sorted = sorted(
-                ((sem.cosine(qvec, e["embedding"]), p) for p, e in entries.items()),
-                reverse=True,
+            started = time.perf_counter()
+            hybrid_results, meta = retrieve.retrieve(
+                index, entry["q"], top=RECALL_K, dense_mode="auto"
             )
-            ranked["dense"] = [p for _, p in dense_sorted[:TOP_K * 2]][:TOP_K]
-            fused = sem.hybrid_fuse(
-                [p for _, p in dense_sorted[:20]],
-                [p for p, _ in bm.score_query(bm_idx, q, top_k=20)],
-                set(entries),
+            latency["hybrid"] = (time.perf_counter() - started) * 1000
+            if meta["degraded"]:
+                raise RuntimeError(f"dense degraded after successful probe: {meta['reason']}")
+            result_sets["hybrid"] = hybrid_results
+        row = {"q": entry["q"], "split": entry["split"]}
+        for channel in channels:
+            paths = [item.path for item in result_sets[channel]]
+            rank = first_hit_rank(paths, expected)
+            recall = recall_at(paths, expected)
+            ndcg = ndcg_at(result_sets[channel], entry)
+            cohorts[channel]["all"].add(rank, recall=recall, ndcg=ndcg, latency_ms=latency[channel])
+            cohorts[channel][entry["split"]].add(rank, recall=recall, ndcg=ndcg, latency_ms=latency[channel])
+            row[channel] = rank
+            row[f"{channel}_ndcg"] = ndcg
+        rows.append(row)
+        if verbose:
+            marks = ", ".join(f"{channel}={row[channel]}" for channel in channels)
+            print(f"{entry['split']:<7} {marks} | {entry['q']}", file=sys.stderr)
+    summary = {
+        channel: {cohort: metrics.summary() for cohort, metrics in by_cohort.items()}
+        for channel, by_cohort in cohorts.items()
+    }
+    return summary, rows, dense_reason
+
+
+def baseline_payload(summary: dict, count: int) -> dict:
+    sparse = {
+        cohort: {key: value for key, value in metrics.items() if key != "p95_ms"}
+        for cohort, metrics in summary["sparse"].items()
+    }
+    return {
+        "schema_version": 2,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "goldset_sha256": goldset_hash(),
+        "goldset_size": count,
+        "max_regression": MAX_REGRESSION,
+        "sparse": sparse,
+    }
+
+
+def gate(summary: dict, baseline_path: Path = BASELINE) -> list[str]:
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"baseline missing/corrupt: {baseline_path}: {exc}") from exc
+    if baseline.get("goldset_sha256") != goldset_hash():
+        raise ValueError("baseline goldset hash differs; review queries and write an explicit new baseline")
+    tolerance = float(baseline.get("max_regression", MAX_REGRESSION))
+    failures: list[str] = []
+    for cohort in ("all", "heldout"):
+        for metric in ("hit_at_5", "mrr_at_10", "recall_at_20", "ndcg_at_10"):
+            if metric not in baseline["sparse"][cohort]:
+                continue
+            old = float(baseline["sparse"][cohort][metric])
+            new = float(summary["sparse"][cohort][metric])
+            if new < old - tolerance - 1e-12:
+                failures.append(
+                    f"sparse/{cohort}/{metric}: {new:.3f} < baseline {old:.3f} - {tolerance:.3f}"
+                )
+    return failures
+
+
+def render(summary: dict, count: int, dense_reason: str | None) -> str:
+    lines = [f"retrieval-bench: {count} queries", ""]
+    lines.append(f"{'channel/split':<18} {'n':>4} {'hit@1':>7} {'hit@5':>7} {'MRR@10':>8} {'R@20':>7} {'NDCG@10':>9} {'p95ms':>8}")
+    for channel, cohorts in summary.items():
+        for cohort in ("all", "heldout", "tune"):
+            metrics = cohorts[cohort]
+            lines.append(
+                f"{channel + '/' + cohort:<18} {metrics['n']:>4} "
+                f"{metrics['hit_at_1']:>7.2f} {metrics['hit_at_5']:>7.2f} "
+                f"{metrics['mrr_at_10']:>8.3f} {metrics['recall_at_20']:>7.3f} "
+                f"{metrics['ndcg_at_10']:>9.3f} {metrics['p95_ms']:>8.1f}"
             )
-            ranked["hybrid"] = [p for p, _ in fused[:TOP_K]]
+    if "hybrid" not in summary:
+        lines.append(f"hybrid: OPTIONAL/UNAVAILABLE ({dense_reason or 'dense cache missing'})")
+    return "\n".join(lines)
 
-        row = {"q": q, "note": entry.get("note", "")}
-        for c in channels:
-            r = first_hit_rank(ranked[c], live_expect)
-            metrics[c].add(r)
-            row[c] = r
-        per_query.append(row)
 
-    # ---- output ----
-    lines: list[str] = []
-    lines.append(f"retrieval-bench: {len(per_query)} queries"
-                 + (f" ({skipped_queries} skipped)" if skipped_queries else ""))
-    lines.append("")
-    lines.append(f"{'channel':<8} {'hit@1':>7} {'hit@5':>7} {'MRR@10':>8}")
-    for c in channels:
-        m = metrics[c]
-        lines.append(f"{c:<8} {m.hit_at(1):>7.2f} {m.hit_at(5):>7.2f} {m.mrr():>8.3f}")
-    if not dense_ok:
-        lines.append("dense/hybrid: SKIPPED (ollama or tiling cache unavailable)")
-    if verbose:
-        lines.append("")
-        header = "rank per query (None = miss beyond top-10):"
-        lines.append(header)
-        for row in per_query:
-            marks = "  ".join(f"{c}={row[c]}" for c in channels)
-            lines.append(f"  {marks}  | {row['q'][:60]}")
-    out = "\n".join(lines)
-    print(out)
+def write_report(path: Path, output: str, rows: list[dict], summary: dict) -> None:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    channels = list(summary)
+    content = [
+        "---",
+        "type: meta",
+        f'title: "retrieval-bench-{today}"',
+        f"created: {today}",
+        f"updated: {today}",
+        "status: solid",
+        "tags: [meta, report, retrieval]",
+        "sessions: []",
+        "---",
+        "",
+        "# Retrieval Benchmark Report",
+        "",
+        "```text",
+        output,
+        "```",
+        "",
+        "| split | query | " + " | ".join(channels) + " |",
+        "|---|---|" + "---|" * len(channels),
+    ]
+    for row in rows:
+        content.append(
+            f"| {row['split']} | {row['q'][:80]} | "
+            + " | ".join(str(row[channel]) for channel in channels)
+            + " |"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(content) + "\n", encoding="utf-8")
 
-    if report_path is not None:
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        rep: list[str] = []
-        rep.append("---")
-        rep.append("type: meta")
-        rep.append(f'title: "retrieval-bench-{date}"')
-        rep.append(f"created: {date}")
-        rep.append(f"updated: {date}")
-        rep.append("status: solid")
-        rep.append("tags:")
-        rep.append("  - meta")
-        rep.append("  - report")
-        rep.append("  - retrieval")
-        rep.append("---")
-        rep.append("")
-        rep.append("# Retrieval Benchmark Report")
-        rep.append("")
-        rep.append(f"- generated: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
-        rep.append(f"- goldset: {len(per_query)} queries"
-                   + (f" ({skipped_queries} skipped)" if skipped_queries else ""))
-        rep.append(f"- dense model: {model or 'n/a'}; dense pages: {len(entries)}; "
-                   f"bm25 pages: {bm_idx['doc_count']}")
-        rep.append("")
-        rep.append("| channel | hit@1 | hit@5 | MRR@10 |")
-        rep.append("|---|---|---|---|")
-        for c in channels:
-            m = metrics[c]
-            rep.append(f"| {c} | {m.hit_at(1):.2f} | {m.hit_at(5):.2f} | {m.mrr():.3f} |")
-        if not dense_ok:
-            rep.append("")
-            rep.append("> dense/hybrid SKIPPED — ollama or tiling cache unavailable at run time.")
-        rep.append("")
-        rep.append("## Per-query ranks (None = miss beyond top-10)")
-        rep.append("")
-        rep.append("| query | " + " | ".join(channels) + " |")
-        rep.append("|---|" + "---|" * len(channels))
-        for row in per_query:
-            cells = " | ".join(str(row[c]) for c in channels)
-            rep.append(f"| {row['q'][:70]} | {cells} |")
-        rep.append("")
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text("\n".join(rep) + "\n", encoding="utf-8")
-        print(f"report written: {report_path}", file=sys.stderr)
-    return 0
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--gate", action="store_true")
+    parser.add_argument("--write-baseline", action="store_true")
+    parser.add_argument("--baseline", type=Path, default=BASELINE)
+    parser.add_argument("--allow-small", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--json", action="store_true", help="emit machine-readable benchmark result")
+    parser.add_argument("--sparse-only", action="store_true", help="skip optional dense probe/channel")
+    args = parser.parse_args(argv)
+    try:
+        entries = load_goldset(allow_small=args.allow_small)
+        summary, rows, dense_reason = benchmark(
+            entries, verbose=args.verbose, sparse_only=args.sparse_only
+        )
+        output = render(summary, len(entries), dense_reason)
+        if args.json:
+            print(json.dumps({"schema_version": 1, "count": len(entries), "summary": summary, "rows": rows, "dense_reason": dense_reason}))
+        else:
+            print(output)
+        if args.report:
+            write_report(args.report, output, rows, summary)
+        if args.write_baseline:
+            args.baseline.write_text(
+                json.dumps(baseline_payload(summary, len(entries)), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(f"baseline written: {args.baseline}", file=sys.stderr)
+        if args.gate:
+            failures = gate(summary, args.baseline)
+            if failures:
+                for failure in failures:
+                    print(f"RETRIEVAL_REGRESSION: {failure}", file=sys.stderr)
+                return 5
+            print("retrieval gate: PASS", file=sys.stderr)
+            QUALITY_PENDING.unlink(missing_ok=True)
+        return 0
+    except (ValueError, RuntimeError, OSError) as exc:
+        print(f"retrieval-bench: {exc}", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

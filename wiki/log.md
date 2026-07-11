@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-06
+updated: 2026-07-11
 tags:
   - meta
   - log
@@ -11,6 +11,8 @@ related:
   - "[[index]]"
   - "[[hot]]"
   - "[[overview]]"
+sessions:
+  - "public-template-v2"
 ---
 
 # Operation Log
@@ -24,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-11] release | llm-obsidian v2.0.0
+
+Public template upgraded to the universal Claude Code and Codex pipeline. Personal notes, runtime sessions, derived indexes, workspace state, and credentials are not part of the release.
 
 ## [2026-07-06] reap | dispatch-reap-live-smoke-20260706030148
 

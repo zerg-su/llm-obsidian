@@ -2,7 +2,7 @@
 type: meta
 title: "Entities Index"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - meta
   - index
@@ -12,6 +12,8 @@ related:
   - "[[index]]"
   - "[[Andrej Karpathy]]"
   - "[[LLM Wiki Pattern]]"
+sessions:
+  - public-template-v2
 ---
 
 # Сущности

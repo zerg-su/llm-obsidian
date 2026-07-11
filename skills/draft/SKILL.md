@@ -1,6 +1,7 @@
 ---
 name: draft
-version: 1.1.0
+metadata:
+  version: 1.1.0
 description: |
   Communication ADVISOR, not sender: 2-3 alternative draft replies for any external communication (email, issue comment, forum post, chat message) + historical hints from the wiki + a redaction pass; the user copies and posts themselves.
   Triggers: сформируй ответ, как ответить, помоги ответить, draft a reply.

@@ -1,6 +1,7 @@
 ---
 name: reap
-version: 1.1.0
+metadata:
+  version: 1.1.0
 description: |
   Symmetric inverse of /dispatch for cmux task-splits running Claude Code or Codex CLI: collect "## Wiki Summary", file into wiki/, update log/hot, allocate address, preserve .task-meta.json provenance.
   Use when a task-agent produced a Wiki Summary block, or /reap directly.
@@ -11,7 +12,9 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # /reap — filing the task result into the wiki
 
-After the task agent (Claude or Codex) in a cmux task split finishes its work and produces a `## Wiki Summary` block, `/reap` collects that block (file-first, `cmux read-screen` fallback), files it into the wiki by the /save rules (3 phases), and offers handoff/worktree cleanup. `/reap` does not close cmux surfaces; agent exit is done with `/exit` inside the task split.
+After the task agent produces a typed summary, `/reap` files it through the
+single writer. Approved v2 unattended tasks use contract-bound final filing,
+validation, and armed exact-surface close; legacy tasks remain interactive.
 
 ## Input
 
@@ -25,12 +28,14 @@ or just `/reap` if there is exactly one active task split — resolved from the 
 
 ## Phase 0: Pre-flight (mandatory — AskUserQuestion)
 
-`/reap` has **two modes** and MUST ask the user before filing:
+Read `.task-meta.json` first. When v2 `interaction_policy=unattended`, require
+`reap_policy.mode=final`, set final mode, and skip the mode question. Otherwise
+`/reap` has two interactive modes:
 
 1. **interim** — file the summary into the wiki NOW, **keep the split + worktree**; the task agent keeps working. Useful for intermediate saves: phase 1 of a big task is done, we want to record the findings, but phase 2 continues in the same task.
 2. **final** — file the summary and mark the task done. Cmux surface is not closed; worktree cleanup is a separate explicit user action.
 
-**Default = interim** (safer — no work is lost). The user confirms the choice explicitly.
+**Interactive default = interim.**
 
 ```python
 AskUserQuestion(
@@ -70,12 +75,14 @@ if [ -f "$WORKTREE/.task-meta.json" ]; then
     RUNTIME=$(echo "$META" | python3 -c "import json,sys;m=json.load(sys.stdin);print(m.get('executor_runtime') or m.get('runtime',''))")
     MODEL=$(echo "$META" | python3 -c "import json,sys;m=json.load(sys.stdin).get('model');print(m or '')")
     PLAN_FILE=$(echo "$META" | python3 -c "import json,sys;print(json.load(sys.stdin).get('plan_file') or '')")
+    APPROVED_PLAN_SHA256=$(echo "$META" | python3 -c "import json,sys;print(json.load(sys.stdin).get('approved_plan_sha256') or '')")
 fi
 ```
 
 `PLAN_FILE` (if non-empty and the file exists) — the plan /dispatch handed to the split: on **mode=final** close the loop in Phase 2 via `plan_close` (status executed + link to the result + exec session). On interim — leave it alone.
 
-**Cross-session mismatch warning:**
+**Cross-session mismatch:** unattended mode fails closed and leaves the task
+surface open. Interactive mode uses the warning question below.
 
 ```python
 curr = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unknown"
@@ -97,12 +104,14 @@ Keep `WIKI_RUNTIME`, `RUNTIME`, `MODEL`, and `SUGGESTED_AGENTS` for echo/frontma
 
 ### 1.2 Fetch the summary (file-first, screen-fallback)
 
-**Priority — `.task-summary.md`** in the worktree, placed there by the task agent's `/reap-send` / `$llm-obsidian:reap-send` RPC. It contains a clean `## Wiki Summary` block with no shell wrapping or scrollback noise.
+**Priority — `.task-summary.json`** in the worktree, placed there by the task agent's `/reap-send` RPC. It is the canonical validated v1 contract. `.task-summary.md` is the legacy/derived fallback.
 
 ```bash
 WORKTREES_DIR="${LLM_OBSIDIAN_WORKTREES:-$HOME/Projects/worktrees}"
 WORKTREE="$WORKTREES_DIR/<repo>-<task-name>"
-if [ -f "$WORKTREE/.task-summary.md" ]; then
+if [ -f "$WORKTREE/.task-summary.json" ]; then
+    python3 scripts/parse-wiki-summary.py --json-file "$WORKTREE/.task-summary.json"
+elif [ -f "$WORKTREE/.task-summary.md" ]; then
     cat "$WORKTREE/.task-summary.md"
 else
     # Fallback: cmux read-screen for when the task agent did not use /reap-send
@@ -111,7 +120,7 @@ else
 fi
 ```
 
-**When `.task-summary.md` is used** (RPC mode — the normal path):
+**When `.task-summary.json` is used** (RPC mode — the normal path):
 - the task agent wrote the file via `/reap-send` and injected `/reap` / `$llm-obsidian:reap` into the wiki split via `cmux send`
 - the wiki agent (us, here) received that injected command as "user" input
 - read the file; no cmux read-screen magic needed
@@ -122,7 +131,7 @@ fi
 
 If both sources are empty — stop:
 ```
-Neither .task-summary.md nor the surface output produced a `## Wiki Summary` block.
+Neither .task-summary.json/.md nor the surface output produced a valid Wiki Summary.
 Switch to the task split and say /reap-send / $llm-obsidian:reap-send (or print the block by hand
 and /reap here).
 ```
@@ -132,15 +141,30 @@ and /reap here).
 Pipe the fetched output (file or read-screen) through the parser — do NOT dissect the block by hand:
 
 ```bash
+python3 scripts/parse-wiki-summary.py --json-file "$WORKTREE/.task-summary.json"
+# legacy fallback only:
 python3 scripts/parse-wiki-summary.py --file "$WORKTREE/.task-summary.md"
 # fallback path: cmux read-screen --surface "$SURFACE_ID" --scrollback --lines 500 | python3 scripts/parse-wiki-summary.py
 ```
 
-stdout — JSON `{type, title, session, body}`. The rules live in the script: the **last** `## Wiki Summary` wins, `type` is validated against the enum (session|decision|runbook|incident|service-update|repo-touch), `title` must be non-empty and not a `<placeholder>`.
+stdout — v1 JSON `{schema_version,type,title,session,body}`. The legacy Markdown parser still uses the last block, but new handoffs must use canonical JSON.
 
 - **Exit 2** = the block is broken/missing — relay the stderr reason into the task split ("finalize the task and produce a Wiki Summary block as described in .task-prompt.md"). Stop, do not file.
 - `session` → `EXEC_SESSION` — the executor session (the task agent in the split; NOT equal to origin_session or the current reap session). Goes into the `sessions:` of the result page and the plan page. `null` (an old split; the script prints a stderr warning) — continue without it, note it in the echo.
 - `type` — determines the folder and the behavior (new page vs update); `title` — the filename and H1; `body` — the markdown content.
+
+For unattended mode, now run:
+
+```bash
+CURRENT_SESSION=$(./scripts/current-session-id.sh)
+python3 scripts/task_contract.py check-handoff \
+  --meta "$WORKTREE/.task-meta.json" \
+  --summary "$WORKTREE/.task-summary.json" \
+  --current-session "$CURRENT_SESSION"
+```
+
+Any plan hash, origin session, type, title, or auto-file mismatch stops before
+address allocation or vault writes.
 
 ### 1.5-1.6 Routing + frontmatter
 
@@ -154,7 +178,7 @@ stdout — JSON `{type, title, session, body}`. The rules live in the script: th
 
 Prepare **in your head** before the Write phase:
 
-1. **The new or updated page** — full markdown with frontmatter and body.
+1. **The new or updated page operation** — full markdown with frontmatter and body. In update-mode capture `python3 scripts/vault-write.py --sha256 <target>` and include it as `expected_sha256`.
 2. **vault-write payload** (a single JSON):
    - `log_entry`: prepend a full prose entry:
      ```
@@ -167,6 +191,10 @@ Prepare **in your head** before the Write phase:
 4. **`wiki/hot.md`** directly — do NOT touch at all (including the frontmatter `related:`).
 
 ### 1.9 Echo-confirm to the user
+
+Skip this section for a successful unattended contract check. The upfront
+dispatch approval is the file authorization. Keep the echo for interactive
+and legacy tasks:
 
 ```
 Ready to file:
@@ -182,28 +210,64 @@ Ready to file:
 File it?
 ```
 
-Wait for "yes / no / edit". No Write without explicit consent.
+Wait for "yes / no / edit" only in interactive mode.
 
 ---
 
-## Phase 2: Write (batched, single assistant message)
+## Phase 2: Write (one transaction)
 
-Two tool calls **in parallel in one assistant message**:
+For unattended final mode, first bind the still-pending approved plan, current
+summary, intended result path, and deterministic post-`plan_close` hash. This
+must happen before the writer changes the plan:
 
-- `Write <target-page-path>` — the new page (or `Edit` in update-mode).
-- `Bash`: a single payload into the dispatcher (plan closure also happens here, NOT via a manual Edit):
+```bash
+python3 scripts/cmux_surface_lifecycle.py prepare-reap \
+  --worktree "$WORKTREE" \
+  --current-session "$CURRENT_SESSION" \
+  --result-path "<absolute-created-or-updated-wiki-page>" \
+  --vault-root "<vault-root>"
+```
+
+If preparation fails, do not write. The marker contains hashes and identifiers
+only; `complete-reap` later rejects a changed summary, metadata, result route,
+or plan that differs from the exact close transformation prepared here.
+
+Send the page, log/hot, and optional plan closure in a single dispatcher call:
+
   ```bash
   python3 scripts/vault-write.py <<'PAYLOAD'
-  {"log_entry": "## [YYYY-MM-DD] reap | <task-name>\n\n`c-NNNNNN` [[Title]]. ...",
+  {"actor": "reap", "session": "<CURRENT_SESSION>",
+   "pages": [{"op": "create", "path": "wiki/<folder>/<Title>.md", "content": "<full markdown, JSON-escaped>"}],
+   "log_entry": "## [YYYY-MM-DD] reap | <task-name>\n\n`c-NNNNNN` [[Title]]. ...",
    "hot_bullet": "YYYY-MM-DD: [[Title]] — essence (`c-NNNNNN`)",
-   "plan_close": {"file": "wiki/plans/<file>.md", "result_link": "[[Title]]", "exec_session": "<EXEC_SESSION|null>"}}
+   "plan_close": {"file": "wiki/plans/<file>.md", "result_link": "[[Title]]", "exec_session": "<EXEC_SESSION|null>", "expected_sha256": "<APPROVED_PLAN_SHA256>"}}
   PAYLOAD
   ```
-  Include `plan_close` ONLY on mode=final with a `PLAN_FILE` present (interim / no plan — omit the key). The script itself does: `status: pending → executed`, bump `updated:`, the exec session into `sessions:` (the plan carries BOTH sessions — planning and executing), and a `Result: <link> (reaped ...)` line at the end of the body.
+  Include `plan_close` ONLY on mode=final with a `PLAN_FILE` present (interim / no plan — omit the key). For a v2 unattended task, include its `APPROVED_PLAN_SHA256` as `expected_sha256`; a concurrent or unprepared plan mutation then aborts the whole transaction before any page/log/hot write. The script itself does: `status: pending → executed`, bump `updated:`, the exec session into `sessions:` (the plan carries BOTH sessions — planning and executing), and a `Result: <link> (reaped ...)` line at the end of the body.
 
-  Exit 2 = a violation with a reason (Active Threads > 8; the plan already executed / not pending — "wrong plan_file?") — fix the payload and rerun; do NOT bypass with direct Edits.
+  Update-mode uses `op:update` plus `expected_sha256`. Exit 2 = cap/lifecycle violation; exit 4 = optimistic-concurrency conflict. Fix/re-read and rerun; do not bypass with direct Edits.
 
 **Do not split across multiple turns.** The Stop hook (autocommit) fires once at the end of the turn — one tidy commit, not five.
+
+For unattended final mode, synchronously run `python3 scripts/reindex.py` and
+`scripts/validate-vault.py --summary` after the writer succeeds. If either
+fails, leave the task surface open as `needs-attention`. If both pass, run:
+
+```bash
+python3 scripts/cmux_surface_lifecycle.py complete-reap \
+  --worktree "$WORKTREE" \
+  --current-session "$CURRENT_SESSION" \
+  --result-path "<absolute-created-or-updated-wiki-page>" \
+  --vault-root "<vault-root>"
+python3 scripts/cmux_surface_lifecycle.py request-exit \
+  --worktree "$WORKTREE" --kind task
+```
+
+`complete-reap` consumes the pre-write preparation, verifies the existing page
+inside this vault's `wiki/`, and requires the plan to match the exact prepared
+post-`plan_close` hash. Only then does it permit close arming. The task launch
+wrapper closes the exact UUID only after its agent process returns. This never
+deletes the worktree or branch.
 
 ---
 
@@ -225,10 +289,11 @@ Saved as [[<Title>]] in wiki/<folder>/.
 
 Task split <surface-id>:
   - repo changes committed: <yes/no based on `git -C <worktree> status --short`>
-  - cmux surface is NOT closed; if you need to stop the task-agent process, switch there and run `/exit`
-  - suggested file cleanup only:
+  - unattended clean final: `/exit` is armed and its exact surface closes after process return
+  - interactive/failed/dirty final: surface stays open for inspection
+  - interactive-only suggested cleanup; unattended tasks keep worktree + branch:
       git -C <worktree> log --oneline -5         # review your commits
-      rm <worktree>/.task-summary.md             # clear the handoff file (optional)
+      rm <worktree>/.task-summary.json <worktree>/.task-summary.md  # optional handoff cleanup
       rm <worktree>/.task-meta.json              # clear the meta file (optional)
       git worktree remove <worktree-path>        # remove the worktree
 
@@ -268,8 +333,9 @@ Cmux surface is not closed — it may hold needed context.
 
 ## Do not
 
-- Do NOT delete the branch (`git branch -D`) automatically — only the worktree.
-- Do NOT close a cmux surface from `/reap` at all. `/reap` files knowledge; task-agent exit is `/exit` inside its surface.
+- Do NOT delete the worktree or branch automatically; unattended tasks retain both.
+- Do NOT call `cmux close-surface` directly. Only arm `request-exit`; the task
+  wrapper closes its own persisted UUID after process return.
 - Do NOT use `cmux close-workspace` (it would close the wiki agent together with the task split).
 - Do NOT duplicate the summary across `log.md` and `hot.md` — long prose only in the new page + log.md; hot.md = one line.
 - Do NOT read a `## Wiki Summary` block older than the latest in the transcript (the task agent may reprint it after edits).

@@ -11,22 +11,22 @@ Based on [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) by A
 ## What you get
 
 - **A wiki that grows itself.** `ingest <path|URL>` turns raw material into 8-15 cross-linked typed pages; `/save` files insights from any conversation; `/autoresearch` runs autonomous research loops; every approved plan is auto-captured into `wiki/plans/`.
-- **Retrieval that is measured, not vibed.** Hybrid search = dense embeddings (local [ollama](https://ollama.com) + `bge-m3`) fused with BM25 and a tag prefilter. A benchmark harness (`make bench-retrieval`) scores hit@1 / hit@5 / MRR@10 against your own goldset — no ranking change ships without moving the numbers.
-- **RU-first, local-first.** `bge-m3` handles Russian prose and transliterated tech terms that English-centric embedding models miss (on our calibration vault the dense channel went from hit@1 0.27 to **0.85** after the swap). Zero cloud API calls: everything embeds on your machine.
-- **A deterministic write path.** `wiki/log.md` (append-only journal) and `wiki/hot.md` (~500-word recent-context cache loaded on session start) are written only through `scripts/vault-write.py`, which enforces hard caps so the hot cache stays a cache and never rots into a second journal.
-- **An industrial Stop hook.** On every turn end: reindex, BM25 rebuild, incremental dense-embedding refresh, sanitized memory backup, auto-commit — serialized under `flock` so parallel sessions never corrupt each other, with per-phase latency telemetry and a slow-turn warning.
+- **Retrieval that is measured, not vibed.** H2/H3 sections are bounded to 800 words with 100-word overlap, ranked sparsely, and deduplicated to the best heading/snippet per page; optional local `bge-m3` joins through RRF. A 48-query RU/EN goldset is half held out, and `make bench-retrieval` rejects hit@5/MRR regressions over 0.02.
+- **RU-first, local-first.** The mandatory sparse channel handles Cyrillic and mixed technical vocabulary without a service. Optional `bge-m3` embeddings stay on your machine; no cloud API is required.
+- **A transactional write path.** Agent-driven page create/update, manifest merge, `wiki/log.md`, and `wiki/hot.md` go through `scripts/vault-write.py`: strict frontmatter, optimistic SHA-256 updates, cap enforcement, and crash-safe roll-forward from a durable journal.
+- **An industrial Stop hook.** Every turn: recover interrupted writes, reindex, self-heal sparse section retrieval, strictly validate, commit only vault-owned paths, then schedule fingerprinted dense refresh when needed without waiting. Stdlib `fcntl` serializes sessions; validation failures block the commit without hiding dirty work.
 - **MCP without the process zoo.** A local HTTP gateway (one launchd service) fronts all your MCP servers: one set of long-lived processes per machine instead of per-terminal duplicates. Ships with [context7](https://context7.com) preconfigured — add one API-key line and library docs are available in every session.
-- **Parallel work, optional.** `/dispatch` spawns a task in a separate git worktree + [cmux](https://github.com/wandb/cmux) split (with plan handoff to a cheaper model), `/reap` files its results back into the wiki. Requires cmux; everything else works without it.
+- **Parallel work, optional.** `/dispatch` gives an approved plan one bounded unattended mandate in a separate git worktree + [cmux](https://github.com/wandb/cmux) split. Cross-model review, contract-bound final `/reap`, validation, observer-only 15/20-minute stall notifications, and armed close-on-process-exit run without repeated prompts; blocking/scope changes return to the coordinator. Requires cmux; everything else works without it.
 
 ## Why this fork
 
 | | upstream claude-obsidian | llm-obsidian |
 |---|---|---|
-| Dense retrieval | contextual-prefix cascade, cloud API tier for best results | local ollama `bge-m3`, no cloud calls, RU-capable (dense hit@1 0.27 → 0.85 on a RU/EN goldset) |
-| Fusion | chunk cascade | scope-aware fusion: dense ranks what it embeds, BM25 *injects only* pages outside the dense scope — tuned on a goldset with a held-out half after plain weighted RRF measurably failed |
-| Retrieval QA | one-off benchmark scripts | permanent harness: goldset + `make bench-retrieval`, hit@1/hit@5/MRR@10 per channel, degradation testing |
-| hot/log write path | free-form model edits | `vault-write.py` payload API with deterministic caps + `validate-vault.py` |
-| Turn-end hook | inline hooks.json commands | `stop.sh`: flock serialization, atomic writes, incremental index refresh, latency telemetry (`STOP_HOOK_SLOW`) |
+| Retrieval unit | contextual-prefix chunk cascade | H2/H3 sections, 800-word cap, 100-word overlap, best heading/snippet per unique page |
+| Fusion | chunk cascade | mandatory sparse title/tag/heading/body ranking + optional local `bge-m3` RRF; explicit degraded metadata |
+| Retrieval QA | one-off benchmark scripts | 48 RU/EN queries, 50% held out, committed baseline, ≤0.02 hit@5/MRR regression gate |
+| vault write path | free-form model edits | transactional `vault-write.py`: pages + manifest + log/hot, optimistic hashes, recovery journal |
+| Turn-end hook | inline hooks.json commands | `stop-hook.py`: `fcntl`, recovery, self-healing indexes, validation gate, scoped commit |
 | Skill routing | descriptions only | data-driven `skill-router` hook (regex rules → soft hints) + `session-nudge` maintenance hints |
 | MCP | per-session stdio servers | HTTP gateway: 1 process set per machine, secrets outside the repo, `doctor`/`smoke`/`update` tooling, profile pattern for heavy servers |
 | Orchestration | — | `/dispatch` / `/reap` worktree + split workflow with auto plan handoff |
@@ -45,12 +45,22 @@ Requirements: macOS (Linux mostly works, launchd bits are macOS-only), [Obsidian
 # 1. Get the vault
 git clone https://github.com/zerg-su/llm-obsidian ~/Projects/llm-obsidian
 cd ~/Projects/llm-obsidian
-bash bin/setup-vault.sh          # one-time provisioning (downloads Excalidraw plugin binary)
+bash bin/setup-clean-machine.sh  # vault + MCP gateway config + Codex metadata
 
 # 2. Open the folder as a vault in Obsidian, then start Claude Code in it
 claude
 # > /wiki                        # bootstrap: the agent walks you through personalization
 ```
+
+`setup-clean-machine.sh` preserves existing Obsidian settings, MCP server entries,
+and secrets. Use `--reset-obsidian` only when you intentionally want the three
+managed defaults restored; it first backs up the complete `.obsidian` directory.
+The Excalidraw `main.js` bootstrap is pinned and checksum-verified. A different
+existing build is preserved with a warning; use
+`bash bin/setup-vault.sh --repair-excalidraw "$(pwd)"` (or pass the same flag
+to `setup-clean-machine.sh`) to back it up and replace it explicitly.
+Add `--install-service` after filling `~/.config/mcp-gateway/secrets.env`, and
+`--install-codex-plugin` when the Codex CLI is already installed.
 
 Install as a plugin (skills + hooks) instead of / in addition to cloning:
 
@@ -61,7 +71,7 @@ claude plugin marketplace add zerg-su/llm-obsidian
 
 ### Local embeddings (recommended)
 
-Dense retrieval and the tiling duplicate-lint run on a local ollama with `bge-m3` (1024-dim, 8k context, 100+ languages, ~1.2 GB):
+Optional dense section retrieval and the tiling duplicate-lint run on a local ollama with `bge-m3` (1024-dim, 8k context, 100+ languages, ~1.2 GB):
 
 ```bash
 brew install ollama
@@ -70,7 +80,28 @@ ollama pull bge-m3
 curl -s http://127.0.0.1:11434 && echo " ollama is up"
 ```
 
-Without ollama nothing breaks: hybrid search degrades to BM25-only automatically, and the Stop hook skips the embedding refresh.
+Without ollama nothing breaks: retrieval returns complete sparse section results with
+`degraded=true`. Stop refreshes sparse indexes synchronously, records a fingerprinted
+dense marker, and launches a lock-safe worker without waiting for embeddings. Failed
+workers retain the marker for a later retry. Required Stop phases default to a 60-second
+budget; override it with `LLM_OBSIDIAN_STOP_REQUIRED_TIMEOUT_SEC` (1–600 seconds).
+
+### Optional agent-memory backup
+
+Backup of Claude's separate auto-memory is off by default and never searches
+neighboring vaults. To opt in, either set `CLAUDE_MEMORY_DIR` explicitly or run:
+
+```bash
+cp config/memory-backup.example.json .vault-meta/memory-backup.json
+# edit source and set enabled=true
+python3 scripts/memory-backup.py --status
+```
+
+Before changing `.claude-memory/`, the helper sanitizes the complete candidate
+snapshot and scans both it and the existing backup. Any residual credential
+pattern blocks all writes and the turn-end commit. This is pattern-based
+defense-in-depth, not proof that arbitrary secrets are absent; review backup
+diffs before publishing them.
 
 ### First contact
 
@@ -85,16 +116,11 @@ lint the wiki                           # health check: orphans, dead links, dup
 
 ## MCP HTTP gateway
 
-Tool schemas aside, MCP's practical tax is processes: every terminal session spawns its own copy of every stdio server. The gateway runs **one** set of children per machine behind [TBXark/mcp-proxy](https://github.com/TBXark/mcp-proxy); sessions connect over HTTP and survive gateway restarts.
+Tool schemas aside, MCP's practical tax is processes: every terminal session spawns its own copy of every stdio server. The gateway runs **one** set of children per machine behind [TBXark/mcp-proxy](https://github.com/TBXark/mcp-proxy); sessions connect over HTTP and survive gateway restarts. Bootstrap installs the exact artifact and SHA-256 recorded in `scripts/mcp-gateway/mcp-proxy.lock.json`—never an unreviewed `latest` release.
 
 ```bash
 # one-time
-mkdir -p ~/.local/bin ~/.config/mcp-gateway
-# download the mcp-proxy release binary for your platform -> ~/.local/bin/mcp-proxy && chmod +x
-cp scripts/mcp-gateway/config.json.example scripts/mcp-gateway/config.json
-cp scripts/mcp-gateway/secrets.env.example ~/.config/mcp-gateway/secrets.env
-chmod 600 ~/.config/mcp-gateway/secrets.env
-cp .mcp.json.example .mcp.json
+bin/setup-clean-machine.sh --skip-vault
 
 # context7 (library docs MCP): get a free key at https://context7.com and add ONE line
 #   CONTEXT7_API_KEY=ctx7sk-...
@@ -104,6 +130,10 @@ scripts/mcp-gateway/mcp-gateway.sh doctor    # read-only pre-flight: tells you w
 scripts/mcp-gateway/mcp-gateway.sh install   # launchd service, autostarts at login
 scripts/mcp-gateway/mcp-gateway.sh health    # real MCP handshake against the first child
 ```
+
+The one local port setting is `scripts/mcp-gateway/runtime.env`. After changing
+it, run `mcp-gateway.sh sync-config --apply`; gateway and default client JSON are
+updated together.
 
 Adding your own servers is a config edit (stdio children with `command`/`args`/`env`, remote children with `url`; `${VAR}` placeholders resolve from `secrets.env`, and `doctor` derives the required key list automatically). Full guide, the add-a-server checklist, disaster recovery and hard-won gotchas: **[docs/mcp-gateway.md](docs/mcp-gateway.md)**.
 
@@ -130,13 +160,15 @@ servers from `~/.codex/config.toml`, and writes optional profile overlays such a
 
 A `UserPromptSubmit` router suggests the right skill from regex rules in `.claude/skill-rules.json` (soft hints, never mandatory); `session-nudge` surfaces overdue maintenance (lint age, fold due, stale backups, a skill-of-the-day tip).
 
+Running an unattended `/dispatch` task end to end (supervisor/watchdog behavior, permission boundaries, typed review callbacks, auto-close, diagnostics): **[docs/unattended-pipeline-operations.md](docs/unattended-pipeline-operations.md)**.
+
 ## Testing
 
 Everything mechanical is covered by hermetic suites — no network, no ollama needed:
 
 ```bash
 make test          # address allocator, tiling, boundary, vault-write/validate,
-                   # stop-hook (flock + latency), bm25 + fusion, bench harness, router
+                   # safe stop-hook + latency, bm25 + fusion, bench harness, router
 make test-gateway  # MCP gateway management layer (offline, fake MCP server)
 ```
 
@@ -153,9 +185,12 @@ codex plugin add llm-obsidian@llm-obsidian-codex
 
 Start a new Codex thread after installing or updating. Invoke skills explicitly
 as `$llm-obsidian:save`, `$llm-obsidian:wiki-query`,
-`$llm-obsidian:review-dispatch`, `$llm-obsidian:close`, etc.
-Claude Code hooks remain Claude-specific; Codex can use the same skills and
-scripts, but does not run `.claude/hooks/`.
+`$llm-obsidian:review-dispatch`,
+`$llm-obsidian:close`, etc.
+Claude prompt/session/tool hooks remain Claude-specific. The installed Codex
+plugin does run the shared, safe `Stop` pipeline, but does not claim automatic
+`SessionStart`, `UserPromptSubmit`, or `PostToolUse` parity. See the
+[runtime capability matrix](docs/runtime-capabilities.md).
 
 Codex limit helpers are bundled too:
 
@@ -186,7 +221,7 @@ set `DCG_TEST_USE_USER_CONFIG=1` to test the machine's live allowlist/config.
 
 ## Roadmap
 
-- **Codex hook parity**: skills and MCP sync are supported; the automatic Claude hook layer (`SessionStart`, `PostToolUse`, `Stop`) remains Claude Code specific.
+- **Codex prompt/tool hook parity**: skills, MCP sync, shared scripts, and the safe `Stop` pipeline are supported; `SessionStart`, `UserPromptSubmit`, and `PostToolUse` remain host-specific.
 - RU localization of skill bodies (currently EN — measurably better instruction-following; RU trigger words already work).
 - More example MCP servers in the gateway config.
 - Generic ports of the remaining incubator skills (morning briefing, commit digest, verification gates, debug discipline).

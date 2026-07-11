@@ -1,0 +1,9 @@
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "read-only"
+web_search = "disabled"
+
+[features]
+apps = false
+multi_agent = false
+memories = false

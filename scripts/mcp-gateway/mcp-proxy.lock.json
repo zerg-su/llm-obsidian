@@ -1,0 +1,22 @@
+{
+  "project": "TBXark/mcp-proxy",
+  "version": "0.43.2",
+  "assets": {
+    "darwin-amd64": {
+      "url": "https://github.com/tbxark/mcp-proxy/releases/download/v0.43.2/mcp-proxy_0.43.2_darwin_amd64.tar.gz",
+      "sha256": "d847af26c340c2fff91dd72281f7456d67fd65dfdb837ea003014827bdb8e2fe"
+    },
+    "darwin-arm64": {
+      "url": "https://github.com/tbxark/mcp-proxy/releases/download/v0.43.2/mcp-proxy_0.43.2_darwin_arm64.tar.gz",
+      "sha256": "5a2b1aaf3346e9a8d6667c311a88f2e5b453ec93874980c405885274c13da9b1"
+    },
+    "linux-amd64": {
+      "url": "https://github.com/tbxark/mcp-proxy/releases/download/v0.43.2/mcp-proxy_0.43.2_linux_amd64.tar.gz",
+      "sha256": "8d2df47e4fb238d4819150f302c25ed691fb36e8c900b863386f2e9e4f4c0ded"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/tbxark/mcp-proxy/releases/download/v0.43.2/mcp-proxy_0.43.2_linux_arm64.tar.gz",
+      "sha256": "f75c723147e23f2c0cbe4ddefa149484709a0196b363be795bf65bd9a3248911"
+    }
+  }
+}

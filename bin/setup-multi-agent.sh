@@ -6,8 +6,8 @@
 # Supported agents:
 #   - Claude Code    : auto-discovered via .claude-plugin/ (no symlink needed)
 #   - Codex CLI      : repo Codex plugin marketplace + MCP mirror
-#   - OpenCode       : symlink to ~/.opencode/skills/llm-obsidian
-#   - Gemini CLI     : symlink to ~/.gemini/skills/llm-obsidian
+#   - OpenCode       : symlink to ~/.opencode/skills/<plugin-name>
+#   - Gemini CLI     : symlink to ~/.gemini/skills/<plugin-name>
 #   - Cursor         : symlink to .cursor/skills (in repo)
 #   - Windsurf       : symlink to .windsurf/skills (in repo)
 #
@@ -20,10 +20,18 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/skills"
-CODEX_MARKETPLACE="llm-obsidian-codex"
+PLUGIN_NAME="$(python3 - "$REPO_ROOT/.claude-plugin/plugin.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    print(json.load(fh)["name"])
+PY
+)"
+CODEX_MARKETPLACE="${PLUGIN_NAME}-codex"
 
 if [ ! -d "$SKILLS_DIR" ]; then
-  echo "ERROR: $SKILLS_DIR does not exist. Are you running this from the llm-obsidian repo?"
+  echo "ERROR: $SKILLS_DIR does not exist. Are you running this from the $PLUGIN_NAME repo?"
   exit 1
 fi
 
@@ -59,7 +67,7 @@ link_if_missing() {
   echo -e "${GREEN}[$agent_name] linked: $dest -> $target${NC}"
 }
 
-echo "llm-obsidian: multi-agent skill installer"
+echo "$PLUGIN_NAME: multi-agent skill installer"
 echo "Repo: $REPO_ROOT"
 echo
 
@@ -73,16 +81,16 @@ if [ -x "$REPO_ROOT/scripts/mcp-gateway/mcp-gateway.sh" ]; then
   "$REPO_ROOT/scripts/mcp-gateway/mcp-gateway.sh" codex-sync --apply || \
     echo -e "${YELLOW}[Codex CLI] MCP sync failed; run scripts/mcp-gateway/mcp-gateway.sh codex-sync --check for details.${NC}"
 fi
-LEGACY_CODEX_LINK="$HOME/.codex/skills/llm-obsidian"
+LEGACY_CODEX_LINK="$HOME/.codex/skills/$PLUGIN_NAME"
 if [ -L "$LEGACY_CODEX_LINK" ] && [ "$(readlink "$LEGACY_CODEX_LINK")" = "$SKILLS_DIR" ]; then
   echo -e "${YELLOW}[Codex CLI] legacy skill symlink still exists: $LEGACY_CODEX_LINK. Plugin install is canonical; remove the symlink manually if duplicate skills appear.${NC}"
 fi
 if command -v codex >/dev/null 2>&1 && [ "${CODEX_SKIP_PLUGIN_INSTALL:-0}" != "1" ]; then
   codex plugin marketplace add "$REPO_ROOT" >/dev/null 2>&1 || true
-  if codex plugin add "llm-obsidian@$CODEX_MARKETPLACE" >/dev/null 2>&1; then
-    echo -e "${GREEN}[Codex CLI] installed llm-obsidian@$CODEX_MARKETPLACE${NC}"
+  if codex plugin add "$PLUGIN_NAME@$CODEX_MARKETPLACE" >/dev/null 2>&1; then
+    echo -e "${GREEN}[Codex CLI] installed $PLUGIN_NAME@$CODEX_MARKETPLACE${NC}"
   else
-    echo -e "${YELLOW}[Codex CLI] could not install llm-obsidian@$CODEX_MARKETPLACE; inspect with: codex plugin list${NC}"
+    echo -e "${YELLOW}[Codex CLI] could not install $PLUGIN_NAME@$CODEX_MARKETPLACE; inspect with: codex plugin list${NC}"
   fi
 elif ! command -v codex >/dev/null 2>&1; then
   echo -e "${YELLOW}[Codex CLI] codex command not found; generated repo files only.${NC}"
@@ -92,10 +100,10 @@ fi
 echo
 
 # OpenCode
-link_if_missing "$SKILLS_DIR" "$HOME/.opencode/skills/llm-obsidian" "OpenCode"
+link_if_missing "$SKILLS_DIR" "$HOME/.opencode/skills/$PLUGIN_NAME" "OpenCode"
 
 # Gemini CLI
-link_if_missing "$SKILLS_DIR" "$HOME/.gemini/skills/llm-obsidian" "Gemini CLI"
+link_if_missing "$SKILLS_DIR" "$HOME/.gemini/skills/$PLUGIN_NAME" "Gemini CLI"
 
 # Cursor (workspace-local)
 link_if_missing "$SKILLS_DIR" "$REPO_ROOT/.cursor/skills" "Cursor"
@@ -108,8 +116,8 @@ echo -e "${GREEN}Done.${NC} Bootstrap files (AGENTS.md, GEMINI.md, .cursor/rules
 echo
 echo "To verify each agent picks up the skills:"
 echo "  - Claude Code: open the project, type /wiki"
-echo "  - Codex CLI:   codex plugin list | grep llm-obsidian"
-echo "                 start a new Codex thread after install; invoke explicitly as \$llm-obsidian:save"
+echo "  - Codex CLI:   codex plugin list | grep $PLUGIN_NAME"
+echo "                 start a new Codex thread after install; invoke explicitly as \$$PLUGIN_NAME:save"
 echo "  - Cursor:      open the project, ask 'what skills do you have?'"
 echo "  - Windsurf:    open in Cascade, ask the same"
 echo "  - Gemini CLI:  gemini --list-skills (if supported)"

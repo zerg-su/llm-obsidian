@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
-"""test_retrieval_bench.py — hermetic tests for scripts/retrieval-bench.py.
+"""Hermetic tests for retrieval metrics, split policy, and regression gate."""
 
-No ollama, no live vault: metrics math and goldset parsing are unit-tested
-via importlib; degradation paths run the copied script in a mktemp sandbox
-via subprocess (dense probe fails against a dead endpoint either way).
+from __future__ import annotations
 
-Usage:
-  python3 tests/test_retrieval_bench.py
-"""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-BENCH = ROOT / "scripts" / "retrieval-bench.py"
+from types import SimpleNamespace
 
 
-def load_module(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+ROOT = Path(__file__).resolve().parents[1]
+BENCH = ROOT / "scripts/retrieval-bench.py"
 
 
 class Fail(SystemExit):
@@ -37,113 +28,181 @@ def assert_eq(label, expected, actual):
     print(f"OK   {label}")
 
 
-def assert_true(label, cond, extra=""):
-    if not cond:
+def assert_true(label, condition, extra=""):
+    if not condition:
         raise Fail(f"FAIL {label}{': ' + extra if extra else ''}")
     print(f"OK   {label}")
 
 
-rb = load_module(BENCH, "retrieval_bench_test")
-
-
-def test_first_hit_rank():
-    assert_eq("rank first", 1, rb.first_hit_rank(["a", "b"], ["a"]))
-    assert_eq("rank later", 3, rb.first_hit_rank(["x", "y", "a"], ["a", "z"]))
-    assert_eq("rank any-of-expect", 2, rb.first_hit_rank(["x", "b"], ["a", "b"]))
-    assert_eq("rank miss", None, rb.first_hit_rank(["x", "y"], ["a"]))
-    assert_eq("rank beyond k", None, rb.first_hit_rank(["x"] * 10 + ["a"], ["a"]))
-    assert_eq("rank empty ranked", None, rb.first_hit_rank([], ["a"]))
+sys.path.insert(0, str(ROOT / "scripts"))
+spec = importlib.util.spec_from_file_location("retrieval_bench_test", BENCH)
+rb = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = rb
+spec.loader.exec_module(rb)
 
 
 def test_metrics():
-    m = rb.Metrics()
-    for r in (1, 3, None, 2):
-        m.add(r)
-    assert_eq("metrics n", 4, m.n)
-    assert_eq("hit@1", 0.25, m.hit_at(1))
-    assert_eq("hit@5", 0.75, m.hit_at(5))
-    # MRR = (1/1 + 1/3 + 0 + 1/2) / 4
-    assert_eq("mrr", round((1 + 1 / 3 + 0.5) / 4, 6), round(m.mrr(), 6))
-    empty = rb.Metrics()
-    assert_eq("empty hit", 0.0, empty.hit_at(5))
-    assert_eq("empty mrr", 0.0, empty.mrr())
+    assert_eq("rank first", 1, rb.first_hit_rank(["a", "b"], ["a"]))
+    assert_eq("rank any expected", 2, rb.first_hit_rank(["x", "b"], ["a", "b"]))
+    assert_eq("rank miss", None, rb.first_hit_rank(["x"], ["a"]))
+    metrics = rb.Metrics()
+    for rank in (1, 3, None, 2):
+        metrics.add(rank)
+    assert_eq("metrics n", 4, metrics.n)
+    assert_eq("hit@1", 0.25, metrics.hit_at(1))
+    assert_eq("hit@5", 0.75, metrics.hit_at(5))
+    assert_eq("mrr", round((1 + 1 / 3 + 1 / 2) / 4, 6), round(metrics.mrr(), 6))
+    metrics.add(12)
+    assert_eq("mrr@10 excludes deeper ranks", round((1 + 1 / 3 + 1 / 2) / 5, 6), round(metrics.mrr(), 6))
+    assert_eq("recall multi", 0.5, rb.recall_at(["a", "x"], ["a", "b"], 2))
+    ranked = [SimpleNamespace(path="a", heading="Right"), SimpleNamespace(path="b", heading="Other")]
+    entry = {
+        "expect": ["a", "b"],
+        "expect_sections": [
+            {"path": "a", "heading": "Right", "relevance": 3},
+            {"path": "b", "heading": "Wanted", "relevance": 1},
+        ],
+    }
+    value = rb.ndcg_at(ranked, entry)
+    assert_true("section NDCG partial", 0.8 < value < 1.0, str(value))
 
 
 def make_sandbox():
-    sb = Path(tempfile.mkdtemp(prefix="bench-test."))
-    (sb / "scripts").mkdir()
-    (sb / ".vault-meta").mkdir()
-    (sb / "wiki").mkdir()
-    for f in ("retrieval-bench.py", "tag-search.py", "bm25-index.py", "semantic-search.py"):
-        shutil.copy2(ROOT / "scripts" / f, sb / "scripts" / f)
-    return sb
+    root = Path(tempfile.mkdtemp(prefix="retrieval-bench-test."))
+    (root / "scripts").mkdir()
+    (root / "wiki").mkdir()
+    (root / ".vault-meta").mkdir()
+    for filename in ("retrieval-bench.py", "retrieve.py", "vault_schema.py", "pipeline_events.py"):
+        shutil.copy2(ROOT / "scripts" / filename, root / "scripts" / filename)
+    return root
 
 
-def run_bench(sb, *args):
+def run_bench(root, *args):
+    env = dict(os.environ)
+    env["OLLAMA_URL"] = "http://127.0.0.1:9"
     return subprocess.run(
-        [sys.executable, str(sb / "scripts" / "retrieval-bench.py"), *args],
-        capture_output=True, text=True)
+        [sys.executable, str(root / "scripts/retrieval-bench.py"), *args],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
 
 
-def test_degradations():
-    sb = make_sandbox()
+def test_cli():
+    root = make_sandbox()
     try:
-        # no goldset -> exit 3
-        r = run_bench(sb)
-        assert_eq("no goldset exit 3", 3, r.returncode)
+        result = run_bench(root, "--allow-small")
+        assert_eq("missing goldset exit 3", 3, result.returncode)
 
-        # corrupt goldset -> exit 3
-        gs = sb / ".vault-meta" / "retrieval-goldset.jsonl"
-        gs.write_text("not-json{\n", encoding="utf-8")
-        r = run_bench(sb)
-        assert_eq("corrupt goldset exit 3", 3, r.returncode)
+        goldset = root / ".vault-meta/retrieval-goldset.jsonl"
+        goldset.write_text("bad-json{\n", encoding="utf-8")
+        result = run_bench(root, "--allow-small")
+        assert_eq("corrupt goldset exit 3", 3, result.returncode)
 
-        # valid goldset but no bm25 index -> exit 3 with hint
-        page = sb / "wiki" / "target.md"
-        page.write_text("---\ntitle: T\ntags: [buildkit]\n---\nbuildkit leak page\n",
-                        encoding="utf-8")
-        gs.write_text(json.dumps(
-            {"q": "buildkit leak", "expect": ["wiki/target.md"]}) + "\n", encoding="utf-8")
-        r = run_bench(sb)
-        assert_eq("no bm25 index exit 3", 3, r.returncode)
-        assert_true("no bm25 hint", "bm25-index.py build" in r.stderr, r.stderr)
+        page = root / "wiki/Target.md"
+        page.write_text(
+            """---
+type: concept
+title: "Buildkit Cleanup"
+address: c-000001
+status: developing
+created: 2026-07-09
+updated: 2026-07-09
+tags: [buildkit, disk]
+sessions: []
+---
 
-        # build bm25 -> runs; dense/hybrid SKIPPED (no tiling cache in sandbox)
-        subprocess.run([sys.executable, str(sb / "scripts" / "bm25-index.py"),
-                        "build", "--quiet"], capture_output=True)
-        r = run_bench(sb)
-        assert_eq("bm25-only run exit 0", 0, r.returncode)
-        assert_true("dense skipped noted", "SKIPPED" in r.stdout + r.stderr,
-                    r.stdout + r.stderr)
-        assert_true("bm25 measured", "bm25" in r.stdout)
-        bm25_line = next((l for l in r.stdout.splitlines() if l.startswith("bm25")), "")
-        assert_eq("bm25 perfect hit", ["bm25", "1.00", "1.00", "1.000"], bm25_line.split())
+# Buildkit Cleanup
 
-        # dead expect page -> query skipped, zero queries -> still exit 0 with 0 queries
-        gs.write_text(json.dumps(
-            {"q": "buildkit leak", "expect": ["wiki/gone.md"]}) + "\n", encoding="utf-8")
-        r = run_bench(sb)
-        assert_eq("dead expect exit 0", 0, r.returncode)
-        assert_true("dead expect warned", "skipped" in (r.stdout + r.stderr).lower())
+## Disk Leak
 
-        # --report writes a file with frontmatter
-        gs.write_text(json.dumps(
-            {"q": "buildkit leak", "expect": ["wiki/target.md"]}) + "\n", encoding="utf-8")
-        rep = sb / "report.md"
-        r = run_bench(sb, "--report", str(rep))
-        assert_eq("report run exit 0", 0, r.returncode)
-        assert_true("report file written", rep.is_file())
-        assert_true("report has frontmatter", rep.read_text().startswith("---\ntype: meta"))
+Remove orphan buildkit containers to reclaim disk space.
+""",
+            encoding="utf-8",
+        )
+        goldset.write_text(
+            json.dumps(
+                {
+                    "q": "buildkit disk leak cleanup",
+                    "expect": ["wiki/Target.md"],
+                    "split": "heldout",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = run_bench(root)
+        assert_eq("small goldset rejected", 3, result.returncode)
+        assert_true("minimum named", "minimum" in result.stderr)
+
+        result = run_bench(root, "--allow-small")
+        assert_eq("sparse bench exit 0", 0, result.returncode)
+        assert_true("sparse measured", "sparse/all" in result.stdout)
+        assert_true("new metrics measured", "NDCG@10" in result.stdout and "R@20" in result.stdout)
+        assert_true("dense optional noted", "OPTIONAL/UNAVAILABLE" in result.stdout)
+
+        report = root / "report.md"
+        result = run_bench(root, "--allow-small", "--report", str(report))
+        assert_eq("report exit 0", 0, result.returncode)
+        text = report.read_text(encoding="utf-8")
+        assert_true("report strict frontmatter", text.startswith("---\ntype: meta") and "sessions: []" in text)
+
+        baseline = root / ".vault-meta/baseline.json"
+        result = run_bench(
+            root,
+            "--allow-small",
+            "--write-baseline",
+            "--baseline",
+            str(baseline),
+        )
+        assert_eq("write baseline exit 0", 0, result.returncode)
+        pending = root / ".vault-meta/retrieval-quality.pending.json"
+        pending.write_text("{}\n", encoding="utf-8")
+        result = run_bench(
+            root, "--allow-small", "--gate", "--baseline", str(baseline)
+        )
+        assert_eq("matching baseline gate pass", 0, result.returncode)
+        assert_true("gate pass message", "gate: PASS" in result.stderr)
+        assert_true("passing gate clears quality marker", not pending.exists())
+
+        data = json.loads(baseline.read_text(encoding="utf-8"))
+        data["sparse"]["all"]["hit_at_5"] = 1.0
+        data["sparse"]["all"]["mrr_at_10"] = 1.0
+        data["sparse"]["heldout"]["hit_at_5"] = 1.0
+        data["sparse"]["heldout"]["mrr_at_10"] = 1.0
+        # Make the current ranking miss while preserving the same goldset hash
+        # in the baseline, so the metric regression path—not hash drift—fires.
+        page.rename(root / "wiki/Irrelevant.md")
+        goldset.write_text(
+            json.dumps(
+                {
+                    "q": "totally unmatched phrase",
+                    "expect": ["wiki/Irrelevant.md"],
+                    "split": "heldout",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        data["goldset_sha256"] = rb.hashlib.sha256(goldset.read_bytes()).hexdigest()
+        baseline.write_text(json.dumps(data), encoding="utf-8")
+        pending.write_text("{}\n", encoding="utf-8")
+        result = run_bench(
+            root, "--allow-small", "--gate", "--baseline", str(baseline)
+        )
+        assert_eq("regression gate exit 5", 5, result.returncode)
+        assert_true("regression named", "RETRIEVAL_REGRESSION" in result.stderr)
+        assert_true("failing gate preserves quality marker", pending.exists())
     finally:
-        shutil.rmtree(sb, ignore_errors=True)
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":
     try:
-        test_first_hit_rank()
         test_metrics()
-        test_degradations()
+        test_cli()
     except Fail as exc:
         print(exc, file=sys.stderr)
-        sys.exit(1)
-    print("\nAll retrieval-bench tests passed.")
+        raise SystemExit(1)
+    print("\nAll retrieval benchmark tests passed.")

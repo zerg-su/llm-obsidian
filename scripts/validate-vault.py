@@ -35,19 +35,22 @@ Caps mirrored in scripts/vault-write.py — keep in sync.
 
 from __future__ import annotations
 
-import importlib.util
 import re
+import json
+import subprocess
 import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
+
+from vault_schema import parse_frontmatter, split_frontmatter, validate_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WIKI = REPO_ROOT / "wiki"
 HOT_FILE = WIKI / "hot.md"
 LOG_FILE = WIKI / "log.md"
 INDEX_FILE = WIKI / "index.md"
-FOLD_COUNTER = REPO_ROOT / ".vault-meta" / "last-fold-count.txt"
+FOLD_SCRIPT = REPO_ROOT / "scripts" / "fold-log.py"
 
 HOT_TOTAL_WORDS = 800
 RC_MAX_BULLETS = 15
@@ -65,14 +68,6 @@ REQUIRED_KEYS = ("type", "status", "created", "updated")
 PLAN_STATUSES = {"pending", "executed", "abandoned"}
 PLAN_RESULT_CUTOFF = date(2026, 7, 3)  # birth of the reap plan_close mechanism
 PLAN_PENDING_MAX_AGE_DAYS = 30
-
-# Reuse the frontmatter parser from reindex.py (hyphenless import via importlib)
-_spec = importlib.util.spec_from_file_location("reindex", REPO_ROOT / "scripts" / "reindex.py")
-_reindex = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_reindex)
-split_frontmatter = _reindex.split_frontmatter
-parse_frontmatter = _reindex.parse_frontmatter
-
 
 class Report:
     def __init__(self) -> None:
@@ -139,18 +134,26 @@ def check_hot(r: Report) -> None:
 
 
 def check_fold(r: Report) -> None:
-    if not LOG_FILE.exists():
+    if not LOG_FILE.exists() or not FOLD_SCRIPT.is_file():
         return
-    current = len(re.findall(r"^## \[", LOG_FILE.read_text(encoding="utf-8"), flags=re.M))
-    last = 0
-    if FOLD_COUNTER.exists():
-        raw = FOLD_COUNTER.read_text().strip()
-        last = int(raw) if raw.isdigit() else 0
-    lag = current - last
-    if lag >= FOLD_FAIL_LAG:
-        r.fail(f"fold: {lag} log entries since last fold (cap {FOLD_FAIL_LAG}) — run /wiki-fold")
-    elif lag >= 64:
-        r.warn(f"fold: {lag} log entries since last fold — /wiki-fold due")
+    result = subprocess.run(
+        [sys.executable, str(FOLD_SCRIPT), "status", "--json"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode:
+        r.fail(f"fold: status helper failed: {(result.stderr or result.stdout).strip()}")
+        return
+    try:
+        unprocessed = int(json.loads(result.stdout)["unprocessed_entries"])
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        r.fail(f"fold: unreadable status: {exc}")
+        return
+    if unprocessed >= FOLD_FAIL_LAG:
+        r.fail(f"fold: {unprocessed} unprocessed eligible log entries (cap {FOLD_FAIL_LAG}) — run /wiki-fold")
+    elif unprocessed >= 64:
+        r.warn(f"fold: {unprocessed} unprocessed eligible log entries — /wiki-fold due")
 
 
 def check_index(r: Report) -> None:
@@ -223,6 +226,16 @@ def check_frontmatter(r: Report) -> None:
     if missing_sessions:
         r.warn(f"frontmatter: {len(missing_sessions)} page(s) missing sessions: key: "
                + ", ".join(missing_sessions[:3]) + (" ..." if len(missing_sessions) > 3 else ""))
+
+
+def check_schema(r: Report) -> None:
+    """Strict repository-wide schema, link, and address-state validation."""
+    for issue in validate_schema(REPO_ROOT):
+        message = f"schema/{issue.code}: {issue.message}"
+        if issue.level == "fail":
+            r.fail(message)
+        else:
+            r.warn(message)
 
 
 def check_plans(r: Report) -> None:
@@ -365,6 +378,7 @@ CHECKS = {
     "fold": check_fold,
     "index": check_index,
     "questions": check_questions,
+    "schema": check_schema,
     "frontmatter": check_frontmatter,
     "plans": check_plans,
     "panic": check_panic,
@@ -372,10 +386,12 @@ CHECKS = {
     "guide": check_guide,
 }
 
+DEFAULT_CHECKS = [name for name in CHECKS if name != "frontmatter"]
+
 
 def main(argv: list[str]) -> int:
     summary = "--summary" in argv
-    selected = list(CHECKS)
+    selected = list(DEFAULT_CHECKS)
     if "--checks" in argv:
         try:
             selected = [c.strip() for c in argv[argv.index("--checks") + 1].split(",")]

@@ -12,10 +12,23 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from string import Formatter
 from typing import Any, NoReturn
+
+
+VAULT_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+sys.path.insert(0, str(VAULT_SCRIPTS))
+from review_contract import ReviewContractError, decode_review, render_markdown
+from task_contract import ContractError as TaskContractError, normalize as normalize_task_contract, review_action
+from cmux_agent_supervisor import (
+    CLAUDE_REVIEW_ALLOWED_TOOLS,
+    CLAUDE_REVIEW_TOOL_SURFACE,
+    write_agent_spec,
+)
 
 try:
     import tomllib
@@ -26,11 +39,14 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback.
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = Path(__file__).resolve().parents[3]
 DEFAULT_CLAUDE_MODEL = "opus"
-DEFAULT_CODEX_MODEL = "gpt-5.5"
+DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
 REVIEW_MODES = {"full", "light"}
+CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+CMUX_PASTE_SETTLE_SECONDS = 0.2
 HANDOFF_EXCLUDES = [
     ".task-prompt.md",
     ".task-summary.md",
+    ".task-summary.json",
     ".task-meta.json",
     ".task-cmux-surface",
     ".task-reap-send-skill",
@@ -38,7 +54,9 @@ HANDOFF_EXCLUDES = [
     ".wiki-agent-runtime",
     ".wiki-reap-command",
     ".task-review.md",
+    ".task-review.json",
     ".task-review-verify.md",
+    ".task-review-verify.json",
     ".task-review-resolution.md",
     ".task-review-skill",
     ".task-review-send-skill",
@@ -49,6 +67,19 @@ HANDOFF_EXCLUDES = [
     ".review-baseline-status.txt",
     ".review-baseline-state.json",
     ".review-send-blocked.md",
+    ".review-outbox.json",
+    ".review-relay.json",
+    ".review-close-armed.json",
+    ".task-close-armed.json",
+    ".task-reap-prepared.json",
+    ".task-reap-complete.json",
+    ".task-needs-attention.json",
+    ".task-watchdog.json",
+    ".task-watchdog.lock",
+    ".review-watchdog.json",
+    ".review-watchdog.lock",
+    ".task-agent-command.json",
+    ".review-agent-command.json",
     ".obsidian/workspace.json",
     ".obsidian/workspace-mobile.json",
 ]
@@ -152,11 +183,11 @@ def plugin_name(vault: Path) -> str:
 
 
 def default_review_skill(runtime: str, plugin: str) -> str:
-    return f"${plugin}:review-dispatch" if runtime == "codex" else "/review-dispatch"
+    return f"${plugin}:review-dispatch" if runtime == "codex" else f"/{plugin}:review-dispatch"
 
 
 def default_review_send_skill(runtime: str, plugin: str) -> str:
-    return f"${plugin}:review-send" if runtime == "codex" else "/review-send"
+    return f"${plugin}:review-send" if runtime == "codex" else f"/{plugin}:review-send"
 
 
 def normalize_skill_command(command: str, runtime: str, skill_name: str, plugin: str) -> str:
@@ -165,7 +196,9 @@ def normalize_skill_command(command: str, runtime: str, skill_name: str, plugin:
     if not command:
         return command
     if runtime == "claude" and command.startswith("$"):
-        return f"/{skill_name}"
+        return f"/{plugin}:{skill_name}"
+    if runtime == "claude" and command == f"/{skill_name}":
+        return f"/{plugin}:{skill_name}"
     if runtime == "codex" and command.startswith("/"):
         return f"${plugin}:{skill_name}"
     return command
@@ -214,10 +247,15 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
 
     codex_model = str(merged.get("codex_review_model") or DEFAULT_CODEX_MODEL).strip()
     claude_model = str(merged.get("claude_review_model") or DEFAULT_CLAUDE_MODEL).strip()
+    claude_effort = str(merged.get("claude_review_effort") or meta.get("claude_review_effort") or "").strip()
     reviewer_model = claude_model if reviewer_runtime == "claude" else codex_model
 
     if reviewer_runtime == "codex" and codex_home and not Path(codex_home).exists():
         die(f"CODEX_HOME for reviewer does not exist: {codex_home}")
+    if reviewer_runtime == "codex" and not profile and codex_home:
+        candidate = f"{plugin}-reviewer-readonly"
+        if (Path(codex_home) / f"{candidate}.config.toml").is_file():
+            profile = candidate
 
     return {
         "codex_home": codex_home,
@@ -225,20 +263,18 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
         "review_skill": review_skill,
         "review_send_skill": review_send_skill,
         "reviewer_model": reviewer_model,
+        "reviewer_effort": claude_effort if reviewer_runtime == "claude" else "",
     }
 
 
 def ensure_excludes(worktree: Path) -> None:
-    info = worktree / ".git" / "info"
-    if not info.is_dir():
-        git_file = worktree / ".git"
-        if git_file.is_file():
-            gitdir_line = git_file.read_text(encoding="utf-8", errors="replace").strip()
-            if gitdir_line.startswith("gitdir:"):
-                gitdir = Path(gitdir_line.split(":", 1)[1].strip())
-                if not gitdir.is_absolute():
-                    gitdir = (worktree / gitdir).resolve()
-                info = gitdir / "info"
+    result = run(["git", "rev-parse", "--git-common-dir"], cwd=worktree)
+    if result.returncode != 0 or not result.stdout.strip():
+        die(result.stderr.strip() or "cannot resolve git common directory")
+    common = Path(result.stdout.strip())
+    if not common.is_absolute():
+        common = (worktree / common).resolve()
+    info = common / "info"
     info.mkdir(parents=True, exist_ok=True)
     exclude = info / "exclude"
     existing = set()
@@ -321,8 +357,39 @@ def spawn_cmux_split(no_spawn: bool) -> tuple[str, str, str]:
     return surface, ref, output
 
 
-def callback_command(review_skill: str, task_name: str) -> str:
-    return f"{review_skill} receive {shlex.quote(task_name)}"
+def prepare_review_runtime(
+    worktree: Path,
+    vault: Path,
+    task_name: str,
+    run_id: str,
+    no_spawn: bool,
+) -> Path:
+    """Create the reviewer's sole writable root outside the product worktree."""
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", task_name).strip("-._") or "task"
+    if no_spawn:
+        runtime = worktree.parent / f".review-runtime-{run_id}"
+        runtime.mkdir(mode=0o700)
+    else:
+        root = vault / ".vault-meta" / "review-runtimes"
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        root.chmod(0o700)
+        runtime = root / f"llm-review-{safe_name}-{run_id}"
+        runtime.mkdir(mode=0o700)
+    runtime.chmod(0o700)
+    return runtime.resolve()
+
+
+def callback_command(vault: Path, worktree: Path) -> str:
+    """Build a runtime-neutral callback prompt instead of a fragile slash command."""
+    script = vault / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
+    receive = shlex.join(
+        ["python3", str(script), "receive", "--worktree", str(worktree)]
+    )
+    return (
+        "Cross-model review callback for the active dispatched task. Process it now without waiting for user input. "
+        "After the command succeeds, continue the Review Gate in .task-prompt.md. "
+        f"Run this exact command: {receive}"
+    )
 
 
 def launch_command(
@@ -333,41 +400,62 @@ def launch_command(
     codex_home: str,
     profile: str,
     prompt_file: str,
+    review_surface: str,
+    reviewer_effort: str,
+    review_runtime_dir: Path | None,
 ) -> str:
-    worktree_q = shlex.quote(str(worktree))
-    prompt_ref = shlex.quote(prompt_file)
+    env: dict[str, str] = {}
     if reviewer_runtime == "claude":
-        return (
-            f"cd {worktree_q}; clear; claude --permission-mode auto "
-            f"--model {shlex.quote(reviewer_model)} \"$(cat {prompt_ref})\""
-        )
-
-    parts: list[str] = []
-    if codex_home:
-        parts.append(f"CODEX_HOME={shlex.quote(codex_home)}")
-    parts.extend(
-        [
+        # Claude Code documents Edit(...) as the canonical scoped permission
+        # for every built-in file editor, including the Write tool.  Anchor the
+        # sole writable handoff at the reviewer's original cwd; scoped Write
+        # rules are not matched consistently by current Claude Code releases.
+        argv = [
+            "claude", "--permission-mode", "dontAsk",
+            "--tools", CLAUDE_REVIEW_TOOL_SURFACE,
+            "--allowedTools", *CLAUDE_REVIEW_ALLOWED_TOOLS,
+            "--model", reviewer_model,
+        ]
+        if reviewer_effort:
+            argv.extend(["--effort", reviewer_effort])
+    else:
+        if review_runtime_dir is None:
+            die("Codex reviewer runtime directory is missing")
+        argv = [
             "codex",
             "--cd",
-            shlex.quote(str(worktree)),
-            "--add-dir",
-            shlex.quote(str(vault)),
+            str(review_runtime_dir),
             "-s",
             "workspace-write",
             "-a",
             "never",
+            "--disable",
+            "hooks",
+            "-c",
+            'web_search="disabled"',
+        ]
+        if profile:
+            argv.extend(["--profile", profile])
+        argv.extend(["--model", reviewer_model])
+        if codex_home:
+            env["CODEX_HOME"] = str(Path(codex_home).expanduser().resolve())
+        env["TMPDIR"] = str(review_runtime_dir)
+
+    write_agent_spec(worktree, "reviewer", reviewer_runtime, argv, prompt_file, env)
+    supervisor = vault / "scripts" / "cmux_agent_supervisor.py"
+    return shlex.join(
+        [
+            "python3", str(supervisor), "run", "--worktree", str(worktree),
+            "--kind", "reviewer", "--surface", review_surface,
         ]
     )
-    if profile:
-        parts.extend(["--profile", shlex.quote(profile)])
-    parts.extend(["--model", shlex.quote(reviewer_model), f"\"$(cat {prompt_ref})\""])
-    return f"cd {worktree_q}; clear; " + " ".join(parts)
 
 
 def send_to_surface(surface: str, text: str) -> None:
     send = run(["cmux", "send", "--surface", surface, text])
     if send.returncode != 0:
         die((send.stdout + "\n" + send.stderr).strip() or "cmux send failed")
+    time.sleep(CMUX_PASTE_SETTLE_SECONDS)
     enter = run(["cmux", "send-key", "--surface", surface, "Enter"])
     if enter.returncode != 0:
         die((enter.stdout + "\n" + enter.stderr).strip() or "cmux send-key failed")
@@ -376,19 +464,72 @@ def send_to_surface(surface: str, text: str) -> None:
 def verify_handoff_message(
     worktree: Path,
     prompt_file: str,
-    output_file: str,
-    review_send_command: str,
 ) -> str:
     prompt_path = worktree / prompt_file
-    output_path = worktree / output_file
     return (
         "# Cross-model review follow-up\n\n"
         f"Read `{prompt_path}` and follow it exactly. "
         "Do not review this short handoff message; the full instructions are in that file.\n\n"
-        f"Write the review result to `{output_path}`.\n"
-        f"Then invoke `{review_send_command}` to callback the executor.\n"
+        "Submit the typed JSON review using the transport in that prompt.\n"
         "Stay open after sending; the executor may send another round."
     )
+
+
+def submit_command(
+    vault: Path,
+    worktree: Path,
+    reviewer_runtime: str,
+    review_runtime_dir: Path | None,
+) -> str:
+    script = vault / "skills" / "review-send" / "scripts" / "send_review.py"
+    if reviewer_runtime == "codex":
+        if review_runtime_dir is None:
+            die("Codex reviewer runtime directory is missing")
+        return f"supervisor relay watches {review_runtime_dir / '.review-outbox.json'}"
+    command = f"python3 {shlex.quote(str(script))} submit --worktree {shlex.quote(str(worktree))}"
+    if reviewer_runtime == "claude":
+        command += f" --input-file {shlex.quote(str(worktree / '.review-outbox.json'))}"
+    return command
+
+
+def submission_instructions(
+    reviewer_runtime: str,
+    command: str,
+    worktree: Path,
+    review_runtime_dir: Path | None,
+) -> str:
+    if reviewer_runtime == "claude":
+        return (
+            "Write the JSON object only to `.review-outbox.json` with the Write tool, "
+            f"then run `{command}` with no pipe or heredoc. This isolated outbox is the only file you may write; "
+            "the callback validates and removes it."
+        )
+    if review_runtime_dir is None:
+        die("Codex reviewer runtime directory is missing")
+    outbox = review_runtime_dir / ".review-outbox.json"
+    staging = review_runtime_dir / ".review-outbox.json.tmp"
+    return (
+        f"Write exactly the JSON object to `{staging}`, then atomically rename it to `{outbox}` only after "
+        "the JSON is complete. This isolated outbox is inside your only writable "
+        "scratch directory. Do not run `review-send`, do not call `cmux`, and do not try to access its socket. "
+        "The supervisor watches this exact file, validates and forwards the payload, then removes it. "
+        "After the outbox disappears, stay open for a possible verification round."
+    )
+
+
+def repository_diagnostics(reviewer_runtime: str, worktree: Path) -> str:
+    if reviewer_runtime == "claude":
+        return (
+            "`python3 tests/test_task_lifecycle.py`, `bash tests/test_review_dispatch.sh`, "
+            "`python3 tests/test_contract_schemas.py`, and `python3 scripts/lint-instructions.py`"
+        )
+    commands = (
+        ["python3", str(worktree / "tests" / "test_task_lifecycle.py")],
+        ["bash", str(worktree / "tests" / "test_review_dispatch.sh")],
+        ["python3", str(worktree / "tests" / "test_contract_schemas.py")],
+        ["python3", str(worktree / "scripts" / "lint-instructions.py")],
+    )
+    return ", ".join(f"`{shlex.join(command)}`" for command in commands)
 
 
 def base_context(worktree: Path, vault: Path, meta: dict[str, Any], task_name: str) -> dict[str, str]:
@@ -428,9 +569,13 @@ def render_review_prompt(
     task_name: str,
     phase: str,
     output_file: str,
+    run_id: str,
+    submission_command: str,
     review_send_command: str,
     executor_callback_command: str,
     review_mode: str,
+    reviewer_runtime: str,
+    review_runtime_dir: Path | None,
 ) -> str:
     template = (
         SKILL_ROOT
@@ -452,10 +597,16 @@ def render_review_prompt(
         {
             "phase": phase,
             "output_file": output_file,
+            "run_id": run_id,
+            "submission_command": submission_command,
             "review_send_command": review_send_command,
             "executor_callback_command": executor_callback_command,
             "review_mode": review_mode,
             "review_mode_instructions": review_mode_instructions(review_mode),
+            "submission_instructions": submission_instructions(
+                reviewer_runtime, submission_command, worktree, review_runtime_dir
+            ),
+            "repository_diagnostics": repository_diagnostics(reviewer_runtime, worktree),
             "previous_review": previous_review,
             "resolution": resolution,
         }
@@ -467,6 +618,10 @@ def cmd_start(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     vault = Path(ns.vault_root).expanduser().resolve()
     meta = read_json(worktree / ".task-meta.json")
+    try:
+        task_policy = normalize_task_contract(meta)
+    except TaskContractError as exc:
+        die(str(exc))
     task_name = ns.task_name or read_task_name(worktree, meta)
     base_branch = ns.base_branch or str(meta.get("base_branch") or "").strip()
     if not base_branch:
@@ -477,21 +632,43 @@ def cmd_start(ns: argparse.Namespace) -> int:
     reviewer_runtime = ns.reviewer_runtime or opposite_runtime(executor_runtime)
     if reviewer_runtime not in {"claude", "codex"}:
         die("--reviewer-runtime must be claude or codex")
+    if reviewer_runtime == "claude" and not ns.no_spawn:
+        subscription = run([sys.executable, str(vault / "scripts" / "claude-subscription-check.py")])
+        if subscription.returncode != 0:
+            die(subscription.stderr.strip() or "Claude subscription preflight failed")
 
     executor_surface = read_text_file(worktree / ".task-cmux-surface") or str(meta.get("task_surface") or "")
     if not executor_surface:
         die(".task-cmux-surface missing; cannot callback executor")
 
     env = resolve_review_env(worktree, vault, meta, reviewer_runtime)
-    review_mode = normalize_review_mode("light" if ns.light else ns.mode)
+    configured_mode = str(task_policy["review_policy"].get("mode") or "")
+    selected_mode = "light" if ns.light else (ns.mode or configured_mode or "full")
+    if selected_mode == "skip":
+        die("review_policy.mode=skip; do not start a reviewer")
+    review_mode = normalize_review_mode(selected_mode)
     reviewer_model = ns.model or env["reviewer_model"]
+    reviewer_effort = ns.effort or env["reviewer_effort"]
+    if reviewer_runtime == "claude" and reviewer_effort not in CLAUDE_EFFORTS | {""}:
+        die(f"Claude reviewer effort must be one of {sorted(CLAUDE_EFFORTS)}")
+    if reviewer_runtime != "claude" and reviewer_effort:
+        die("--effort is supported only for Claude reviewers")
     review_skill = ns.review_skill or env["review_skill"]
     review_send_skill = ns.review_send_skill or env["review_send_skill"]
     output_file = ".task-review.md"
+    output_json_file = ".task-review.json"
     prompt_file = ".review-prompt.md"
-    executor_callback = callback_command(review_skill, task_name)
+    run_id = str(uuid.uuid4())
+    review_runtime_dir = (
+        prepare_review_runtime(worktree, vault, task_name, run_id, ns.no_spawn)
+        if reviewer_runtime == "codex"
+        else None
+    )
+    executor_callback = callback_command(vault, worktree)
+    submission_command = submit_command(vault, worktree, reviewer_runtime, review_runtime_dir)
 
     ensure_excludes(worktree)
+    (worktree / ".review-relay.json").unlink(missing_ok=True)
     (worktree / ".task-review-skill").write_text(review_skill + "\n", encoding="utf-8")
     (worktree / ".task-review-send-skill").write_text(review_send_skill + "\n", encoding="utf-8")
     write_baseline(worktree)
@@ -501,10 +678,14 @@ def cmd_start(ns: argparse.Namespace) -> int:
         meta,
         task_name,
         "initial-review",
-        output_file,
+        output_json_file,
+        run_id,
+        submission_command,
         review_send_skill,
         executor_callback,
         review_mode,
+        reviewer_runtime,
+        review_runtime_dir,
     )
     (worktree / prompt_file).write_text(prompt, encoding="utf-8")
 
@@ -518,10 +699,14 @@ def cmd_start(ns: argparse.Namespace) -> int:
         env["codex_home"],
         env["profile"],
         prompt_file,
+        review_surface,
+        reviewer_effort,
+        review_runtime_dir,
     )
 
     review_meta = {
-        "version": 2,
+        "version": 4,
+        "run_id": run_id,
         "task_name": task_name,
         "started_at": utc_now(),
         "updated_at": utc_now(),
@@ -534,6 +719,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "review_surface_ref": review_ref,
         "reviewer_runtime": reviewer_runtime,
         "reviewer_model": reviewer_model,
+        "reviewer_effort": reviewer_effort or None,
         "codex_home": env["codex_home"] or None,
         "codex_profile": env["profile"] or None,
         "review_skill": review_skill,
@@ -544,6 +730,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "iteration": 1,
         "prompt_file": prompt_file,
         "output_file": output_file,
+        "output_json_file": output_json_file,
+        "submission_command": submission_command,
+        "review_runtime_dir": str(review_runtime_dir) if review_runtime_dir else None,
         "cmux_output": cmux_output,
         "command": command,
         "status": "prepared",
@@ -570,6 +759,14 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     vault = Path(ns.vault_root).expanduser().resolve()
     meta = read_json(worktree / ".task-meta.json")
     review_meta = read_json(worktree / ".review-meta.json")
+    try:
+        policy = normalize_task_contract(meta)
+    except TaskContractError as exc:
+        die(str(exc))
+    if policy["interaction_policy"] == "unattended":
+        completed_verifies = max(0, int(review_meta.get("iteration") or 1) - 1)
+        if completed_verifies >= int(policy["review_policy"]["max_verify_iterations"]):
+            die("unattended verify iteration limit reached; escalate to the coordinator")
     task_name = ns.task_name or str(review_meta.get("task_name") or read_task_name(worktree, meta))
     review_surface = str(review_meta.get("review_surface") or read_text_file(worktree / ".review-cmux-surface"))
     if not review_surface:
@@ -581,9 +778,18 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         review_meta.get("review_send_command") or default_review_send_skill(reviewer_runtime, plugin_name(vault))
     )
     review_send_skill = normalize_skill_command(raw_review_send_skill, reviewer_runtime, "review-send", plugin_name(vault))
-    executor_callback = str(review_meta.get("executor_callback_command") or callback_command(str(review_meta.get("review_skill")), task_name))
+    executor_callback = callback_command(vault, worktree)
     output_file = ".task-review-verify.md"
+    output_json_file = ".task-review-verify.json"
     prompt_file = ".review-prompt-verify.md"
+    run_id = str(uuid.uuid4())
+    raw_runtime_dir = str(review_meta.get("review_runtime_dir") or "").strip()
+    review_runtime_dir = Path(raw_runtime_dir).expanduser().resolve() if raw_runtime_dir else None
+    if reviewer_runtime == "codex" and (
+        review_runtime_dir is None or not review_runtime_dir.is_dir()
+    ):
+        die("Codex reviewer runtime directory is missing; start a fresh reviewer")
+    submission_command = submit_command(vault, worktree, reviewer_runtime, review_runtime_dir)
 
     write_baseline(worktree)
     prompt = render_review_prompt(
@@ -592,10 +798,14 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         meta,
         task_name,
         "verify-fixes",
-        output_file,
+        output_json_file,
+        run_id,
+        submission_command,
         review_send_skill,
         executor_callback,
         review_mode,
+        reviewer_runtime,
+        review_runtime_dir,
     )
     (worktree / prompt_file).write_text(prompt, encoding="utf-8")
 
@@ -603,6 +813,9 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     review_meta["iteration"] = int(review_meta.get("iteration") or 1) + 1
     review_meta["prompt_file"] = prompt_file
     review_meta["output_file"] = output_file
+    review_meta["output_json_file"] = output_json_file
+    review_meta["run_id"] = run_id
+    review_meta["submission_command"] = submission_command
     review_meta["review_send_command"] = review_send_skill
     review_meta["review_mode"] = review_mode
     review_meta["executor_callback_command"] = executor_callback
@@ -610,7 +823,7 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     review_meta["status"] = "verify_sent" if not ns.no_send else "verify_prepared"
     review_meta["updated_at"] = utc_now()
     write_json(worktree / ".review-meta.json", review_meta)
-    handoff = verify_handoff_message(worktree, prompt_file, output_file, review_send_skill)
+    handoff = verify_handoff_message(worktree, prompt_file)
 
     if ns.no_send:
         print(handoff)
@@ -619,6 +832,42 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     send_to_surface(review_surface, handoff)
     print(f"sent verify prompt to reviewer: {review_meta.get('review_surface_ref') or review_surface}")
     print(f"review output: {worktree / output_file}")
+    return 0
+
+
+def cmd_receive(ns: argparse.Namespace) -> int:
+    worktree = Path(ns.worktree).expanduser().resolve()
+    task_meta = read_json(worktree / ".task-meta.json")
+    review_meta = read_json(worktree / ".review-meta.json")
+    run_id = str(review_meta.get("run_id") or "").strip()
+    review_mode = normalize_review_mode(str(review_meta.get("review_mode") or "full"))
+    if not run_id:
+        die("review metadata is missing run_id")
+    try:
+        review = decode_review(
+            ns.payload_b64, expected_run_id=run_id, expected_mode=review_mode
+        )
+    except ReviewContractError as exc:
+        die(f"invalid review payload: {exc}", 3)
+
+    output_file = str(review_meta.get("output_file") or ".task-review.md")
+    output_json_file = str(review_meta.get("output_json_file") or ".task-review.json")
+    task_name = str(review_meta.get("task_name") or "task")
+    write_json(worktree / output_json_file, review)
+    (worktree / output_file).write_text(render_markdown(review, task_name), encoding="utf-8")
+    review_meta["status"] = "review_received"
+    review_meta["updated_at"] = utc_now()
+    review_meta["sent_output_file"] = output_file
+    review_meta["sent_output_json_file"] = output_json_file
+    try:
+        completed_verifies = max(0, int(review_meta.get("iteration") or 1) - 1)
+        review_meta["recommended_action"] = review_action(task_meta, review, completed_verifies)
+    except TaskContractError as exc:
+        die(str(exc))
+    write_json(worktree / ".review-meta.json", review_meta)
+    print(f"received typed review: {worktree / output_json_file}")
+    print(f"rendered review: {worktree / output_file}")
+    print(f"recommended action: {review_meta['recommended_action']}")
     return 0
 
 
@@ -631,6 +880,11 @@ def cmd_status(ns: argparse.Namespace) -> int:
 
 def cmd_finish(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
+    task_meta = read_json(worktree / ".task-meta.json")
+    try:
+        task_policy = normalize_task_contract(task_meta)
+    except TaskContractError as exc:
+        die(str(exc))
     review_meta = read_json(worktree / ".review-meta.json")
     surface = str(review_meta.get("review_surface") or read_text_file(worktree / ".review-cmux-surface"))
     runtime = str(review_meta.get("reviewer_runtime") or "")
@@ -638,19 +892,48 @@ def cmd_finish(ns: argparse.Namespace) -> int:
         die("review surface missing; cannot finish")
 
     if ns.no_send:
-        print(f"would send /exit to {runtime} reviewer surface {surface}")
+        auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
+            "surface_policy"
+        ].get("auto_close") is True
+        print(f"would arm close={str(auto_close).lower()} and send /exit to {runtime} reviewer surface {surface}")
+        return 0
+
+    auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
+        "surface_policy"
+    ].get("auto_close") is True
+    if auto_close:
+        if review_meta.get("status") != "review_received" or review_meta.get("recommended_action") != "approve":
+            die("unattended reviewer finish requires a received approve callback")
+        lifecycle = DEFAULT_VAULT / "scripts" / "cmux_surface_lifecycle.py"
+        result = run(
+            [sys.executable, str(lifecycle), "request-exit", "--worktree", str(worktree), "--kind", "reviewer"]
+        )
+        if result.returncode != 0:
+            die((result.stdout + result.stderr).strip() or "cannot arm reviewer close")
+        review_meta["status"] = "finish_sent_close_armed"
+        review_meta["updated_at"] = utc_now()
+        write_json(worktree / ".review-meta.json", review_meta)
+        print(result.stdout.strip())
         return 0
 
     if runtime == "codex":
         for _ in range(40):
             run(["cmux", "send-key", "--surface", surface, "backspace"])
-        run(["cmux", "send", "--surface", surface, "/exit"])
-        run(["cmux", "send-key", "--surface", surface, "tab"])
+        sent = run(["cmux", "send", "--surface", surface, "/exit"])
+        time.sleep(CMUX_PASTE_SETTLE_SECONDS)
+        accepted = run(["cmux", "send-key", "--surface", surface, "tab"])
+        time.sleep(0.1)
+        entered = run(["cmux", "send-key", "--surface", surface, "Enter"])
         fallback = "Codex reviewer may require manual fallback: focus the reviewer split and run /exit."
     else:
-        run(["cmux", "send", "--surface", surface, "/exit"])
-        run(["cmux", "send-key", "--surface", surface, "Enter"])
+        sent = run(["cmux", "send", "--surface", surface, "/exit"])
+        time.sleep(CMUX_PASTE_SETTLE_SECONDS)
+        accepted = subprocess.CompletedProcess([], 0, "", "")
+        entered = run(["cmux", "send-key", "--surface", surface, "Enter"])
         fallback = ""
+    for result in (sent, accepted, entered):
+        if result.returncode != 0:
+            die((result.stdout + result.stderr).strip() or "cannot submit reviewer /exit")
 
     review_meta["status"] = "finish_sent"
     review_meta["updated_at"] = utc_now()
@@ -673,8 +956,13 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--reviewer-runtime", choices=["claude", "codex"], default="", help="override opposite runtime")
     start.add_argument("--review-skill", default="", help="executor callback skill command")
     start.add_argument("--review-send-skill", default="", help="reviewer handoff skill command")
-    start.add_argument("--model", default="", help="reviewer model; defaults opus for Claude, gpt-5.5 for Codex")
-    start.add_argument("--mode", choices=sorted(REVIEW_MODES), default="full", help="review depth: full gate or light pass")
+    start.add_argument(
+        "--model",
+        default="",
+        help="reviewer model; defaults opus (currently Opus 4.8) for Claude, gpt-5.6-sol for Codex",
+    )
+    start.add_argument("--effort", choices=sorted(CLAUDE_EFFORTS), default="", help="Claude reviewer reasoning effort")
+    start.add_argument("--mode", choices=sorted(REVIEW_MODES), default="", help="override review depth; otherwise use task policy or full legacy default")
     start.add_argument("--light", action="store_true", help="shortcut for --mode light")
     start.add_argument("--no-spawn", action="store_true", help="write files and print launch command without cmux")
     start.set_defaults(func=cmd_start)
@@ -687,11 +975,16 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--no-send", action="store_true", help="write prompt and print it without cmux send")
     verify.set_defaults(func=cmd_verify)
 
+    receive = sub.add_parser("receive", help="validate a typed reviewer callback and render handoff files")
+    receive.add_argument("--worktree", default=".", help="task worktree path")
+    receive.add_argument("--payload-b64", required=True, help="compressed review payload token")
+    receive.set_defaults(func=cmd_receive)
+
     status = sub.add_parser("status", help="print .review-meta.json")
     status.add_argument("--worktree", default=".", help="task worktree path")
     status.set_defaults(func=cmd_status)
 
-    finish = sub.add_parser("finish", help="exit the reviewer agent process after user approval")
+    finish = sub.add_parser("finish", help="exit reviewer; unattended tasks arm exact-surface close")
     finish.add_argument("--worktree", default=".", help="task worktree path")
     finish.add_argument("--no-send", action="store_true", help="print exit action without sending it")
     finish.set_defaults(func=cmd_finish)

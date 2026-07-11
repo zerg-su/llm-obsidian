@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-05
+updated: 2026-07-11
 tags:
   - meta
   - guide
@@ -11,7 +11,8 @@ status: evergreen
 related:
   - "[[index]]"
   - "[[getting-started]]"
-sessions: []
+sessions:
+  - public-template-v2
 ---
 
 # Daily Pipeline Guide
@@ -49,6 +50,8 @@ sessions: []
 - **dispatch** — вынести задачу в параллельный split + git worktree, с передачей approved-плана.
 - **reap** — собрать результат task-split'а в вики (interim/final).
 - **reap-send** — вызывается ИЗ task-split'а: handoff summary в вики одной командой.
+- **review-dispatch** — запускает независимое cross-model review и bounded verify.
+- **review-send** — возвращает типизированный reviewer verdict исполнителю.
 
 ### Reference (не вызываются, подгружаются по контексту)
 

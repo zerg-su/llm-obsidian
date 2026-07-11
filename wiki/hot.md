@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-07-06
+updated: 2026-07-11
 tags:
   - meta
   - hot-cache
@@ -12,7 +12,8 @@ related:
   - "[[log]]"
   - "[[overview]]"
   - "[[getting-started]]"
-sessions: []
+sessions:
+  - "public-template-v2"
 ---
 
 # Hot Cache
@@ -23,7 +24,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Last Updated
 
-Свежий вольт. Начни с [[getting-started]], потом `/wiki` для бутстрапа под себя. Первая запись появится здесь после первого `/save`.
+Шаблон обновлён до llm-obsidian v2.0.0: Claude Code и Codex используют общий безопасный write/retrieval pipeline, а cmux-оркестрация остаётся опциональной.
 
 ## Key Recent Facts
 
@@ -33,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-07-11: [[Unattended Pipeline]] — public v2 pipeline and strict contracts (c-000004)
 - 2026-07-06: [[Dispatch Reap Live Smoke gpt-5.5]] - live Codex gpt-5.5 dispatch/reap-send smoke filed (`c-000004`)
 - 2026-07-05: вольт инициализирован из шаблона llm-obsidian v1.0.0
 

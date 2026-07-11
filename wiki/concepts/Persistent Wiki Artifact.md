@@ -1,9 +1,9 @@
 ---
 type: concept
-address: c-000001
+address: c-000006
 title: "Persistent Wiki Artifact"
 created: 2026-04-24
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - llm-wiki
   - knowledge-management
@@ -14,6 +14,8 @@ related:
   - "[[Compounding Knowledge]]"
   - "[[Source-First Synthesis]]"
   - "[[Query-Time Retrieval]]"
+sessions:
+  - public-template-v2
 ---
 
 # Persistent Wiki Artifact

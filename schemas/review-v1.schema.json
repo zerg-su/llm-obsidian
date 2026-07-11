@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/review-v1.schema.json",
+  "title": "Cross-model review v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "mode", "verdict", "findings", "verification_gaps", "notes_for_executor", "residual_risks"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 100},
+    "mode": {"enum": ["full", "light"]},
+    "verdict": {"enum": ["approve", "changes-requested", "blocked"]},
+    "findings": {
+      "type": "array", "maxItems": 50,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["severity", "file", "title", "evidence", "recommendation"],
+        "properties": {
+          "severity": {"enum": ["blocking", "warning", "nit"]},
+          "file": {"type": "string", "minLength": 1},
+          "line": {"type": ["integer", "null"], "minimum": 1},
+          "title": {"type": "string", "minLength": 1},
+          "evidence": {"type": "string", "minLength": 1},
+          "recommendation": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "verification_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
+    "notes_for_executor": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
+    "residual_risks": {"type": "array", "items": {"type": "string"}, "maxItems": 50}
+  }
+}

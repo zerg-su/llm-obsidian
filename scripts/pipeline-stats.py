@@ -6,6 +6,8 @@ Sources (all local-only, nothing leaves the machine):
   * ~/.claude/projects/<proj>/*.jsonl — session transcripts: Skill tool_use =
     auto-invocations by Claude, Task/Agent tool_use = sub-agent usage
   * .vault-meta/router-hits.jsonl — skill-router hint log (plus rotated .1)
+  * .vault-meta/pipeline-events.jsonl — runtime-neutral script operations;
+    paths/counters only, never prompts, queries, commands, or page content
 
 v2 (2026-06-10): history.jsonl sees only what the user TYPES (/skill); skills
 Claude invokes itself via trigger phrases appear only in transcripts as Skill
@@ -33,8 +35,13 @@ retrieval assist was invoked; prints nothing otherwise. Always exit 0.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
+import math
+import os
 import re
+import statistics
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -48,6 +55,8 @@ ROUTER_LOGS = [VAULT_ROOT / ".vault-meta" / "router-hits.jsonl",
                VAULT_ROOT / ".vault-meta" / "router-hits.jsonl.1"]
 COMMAND_LOGS = [VAULT_ROOT / ".vault-meta" / "command-log.jsonl",
                 VAULT_ROOT / ".vault-meta" / "command-log.jsonl.1"]
+EVENT_LOGS = [VAULT_ROOT / ".vault-meta" / "pipeline-events.jsonl",
+              VAULT_ROOT / ".vault-meta" / "pipeline-events.jsonl.1"]
 
 # Retrieval-assist markers in captured Bash commands (plan-trim hook writes
 # command-log.jsonl). Deterministic check that /wiki-query SKILL instructions
@@ -58,9 +67,8 @@ ASSIST_MARKERS = [
     ("bm25-query", "bm25-index.py query"),
 ]
 SKILL_ROOTS = [VAULT_ROOT / "skills"]
-# Custom sub-agents shipped with this repo (none in the base install);
-# extend when you add your own agents/ definitions.
-CUSTOM_AGENTS: set[str] = set()
+# Custom Claude sub-agents shipped with this repo.
+CUSTOM_AGENTS: set[str] = {"daily-summarizer"}
 
 
 def installed_skills() -> set[str]:
@@ -135,8 +143,12 @@ def parse_log_ts(raw) -> dt.datetime | None:
     """ts field from router-hits/command-log jsonl -> naive local datetime."""
     try:
         if isinstance(raw, str):
-            return dt.datetime.fromisoformat(raw)
-        return dt.datetime.fromtimestamp(raw / 1000 if raw > 1e12 else raw)
+            parsed = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        else:
+            parsed = dt.datetime.fromtimestamp(raw / 1000 if raw > 1e12 else raw)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
     except (ValueError, TypeError, OSError, OverflowError):
         return None
 
@@ -233,13 +245,8 @@ def main() -> int:
     hint_followed: dict[str, int] = defaultdict(int)
     for log in ROUTER_LOGS:
         for rec in iter_jsonl(log):
-            ts_raw = rec.get("ts", 0)
-            try:
-                ts = (dt.datetime.fromisoformat(str(ts_raw)) if isinstance(ts_raw, str)
-                      else dt.datetime.fromtimestamp(ts_raw / 1000 if ts_raw > 1e12 else ts_raw))
-            except (ValueError, OSError, OverflowError):
-                continue
-            if ts < cutoff:
+            ts = parse_log_ts(rec.get("ts", 0))
+            if ts is None or ts < cutoff:
                 continue
             for m in rec.get("skill_matches", []) or []:
                 name = m if isinstance(m, str) else (m.get("name") or m.get("skill") or "")
@@ -266,12 +273,68 @@ def main() -> int:
                     assist_count[kind] += 1
                     assist_last[kind] = max(assist_last.get(kind, ts), ts)
 
+    # Source 5: content-free operations emitted by shared scripts in any runtime.
+    operation_count: dict[tuple[str, str, str], int] = defaultdict(int)
+    operation_last: dict[tuple[str, str, str], dt.datetime] = {}
+    operation_durations: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    for log in EVENT_LOGS:
+        for rec in iter_jsonl(log):
+            ts = parse_log_ts(rec.get("ts", ""))
+            if ts is None or ts < cutoff:
+                continue
+            runtime = str(rec.get("runtime") or "unknown")
+            if runtime not in {"claude", "codex", "unknown"}:
+                runtime = "unknown"
+            op = base_name(str(rec.get("op") or "unknown"))
+            status = str(rec.get("status") or "unknown")
+            key = (runtime, op, status)
+            operation_count[key] += 1
+            operation_last[key] = max(operation_last.get(key, ts), ts)
+            counts = rec.get("counts")
+            duration = counts.get("duration_ms") if isinstance(counts, dict) else None
+            if (
+                isinstance(duration, (int, float))
+                and not isinstance(duration, bool)
+                and duration >= 0
+                and math.isfinite(duration)
+            ):
+                operation_durations[key].append(float(duration))
+
     totals = {n: typed_count.get(n, 0) + auto_count.get(n, 0)
               for n in set(typed_count) | set(auto_count)}
     used = sorted(totals.items(), key=lambda kv: -kv[1])
     dead = sorted(skills - set(totals))
 
     lines = [f"# Pipeline stats — last {days}d (prompts in project: {total_prompts})", ""]
+    lines.append("## Runtime-neutral observed operations")
+    lines.append("")
+    lines.append(
+        "These are content-free events from shared scripts. They measure executed operations, "
+        "not skill invocation or hook parity."
+    )
+    lines.append("")
+    if operation_count:
+        lines.append("| Runtime | Operation | Status | Calls | P50 ms | P95 ms | Last observed |")
+        lines.append("|---|---|---|---|---:|---:|---|")
+        for key, count in sorted(operation_count.items(), key=lambda item: (-item[1], item[0])):
+            runtime, op, status = key
+            durations = sorted(operation_durations.get(key, []))
+            p50 = f"{statistics.median(durations):.1f}" if durations else "-"
+            p95 = f"{durations[max(0, math.ceil(len(durations) * 0.95) - 1)]:.1f}" if durations else "-"
+            lines.append(
+                f"| {runtime} | {op} | {status} | {count} | {p50} | {p95} | "
+                f"{operation_last[key].strftime('%Y-%m-%d')} |"
+            )
+    else:
+        lines.append("no runtime-neutral operations captured")
+    lines.append("")
+    lines.append("## Claude-only skill telemetry")
+    lines.append("")
+    lines.append(
+        "Typed/Auto/router/assist columns below come from Claude history, transcripts, and "
+        "Claude-specific hooks; they do not measure Codex skill usage."
+    )
+    lines.append("")
     lines.append("| Skill | Typed | Auto | Total | Last used | Router hints | Hint→use ≤1h |")
     lines.append("|---|---|---|---|---|---|---|")
     for name, n in used:
@@ -332,8 +395,33 @@ def main() -> int:
         today = dt.date.today().isoformat()
         path = VAULT_ROOT / "wiki" / "meta" / "reports" / f"pipeline-stats-{today}.md"
         fm = (f"---\ntype: meta\ntitle: \"Pipeline Stats {today}\"\ncreated: {today}\n"
-              f"updated: {today}\ntags: [meta, pipeline, stats]\nstatus: developing\n---\n\n")
-        path.write_text(fm + out + "\n", encoding="utf-8")
+              f"updated: {today}\ntags: [meta, pipeline, stats]\nstatus: developing\n"
+              "sessions: []\n---\n\n")
+        content = fm + out + "\n"
+        page = {
+            "op": "update" if path.is_file() else "create",
+            "path": str(path.relative_to(VAULT_ROOT)),
+            "content": content,
+        }
+        if path.is_file():
+            page["expected_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        payload = {
+            "actor": "pipeline-stats",
+            "session": os.environ.get("CODEX_THREAD_ID")
+            or os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or "unknown",
+            "pages": [page],
+        }
+        result = subprocess.run(
+            [sys.executable, str(VAULT_ROOT / "scripts" / "vault-write.py")],
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            capture_output=True,
+            cwd=VAULT_ROOT,
+        )
+        if result.returncode:
+            print(result.stderr or result.stdout, end="", file=sys.stderr)
+            return result.returncode
         print(f"\nreport written: {path.relative_to(VAULT_ROOT)}", file=sys.stderr)
     return 0
 

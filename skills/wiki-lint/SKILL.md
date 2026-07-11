@@ -1,6 +1,7 @@
 ---
 name: wiki-lint
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: >
   Health check the Obsidian wiki vault. Finds orphan pages, dead wikilinks, stale claims,
   missing cross-references, frontmatter gaps, and empty sections. Creates or updates
@@ -69,9 +70,9 @@ Beyond the basic «missing required fields» check (item 6), flag these WARN-lev
 
 - **`related:` overflow** — `related:` array > 8 entries. Better: short list + long cross-references in the body. Hard cap is not enforced; this is a hint to declutter.
 - **Frontmatter block > 25 lines** — compact visibility lost. Suggest extracting auxiliary fields into the body, or merging arrays into flow-style.
-- **`tags:` missing** — every page except `_templates/` and `log.md` should have at least one tag. Untagged pages don't appear in `.vault-meta/tag-index.json` and can't be found by tag-filter queries.
+- **`tags:` missing/empty** — strict schema fails every Markdown page; untagged pages are invisible to tag-filter queries.
 - **`status: developing` > 30 days** — page hasn't moved out of `developing` since `updated:` field. Either promote to `evergreen`/`mature`, mark `superseded`/`closed`, or move into `wiki/questions/` if it's an unresolved open question.
-- **Missing `sessions:` array** — any page outside `log.md` and `_templates/` without `sessions:` is a provenance gap (per memory `feedback_session_id_in_frontmatter`).
+- **Missing `sessions:` array** — strict schema failure. `sessions: []` is accepted only as an explicit legacy-unknown marker and reported as WARN.
 
 All five issues are **WARN** (not blocking). Report under `## Frontmatter Discipline` section in the lint report. Suggest concrete remediation per finding (which tag to add, which status to set, which session id to backfill).
 

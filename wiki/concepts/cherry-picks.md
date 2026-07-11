@@ -2,7 +2,7 @@
 type: concept
 title: "Cherry-Picks: Feature Backlog from Ecosystem Research"
 created: 2026-04-08
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - backlog
   - cherry-picks
@@ -12,6 +12,8 @@ status: current
 related:
   - "[[LLM Wiki Pattern]]"
 sources: []
+sessions:
+  - public-template-v2
 ---
 
 # Cherry-Picks: feature-backlog

@@ -70,9 +70,10 @@ Any vault change goes through the wiki agent (`/reap` after your summary)
 - Wiki reap RPC: <wiki-reap-command>
 - Review gate: <review-skill>
 - Review send: <review-send-skill>
-- Review defaults: Claude reviewer `opus`, Codex reviewer `gpt-5.5`
-- Commit as you go, as usual. If push is blocked by permission rules — that
-  is intended; do not try to bypass it with `--no-verify` or other hacks.
+- Review defaults: Claude reviewer `opus` (currently Opus 4.8; Fable only by
+  explicit request), Codex reviewer `gpt-5.6-sol`
+- Commit as you go, as usual. Never push, deploy, publish, delete the worktree
+  or branch, or expand scope under this task mandate.
 - Commit messages — in this repo's style (`git log --oneline -15` for a sample).
 
 <!-- BRANCH A: rendered ONLY in plan-mode (instead of branch B) -->
@@ -86,9 +87,26 @@ and start executing immediately, WITHOUT waiting for approval — the plan was
 already confirmed twice (ExitPlanMode in the wiki window + the dispatch
 echo-confirm).
 
+Read `.task-meta.json` and validate it with
+`python3 <vault-root>/scripts/task_contract.py validate`. When
+`interaction_policy=unattended`, this approval is the complete execution
+mandate: do not ask again for plan, review, verify, finish, or reap-send.
+Treat `.task-meta.json` as read-only; changing its policies is contract drift.
+
+For unattended tasks, `watchdog_policy` observes the task and reviewer cmux
+viewports. It only sends staged coordinator notifications after prolonged
+visible inactivity; it never sends you input, cancels work, or closes a surface.
+
 Stop conditions still apply: a fork that materially changes the plan / a new
-risk / an out-of-scope item → stop, explain, wait for a decision. Small
-tactical choices (variable names, step ordering) — your call.
+risk / an out-of-scope item → call `python3 <vault-root>/scripts/task_escalation.py
+raise --category <category> --reason "..." --question "..."`, then remain
+paused until the coordinator relays a decision. Never wait on a permission
+prompt in this background pane. Small tactical choices are your call.
+
+For a Claude executor in `auto` mode, treat the first classifier denial as a
+`permission` escalation: do not retry the blocked action. Repeated denials can
+make Claude fall back to interactive prompts, so one denial must pause and
+relay to the coordinator immediately.
 
 The plan file in the vault is read-only — do NOT edit it; record deviations
 from the plan in your final ## Wiki Summary.
@@ -150,8 +168,9 @@ within one task) — your call.
 
 ## Cross-model review gate
 
-When the task is complete, local checks have passed, and you have done your own
-self-review, ask the user:
+Read `interaction_policy` and `review_policy` from `.task-meta.json`.
+
+For `interactive`, keep the compatibility gate after implementation:
 
 ```text
 Implementation done. Run cross-model review before reap-send? Default: light. Options: light / full / skip.
@@ -165,22 +184,32 @@ security-sensitive review, or operationally risky review, run full mode without
 `--light`.
 
 The reviewer opens in a neighboring cmux split on the opposite model:
-Codex executor -> Claude reviewer (`opus`), Claude executor -> Codex reviewer
-(`gpt-5.5`). The reviewer writes `.task-review.md`, invokes
+Codex executor -> Claude reviewer (`opus`, currently Opus 4.8), Claude executor
+-> Codex reviewer (`gpt-5.6-sol`). Fable is an explicit opt-in. The reviewer
+writes `.task-review.md`, invokes
 `<review-send-skill>`, and stays open.
+
+For `unattended`, start the configured `light|full` review automatically. Do
+not ask the user unless the deterministic review action is `escalate`.
+The reviewer watchdog follows the same observer-only policy and stops with the
+reviewer process.
 
 When the callback returns:
 
 1. Read `.task-review.md`.
 2. Write `.task-review-resolution.md`: mark each finding as `applied`,
    `rejected`, or `out-of-scope`, with a short reason.
-3. Apply only clearly correct, in-scope fixes. Ask before changing public
-   behavior, data migrations, operational contracts, or anything out of scope.
-4. If you applied reviewer findings, call `<review-skill> verify` through the
+3. Run `python3 <vault-root>/scripts/task_contract.py review-action --review
+   <active-review-json> --iteration <completed-verify-count>`. For `resolve`,
+   apply clearly correct in-scope fixes or reject with evidence. For
+   `escalate`, use `task_escalation.py raise` and pause: blocking findings,
+   public behavior, migrations, security boundaries, external effects, scope
+   changes, or exhausted verify iterations always require the user.
+4. After any `changes-requested` resolution, call `<review-skill> verify` through the
    skill, or directly:
    `python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py verify`.
    This sends the implementation back to the SAME reviewer split; do not open a
-   new cmux split. In light mode with no applied findings, verify is optional.
+   new cmux split. Obey the configured `max_verify_iterations` limit.
 5. Wait for `.task-review-verify.md`, evaluate unresolved items, and do your own
    final review with the other model's opinion in mind.
 6. After reviewer approve/verify, commit any remaining non-handoff changes. Use
@@ -188,35 +217,36 @@ When the callback returns:
    `.task-*`, `.wiki-*`, `.review-*`, `.obsidian/workspace*.json`, or UI/runtime
    state. Never push. If there is nothing to commit, record
    `Commit: no changes` in the summary.
-7. Show the user a summary: what the other model found, what you applied or
-   rejected, checks run, and the commit hash or `Commit: no changes`. Do not
-   close the reviewer split yet.
-8. Only after the user confirms the result is acceptable, run
-   `<review-skill> finish`, then proceed to `/reap-send`.
+7. In `interactive`, show the result and wait for acceptance. In `unattended`,
+   an `approve` verdict authorizes `<review-skill> finish` immediately; its
+   close-on-exit wrapper closes only the reviewer surface after process return.
+8. Proceed to `/reap-send` after finish. Never push, deploy, publish, delete a
+   worktree/branch, or expand scope under the unattended mandate.
 
 ## Finalization
 
-If the user skipped review or review already passed, invoke `/reap-send`
-(Claude) or `<reap-send-skill>` / natural trigger `reap-send` (Codex). It assembles the
-`## Wiki Summary` block, writes it to `./.task-summary.md`, and via
-`cmux send` triggers `/reap` or the exact command stored in
+If review already passed, invoke `/reap-send` (Claude) or `<reap-send-skill>` /
+natural trigger `reap-send` (Codex). It assembles the
+typed summary, validates `./.task-summary.json`, renders the legacy
+`./.task-summary.md` view, and via
+`cmux send` triggers `/reap final` in unattended mode (plain `/reap` in
+interactive mode) or the exact command stored in
 `./.wiki-reap-command` in the left wiki split — the wiki agent automatically
 picks it up and files it into the vault.
 
-The block format:
+The canonical JSON format:
 
+```json
+{{
+  "schema_version": 1,
+  "type": "session|decision|runbook|incident|service-update|repo-touch",
+  "title": "the exact wiki page title",
+  "session": "SESSION_ID from <vault-root>/scripts/current-session-id.sh",
+  "body": "declarative Markdown with [[wikilinks]]"
+}}
 ```
-## Wiki Summary
 
-type: <session|decision|runbook|incident|service-update|repo-touch>
-title: <the wiki page title, exactly as it will appear in the filename>
-session: <your SESSION_ID from <vault-root>/scripts/current-session-id.sh;
-          the wiki agent appends it to the provenance of the result page and plan page>
-
-<content in declarative present tense, with [[wikilinks]] to adjacent pages>
-```
-
-If cross-model review ran, add one body line:
+If cross-model review ran, add one `body` line:
 `Cross-model review: <not run | passed | fixes applied | blocked>`.
 If a post-review commit was created, add:
 `Commit: <hash> <message>`; if everything was already committed,

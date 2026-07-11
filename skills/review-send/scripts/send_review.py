@@ -9,14 +9,21 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
 
+VAULT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(VAULT_ROOT / "scripts"))
+from review_contract import ReviewContractError, encode_review, parse_review_json
+
+
 HANDOFF_EXCLUDES = [
     ".task-prompt.md",
     ".task-summary.md",
+    ".task-summary.json",
     ".task-meta.json",
     ".task-cmux-surface",
     ".task-reap-send-skill",
@@ -24,7 +31,9 @@ HANDOFF_EXCLUDES = [
     ".wiki-agent-runtime",
     ".wiki-reap-command",
     ".task-review.md",
+    ".task-review.json",
     ".task-review-verify.md",
+    ".task-review-verify.json",
     ".task-review-resolution.md",
     ".task-review-skill",
     ".task-review-send-skill",
@@ -35,9 +44,23 @@ HANDOFF_EXCLUDES = [
     ".review-baseline-status.txt",
     ".review-baseline-state.json",
     ".review-send-blocked.md",
+    ".review-outbox.json",
+    ".review-relay.json",
+    ".review-close-armed.json",
+    ".task-close-armed.json",
+    ".task-reap-prepared.json",
+    ".task-reap-complete.json",
+    ".task-needs-attention.json",
+    ".task-watchdog.json",
+    ".task-watchdog.lock",
+    ".review-watchdog.json",
+    ".review-watchdog.lock",
+    ".task-agent-command.json",
+    ".review-agent-command.json",
     ".obsidian/workspace.json",
     ".obsidian/workspace-mobile.json",
 ]
+CMUX_PASTE_SETTLE_SECONDS = 0.2
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -115,6 +138,9 @@ def send_to_surface(surface: str, text: str) -> None:
     send = run(["cmux", "send", "--surface", surface, text])
     if send.returncode != 0:
         die((send.stdout + "\n" + send.stderr).strip() or "cmux send failed")
+    # Codex may still be processing the paste when an immediate Enter arrives.
+    # Give the TUI one short settle window so the key submits the pasted callback.
+    time.sleep(CMUX_PASTE_SETTLE_SECONDS)
     enter = run(["cmux", "send-key", "--surface", surface, "Enter"])
     if enter.returncode != 0:
         die((enter.stdout + "\n" + enter.stderr).strip() or "cmux send-key failed")
@@ -167,6 +193,62 @@ def cmd_send(ns: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_submit(ns: argparse.Namespace) -> int:
+    """Validate a typed JSON payload and callback without product-file writes."""
+    worktree = Path(ns.worktree).expanduser().resolve()
+    meta = read_json(worktree / ".review-meta.json")
+    expected_run_id = str(meta.get("run_id") or "").strip()
+    expected_mode = str(meta.get("review_mode") or "").strip()
+    if not expected_run_id:
+        die(".review-meta.json missing run_id")
+    input_path: Path | None = None
+    if ns.input_file:
+        input_path = Path(ns.input_file).expanduser()
+        if not input_path.is_absolute():
+            input_path = worktree / input_path
+        input_path = input_path.resolve()
+        expected = (worktree / ".review-outbox.json").resolve()
+        if input_path != expected:
+            die("--input-file is restricted to .review-outbox.json", 3)
+        try:
+            raw_payload = input_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            die(".review-outbox.json is missing", 3)
+    else:
+        raw_payload = sys.stdin.read()
+    try:
+        review = parse_review_json(
+            raw_payload, expected_run_id=expected_run_id, expected_mode=expected_mode
+        )
+    except ReviewContractError as exc:
+        die(f"invalid review payload: {exc}", 3)
+
+    changed = changed_non_handoff(worktree)
+    if changed:
+        print(
+            "Review submission blocked: non-handoff files changed since baseline:\n"
+            + "\n".join(f"- {rel}" for rel in changed),
+            file=sys.stderr,
+        )
+        return 2
+
+    callback = str(meta.get("executor_callback_command") or "").strip()
+    surface = str(meta.get("executor_surface") or "").strip()
+    if not callback or not surface:
+        die("review metadata is missing executor callback or surface")
+    message = f"{callback} --payload-b64 {encode_review(review)}"
+    if ns.no_send:
+        if input_path is not None:
+            input_path.unlink(missing_ok=True)
+        print(message)
+        return 0
+    send_to_surface(surface, message)
+    if input_path is not None:
+        input_path.unlink(missing_ok=True)
+    print(f"submitted typed review callback to executor surface: {surface}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--output", default="", help="override review output file")
     send.add_argument("--no-send", action="store_true", help="validate and print callback without cmux send")
     send.set_defaults(func=cmd_send)
+    submit = sub.add_parser("submit", help="validate typed JSON and send a product-write-free callback")
+    submit.add_argument("--worktree", default=".", help="task worktree path")
+    submit.add_argument("--input-file", default="", help="Claude-only isolated .review-outbox.json transport")
+    submit.add_argument("--no-send", action="store_true", help="validate and print callback without cmux send")
+    submit.set_defaults(func=cmd_submit)
     return parser
 
 

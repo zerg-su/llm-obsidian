@@ -2,7 +2,7 @@
 type: concept
 title: "SVG Diagram Style Guide"
 created: 2026-04-14
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - design
   - svg
@@ -12,6 +12,8 @@ status: evergreen
 related:
   - "[[index]]"
 sources: []
+sessions:
+  - public-template-v2
 ---
 
 # SVG Diagram Style Guide

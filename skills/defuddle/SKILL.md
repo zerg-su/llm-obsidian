@@ -1,6 +1,7 @@
 ---
 name: defuddle
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: "Strip clutter from web pages before ingesting into the wiki. Removes ads, navigation, headers, footers, and boilerplate: leaving clean readable markdown that saves 40-60% tokens. Triggers on: defuddle, clean this page, strip this url, fetch and clean, clean web content before ingesting, strip ads, remove clutter, clean URL content, readable markdown from URL."
 allowed-tools: Read Bash
 ---

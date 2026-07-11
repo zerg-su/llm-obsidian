@@ -2,7 +2,7 @@
 type: overview
 title: "Wiki Overview"
 created: 2026-04-07
-updated: 2026-04-26
+updated: 2026-07-11
 tags:
   - meta
   - overview
@@ -14,6 +14,8 @@ related:
   - "[[dashboard]]"
   - "[[LLM Wiki Pattern]]"
 sources:
+sessions:
+  - public-template-v2
 ---
 
 # Обзор вольта

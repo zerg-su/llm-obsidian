@@ -48,15 +48,15 @@ compact status/cmux segment; `scripts/codex-limit-monitor.py --install` installs
 
 1. The vault is `wiki/`. External sources are READ-ONLY; write only into this
    vault.
-2. `wiki/log.md` and `wiki/hot.md` are written ONLY through
-   `scripts/vault-write.py` (single JSON payload, deterministic caps). Never
-   edit them directly.
+2. Agent-driven `wiki/` page mutations and `.raw/.manifest.json` merges go
+   through `scripts/vault-write.py` (single JSON transaction, optimistic hash
+   for updates, deterministic log/hot caps). Never edit log/hot directly.
 3. Every page carries frontmatter: `type`, `status`, `created`, `updated`,
    `tags`, `sessions` (provenance), and a DragonScale `address: c-NNNNNN`
    allocated via `./scripts/allocate-address.sh`.
 4. Wikilinks are `[[Page Name]]` — file names are vault-unique, no paths.
-5. Search before writing: `scripts/semantic-search.py "<query>" --hybrid`
-   (local ollama bge-m3 + BM25). Merge into existing pages instead of
+5. Search before writing: `scripts/retrieve.py "<query>" --top 5 --json`
+   (section-level sparse by default, optional local bge-m3). Merge into existing pages instead of
    creating near-duplicates; `scripts/tiling-check.py` finds duplicate
    candidates.
 6. Retrieval changes ship only with shifted metrics:
@@ -67,21 +67,47 @@ compact status/cmux segment; `scripts/codex-limit-monitor.py --install` installs
 ## Write path (what happens on turn end)
 
 The Stop hook (`.claude/hooks/stop.sh`, registered through `hooks/hooks.json`)
-reindexes `.vault-meta/`, rebuilds the BM25 index, refreshes dense embeddings
-incrementally, backs up agent memory, and auto-commits
-`wiki/ .raw/ .vault-meta/ .claude-memory/` under an flock (parallel sessions do
-not collide). Claude Code runs it through the normal hook layer; Codex plugin
+recovers transactions, reindexes `.vault-meta/`, self-heals sparse section retrieval,
+validates, scoped-commits vault-owned paths, and schedules fingerprinted dense refresh
+when needed without blocking Stop. Stdlib `fcntl` locks serialize both paths.
+Validation failure blocks the commit and leaves the tree
+dirty. Memory backup is disabled unless `CLAUDE_MEMORY_DIR` is explicitly set or
+`.vault-meta/memory-backup.json` enables a source (start from
+`config/memory-backup.example.json`); it never guesses a sibling vault. Claude Code runs it through the normal hook layer; Codex plugin
 hooks run the same script with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`. Other agents
 can run the same script manually after writing pages.
 
 Use `./scripts/current-session-id.sh` for provenance. It returns
 `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, then `unknown`.
 
+Shared writer/retrieval/fold scripts emit content-free, gitignored events to
+`.vault-meta/pipeline-events.jsonl`. The allowed schema is identifiers, relative
+vault paths, and numeric counters only. Do not add prompts, queries, commands,
+snippets, page bodies, or error text. Runtime hook parity is documented in
+`docs/runtime-capabilities.md`.
+
+For local shell probes that need a wall-clock limit, do not use bare GNU
+`timeout`: this toolkit is often operated from macOS, where it is absent by
+default. Use `./scripts/with-timeout 8 <command> ...` from the repo root, or an
+MCP/API-native timeout parameter when the tool exposes one.
+
+Never use `claude -p` or `claude --print` for Claude reviewer, dispatch, or
+task-split sessions. Those flows must open an interactive Claude Code session in
+a cmux split so the user can see and continue the reviewer.
+
+Do not interrupt an interactive Claude reviewer while it is visibly active
+(spinner, token counters, tool activity, or changing screen). Wait at least
+15 minutes without visible progress before intervening; by 20 minutes, inspect
+and ask for a concise status instead of blindly cancelling.
+
 ## Danger zones
 
 - Never commit credentials; `.gitignore` blocks common secret containers and
   `scripts/lib_sanitize.py` masks credential-looking strings in captured
-  command logs and memory backups.
+  command logs and memory backups. Memory backup scans the complete sanitized
+  snapshot and existing backup before mutation; residual patterns block writes.
+  This pattern scan is defense-in-depth, not proof that arbitrary secrets are
+  absent; review backup diffs before publishing them.
 - `.vault-meta/` runtime indexes are derived state — regenerate, do not hand-edit.
 - Optional destructive-command guard setup is portable: `bin/setup-dcg.sh`
   installs dcg/config/hooks; policy is `config/dcg/config.toml`; smoke test is

@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Deterministic date-page mutations routed through vault-write.py."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from daily_contract import DailyContractError, replace_h2, update_frontmatter, validate_date
+
+
+ROOT = Path(os.environ.get("LLM_OBSIDIAN_ROOT") or Path(__file__).resolve().parents[1]).resolve()
+WRITER = ROOT / "scripts" / "vault-write.py"
+TEMPLATE = ROOT / "_templates" / "daily.md"
+SECTIONS = {"plans": "## Планы", "reminders": "## Напоминания", "notes": "## Заметки"}
+SESSION_LINE_RX = re.compile(r"^-\s+.+?\s+·\s+`[A-Za-z0-9][A-Za-z0-9._:-]{7,127}`\s*$")
+SESSION_HEADING_RX = re.compile(r"^###\s+(?:Claude|Codex|Other)\s*$")
+
+
+def session_id() -> str:
+    helper = ROOT / "scripts" / "current-session-id.sh"
+    result = subprocess.run([str(helper)], cwd=ROOT, text=True, capture_output=True) if helper.is_file() else None
+    return result.stdout.strip() if result and result.returncode == 0 and result.stdout.strip() else "unknown"
+
+
+def rel_path(date: str) -> str:
+    validate_date(date)
+    return f"wiki/daily/{date[:4]}/{date[5:7]}/{date}.md"
+
+
+def skeleton(date: str, current_session: str) -> str:
+    if not TEMPLATE.is_file():
+        raise DailyContractError("canonical _templates/daily.md is missing")
+    text = TEMPLATE.read_text(encoding="utf-8").replace("<DATE>", date)
+    if current_session != "unknown":
+        text = text.replace("sessions: []", f"sessions:\n  - {current_session}")
+    return text
+
+
+def load_page(date: str, current_session: str) -> tuple[str, str | None]:
+    rel = rel_path(date)
+    path = ROOT / rel
+    current = path.read_text(encoding="utf-8") if path.is_file() else None
+    return rel, current if current is not None else skeleton(date, current_session)
+
+
+def section_lines(text: str, heading: str) -> list[str]:
+    lines = text.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == heading) + 1
+    except StopIteration as exc:
+        raise DailyContractError(f"required section missing: {heading}") from exc
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    return [line for line in lines[start:end] if line.strip()]
+
+
+def page_spec(rel: str, old: str | None, new: str) -> dict:
+    if old is None:
+        return {"op": "create", "path": rel, "content": new}
+    digest = hashlib.sha256(old.encode("utf-8")).hexdigest()
+    return {"op": "update", "path": rel, "content": new, "expected_sha256": digest}
+
+
+def call_writer(specs: list[dict], current_session: str, *, dry_run: bool) -> dict:
+    payload = {"schema_version": 1, "actor": "journal", "session": current_session, "pages": specs}
+    command = [sys.executable, str(WRITER), "--output", "json"]
+    if dry_run:
+        command.append("--dry-run")
+    result = subprocess.run(command, cwd=ROOT, input=json.dumps(payload, ensure_ascii=False), text=True, capture_output=True)
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DailyContractError(f"vault writer returned invalid JSON: {(result.stderr or result.stdout).strip()}") from exc
+    if result.returncode:
+        raise DailyContractError(response.get("error", {}).get("message") or "vault writer failed")
+    return response
+
+
+def mutate(date: str, transform, *, dry_run: bool) -> dict:
+    current_session = session_id()
+    rel = rel_path(date)
+    path = ROOT / rel
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    base = old if old is not None else skeleton(date, current_session)
+    new = transform(base)
+    new = update_frontmatter(new, datetime.now().astimezone().strftime("%Y-%m-%d"), current_session)
+    return call_writer([page_spec(rel, old, new)], current_session, dry_run=dry_run)
+
+
+def ensure(date: str, *, dry_run: bool) -> dict:
+    validate_date(date)
+    path = ROOT / rel_path(date)
+    if path.is_file():
+        return {"schema_version": 1, "status": "existing", "written_paths": []}
+    return mutate(date, lambda text: text, dry_run=dry_run)
+
+
+def append(date: str, section_name: str, text: str, *, dry_run: bool) -> dict:
+    heading = SECTIONS[section_name]
+    if section_name != "notes" and ("\n" in text or not text.strip()):
+        raise DailyContractError("plans/reminders require one non-empty line")
+    if not text.strip():
+        raise DailyContractError("notes text must not be empty")
+    if section_name == "notes" and any(line.startswith(("## ", "---")) for line in text.splitlines()):
+        raise DailyContractError("notes must not introduce headings or frontmatter delimiters")
+
+    def transform(page: str) -> str:
+        current = section_lines(page, heading)
+        if section_name == "plans":
+            line = f"- [ ] {text.strip()}"
+            identity = text.strip().casefold()
+            if any(re.sub(r"^- \[[ xX]\]\s*", "", item).casefold() == identity for item in current):
+                return page
+            current.append(line)
+        elif section_name == "reminders":
+            line = f"- {text.strip()}"
+            if any(item.casefold() == line.casefold() for item in current):
+                return page
+            current.append(line)
+        else:
+            current.extend(text.strip().splitlines())
+        return replace_h2(page, heading, current)
+
+    return mutate(date, transform, dry_run=dry_run)
+
+
+def check(date: str, match: str, *, dry_run: bool) -> dict:
+    needle = match.strip().casefold()
+    if not needle:
+        raise DailyContractError("check match must not be empty")
+
+    def transform(page: str) -> str:
+        current = section_lines(page, "## Планы")
+        indexes = [index for index, line in enumerate(current) if line.startswith("- [ ]") and needle in line.casefold()]
+        if not indexes:
+            raise DailyContractError("no unchecked plan matches")
+        if len(indexes) > 1:
+            choices = "; ".join(current[index] for index in indexes[:5])
+            raise DailyContractError(f"multiple unchecked plans match: {choices}")
+        current[indexes[0]] = current[indexes[0]].replace("- [ ]", "- [x]", 1)
+        return replace_h2(page, "## Планы", current)
+
+    return mutate(date, transform, dry_run=dry_run)
+
+
+def sessions(date: str, *, dry_run: bool) -> dict:
+    helper = ROOT / "scripts" / "session-map.py"
+    result = subprocess.run([sys.executable, str(helper), date], cwd=ROOT, text=True, capture_output=True)
+    if result.returncode:
+        raise DailyContractError(result.stderr.strip() or "session-map failed")
+    lines = [line.rstrip() for line in result.stdout.splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines == [f"# no sessions on {date}"]:
+        lines = []
+    meaningful = [line.strip() for line in lines if line.strip()]
+    if any(SESSION_LINE_RX.fullmatch(line) is None and SESSION_HEADING_RX.fullmatch(line) is None for line in meaningful):
+        raise DailyContractError("session-map returned an invalid line")
+    return mutate(date, lambda page: replace_h2(page, "## Сессии", lines), dry_run=dry_run)
+
+
+def carryover(source: str, target: str, *, dry_run: bool) -> dict:
+    source_path = ROOT / rel_path(source)
+    if not source_path.is_file():
+        raise DailyContractError(f"source date page does not exist: {source}")
+    pending = [line for line in section_lines(source_path.read_text(encoding="utf-8"), "## Планы") if line.startswith("- [ ]")]
+    if not pending:
+        return {"schema_version": 1, "status": "nothing", "written_paths": []}
+
+    def transform(page: str) -> str:
+        current = section_lines(page, "## Планы")
+        identities = {re.sub(r"^- \[[ xX]\]\s*", "", line).casefold() for line in current}
+        for line in pending:
+            identity = re.sub(r"^- \[[ xX]\]\s*", "", line).casefold()
+            if identity not in identities:
+                current.append(line)
+                identities.add(identity)
+        return replace_h2(page, "## Планы", current)
+
+    return mutate(target, transform, dry_run=dry_run)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    for name in ("ensure", "sessions"):
+        item = sub.add_parser(name)
+        item.add_argument("--date", required=True)
+        item.add_argument("--dry-run", action="store_true")
+    add = sub.add_parser("append")
+    add.add_argument("--date", required=True)
+    add.add_argument("--section", choices=sorted(SECTIONS), required=True)
+    add.add_argument("--text", required=True)
+    add.add_argument("--dry-run", action="store_true")
+    done = sub.add_parser("check")
+    done.add_argument("--date", required=True)
+    done.add_argument("--match", required=True)
+    done.add_argument("--dry-run", action="store_true")
+    carry = sub.add_parser("carryover")
+    carry.add_argument("--source", required=True)
+    carry.add_argument("--target", required=True)
+    carry.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    try:
+        if args.command == "ensure":
+            response = ensure(args.date, dry_run=args.dry_run)
+        elif args.command == "append":
+            response = append(args.date, args.section, args.text, dry_run=args.dry_run)
+        elif args.command == "check":
+            response = check(args.date, args.match, dry_run=args.dry_run)
+        elif args.command == "sessions":
+            response = sessions(args.date, dry_run=args.dry_run)
+        else:
+            response = carryover(args.source, args.target, dry_run=args.dry_run)
+        print(json.dumps(response, ensure_ascii=False))
+        return 0
+    except (DailyContractError, OSError) as exc:
+        print(f"journal-write: {exc}", file=sys.stderr)
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

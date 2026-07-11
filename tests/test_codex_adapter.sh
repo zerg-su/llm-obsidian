@@ -48,6 +48,24 @@ expect_grep "A3 helper falls back to Codex" "$OUT" "codex-thread"
 env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID "$FIX/scripts/current-session-id.sh" >"$OUT" 2>&1
 expect_grep "A4 helper unknown fallback" "$OUT" "unknown"
 
+python3 - "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+plugin = json.loads((root / ".claude-plugin/plugin.json").read_text())
+market = json.loads((root / ".claude-plugin/marketplace.json").read_text())
+entry = market["plugins"][0]
+assert plugin["name"] == entry["name"] == "llm-obsidian"
+assert plugin["version"] == entry["version"] == market["metadata"]["version"]
+assert plugin["repository"] == "https://github.com/zerg-su/llm-obsidian"
+assert entry["source"] == {
+    "source": "github",
+    "repo": "zerg-su/llm-obsidian",
+    "ref": "main",
+}
+print("CLAUDE_PACKAGE_OK")
+PYEOF
+expect_grep "A5 public Claude package metadata is aligned" "$OUT" "CLAUDE_PACKAGE_OK"
+
 echo "B. check/apply"
 python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --check >"$OUT" 2>&1
 expect_exit "B1 initial check reports drift" "$?" 1
@@ -66,6 +84,7 @@ plugin = json.loads((root / ".codex-plugin/plugin.json").read_text())
 market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
 assert plugin["name"] == "llm-obsidian"
 assert plugin["skills"] == "./skills/"
+assert plugin["author"] == {"name": "zerg-su"}
 assert plugin["interface"]["displayName"] == "llm-obsidian"
 assert market["name"] == "llm-obsidian-codex"
 assert market["plugins"][0]["name"] == "llm-obsidian"
@@ -77,15 +96,25 @@ python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --check >"$OUT" 2>&1
 expect_exit "C2 second check clean" "$?" 0
 expect_grep "C3 no changes message" "$OUT" "codex-adapter: no changes"
 
+python3 - "$FIX/.codex-plugin/plugin.json" <<'PYEOF'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1]); data = json.loads(path.read_text())
+data["version"] = "1.0.0+codex.test-cache"
+path.write_text(json.dumps(data, indent=2) + "\n")
+PYEOF
+python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --apply >"$OUT" 2>&1
+expect_exit "C4 cachebuster apply exits 0" "$?" 0
+expect_grep "C5 cachebuster preserved" "$FIX/.codex-plugin/plugin.json" '"version": "1.0.0+codex.test-cache"'
+
 echo "D. fork plugin names"
 python3 - "$FIX" >"$OUT" 2>&1 <<'PYEOF'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 path = root / ".claude-plugin/plugin.json"
 data = json.loads(path.read_text())
-data["name"] = "llm-obsidian-swarm"
-data["homepage"] = "https://github.com/zerg-su/llm-obsidian-swarm"
-data["repository"] = "https://github.com/zerg-su/llm-obsidian-swarm"
+data["name"] = "llm-obsidian-custom"
+data["homepage"] = "https://github.com/example/llm-obsidian-custom"
+data["repository"] = "https://github.com/example/llm-obsidian-custom"
 path.write_text(json.dumps(data, indent=2) + "\n")
 print("FORK_SOURCE_OK")
 PYEOF
@@ -97,11 +126,11 @@ import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 plugin = json.loads((root / ".codex-plugin/plugin.json").read_text())
 market = json.loads((root / ".agents/plugins/marketplace.json").read_text())
-assert plugin["name"] == "llm-obsidian-swarm"
-assert plugin["interface"]["displayName"] == "llm-obsidian-swarm"
-assert market["name"] == "llm-obsidian-swarm-codex"
-assert market["interface"]["displayName"] == "llm-obsidian-swarm Codex"
-assert market["plugins"][0]["name"] == "llm-obsidian-swarm"
+assert plugin["name"] == "llm-obsidian-custom"
+assert plugin["interface"]["displayName"] == "llm-obsidian-custom"
+assert market["name"] == "llm-obsidian-custom-codex"
+assert market["interface"]["displayName"] == "llm-obsidian-custom Codex"
+assert market["plugins"][0]["name"] == "llm-obsidian-custom"
 print("FORK_SHAPE_OK")
 PYEOF
 expect_grep "D3 fork generated shape" "$OUT" "FORK_SHAPE_OK"

@@ -1,11 +1,11 @@
 ---
 name: wiki
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: >
   Claude + Obsidian knowledge companion router: bootstraps a vault (SCAFFOLD)
-  and routes operations to sub-skills. Slash-only since 2026-06-10 — the vault
-  is built, scaffold is a one-time op (unfreeze by removing disable-model-invocation).
-disable-model-invocation: true
+  and routes operations to sub-skills. Manual-only: never auto-invoke; run only
+  when the user explicitly requests /wiki because scaffold is a one-time operation.
 allowed-tools: Read Write Edit Glob Grep Bash
 ---
 
@@ -68,11 +68,11 @@ Created: YYYY-MM-DD
 [paste folder map from chosen mode]
 
 ## Conventions
-- YAML frontmatter required: type, status, created, updated, tags
+- YAML frontmatter required: type, status, created, updated, tags, sessions
 - Wikilinks `[[Note Name]]` (unique filenames, no paths)
 - `.raw/` source documents — never modify
 - `wiki/index.md` — master catalog, update on every ingest
-- `wiki/log.md` — append-only, new entries at TOP
+- All wiki mutation goes through `scripts/vault-write.py`; `wiki/log.md` is prepend-only and writer-owned
 
 ## Operations
 - Ingest: drop in `.raw/`, say "ingest [filename]"

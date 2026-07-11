@@ -1,6 +1,7 @@
 ---
 name: distill-runbook
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: >-
   Distill this session's shell commands (.vault-meta/command-log.jsonl, PostToolUse capture) into a human-executable runbook in wiki/runbooks/ — AI-outage resilience: процедуры живут как copy-paste bash без ИИ. Triggers: distill runbook, runbook from session, сделай ранбук из сессии, ранбук из команд, сохрани команды сессии, дистиллируй ранбук.
 allowed-tools: Read Grep Glob Bash Write Edit AskUserQuestion
@@ -48,19 +49,25 @@ the vault's insurance policy for «ИИ отключился».
 ## Phase 3 — Write
 
 1. Allocate address: `./scripts/allocate-address.sh`.
-2. `Write` the runbook. Frontmatter per vault convention (`type: runbook`,
+2. Draft the complete runbook. Frontmatter per vault convention (`type: runbook`,
    `status: stable`, `sessions:` provenance, `last_validated: <today>` —
    the session that produced the commands IS the validation run).
+   **Session refs = ID, never a bare date.** `sessions:` frontmatter AND any
+   provenance / validation prose in the body reference the session by its **ID**
+   (`./scripts/current-session-id.sh`), ideally as **date + ID**. A bare date is
+   not resumable (`claude --resume <id>`) nor grep-findable in `command-log.jsonl`.
    Body requirements (this is the AI-less contract):
    - every command copy-paste ready, full paths, explicit hosts/IPs (from
      the log's `cwd` and command args) — no «подставь свой хост»;
    - expected output / success check after each step;
    - «What NOT to do» section if instructive failures were captured;
    - zero steps that require asking an AI.
-3. Bookkeeping via the dispatcher (one call, caps enforced):
+3. Create the runbook and bookkeeping in one dispatcher transaction:
    ```bash
    python3 scripts/vault-write.py <<'PAYLOAD'
-   {"log_entry": "## [YYYY-MM-DD] distill-runbook | <Title>\n\n`c-NNNNNN` [[<Title>]]. Дистиллирован из N команд сессии <sid>: <one-line что за процедура>.",
+   {"actor": "distill-runbook", "session": "<sid>",
+    "pages": [{"op": "create", "path": "wiki/runbooks/<Title>.md", "content": "<full markdown, JSON-escaped>"}],
+    "log_entry": "## [YYYY-MM-DD] distill-runbook | <Title>\n\n`c-NNNNNN` [[<Title>]]. Дистиллирован из N команд сессии <sid>: <one-line что за процедура>.",
     "hot_bullet": "YYYY-MM-DD: runbook [[<Title>]] — <essence> (`c-NNNNNN`)"}
    PAYLOAD
    ```

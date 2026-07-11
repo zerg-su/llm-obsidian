@@ -18,6 +18,10 @@ Pattern:
    } }
    ```
 
+   Use the port recorded in `scripts/mcp-gateway/runtime.env`; the shipped
+   example is 9090. Gateway and default `.mcp.json` ports are materialized with
+   `scripts/mcp-gateway/mcp-gateway.sh sync-config --apply`.
+
 3. Start a session with the profile ADDED to the base set:
 
    ```bash

@@ -1,6 +1,7 @@
 ---
 name: save
-version: 1.0.0
+metadata:
+  version: 1.0.0
 description: >-
   Save the conversation/insight into the wiki as a structured note: frontmatter, folder, DragonScale address, session provenance; log/hot bookkeeping через scripts/vault-write.py. Smart fast-path: infer type/folder/title, one-line plan, ask only when ambiguous. Triggers: /save, сохрани (это/сессию), зафайли, запиши в вики, добавь в вольт, save this, file this, keep this.
 allowed-tools: Read Write Edit Glob Grep AskUserQuestion Bash
@@ -38,8 +39,8 @@ Three phases. Plan everything first, then dispatch all writes in one batched ass
 
 The four touched files have **different jobs**. Don't duplicate content across them.
 
-- **`wiki/<folder>/<note>.md`** — the new note. **Source of truth.** Full content, frontmatter, prose, all details, alternatives, evidence. Written by you (Write tool).
-- **`wiki/log.md` + `wiki/hot.md`** — bookkeeping, written by `scripts/vault-write.py` from ONE JSON payload you compose. You never Edit these files directly: the script prepends the log entry, prepends the hot bullet (evicting beyond 15, truncating to 160 chars), applies Active Threads add/resolve, bumps `updated:` — and FAILS (exit 2) with a reason if any cap would break, in which case fix the payload and re-run.
+- **`wiki/<folder>/<note>.md`** — source of truth: full content, frontmatter, evidence. It is included in the same `vault-write.py` transaction as bookkeeping; never Write/Edit it directly.
+- **`wiki/log.md` + `wiki/hot.md`** — bookkeeping in that same payload. The writer prepends entries, enforces caps, and rolls a crashed multi-file transaction forward on its next call.
 - **`wiki/index.md`** — thin curated map. **Default: do NOT touch it.** Folder listings regenerate automatically (`reindex.py --folder-indexes` in the Stop hook). Add a link manually only when the page is a key hub for its domain.
 - **Folder `_index.md`** — never touch; the AUTO-INDEX block is machine-owned.
 
@@ -77,7 +78,7 @@ In a single turn, before issuing any Write/Edit:
 3. **Determine** note type using the table above (already inferred in Phase 0).
 4. **Extract** all relevant content from the conversation. Rewrite it in declarative present tense (not "the user asked" but the actual content itself).
 5. **Collect links**: identify any wiki pages mentioned in the conversation. Add them to `related` in the **new note's** frontmatter (NOT in `wiki/hot.md` frontmatter — see Phase 2 below).
-6. **Draft** the two artifacts internally before writing anything (no pre-reads of log/hot/index needed — vault-write.py owns their structure):
+6. **Draft** one transactional payload internally before writing anything (no pre-reads of log/hot needed — vault-write.py owns their structure):
    - Full content of the new note (path, frontmatter, body) — source of truth.
    - The vault-write JSON payload: `log_entry` (full prose, format below), `hot_bullet` (one line, format below), optional `hot_threads` `{"add": [...], "resolve": ["substring"]}` when the save opens/closes an Active Thread, optional `hot_narrative` (≤120 words) when the save IS the new headline event of the day.
 
@@ -93,20 +94,26 @@ Hot.md bullet format (terse, scannable, ~one line):
 - YYYY-MM-DD: [[Note Title]] — one-sentence essence (`c-NNNNNN`)
 ```
 
-### Phase 2 — Write (one assistant message, two tool calls)
+For update-mode, capture the optimistic lock before drafting:
 
-Dispatch both writes **in a single assistant message**:
+```bash
+python3 scripts/vault-write.py --sha256 "wiki/<folder>/<Note Title>.md"
+```
 
-- `Write(wiki/[folder]/Note Title.md, ...)` — full content. Source of truth.
-- `Bash`: pipe the payload into the dispatcher:
+### Phase 2 — Write (one dispatcher call)
+
+Pipe the page plus bookkeeping into one dispatcher payload:
+
   ```bash
   python3 scripts/vault-write.py <<'PAYLOAD'
-  {"log_entry": "## [YYYY-MM-DD] save | Note Title\n\n`c-NNNNNN` [[Note Title]]. Full prose...",
+  {"actor": "save", "session": "<SESSION_ID>",
+   "pages": [{"op": "create", "path": "wiki/<folder>/Note Title.md", "content": "<full markdown, JSON-escaped>"}],
+   "log_entry": "## [YYYY-MM-DD] save | Note Title\n\n`c-NNNNNN` [[Note Title]]. Full prose...",
    "hot_bullet": "YYYY-MM-DD: [[Note Title]] — one-sentence essence (`c-NNNNNN`)"}
   PAYLOAD
   ```
 
-If vault-write exits 2 (cap violation), it names the reason (e.g. Active Threads over 8 with a listing) — fix the payload (resolve a thread, shorten the narrative) and re-run. Do not bypass it with direct Edits.
+For an existing page use `"op":"update"` and include the previously captured `"expected_sha256":"..."`. Exit 2 is a cap/lifecycle violation; exit 4 is a concurrent-edit conflict—re-read and re-draft. Never bypass either with direct Edits.
 
 **Do NOT** edit `wiki/hot.md` directly, its frontmatter `related:` included (curated evergreen hubs, managed by `/wiki-lint`).
 
@@ -122,8 +129,7 @@ After the batch returns:
 ## Frontmatter Template
 
 **Every saved page MUST carry `sessions:` (provenance) and `address:` (DragonScale).**
-Skip provenance only for `wiki/log.md` (linear journal, exception in memory rule
-`feedback_session_id_in_frontmatter`).
+The dispatcher owns the global log; every content page carries provenance.
 
 ```yaml
 ---

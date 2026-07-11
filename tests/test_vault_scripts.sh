@@ -17,8 +17,11 @@ trap 'rm -rf "$SANDBOX"' EXIT
 
 mkdir -p "$SANDBOX/scripts" "$SANDBOX/wiki/plans" "$SANDBOX/wiki/questions" "$SANDBOX/.vault-meta"
 cp "$REPO_ROOT/scripts/vault-write.py" \
+   "$REPO_ROOT/scripts/plan_lifecycle.py" \
+   "$REPO_ROOT/scripts/pipeline_events.py" \
    "$REPO_ROOT/scripts/validate-vault.py" \
    "$REPO_ROOT/scripts/reindex.py" \
+   "$REPO_ROOT/scripts/vault_schema.py" \
    "$REPO_ROOT/scripts/tag-search.py" "$SANDBOX/scripts/"
 
 VW="$SANDBOX/scripts/vault-write.py"
@@ -112,16 +115,73 @@ expect_exit "vw-log-prepend" "$?" 0
 head -15 "$SANDBOX/wiki/log.md" > "$SANDBOX/.head"
 expect_grep "vw-log-prepend-order" "$SANDBOX/.head" "test | Prepend"
 
+echo '{"session":"public-template-v2","log_entry":"## ['"$TODAY"'] test | Provenance\n\n- session-aware entry","hot_narrative":"Session-aware narrative."}' | "$VW" >/dev/null 2>&1
+expect_exit "vw-writer-owned-session" "$?" 0
+expect_grep "vw-log-session-recorded" "$SANDBOX/wiki/log.md" '  - "public-template-v2"'
+expect_grep "vw-hot-session-recorded" "$SANDBOX/wiki/hot.md" '  - "public-template-v2"'
+
 echo '{"log_entry": "no heading format"}' | "$VW" >/dev/null 2>&1
 expect_exit "vw-log-bad-format" "$?" 2
 
-long_bullet=$(printf 'x%.0s' {1..200})
-echo '{"hot_bullet": "'"$long_bullet"'"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+echo '{"log_entry": "## ['"$TODAY"'] missing separator\n\n- body"}' | "$VW" >/dev/null 2>&1
+expect_exit "vw-log-missing-pipe" "$?" 2
+
+echo '{"log_entry": "## ['"$TODAY"' 12:34] test-op | Timestamp accepted\n\n- body"}' | "$VW" >/dev/null 2>&1
+expect_exit "vw-log-timestamp" "$?" 0
+
+hot_hash=$("$VW" --sha256 wiki/hot.md)
+python3 - "$SANDBOX/wiki/hot.md" "$hot_hash" <<'PY' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+import json, sys
+print(json.dumps({"pages": [{"op": "update", "path": "wiki/hot.md", "expected_sha256": sys.argv[2], "content": open(sys.argv[1]).read()}]}))
+PY
+expect_exit "vw-pages-hot-rejected" "$?" 3
+expect_grep "vw-pages-hot-guidance" "$SANDBOX/.err" "dedicated hot_*"
+
+log_hash=$("$VW" --sha256 wiki/log.md)
+python3 - "$SANDBOX/wiki/log.md" "$log_hash" <<'PY' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+import json, sys
+print(json.dumps({"pages": [{"op": "update", "path": "wiki/log.md", "expected_sha256": sys.argv[2], "content": open(sys.argv[1]).read()}]}))
+PY
+expect_exit "vw-pages-log-rejected" "$?" 3
+expect_grep "vw-pages-log-guidance" "$SANDBOX/.err" "dedicated log_entry"
+
+long_bullet=$(printf 'длинное-описание-%.0s' {1..20})
+echo '{"hot_bullet": "2026-01-02: [[Structurally Important Page]] — '"$long_bullet"' (`c-000047`)"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
 expect_exit "vw-bullet-truncate-exit" "$?" 0
 expect_grep "vw-bullet-truncate-warn" "$SANDBOX/.err" "truncated"
+recent=$(sed -n '/## Recent Changes/,/## Active Threads/p' "$SANDBOX/wiki/hot.md" | grep '^- ' | head -n 1)
+[[ ${#recent} -le 160 ]] && ok "vw-bullet-truncate-cap" || bad "vw-bullet-truncate-cap" "got ${#recent} chars"
+[[ "$recent" == *'[[Structurally Important Page]]'* ]] && ok "vw-bullet-link-preserved" || bad "vw-bullet-link-preserved" "$recent"
+[[ "$recent" == *'c-000047'* && "$recent" != *'c-00004…'* ]] && ok "vw-bullet-address-preserved" || bad "vw-bullet-address-preserved" "$recent"
+
+echo '{"hot_bullet": "2026-01-02: [[Missing Address]] — invalid"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-bullet-missing-address-rejected" "$?" 3
+expect_grep "vw-bullet-missing-address-guidance" "$SANDBOX/.err" "c-NNNNNN"
+
+json_out=$(echo '{"schema_version":1,"request_id":"test.hot.001","hot_bullet":"2026-01-02: [[JSON Contract]] — dry (`c-000047`)"}' | "$VW" --dry-run --output json 2>"$SANDBOX/.err")
+python3 - "$json_out" <<'PY'
+import json, sys
+d=json.loads(sys.argv[1])
+assert d["schema_version"] == 1
+assert d["transaction_id"] == "test.hot.001" == d["request_id"]
+assert d["status"] == "dry-run"
+assert d["written_paths"] == ["wiki/hot.md"]
+PY
+expect_exit "vw-json-success-contract" "$?" 0
+
+json_out=$(echo '{"schema_version":2,"request_id":"bad.version","hot_bullet":"2026-01-02: [[JSON Contract]] — bad (`c-000047`)"}' | "$VW" --output json 2>/dev/null)
+expect_exit "vw-json-version-exit" "$?" 3
+python3 - "$json_out" <<'PY'
+import json, sys
+d=json.loads(sys.argv[1]); assert d["status"] == "error"
+assert d["error"]["category"] == "invalid_request"
+assert d["error"]["retryable"] is False
+PY
+expect_exit "vw-json-error-contract" "$?" 0
 
 for i in $(seq 1 16); do
-  echo '{"hot_bullet": "2026-01-02: [[P'"$i"']] — bullet '"$i"'"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+  printf -v addr 'c-%06d' "$i"
+  echo '{"hot_bullet": "2026-01-02: [[P'"$i"']] — bullet '"$i"' (`'"$addr"'`)"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
 done
 expect_grep "vw-rc-evict-warn" "$SANDBOX/.err" "evicted"
 n_bullets=$(sed -n '/## Recent Changes/,/## Active Threads/p' "$SANDBOX/wiki/hot.md" | grep -c '^- ')
@@ -143,6 +203,175 @@ expect_exit "vw-empty-payload" "$?" 3
 echo '{"index_line": "- x"}' | "$VW" >/dev/null 2>&1
 expect_exit "vw-index-line-rejected" "$?" 3
 
+# ---------- vault-write: transactional pages / manifest / recovery ----------
+echo "== vault-write: transactional mutations =="
+
+cat > "$SANDBOX/.page.md" <<EOF
+---
+type: concept
+title: "Transaction Page"
+address: c-000001
+status: developing
+created: $TODAY
+updated: $TODAY
+tags: [test]
+sessions: []
+---
+
+# Transaction Page
+EOF
+python3 -c 'import json,sys; print(json.dumps({"actor":"test","pages":[{"op":"create","path":"wiki/concepts/Transaction Page.md","content":open(sys.argv[1]).read()}],"log_entry":"## ['"$TODAY"'] test | Transaction create\n\n- created"}))' "$SANDBOX/.page.md" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-create" "$?" 0
+[[ -f "$SANDBOX/wiki/concepts/Transaction Page.md" ]] && ok "vw-page-created" || bad "vw-page-created" "file missing"
+expect_grep "vw-page-log-same-transaction" "$SANDBOX/wiki/log.md" "Transaction create"
+
+cp "$SANDBOX/wiki/log.md" "$SANDBOX/.log-before-conflict"
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"create","path":"wiki/concepts/Transaction Page.md","content":open(sys.argv[1]).read()}],"log_entry":"## ['"$TODAY"'] test | MustNotLand"}))' "$SANDBOX/.page.md" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-create-conflict" "$?" 4
+cmp -s "$SANDBOX/wiki/log.md" "$SANDBOX/.log-before-conflict" && ok "vw-conflict-no-partial-log" || bad "vw-conflict-no-partial-log" "log changed"
+
+sed 's/# Transaction Page/# Transaction Page Updated/' "$SANDBOX/.page.md" > "$SANDBOX/.page-updated.md"
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"update","path":"wiki/concepts/Transaction Page.md","expected_sha256":"0"*64,"content":open(sys.argv[1]).read()}]}))' "$SANDBOX/.page-updated.md" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-update-stale-sha" "$?" 4
+hash=$(shasum -a 256 "$SANDBOX/wiki/concepts/Transaction Page.md" | awk '{print $1}')
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"update","path":"wiki/concepts/Transaction Page.md","expected_sha256":sys.argv[2],"content":open(sys.argv[1]).read()}]}))' "$SANDBOX/.page-updated.md" "$hash" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-update-matching-sha" "$?" 0
+expect_grep "vw-update-landed" "$SANDBOX/wiki/concepts/Transaction Page.md" "Page Updated"
+
+hash=$(shasum -a 256 "$SANDBOX/wiki/concepts/Transaction Page.md" | awk '{print $1}')
+python3 -c 'import json,sys; print(json.dumps({"moves":[{"from":"wiki/concepts/Transaction Page.md","to":"wiki/concepts/Transaction Page Renamed.md","expected_sha256":sys.argv[1]}]}))' "$hash" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-move" "$?" 0
+[[ ! -e "$SANDBOX/wiki/concepts/Transaction Page.md" && -f "$SANDBOX/wiki/concepts/Transaction Page Renamed.md" ]] \
+  && ok "vw-page-moved" || bad "vw-page-moved" "source/target state is wrong"
+echo '{"moves":[{"from":"wiki/concepts/Transaction Page Renamed.md","to":"wiki/concepts/Stale Move.md","expected_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}' \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-move-stale-sha" "$?" 4
+
+cat > "$SANDBOX/.source.md" <<EOF
+---
+type: source
+title: "Provenance Source"
+address: c-000003
+status: developing
+created: $TODAY
+updated: $TODAY
+tags: [source]
+sessions: []
+---
+
+# Provenance Source
+EOF
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"create","path":"wiki/sources/Provenance Source.md","content":open(sys.argv[1]).read()}]}))' "$SANDBOX/.source.md" \
+  | "$VW" --dry-run >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-source-provenance-required" "$?" 3
+expect_grep "vw-source-provenance-guidance" "$SANDBOX/.err" "source_class"
+python3 - "$SANDBOX/.source.md" <<'PY'
+import sys
+p=sys.argv[1]; t=open(p).read(); t=t.replace("status: developing", "source_class: official\nverified_at: 2026-07-10\ncontent_sha256: " + "a"*64 + "\nstatus: developing")
+open(p,"w").write(t)
+PY
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"create","path":"wiki/sources/Provenance Source.md","content":open(sys.argv[1]).read()}]}))' "$SANDBOX/.source.md" \
+  | "$VW" --dry-run >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-source-provenance-valid" "$?" 0
+
+mkdir -p "$SANDBOX/.raw"
+printf '{"address_map":{},"sources":{}}\n' > "$SANDBOX/.raw/.manifest.json"
+manifest_hash=$(shasum -a 256 "$SANDBOX/.raw/.manifest.json" | awk '{print $1}')
+python3 -c 'import json,sys; print(json.dumps({"manifest_update":{"path":".raw/.manifest.json","expected_sha256":sys.argv[1],"merge":{"address_map":{"wiki/concepts/Transaction Page.md":"c-000001"}}}}))' "$manifest_hash" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-manifest-merge" "$?" 0
+expect_grep "vw-manifest-merged" "$SANDBOX/.raw/.manifest.json" "Transaction Page.md"
+
+# Exercise the real crash window: the subprocess durably writes a journal and
+# then dies before the first destination write. A fresh process must roll the
+# complete page + log transaction forward.
+cat > "$SANDBOX/.crash-page.md" <<EOF
+---
+type: concept
+title: "Crash Recovery"
+address: c-000002
+status: developing
+created: $TODAY
+updated: $TODAY
+tags: [test]
+sessions: []
+---
+
+# Crash Recovery
+
+recovered by journal
+EOF
+python3 - "$SANDBOX/.crash-page.md" "$SANDBOX/.crash-payload.json" "$TODAY" \
+  "$SANDBOX/wiki/concepts/Transaction Page Renamed.md" <<'PY'
+import hashlib
+import json
+import sys
+
+page_file, payload_file, today, move_source = sys.argv[1:]
+payload = {
+    "actor": "crash-test",
+    "pages": [{
+        "op": "create",
+        "path": "wiki/concepts/Crash Recovery.md",
+        "content": open(page_file, encoding="utf-8").read(),
+    }],
+    "moves": [{
+        "from": "wiki/concepts/Transaction Page Renamed.md",
+        "to": "wiki/concepts/Transaction Page Recovered.md",
+        "expected_sha256": hashlib.sha256(open(move_source, "rb").read()).hexdigest(),
+    }],
+    "log_entry": f"## [{today}] test | Crash recovery\n\n- recovered transaction",
+}
+open(payload_file, "w", encoding="utf-8").write(json.dumps(payload))
+PY
+python3 - "$VW" "$SANDBOX/.crash-payload.json" <<'PY'
+import importlib.util
+import io
+import os
+import sys
+from pathlib import Path
+
+script, payload_file = map(Path, sys.argv[1:])
+sys.path.insert(0, str(script.parent))
+spec = importlib.util.spec_from_file_location("vault_write_crash_test", script)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+original_atomic_write = module.atomic_write
+
+def crash_after_journal(path, text):
+    if path == module.JOURNAL_FILE:
+        return original_atomic_write(path, text)
+    os._exit(99)
+
+module.atomic_write = crash_after_journal
+sys.stdin = io.StringIO(payload_file.read_text(encoding="utf-8"))
+raise SystemExit(module.main([]))
+PY
+expect_exit "vw-crash-after-journal" "$?" 99
+[[ -e "$SANDBOX/.vault-meta/.vault-write-journal.json" ]] && ok "vw-crash-leaves-journal" || bad "vw-crash-leaves-journal" "journal missing"
+"$VW" --recover >/dev/null 2>&1
+expect_exit "vw-roll-forward-exit" "$?" 0
+expect_grep "vw-roll-forward-content" "$SANDBOX/wiki/concepts/Crash Recovery.md" "recovered by journal"
+expect_grep "vw-roll-forward-log" "$SANDBOX/wiki/log.md" "test | Crash recovery"
+[[ ! -e "$SANDBOX/wiki/concepts/Transaction Page Renamed.md" && -f "$SANDBOX/wiki/concepts/Transaction Page Recovered.md" ]] \
+  && ok "vw-roll-forward-move" || bad "vw-roll-forward-move" "move did not roll forward"
+[[ ! -e "$SANDBOX/.vault-meta/.vault-write-journal.json" ]] && ok "vw-roll-forward-clears-journal" || bad "vw-roll-forward-clears-journal" "journal remains"
+python3 - "$SANDBOX/.vault-meta/pipeline-events.jsonl" > "$SANDBOX/.event-check" <<'PY'
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1])]
+assert any(e["op"] == "vault-write" and e["actor"] == "test" and "wiki/concepts/Transaction Page.md" in e["paths"] for e in events)
+assert any(e["op"] == "vault-recover" and e["counts"]["writes"] == 4 for e in events)
+assert all(not ({"prompt", "query", "content", "command", "snippet", "reason"} & set(e)) for e in events)
+print("EVENTS_OK")
+PY
+expect_grep "vw-content-free-events" "$SANDBOX/.event-check" "EVENTS_OK"
+
 # ---------- vault-write: plan_close ----------
 echo "== vault-write: plan_close =="
 
@@ -151,6 +380,7 @@ write_plan "pending-plan" "pending" "$TODAY" 'sessions:
     date: 2026-07-01' "Plan body."
 write_plan "executed-plan" "executed" "2026-05-01" 'sessions: []' "Old body."
 write_plan "marker-plan" "pending" "$TODAY" 'sessions: []' "Marker body."
+write_plan "guarded-plan" "pending" "$TODAY" 'sessions: []' "Guarded body."
 
 echo '{"plan_close": {"file": "wiki/hot.md", "result_link": "[[X]]"}}' | "$VW" >/dev/null 2>&1
 expect_exit "pc-outside-plans" "$?" 2
@@ -179,6 +409,13 @@ echo '{"plan_close": {"file": "wiki/plans/marker-plan.md", "result_link": "[[Y]]
 expect_exit "pc-marker-ok" "$?" 0
 expect_grep   "pc-marker-converted" "$SANDBOX/wiki/plans/marker-plan.md" "- id: exec-id-43"
 expect_nogrep "pc-marker-no-empty"  "$SANDBOX/wiki/plans/marker-plan.md" "sessions: []"
+
+GUARDED_SHA="$(shasum -a 256 "$SANDBOX/wiki/plans/guarded-plan.md" | awk '{print $1}')"
+echo '{"plan_close": {"file": "wiki/plans/guarded-plan.md", "result_link": "[[Guarded]]", "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}}' | "$VW" >/dev/null 2>&1
+expect_exit "pc-stale-approved-hash" "$?" 4
+expect_grep "pc-stale-hash-no-close" "$SANDBOX/wiki/plans/guarded-plan.md" "status: pending"
+echo '{"plan_close": {"file": "wiki/plans/guarded-plan.md", "result_link": "[[Guarded]]", "expected_sha256": "'"$GUARDED_SHA"'"}}' | "$VW" >/dev/null 2>&1
+expect_exit "pc-approved-hash-close" "$?" 0
 
 # atomicity: valid log_entry + broken plan_close => exit 2, log untouched
 echo '{"log_entry": "## ['"$TODAY"'] test | AtomicProbe\n\n- must not land",
@@ -210,6 +447,26 @@ expect_exit "pws-placeholder-title" "$?" 2
 out=$(printf '## Wiki Summary\n\ntype: session\ntitle: First\n\nold\n\n## Wiki Summary\n\ntype: decision\ntitle: Second\nsession: s2\n\nnew\n' | "$PW" 2>/dev/null)
 printf '%s' "$out" > "$SANDBOX/.json"
 expect_grep "pws-last-block-wins" "$SANDBOX/.json" '"title": "Second"'
+
+cat > "$SANDBOX/.task-summary.json" <<'JSON'
+{"schema_version":1,"type":"runbook","title":"Typed Summary","session":"exec-1","body":"Steps and evidence."}
+JSON
+out=$("$PW" --json-file "$SANDBOX/.task-summary.json" 2>"$SANDBOX/.err")
+expect_exit "pws-canonical-json" "$?" 0
+printf '%s' "$out" > "$SANDBOX/.json"
+expect_grep "pws-canonical-version" "$SANDBOX/.json" '"schema_version": 1'
+out=$("$PW" --json-file "$SANDBOX/.task-summary.json" --render-markdown 2>"$SANDBOX/.err")
+expect_exit "pws-render-markdown" "$?" 0
+printf '%s' "$out" > "$SANDBOX/.rendered"
+expect_grep "pws-rendered-marker" "$SANDBOX/.rendered" '## Wiki Summary'
+expect_grep "pws-rendered-title" "$SANDBOX/.rendered" 'title: Typed Summary'
+
+echo '{"schema_version":2,"type":"session","title":"Bad","session":"x","body":"body"}' > "$SANDBOX/.task-summary.json"
+"$PW" --json-file "$SANDBOX/.task-summary.json" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "pws-canonical-bad-version" "$?" 2
+echo '{"type":"session","title":"Missing Version","session":"x","body":"body"}' > "$SANDBOX/.task-summary.json"
+"$PW" --json-file "$SANDBOX/.task-summary.json" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "pws-canonical-missing-version" "$?" 2
 
 # ---------- validate-vault: plans / questions / sessions ----------
 echo "== validate-vault: plans / questions / sessions =="
@@ -305,11 +562,53 @@ expect_exit "ts-no-index-exit3" "$rc" 3
 
 # ---------- reindex: atomic writes ----------
 
-python3 "$SANDBOX/scripts/reindex.py" --quiet; rc=$?
+mkdir -p "$SANDBOX/wiki/reindex-fixture"
+cat > "$SANDBOX/wiki/reindex-fixture/Page.md" <<'EOF'
+---
+type: concept
+title: "Deterministic Listing Date"
+address: c-000099
+status: developing
+created: 2026-02-01
+updated: 2026-02-03
+tags: [test]
+sessions: []
+---
+
+# Deterministic Listing Date
+EOF
+python3 "$SANDBOX/scripts/reindex.py" --quiet --folder-indexes; rc=$?
 expect_exit "ri-run-ok" "$rc" 0
 [[ -s "$SANDBOX/.vault-meta/index.jsonl" ]] && ok "ri-index-written" || bad "ri-index-written" "index.jsonl missing/empty"
 python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SANDBOX/.vault-meta/tag-index.json" 2>/dev/null \
   && ok "ri-tagindex-valid-json" || bad "ri-tagindex-valid-json" "tag-index.json not valid JSON"
+expect_grep "ri-folder-date-from-content" "$SANDBOX/wiki/reindex-fixture/_index.md" "_1 pages, updated 2026-02-03_"
+python3 - "$SANDBOX/scripts/reindex.py" "$SANDBOX/wiki/reindex-fixture/_index.md" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+script, index_file = map(Path, sys.argv[1:])
+sys.path.insert(0, str(script.parent))
+spec = importlib.util.spec_from_file_location("reindex_clock_test", script)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+pages, _ = module.build_indexes()
+before = index_file.read_text(encoding="utf-8")
+
+class FutureClock:
+    @staticmethod
+    def strftime(_format):
+        return "2099-12-31"
+
+module.time = FutureClock
+written = module.write_folder_indexes(pages)
+after = index_file.read_text(encoding="utf-8")
+assert written == 0
+assert after == before
+PY
+expect_exit "ri-folder-no-wall-clock-churn" "$?" 0
 # atomic_write must never leave *.tmp.* strays (covers vault-write runs above too)
 leftovers=$(find "$SANDBOX" -name '*.tmp.*' | wc -l | tr -d ' ')
 [[ "$leftovers" == "0" ]] && ok "atomic-no-tmp-leftovers" || bad "atomic-no-tmp-leftovers" "$leftovers tmp files left"

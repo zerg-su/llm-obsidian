@@ -156,7 +156,7 @@
         "(?i)\\bstudy module\\b",
         "(?i)\\bмодул[ьея] [AB]\\d\\b"
       ],
-      "hint": "Интерактивный тьютор AI Architect Curriculum (wiki/learning/): study/quiz/practice/progress"
+      "hint": "Интерактивный тьютор по любым заметкам в wiki/learning/: study/quiz/practice/progress"
     },
     {
       "skill": "distill-runbook",
