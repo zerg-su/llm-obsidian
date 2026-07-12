@@ -1,6 +1,6 @@
 {
   "name": "llm-obsidian",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "LLM-powered self-organizing second brain for Obsidian: wiki companion skills, local hybrid retrieval (ollama bge-m3 + BM25), DragonScale memory mechanisms, MCP HTTP gateway, parallel task orchestration.",
   "author": {
     "name": "zerg-su (based on claude-obsidian by AgriciDaniel)"
