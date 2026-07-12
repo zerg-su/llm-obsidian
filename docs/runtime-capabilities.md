@@ -35,4 +35,11 @@ capture remains Claude-only because Codex exposes no equivalent tool event.
 Protected web flows (`autoresearch`, URL ingest, and deep-query supplements)
 use separate runtime homes: a web-enabled fetch context without vault access,
 then a networkless vault synthesizer. They require cmux and fail closed outside
-it; see `scripts/research-isolation.py`.
+it. On macOS both profiles expose `/opt/homebrew` and Xcode Command Line Tools
+as runtime roots so the selected Python and its dynamic libraries work inside
+the sandbox; narrower filesystem rules keep those tool roots read-only. The
+network proxy runs in limited mode with no external-domain allowlist and one
+explicit Unix-socket exception for cmux callbacks. Completion markers make
+callback delivery recoverable rather than a single point of failure. A failed
+synthesis can be resumed from its already validated artifact with
+`research-isolation.py restart-synthesis`; see `scripts/research-isolation.py`.

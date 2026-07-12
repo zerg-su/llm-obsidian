@@ -159,7 +159,7 @@ DragonScale Memory (fold-роллапы, детерминированные ад
 
 ## Быстрый старт
 
-Требования: macOS (единственная поддерживаемая и регулярно тестируемая платформа), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) или Codex CLI, Python 3.9+ и git. Опционально: [Ollama](https://ollama.com) для семантического retrieval, [cmux](https://github.com/wandb/cmux) для параллельных задач, DCG для проверки разрушительных команд и VoiceInk для голосового ввода. Портирование на Linux и Windows возможно, но сейчас проект их не тестирует и не поддерживает.
+Требования: macOS с Xcode Command Line Tools (единственная поддерживаемая и регулярно тестируемая платформа), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) или Codex CLI, рабочий Python 3.9+ и git. Опционально: [Ollama](https://ollama.com) для семантического retrieval, [cmux](https://github.com/wandb/cmux) для параллельных задач, DCG для проверки разрушительных команд и VoiceInk для голосового ввода. Портирование на Linux и Windows возможно, но сейчас проект их не тестирует и не поддерживает.
 
 ```bash
 # 1. Забираем вольт
@@ -175,7 +175,11 @@ claude
 `setup-clean-machine.sh` сохраняет существующие настройки Obsidian, MCP-конфиги
 и секреты. Флаг `--reset-obsidian` нужен только для намеренного сброса трёх
 управляемых файлов; перед сбросом скрипт делает полную резервную копию
-`.obsidian`. Добавьте `--install-service` после заполнения
+`.obsidian`. На macOS скрипт сначала проверяет Command Line Tools и Python. Если
+CLT отсутствуют, он открывает штатный диалог `xcode-select --install` и
+останавливается: завершите установку и запустите bootstrap снова. Нерабочий
+placeholder `/usr/bin/python3` отбрасывается; при наличии выбирается рабочий
+Homebrew Python. Добавьте `--install-service` после заполнения
 `~/.config/mcp-gateway/secrets.env`, а `--install-codex-plugin` — когда Codex CLI
 уже установлен.
 

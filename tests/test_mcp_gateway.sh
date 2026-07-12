@@ -442,6 +442,42 @@ expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-custo
 
 # ---------- I. clean-machine dry run ----------
 echo "I. clean-machine dry run"
+mkdir -p "$SANDBOX/fake-missing-clt"
+cat > "$SANDBOX/fake-missing-clt/uname" <<'EOF'
+#!/bin/sh
+echo Darwin
+EOF
+cat > "$SANDBOX/fake-missing-clt/xcode-select" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -p) exit 1 ;;
+  --install)
+    [ -n "${CLT_MARKER:-}" ] && printf 'requested\n' > "$CLT_MARKER"
+    exit 0
+    ;;
+esac
+exit 1
+EOF
+cat > "$SANDBOX/fake-missing-clt/xcrun" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$SANDBOX/fake-missing-clt/uname" "$SANDBOX/fake-missing-clt/xcode-select" "$SANDBOX/fake-missing-clt/xcrun"
+
+mkdir -p "$SANDBOX/clt-check-home"
+PATH="$SANDBOX/fake-missing-clt:$PATH" HOME="$SANDBOX/clt-check-home" \
+  bash "$REPO_ROOT/bin/setup-clean-machine.sh" --check --skip-vault --skip-proxy >"$OUT" 2>&1
+expect_exit "I0a missing CLT dry run exits 0" "$?" 0
+expect_grep "I0b missing CLT dry run shows installer" "$OUT" "xcode-select --install"
+
+rm -f "$SANDBOX/clt-installer-requested"
+PATH="$SANDBOX/fake-missing-clt:$PATH" HOME="$SANDBOX/clt-check-home" \
+  CLT_MARKER="$SANDBOX/clt-installer-requested" \
+  bash "$REPO_ROOT/bin/setup-clean-machine.sh" --skip-vault --skip-proxy >"$OUT" 2>&1
+expect_exit "I0c missing CLT real run stops after installer" "$?" 1
+[[ -f "$SANDBOX/clt-installer-requested" ]] && ok "I0d CLT installer requested" || bad "I0d CLT installer requested" "marker missing"
+expect_grep "I0e rerun guidance shown" "$OUT" "Finish the macOS dialog"
+
 mkdir -p "$SANDBOX/check-home"
 HOME="$SANDBOX/check-home" MCP_PROXY_BIN="$SANDBOX/check-home/bin/mcp-proxy" \
   bash "$REPO_ROOT/bin/setup-clean-machine.sh" --check --skip-vault >"$OUT" 2>&1

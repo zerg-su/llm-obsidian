@@ -159,7 +159,7 @@ DragonScale Memory (fold rollups, deterministic `c-NNNNNN` page addresses, seman
 
 ## Quick start
 
-Requirements: macOS (the maintained and tested target), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) or Codex CLI, Python 3.9+, and git. Optional: [Ollama](https://ollama.com) for semantic retrieval, [cmux](https://github.com/wandb/cmux) for parallel tasks, DCG for destructive-command checks, and VoiceInk for voice input. Linux and Windows ports may be feasible, but this project does not currently test or support them.
+Requirements: macOS with Xcode Command Line Tools (the maintained and tested target), [Obsidian](https://obsidian.md), [Claude Code](https://claude.com/claude-code) or Codex CLI, a runnable Python 3.9+, and git. Optional: [Ollama](https://ollama.com) for semantic retrieval, [cmux](https://github.com/wandb/cmux) for parallel tasks, DCG for destructive-command checks, and VoiceInk for voice input. Linux and Windows ports may be feasible, but this project does not currently test or support them.
 
 ```bash
 # 1. Get the vault
@@ -175,6 +175,10 @@ claude
 `setup-clean-machine.sh` preserves existing Obsidian settings, MCP server entries,
 and secrets. Use `--reset-obsidian` only when you intentionally want the three
 managed defaults restored; it first backs up the complete `.obsidian` directory.
+On macOS it verifies the Command Line Tools and Python before touching the vault.
+If the tools are missing, it opens Apple's `xcode-select --install` dialog and
+stops; finish the installer and rerun the bootstrap. It also rejects the inert
+`/usr/bin/python3` placeholder and selects a working Homebrew Python when present.
 The Excalidraw `main.js` bootstrap is pinned and checksum-verified. A different
 existing build is preserved with a warning; use
 `bash bin/setup-vault.sh --repair-excalidraw "$(pwd)"` (or pass the same flag
