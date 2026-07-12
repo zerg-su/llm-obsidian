@@ -1,7 +1,7 @@
 ---
 name: autoresearch
 metadata:
-  version: 2.0.0
+  version: 2.0.1
 description: >-
   Run protected multi-source web research and file it into the wiki. Uses an
   isolated web fetcher plus a networkless vault synthesizer; requires cmux.
@@ -17,8 +17,11 @@ outbound channel. This skill coordinates two isolated interactive Codex splits:
 2. synthesizer — validated source artifact plus vault access, no network/web,
    apps, MCP, hooks, memories, or subagents.
 
-Both sessions remain visible in cmux. The current agent coordinates them but
-must not fetch or read source bodies itself.
+Both sessions remain visible in cmux while active. By default the coordinator
+closes each exact split after its trusted completion marker: fetch during
+`receive`, synthesis during final `status`. The current agent coordinates them
+but must not fetch or read source bodies itself. Use `start --keep-surfaces`
+only for deliberate debugging.
 
 ## Topic
 
@@ -58,8 +61,10 @@ python3 scripts/research-isolation.py receive --run-id <uuid>
 ```
 
 This validates source URLs, size limits, timestamps, and every content SHA-256,
-marks all source bodies untrusted, then opens the networkless synthesizer.
-Reject invalid artifacts; never copy them into the vault manually.
+marks all source bodies untrusted, then opens the networkless synthesizer. The
+completed fetch surface is closed whether the artifact is accepted or rejected;
+the artifact and state remain available for diagnosis. Reject invalid artifacts;
+never copy them into the vault manually.
 
 ## Synthesis and filing
 
@@ -76,8 +81,10 @@ bodies into the coordinator context:
 python3 scripts/research-isolation.py status --run-id <uuid>
 ```
 
-Report generated paths, validation status, and the visible synthesis surface.
-The ordinary Stop pipeline validates and scoped-commits resulting vault writes.
+Final `status` verifies the output contract and completion marker, then closes
+the exact synthesis surface idempotently. Report generated paths, validation,
+and cleanup status. The ordinary Stop pipeline validates and scoped-commits
+resulting vault writes.
 
 ## Security invariants
 

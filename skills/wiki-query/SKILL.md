@@ -1,7 +1,7 @@
 ---
 name: wiki-query
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 description: >-
   Answer from the wiki using quick, standard, or deep retrieval. Optional web
   gaps use an isolated cmux flow; never browse in the vault-aware context.
@@ -71,7 +71,8 @@ Steps:
    ```
 
    Do not call WebSearch/WebFetch in this context. The protected synthesizer
-   writes `answer.md` in its isolated workspace and remains visible in cmux.
+   writes `answer.md` in its isolated workspace, remains visible while active,
+   and closes after final marker-backed `status` cleanup.
 5. Without web supplementation, synthesize from wiki citations normally. With
    supplementation, report the protected surface/run ID; do not paste untrusted
    source bodies back into this coordinator context.

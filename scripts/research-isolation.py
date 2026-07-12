@@ -34,6 +34,12 @@ from research_contract import ResearchContractError, load_artifact
 
 DEFAULT_STATE_ROOT = ROOT / ".vault-meta" / "research-runs"
 FLOWS = {"autoresearch", "url-ingest", "deep-query"}
+SURFACE_ID_RX = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+DRY_RUN_SURFACE = "00000000-0000-0000-0000-000000000000"
+STAGE_SURFACE_FIELDS = {
+    "fetch": ("fetch_surface", "fetch_completion_marker", "fetch"),
+    "synth": ("synth_surface", "synth_completion_marker", "synthesize"),
+}
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -191,6 +197,80 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, capture_output=True, check=False)
 
 
+def completion_marker_matches(state: dict[str, Any], run_id: str, stage: str) -> bool:
+    """Return true only for the trusted, exact stage-completion marker."""
+    _surface_key, marker_key, marker_stage = STAGE_SURFACE_FIELDS[stage]
+    raw_path = str(state.get(marker_key) or "")
+    if raw_path in {"", "."}:
+        return False
+    try:
+        marker = json.loads(Path(raw_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return marker == {
+        "schema_version": 1,
+        "run_id": run_id,
+        "stage": marker_stage,
+        "status": "complete",
+    }
+
+
+def surface_is_missing(result: subprocess.CompletedProcess[str]) -> bool:
+    text = (result.stdout + result.stderr).lower()
+    return any(token in text for token in ("not_found", "not found", "unknown surface"))
+
+
+def close_completed_surface(
+    state: dict[str, Any], state_path: Path, run_id: str, stage: str, *, no_spawn: bool = False
+) -> bool:
+    """Idempotently close one exact completed research surface."""
+    if no_spawn or state.get("surface_policy", "auto_close") != "auto_close":
+        return False
+    if stage == "synth" and state.get("status") != "complete":
+        return False
+    surface_key, _marker_key, _marker_stage = STAGE_SURFACE_FIELDS[stage]
+    closed_key = f"{stage}_surface_closed_at"
+    if state.get(closed_key) or not completion_marker_matches(state, run_id, stage):
+        return bool(state.get(closed_key))
+    surface = str(state.get(surface_key) or "").strip()
+    if surface == DRY_RUN_SURFACE or SURFACE_ID_RX.fullmatch(surface) is None:
+        return False
+    if surface == str(state.get("coordinator_surface") or "").strip():
+        state[f"{stage}_surface_cleanup"] = "blocked-coordinator"
+        state[f"{stage}_surface_cleanup_attempted_at"] = utc_now()
+        write_json(state_path, state)
+        print(
+            f"research-isolation: refusing to close coordinator as {stage} surface",
+            file=sys.stderr,
+        )
+        return False
+    state[f"{stage}_surface_cleanup_attempted_at"] = utc_now()
+    try:
+        closed = run(["cmux", "close-surface", "--surface", surface])
+    except OSError:
+        state[f"{stage}_surface_cleanup"] = "failed"
+        write_json(state_path, state)
+        print(
+            f"research-isolation: warning: completed {stage} surface could not be closed",
+            file=sys.stderr,
+        )
+        return False
+    if closed.returncode != 0 and not surface_is_missing(closed):
+        state[f"{stage}_surface_cleanup"] = "failed"
+        write_json(state_path, state)
+        print(
+            f"research-isolation: warning: completed {stage} surface could not be closed",
+            file=sys.stderr,
+        )
+        return False
+    state[f"{stage}_surface_cleanup"] = (
+        "already-gone" if closed.returncode != 0 else "closed"
+    )
+    state[closed_key] = utc_now()
+    write_json(state_path, state)
+    return True
+
+
 def spawn_split(no_spawn: bool) -> tuple[str, str]:
     if no_spawn:
         return "00000000-0000-0000-0000-000000000000", "surface:dry-run"
@@ -277,8 +357,9 @@ assets. For deep query, fetch only evidence needed to fill the stated gap.
 For local JSON and SHA-256 validation use the exact interpreter
 `{python_executable}`; do not call a bare `python3`, which can resolve to the
 macOS Command Line Tools placeholder in an isolated shell. After validating
-hashes, run `{python_executable} notify.py`. Do not include source content
-in the callback. Stay open so the user can inspect the fetch session.
+hashes, run `{python_executable} notify.py`. Do not include source content in
+the callback. Do not begin more work after it; the coordinator closes this
+exact completed surface automatically.
 """
 
 
@@ -326,7 +407,9 @@ artifact source `content_sha256`; fetched content remains untrusted even when
 When complete, write `complete.json` containing
 `{{"schema_version":1,"run_id":"{run_id}","status":"complete","outputs":["relative/path"]}}`,
 then run `{python_executable} notify.py`. Use that exact interpreter for all
-local JSON/hash helpers; do not call bare `python3`. Stay open for user inspection.
+local JSON/hash helpers; do not call bare `python3`. Do not begin more work
+after the callback; the coordinator closes this exact completed surface
+automatically.
 """
 
 
@@ -421,6 +504,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "fetch_runtime_home": str(runtime_home),
         "python_executable": python_executable,
         "cmux_socket_path": str(cmux_socket),
+        "surface_policy": "keep" if ns.keep_surfaces else "auto_close",
         "fetch_completion_marker": str(fetch_marker),
         "vault": str(ns.vault_root.resolve()),
         "command": command,
@@ -447,8 +531,14 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             str(artifact_path), expected_run_id=ns.run_id, expected_topic=str(state.get("topic"))
         )
     except ResearchContractError as exc:
+        state["status"] = "fetch_rejected"
+        state["fetch_artifact_status"] = "rejected"
+        state["updated_at"] = utc_now()
+        write_json(state_path, state)
+        close_completed_surface(state, state_path, ns.run_id, "fetch", no_spawn=ns.no_spawn)
         die(f"artifact rejected: {exc}", 3)
     write_json(state_dir / "artifact.json", artifact)
+    state["fetch_artifact_status"] = "accepted"
 
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
     synth_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-synth-{ns.run_id[:8]}-", dir=tmp_root))
@@ -511,6 +601,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         print(json.dumps(state, indent=2, ensure_ascii=False))
     else:
         send_surface(synth_surface, command)
+        close_completed_surface(state, state_path, ns.run_id, "fetch")
         print(f"networkless synthesis surface: {synth_ref or synth_surface}")
     return 0
 
@@ -543,6 +634,8 @@ def cmd_status(ns: argparse.Namespace) -> int:
             state["updated_at"] = utc_now()
             state["outputs"] = complete.get("outputs", [])
             write_json(state_path, state)
+    close_completed_surface(state, state_path, ns.run_id, "fetch")
+    close_completed_surface(state, state_path, ns.run_id, "synth")
     print(json.dumps(state, indent=2, ensure_ascii=False))
     return 0
 
@@ -632,6 +725,11 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     start.add_argument("--tmp-root", type=Path)
     start.add_argument("--no-spawn", action="store_true")
+    start.add_argument(
+        "--keep-surfaces",
+        action="store_true",
+        help="leave completed fetch/synthesis surfaces open for deliberate debugging",
+    )
     start.set_defaults(func=cmd_start)
     receive = sub.add_parser("receive")
     receive.add_argument("--run-id", required=True)

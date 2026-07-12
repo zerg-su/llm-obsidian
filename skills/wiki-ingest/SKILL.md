@@ -1,7 +1,7 @@
 ---
 name: wiki-ingest
 metadata:
-  version: 1.0.0
+  version: 1.0.1
 description: >-
   Ingest local files or protected URLs into the wiki with dedup, provenance,
   cross-links, and one vault-write transaction. URL mode requires cmux.
@@ -67,7 +67,9 @@ python3 scripts/research-isolation.py start --flow url-ingest --topic '<URL>'
 
 On the fixed-content callback, run the exact `receive --run-id <uuid>` command.
 It validates the artifact and opens a networkless synthesizer that performs the
-normal dedup/provenance/vault-write flow. Do not save fetched pages under
+normal dedup/provenance/vault-write flow. Completed fetch and synthesis splits
+close automatically after their exact completion markers are consumed. Do not
+save fetched pages under
 `.raw/`; user-provided `.raw/` source files remain immutable. Without cmux,
 fail closed and offer local-file ingest instead.
 

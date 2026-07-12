@@ -30,8 +30,25 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     tmp = Path(raw)
     state_root = tmp / "state"
+    fake_bin = tmp / "bin"
+    fake_bin.mkdir()
+    cmux_log = tmp / "cmux.log"
+    fake_cmux = fake_bin / "cmux"
+    fake_cmux.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$CMUX_LOG\"\n"
+        "if [ \"$1 $2 $3\" = \"--id-format both new-split\" ]; then\n"
+        "  printf '%s\\n' 'surface:9 22222222-2222-2222-2222-222222222222'\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_cmux.chmod(0o755)
     env = dict(os.environ)
     env.pop("CMUX_SURFACE_ID", None)
+    fake_env = dict(env)
+    fake_env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+    fake_env["CMUX_LOG"] = str(cmux_log)
     result = run(
         "start", "--topic", "test", "--flow", "autoresearch",
         "--state-root", str(state_root), "--tmp-root", str(tmp), env=env,
@@ -46,6 +63,13 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     )
     check("dry start", result.returncode == 0, result.stderr)
     state = json.loads(result.stdout)
+    check("surface auto-close default", state["surface_policy"] == "auto_close")
+    keep = run(
+        "start", "--topic", "debug surfaces", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--state-root", str(state_root),
+        "--tmp-root", str(tmp), "--no-spawn", "--keep-surfaces",
+    )
+    check("surface keep is explicit opt-in", json.loads(keep.stdout)["surface_policy"] == "keep")
     run_id = state["run_id"]
     fetch_dir = Path(state["fetch_dir"])
     fetch_config = Path(state["fetch_runtime_home"]) / "config.toml"
@@ -157,21 +181,188 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     result = run("status", "--run-id", run_id, "--state-root", str(state_root))
     check("status complete", json.loads(result.stdout)["status"] == "complete")
 
+    live = run(
+        "start", "--topic", "surface cleanup", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--state-root", str(state_root),
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    live_state = json.loads(live.stdout)
+    live_run_id = live_state["run_id"]
+    live_fetch_surface = "11111111-1111-1111-1111-111111111111"
+    live_state["fetch_surface"] = live_fetch_surface
+    live_state_path = state_root / live_run_id / "state.json"
+    live_state_path.write_text(json.dumps(live_state), encoding="utf-8")
+    Path(live_state["fetch_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": live_run_id,
+            "stage": "fetch",
+            "status": "complete",
+        }),
+        encoding="utf-8",
+    )
+    live_artifact = json.loads(json.dumps(artifact))
+    live_artifact["run_id"] = live_run_id
+    live_artifact["topic"] = "surface cleanup"
+    Path(live_state["fetch_dir"], "artifact.json").write_text(
+        json.dumps(live_artifact), encoding="utf-8"
+    )
+    received_live = run(
+        "receive", "--run-id", live_run_id, "--state-root", str(state_root),
+        "--tmp-root", str(tmp), env=fake_env,
+    )
+    check("live receive succeeds", received_live.returncode == 0, received_live.stderr)
+    after_receive = json.loads(live_state_path.read_text(encoding="utf-8"))
+    check("fetch surface auto-closed", after_receive["fetch_surface_cleanup"] == "closed")
+    check(
+        "fetch exact surface targeted",
+        f"close-surface --surface {live_fetch_surface}" in cmux_log.read_text(encoding="utf-8"),
+    )
+    Path(after_receive["synth_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": live_run_id,
+            "stage": "synthesize",
+            "status": "complete",
+        }),
+        encoding="utf-8",
+    )
+    marker_only = run(
+        "status", "--run-id", live_run_id, "--state-root", str(state_root), env=fake_env,
+    )
+    marker_only_state = json.loads(marker_only.stdout)
+    check("synth marker alone is incomplete", marker_only_state["status"] == "synthesizing")
+    check("synth marker alone leaves surface open", "synth_surface_cleanup" not in marker_only_state)
+    check(
+        "synth marker alone never targets surface",
+        "close-surface --surface 22222222-2222-2222-2222-222222222222"
+        not in cmux_log.read_text(encoding="utf-8"),
+    )
+    Path(after_receive["synth_dir"], "complete.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": live_run_id,
+            "status": "complete",
+            "outputs": ["wiki/questions/Research Result.md"],
+        }),
+        encoding="utf-8",
+    )
+    completed_live = run(
+        "status", "--run-id", live_run_id, "--state-root", str(state_root), env=fake_env,
+    )
+    completed_state = json.loads(completed_live.stdout)
+    check("live status complete", completed_state["status"] == "complete")
+    check("synth surface auto-closed", completed_state["synth_surface_cleanup"] == "closed")
+    check(
+        "synth exact surface targeted",
+        "close-surface --surface 22222222-2222-2222-2222-222222222222"
+        in cmux_log.read_text(encoding="utf-8"),
+    )
+    close_count = cmux_log.read_text(encoding="utf-8").count("close-surface --surface")
+    repeated_status = run(
+        "status", "--run-id", live_run_id, "--state-root", str(state_root), env=fake_env,
+    )
+    check("repeated status succeeds", repeated_status.returncode == 0, repeated_status.stderr)
+    check(
+        "surface cleanup idempotent",
+        cmux_log.read_text(encoding="utf-8").count("close-surface --surface") == close_count,
+    )
+    retry_surface = "55555555-5555-5555-5555-555555555555"
+    retry_state = json.loads(live_state_path.read_text(encoding="utf-8"))
+    retry_state["synth_surface"] = retry_surface
+    retry_state.pop("synth_surface_closed_at", None)
+    retry_state.pop("synth_surface_cleanup", None)
+    live_state_path.write_text(json.dumps(retry_state), encoding="utf-8")
+    no_cmux_env = dict(env)
+    no_cmux_env["PATH"] = str(tmp / "no-cmux")
+    missing_cmux = run(
+        "status", "--run-id", live_run_id, "--state-root", str(state_root), env=no_cmux_env,
+    )
+    check("missing cmux cleanup is nonfatal", missing_cmux.returncode == 0, missing_cmux.stderr)
+    failed_cleanup = json.loads(missing_cmux.stdout)
+    check("missing cmux cleanup is retryable", failed_cleanup["synth_surface_cleanup"] == "failed")
+    retried_cleanup = run(
+        "status", "--run-id", live_run_id, "--state-root", str(state_root), env=fake_env,
+    )
+    retried_state = json.loads(retried_cleanup.stdout)
+    check("cleanup retry succeeds", retried_state["synth_surface_cleanup"] == "closed")
+    check(
+        "cleanup retry targets exact surface",
+        f"close-surface --surface {retry_surface}" in cmux_log.read_text(encoding="utf-8"),
+    )
+
+    guarded_surface = "44444444-4444-4444-4444-444444444444"
+    guarded = run(
+        "start", "--topic", "coordinator guard", "--flow", "autoresearch",
+        "--coordinator-surface", guarded_surface, "--state-root", str(state_root),
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    guarded_state = json.loads(guarded.stdout)
+    guarded_state["fetch_surface"] = guarded_surface
+    guarded_state_path = state_root / guarded_state["run_id"] / "state.json"
+    guarded_state_path.write_text(json.dumps(guarded_state), encoding="utf-8")
+    Path(guarded_state["fetch_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": guarded_state["run_id"],
+            "stage": "fetch",
+            "status": "complete",
+        }),
+        encoding="utf-8",
+    )
+    guarded_artifact = json.loads(json.dumps(artifact))
+    guarded_artifact["run_id"] = guarded_state["run_id"]
+    guarded_artifact["topic"] = "coordinator guard"
+    Path(guarded_state["fetch_dir"], "artifact.json").write_text(
+        json.dumps(guarded_artifact), encoding="utf-8"
+    )
+    guarded_result = run(
+        "receive", "--run-id", guarded_state["run_id"], "--state-root", str(state_root),
+        "--tmp-root", str(tmp), env=fake_env,
+    )
+    check("coordinator guard preserves pipeline", guarded_result.returncode == 0, guarded_result.stderr)
+    guarded_after = json.loads(guarded_state_path.read_text(encoding="utf-8"))
+    check("coordinator cleanup blocked", guarded_after["fetch_surface_cleanup"] == "blocked-coordinator")
+    check(
+        "coordinator surface never targeted",
+        f"close-surface --surface {guarded_surface}" not in cmux_log.read_text(encoding="utf-8"),
+    )
+
     second = run(
         "start", "--topic", "bad hash", "--flow", "url-ingest",
         "--coordinator-surface", "surface:test", "--state-root", str(state_root),
         "--tmp-root", str(tmp), "--no-spawn",
     )
     bad_state = json.loads(second.stdout)
+    rejected_surface = "33333333-3333-3333-3333-333333333333"
+    bad_state["fetch_surface"] = rejected_surface
+    bad_state_path = state_root / bad_state["run_id"] / "state.json"
+    bad_state_path.write_text(json.dumps(bad_state), encoding="utf-8")
+    Path(bad_state["fetch_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": bad_state["run_id"],
+            "stage": "fetch",
+            "status": "complete",
+        }),
+        encoding="utf-8",
+    )
     artifact["run_id"] = bad_state["run_id"]
     artifact["topic"] = "bad hash"
     artifact["sources"][0]["content_sha256"] = "0" * 64
     Path(bad_state["fetch_dir"], "artifact.json").write_text(json.dumps(artifact), encoding="utf-8")
     result = run(
         "receive", "--run-id", bad_state["run_id"], "--state-root", str(state_root),
-        "--tmp-root", str(tmp), "--no-spawn",
+        "--tmp-root", str(tmp), env=fake_env,
     )
     check("bad digest rejected", result.returncode == 3)
     check("digest guidance", "sha256 mismatch" in result.stderr)
+    rejected_state = json.loads(bad_state_path.read_text(encoding="utf-8"))
+    check("rejected artifact state", rejected_state["status"] == "fetch_rejected")
+    check("rejected fetch auto-closed", rejected_state["fetch_surface_cleanup"] == "closed")
+    check(
+        "rejected exact surface targeted",
+        f"close-surface --surface {rejected_surface}" in cmux_log.read_text(encoding="utf-8"),
+    )
 
 print("\nAll research isolation tests passed.")
