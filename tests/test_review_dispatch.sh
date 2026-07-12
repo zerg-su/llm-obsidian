@@ -47,6 +47,14 @@ print(data.get(sys.argv[2], ""))
 PY
 }
 
+path_resolve() {
+  python3 - "$1" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve())
+PY
+}
+
 argv_has() {
   local file="$1"
   shift
@@ -75,6 +83,8 @@ argv_has "$LIGHT_SPEC" --tools Read,Glob,Grep,Write,Bash && ok "claude-tool-surf
 grep -q -- "Bash(python3 \*send_review.py submit \*)" "$LIGHT_SPEC" && ok "claude-callback-allowed" || bad "claude-callback-allowed" "typed callback allow rule missing"
 grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-only-write" || bad "claude-outbox-only-write" "cwd-anchored outbox Edit rule missing"
 grep -q -- '--input-file.*/.review-outbox.json' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "outbox callback missing"
+grep -qF -- 'Do not prefix them with `git -C`' "$LIGHT/.review-prompt.md" && ok "claude-cwd-git-prompt" || bad "claude-cwd-git-prompt" "cwd-relative git guidance missing"
+if grep -qF -- "git -C $LIGHT ..." "$LIGHT/.review-prompt.md"; then bad "claude-no-git-c-escape" "Claude prompt requests a denied git -C command"; else ok "claude-no-git-c-escape"; fi
 grep -q -- 'cmux_agent_supervisor.py run' "$SANDBOX/light.out" && ok "review-supervisor-wrapper" || bad "review-supervisor-wrapper" "short supervisor command missing"
 grep -q -- '--kind reviewer' "$SANDBOX/light.out" && ok "review-watchdog-kind" || bad "review-watchdog-kind" "reviewer routing missing"
 "$SUPERVISOR" validate --worktree "$LIGHT" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/supervisor.err"
@@ -244,6 +254,7 @@ PY
 expect_eq "codex-review-start" "$?" 0
 CODEX_SPEC="$CODEX_REVIEW/.review-agent-command.json"
 CODEX_RUNTIME="$(json_get "$CODEX_REVIEW/.review-meta.json" review_runtime_dir)"
+CODEX_REVIEW_RESOLVED="$(path_resolve "$CODEX_REVIEW")"
 argv_has "$CODEX_SPEC" -s workspace-write && ok "codex-scratch-write-mode" || bad "codex-scratch-write-mode" "workspace-write missing"
 argv_has "$CODEX_SPEC" --model gpt-5.6-sol && ok "codex-sol-default" || bad "codex-sol-default" "default Codex reviewer is not gpt-5.6-sol"
 expect_eq "codex-sol-meta" "$(json_get "$CODEX_REVIEW/.review-meta.json" reviewer_model)" "gpt-5.6-sol"
@@ -260,6 +271,7 @@ if grep -q -- '--add-dir' "$CODEX_SPEC"; then bad "codex-no-additional-write-roo
 grep -q 'web_search=' "$CODEX_SPEC" && ok "codex-network-disabled" || bad "codex-network-disabled" "web search override missing"
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
+grep -qF -- "git -C $CODEX_REVIEW_RESOLVED ..." "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks worktree git guidance"
 "$SUPERVISOR" validate --worktree "$CODEX_REVIEW" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/codex-supervisor.err"
 expect_eq "codex-review-supervisor-valid" "$?" 0
 python3 - "$CODEX_SPEC" <<'PY'

@@ -39,7 +39,13 @@ it. On macOS both profiles expose `/opt/homebrew` and Xcode Command Line Tools
 as runtime roots so the selected Python and its dynamic libraries work inside
 the sandbox; narrower filesystem rules keep those tool roots read-only. The
 network proxy runs in limited mode with no external-domain allowlist and one
-explicit Unix-socket exception for cmux callbacks. Completion markers make
+explicit Unix-socket exception for cmux callbacks. Per the official
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference#configtoml),
+an omitted domain map denies every external destination until an allow rule is
+added. The generated profiles also explicitly disable upstream-proxy chaining,
+broad local binding, non-loopback listeners, arbitrary Unix sockets, and
+SOCKS5/UDP. Hermetic tests parse and assert this configuration contract; they do
+not depend on a live Internet endpoint. Completion markers make
 callback delivery recoverable rather than a single point of failure. They also
 authorize idempotent cleanup of only the recorded fetch/synthesis surface UUID:
 fetch closes during `receive` (including rejected artifacts), synthesis during

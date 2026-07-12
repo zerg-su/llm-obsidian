@@ -27,10 +27,8 @@ including staged, unstaged, and untracked changes. Treat `.task-*`, `.wiki-*`,
 and `.review-*` files as orchestration noise unless this task explicitly changes
 review plumbing.
 
-Resolve every repository-relative path against `{worktree}`. Use
-`git -C {worktree} ...` for git inspection; your process may start in an isolated
-scratch directory rather than the product worktree. Read `{worktree}/AGENTS.md`
-and relevant repository instructions before judging the change.
+{repository_inspection_instructions} Read `{worktree}/AGENTS.md` and relevant
+repository instructions before judging the change.
 
 ## Review Mode
 

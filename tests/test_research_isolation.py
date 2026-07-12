@@ -78,12 +78,39 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     notifier = (fetch_dir / "notify.py").read_text(encoding="utf-8")
     cmux_socket = state["cmux_socket_path"]
     config_text = fetch_config.read_text(encoding="utf-8")
-    tomllib.loads(config_text)
+    fetch_parsed = tomllib.loads(config_text)
+    fetch_proxy = fetch_parsed["features"]["network_proxy"]
+    fetch_network = fetch_parsed["permissions"]["research-fetch"]["network"]
     check("fetch web enabled", 'web_search = "live"' in config_text)
-    check("fetch network proxy enabled", "network_proxy = true" in config_text)
-    check("fetch command network policy enabled", "enabled = true" in config_text)
-    check("fetch network is limited", 'mode = "limited"' in config_text)
-    check("fetch has no outbound domain allowlist", ".network.domains]" not in config_text)
+    check("fetch network proxy enabled", fetch_proxy["enabled"] is True)
+    check("fetch command network policy enabled", fetch_network["enabled"] is True)
+    check("fetch network is limited", fetch_network["mode"] == "limited")
+    check(
+        "fetch has no outbound domain allowlist",
+        "domains" not in fetch_proxy and "domains" not in fetch_network,
+    )
+    check(
+        "fetch blocks upstream proxy",
+        fetch_proxy["allow_upstream_proxy"] is False
+        and fetch_network["allow_upstream_proxy"] is False,
+    )
+    check(
+        "fetch blocks broad local binding",
+        fetch_proxy["allow_local_binding"] is False
+        and fetch_network["allow_local_binding"] is False,
+    )
+    check(
+        "fetch blocks arbitrary unix sockets",
+        fetch_proxy["dangerously_allow_all_unix_sockets"] is False
+        and fetch_network["dangerously_allow_all_unix_sockets"] is False,
+    )
+    check(
+        "fetch disables socks",
+        fetch_proxy["enable_socks5"] is False
+        and fetch_proxy["enable_socks5_udp"] is False
+        and fetch_network["enable_socks5"] is False
+        and fetch_network["enable_socks5_udp"] is False,
+    )
     check("fetch socket allowlist", f'"{cmux_socket}" = "allow"' in config_text)
     check("fetch socket directory readable", f'"{Path(cmux_socket).parent}" = "read"' in config_text)
     check("fetch has no vault path", str(ROOT) not in config_text)
@@ -137,13 +164,40 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("artifact accepted", result.returncode == 0, result.stderr)
     received = json.loads(result.stdout)
     synth_config = (Path(received["synth_runtime_home"]) / "config.toml").read_text(encoding="utf-8")
-    tomllib.loads(synth_config)
+    synth_parsed = tomllib.loads(synth_config)
+    synth_proxy = synth_parsed["features"]["network_proxy"]
+    synth_network = synth_parsed["permissions"]["research-synthesize"]["network"]
     synth_prompt = (Path(received["synth_dir"]) / "synth-prompt.md").read_text(encoding="utf-8")
     check("synth web disabled", 'web_search = "disabled"' in synth_config)
-    check("synth network proxy enabled", "network_proxy = true" in synth_config)
-    check("synth command network policy enabled", "enabled = true" in synth_config)
-    check("synth network is limited", 'mode = "limited"' in synth_config)
-    check("synth has no outbound domain allowlist", ".network.domains]" not in synth_config)
+    check("synth network proxy enabled", synth_proxy["enabled"] is True)
+    check("synth command network policy enabled", synth_network["enabled"] is True)
+    check("synth network is limited", synth_network["mode"] == "limited")
+    check(
+        "synth has no outbound domain allowlist",
+        "domains" not in synth_proxy and "domains" not in synth_network,
+    )
+    check(
+        "synth blocks upstream proxy",
+        synth_proxy["allow_upstream_proxy"] is False
+        and synth_network["allow_upstream_proxy"] is False,
+    )
+    check(
+        "synth blocks broad local binding",
+        synth_proxy["allow_local_binding"] is False
+        and synth_network["allow_local_binding"] is False,
+    )
+    check(
+        "synth blocks arbitrary unix sockets",
+        synth_proxy["dangerously_allow_all_unix_sockets"] is False
+        and synth_network["dangerously_allow_all_unix_sockets"] is False,
+    )
+    check(
+        "synth disables socks",
+        synth_proxy["enable_socks5"] is False
+        and synth_proxy["enable_socks5_udp"] is False
+        and synth_network["enable_socks5"] is False
+        and synth_network["enable_socks5_udp"] is False,
+    )
     check("synth socket allowlist", f'"{cmux_socket}" = "allow"' in synth_config)
     check("synth socket directory readable", f'"{Path(cmux_socket).parent}" = "read"' in synth_config)
     check("synth sees vault", str(ROOT) in synth_config)

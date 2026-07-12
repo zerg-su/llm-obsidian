@@ -532,6 +532,20 @@ def repository_diagnostics(reviewer_runtime: str, worktree: Path) -> str:
     return ", ".join(f"`{shlex.join(command)}`" for command in commands)
 
 
+def repository_inspection_instructions(reviewer_runtime: str, worktree: Path) -> str:
+    if reviewer_runtime == "claude":
+        return (
+            "Your process starts in the product worktree. Resolve repository-relative paths from the current "
+            "directory and use cwd-relative `git status ...`, `git diff ...`, `git log ...`, or `git show ...` "
+            "commands. Do not prefix them with `git -C`: the locked-down Claude allowlist intentionally "
+            "recognizes only these cwd-relative, read-only forms."
+        )
+    return (
+        f"Your process starts in an isolated scratch directory. Resolve every repository-relative path against "
+        f"`{worktree}` and use `git -C {worktree} ...` for git inspection."
+    )
+
+
 def base_context(worktree: Path, vault: Path, meta: dict[str, Any], task_name: str) -> dict[str, str]:
     return {
         "task_name": task_name,
@@ -605,6 +619,9 @@ def render_review_prompt(
             "review_mode_instructions": review_mode_instructions(review_mode),
             "submission_instructions": submission_instructions(
                 reviewer_runtime, submission_command, worktree, review_runtime_dir
+            ),
+            "repository_inspection_instructions": repository_inspection_instructions(
+                reviewer_runtime, worktree
             ),
             "repository_diagnostics": repository_diagnostics(reviewer_runtime, worktree),
             "previous_review": previous_review,
