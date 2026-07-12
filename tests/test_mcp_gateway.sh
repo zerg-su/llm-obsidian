@@ -485,6 +485,13 @@ expect_exit "I1 dry run exits 0" "$?" 0
 expect_grep "I2 exact proxy version shown" "$OUT" "mcp-proxy 0.43.2"
 expect_nogrep "I3 no latest-release lookup" "$OUT" "releases/latest"
 [[ ! -e "$SANDBOX/check-home/bin/mcp-proxy" ]] && ok "I4 dry run writes no proxy" || bad "I4 dry run writes no proxy" "binary exists"
+expect_grep "I4a Docling is planned by default" "$OUT" "docling[easyocr]==2.112.0"
+expect_grep "I4b Docling uses isolated Python" "$OUT" "--python 3.12"
+
+HOME="$SANDBOX/check-home" MCP_PROXY_BIN="$SANDBOX/check-home/bin/mcp-proxy" \
+  bash "$REPO_ROOT/bin/setup-clean-machine.sh" --check --skip-vault --skip-proxy --skip-docling >"$OUT" 2>&1
+expect_exit "I4c skip Docling dry run exits 0" "$?" 0
+expect_nogrep "I4d skip Docling suppresses install" "$OUT" "docling[easyocr]"
 
 mkdir -p "$SANDBOX/bash32-home"
 HOME="$SANDBOX/bash32-home" MCP_PROXY_BIN="$SANDBOX/bash32-home/bin/mcp-proxy" \

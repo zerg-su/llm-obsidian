@@ -26,6 +26,7 @@ CATEGORIES = {
     "security",
     "external-effect",
     "contract-drift",
+    "mechanism-failure",
     "permission",
 }
 

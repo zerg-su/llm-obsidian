@@ -5,6 +5,7 @@
 #   - vault provisioning
 #   - MCP gateway local config + mcp-proxy binary
 #   - Codex plugin/MCP generated metadata
+#   - isolated Docling document runtime + ru/en OCR models
 #   - optional launchd install after secrets are in place
 #
 # The script is intentionally idempotent: secrets and user config are preserved.
@@ -23,6 +24,7 @@ DO_INSTALL_SERVICE=0
 DO_INSTALL_CODEX=0
 DO_SETUP_VAULT=1
 DO_PROXY=1
+DO_DOCLING=1
 RESET_OBSIDIAN=0
 REPAIR_EXCALIDRAW=0
 DRY_RUN=0
@@ -46,6 +48,8 @@ Options:
                           with the pinned, checksum-verified artifact.
   --skip-vault            Do not run bin/setup-vault.sh.
   --skip-proxy            Do not verify/install the pinned mcp-proxy artifact.
+  --skip-docling          Do not install the pinned Docling document runtime
+                          and prefetch the ru/en OCR/layout/table models.
   --check                 Dry-run: print what would be created/installed.
   -h, --help              Show this help.
 
@@ -120,7 +124,7 @@ ensure_macos_clt() {
 }
 
 select_python() {
-  local candidate version seen=""
+  local candidate version seen="" python_dir
   for candidate in "$(command -v python3 2>/dev/null || true)" \
                    /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
     [ -n "$candidate" ] && [ -x "$candidate" ] || continue
@@ -128,7 +132,8 @@ select_python() {
     seen="$seen $candidate"
     if version="$($candidate -c 'import sys; sys.version_info >= (3, 9) or sys.exit(1); print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"; then
       PYTHON="$candidate"
-      export PATH="$(dirname "$PYTHON"):$PATH"
+      python_dir="$(dirname "$PYTHON")"
+      export PATH="$python_dir:$PATH"
       log "pre-flight: Python $version at $PYTHON"
       return 0
     fi
@@ -154,6 +159,35 @@ install_codex_plugin() {
   run codex plugin add llm-obsidian@llm-obsidian-codex
 }
 
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    log "pre-flight: uv at $(command -v uv)"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "+ brew install uv"
+    warn "uv is missing; a real macOS run installs it with Homebrew"
+    return 0
+  fi
+  if [ "$(uname -s)" != "Darwin" ]; then
+    die "uv is required for Docling. Install uv or rerun with --skip-docling."
+  fi
+  command -v brew >/dev/null 2>&1 || \
+    die "Homebrew is required to install uv. Install Homebrew, run 'brew install uv', or rerun with --skip-docling."
+  log "install: uv via Homebrew"
+  run brew install uv
+  command -v uv >/dev/null 2>&1 || die "Homebrew completed but uv is not on PATH"
+}
+
+install_docling() {
+  ensure_uv
+  if [ "$DRY_RUN" -eq 1 ]; then
+    "$PYTHON" "$ROOT/scripts/install-docling.py" plan
+  else
+    "$PYTHON" "$ROOT/scripts/install-docling.py" install
+  fi
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --install-service) DO_INSTALL_SERVICE=1 ;;
@@ -162,6 +196,7 @@ while [ "$#" -gt 0 ]; do
     --repair-excalidraw) REPAIR_EXCALIDRAW=1 ;;
     --skip-vault) DO_SETUP_VAULT=0 ;;
     --skip-proxy) DO_PROXY=0 ;;
+    --skip-docling) DO_DOCLING=0 ;;
     --check) DRY_RUN=1 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -198,6 +233,11 @@ if [ "$DO_PROXY" -eq 1 ]; then
   install_mcp_proxy
 fi
 
+if [ "$DO_DOCLING" -eq 1 ]; then
+  log "prepare: local Docling document runtime"
+  install_docling
+fi
+
 log "generate: Codex plugin metadata"
 run "$PYTHON" "$ROOT/scripts/codex-adapter.py" --apply
 
@@ -229,6 +269,7 @@ Required manual step:
 Then verify:
   scripts/mcp-gateway/mcp-gateway.sh install
   scripts/mcp-gateway/mcp-gateway.sh health
+  python3 scripts/document-normalize.py check
 
 For Codex plugin installation:
   bin/setup-clean-machine.sh --install-codex-plugin --skip-vault --skip-proxy

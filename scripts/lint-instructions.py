@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -70,8 +71,56 @@ def daily_runtime_repo_issues(root: Path) -> list[str]:
     return issues
 
 
+def failure_repair_issues(
+    claude: str,
+    agents: str,
+    task_prompt: str,
+    escalation: str,
+    reference: str,
+) -> list[str]:
+    """Keep the interactive and unattended repair consent boundary aligned."""
+    issues: list[str] = []
+    required_reference = (
+        "Contain before asking",
+        "Ask once, concretely",
+        "Repair after consent",
+        "mechanism-failure",
+        "pipeline-events.jsonl",
+    )
+    for value in required_reference:
+        if value not in reference:
+            issues.append(f"failure repair reference missing invariant {value!r}")
+    central_required = {
+        "CLAUDE.md": ("Failure-to-repair", "явное согласие", "regression test"),
+        "AGENTS.md": ("Failure-to-repair", "explicit yes", "regression test"),
+    }
+    for name, text in (("CLAUDE.md", claude), ("AGENTS.md", agents)):
+        for value in central_required[name]:
+            if value not in text:
+                issues.append(f"{name} missing failure-repair invariant {value!r}")
+    for value in ("mechanism-failure", "read-only diagnosis", "Remain paused", "explicitly agrees"):
+        if value not in task_prompt:
+            issues.append(f"dispatch task prompt missing failure-repair invariant {value!r}")
+    if '"mechanism-failure"' not in escalation:
+        issues.append("task escalation missing mechanism-failure category")
+    return issues
+
+
 def check_repo(root: Path) -> list[str]:
     issues: list[str] = []
+    repair_reference_path = root / "docs" / "skill-references" / "failure-repair-contract.md"
+    repair_reference = repair_reference_path.read_text(encoding="utf-8") if repair_reference_path.is_file() else ""
+    if not repair_reference:
+        issues.append("missing docs/skill-references/failure-repair-contract.md")
+    issues.extend(
+        failure_repair_issues(
+            (root / "CLAUDE.md").read_text(encoding="utf-8"),
+            (root / "AGENTS.md").read_text(encoding="utf-8"),
+            (root / "skills" / "dispatch" / "references" / "task-prompt-template.md").read_text(encoding="utf-8"),
+            (root / "scripts" / "task_escalation.py").read_text(encoding="utf-8"),
+            repair_reference,
+        )
+    )
     for name in PROTECTED_WEB_SKILLS:
         path = root / "skills" / name / "SKILL.md"
         if not path.is_file():
@@ -94,6 +143,33 @@ def check_repo(root: Path) -> list[str]:
             issues.append(f"wiki-ingest contains stale instruction: {forbidden}")
     if "expected_sha256" not in ingest or "manifest_update" not in ingest:
         issues.append("wiki-ingest must describe optimistic full-content/manifest writes")
+    normalization_ref_path = root / "skills" / "wiki-ingest" / "references" / "document-normalization.md"
+    if normalization_ref_path.is_file():
+        normalization_ref = normalization_ref_path.read_text(encoding="utf-8")
+    else:
+        normalization_ref = ""
+        issues.append("wiki-ingest is missing references/document-normalization.md")
+    for required in (
+        "scripts/document-normalize.py normalize",
+        "needs_user_action",
+        "explicit user confirmation",
+        "--no-enable-remote-services",
+    ):
+        if required not in ingest and required not in normalization_ref:
+            issues.append(f"wiki-ingest document normalization missing invariant {required!r}")
+
+    normalizer = (root / "scripts" / "document-normalize.py").read_text(encoding="utf-8")
+    for required in (
+        '"--no-enable-remote-services"',
+        '"--no-allow-external-plugins"',
+        '"HF_HUB_OFFLINE": "1"',
+        '",".join(OCR_LANGUAGES)',
+    ):
+        if required not in normalizer:
+            issues.append(f"document normalizer missing isolation invariant {required!r}")
+    document_tools = json.loads((root / "config" / "document-tools.json").read_text(encoding="utf-8"))
+    if document_tools.get("docling", {}).get("ocr_languages") != ["ru", "en"]:
+        issues.append("document normalizer must pin ru/en OCR languages")
 
     for path in sorted((root / "skills").glob("*/SKILL.md")):
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -134,9 +210,8 @@ def check_repo(root: Path) -> list[str]:
         if required not in review_contract:
             issues.append(f"Claude reviewer missing unattended read-only invariant {required!r}")
     for required in (
-        "Bash(python3 tests/test_task_lifecycle.py)",
-        "Bash(bash tests/test_review_dispatch.sh)",
-        "Bash(python3 tests/test_contract_schemas.py)",
+        "Bash(python3 tests/test_*.py)",
+        "Bash(bash tests/test_*.sh)",
         "Bash(python3 scripts/lint-instructions.py)",
     ):
         if required not in supervisor:

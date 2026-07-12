@@ -133,6 +133,9 @@ Reviewers are launched with read-only mandates. Secrets for MCP services live ou
 - **A wiki that grows itself.** `ingest <path|URL>` turns raw material into 8-15 cross-linked typed pages; `/save` files insights from any conversation; `/autoresearch` runs autonomous research loops; every approved plan is auto-captured into `wiki/plans/`.
 - **Retrieval that is measured, not vibed.** H2/H3 sections are bounded to 800 words with 100-word overlap, ranked sparsely, and deduplicated to the best heading/snippet per page; optional local `bge-m3` joins through RRF. A 48-query RU/EN goldset is half held out, and `make bench-retrieval` rejects hit@5/MRR regressions over 0.02.
 - **RU-first, local-first.** The mandatory sparse channel handles Cyrillic and mixed technical vocabulary without a service. Optional `bge-m3` embeddings stay on your machine; no cloud API is required.
+- **Documents become model-ready locally.** Markdown/text take a stdlib fast
+  path; PDF, Office, EPUB, and scans go through pinned Docling with explicit
+  `ru,en` OCR, accurate tables, content-addressed cache, and no remote services.
 - **A transactional write path.** Agent-driven page create/update, manifest merge, `wiki/log.md`, and `wiki/hot.md` go through `scripts/vault-write.py`: strict frontmatter, optimistic SHA-256 updates, cap enforcement, and crash-safe roll-forward from a durable journal.
 - **An industrial Stop hook.** Every turn: recover interrupted writes, reindex, self-heal sparse section retrieval, strictly validate, commit only vault-owned paths, then schedule fingerprinted dense refresh when needed without waiting. Stdlib `fcntl` serializes sessions; validation failures block the commit without hiding dirty work.
 - **MCP without the process zoo.** A local HTTP gateway (one launchd service) fronts all your MCP servers: one set of long-lived processes per machine instead of per-terminal duplicates. Ships with [context7](https://context7.com) preconfigured — add one API-key line and library docs are available in every session.
@@ -165,7 +168,7 @@ Requirements: macOS with Xcode Command Line Tools (the maintained and tested tar
 # 1. Get the vault
 git clone https://github.com/zerg-su/llm-obsidian ~/Projects/llm-obsidian
 cd ~/Projects/llm-obsidian
-bash bin/setup-clean-machine.sh  # vault + MCP gateway config + Codex metadata
+bash bin/setup-clean-machine.sh  # vault + MCP + Docling ru/en + Codex metadata
 
 # 2. Open the folder as a vault in Obsidian, then start Claude Code in it
 claude
@@ -184,7 +187,12 @@ existing build is preserved with a warning; use
 `bash bin/setup-vault.sh --repair-excalidraw "$(pwd)"` (or pass the same flag
 to `setup-clean-machine.sh`) to back it up and replace it explicitly.
 Add `--install-service` after filling `~/.config/mcp-gateway/secrets.env`, and
-`--install-codex-plugin` when the Codex CLI is already installed.
+`--install-codex-plugin` when the Codex CLI is already installed. Docling is
+installed in an isolated Python 3.12 environment and its OCR/layout/table models
+are prefetched (roughly 1.8 GiB total on Apple Silicon); use `--skip-docling`
+for a deliberately lightweight setup. See
+[local document ingestion](docs/document-ingestion.md) for formats, cache,
+security boundaries, and repair commands.
 
 Install as a plugin (skills + hooks) instead of / in addition to cloning:
 
@@ -300,6 +308,7 @@ Everything mechanical is covered by hermetic suites — no network, no ollama ne
 make test          # address allocator, tiling, boundary, vault-write/validate,
                    # safe stop-hook + latency, bm25 + fusion, bench harness, router
 make test-gateway  # MCP gateway management layer (offline, fake MCP server)
+make test-documents # live installed Docling ru/en + Office/PDF acceptance
 ```
 
 ## Codex CLI

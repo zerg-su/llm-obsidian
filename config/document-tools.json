@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "docling": {
+    "version": "2.112.0",
+    "python": "3.12",
+    "extra": "easyocr",
+    "models": [
+      "layout",
+      "tableformer",
+      "easyocr"
+    ],
+    "ocr_languages": [
+      "ru",
+      "en"
+    ],
+    "easyocr_required_files": [
+      "craft_mlt_25k.pth",
+      "cyrillic_g2.pth"
+    ]
+  },
+  "limits": {
+    "max_bytes": 262144000,
+    "max_pages": 2000,
+    "timeout_seconds": 1200
+  }
+}

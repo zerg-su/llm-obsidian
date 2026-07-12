@@ -10,6 +10,7 @@ must not be inferred from another runtime.
 | Daily synthesis | Subscription preflight + read-only Sonnet low plugin agent | Read-only Terra low project agent | Same contract in the parent agent |
 | Daily latency | Content-free collection/synthesis/run timings with p50/p95 | Same shared numeric events | Same shared numeric events |
 | Transactional writer, retrieval, fold | Shared Python/shell scripts | Same scripts | Same scripts |
+| Local document normalization | Shared stdlib fast path + isolated pinned Docling | Same scripts/runtime | Same scripts/runtime |
 | MCP HTTP gateway | Shared local client pointers | Generated TOML/profile pointers | Any HTTP-capable MCP client |
 | Turn-end Stop pipeline | Claude `Stop` hook | Codex plugin `Stop` hook opts into the same `stop.sh`; output goes to `.vault-meta/stop-hook-last.log` | Run `.claude/hooks/stop.sh` manually |
 | `SessionStart` hot cache + nudges | Shared runtime adapter | Shared runtime adapter; startup/resume/clear/compact | Manual |
@@ -25,6 +26,14 @@ runtime/session identifiers, actor/operation/status, relative vault paths, and
 numeric counters. Prompt text, search queries, commands, snippets, page bodies,
 and error text are not accepted. `pipeline-stats.py` reports these shared
 operations separately from Claude-only skill telemetry.
+
+Local file ingestion is also runtime-neutral. `document-normalize.py` handles
+text-like sources directly and invokes the isolated Docling runtime only for
+binary documents. The converter accepts local paths only, explicitly disables
+remote services and external plugins, runs with offline model flags, and uses
+prefetched EasyOCR `ru,en` plus layout/table artifacts. Missing dependencies
+return a typed coordinator escalation instead of an interactive background
+prompt. See [document ingestion](document-ingestion.md).
 
 Codex hook parity uses the documented lifecycle wire format and fixtures in
 `tests/test_runtime_hooks.py`. Current Codex interception is incomplete for

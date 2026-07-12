@@ -40,4 +40,12 @@ with tempfile.TemporaryDirectory(prefix="instruction-lint-test.") as raw:
     assert module.daily_runtime_repo_issues(Path(raw)) == []
 print("OK   missing daily skill handled without traceback")
 
+issues = module.failure_repair_issues("", "", "", "", "")
+assert any("CLAUDE.md" in issue for issue in issues)
+assert any("AGENTS.md" in issue for issue in issues)
+assert any("dispatch task prompt" in issue for issue in issues)
+assert any("mechanism-failure category" in issue for issue in issues)
+assert any("reference missing" in issue for issue in issues)
+print("OK   failure-repair consent drift detected")
+
 print("\nAll instruction lint tests passed.")

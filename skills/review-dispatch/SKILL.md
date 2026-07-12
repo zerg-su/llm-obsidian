@@ -73,8 +73,12 @@ sends keys, cancels the reviewer, or closes the surface. It stops when the
 reviewer process returns. Legacy metadata leaves it disabled.
 
 Claude reviewers run in locked-down `dontAsk` with Read/Glob/Grep, recognized
-read-only Bash/git inspection, one cwd-anchored `Edit` permission covering the
-Write tool only for `.review-outbox.json`, and the typed callback command. The callback validates and removes that isolated
+read-only Bash/git inspection, exact cwd-relative Python/shell test entrypoints
+whose permission patterns end in `.py`/`.sh`, one cwd-anchored `Edit`
+permission covering the Write tool only for `.review-outbox.json`, and the
+typed callback command. The prompt requires no arguments or shell composition;
+the Claude wildcard matcher is not treated as an argv validator. The callback
+validates and removes that isolated
 outbox; anything else is denied without prompting. Codex reviewers keep
 `approval=never`, start with `workspace-write` rooted at an owner-only temporary
 scratch directory outside the product worktree, and receive no additional write

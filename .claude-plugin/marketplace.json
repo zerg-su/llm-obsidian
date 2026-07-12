@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Marketplace for the llm-obsidian plugin: self-organizing second brain for Obsidian + Claude Code.",
-    "version": "2.0.2"
+    "version": "2.0.3"
   },
   "plugins": [
     {
@@ -17,7 +17,7 @@
         "ref": "main"
       },
       "description": "Wiki companion skills, local hybrid retrieval (ollama bge-m3 + BM25), DragonScale memory, MCP HTTP gateway, parallel task orchestration.",
-      "version": "2.0.2",
+      "version": "2.0.3",
       "author": "zerg-su (based on claude-obsidian by AgriciDaniel)",
       "homepage": "https://github.com/zerg-su/llm-obsidian",
       "repository": "https://github.com/zerg-su/llm-obsidian",

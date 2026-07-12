@@ -120,6 +120,7 @@ entry в `~/.codex/hooks.json` и `~/.claude/settings.json`, делая backups
 ## Дисциплина
 
 - **Pre-flight**: write-skill перед действием задаёт до 3 уточняющих вопросов (только по пунктам, которые не резолвятся из prompt'а). Read-only скиллы — auto-skip.
+- **Failure-to-repair**: если repository-owned script/hook/skill/contract не выполняет документированное поведение, сначала contain + read-only diagnosis, затем остановить исходный flow и спросить явное согласие на ремонт самого механизма. После «да»: минимальный fix → regression test → relevant suite → повтор failed stage → продолжение исходной задачи с последней safe boundary. До согласия не менять механизм, не обходить invariant и не расширять permissions. Обычный validation reject, stale hash, product-test failure, missing input/auth/dependency approval или внешний transient сами по себе не являются mechanism failure. Полный контракт: `docs/skill-references/failure-repair-contract.md`.
 - **Код-дисциплина**: think before coding; simplicity first; surgical changes; goal-driven (без «полезного попутно»).
 - **Sub-agent задачи** — контрактом: objective + границы (in/out) + формат результата + источники.
 

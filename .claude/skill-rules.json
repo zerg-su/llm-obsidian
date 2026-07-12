@@ -139,9 +139,11 @@
         "(?i)\\bingest (this|section|<|/)\\b",
         "(?i)\\bзагрузи (источник|это в вики)\\b",
         "(?i)\\bобработай (этот|это) (файл|источник)\\b",
-        "(?i)\\bразбери и зафайль\\b"
+        "(?i)\\bразбери и зафайль\\b",
+        "(?i)\\b(обработай|разбери|загрузи|закинь|импортируй)\\b.{0,80}\\.(pdf|docx|pptx|xlsx|odt|ods|odp|epub|md|txt|html?)\\b",
+        "(?i)\\bingest\\b.{0,80}\\.(pdf|docx|pptx|xlsx|odt|ods|odp|epub|md|txt|html?)\\b"
       ],
-      "hint": null
+      "hint": "Local binary documents normalize through pinned offline Docling; text-like files use the stdlib fast path"
     },
     {
       "skill": "learn",

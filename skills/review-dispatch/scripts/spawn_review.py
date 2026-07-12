@@ -520,8 +520,9 @@ def submission_instructions(
 def repository_diagnostics(reviewer_runtime: str, worktree: Path) -> str:
     if reviewer_runtime == "claude":
         return (
-            "`python3 tests/test_task_lifecycle.py`, `bash tests/test_review_dispatch.sh`, "
-            "`python3 tests/test_contract_schemas.py`, and `python3 scripts/lint-instructions.py`"
+            "any existing cwd-relative `python3 tests/test_<name>.py` or "
+            "`bash tests/test_<name>.sh` entrypoint, plus "
+            "`python3 scripts/lint-instructions.py`"
         )
     commands = (
         ["python3", str(worktree / "tests" / "test_task_lifecycle.py")],

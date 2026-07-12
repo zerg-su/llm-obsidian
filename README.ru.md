@@ -133,6 +133,9 @@ LLM Obsidian **не обходит подписки, rate limits, authentication
 - **Вики, которая растёт сама.** `ingest <path|URL>` превращает сырой материал в 8-15 перелинкованных типизированных страниц; `/save` файлит инсайты из любого разговора; `/autoresearch` запускает автономные research-циклы; каждый одобренный план автоматически захватывается в `wiki/plans/`.
 - **Retrieval, который измеряют, а не оценивают на глазок.** H2/H3-секции режутся до 800 слов с overlap 100, ранжируются sparse-каналом и дедуплицируются до лучшего heading/snippet на страницу; optional `bge-m3` добавляется через RRF. Goldset содержит 48 RU/EN-запросов, половина held-out; `make bench-retrieval` блокирует регресс hit@5/MRR больше 0,02.
 - **RU-first, local-first.** Обязательный sparse-канал понимает кириллицу и смешанный технический словарь без отдельного сервиса. Опциональные `bge-m3` embeddings остаются локально; cloud API не нужен.
+- **Локальная подготовка документов для модели.** Markdown и текст идут по
+  быстрому stdlib-пути; PDF, Office, EPUB и сканы обрабатывает pinned Docling с
+  явным OCR `ru,en`, точными таблицами, content-addressed кешем и без remote services.
 - **Транзакционный write path.** Агентские create/update страниц, merge манифеста, `wiki/log.md` и `wiki/hot.md` идут через `scripts/vault-write.py`: строгий frontmatter, optimistic SHA-256, капы и crash-safe roll-forward из журнала.
 - **Индустриальный Stop-хук.** На каждом ходе: recovery незавершённых writes, reindex, self-heal section retrieval, опциональный dense refresh, строгая валидация и commit только vault-owned путей. Сессии сериализует stdlib `fcntl`; validation failure блокирует commit и оставляет dirty state видимым.
 - **MCP без зоопарка процессов.** Локальный HTTP-гейтвей (один launchd-сервис) стоит перед всеми вашими MCP-серверами: один набор долгоживущих процессов на машину вместо дублей на каждый терминал. Из коробки преднастроен [context7](https://context7.com): добавьте одну строку с API-ключом, и документация библиотек доступна в каждой сессии.
@@ -165,7 +168,7 @@ DragonScale Memory (fold-роллапы, детерминированные ад
 # 1. Забираем вольт
 git clone https://github.com/zerg-su/llm-obsidian ~/Projects/llm-obsidian
 cd ~/Projects/llm-obsidian
-bash bin/setup-clean-machine.sh  # вольт + MCP gateway config + Codex metadata
+bash bin/setup-clean-machine.sh  # вольт + MCP + Docling ru/en + Codex metadata
 
 # 2. Открываем папку как вольт в Obsidian, затем запускаем в ней Claude Code
 claude
@@ -181,7 +184,11 @@ CLT отсутствуют, он открывает штатный диалог 
 placeholder `/usr/bin/python3` отбрасывается; при наличии выбирается рабочий
 Homebrew Python. Добавьте `--install-service` после заполнения
 `~/.config/mcp-gateway/secrets.env`, а `--install-codex-plugin` — когда Codex CLI
-уже установлен.
+уже установлен. Docling ставится в изолированный Python 3.12, а OCR/layout/table
+модели скачиваются заранее (около 1,8 ГБ вместе с runtime на Apple Silicon);
+`--skip-docling` оставлен для намеренно облегчённой установки. Форматы, кеш,
+security boundary и ремонт описаны в
+[гайде по локальным документам](docs/document-ingestion.md).
 
 Установка как плагина (skills + hooks) вместо клонирования или в дополнение к нему:
 
@@ -290,6 +297,7 @@ scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
 make test          # аллокатор адресов, tiling, boundary, vault-write/validate,
                    # безопасный stop-хук + latency, bm25 + fusion, bench-харнес, router
 make test-gateway  # management-слой MCP-гейтвея (офлайн, фейковый MCP-сервер)
+make test-documents # live acceptance установленного Docling: ru/en + Office/PDF
 ```
 
 ## Codex CLI

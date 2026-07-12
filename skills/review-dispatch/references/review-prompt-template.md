@@ -46,8 +46,12 @@ repository instructions before judging the change.
 6. In verify phase, focus on whether prior findings were actually resolved.
 
 When present, these repository checks are pre-approved. Run the exact commands
-without pipes, redirects, or extra arguments: {repository_diagnostics}. Other denied diagnostics are optional;
-continue with Read/Grep instead of asking the user for permission.
+without pipes, redirects, extra arguments, command substitution, or shell
+wrappers: {repository_diagnostics}. For example, run
+`python3 tests/test_document_normalize.py`, not
+`python3 tests/test_document_normalize.py 2>&1 | tail -50`. Other denied
+diagnostics are optional; continue with Read/Grep instead of asking the user
+for permission.
 
 ## Phase Instructions
 

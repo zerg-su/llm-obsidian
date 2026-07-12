@@ -103,6 +103,15 @@ raise --category <category> --reason "..." --question "..."`, then remain
 paused until the coordinator relays a decision. Never wait on a permission
 prompt in this background pane. Small tactical choices are your call.
 
+If a repository-owned pipeline script, hook, skill, instruction, schema,
+callback, or runtime adapter appears defective, contain the state and perform
+read-only diagnosis only. Then raise category `mechanism-failure`; state the
+failed stage, whether the intended mutation started/rolled back/completed/is
+pending recovery, and ask whether the coordinator authorizes repairing the
+mechanism, testing it, and resuming the original task. Remain paused. Do not
+self-repair or use repeated retries before the coordinator relays explicit
+consent. Follow `<vault-root>/docs/skill-references/failure-repair-contract.md`.
+
 For a Claude executor in `auto` mode, treat the first classifier denial as a
 `permission` escalation: do not retry the blocked action. Repeated denials can
 make Claude fall back to interactive prompts, so one denial must pause and
@@ -163,6 +172,13 @@ If a fork appears mid-work that materially changes the plan (a new
 out-of-scope item, an unexpected risk, a big design choice) — stop, explain,
 wait for a new decision. Small tactical choices (variable names, step order
 within one task) — your call.
+
+If the fork is a probable defect in a repository-owned pipeline mechanism,
+apply `<vault-root>/docs/skill-references/failure-repair-contract.md`: contain
+and diagnose read-only, then ask whether to repair the mechanism. Do not change
+pipeline implementation until the user explicitly agrees; after consent, fix,
+regression-test, re-run the failed stage, and resume this task from the last
+safe boundary.
 
 <!-- END BRANCH B -->
 

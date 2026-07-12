@@ -44,9 +44,13 @@ CLAUDE_REVIEW_ALLOWED_TOOLS = (
     "Bash(git status *)",
     "Bash(git log *)",
     "Bash(git show *)",
-    "Bash(python3 tests/test_task_lifecycle.py)",
-    "Bash(bash tests/test_review_dispatch.sh)",
-    "Bash(python3 tests/test_contract_schemas.py)",
+    # Repository test entrypoints are executable code, but reviewers already
+    # need to run changed tests to verify a task. These end-anchored patterns
+    # deny the observed pipe/redirect/wrapper forms, but the embedded wildcard
+    # is not an argv parser: a trailing token that also ends in .py/.sh may
+    # still match. The prompt therefore requires the exact no-argument form.
+    "Bash(python3 tests/test_*.py)",
+    "Bash(bash tests/test_*.sh)",
     "Bash(python3 scripts/lint-instructions.py)",
     "Bash(cmux --help)",
     "Bash(cmux notify --help)",
