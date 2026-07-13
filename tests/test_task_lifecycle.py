@@ -528,7 +528,25 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and escalation_events[-1]["counts"].get("raised") == 1
         and escalation_events[-1]["counts"].get("delivery_failures") == 1,
     )
-    write_json(worktree / ".task-needs-attention.json", resolved_attention)
+    cmux_log.write_text("", encoding="utf-8")
+    result = run(
+        ESCALATION, "resolve", "--decision", "Continue after coordinator inspection",
+        cwd=worktree, env=origin_env,
+    )
+    check("delivery-failed escalation can be recovered", result.returncode == 0, result.stderr)
+    recovered_attention = json.loads(
+        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
+    )
+    check(
+        "recovered escalation preserves failed delivery provenance",
+        recovered_attention["status"] == "resolved"
+        and recovered_attention["resolved_from"] == "delivery-failed",
+    )
+    escalation_events = telemetry(worktree, "task-escalation")
+    check(
+        "recovered escalation resolution counted",
+        escalation_events[-1]["counts"].get("resolved") == 1,
+    )
     check("task exact surface targeted", f"--surface {meta['task_surface']}" in cmux_log.read_text())
     check("Codex task composer cleared", f"send-key --surface {meta['task_surface']} backspace" in cmux_log.read_text())
 

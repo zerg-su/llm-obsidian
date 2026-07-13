@@ -171,8 +171,9 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
     meta, _ = load_unattended(worktree)
     marker_path = worktree / ".task-needs-attention.json"
     marker = read_json(marker_path)
-    if marker.get("status") != "pending":
-        die("there is no pending task escalation", 3)
+    unresolved_status = str(marker.get("status") or "")
+    if unresolved_status not in {"pending", "delivery-failed"}:
+        die("there is no unresolved task escalation", 3)
     current = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unknown"
     if current == "unknown" or current != str(meta.get("origin_session") or ""):
         die("only the originating coordinator session may resolve this escalation", 3)
@@ -184,7 +185,14 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         "Continue only within this decision and the approved plan; escalate again on further drift.",
         clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "") == "codex",
     )
-    marker.update({"status": "resolved", "decision": answer, "resolved_at": utc_now()})
+    marker.update(
+        {
+            "status": "resolved",
+            "resolved_from": unresolved_status,
+            "decision": answer,
+            "resolved_at": utc_now(),
+        }
+    )
     write_json(marker_path, marker)
     duration = elapsed_ms(marker.get("raised_at"), marker.get("resolved_at"))
     emit_lifecycle_event(
