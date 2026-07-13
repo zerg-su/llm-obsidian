@@ -82,13 +82,19 @@ def markdown_inline(value: object, *, limit: int = 1000) -> str:
     return text
 
 
-def quote_block(value: object, *, fallback: str = "None") -> list[str]:
+def inert_review_text(value: object, *, fallback: str = "None") -> str:
+    """Keep reviewer/executor prose from creating durable graph edges."""
     text = str(value or "").replace("\x00", "").strip() or fallback
+    return text.replace("[", r"\[").replace("]", r"\]")
+
+
+def quote_block(value: object, *, fallback: str = "None") -> list[str]:
+    text = inert_review_text(value, fallback=fallback)
     return [f"> {line}" if line else ">" for line in text.splitlines()]
 
 
 def bullet_block(value: object, *, fallback: str = "None") -> list[str]:
-    text = str(value or "").replace("\x00", "").strip() or fallback
+    text = inert_review_text(value, fallback=fallback)
     lines = text.splitlines()
     return [f"- {lines[0]}", *(f"  {line}" if line else "" for line in lines[1:])]
 

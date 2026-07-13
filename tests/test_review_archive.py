@@ -16,6 +16,7 @@ SPEC = importlib.util.spec_from_file_location("review_archive", SCRIPT)
 assert SPEC and SPEC.loader
 archive = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(archive)
+vault_schema = importlib.import_module("vault_schema")
 
 
 def review(run_id: str, verdict: str, findings: list[dict[str, object]]) -> dict[str, object]:
@@ -202,6 +203,34 @@ class ReviewArchiveTests(unittest.TestCase):
         self.assertEqual(self.allocations, 0)
         self.assertEqual(self.payloads, [])
         self.assertFalse((self.worktree / ".review-archive.json").exists())
+
+    def test_free_text_cannot_create_spurious_wikilinks(self) -> None:
+        history_path = self.worktree / ".review-history.json"
+        history = json.loads(history_path.read_text(encoding="utf-8"))
+        history["request"]["description"] = "Inspect [[Request Page]] before release."
+        finding = history["rounds"][0]["review"]["findings"][0]
+        finding["evidence"] = "See [[Some Page]] and the class [[:alpha:]]."
+        finding["recommendation"] = "Do not link [[Recommendation Page]]."
+        history["rounds"][0]["resolution"] = "Applied after checking [[Resolution Page]]."
+        history["rounds"][0]["review"]["verification_gaps"] = [
+            "The [[:alpha:]] case was not exercised live."
+        ]
+        history["rounds"][0]["review"]["residual_risks"] = [
+            "A reviewer may mention [[Risk Page]]."
+        ]
+        history["rounds"][0]["review"]["notes_for_executor"] = [
+            "Keep [[Notes Page]] as plain prose."
+        ]
+        history_path.write_text(json.dumps(history), encoding="utf-8")
+
+        result = self.run_archive()
+        page = (self.vault / str(result["path"])).read_text(encoding="utf-8")
+
+        self.assertIn(r"\[\[Some Page\]\]", page)
+        self.assertIn(r"\[\[:alpha:\]\]", page)
+        links = list(vault_schema.iter_wikilinks(page))
+        self.assertTrue(links)
+        self.assertEqual(set(links), {"Durable review history"})
 
     def test_rejects_invalid_history(self) -> None:
         history = json.loads((self.worktree / ".review-history.json").read_text(encoding="utf-8"))
