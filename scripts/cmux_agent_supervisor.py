@@ -196,16 +196,24 @@ def validate_reviewer_safety(argv: list[str], runtime: str) -> None:
         raise SupervisorError("Claude reviewer command has an unexpected permission allowlist")
 
 
-def validate_task_safety(argv: list[str], runtime: str, interaction_policy: str) -> None:
+def validate_task_safety(
+    argv: list[str],
+    runtime: str,
+    interaction_policy: str,
+    git_common_dir: Path | None = None,
+) -> None:
     if runtime == "codex":
         if any(item in CODEX_FORBIDDEN_OPTIONS for item in argv) or "danger-full-access" in argv:
             raise SupervisorError("Codex task command weakens the approved sandbox")
         if option_value(argv, "-c") is not None:
             raise SupervisorError("Codex task command has an unexpected config override")
         if interaction_policy == "unattended":
+            if git_common_dir is None:
+                raise SupervisorError("Codex unattended task is missing its Git metadata root")
+            require_option(argv, "--add-dir", str(git_common_dir))
             require_option(argv, "-a", "never")
             require_option(argv, "-s", "workspace-write")
-        elif option_value(argv, "-a") is not None or option_value(argv, "-s") is not None:
+        elif any(option_value(argv, flag) is not None for flag in ("-a", "-s", "--add-dir")):
             raise SupervisorError("interactive Codex task command has unexpected approval overrides")
         return
     require_option(argv, "--permission-mode", "auto")
@@ -216,6 +224,36 @@ def validate_task_safety(argv: list[str], runtime: str, interaction_policy: str)
 def expected_codex_home(meta: dict[str, Any]) -> str | None:
     raw = str(meta.get("codex_home") or "").strip()
     return str(Path(raw).expanduser().resolve()) if raw else None
+
+
+def resolved_git_common_dir(worktree: Path) -> Path:
+    result = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    raw = result.stdout.strip()
+    if result.returncode != 0 or not raw or "\n" in raw or "\0" in raw:
+        raise SupervisorError("cannot resolve the task Git metadata root")
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = worktree / candidate
+    common = candidate.resolve()
+    if not common.is_dir() or common.stat().st_uid != os.getuid():
+        raise SupervisorError("task Git metadata root is missing or not owned by the current user")
+    return common
+
+
+def validated_task_git_common_dir(worktree: Path, meta: dict[str, Any]) -> Path:
+    common = resolved_git_common_dir(worktree)
+    target_raw = str(meta.get("target_repo") or "").strip()
+    if not target_raw:
+        return common
+    target = Path(target_raw).expanduser().resolve()
+    if not target.is_dir() or resolved_git_common_dir(target) != common:
+        raise SupervisorError("task worktree does not belong to target_repo")
+    return common
 
 
 def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
@@ -292,7 +330,17 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
     if kind == "reviewer":
         validate_reviewer_safety(spec["argv"], spec["runtime"])
     else:
-        validate_task_safety(spec["argv"], spec["runtime"], task_policy["interaction_policy"])
+        git_common_dir = (
+            validated_task_git_common_dir(worktree, source_meta)
+            if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
+            else None
+        )
+        validate_task_safety(
+            spec["argv"],
+            spec["runtime"],
+            task_policy["interaction_policy"],
+            git_common_dir,
+        )
 
 
 def load_validated_spec(worktree: Path, kind: str, surface: str, raw_path: str = "") -> dict[str, Any]:
@@ -328,6 +376,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
         if model:
             argv.extend(["--model", model])
         if policy["interaction_policy"] == "unattended":
+            argv.extend(["--add-dir", str(validated_task_git_common_dir(worktree, meta))])
             argv.extend(["-a", "never", "-s", "workspace-write"])
         codex_home = str(meta.get("codex_home") or "").strip()
         if codex_home:

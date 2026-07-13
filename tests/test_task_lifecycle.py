@@ -275,6 +275,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     check("supervisor prepares task argv", result.returncode == 0, result.stderr)
     agent_spec = json.loads((worktree / ".task-agent-command.json").read_text(encoding="utf-8"))
     check("supervisor pins unattended Codex approvals", agent_spec["argv"][-4:] == ["-a", "never", "-s", "workspace-write"])
+    add_dir_index = agent_spec["argv"].index("--add-dir")
+    check(
+        "supervisor grants only the task Git metadata root",
+        agent_spec["argv"][add_dir_index + 1] == str((worktree / ".git").resolve()),
+    )
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
         "--surface", meta["task_surface"], cwd=worktree, env=env,
@@ -288,6 +293,16 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--surface", meta["task_surface"], cwd=worktree, env=env,
     )
     check("supervisor rejects sandbox tampering", result.returncode == 2)
+    write_json(worktree / ".task-agent-command.json", safe_agent_spec)
+    agent_spec = json.loads(json.dumps(safe_agent_spec))
+    add_dir_index = agent_spec["argv"].index("--add-dir")
+    agent_spec["argv"][add_dir_index + 1] = "/tmp"
+    write_json(worktree / ".task-agent-command.json", agent_spec)
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor rejects arbitrary task writable roots", result.returncode == 2)
     write_json(worktree / ".task-agent-command.json", safe_agent_spec)
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",

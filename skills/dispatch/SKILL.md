@@ -402,8 +402,12 @@ Why `.task-meta.json`:
 
 Prepare the shell-free task argv from validated metadata, then send only the
 short supervisor command. `prepare-task` pins unattended Codex to
-`-a never -s workspace-write`; Claude keeps `auto`. The supervisor appends the
-prompt as one argv value, runs the watchdog, and calls lifecycle after exit.
+`-a never -s workspace-write` and adds exactly the worktree's validated Git
+common directory as a writable root. Linked worktrees keep their index,
+objects, and task-branch ref there, so this narrow grant lets the task commit
+without exposing arbitrary filesystem roots. Claude keeps `auto`. The
+supervisor appends the prompt as one argv value, runs the watchdog, and calls
+lifecycle after exit.
 
 ```bash
 WORKTREE="<worktree-path>"
