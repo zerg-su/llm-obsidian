@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Relay a contract-approved task escalation through the coordinator surface."""
+"""Relay a task stop condition through the owning coordinator surface."""
 
 from __future__ import annotations
 
@@ -30,6 +30,8 @@ CATEGORIES = {
     "mechanism-failure",
     "permission",
 }
+
+MECHANISM_REPAIR_POLICY = "classify-and-auto-repair-if-eligible"
 
 
 def die(message: str, code: int = 2) -> NoReturn:
@@ -136,12 +138,23 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         "task_surface": task_surface,
         "raised_at": utc_now(),
     }
+    if category == "mechanism-failure":
+        marker["coordinator_policy"] = MECHANISM_REPAIR_POLICY
     marker_path = worktree / ".task-needs-attention.json"
     write_json(marker_path, marker)
     title = f"Task {task_name} needs a decision"
+    if category == "mechanism-failure":
+        action = (
+            "Coordinator: classify now. Auto-repair only when the defect is repo-owned, "
+            "local, reproducible, reversible, scope-preserving, and has no permission, "
+            "security, dependency, public-interface, migration, destructive, or external-effect "
+            "boundary; otherwise ask the user once. "
+        )
+    else:
+        action = "Coordinator decision required. "
     body = (
-        f"{category}: {marker['reason']} Question: {marker['question']} "
-        f"Paused. Resolve from the coordinator with task_escalation.py resolve --worktree "
+        f"{category}: {marker['reason']} Requested decision: {marker['question']} {action}"
+        f"Task remains paused. Resolve with task_escalation.py resolve --worktree "
         f"{shlex.quote(str(worktree))}."
     )
     try:

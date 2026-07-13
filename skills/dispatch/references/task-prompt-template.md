@@ -107,10 +107,13 @@ If a repository-owned pipeline script, hook, skill, instruction, schema,
 callback, or runtime adapter appears defective, contain the state and perform
 read-only diagnosis only. Then raise category `mechanism-failure`; state the
 failed stage, whether the intended mutation started/rolled back/completed/is
-pending recovery, and ask whether the coordinator authorizes repairing the
-mechanism, testing it, and resuming the original task. Remain paused. Do not
-self-repair or use repeated retries before the coordinator relays explicit
-consent. Follow `<vault-root>/docs/skill-references/failure-repair-contract.md`.
+pending recovery, and request coordinator classification. Remain paused. Do
+not self-repair or use repeated retries. The coordinator may authorize a narrow
+repo-owned/local/reproducible/reversible repair automatically, but must ask the
+user for any permission, dependency, security, public-interface, migration,
+destructive, external-effect, scope, or ambiguous-state boundary. Resume only
+after the coordinator relays its explicit resolution. Follow
+`<vault-root>/docs/skill-references/failure-repair-contract.md`.
 
 For a Claude executor in `auto` mode, treat the first classifier denial as a
 `permission` escalation: do not retry the blocked action. Repeated denials can
@@ -175,10 +178,12 @@ within one task) — your call.
 
 If the fork is a probable defect in a repository-owned pipeline mechanism,
 apply `<vault-root>/docs/skill-references/failure-repair-contract.md`: contain
-and diagnose read-only, then ask whether to repair the mechanism. Do not change
-pipeline implementation until the user explicitly agrees; after consent, fix,
-regression-test, re-run the failed stage, and resume this task from the last
-safe boundary.
+and diagnose read-only, then classify it against the coordinator auto-repair
+boundary. Repair routine repo-owned/local/reproducible/reversible defects in
+scope; ask once when permissions, dependencies, security, public interfaces,
+migrations, destructive actions, external effects, or ambiguous state are
+involved. Then regression-test, re-run the failed stage, and resume from the
+last safe boundary.
 
 <!-- END BRANCH B -->
 

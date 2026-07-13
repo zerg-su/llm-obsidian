@@ -45,20 +45,21 @@ def origin_vault(worktree: Path) -> Path | None:
         if candidate is not None:
             return candidate
 
-    review_meta = read_object(root / ".review-meta.json")
-    candidate = declared_vault(review_meta.get("vault_root"))
+    meta = read_object(root / ".task-meta.json")
+    candidate = declared_vault(meta.get("vault_root"))
     if candidate is not None:
         return candidate
 
-    meta = read_object(root / ".task-meta.json")
     raw_plan = str(meta.get("plan_file") or "").strip()
-    if not raw_plan:
-        return None
-    plan = Path(raw_plan).expanduser().resolve()
-    if plan.parent.name != "plans" or plan.parent.parent.name != "wiki":
-        return None
-    candidate = plan.parents[2]
-    return candidate if (candidate / "wiki").is_dir() else None
+    if raw_plan:
+        plan = Path(raw_plan).expanduser().resolve()
+        if plan.parent.name == "plans" and plan.parent.parent.name == "wiki":
+            candidate = plan.parents[2]
+            if (candidate / "wiki").is_dir():
+                return candidate
+
+    review_meta = read_object(root / ".review-meta.json")
+    return declared_vault(review_meta.get("vault_root"))
 
 
 def parse_utc(value: object) -> datetime | None:

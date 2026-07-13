@@ -72,8 +72,11 @@ echo "== review-dispatch mode plumbing =="
 
 LIGHT="$SANDBOX/light"
 write_fixture "$LIGHT"
+printf '# stale resolution\n' > "$LIGHT/.task-review-resolution.md"
+printf '# stale verify\n' > "$LIGHT/.task-review-verify.md"
 "$SCRIPT" start --light --no-spawn --worktree "$LIGHT" --vault-root "$REPO_ROOT" >"$SANDBOX/light.out" 2>"$SANDBOX/light.err"
 expect_eq "start-light-exit" "$?" 0
+[[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify survived"
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
 expect_eq "start-review-id-stable" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$(json_get "$LIGHT/.review-meta.json" run_id)"
 [[ -f "$LIGHT/.review-history.json" ]] && ok "start-review-history" || bad "start-review-history" "history file missing"
@@ -89,10 +92,19 @@ grep -q 'Review mode: `light`' "$LIGHT/.review-prompt.md" && ok "start-light-pro
 grep -q 'top 5 actionable findings' "$LIGHT/.review-prompt.md" && ok "start-light-instructions" || bad "start-light-instructions" "missing light instructions"
 LIGHT_SPEC="$LIGHT/.review-agent-command.json"
 argv_has "$LIGHT_SPEC" --permission-mode dontAsk && ok "claude-unattended-mode" || bad "claude-unattended-mode" "dontAsk mode missing"
+python3 - "$LIGHT_SPEC" <<'PY'
+import json, os, sys
+env = json.load(open(sys.argv[1], encoding="utf-8"))["env"]
+assert set(env) == {"PATH"}
+assert env["PATH"] and all(os.path.isabs(item) for item in env["PATH"].split(os.pathsep))
+PY
+[[ $? -eq 0 ]] && ok "claude-review-trusted-path" || bad "claude-review-trusted-path" "reviewer PATH is not pinned"
 argv_has "$LIGHT_SPEC" --tools Read,Glob,Grep,Write,Bash && ok "claude-tool-surface" || bad "claude-tool-surface" "restricted tools missing"
 grep -q -- "Bash(python3 \*send_review.py submit \*)" "$LIGHT_SPEC" && ok "claude-callback-allowed" || bad "claude-callback-allowed" "typed callback allow rule missing"
 grep -qF -- 'Bash(python3 tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-python-tests-allowed" || bad "claude-python-tests-allowed" "bounded Python test rule missing"
 grep -qF -- 'Bash(bash tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-shell-tests-allowed" || bad "claude-shell-tests-allowed" "bounded shell test rule missing"
+grep -qF -- 'Bash(bash scripts/dcg-test-suite.sh)' "$LIGHT_SPEC" && ok "claude-dcg-smoke-allowed" || bad "claude-dcg-smoke-allowed" "exact DCG smoke rule missing"
+grep -qF -- '`bash scripts/dcg-test-suite.sh`' "$LIGHT/.review-prompt.md" && ok "claude-dcg-smoke-advertised" || bad "claude-dcg-smoke-advertised" "DCG smoke command missing from prompt"
 grep -qF -- '`python3 tests/test_document_normalize.py 2>&1 | tail -50`' "$LIGHT/.review-prompt.md" && ok "claude-test-shell-composition-denied" || bad "claude-test-shell-composition-denied" "prompt does not explain bounded test form"
 grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-only-write" || bad "claude-outbox-only-write" "cwd-anchored outbox Edit rule missing"
 grep -q -- '--input-file.*/.review-outbox.json' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "outbox callback missing"
@@ -117,6 +129,25 @@ path = sys.argv[1]
 data = json.load(open(path, encoding="utf-8"))
 data["argv"][data["argv"].index("auto")] = "dontAsk"
 open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
+python3 - "$LIGHT_SPEC" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["env"]["PATH"] = "/tmp:" + data["env"]["PATH"]
+open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
+"$SUPERVISOR" validate --worktree "$LIGHT" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/supervisor-path.err"
+[[ $? -ne 0 ]] && ok "review-supervisor-rejects-path-tamper" || bad "review-supervisor-rejects-path-tamper" "reviewer PATH drift accepted"
+python3 - "$SUPERVISOR" "$LIGHT_SPEC" <<'PY'
+import importlib.util, json, pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).resolve().parent))
+spec = importlib.util.spec_from_file_location("supervisor_path_restore", sys.argv[1])
+module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+path = pathlib.Path(sys.argv[2])
+data = json.loads(path.read_text(encoding="utf-8"))
+data["env"]["PATH"] = module.trusted_runtime_path()
+path.write_text(json.dumps(data) + "\n", encoding="utf-8")
 PY
 [[ $(wc -c < "$SANDBOX/light.out") -lt 1000 ]] && ok "review-command-bounded" || bad "review-command-bounded" "cmux command is unexpectedly long"
 argv_has "$LIGHT_SPEC" --effort medium && ok "claude-medium-effort" || bad "claude-medium-effort" "medium effort missing"
@@ -144,17 +175,117 @@ printf '# Task: linked-review-test\n' > "$LINK_WORKTREE/.task-prompt.md"
 printf '00000000-0000-0000-0000-000000000001\n' > "$LINK_WORKTREE/.task-cmux-surface"
 "$SCRIPT" start --no-spawn --worktree "$LINK_WORKTREE" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/linked.err"
 printf '{}\n' > "$LINK_WORKTREE/.review-relay.json"
+printf '{}\n' > "$LINK_WORKTREE/.review-callback.json"
 printf '{}\n' > "$LINK_WORKTREE/.task-reap-prepared.json"
 git -C "$LINK_WORKTREE" check-ignore -q .review-relay.json
 relay_ignored=$?
+git -C "$LINK_WORKTREE" check-ignore -q .review-callback.json
+callback_ignored=$?
 git -C "$LINK_WORKTREE" check-ignore -q .task-reap-prepared.json
 prepared_ignored=$?
-[[ $relay_ignored -eq 0 && $prepared_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
+[[ $relay_ignored -eq 0 && $callback_ignored -eq 0 && $prepared_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
 for artifact in .review-history.json .review-archive.json .review-archive-request.json; do
   printf '{}\n' > "$LINK_WORKTREE/$artifact"
   git -C "$LINK_WORKTREE" check-ignore -q "$artifact" || bad "linked-worktree-$artifact-ignored" "common exclude not updated"
 done
 ok "linked-worktree-review-archive-ignored"
+
+SELF_VAULT="$SANDBOX/self-vault"
+SELF_TASK="$SANDBOX/self-task"
+mkdir -p "$SELF_VAULT/wiki/plans" "$SELF_VAULT/scripts" \
+  "$SELF_VAULT/skills/review-dispatch/scripts"
+printf '# approved\n' > "$SELF_VAULT/wiki/plans/self-plan.md"
+printf '# fixture\n' > "$SELF_VAULT/scripts/vault-write.py"
+printf '# fixture\n' > "$SELF_VAULT/skills/review-dispatch/scripts/archive_review.py"
+write_fixture "$SELF_TASK"
+python3 - "$SELF_TASK/.task-meta.json" "$SELF_VAULT/wiki/plans/self-plan.md" <<'PY'
+import json, sys
+path, plan = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+data["plan_file"] = plan
+open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$SELF_TASK" >"$SANDBOX/self-start.out" 2>"$SANDBOX/self-start.err"
+expect_eq "plan-derived-vault-start" "$?" 0
+expect_eq "plan-derived-vault-root" "$(json_get "$SELF_TASK/.review-meta.json" vault_root)" "$(path_resolve "$SELF_VAULT")"
+(cd "$SELF_TASK" && "$SCRIPT" archive --dry-run --worktree "$SELF_TASK") >"$SANDBOX/self-archive.out" 2>"$SANDBOX/self-archive.err"
+expect_eq "plan-derived-task-archive" "$?" 0
+grep -q '"status": "deferred"' "$SANDBOX/self-archive.out" && ok "plan-derived-task-defers" || bad "plan-derived-task-defers" "task context attempted a coordinator write"
+
+python3 - "$SCRIPT" "$LINK_WORKTREE" <<'PY'
+import importlib.util
+import os
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("review_dispatch_self_vault_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2]).resolve()
+os.chdir(worktree)
+result = module.archive_or_defer(
+    worktree,
+    {"vault_root": str(worktree), "review_id": "self-vault"},
+    dry_run=True,
+)
+assert result["status"] == "deferred"
+PY
+expect_eq "worktree-never-self-archives" "$?" 0
+
+COORDINATOR="$SANDBOX/coordinator"
+write_fixture "$COORDINATOR"
+mkdir -p "$COORDINATOR/wiki" "$COORDINATOR/scripts" \
+  "$COORDINATOR/skills/review-dispatch/scripts"
+printf '# fixture\n' > "$COORDINATOR/scripts/vault-write.py"
+cat > "$COORDINATOR/skills/review-dispatch/scripts/archive_review.py" <<'PY'
+import json
+print(json.dumps({"schema_version": 1, "status": "dry-run", "review_id": "fixture"}))
+PY
+"$SCRIPT" start --coordinator-review --no-spawn --worktree "$COORDINATOR" \
+  --vault-root "$COORDINATOR" >"$SANDBOX/coordinator-start.out" 2>"$SANDBOX/coordinator-start.err"
+expect_eq "coordinator-review-start" "$?" 0
+expect_eq "coordinator-review-mode" "$(json_get "$COORDINATOR/.review-meta.json" archive_mode)" "coordinator"
+(cd "$COORDINATOR" && "$SCRIPT" archive --dry-run --worktree "$COORDINATOR") \
+  >"$SANDBOX/coordinator-archive.out" 2>"$SANDBOX/coordinator-archive.err"
+expect_eq "coordinator-review-archive" "$?" 0
+grep -q '"status": "dry-run"' "$SANDBOX/coordinator-archive.out" && ok "coordinator-review-archives-directly" || bad "coordinator-review-archives-directly" "primary checkout deferred"
+LINK_COORDINATOR="$SANDBOX/linked-coordinator"
+git -C "$LINK_ROOT" worktree add -q -b task/linked-coordinator "$LINK_COORDINATOR"
+cat > "$LINK_COORDINATOR/.task-meta.json" <<'JSON'
+{"task_name":"linked-coordinator-test","base_branch":"HEAD","branch":"task/linked-coordinator","executor_runtime":"codex","model":"gpt-5.6-sol"}
+JSON
+printf '# Task: linked-coordinator-test\n' > "$LINK_COORDINATOR/.task-prompt.md"
+printf '00000000-0000-0000-0000-000000000001\n' > "$LINK_COORDINATOR/.task-cmux-surface"
+"$SCRIPT" start --coordinator-review --no-spawn --worktree "$LINK_COORDINATOR" \
+  --vault-root "$REPO_ROOT" >"$SANDBOX/linked-coordinator.out" 2>"$SANDBOX/linked-coordinator.err"
+[[ $? -ne 0 ]] && ok "linked-worktree-coordinator-mode-rejected" || bad "linked-worktree-coordinator-mode-rejected" "linked task accepted coordinator mode"
+grep -q 'worktree and vault root to be identical' "$SANDBOX/linked-coordinator.err" && ok "linked-worktree-coordinator-rejection-reason" || bad "linked-worktree-coordinator-rejection-reason" "wrong rejection path"
+python3 - "$SCRIPT" "$LINK_COORDINATOR" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("review_dispatch_forged_coordinator_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2]).resolve()
+result = module.archive_or_defer(
+    worktree,
+    {
+        "archive_mode": "coordinator",
+        "vault_root": str(worktree),
+        "review_id": "forged-linked-coordinator",
+    },
+    dry_run=True,
+)
+assert result["status"] == "deferred"
+assert not module.is_primary_coordinator_review(
+    worktree,
+    worktree,
+    {"archive_mode": "coordinator"},
+)
+PY
+expect_eq "linked-worktree-forged-archive-mode-defers" "$?" 0
 
 python3 - "$LIGHT/.review-meta.json" "$LIGHT" <<'PY'
 import json, sys
@@ -168,7 +299,7 @@ review_payload=$(python3 - "$run_id" <<'PY'
 import json, sys
 print(json.dumps({
   "schema_version": 1, "run_id": sys.argv[1], "mode": "light", "verdict": "approve",
-  "findings": [], "verification_gaps": ["live model eval not run"],
+  "findings": [], "verification_gaps": ["x" * 1800],
   "notes_for_executor": [], "residual_risks": []
 }))
 PY
@@ -177,15 +308,24 @@ printf '%s' "$review_payload" > "$LIGHT/.review-outbox.json"
 printf '{}\n' > "$LIGHT/.review-watchdog.json"
 outbox_callback=$("$SEND_SCRIPT" submit --no-send --worktree "$LIGHT" --input-file "$LIGHT/.review-outbox.json" 2>"$SANDBOX/outbox.err")
 expect_eq "typed-outbox-submit" "$?" 0
+light_callback_path="$(path_resolve "$LIGHT")/.review-callback.json"
 [[ ! -e "$LIGHT/.review-outbox.json" ]] && ok "typed-outbox-removed" || bad "typed-outbox-removed" "outbox remains"
-[[ "$outbox_callback" == *"--payload-b64 "* ]] && ok "typed-outbox-callback" || bad "typed-outbox-callback" "callback missing"
-[[ "$(grep -o -- '--payload-b64' <<<"$outbox_callback" | wc -l | tr -d ' ')" == 1 ]] && ok "typed-callback-single-payload-flag" || bad "typed-callback-single-payload-flag" "payload flag duplicated"
+[[ -f "$LIGHT/.review-callback.json" ]] && ok "typed-callback-relay-written" || bad "typed-callback-relay-written" "relay missing"
+python3 - "$LIGHT/.review-callback.json" <<'PY'
+import stat, sys
+raise SystemExit(0 if stat.S_IMODE(__import__("os").stat(sys.argv[1]).st_mode) == 0o600 else 1)
+PY
+[[ $? -eq 0 ]] && ok "typed-callback-relay-private" || bad "typed-callback-relay-private" "relay mode is not 600"
+[[ "$outbox_callback" == *"--relay-file $light_callback_path"* ]] && ok "typed-outbox-callback" || bad "typed-outbox-callback" "short relay callback missing"
+if [[ "$outbox_callback" == *"--payload-b64"* ]]; then bad "typed-callback-no-inline-payload" "large payload remains inline"; else ok "typed-callback-no-inline-payload"; fi
+[[ ${#outbox_callback} -lt 1000 ]] && ok "typed-callback-bounded" || bad "typed-callback-bounded" "callback is unexpectedly long"
 [[ "$outbox_callback" == "Cross-model review callback"* ]] && ok "runtime-neutral-callback" || bad "runtime-neutral-callback" "callback still depends on a slash command"
 callback=$(printf '%s' "$review_payload" | "$SEND_SCRIPT" submit --no-send --worktree "$LIGHT" 2>"$SANDBOX/submit.err")
 expect_eq "typed-submit-exit" "$?" 0
-token="${callback##*--payload-b64 }"
-"$SCRIPT" receive --worktree "$LIGHT" --payload-b64 "$token" >/dev/null 2>"$SANDBOX/receive.err"
+[[ "$callback" == *"--relay-file $light_callback_path"* ]] && ok "typed-stdin-short-callback" || bad "typed-stdin-short-callback" "stdin transport did not publish relay"
+"$SCRIPT" receive --worktree "$LIGHT" --relay-file "$LIGHT/.review-callback.json" >/dev/null 2>"$SANDBOX/receive.err"
 expect_eq "typed-receive-exit" "$?" 0
+[[ ! -e "$LIGHT/.review-callback.json" ]] && ok "typed-receive-removes-relay" || bad "typed-receive-removes-relay" "received relay remains"
 expect_eq "typed-json-verdict" "$(json_get "$LIGHT/.task-review.json" verdict)" "approve"
 python3 - "$LIGHT/.review-history.json" "$run_id" <<'PY'
 import json, sys
@@ -206,6 +346,68 @@ assert matches[0]["counts"]["verdict_approve"] == 1
 assert matches[0]["counts"]["action_interactive"] == 1
 PY
 [[ $? -eq 0 ]] && ok "review-callback-telemetry" || bad "review-callback-telemetry" "typed lifecycle event missing"
+
+LEGACY="$SANDBOX/legacy-payload"
+write_fixture "$LEGACY"
+"$SCRIPT" start --light --no-spawn --worktree "$LEGACY" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/legacy-start.err"
+legacy_run_id="$(json_get "$LEGACY/.review-meta.json" run_id)"
+legacy_token=$(PYTHONPATH="$REPO_ROOT/scripts" python3 - "$legacy_run_id" <<'PY'
+import sys
+from review_contract import encode_review
+print(encode_review({
+  "schema_version": 1, "run_id": sys.argv[1], "mode": "light", "verdict": "approve",
+  "findings": [], "verification_gaps": [], "notes_for_executor": [], "residual_risks": []
+}))
+PY
+)
+"$SCRIPT" receive --worktree "$LEGACY" --payload-b64 "$legacy_token" >/dev/null 2>"$SANDBOX/legacy-receive.err"
+expect_eq "legacy-payload-receive" "$?" 0
+expect_eq "legacy-payload-verdict" "$(json_get "$LEGACY/.task-review.json" verdict)" "approve"
+
+printf '%s\n' "$review_payload" > "$LIGHT/not-the-relay.json"
+"$SCRIPT" receive --worktree "$LIGHT" --relay-file "$LIGHT/not-the-relay.json" >/dev/null 2>"$SANDBOX/wrong-relay.err"
+expect_eq "wrong-relay-path-rejected" "$?" 3
+grep -q 'relay file must be the regular file' "$SANDBOX/wrong-relay.err" && ok "wrong-relay-path-message" || bad "wrong-relay-path-message" "exact-path failure missing"
+rm -f "$LIGHT/not-the-relay.json"
+printf '{invalid\n' > "$LIGHT/.review-callback.json"
+"$SCRIPT" receive --worktree "$LIGHT" --relay-file "$LIGHT/.review-callback.json" >/dev/null 2>"$SANDBOX/invalid-relay.err"
+expect_eq "invalid-relay-rejected" "$?" 3
+[[ -f "$LIGHT/.review-callback.json" ]] && ok "invalid-relay-retained" || bad "invalid-relay-retained" "failed callback was destroyed"
+rm -f "$LIGHT/.review-callback.json"
+
+SEND_FAIL="$SANDBOX/send-failure"
+write_fixture "$SEND_FAIL"
+"$SCRIPT" start --light --no-spawn --worktree "$SEND_FAIL" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/send-failure-start.err"
+python3 - "$SEND_SCRIPT" "$SEND_FAIL" <<'PY'
+import importlib.util, json, pathlib, sys
+from types import SimpleNamespace
+
+spec = importlib.util.spec_from_file_location("review_send_failure_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2])
+meta = json.loads((worktree / ".review-meta.json").read_text(encoding="utf-8"))
+outbox = worktree / ".review-outbox.json"
+outbox.write_text(json.dumps({
+  "schema_version": 1, "run_id": meta["run_id"], "mode": "light", "verdict": "approve",
+  "findings": [], "verification_gaps": [], "notes_for_executor": [], "residual_risks": []
+}) + "\n", encoding="utf-8")
+def fail_send(*_):
+    raise SystemExit(1)
+
+module.send_to_surface = fail_send
+try:
+    module.cmd_submit(SimpleNamespace(
+        worktree=str(worktree), input_file=str(outbox), no_send=False
+    ))
+except SystemExit:
+    pass
+else:
+    raise AssertionError("send failure did not propagate")
+assert outbox.is_file()
+assert (worktree / module.REVIEW_CALLBACK_FILE).is_file()
+PY
+[[ $? -eq 0 ]] && ok "failed-send-retains-retry-state" || bad "failed-send-retains-retry-state" "outbox/relay were lost"
 python3 - "$SEND_SCRIPT" <<'PY'
 import importlib.util
 import subprocess
@@ -266,6 +468,19 @@ cat > "$LIGHT/.task-review-resolution.md" <<'MD'
 
 No findings applied.
 MD
+python3 - "$LIGHT/.task-meta.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data.update({
+    "base_branch": "stale/base",
+    "branch": "stale/branch",
+    "executor_runtime": "claude",
+    "model": "stale-model",
+    "plan_file": "/tmp/stale-plan.md",
+})
+open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
 "$SCRIPT" verify --no-send --worktree "$LIGHT" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/verify.err"
 expect_eq "verify-light-exit" "$?" 0
 expect_eq "verify-light-preserved" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
@@ -277,7 +492,11 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 assert data["rounds"][0]["resolution"].startswith("# Review Resolution")
 PY
 [[ $? -eq 0 ]] && ok "verify-snapshots-resolution" || bad "verify-snapshots-resolution" "resolution not retained"
-"$SCRIPT" archive --dry-run --worktree "$LIGHT" >"$SANDBOX/archive-dry.out" 2>"$SANDBOX/archive-dry.err"
+grep -qF -- '- Base branch: `HEAD`' "$LIGHT/.review-prompt-verify.md" && ok "verify-stable-base-branch" || bad "verify-stable-base-branch" "task metadata overrode review base"
+grep -qF -- '- Task branch: `task/review-dispatch-test`' "$LIGHT/.review-prompt-verify.md" && ok "verify-stable-task-branch" || bad "verify-stable-task-branch" "task metadata overrode review branch"
+grep -qF -- '- Executor: `codex` `gpt-5.6-sol`' "$LIGHT/.review-prompt-verify.md" && ok "verify-stable-executor" || bad "verify-stable-executor" "task metadata overrode executor context"
+grep -qF -- '- Plan file: `none`' "$LIGHT/.review-prompt-verify.md" && ok "verify-stable-plan" || bad "verify-stable-plan" "stale task plan leaked"
+(cd "$LIGHT" && "$SCRIPT" archive --dry-run --worktree "$LIGHT") >"$SANDBOX/archive-dry.out" 2>"$SANDBOX/archive-dry.err"
 expect_eq "task-archive-deferred-dry" "$?" 0
 grep -q '"status": "deferred"' "$SANDBOX/archive-dry.out" && ok "task-archive-defers-to-reap" || bad "task-archive-defers-to-reap" "task attempted a vault write"
 "$SCRIPT" start --no-spawn --worktree "$LIGHT" --vault-root "$REPO_ROOT" >"$SANDBOX/restart.out" 2>"$SANDBOX/restart.err"
@@ -291,6 +510,30 @@ write_fixture "$FULL"
 expect_eq "start-full-exit" "$?" 0
 expect_eq "start-full-default" "$(json_get "$FULL/.review-meta.json" review_mode)" "full"
 grep -q 'Review mode: `full`' "$FULL/.review-prompt.md" && ok "start-full-prompt" || bad "start-full-prompt" "missing full marker"
+
+FINDINGS="$SANDBOX/findings-without-resolution"
+write_fixture "$FINDINGS"
+"$SCRIPT" start --no-spawn --worktree "$FINDINGS" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/findings-start.err"
+findings_run_id="$(json_get "$FINDINGS/.review-meta.json" run_id)"
+python3 - "$FINDINGS/.review-callback.json" "$findings_run_id" <<'PY'
+import json, os, sys
+path, run_id = sys.argv[1:]
+payload = {
+  "schema_version": 1, "run_id": run_id, "mode": "full", "verdict": "changes-requested",
+  "findings": [{
+    "severity": "warning", "file": "file.txt", "line": 1,
+    "title": "fixture finding", "evidence": "fixture evidence", "recommendation": "fix it"
+  }],
+  "verification_gaps": [], "notes_for_executor": [], "residual_risks": []
+}
+open(path, "w", encoding="utf-8").write(json.dumps(payload) + "\n")
+os.chmod(path, 0o600)
+PY
+"$SCRIPT" receive --worktree "$FINDINGS" --relay-file "$FINDINGS/.review-callback.json" >/dev/null 2>"$SANDBOX/findings-receive.err"
+expect_eq "findings-receive" "$?" 0
+"$SCRIPT" verify --no-send --worktree "$FINDINGS" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/findings-verify.err"
+expect_eq "findings-require-resolution" "$?" 1
+grep -q 'latest review has findings; write .task-review-resolution.md before verify' "$SANDBOX/findings-verify.err" && ok "findings-resolution-message" || bad "findings-resolution-message" "missing fail-closed guidance"
 
 FABLE="$SANDBOX/fable"
 write_fixture "$FABLE"
@@ -325,6 +568,18 @@ PY
 [[ $? -eq 0 ]] && ok "codex-scratch-env" || bad "codex-scratch-env" "TMPDIR is not pinned to scratch"
 if grep -q -- '--add-dir' "$CODEX_SPEC"; then bad "codex-no-additional-write-root" "reviewer requests --add-dir"; else ok "codex-no-additional-write-root"; fi
 grep -q 'web_search=' "$CODEX_SPEC" && ok "codex-network-disabled" || bad "codex-network-disabled" "web search override missing"
+python3 - "$CODEX_SPEC" <<'PY'
+import json, os, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+argv = data["argv"]
+configs = [argv[i + 1] for i, value in enumerate(argv[:-1]) if value == "-c"]
+assert 'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }' in configs
+assert "features.network_proxy.unix_sockets={}" in configs
+assert "features.network_proxy.allow_local_binding=true" in configs
+assert "PATH" in data["env"] and data["env"]["PATH"]
+assert all(os.path.isabs(item) for item in data["env"]["PATH"].split(os.pathsep))
+PY
+[[ $? -eq 0 ]] && ok "codex-review-loopback-toolchain" || bad "codex-review-loopback-toolchain" "exact loopback/toolchain policy missing"
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
 grep -qF -- "git -C $CODEX_REVIEW_RESOLVED ..." "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks worktree git guidance"

@@ -283,6 +283,67 @@ def validated_review_archive(worktree: Path, vault: Path) -> dict[str, Any] | No
     return marker
 
 
+def result_wikilink(summary_title: str, result_path: Path) -> str:
+    title = summary_title.strip()
+    stem = result_path.stem.strip()
+    if not title or not stem:
+        raise ValueError("reap result title and filename must be non-empty")
+    return f"[[{title}]]" if stem == title else f"[[{stem}|{title}]]"
+
+
+def collision_safe_result_path(vault: Path, intended: Path) -> Path:
+    """Route a new result around a vault-wide filename collision.
+
+    Obsidian resolves pathless wikilinks by filename, and the vault validator
+    intentionally rejects duplicate Markdown names across folders.  The
+    common collision is an exact-title plan plus a not-yet-created session
+    result.  Existing targets are never silently rerouted because that would
+    turn an update into a create and leave the original collision in place.
+    """
+
+    wiki = (vault / "wiki").resolve()
+    result = intended.expanduser().resolve()
+    collisions = [
+        path.resolve()
+        for path in wiki.rglob("*.md")
+        if path.resolve() != result and path.name.casefold() == result.name.casefold()
+    ]
+    if not collisions:
+        return result
+    if result.exists():
+        raise ValueError(
+            "existing reap result has a vault-wide filename collision; repair the vault first"
+        )
+    candidate = result.with_name(f"{result.stem} — Result.md")
+    candidate_collides = candidate.exists() or any(
+        path.resolve() != candidate
+        and path.name.casefold() == candidate.name.casefold()
+        for path in wiki.rglob("*.md")
+    )
+    if candidate_collides:
+        raise ValueError(
+            "collision-safe reap filename is already occupied; choose an explicit unique route"
+        )
+    return candidate
+
+
+def reroute_closed_plan(text: str, old_link: str, new_link: str, *, label: str) -> str:
+    if not old_link or not new_link:
+        raise PlanCloseError(f"reap reroute: {label} requires old and new result links")
+    if old_link == new_link:
+        return text
+    pattern = re.compile(
+        rf"^(Результат:\s*){re.escape(old_link)}(\s+\(reaped\s+\d{{4}}-\d{{2}}-\d{{2}}\)\s*)$",
+        flags=re.M,
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise PlanCloseError(
+            f"reap reroute: {label} has {len(matches)} exact prior result lines (expected 1)"
+        )
+    return pattern.sub(rf"\g<1>{new_link}\g<2>", text, count=1)
+
+
 def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
     attention_path = worktree / ".task-needs-attention.json"
@@ -293,7 +354,7 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
     summary_path = worktree / ".task-summary.json"
     summary = read_contract_json(summary_path)
     try:
-        validate_handoff(meta, summary, current_session)
+        validate_handoff(meta, summary, current_session, verify_plan_hash=False)
     except ContractError as exc:
         die(str(exc))
     result = result_path.expanduser().resolve()
@@ -305,22 +366,62 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         die("validated reap result must be inside the selected vault wiki", 3)
     if result.suffix != ".md":
         die("prepared reap result must be a wiki Markdown page", 3)
+    try:
+        result = collision_safe_result_path(vault, result)
+    except ValueError as exc:
+        die(str(exc), 3)
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     try:
         plan.relative_to(vault / "wiki" / "plans")
     except ValueError:
         die("approved task plan must be inside the selected vault plans directory", 3)
-    result_link = f"[[{str(summary.get('title') or '').strip()}]]"
+    try:
+        result_link = result_wikilink(str(summary.get("title") or ""), result)
+    except ValueError as exc:
+        die(str(exc), 3)
     exec_session = str(summary.get("session") or "").strip() or None
     prepared_date = time.strftime("%Y-%m-%d")
+    plan_text = plan.read_text(encoding="utf-8")
+    plan_hash = hashlib.sha256(plan_text.encode("utf-8")).hexdigest()
+    approved_hash = str(meta.get("approved_plan_sha256") or "")
+    prior_marker: dict[str, Any] = {}
     try:
-        closed_plan = render_plan_close(
-            plan.read_text(encoding="utf-8"),
-            today=prepared_date,
-            result_link=result_link,
-            exec_session=exec_session,
-            label=str(plan.relative_to(vault)),
-        )
+        if plan_hash == approved_hash:
+            closed_plan = render_plan_close(
+                plan_text,
+                today=prepared_date,
+                result_link=result_link,
+                exec_session=exec_session,
+                label=str(plan.relative_to(vault)),
+            )
+        else:
+            prior_marker = read_json(worktree / ".task-reap-prepared.json")
+            immutable = {
+                "task_name": meta.get("task_name"),
+                "current_session": current_session,
+                "vault_root": str(vault),
+                "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+                "meta_sha256": hashlib.sha256(meta_path.read_bytes()).hexdigest(),
+                "plan_path": str(plan),
+                "approved_plan_sha256": approved_hash,
+            }
+            for field, expected in immutable.items():
+                if prior_marker.get(field) != expected:
+                    die(f"prior reap preparation no longer matches {field}", 3)
+            if prior_marker.get("closed_plan_sha256") != plan_hash:
+                die("approved plan is neither pending nor the prior prepared close", 3)
+            if review_archive is not None:
+                marker_hash = hashlib.sha256(
+                    (worktree / ".review-archive.json").read_bytes()
+                ).hexdigest()
+                if prior_marker.get("review_archive_marker_sha256") != marker_hash:
+                    die("prior reap preparation no longer matches review archive marker", 3)
+            closed_plan = reroute_closed_plan(
+                plan_text,
+                str(prior_marker.get("result_link") or ""),
+                result_link,
+                label=str(plan.relative_to(vault)),
+            )
     except (OSError, PlanCloseError) as exc:
         die(str(exc), 3)
     marker = {
@@ -339,6 +440,9 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         "prepared_date": prepared_date,
         "prepared_at": utc_now(),
     }
+    if prior_marker:
+        marker["previous_closed_plan_sha256"] = plan_hash
+        marker["previous_result_link"] = str(prior_marker.get("result_link") or "")
     if review_archive is not None:
         marker["review_archive_marker_sha256"] = hashlib.sha256(
             (worktree / ".review-archive.json").read_bytes()

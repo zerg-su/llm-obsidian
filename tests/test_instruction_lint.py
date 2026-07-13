@@ -46,6 +46,6 @@ assert any("AGENTS.md" in issue for issue in issues)
 assert any("dispatch task prompt" in issue for issue in issues)
 assert any("mechanism-failure category" in issue for issue in issues)
 assert any("reference missing" in issue for issue in issues)
-print("OK   failure-repair consent drift detected")
+print("OK   failure-repair auto-repair boundary drift detected")
 
 print("\nAll instruction lint tests passed.")

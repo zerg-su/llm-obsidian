@@ -115,11 +115,6 @@ expect_exit "vw-log-prepend" "$?" 0
 head -15 "$SANDBOX/wiki/log.md" > "$SANDBOX/.head"
 expect_grep "vw-log-prepend-order" "$SANDBOX/.head" "test | Prepend"
 
-echo '{"session":"public-template-v2","log_entry":"## ['"$TODAY"'] test | Provenance\n\n- session-aware entry","hot_narrative":"Session-aware narrative."}' | "$VW" >/dev/null 2>&1
-expect_exit "vw-writer-owned-session" "$?" 0
-expect_grep "vw-log-session-recorded" "$SANDBOX/wiki/log.md" '  - "public-template-v2"'
-expect_grep "vw-hot-session-recorded" "$SANDBOX/wiki/hot.md" '  - "public-template-v2"'
-
 echo '{"log_entry": "no heading format"}' | "$VW" >/dev/null 2>&1
 expect_exit "vw-log-bad-format" "$?" 2
 
@@ -157,6 +152,15 @@ recent=$(sed -n '/## Recent Changes/,/## Active Threads/p' "$SANDBOX/wiki/hot.md
 echo '{"hot_bullet": "2026-01-02: [[Missing Address]] — invalid"}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
 expect_exit "vw-bullet-missing-address-rejected" "$?" 3
 expect_grep "vw-bullet-missing-address-guidance" "$SANDBOX/.err" "c-NNNNNN"
+
+echo '{"hot_recent_remove_addresses":["c-000047"],"hot_bullet":"2026-01-02: [[Replacement]] — corrected (`c-000048`)"}' \
+  | "$VW" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-hot-recent-replace" "$?" 0
+expect_nogrep "vw-hot-recent-old-removed" "$SANDBOX/wiki/hot.md" 'c-000047'
+expect_grep "vw-hot-recent-new-added" "$SANDBOX/wiki/hot.md" 'c-000048'
+
+echo '{"hot_recent_remove_addresses":["broken"]}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-hot-recent-invalid-address" "$?" 3
 
 json_out=$(echo '{"schema_version":1,"request_id":"test.hot.001","hot_bullet":"2026-01-02: [[JSON Contract]] — dry (`c-000047`)"}' | "$VW" --dry-run --output json 2>"$SANDBOX/.err")
 python3 - "$json_out" <<'PY'
@@ -404,6 +408,34 @@ expect_grep "pc-planner-kept"     "$SANDBOX/wiki/plans/pending-plan.md" "- id: p
 
 echo '{"plan_close": {"file": "wiki/plans/pending-plan.md", "result_link": "[[X]]"}}' | "$VW" >/dev/null 2>&1
 expect_exit "pc-reclose-fails" "$?" 2
+
+# Recovery after a validated route collision updates the one result link on
+# an already-executed plan through the normal optimistic page writer. It must
+# not bypass vault-write or attempt a second plan_close.
+python3 - "$SANDBOX/wiki/plans/pending-plan.md" <<'PY' | "$VW" >/dev/null 2>&1
+import hashlib
+import json
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+old = "Результат: [[Result Page]]"
+new = "Результат: [[Result Page — Result|Result Page]]"
+assert text.count(old) == 1
+payload = {
+    "pages": [{
+        "op": "update",
+        "path": "wiki/plans/pending-plan.md",
+        "content": text.replace(old, new),
+        "expected_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }]
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+expect_exit "pc-executed-reroute-update" "$?" 0
+expect_grep "pc-executed-reroute-alias" "$SANDBOX/wiki/plans/pending-plan.md" \
+  "Результат: [[Result Page — Result|Result Page]] (reaped $TODAY)"
+expect_grep "pc-executed-reroute-status" "$SANDBOX/wiki/plans/pending-plan.md" "status: executed"
 
 echo '{"plan_close": {"file": "wiki/plans/marker-plan.md", "result_link": "[[Y]]", "exec_session": "exec-id-43"}}' | "$VW" >/dev/null 2>&1
 expect_exit "pc-marker-ok" "$?" 0

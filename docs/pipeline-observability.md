@@ -102,5 +102,6 @@ Record the report date and sample counts; do not copy task content into a releas
 issue. The CI suite proves deterministic contracts, while this window measures
 the human and model behavior that hermetic tests cannot simulate.
 
-See also [runtime capabilities](runtime-capabilities.md) and the
-[unattended pipeline operations guide](unattended-pipeline-operations.md).
+See also [runtime capabilities](runtime-capabilities.md) for host parity and the
+unattended pipeline operations guide for the supervisor, watchdog, review, and
+surface state machines.

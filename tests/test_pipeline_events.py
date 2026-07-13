@@ -90,6 +90,11 @@ def run() -> None:
             json.dumps({"origin_session": "origin-1", "plan_file": str(root / "wiki/plans/demo.md")}),
             encoding="utf-8",
         )
+        misleading = root / "misleading-review-vault"
+        (misleading / "wiki").mkdir(parents=True)
+        (worktree / ".review-meta.json").write_text(
+            json.dumps({"vault_root": str(misleading)}) + "\n", encoding="utf-8"
+        )
         check("lifecycle origin vault resolved", lifecycle.origin_vault(worktree) == root.resolve())
         standalone_review = root / "standalone-review"
         standalone_review.mkdir()

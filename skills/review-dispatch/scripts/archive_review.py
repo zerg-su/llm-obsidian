@@ -205,10 +205,9 @@ def task_request_description(worktree: Path) -> str:
         )
     else:
         start = 1 if lines and lines[0].startswith("# Task:") else 0
-        end = next(
-            (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
-            len(lines),
-        )
+        # Legacy/custom prompts contain only human-authored task scope after
+        # the H1; preserve their subsections instead of truncating at H2.
+        end = len(lines)
     description = "\n".join(lines[start:end]).strip()
     if len(description) > MAX_REQUEST_CHARS:
         description = description[: MAX_REQUEST_CHARS - 1].rstrip() + "…"

@@ -29,20 +29,23 @@ The current directory must be a dispatch task worktree and must contain:
 
    - Claude: Write only `.review-outbox.json`, then run the prompt's exact
      `submission_command --input-file ...` with no pipe/heredoc.
-   - Codex: pass the object on stdin to the exact `submission_command`.
+   - Codex: atomically publish the JSON in the isolated scratch outbox named by
+     the prompt; the trusted supervisor invokes the submission command.
 
 3. The script validates schema/run/mode and blocks if any non-handoff file
    changed since the executor captured the review baseline. A valid Claude
    outbox is removed after callback. If blocked, report and do not callback.
-4. If validation passes, the script sends the executor callback recorded in
-   `.review-meta.json`.
+4. If validation passes, the script atomically writes the canonical object to
+   `<worktree>/.review-callback.json` and sends only that exact file reference
+   to the executor. The callback remains bounded even for a large review.
 
 The reviewer session stays open after callback. Do not exit yourself: the
 executor may send verify, then `review-dispatch finish` arms and closes an
 approved unattended reviewer surface after process return.
 
-The executor validates the compressed callback again, writes canonical
-`.task-review*.json`, and deterministically renders `.task-review*.md`.
+The executor validates the relay again, removes it after successful receipt,
+writes canonical `.task-review*.json`, and deterministically renders
+`.task-review*.md`. Legacy compressed callbacks remain receive-only compatible.
 
 ## Do Not
 

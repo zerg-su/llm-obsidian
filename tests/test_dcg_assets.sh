@@ -4,7 +4,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$(mktemp /tmp/dcg-assets-test.XXXXXX)"
-trap 'rm -f "$OUT"' EXIT
+TMP_DIR="$(mktemp -d /tmp/dcg-assets-test-dir.XXXXXX)"
+trap 'rm -f "$OUT"; rm -rf "$TMP_DIR"' EXIT
 
 pass=0; fail=0; failures=()
 ok()  { pass=$((pass+1)); printf '  OK   %s\n' "$1"; }
@@ -41,9 +42,13 @@ assert pre[0]["matcher"] == "Bash"
 assert pre[0]["hooks"][0]["command"] == "__DCG_BIN__"
 
 cfg_text = (root / "config/dcg/config.toml").read_text()
+task_cfg_text = (root / "config/dcg/task.toml").read_text()
 packs_match = re.search(r"(?ms)^\[packs\]\s*^enabled\s*=\s*\[(.*?)^\]", cfg_text)
 assert packs_match, "packs.enabled block"
 packs = set(re.findall(r'"([^"]+)"', packs_match.group(1)))
+task_packs_match = re.search(r"(?ms)^\[packs\]\s*^enabled\s*=\s*\[(.*?)^\]", task_cfg_text)
+assert task_packs_match, "task packs.enabled block"
+task_packs = set(re.findall(r'"([^"]+)"', task_packs_match.group(1)))
 for name in ("core.filesystem", "core.git", "strict_git", "cloud.aws", "kubernetes.kubectl"):
     assert name in packs, name
 interactive_match = re.search(r"(?ms)^\[interactive\](.*?)(?:^\[|\Z)", cfg_text)
@@ -51,8 +56,26 @@ assert interactive_match, "interactive block"
 interactive = interactive_match.group(1)
 for key in ("enabled", "verification", "timeout_seconds", "code_length", "max_attempts"):
     assert key in interactive, key
+assert "git_awareness" in cfg_text
+assert "git_awareness" not in task_cfg_text
+for invariant in ("git\\\\b.*?\\\\bpush", "reset\\\\s+--hard", "worktree\\\\s+(?:remove|prune)", "branch\\\\s+-D"):
+    assert invariant in cfg_text, invariant
+assert task_packs == packs - {"strict_git"}, "task/base pack drift"
+def section(text, name):
+    match = re.search(rf"(?ms)^\[{re.escape(name)}\](.*?)(?:^\[|\Z)", text)
+    assert match, name
+    return match.group(1)
+base_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(cfg_text, "overrides")))
+task_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(task_cfg_text, "overrides")))
+assert base_blocks <= task_blocks, "task lost a base absolute override"
+def assignments(body):
+    return dict(re.findall(r"(?m)^([a-z_]+)\s*=\s*([^#\n]+)", body))
+assert assignments(section(task_cfg_text, "interactive")) == assignments(section(cfg_text, "interactive")), "task/base interactive drift"
+for invariant in ("filter-(?:branch|repo)", "reflog\\\\s+expire", "gc\\\\s+.*--(?:aggressive|prune)", "submodule\\\\s+deinit"):
+    assert invariant in task_cfg_text, invariant
 assert "/Users/" not in cfg_text
 assert "WhaleKit" not in cfg_text
+assert "/Users/" not in task_cfg_text
 print("SHAPE_OK")
 PY
 expect_grep "B1 hook/config shape" "$OUT" "SHAPE_OK"
@@ -68,9 +91,34 @@ expect_grep "C4 monitor help names install command" "$OUT" "codex-limit-status"
 "$REPO_ROOT/bin/setup-dcg.sh" --help >"$OUT" 2>&1
 expect_exit "C5 setup help exits 0" "$?" 0
 expect_grep "C6 setup help mentions --check" "$OUT" "--check"
+mkdir -p "$TMP_DIR/home/.local/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP_DIR/home/.local/bin/dcg"
+chmod 755 "$TMP_DIR/home/.local/bin/dcg"
+env HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
+  bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
+expect_exit "C7 dcg resolver exits 0 without PATH entry" "$?" 0
+expect_grep "C8 dcg resolver finds user install" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
+(cd "$TMP_DIR/home/.local/bin" && \
+  env DCG_BIN=./dcg HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
+  bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin) >"$OUT" 2>&1
+expect_exit "C9 explicit relative DCG_BIN exits 0" "$?" 0
+expect_grep "C10 explicit relative DCG_BIN is absolute" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
+env DCG_BIN="$TMP_DIR/missing-dcg" HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
+  bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
+expect_exit "C11 invalid explicit DCG_BIN fails closed" "$?" 127
+expect_grep "C12 invalid explicit DCG_BIN explains failure" "$OUT" "DCG_BIN не указывает на исполняемый файл"
+env -u HOME PATH="/usr/bin:/bin" \
+  bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
+home_rc=$?
+if [ "$home_rc" = "0" ] || [ "$home_rc" = "127" ]; then
+  ok "C13 missing HOME degrades without shell crash"
+else
+  bad "C13 missing HOME degrades without shell crash" "exit $home_rc (want 0 or 127)"
+fi
+expect_no_grep "C14 missing HOME is not an unbound variable" "$OUT" "HOME: unbound variable"
 
 echo "D. portability"
-expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/example"
+expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/kirill"
 expect_no_grep "D2 cmux updater has no old repo path" "$REPO_ROOT/.codex/update-cmux-limits.sh" "claude-obsidian"
 expect_no_grep "D3 dcg hook has no absolute user path" "$REPO_ROOT/.github/hooks/dcg.json" "/Users/"
 

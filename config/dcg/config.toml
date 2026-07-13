@@ -162,8 +162,12 @@ fallback_on_timeout = true
 #-------------------------------------------------------------
 
 [overrides]
-# Additional blocks beyond packs. Keep pushes human-owned by default; this is
-# intentionally broader than strict_git's force/main-branch checks.
+# Additional blocks beyond packs. These remain absolute even on relaxed task
+# branches: ordinary history editing is allowed there, destructive recovery
+# and lifecycle operations stay coordinator/human-owned.
 block = [
     { pattern = "git\\b.*?\\bpush\\b", reason = "Only the human user should push branches/remotes from an agent workflow" },
+    { pattern = "git\\b.*?\\breset\\s+--hard\\b", reason = "Hard reset is outside the practical unattended Git profile" },
+    { pattern = "git\\b.*?\\bworktree\\s+(?:remove|prune)\\b", reason = "Worktree cleanup must use the validated lifecycle path" },
+    { pattern = "git\\b.*?\\bbranch\\s+-D\\b", reason = "Forced branch deletion is coordinator/human-owned" },
 ]

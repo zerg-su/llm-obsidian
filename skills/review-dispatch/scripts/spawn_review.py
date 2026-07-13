@@ -22,11 +22,17 @@ from typing import Any, NoReturn
 
 VAULT_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
 sys.path.insert(0, str(VAULT_SCRIPTS))
-from review_contract import ReviewContractError, decode_review, render_markdown
+from review_contract import (
+    ReviewContractError,
+    decode_review,
+    parse_review_json,
+    render_markdown,
+)
 from task_contract import ContractError as TaskContractError, normalize as normalize_task_contract, review_action
 from cmux_agent_supervisor import (
     CLAUDE_REVIEW_ALLOWED_TOOLS,
     CLAUDE_REVIEW_TOOL_SURFACE,
+    reviewer_codex_config_values,
     write_agent_spec,
 )
 from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event, nonnegative_int
@@ -72,6 +78,7 @@ HANDOFF_EXCLUDES = [
     ".review-baseline-state.json",
     ".review-send-blocked.md",
     ".review-outbox.json",
+    ".review-callback.json",
     ".review-relay.json",
     ".review-close-armed.json",
     ".task-close-armed.json",
@@ -87,6 +94,15 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace.json",
     ".obsidian/workspace-mobile.json",
 ]
+REVIEW_CALLBACK_FILE = ".review-callback.json"
+REVIEW_ROUND_ARTIFACTS = (
+    ".task-review.md",
+    ".task-review.json",
+    ".task-review-verify.md",
+    ".task-review-verify.json",
+    ".task-review-resolution.md",
+    REVIEW_CALLBACK_FILE,
+)
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -108,6 +124,65 @@ def review_actor(review_meta: dict[str, Any]) -> str:
 def review_vault(review_meta: dict[str, Any]) -> Path | None:
     raw = str(review_meta.get("vault_root") or "").strip()
     return Path(raw).expanduser().resolve() if raw else None
+
+
+def valid_vault_root(path: Path) -> bool:
+    candidate = path.expanduser().resolve()
+    return (
+        (candidate / "wiki").is_dir()
+        and (candidate / "scripts" / "vault-write.py").is_file()
+        and (candidate / "skills" / "review-dispatch" / "scripts" / "archive_review.py").is_file()
+    )
+
+
+def vault_from_plan(task_meta: dict[str, Any]) -> Path | None:
+    raw = str(task_meta.get("plan_file") or "").strip()
+    if not raw:
+        return None
+    plan = Path(raw).expanduser().resolve()
+    if plan.parent.name != "plans" or plan.parent.parent.name != "wiki":
+        return None
+    candidate = plan.parents[2]
+    return candidate if valid_vault_root(candidate) else None
+
+
+def resolve_vault_root(
+    worktree: Path,
+    *,
+    explicit: str = "",
+    task_meta: dict[str, Any] | None = None,
+    review_meta: dict[str, Any] | None = None,
+) -> Path:
+    """Resolve the coordinator vault without trusting the executing script copy.
+
+    A self-dogfood task can execute this file from its linked worktree, so
+    ``DEFAULT_VAULT`` is only a legacy fallback.  Dispatch metadata and its
+    approved plan bind the authoritative coordinator vault first.
+    """
+
+    meta = task_meta if task_meta is not None else read_json(worktree / ".task-meta.json")
+    sources: list[tuple[str, str]] = []
+    if explicit.strip():
+        sources.append(("--vault-root", explicit))
+    declared = str(meta.get("vault_root") or "").strip()
+    if declared:
+        sources.append((".task-meta.json vault_root", declared))
+    plan_vault = vault_from_plan(meta)
+    if plan_vault is not None:
+        sources.append((".task-meta.json plan_file", str(plan_vault)))
+    if review_meta is not None:
+        prior = str(review_meta.get("vault_root") or "").strip()
+        if prior:
+            sources.append((".review-meta.json vault_root", prior))
+    sources.append(("script-location fallback", str(DEFAULT_VAULT)))
+
+    for source, raw in sources:
+        candidate = Path(raw).expanduser().resolve()
+        if valid_vault_root(candidate):
+            return candidate
+        if source == "--vault-root":
+            die(f"{source} is not an llm-obsidian vault: {candidate}")
+    die("cannot resolve the coordinator llm-obsidian vault")
 
 
 def emit_review_event(
@@ -170,10 +245,9 @@ def review_request_description(worktree: Path, limit: int = 6_000) -> str:
         description = "\n".join(lines[start:end]).strip()
     else:
         start = 1 if lines and lines[0].startswith("# Task:") else 0
-        end = next(
-            (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
-            len(lines),
-        )
+        # Legacy/custom task prompts predate the standard Task description
+        # heading; their remaining sections are still human-authored scope.
+        end = len(lines)
         description = "\n".join(lines[start:end]).strip()
     if len(description) > limit:
         description = description[: limit - 1].rstrip() + "…"
@@ -204,6 +278,12 @@ def initialize_review_history(
             "rounds": [],
         },
     )
+
+
+def reset_review_round_artifacts(worktree: Path) -> None:
+    """Prevent an archived cycle from leaking into a newly started review."""
+    for name in REVIEW_ROUND_ARTIFACTS:
+        (worktree / name).unlink(missing_ok=True)
 
 
 def ensure_review_cycle_can_start(worktree: Path) -> None:
@@ -298,47 +378,60 @@ def record_review_round(
 
 def snapshot_latest_resolution(worktree: Path) -> None:
     history_path = worktree / ".review-history.json"
-    resolution = read_text_file(worktree / ".task-review-resolution.md")
-    if not history_path.is_file() or not resolution:
-        return
-    if len(resolution) > 20_000:
-        die(".task-review-resolution.md exceeds 20000 characters")
+    if not history_path.is_file():
+        die(".review-history.json is missing; cannot bind an executor resolution")
     history = read_json(history_path)
     rounds = history.get("rounds")
     if not isinstance(rounds, list) or not rounds:
-        return
+        die(".review-history.json has no received round to verify")
     latest = rounds[-1]
     if not isinstance(latest, dict):
         die(".review-history.json latest round must be an object")
+    review = latest.get("review")
+    if not isinstance(review, dict):
+        die(".review-history.json latest round has no review object")
+    findings = review.get("findings")
+    if not isinstance(findings, list):
+        die(".review-history.json latest review has invalid findings")
+    resolution = read_text_file(worktree / ".task-review-resolution.md")
+    if findings and not resolution:
+        die("latest review has findings; write .task-review-resolution.md before verify")
+    if not resolution:
+        return
+    if len(resolution) > 20_000:
+        die(".task-review-resolution.md exceeds 20000 characters")
     latest["resolution"] = resolution
     write_json(history_path, history)
 
 
-def coordinator_repo_root() -> Path | None:
-    result = run(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd())
+def coordinator_repo_root(cwd: Path | None = None) -> Path | None:
+    result = run(["git", "rev-parse", "--show-toplevel"], cwd=cwd or Path.cwd())
     if result.returncode != 0 or not result.stdout.strip():
         return None
     return Path(result.stdout.strip()).expanduser().resolve()
 
 
-def archive_or_defer(
+def is_primary_coordinator_review(
     worktree: Path,
+    vault: Path,
     review_meta: dict[str, Any],
+) -> bool:
+    resolved_worktree = worktree.resolve()
+    resolved_vault = vault.resolve()
+    return (
+        review_meta.get("archive_mode") == "coordinator"
+        and resolved_worktree == resolved_vault
+        and (resolved_vault / ".git").is_dir()
+        and coordinator_repo_root(resolved_vault) == resolved_vault
+    )
+
+
+def run_review_archive(
+    worktree: Path,
+    vault: Path,
     *,
-    dry_run: bool = False,
+    dry_run: bool,
 ) -> dict[str, Any]:
-    vault = review_vault(review_meta) or DEFAULT_VAULT
-    review_id = str(review_meta.get("review_id") or "").strip()
-    if coordinator_repo_root() != vault.resolve():
-        result = {
-            "schema_version": 1,
-            "status": "deferred",
-            "review_id": review_id,
-            "reason": "coordinator-reap-required",
-        }
-        if not dry_run:
-            write_json(worktree / ".review-archive-request.json", result)
-        return result
     command = [
         sys.executable,
         str(vault / "skills" / "review-dispatch" / "scripts" / "archive_review.py"),
@@ -360,6 +453,32 @@ def archive_or_defer(
     if not isinstance(value, dict):
         die("review archive result must be an object")
     return value
+
+
+def archive_or_defer(
+    worktree: Path,
+    review_meta: dict[str, Any],
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    vault = review_vault(review_meta) or DEFAULT_VAULT
+    review_id = str(review_meta.get("review_id") or "").strip()
+    if is_primary_coordinator_review(worktree, vault, review_meta):
+        return run_review_archive(worktree, vault, dry_run=dry_run)
+    # A task worktree must never become its own coordinator merely because a
+    # script copy was executed there.  Only the distinct canonical vault may
+    # perform the contentful archive transaction.
+    if worktree.resolve() == vault.resolve() or coordinator_repo_root() != vault.resolve():
+        result = {
+            "schema_version": 1,
+            "status": "deferred",
+            "review_id": review_id,
+            "reason": "coordinator-reap-required",
+        }
+        if not dry_run:
+            write_json(worktree / ".review-archive-request.json", result)
+        return result
+    return run_review_archive(worktree, vault, dry_run=dry_run)
 
 
 def read_task_name(worktree: Path, meta: dict[str, Any]) -> str:
@@ -679,9 +798,9 @@ def launch_command(
             "never",
             "--disable",
             "hooks",
-            "-c",
-            'web_search="disabled"',
         ]
+        for value in reviewer_codex_config_values():
+            argv.extend(["-c", value])
         if profile:
             argv.extend(["--profile", profile])
         argv.extend(["--model", reviewer_model])
@@ -770,7 +889,8 @@ def repository_diagnostics(reviewer_runtime: str, worktree: Path) -> str:
         return (
             "any existing cwd-relative `python3 tests/test_<name>.py` or "
             "`bash tests/test_<name>.sh` entrypoint, plus "
-            "`python3 scripts/lint-instructions.py`"
+            "`python3 scripts/lint-instructions.py` and the exact DCG policy "
+            "smoke command `bash scripts/dcg-test-suite.sh`"
         )
     commands = (
         ["python3", str(worktree / "tests" / "test_task_lifecycle.py")],
@@ -883,8 +1003,15 @@ def render_review_prompt(
 def cmd_start(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     ensure_review_cycle_can_start(worktree)
-    vault = Path(ns.vault_root).expanduser().resolve()
     meta = read_json(worktree / ".task-meta.json")
+    vault = resolve_vault_root(worktree, explicit=ns.vault_root, task_meta=meta)
+    if ns.coordinator_review:
+        if not ns.vault_root.strip():
+            die("--coordinator-review requires explicit --vault-root")
+        if worktree != vault:
+            die("--coordinator-review requires worktree and vault root to be identical")
+        if not (vault / ".git").is_dir() or coordinator_repo_root(vault) != vault:
+            die("--coordinator-review requires the primary coordinator checkout")
     try:
         task_policy = normalize_task_contract(meta)
     except TaskContractError as exc:
@@ -934,6 +1061,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     executor_callback = callback_command(vault, worktree)
     submission_command = submit_command(vault, worktree, reviewer_runtime, review_runtime_dir)
 
+    reset_review_round_artifacts(worktree)
     ensure_excludes(worktree)
     (worktree / ".review-relay.json").unlink(missing_ok=True)
     (worktree / ".task-review-skill").write_text(review_skill + "\n", encoding="utf-8")
@@ -985,6 +1113,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "base_branch": base_branch,
         "branch": str(meta.get("branch") or "(unknown)"),
         "executor_runtime": executor_runtime,
+        "model": str(meta.get("model") or "default"),
+        "plan_file": str(meta.get("plan_file") or "none"),
         "executor_surface": executor_surface,
         "review_surface": review_surface,
         "review_surface_ref": review_ref,
@@ -996,6 +1126,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "review_skill": review_skill,
         "review_send_command": review_send_skill,
         "review_mode": review_mode,
+        "archive_mode": "coordinator" if ns.coordinator_review else "reap",
         "executor_callback_command": executor_callback,
         "phase": "initial-review",
         "iteration": 1,
@@ -1034,9 +1165,15 @@ def cmd_start(ns: argparse.Namespace) -> int:
 
 def cmd_verify(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
-    vault = Path(ns.vault_root).expanduser().resolve()
     meta = read_json(worktree / ".task-meta.json")
     review_meta = read_json(worktree / ".review-meta.json")
+    vault = resolve_vault_root(
+        worktree,
+        explicit=ns.vault_root,
+        task_meta=meta,
+        review_meta=review_meta,
+    )
+    review_meta["vault_root"] = str(vault)
     try:
         policy = normalize_task_contract(meta)
     except TaskContractError as exc:
@@ -1069,12 +1206,19 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         die("Codex reviewer runtime directory is missing; start a fresh reviewer")
     snapshot_latest_resolution(worktree)
     submission_command = submit_command(vault, worktree, reviewer_runtime, review_runtime_dir)
+    (worktree / REVIEW_CALLBACK_FILE).unlink(missing_ok=True)
+
+    prompt_meta = dict(meta)
+    for key in ("base_branch", "branch", "executor_runtime", "model", "plan_file"):
+        stable_value = review_meta.get(key)
+        if stable_value not in (None, ""):
+            prompt_meta[key] = stable_value
 
     write_baseline(worktree)
     prompt = render_review_prompt(
         worktree,
         vault,
-        meta,
+        prompt_meta,
         task_name,
         "verify-fixes",
         output_json_file,
@@ -1133,10 +1277,30 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     review_mode = normalize_review_mode(str(review_meta.get("review_mode") or "full"))
     if not run_id:
         die("review metadata is missing run_id")
+    relay_path: Path | None = None
     try:
-        review = decode_review(
-            ns.payload_b64, expected_run_id=run_id, expected_mode=review_mode
-        )
+        if ns.relay_file:
+            expected = worktree / REVIEW_CALLBACK_FILE
+            candidate = Path(ns.relay_file).expanduser()
+            if not candidate.is_absolute():
+                candidate = worktree / candidate
+            candidate = candidate.parent.resolve() / candidate.name
+            if candidate != expected or candidate.is_symlink():
+                raise ReviewContractError(
+                    f"relay file must be the regular file {expected}"
+                )
+            try:
+                raw_payload = candidate.read_text(encoding="utf-8")
+            except (FileNotFoundError, UnicodeError, OSError) as exc:
+                raise ReviewContractError(f"cannot read relay file: {exc}") from exc
+            relay_path = candidate
+            review = parse_review_json(
+                raw_payload, expected_run_id=run_id, expected_mode=review_mode
+            )
+        else:
+            review = decode_review(
+                ns.payload_b64, expected_run_id=run_id, expected_mode=review_mode
+            )
     except ReviewContractError as exc:
         duration = elapsed_ms(review_meta.get("phase_started_at") or review_meta.get("started_at"))
         emit_review_event(
@@ -1201,6 +1365,9 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             **({"duration_ms": duration} if duration is not None else {}),
         },
     )
+    (worktree / ".task-review-resolution.md").unlink(missing_ok=True)
+    if relay_path is not None:
+        relay_path.unlink(missing_ok=True)
     print(f"received typed review: {worktree / output_json_file}")
     print(f"rendered review: {worktree / output_file}")
     print(f"recommended action: {review_meta['recommended_action']}")
@@ -1216,9 +1383,17 @@ def cmd_status(ns: argparse.Namespace) -> int:
 
 def cmd_archive(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
+    if not ns.dry_run:
+        ensure_excludes(worktree)
+    task_meta = read_json(worktree / ".task-meta.json")
     review_meta = read_json(worktree / ".review-meta.json")
-    if ns.vault_root:
-        review_meta["vault_root"] = str(Path(ns.vault_root).expanduser().resolve())
+    vault = resolve_vault_root(
+        worktree,
+        explicit=ns.vault_root,
+        task_meta=task_meta,
+        review_meta=review_meta,
+    )
+    review_meta["vault_root"] = str(vault)
     result = archive_or_defer(worktree, review_meta, dry_run=ns.dry_run)
     if not ns.dry_run:
         review_meta["archive_status"] = str(result.get("status") or "unknown")
@@ -1238,6 +1413,8 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     except TaskContractError as exc:
         die(str(exc))
     review_meta = read_json(worktree / ".review-meta.json")
+    vault = resolve_vault_root(worktree, task_meta=task_meta, review_meta=review_meta)
+    review_meta["vault_root"] = str(vault)
     surface = str(review_meta.get("review_surface") or read_text_file(worktree / ".review-cmux-surface"))
     runtime = str(review_meta.get("reviewer_runtime") or "")
     if not surface:
@@ -1267,7 +1444,7 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     review_meta["updated_at"] = utc_now()
     write_json(worktree / ".review-meta.json", review_meta)
     if auto_close:
-        lifecycle = DEFAULT_VAULT / "scripts" / "cmux_surface_lifecycle.py"
+        lifecycle = vault / "scripts" / "cmux_surface_lifecycle.py"
         result = run(
             [sys.executable, str(lifecycle), "request-exit", "--worktree", str(worktree), "--kind", "reviewer"]
         )
@@ -1313,7 +1490,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = sub.add_parser("start", aliases=["spawn"], help="open the opposite-model reviewer split")
     start.add_argument("--worktree", default=".", help="task worktree path")
-    start.add_argument("--vault-root", default=str(DEFAULT_VAULT), help="llm-obsidian vault root")
+    start.add_argument("--vault-root", default="", help="explicit coordinator llm-obsidian vault root")
+    start.add_argument(
+        "--coordinator-review",
+        action="store_true",
+        help="review the explicit primary vault checkout and archive directly on finish",
+    )
     start.add_argument("--task-name", default="", help="override task name")
     start.add_argument("--base-branch", default="", help="override base branch")
     start.add_argument("--reviewer-runtime", choices=["claude", "codex"], default="", help="override opposite runtime")
@@ -1332,7 +1514,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = sub.add_parser("verify", help="send fixes back to the same reviewer split")
     verify.add_argument("--worktree", default=".", help="task worktree path")
-    verify.add_argument("--vault-root", default=str(DEFAULT_VAULT), help="llm-obsidian vault root")
+    verify.add_argument("--vault-root", default="", help="explicit coordinator llm-obsidian vault root")
     verify.add_argument("--task-name", default="", help="override task name")
     verify.add_argument("--review-send-skill", default="", help="reviewer handoff skill command")
     verify.add_argument("--no-send", action="store_true", help="write prompt and print it without cmux send")
@@ -1340,7 +1522,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     receive = sub.add_parser("receive", help="validate a typed reviewer callback and render handoff files")
     receive.add_argument("--worktree", default=".", help="task worktree path")
-    receive.add_argument("--payload-b64", required=True, help="compressed review payload token")
+    receive_source = receive.add_mutually_exclusive_group(required=True)
+    receive_source.add_argument("--relay-file", default="", help="validated callback file from review-send")
+    receive_source.add_argument("--payload-b64", default="", help="legacy compressed review payload token")
     receive.set_defaults(func=cmd_receive)
 
     status = sub.add_parser("status", help="print .review-meta.json")

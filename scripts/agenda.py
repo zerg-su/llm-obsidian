@@ -378,16 +378,17 @@ def render_month_report(month: str, counts: dict[str, int], session: str, old: s
     return (
         "---\n"
         "type: meta\n"
-        f'title: "{month} — Незавершённое"\n'
+        f'title: "{month} — Незавершённые планы и напоминания"\n'
         f"created: {created}\n"
         f"updated: {today}\n"
         "tags:\n  - meta\n  - agenda\n"
         "status: evergreen\n"
         f"{session_yaml}\n"
         "---\n\n"
-        f"# {month} — незавершённое\n\n"
+        f"# {month} — незавершённые планы и напоминания\n\n"
         "> [!info] Автоматическая сводка\n"
-        "> Пункты остаются в исходных daily-страницах. Этот файл хранит только счётчики и живой запрос Tasks.\n\n"
+        "> Незавершённые планы и напоминания остаются в исходных daily-страницах. "
+        "Этот файл хранит месячные счётчики и один живой запрос Tasks.\n\n"
         "## Состояние\n\n"
         f"- Открыто: {counts['open']}\n"
         f"- В работе: {counts['in_progress']}\n"

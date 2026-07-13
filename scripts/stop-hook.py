@@ -156,13 +156,53 @@ def wiki_dirty() -> bool:
     return bool(run(["git", "status", "--porcelain", "--untracked-files=all", "--", "wiki"]).stdout.strip())
 
 
-def dense_retry_due() -> bool:
-    if not DENSE_RETRY.is_file():
-        return False
+def read_json_object(path: Path) -> dict:
     try:
-        data = json.loads(DENSE_RETRY.read_text(encoding="utf-8"))
-        return float(data.get("next_retry_at", 0)) <= time.time()
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
     except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def sparse_fingerprint() -> str:
+    index = read_json_object(META / "retrieval" / "index.json")
+    return str(index.get("source_fingerprint") or "")
+
+
+def dense_cache_current() -> tuple[bool, str]:
+    """Return whether dense exactly covers the current sparse snapshot."""
+    sparse = read_json_object(META / "retrieval" / "index.json")
+    fingerprint = str(sparse.get("source_fingerprint") or "")
+    docs = sparse.get("docs")
+    if not fingerprint or not isinstance(docs, dict):
+        return False, fingerprint
+    dense = read_json_object(META / "retrieval" / "dense.json")
+    embeddings = dense.get("embeddings")
+    current = (
+        dense.get("schema_version") == sparse.get("schema_version")
+        and dense.get("chunk_config") == sparse.get("chunk_config")
+        and dense.get("source_fingerprint") == fingerprint
+        and dense.get("model") == os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
+        and dense.get("complete") is True
+        and isinstance(embeddings, dict)
+        and set(embeddings) == set(docs)
+    )
+    return current, fingerprint
+
+
+def dense_refresh_due(*, now: float | None = None) -> bool:
+    """Schedule stale dense once per fingerprint while respecting retry backoff."""
+    current, fingerprint = dense_cache_current()
+    if current or not fingerprint:
+        return False
+    marker = read_json_object(DENSE_RETRY)
+    if marker.get("schema_version") != 2:
+        return True
+    if str(marker.get("source_fingerprint") or "") != fingerprint:
+        return True
+    try:
+        return float(marker.get("next_retry_at", 0)) <= (time.time() if now is None else now)
+    except (TypeError, ValueError):
         return True
 
 
@@ -329,6 +369,7 @@ def main() -> int:
                     emit(recovered.stderr.strip())
 
             dirty = wiki_dirty()
+            sparse_before = sparse_fingerprint()
             reindex = ROOT / "scripts" / "reindex.py"
             if reindex.is_file():
                 timed(
@@ -367,9 +408,13 @@ def main() -> int:
                         retry_hint="python3 scripts/retrieve.py ensure --quiet",
                     ),
                 )
-            if dirty:
+            sparse_after = sparse_fingerprint()
+            corpus_changed = dirty or bool(
+                sparse_before and sparse_after and sparse_before != sparse_after
+            )
+            if corpus_changed:
                 mark_retrieval_quality_pending()
-            dense_needed = dirty or dense_retry_due()
+            dense_needed = dense_refresh_due()
 
             memory = ROOT / "scripts" / "memory-backup.py"
             memory_enabled = False

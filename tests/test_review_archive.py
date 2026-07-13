@@ -248,6 +248,11 @@ class ReviewArchiveTests(unittest.TestCase):
 
     def test_legacy_artifacts_are_backfilled(self) -> None:
         (self.worktree / ".review-history.json").unlink()
+        (self.worktree / ".task-prompt.md").write_text(
+            "# Task: legacy-review\n\nReview the legacy implementation.\n\n"
+            "## Constraints\n\nPreserve every human-authored scope section.\n",
+            encoding="utf-8",
+        )
         initial = review("legacy-initial", "changes-requested", [])
         final = review("legacy-verify", "approve", [])
         (self.worktree / ".task-review.json").write_text(json.dumps(initial), encoding="utf-8")
@@ -258,7 +263,8 @@ class ReviewArchiveTests(unittest.TestCase):
         self.assertEqual(result["review_id"], "legacy-initial")
         self.assertIn("Applied legacy finding", page)
         self.assertIn("## Round 2 — approve", page)
-        self.assertIn("explain why the review ran", page)
+        self.assertIn("Review the legacy implementation", page)
+        self.assertIn("Preserve every human-authored scope section", page)
 
 
 if __name__ == "__main__":

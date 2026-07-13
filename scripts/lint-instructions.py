@@ -78,12 +78,12 @@ def failure_repair_issues(
     escalation: str,
     reference: str,
 ) -> list[str]:
-    """Keep the interactive and unattended repair consent boundary aligned."""
+    """Keep coordinator auto-repair and background pause boundaries aligned."""
     issues: list[str] = []
     required_reference = (
-        "Contain before asking",
-        "Ask once, concretely",
-        "Repair after consent",
+        "Contain before classification",
+        "Coordinator auto-repair boundary",
+        "Execute the repair",
         "mechanism-failure",
         "pipeline-events.jsonl",
     )
@@ -91,18 +91,28 @@ def failure_repair_issues(
         if value not in reference:
             issues.append(f"failure repair reference missing invariant {value!r}")
     central_required = {
-        "CLAUDE.md": ("Failure-to-repair", "явное согласие", "regression test"),
-        "AGENTS.md": ("Failure-to-repair", "explicit yes", "regression test"),
+        "CLAUDE.md": ("Failure-to-repair", "без дополнительного вопроса", "один раз спрашивает", "regression test"),
+        "AGENTS.md": ("Failure-to-repair", "auto-repair", "ask the user once", "regression test"),
     }
     for name, text in (("CLAUDE.md", claude), ("AGENTS.md", agents)):
         for value in central_required[name]:
             if value not in text:
                 issues.append(f"{name} missing failure-repair invariant {value!r}")
-    for value in ("mechanism-failure", "read-only diagnosis", "Remain paused", "explicitly agrees"):
+    for value in (
+        "mechanism-failure",
+        "read-only diagnosis",
+        "request coordinator classification",
+        "Remain paused",
+        "may authorize",
+        "must ask",
+    ):
         if value not in task_prompt:
             issues.append(f"dispatch task prompt missing failure-repair invariant {value!r}")
     if '"mechanism-failure"' not in escalation:
         issues.append("task escalation missing mechanism-failure category")
+    for value in ("MECHANISM_REPAIR_POLICY", "Auto-repair only", "otherwise ask the user once"):
+        if value not in escalation:
+            issues.append(f"task escalation missing coordinator repair invariant {value!r}")
     return issues
 
 
@@ -199,6 +209,7 @@ def check_repo(root: Path) -> list[str]:
     for required in (
         '"workspace-write"', "review_runtime_dir", "review-outbox-relay",
         '"--disable",\n            "hooks"',
+        "reviewer_codex_config_values", "trusted_runtime_path",
         "Codex reviewer command must not request additional writable roots",
     ):
         if required not in review_contract:
@@ -226,10 +237,16 @@ def check_repo(root: Path) -> list[str]:
     for required in ("interaction_policy", "approved_plan_sha256", "forbidden_actions", "watchdog_policy", "cmux_agent_supervisor.py"):
         if required not in dispatch_text:
             issues.append(f"dispatch missing unattended contract invariant {required!r}")
-    for required in ("-a never", "workspace-write", "cmux_agent_supervisor.py"):
+    for required in (
+        "-a never", "workspace-write", "cmux_agent_supervisor.py",
+        "DCG_CONFIG", "localhost", "trusted `PATH`",
+    ):
         if required not in dispatch_text:
             issues.append(f"Codex dispatch missing unattended approval invariant {required!r}")
-    for required in ("cmux_task_watchdog.py", "cmux_surface_lifecycle.py", "subprocess.run(argv"):
+    for required in (
+        "cmux_task_watchdog.py", "cmux_surface_lifecycle.py", "subprocess.run(argv",
+        "trusted_runtime_path", "task_dcg_config",
+    ):
         if required not in supervisor:
             issues.append(f"cmux supervisor missing lifecycle invariant {required!r}")
     if "shell=True" in supervisor:

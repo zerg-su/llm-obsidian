@@ -355,6 +355,7 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "task_surface": "$SURFACE_ID",
   "task_surface_ref": "$SURFACE_REF",
   "target_repo": "<repo-path>",
+  "vault_root": "<absolute coordinator vault path>",
   "branch": "task/<task_name>",
   "base_branch": "<base-branch>",
   "codex_home": "<absolute CODEX_HOME path or null>",
@@ -391,6 +392,10 @@ EOF
 
 Why `.task-meta.json`:
 - `origin_session` — `/reap` compares it with current `./scripts/current-session-id.sh`; on mismatch (the wiki agent restarted between dispatch and reap, or another session runs reap) — WARNING and an explicit confirm before filing. Does not block, but stays visible. See Edge case 6.
+- `vault_root` — binds review archives, callbacks, lifecycle telemetry, and reap
+  to the canonical coordinator vault even when this repository reviews a linked
+  worktree copy of itself. Older v2 metadata derives the same root from
+  `plan_file`; script-location inference is only a legacy fallback.
 - `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude, or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
 - `executor_runtime` / `runtime` / `model` — `/reap` preserves executor provenance in result-page frontmatter and echo output (`runtime` stays as a legacy alias for old consumers).
 - `suggested_agents` — `/reap` can add them to the saved page's frontmatter or use them for cross-refs.
@@ -400,20 +405,21 @@ Why `.task-meta.json`:
   collision, or session mismatch escalates instead of filing.
 - `watchdog_policy` only observes/alerts; it never sends input, kills, or closes.
 
-Prepare the shell-free task argv from validated metadata, then send only the
-short supervisor command. `prepare-task` pins unattended Codex to
-`-a never -s workspace-write` and adds exactly the worktree's validated Git
-common directory as a writable root. Linked worktrees keep their index,
-objects, and task-branch ref there, so this narrow grant lets the task commit
-without exposing arbitrary filesystem roots. The same command enables Codex's
-network proxy with an empty domain map and allows only the user-owned Unix
-socket from `CMUX_SOCKET_PATH`; loopback binding, upstream proxies, arbitrary
-Unix sockets, and SOCKS remain disabled. This lets task-side review, escalation,
-and reap callbacks reach cmux without granting outbound Internet access. The
-supervisor validates the complete fixed override list and refuses to start if
-the socket is absent, not user-owned, or replaced in the command spec. Claude
-keeps `auto`. The supervisor appends the prompt as one argv value, runs the
-watchdog, and calls lifecycle after exit.
+Prepare the shell-free task argv, then send only the short supervisor command.
+`prepare-task` pins Codex to `-a never -s workspace-write` and adds only the
+validated Git common directory, enough for linked-worktree commits. Its proxy allows client
+connections only to `localhost`, `127.0.0.1`, `::1`, and the exact user-owned
+cmux Unix socket from `CMUX_SOCKET_PATH`; loopback binding is allowed, while
+external domains, non-loopback proxying, upstream proxies, arbitrary Unix
+sockets, and SOCKS remain disabled. The
+supervisor pins a trusted `PATH` with Python, Homebrew, Docling, Git, cmux,
+Claude, and Codex, plus the standalone task profile through `DCG_CONFIG`.
+That profile permits local rebase/amend/cherry-pick/staging but blocks push,
+hard reset, file discard, worktree/branch deletion, repository-wide history
+rewriting, deployment, publication, and the other destructive packs.
+Claude keeps `auto` while using the same trusted `PATH` and task DCG profile.
+The supervisor validates the command/environment contract, refuses drift,
+appends one prompt argv, runs the watchdog, and calls lifecycle after exit.
 
 ```bash
 WORKTREE="<worktree-path>"

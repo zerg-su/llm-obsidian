@@ -44,7 +44,7 @@ help:
 	@echo "  make test-codex-adapter Codex plugin packaging generator tests"
 	@echo "  make test-dcg-assets  dcg config/hooks and Codex limit helper checks"
 	@echo "  make test-with-timeout portable shell timeout helper tests"
-	@echo "  make bench-retrieval  LIVE sparse quality gate (local dense channel optional)"
+	@echo "  make bench-retrieval  LIVE retrieval quality benchmark (requires ollama)"
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 

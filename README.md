@@ -209,6 +209,10 @@ claude plugin marketplace add zerg-su/llm-obsidian
 # then: /plugin install llm-obsidian
 ```
 
+After installing or updating either runtime plugin, start a new Claude Code or
+Codex thread (or explicitly reload skills when the host exposes that action).
+Existing threads keep the skill registry they started with.
+
 ### Local embeddings (recommended)
 
 Optional dense section retrieval and the tiling duplicate-lint run on a local ollama with `bge-m3` (1024-dim, 8k context, 100+ languages, ~1.2 GB):

@@ -7,6 +7,8 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
+import shlex
 import subprocess
 import sys
 import time
@@ -17,7 +19,7 @@ from typing import Any, NoReturn
 
 VAULT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(VAULT_ROOT / "scripts"))
-from review_contract import ReviewContractError, encode_review, parse_review_json
+from review_contract import ReviewContractError, parse_review_json
 
 
 HANDOFF_EXCLUDES = [
@@ -48,6 +50,7 @@ HANDOFF_EXCLUDES = [
     ".review-baseline-state.json",
     ".review-send-blocked.md",
     ".review-outbox.json",
+    ".review-callback.json",
     ".review-relay.json",
     ".review-close-armed.json",
     ".task-close-armed.json",
@@ -64,6 +67,7 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace-mobile.json",
 ]
 CMUX_PASTE_SETTLE_SECONDS = 0.2
+REVIEW_CALLBACK_FILE = ".review-callback.json"
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -90,6 +94,17 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_callback(path: Path, data: dict[str, Any]) -> None:
+    """Publish one validated callback atomically for the executor."""
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def is_handoff(path: str) -> bool:
@@ -239,7 +254,9 @@ def cmd_submit(ns: argparse.Namespace) -> int:
     surface = str(meta.get("executor_surface") or "").strip()
     if not callback or not surface:
         die("review metadata is missing executor callback or surface")
-    message = f"{callback} --payload-b64 {encode_review(review)}"
+    relay_path = worktree / REVIEW_CALLBACK_FILE
+    write_callback(relay_path, review)
+    message = f"{callback} --relay-file {shlex.quote(str(relay_path))}"
     if ns.no_send:
         if input_path is not None:
             input_path.unlink(missing_ok=True)

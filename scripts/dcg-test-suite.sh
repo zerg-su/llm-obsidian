@@ -8,6 +8,7 @@
 #
 # Запуск:
 #   bash scripts/dcg-test-suite.sh
+#   bash scripts/dcg-test-suite.sh --print-dcg-bin
 #
 # Все имена ресурсов заведомо несуществующие (fake-*-99999, nonexistent-*,
 # /dev/nonexistent-*, PFAKE99999). dcg test — dry-run, команды не выполняются.
@@ -20,11 +21,60 @@
 
 set -uo pipefail
 
-if ! command -v dcg >/dev/null 2>&1; then
-    echo "dcg не найден в PATH" >&2
-    exit 127
+resolve_dcg_bin() {
+    local requested="${DCG_BIN:-}"
+    local candidate
+
+    if [ -n "$requested" ]; then
+        if [ ! -x "$requested" ]; then
+            echo "DCG_BIN не указывает на исполняемый файл: $requested" >&2
+            return 127
+        fi
+        candidate="$(cd "$(dirname "$requested")" && pwd -P)/$(basename "$requested")"
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    if command -v dcg >/dev/null 2>&1; then
+        command -v dcg
+        return 0
+    fi
+
+    if [ -n "${HOME:-}" ] && [ -x "$HOME/.local/bin/dcg" ]; then
+        printf '%s\n' "$HOME/.local/bin/dcg"
+        return 0
+    fi
+
+    for candidate in /opt/homebrew/bin/dcg /usr/local/bin/dcg; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    echo "dcg не найден в PATH или стандартных каталогах установки" >&2
+    return 127
+}
+
+resolve_rc=0
+resolved_dcg_bin="$(resolve_dcg_bin)" || resolve_rc=$?
+if [ "$resolve_rc" -ne 0 ]; then
+    exit "$resolve_rc"
 fi
-DCG_BIN="$(command -v dcg)"
+DCG_BIN="$resolved_dcg_bin"
+
+if [ "${1:-}" = "--print-dcg-bin" ]; then
+    if [ "$#" -ne 1 ]; then
+        echo "usage: bash scripts/dcg-test-suite.sh [--print-dcg-bin]" >&2
+        exit 2
+    fi
+    printf '%s\n' "$DCG_BIN"
+    exit 0
+fi
+if [ "$#" -ne 0 ]; then
+    echo "usage: bash scripts/dcg-test-suite.sh [--print-dcg-bin]" >&2
+    exit 2
+fi
 
 # By default, validate the repo-shipped dcg policy in isolation. User-level
 # allowlists are intentionally ignored so personal exceptions do not mask
@@ -85,6 +135,28 @@ run_case() {
     fi
 }
 
+run_task_case() {
+    local expected="$1"
+    local cmd="$2"
+    local actual out
+
+    out=$(DCG_CONFIG="$REPO_ROOT/config/dcg/task.toml" "$DCG_BIN" test --agent codex "$cmd" 2>&1)
+    if   grep -qE 'Result: BLOCKED' <<<"$out"; then actual="BLOCKED"; BLOCKED_COUNT=$((BLOCKED_COUNT+1))
+    elif grep -qE 'Result: WARN'    <<<"$out"; then actual="WARN"; WARN_COUNT=$((WARN_COUNT+1))
+    elif grep -qE 'Result: LOG'     <<<"$out"; then actual="LOG"; LOG_COUNT=$((LOG_COUNT+1))
+    elif grep -qE 'Result: ALLOWED' <<<"$out"; then actual="ALLOWED"; ALLOWED_COUNT=$((ALLOWED_COUNT+1))
+    else actual="UNKNOWN"; UNKNOWN_COUNT=$((UNKNOWN_COUNT+1)); fi
+
+    if [[ "$expected" == "$actual" ]]; then
+        printf "  \033[32m✔\033[0m  %-7s  %s\n" "$actual" "$cmd"
+        PASS=$((PASS+1))
+    else
+        printf "  \033[31m✗\033[0m  %-7s (expected %s)  %s\n" "$actual" "$expected" "$cmd"
+        FAIL=$((FAIL+1))
+        FAILURES+=("[$CURRENT_PACK] expected=$expected actual=$actual cmd=$cmd")
+    fi
+}
+
 #─────────────────────────────────────────────────────────────
 # BASELINE: безобидные команды, ожидаем ALLOWED
 #─────────────────────────────────────────────────────────────
@@ -112,6 +184,20 @@ group "strict_git"
 run_case BLOCKED "git filter-branch --force --tree-filter 'rm -rf .git/fake-99999' HEAD"
 run_case BLOCKED "git rebase --onto fake-99999 fake-99998"
 run_case BLOCKED "git commit --amend -m 'fake-99999'"
+
+group "task branch practical Git"
+run_task_case ALLOWED "git rebase --onto fake-99999 fake-99998"
+run_task_case ALLOWED "git commit --amend -m 'fake-99999'"
+run_task_case ALLOWED "git cherry-pick fake-99999"
+run_task_case ALLOWED "git add -A"
+run_task_case BLOCKED "git restore fake-99999.txt"
+run_task_case BLOCKED "git reset --hard HEAD~1"
+run_task_case BLOCKED "git push origin task/dcg-fixture"
+run_task_case BLOCKED "git worktree remove /tmp/fake-worktree-99999"
+run_task_case BLOCKED "git filter-repo --force"
+run_task_case BLOCKED "git reflog expire --expire=now --all"
+run_task_case BLOCKED "git gc --prune=now"
+run_task_case BLOCKED "git submodule deinit --all"
 
 #─────────────────────────────────────────────────────────────
 # infrastructure

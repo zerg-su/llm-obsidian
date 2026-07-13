@@ -168,10 +168,58 @@ ok, status = module.schedule_dense_refresh(True)
 assert ok and status == "scheduled"
 assert len(seen) == 1 and seen[0][1]["start_new_session"] is True
 module.DENSE_RETRY.write_text("{broken", encoding="utf-8")
-assert module.dense_retry_due()
+assert module.dense_refresh_due()
 module.mark_dense_pending()
 marker = __import__("json").loads(module.DENSE_RETRY.read_text(encoding="utf-8"))
 assert marker["schema_version"] == 2 and marker["source_fingerprint"]
+
+json = __import__("json")
+sparse_path = root / ".vault-meta/retrieval/index.json"
+dense_path = root / ".vault-meta/retrieval/dense.json"
+sparse = json.loads(sparse_path.read_text(encoding="utf-8"))
+fingerprint = sparse["source_fingerprint"]
+docs = sparse["docs"]
+dense = {
+    "schema_version": sparse["schema_version"],
+    "chunk_config": sparse["chunk_config"],
+    "source_fingerprint": fingerprint,
+    "model": "bge-m3",
+    "complete": True,
+    "embeddings": {chunk_id: [1.0] for chunk_id in docs},
+}
+dense_path.write_text(json.dumps(dense), encoding="utf-8")
+module.DENSE_RETRY.write_text(
+    json.dumps({
+        "schema_version": 2,
+        "source_fingerprint": fingerprint,
+        "next_retry_at": 0,
+    }),
+    encoding="utf-8",
+)
+assert not module.dense_refresh_due(now=1)
+
+dense["complete"] = False
+dense_path.write_text(json.dumps(dense), encoding="utf-8")
+module.DENSE_RETRY.write_text(
+    json.dumps({
+        "schema_version": 2,
+        "source_fingerprint": fingerprint,
+        "next_retry_at": 100,
+    }),
+    encoding="utf-8",
+)
+assert not module.dense_refresh_due(now=1)
+assert module.dense_refresh_due(now=100)
+
+module.DENSE_RETRY.write_text(
+    json.dumps({
+        "schema_version": 2,
+        "source_fingerprint": "old-corpus",
+        "next_retry_at": 100,
+    }),
+    encoding="utf-8",
+)
+assert module.dense_refresh_due(now=1)
 PY
 [[ "$?" == 0 ]] && ok "sh-dense-detached-worker" || bad "sh-dense-detached-worker" "worker was not detached"
 
@@ -181,6 +229,39 @@ before=$(commit_count)
 out=$(run_hook)
 [[ -s "$SANDBOX/.vault-meta/retrieval/index.json" ]] && ok "sh-sparse-self-heal-clean-tree" || bad "sh-sparse-self-heal-clean-tree" "index not rebuilt"
 [[ "$(commit_count)" == "$before" ]] && ok "sh-sparse-derived-no-commit" || bad "sh-sparse-derived-no-commit" "unexpected commit"
+
+# A clean tree can contain a newer committed corpus than the sparse/dense
+# snapshots when another session committed first. The Stop hook must catch up
+# both indexes even when an old fingerprint is still in retry backoff.
+printf '\nnew committed corpus term\n' >> "$SANDBOX/wiki/index.md"
+git -C "$SANDBOX" add wiki/index.md
+git -C "$SANDBOX" commit -qm "test: committed corpus drift"
+python3 - "$SANDBOX/.vault-meta/dense-refresh.pending.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+path.write_text(json.dumps({
+    "schema_version": 2,
+    "source_fingerprint": "old-corpus",
+    "next_retry_at": 4102444800,
+}), encoding="utf-8")
+PY
+out=$(run_hook)
+printf '%s' "$out" | grep -q 'DENSE_DEFERRED' \
+  && ok "sh-clean-committed-corpus-dense-catchup" || bad "sh-clean-committed-corpus-dense-catchup" "dense catch-up not scheduled"
+python3 - "$SANDBOX/.vault-meta/retrieval/index.json" "$SANDBOX/.vault-meta/retrieval-quality.pending.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+index_path, marker_path = map(Path, sys.argv[1:])
+index = json.loads(index_path.read_text(encoding="utf-8"))
+marker = json.loads(marker_path.read_text(encoding="utf-8"))
+assert marker["corpus_sha256"] == index["source_fingerprint"]
+PY
+[[ "$?" == 0 ]] && ok "sh-clean-committed-corpus-quality-marker" || bad "sh-clean-committed-corpus-quality-marker" "quality marker did not follow rebuilt sparse index"
 
 # Required phases use a configurable deadline and identify an exact repair command.
 mv "$SANDBOX/scripts/reindex.py" "$SANDBOX/scripts/reindex.real.py"

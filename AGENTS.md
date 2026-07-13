@@ -68,20 +68,23 @@ compact status/cmux segment; `scripts/codex-limit-monitor.py --install` installs
 
 If a repository-owned script, hook, skill, instruction, schema, callback, or
 runtime adapter fails to deliver its documented behavior, contain the state and
-perform read-only diagnosis first. Then pause the original workflow and ask the
-user explicitly whether to repair the mechanism itself. Before an explicit yes,
-do not edit the mechanism, loop retries, bypass an invariant, or broaden
-permissions. After yes: make the narrowest fix, add a regression test, run the
-relevant suite, retry the failed stage, and resume the original task from its
-last safe boundary.
+perform read-only diagnosis first. The owning coordinator may auto-repair it
+without another user prompt only when it is repo-owned, local, reproducible,
+reversible, inside the approved scope, preserves unrelated dirty work, and
+requires no new permission/dependency/security/public-interface/migration,
+destructive, or external effect. Otherwise ask the user once. Then make the
+narrowest fix, add a regression test, run the relevant suite, retry the failed
+stage, and resume from the last safe boundary without repeating external
+effects.
 
 A correct validation/conflict rejection, a product test exposing the requested
 product change, missing input/auth/dependency approval, user cancellation, or
 an external transient is not by itself a mechanism failure. Unattended task
-splits raise category `mechanism-failure` to the coordinator and remain paused;
-Stop hooks remain fail-closed and defer the repair offer to the next interactive
-contact. The canonical wording, state classification, consent boundary, and
-logging rules are in `docs/skill-references/failure-repair-contract.md`.
+splits raise category `mechanism-failure` and remain paused; the coordinator
+immediately classifies and either repairs/authorizes the narrow fix or asks once
+at the boundary. Stop hooks remain fail-closed. The canonical classification,
+auto-repair boundary, and logging rules are in
+`docs/skill-references/failure-repair-contract.md`.
 
 ## Write path (what happens on turn end)
 

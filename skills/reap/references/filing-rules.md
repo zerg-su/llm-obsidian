@@ -20,6 +20,14 @@ name. `reap` writes `[[Title]]` into `log.md` and `hot.md`, and Obsidian resolve
 that wikilink by filename. A dated task-name path would therefore create dead
 links unless every caller also emitted an alias.
 
+`prepare-reap` checks the proposed filename against **all** Markdown files in
+`wiki/`, not only the target folder. If a new target collides (commonly when an
+approved plan and its exact result title are identical), it routes the result
+to `<Title> — Result.md` while keeping the contract/frontmatter title unchanged.
+Read the authoritative `result_path` and `result_link` from its marker. Use
+`[[<Title> — Result|<Title>]]` in page/log/hot links and pass that same alias as
+`plan_close.result_link`; never weaken the vault-wide unique-filename validator.
+
 For update-mode: `Read` the existing page and merge. The body from the summary replaces the **last** `## Recent` section (if present) or is appended as a new `## <YYYY-MM-DD> <task-name>` section at the end.
 
 ### 1.6 Frontmatter

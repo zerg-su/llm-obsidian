@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -60,8 +61,36 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     worktree = Path(raw)
     check("watchdog atomic tmp keeps handoff prefix", watchdog_module.atomic_tmp_path(worktree / ".task-watchdog.json").name.startswith(".task-"))
     check("supervisor atomic tmp keeps handoff prefix", supervisor_module.atomic_tmp_path(worktree / ".review-agent-command.json").name.startswith(".review-"))
+    check(
+        "reap result link uses filename alias on collision",
+        lifecycle_module.result_wikilink(
+            "Demo Result", worktree / "wiki" / "Demo Result — Result.md"
+        ) == "[[Demo Result — Result|Demo Result]]",
+    )
+    collision_plan = worktree / "wiki" / "plans" / "Demo Result.md"
+    collision_plan.parent.mkdir(parents=True)
+    collision_plan.write_text("# collision fixture\n", encoding="utf-8")
+    check(
+        "reap result auto-routes around vault-wide filename collision",
+        lifecycle_module.collision_safe_result_path(
+            worktree, worktree / "wiki" / "meta" / "sessions" / "Demo Result.md"
+        ).name == "Demo Result — Result.md",
+    )
+    occupied_result = worktree / "wiki" / "meta" / "sessions" / "Demo Result — Result.md"
+    occupied_result.parent.mkdir(parents=True)
+    occupied_result.write_text("# occupied fixture\n", encoding="utf-8")
+    try:
+        lifecycle_module.collision_safe_result_path(
+            worktree, worktree / "wiki" / "meta" / "sessions" / "Demo Result.md"
+        )
+    except ValueError:
+        check("reap result refuses a second ambiguous fallback", True)
+    else:
+        check("reap result refuses a second ambiguous fallback", False)
+    occupied_result.unlink()
+    collision_plan.unlink()
     plan = worktree / "wiki" / "plans" / "approved-plan.md"
-    plan.parent.mkdir(parents=True)
+    plan.parent.mkdir(parents=True, exist_ok=True)
     approved_plan_text = (
         "---\n"
         "type: plan\n"
@@ -109,6 +138,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "executor_runtime": "codex",
         "task_surface": "11111111-1111-1111-1111-111111111111",
         "wiki_surface": "33333333-3333-3333-3333-333333333333",
+        "vault_root": str(worktree),
         "plan_file": str(plan),
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
@@ -148,6 +178,18 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     write_json(worktree / "invalid-origin.json", invalid)
     result = run(CONTRACT, "validate", "--meta", "invalid-origin.json", cwd=worktree)
     check("missing origin rejected", result.returncode == 2)
+    invalid = dict(meta)
+    invalid["vault_root"] = "relative-vault"
+    write_json(worktree / "invalid-vault-relative.json", invalid)
+    result = run(CONTRACT, "validate", "--meta", "invalid-vault-relative.json", cwd=worktree)
+    check("relative coordinator vault rejected", result.returncode == 2)
+    other_vault = worktree / "other-vault"
+    (other_vault / "wiki").mkdir(parents=True)
+    invalid = dict(meta)
+    invalid["vault_root"] = str(other_vault)
+    write_json(worktree / "invalid-vault-plan.json", invalid)
+    result = run(CONTRACT, "validate", "--meta", "invalid-vault-plan.json", cwd=worktree)
+    check("plan outside coordinator vault rejected", result.returncode == 2)
     invalid = json.loads(json.dumps(meta))
     invalid["review_policy"]["max_verify_iterations"] = True
     write_json(worktree / "invalid-max-verify.json", invalid)
@@ -303,6 +345,30 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         == supervisor_module.task_codex_config_values(cmux_socket_path.resolve())
         and agent_spec["env"]["CMUX_SOCKET_PATH"] == str(cmux_socket_path.resolve()),
     )
+    check(
+        "supervisor grants exact loopback destinations only",
+        'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }'
+        in supervisor_module.option_values(agent_spec["argv"], "-c")
+        and "features.network_proxy.allow_local_binding=true"
+        in supervisor_module.option_values(agent_spec["argv"], "-c"),
+    )
+    check(
+        "supervisor pins trusted task runtime and DCG profile",
+        str(fake_bin.resolve()) in agent_spec["env"]["PATH"].split(os.pathsep)
+        and agent_spec["env"]["DCG_CONFIG"] == str((ROOT / "config/dcg/task.toml").resolve()),
+    )
+    check(
+        "supervisor excludes ephemeral cmux CLI shims",
+        all(
+            "cmux-cli-shims" not in Path(item).parts
+            for item in agent_spec["env"]["PATH"].split(os.pathsep)
+        ),
+    )
+    host_brew = shutil.which("brew")
+    check(
+        "supervisor preserves Homebrew command when installed",
+        host_brew is None or shutil.which("brew", path=agent_spec["env"]["PATH"]) is not None,
+    )
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
         "--surface", meta["task_surface"], cwd=worktree, env=env,
@@ -344,6 +410,24 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--surface", meta["task_surface"], cwd=worktree, env=env,
     )
     check("supervisor rejects cmux socket policy drift", result.returncode == 2)
+    write_json(worktree / ".task-agent-command.json", safe_agent_spec)
+    agent_spec = json.loads(json.dumps(safe_agent_spec))
+    agent_spec["env"]["PATH"] = f"/tmp{os.pathsep}{agent_spec['env']['PATH']}"
+    write_json(worktree / ".task-agent-command.json", agent_spec)
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor rejects task PATH tampering", result.returncode == 2)
+    write_json(worktree / ".task-agent-command.json", safe_agent_spec)
+    agent_spec = json.loads(json.dumps(safe_agent_spec))
+    agent_spec["env"]["DCG_CONFIG"] = str(worktree / "weaker-dcg.toml")
+    write_json(worktree / ".task-agent-command.json", agent_spec)
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor rejects task DCG tampering", result.returncode == 2)
     write_json(worktree / ".task-agent-command.json", safe_agent_spec)
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
@@ -429,6 +513,32 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         label="wiki/plans/approved-plan.md",
     )
     plan.write_text(closed_plan_text, encoding="utf-8")
+    rerouted_result_page = worktree / "wiki" / "Demo Result — Result.md"
+    result_page.rename(rerouted_result_page)
+    result = run(
+        LIFECYCLE, "prepare-reap", "--current-session", "origin-1",
+        "--result-path", str(rerouted_result_page), "--vault-root", str(worktree),
+        cwd=worktree, env=origin_env,
+    )
+    check("closed prepared reap can be collision-rerouted", result.returncode == 0, result.stderr)
+    rerouted_prepared = json.loads(
+        (worktree / ".task-reap-prepared.json").read_text(encoding="utf-8")
+    )
+    check(
+        "rerouted preparation binds filename alias",
+        rerouted_prepared["result_link"] == "[[Demo Result — Result|Demo Result]]"
+        and rerouted_prepared["previous_result_link"] == "[[Demo Result]]"
+        and rerouted_prepared["previous_closed_plan_sha256"]
+        == hashlib.sha256(closed_plan_text.encode("utf-8")).hexdigest(),
+    )
+    closed_plan_text = lifecycle_module.reroute_closed_plan(
+        closed_plan_text,
+        "[[Demo Result]]",
+        rerouted_prepared["result_link"],
+        label="wiki/plans/approved-plan.md",
+    )
+    plan.write_text(closed_plan_text, encoding="utf-8")
+    result_page = rerouted_result_page
     result = run(
         WATCHDOG, "sample", "--kind", "task", "--surface", meta["task_surface"],
         "--now", "900", "--reset", cwd=worktree, env=env,
@@ -452,7 +562,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "reap completion marker is owner-only",
         (worktree / ".task-reap-complete.json").stat().st_mode & 0o777 == 0o600,
     )
-    subprocess.run(["git", "add", str(plan)], cwd=worktree, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=worktree, check=True)
     subprocess.run(["git", "commit", "-qm", "close plan fixture"], cwd=worktree, check=True)
 
     summary["body"] = "changed after reap"
@@ -566,7 +676,32 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and escalation_events[0]["counts"].get("raised") == 1
         and escalation_events[1]["counts"].get("resolved") == 1,
     )
-    resolved_attention = dict(attention)
+    cmux_log.write_text("", encoding="utf-8")
+    result = run(
+        ESCALATION, "raise", "--category", "mechanism-failure",
+        "--reason", "The repo-owned callback fails its deterministic fixture",
+        "--question", "Classify the repair boundary and resume if eligible",
+        cwd=worktree, env=env,
+    )
+    check("mechanism failure reaches coordinator", result.returncode == 0, result.stderr)
+    mechanism_attention = json.loads(
+        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
+    )
+    check(
+        "mechanism escalation carries auto-repair policy",
+        mechanism_attention.get("coordinator_policy")
+        == "classify-and-auto-repair-if-eligible",
+    )
+    check(
+        "mechanism notification states the user boundary",
+        "Auto-repair only when" in cmux_log.read_text(encoding="utf-8")
+        and "otherwise ask the user once" in cmux_log.read_text(encoding="utf-8"),
+    )
+    result = run(
+        ESCALATION, "resolve", "--decision", "Eligible local repair verified; resume",
+        cwd=worktree, env=origin_env,
+    )
+    check("coordinator resolves eligible mechanism repair", result.returncode == 0, result.stderr)
     failed_notify_env = dict(env, CMUX_NOTIFY_FAIL="1")
     result = run(
         ESCALATION, "raise", "--category", "permission",

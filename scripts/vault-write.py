@@ -13,6 +13,7 @@ Payload (stdin or --file), all mutation keys optional:
       "request_id": "optional-idempotency/correlation-id",
       "log_entry":     "## [YYYY-MM-DD] verb | Title\\n- body...",
       "hot_bullet":    "YYYY-MM-DD: [[Page]] — one-liner (`c-NNNNNN`)",
+      "hot_recent_remove_addresses": ["c-NNNNNN"],
       "hot_narrative": "replaces ## Last Updated body, <=120 words",
       "hot_threads":   {"add": ["- **Open**: ..."], "resolve": ["substring"]},
       "plan_close":    {"file": "wiki/plans/<name>.md",
@@ -89,7 +90,6 @@ from vault_schema import (
     LOG_ENTRY_RX,
     REQUIRED_KEYS,
     parse_frontmatter,
-    split_document,
     split_frontmatter,
 )
 
@@ -124,6 +124,7 @@ NARRATIVE_WORDS = 120
 MUTATION_KEYS = {
     "log_entry",
     "hot_bullet",
+    "hot_recent_remove_addresses",
     "hot_narrative",
     "hot_threads",
     "plan_close",
@@ -265,68 +266,41 @@ def set_frontmatter_updated(text: str, today: str) -> str:
     return re.sub(r"^updated: .*$", f"updated: {today}", text, count=1, flags=re.M)
 
 
-def record_frontmatter_session(text: str, session: str | None) -> str:
-    """Add one session ID to a strict frontmatter list without duplicating it.
-
-    ``session`` already belongs to the public writer contract, so log/hot
-    mutations should retain the same provenance as ordinary page writes.  A
-    missing value remains a no-op for backward compatibility with callers that
-    do not have a runtime session.
-    """
-    if not session:
-        return text
-    document = split_document(text)
-    if document is None:
-        raise PayloadError("writer-owned page is missing frontmatter")
-    block, body = document
-    try:
-        parsed = parse_frontmatter(block)
-    except FrontmatterError as exc:
-        raise PayloadError(f"writer-owned page has invalid frontmatter: {exc}") from exc
-    existing = parsed.get("sessions")
-    if isinstance(existing, list):
-        ids = [item.get("id") if isinstance(item, dict) else item for item in existing]
-        if session in ids:
-            return text
-
-    rendered = json.dumps(session, ensure_ascii=False)
-    lines = block.splitlines()
-    session_index = next(
-        (index for index, line in enumerate(lines) if line.startswith("sessions:")),
-        None,
-    )
-    if session_index is None:
-        lines.extend(("sessions:", f"  - {rendered}"))
-    elif lines[session_index].strip() == "sessions: []":
-        lines[session_index : session_index + 1] = ("sessions:", f"  - {rendered}")
-    elif lines[session_index].strip() == "sessions:":
-        next_key = session_index + 1
-        while next_key < len(lines) and (
-            not lines[next_key].strip() or lines[next_key].startswith(" ")
-        ):
-            next_key += 1
-        lines.insert(next_key, f"  - {rendered}")
-    else:
-        raise PayloadError("writer-owned page sessions must be a list")
-    return "---\n" + "\n".join(lines) + "\n---\n" + body
-
-
 def apply_hot(payload: dict, hot_text: str, today: str) -> tuple[str, list[str]]:
     """Return (new_hot_text, warnings). Raises CapViolation on hard failures."""
     warnings: list[str] = []
     lines = hot_text.split("\n")
 
-    # Recent Changes: prepend + schema-aware essence truncation + evict
+    # Recent Changes: targeted cache correction, prepend, truncate, and evict.
+    removals = payload.get("hot_recent_remove_addresses") or []
+    if not isinstance(removals, list) or any(
+        not isinstance(value, str) or HOT_ADDRESS_TOKEN_RX.fullmatch(value) is None
+        for value in removals
+    ):
+        raise PayloadError("hot_recent_remove_addresses must contain c-NNNNNN strings")
+    if len(removals) != len(set(removals)) or len(removals) > 5:
+        raise PayloadError(
+            "hot_recent_remove_addresses must be unique and contain at most 5 items"
+        )
     bullet = payload.get("hot_bullet")
-    if bullet:
-        b, truncated = safe_hot_bullet(bullet)
-        if truncated:
-            warnings.append(f"hot_bullet essence truncated to {RC_BULLET_CHARS} chars")
+    if bullet or removals:
         bounds = section_bounds(lines, RC_HEADING)
         if bounds is None:
             raise CapViolation(f"hot.md has no '{RC_HEADING}' section")
         existing = bullets_of(lines[bounds[0]:bounds[1]])
-        kept = [b] + existing
+        kept = [
+            item
+            for item in existing
+            if not any(address in HOT_ADDRESS_TOKEN_RX.findall(item) for address in removals)
+        ]
+        removed = len(existing) - len(kept)
+        if removals and removed == 0:
+            warnings.append("hot_recent_remove_addresses matched no Recent Changes bullets")
+        if bullet:
+            b, truncated = safe_hot_bullet(bullet)
+            if truncated:
+                warnings.append(f"hot_bullet essence truncated to {RC_BULLET_CHARS} chars")
+            kept.insert(0, b)
         if len(kept) > RC_MAX_BULLETS:
             evicted = len(kept) - RC_MAX_BULLETS
             kept = kept[:RC_MAX_BULLETS]
@@ -850,18 +824,20 @@ def main(argv: list[str]) -> int:
         if manifest:
             writes.append(manifest)
 
-        if payload.keys() & {"hot_bullet", "hot_narrative", "hot_threads"}:
+        if payload.keys() & {
+            "hot_bullet",
+            "hot_recent_remove_addresses",
+            "hot_narrative",
+            "hot_threads",
+        }:
             hot_text = HOT_FILE.read_text(encoding="utf-8")
             new_hot, w = apply_hot(payload, hot_text, today)
-            new_hot = record_frontmatter_session(new_hot, payload.get("session"))
             writes.append((HOT_FILE, new_hot))
             warnings.extend(w)
 
         if payload.get("log_entry"):
             log_text = LOG_FILE.read_text(encoding="utf-8")
-            new_log = apply_log(payload["log_entry"], log_text, today)
-            new_log = record_frontmatter_session(new_log, payload.get("session"))
-            writes.append((LOG_FILE, new_log))
+            writes.append((LOG_FILE, apply_log(payload["log_entry"], log_text, today)))
 
         if payload.get("plan_close"):
             writes.append(apply_plan_close(payload["plan_close"], today))
@@ -906,7 +882,17 @@ def main(argv: list[str]) -> int:
                 "page_updates": sum(1 for spec in page_specs if spec.get("op") == "update"),
                 "page_moves": len(payload.get("moves") or []),
                 "manifest_updates": int(bool(payload.get("manifest_update"))),
-                "hot_updates": int(bool(payload.keys() & {"hot_bullet", "hot_narrative", "hot_threads"})),
+                "hot_updates": int(
+                    bool(
+                        payload.keys()
+                        & {
+                            "hot_bullet",
+                            "hot_recent_remove_addresses",
+                            "hot_narrative",
+                            "hot_threads",
+                        }
+                    )
+                ),
                 "log_updates": int(bool(payload.get("log_entry"))),
                 "plan_closes": int(bool(payload.get("plan_close"))),
                 "recovered_writes": recovered,

@@ -20,7 +20,7 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
-| Durable review history | Coordinator archives validated rounds/resolutions through `vault-write.py`; task splits only defer | Same | Explicit `spawn_review.py archive` from the coordinator vault |
+| Durable review history | Explicit primary-checkout reviews archive on finish; task splits defer to coordinator `reap` | Same | Explicit `spawn_review.py archive` from the coordinator vault |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
@@ -79,13 +79,51 @@ final `status`; the coordinator surface is never a valid cleanup target. Pass
 be resumed from its already validated artifact with
 `research-isolation.py restart-synthesis`; see `scripts/research-isolation.py`.
 
-Unattended Codex task splits use the older `workspace-write` policy because the
-installed user/profile stack still contains legacy sandbox settings. The task
-supervisor pins command networking on only behind Codex's network proxy, sets an
-empty external-domain map, and allows one exact user-owned cmux Unix socket.
-Broad local binding, upstream proxy chaining, arbitrary Unix sockets, and
-SOCKS5/UDP are explicitly disabled. The only additional writable root is the
-validated Git common directory needed by linked-worktree commits. This narrow
-exception supports task-side review, escalation, and reap callbacks while
-preserving a no-outbound-network boundary; `tests/test_task_lifecycle.py`
-rejects command-spec, writable-root, and socket-policy drift.
+Unattended Codex task splits use `workspace-write` with `-a never`. The only
+additional writable root is the validated Git common directory needed by the
+linked task branch. The network proxy allows client connections to exactly
+`localhost`, `127.0.0.1`, and `::1`, plus one exact user-owned cmux Unix socket;
+loopback binding is allowed, while external domains, non-loopback proxying,
+upstream proxy chaining, arbitrary Unix sockets, and SOCKS5/UDP remain disabled.
+This supports local MCP/services and
+task-side review/escalation/reap callbacks without outbound Internet access.
+
+Both Claude and Codex background commands receive a supervisor-generated
+owner/root-controlled `PATH`. It contains the selected Python runtime plus
+available Homebrew, Git, uv, Docling, cmux, Claude, and Codex directories, so a
+task does not inherit a stale GUI/session path. Unattended executors also receive
+the standalone `config/dcg/task.toml` through `DCG_CONFIG`. DCG 0.6.x replaces,
+rather than overlays, an explicit config, so this task policy repeats all base
+packs and absolute blocks. It permits local rebase/amend/cherry-pick/staging in
+the isolated branch while keeping push, hard reset, file discard, worktree or
+branch deletion, repository-wide rewriting, and infrastructure destructive
+actions blocked. Tests compare the task/base policies and exercise both allowed
+and denied commands.
+
+Reviewers remain product-read-only but are no longer toolchain-starved: Claude
+gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG
+smoke `bash scripts/dcg-test-suite.sh`; Codex gets a
+private scratch directory, exact loopback access/binding, disabled web search,
+and no product writable root. `tests/test_task_lifecycle.py` and
+`tests/test_review_dispatch.sh` reject command, environment, writable-root,
+domain, and socket drift.
+
+The DCG suite resolves an explicit `DCG_BIN`, then `PATH`, then the portable
+user/Homebrew install locations. A GUI-launched reviewer can therefore test the
+repo-shipped policy with the installed binary without inheriting the foreground
+terminal's PATH, while an invalid explicit override fails closed.
+
+This task policy is a portable repository default. It does not rewrite a
+user's foreground Claude/Codex permission settings; a personal foreground
+session may deliberately use fuller trust while public installs retain their
+own host policy.
+
+Background tasks still pause on a probable defect in the orchestration itself:
+the executor that discovered the defect must not decide that its own repair is
+safe. Its `mechanism-failure` marker tells the owning coordinator to classify
+immediately. The coordinator auto-repairs only a repo-owned, local,
+reproducible, reversible, in-scope defect with preserved dirty work and no new
+permission, dependency, security, public-interface, migration, destructive, or
+external-effect boundary; otherwise it asks the user once. Stop hooks never
+self-repair. The canonical decision table is
+[failure-to-repair contract](skill-references/failure-repair-contract.md).

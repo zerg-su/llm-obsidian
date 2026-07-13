@@ -16,10 +16,10 @@ Runs the review leg between task completion and `reap-send`. The executor keeps
 ownership of the work. The reviewer is advisory and read-only for product/vault
 files.
 
-This skill is for task worktrees created by `/dispatch` or the matching
-`$<plugin>:dispatch` Codex command. It
-expects `.task-prompt.md`, `.task-meta.json`, and `.task-cmux-surface` in the
-current directory.
+This skill normally reviews task worktrees created by `/dispatch` or the
+matching `$<plugin>:dispatch` Codex command. An explicit coordinator review may
+target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
+`.task-meta.json`, and `.task-cmux-surface` in the current directory.
 
 ## Model Defaults
 
@@ -55,6 +55,16 @@ For lightweight review, use:
 ```bash
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py start --light
 ```
+
+To review changes made directly in the primary vault and archive the validated
+cycle automatically, opt in explicitly:
+
+```bash
+python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py start \
+  --coordinator-review --vault-root <vault-root>
+```
+
+This mode rejects linked worktrees, inferred vaults, and non-primary checkouts.
 
 `spawn` remains a backward-compatible alias for `start`.
 
@@ -94,6 +104,8 @@ The trusted supervisor—not the reviewer—polls that exact outbox, runs the sc
 and baseline validator, forwards the callback through cmux, and removes the
 outbox. The Codex reviewer therefore never receives cmux-socket access while
 still being able to run diagnostics that need temporary files.
+Claude may also run the exact `bash scripts/dcg-test-suite.sh` DCG policy
+smoke; this does not grant a wildcard script permission.
 
 Before a real Claude split is created, `claude-subscription-check.py` verifies
 first-party paid subscription auth and rejects API/provider overrides. Dry-run
@@ -114,20 +126,28 @@ reviewer for a concise status or verdict instead of blindly cancelling.
 Use when the reviewer split calls back after `$<plugin>:review-send` or
 `/review-send`.
 
-1. When the callback contains `--payload-b64 TOKEN`, first run:
+1. The normal callback contains only a short reference to the validated relay:
 
    ```bash
-   python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py receive --payload-b64 TOKEN
+   python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py receive \
+     --relay-file <worktree>/.review-callback.json
    ```
 
-   This validates canonical JSON and renders the Markdown handoff. Then read the
+   This exact-path file is atomically published by trusted `review-send`, then
+   schema/run/mode-validated again and removed by `receive`. The callback itself
+   stays short even when the review is large, so cmux never has to paste a
+   compressed report into the executor composer. Legacy `--payload-b64 TOKEN`
+   callbacks remain accepted for in-flight sessions created by older versions.
+
+   After the command succeeds, read the
    file named by `.review-meta.json.output_file`:
    - `.task-review.md` for initial findings.
    - `.task-review-verify.md` for the follow-up verification pass.
    The bounded human task-description section and every validated callback are
    also appended idempotently to the stable `.review-history.json` cycle. A later `verify` snapshots the executor's
    `.task-review-resolution.md` into the round it resolves before rotating to
-   the next `run_id`.
+   the next `run_id`. `verify` fails closed when the latest round has findings
+   but this resolution file is absent; a new cycle clears stale round artifacts.
 2. Classify each finding in `.task-review-resolution.md`:
    - `applied`
    - `rejected`
@@ -177,14 +197,21 @@ After interactive approval, or immediately after unattended approve:
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py finish
 ```
 
-Before exit, `finish` archives the validated cycle when it runs in the
-coordinator vault. Inside an isolated task worktree it writes only
+Before exit, `finish` archives the validated cycle when it runs in an explicit
+primary-vault `--coordinator-review`. Inside an isolated task worktree it
+writes only
 `.review-archive-request.json`; coordinator `/reap` performs the authorized
 `vault-write.py` transaction and links the archive from the task result. The
 archive keeps the original task request, validated findings, per-round executor
 resolutions, verification gaps, residual risks, reviewer/runtime/model/mode,
 and final verdict. It does not copy raw orchestration/reviewer prompts,
 compressed payloads, command logs, sockets, or cmux IDs.
+
+The coordinator vault is resolved in fail-closed order: explicit
+`--vault-root`, `.task-meta.json.vault_root`, the approved `plan_file`, prior
+review metadata, then the script location for legacy tasks. This matters when
+the repository reviews a linked worktree copy of itself: a task worktree is
+never allowed to treat its own `wiki/` as the coordinator archive target.
 
 For unattended tasks `finish` then arms a surface-bound sentinel, queues `/exit`, and
 lets the launch wrapper call `cmux close-surface` only after the agent process

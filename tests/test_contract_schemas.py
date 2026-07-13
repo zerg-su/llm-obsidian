@@ -34,6 +34,7 @@ review = load("review-v1.schema.json")
 assert set(review["properties"]["verdict"]["enum"]) == review_contract.VERDICTS
 assert set(review["properties"]["mode"]["enum"]) == review_contract.MODES
 task_meta = load("task-meta-v2.schema.json")
+assert task_meta["properties"]["vault_root"] == {"type": "string", "minLength": 1}
 task_types = task_meta["properties"]["reap_policy"]["properties"]["allowed_types"]["items"]["enum"]
 assert set(task_types) == task_contract.SUMMARY_TYPES
 assert task_meta["properties"]["forbidden_actions"]["const"] == task_contract.FORBIDDEN_ACTIONS

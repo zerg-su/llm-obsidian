@@ -100,6 +100,22 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         raise ContractError(f"approved plan is missing: {plan}")
     if verify_plan_hash and sha256_file(plan) != plan_hash:
         raise ContractError("approved plan hash changed after dispatch approval")
+    vault_raw = meta.get("vault_root")
+    if vault_raw is not None:
+        if not isinstance(vault_raw, str) or not vault_raw.strip():
+            raise ContractError("vault_root must be a non-empty absolute path")
+        declared_vault = Path(vault_raw).expanduser()
+        if not declared_vault.is_absolute():
+            raise ContractError("vault_root must be a non-empty absolute path")
+        declared_vault = declared_vault.resolve()
+        if not (declared_vault / "wiki").is_dir():
+            raise ContractError("vault_root must contain the coordinator wiki")
+        if (
+            plan.parent.name != "plans"
+            or plan.parent.parent.name != "wiki"
+            or plan.parents[2] != declared_vault
+        ):
+            raise ContractError("plan_file must belong to vault_root/wiki/plans")
 
     review = meta.get("review_policy")
     if not isinstance(review, dict) or review.get("mode") not in REVIEW_MODES:
@@ -204,7 +220,8 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
             raise ContractError("reap preparation plan mismatch")
         if len(closed) != 64 or any(char not in "0123456789abcdef" for char in closed):
             raise ContractError("reap preparation closed hash is invalid")
-        if sha256_file(plan) != closed:
+        previous_closed = str(prepared.get("previous_closed_plan_sha256") or "")
+        if sha256_file(plan) not in {closed, previous_closed}:
             raise ContractError("reap preparation closed plan mismatch")
     except (ContractError, OSError):
         raise ContractError("approved plan hash changed after dispatch approval") from None

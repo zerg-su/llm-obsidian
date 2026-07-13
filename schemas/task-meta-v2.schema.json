@@ -14,6 +14,7 @@
     "task_name": {"type": "string", "minLength": 1},
     "origin_session": {"type": "string", "minLength": 1},
     "executor_runtime": {"enum": ["claude", "codex"]},
+    "vault_root": {"type": "string", "minLength": 1},
     "plan_file": {"type": "string", "minLength": 1},
     "approved_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "interaction_policy": {"enum": ["interactive", "unattended"]},

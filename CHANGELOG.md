@@ -6,13 +6,29 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-07-14
+
 ### Added
 
 - Cross-model review cycles now keep a stable, idempotent history page under `wiki/meta/reviews/`: the original task request, every validated round, executor resolution, verification gap, residual risk, reviewer/model/mode, and final verdict are retained and linked from the reaped task result. Unattended finalization hashes the marker and blocks close if the approved archive is missing, changed, or unlinked.
+- Coordinator reviews use the same durable archive contract, while task worktrees defer archive writes to the canonical coordinator vault.
+
+### Changed
+
+- Unattended task splits use a practical workspace-write profile constrained to the task worktree, exact cmux callback socket, and validated supervisor command; the coordinator owns any bounded mechanism repair.
+- Review callbacks use an atomic relay file instead of pasting large encoded payloads into the terminal composer.
+- Monthly agenda reports identify themselves as unfinished plans and reminders, improving both human navigation and sparse retrieval.
+
+### Fixed
+
+- Dense retrieval now catches up after sparse self-heal on an already-clean Git tree, respects retry backoff for the same corpus fingerprint, and immediately retries when a newer fingerprint supersedes an old marker.
+- Failed escalation delivery is recoverable, unattended executors may commit inside their isolated worktree, and exact-socket callbacks work without broadening filesystem access.
+- Review archives remain bound to the coordinator vault, reap result-name collisions reroute deterministically, and coordinator reviews archive automatically after approval.
 
 ### Security
 
 - Review archives are coordinator-owned `vault-write.py` transactions. Task worktrees can only request archival; only the bounded human task-description section is retained, while raw orchestration/reviewer prompts, compressed callback payloads, command logs, sockets, and cmux identifiers stay outside the durable page.
+- Auto-repair remains limited to local, reproducible, reversible repository mechanisms inside approved scope; permission, dependency, public-interface, migration, destructive, and external effects still require user authority.
 
 ## [2.0.6] - 2026-07-13
 

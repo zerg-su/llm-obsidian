@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SESSION = "019f0000-0000-7000-8000-000000000002"
+SESSION = "019f0000-0000-7000-8000-000000000003"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from daily_contract import parse_daily_task, task_open_line  # noqa: E402
@@ -144,6 +144,12 @@ with tempfile.TemporaryDirectory(prefix="agenda-test.") as raw:
     report = root / "wiki/daily/2028/03/2028-03 — Незавершённое.md"
     report_text = report.read_text(encoding="utf-8")
     check("monthly report is declarative", "```tasks" in report_text and "tags do not include #agenda/migrated" in report_text)
+    check(
+        "monthly report describes plans and reminders",
+        'title: "2028-03 — Незавершённые планы и напоминания"' in report_text
+        and "# 2028-03 — незавершённые планы и напоминания" in report_text,
+        report_text,
+    )
     source_report = root / "wiki/daily/2028/02/2028-02 — Незавершённое.md"
     check(
         "cross-month collect refreshes source report",

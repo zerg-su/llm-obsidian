@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -22,7 +23,7 @@ from task_contract import ContractError, normalize, read_json as read_task_json
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPEC_FILES = {"task": ".task-agent-command.json", "reviewer": ".review-agent-command.json"}
 PROMPT_FILES = {"task": ".task-prompt.md", "reviewer": ".review-prompt.md"}
-ALLOWED_ENV = {"CODEX_HOME", "TMPDIR", "CMUX_SOCKET_PATH"}
+ALLOWED_ENV = {"CODEX_HOME", "TMPDIR", "CMUX_SOCKET_PATH", "DCG_CONFIG", "PATH"}
 REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
@@ -54,11 +55,23 @@ CLAUDE_REVIEW_ALLOWED_TOOLS = (
     "Bash(python3 tests/test_*.py)",
     "Bash(bash tests/test_*.sh)",
     "Bash(python3 scripts/lint-instructions.py)",
+    "Bash(python3 scripts/document-normalize.py check *)",
+    "Bash(bash scripts/dcg-test-suite.sh)",
+    "Bash(make test)",
     "Bash(cmux --help)",
     "Bash(cmux notify --help)",
     "Bash(cmux read-screen --help)",
     "Bash(cmux top --help)",
     "Bash(python3 *send_review.py submit *)",
+)
+
+RUNTIME_COMMANDS = ("python3", "git", "bash", "make", "uv", "brew", "cmux", "codex", "claude")
+RUNTIME_DIRS = (
+    Path.home() / ".local" / "bin",
+    Path("/opt/homebrew/bin"),
+    Path("/usr/local/bin"),
+    Path("/usr/bin"),
+    Path("/bin"),
 )
 
 
@@ -115,16 +128,109 @@ def write_agent_spec(
     env: dict[str, str] | None = None,
 ) -> Path:
     path = exact_spec_path(worktree, kind)
+    spec_env = dict(env or {})
+    spec_env["PATH"] = trusted_runtime_path()
     payload = {
         "version": 1,
         "kind": kind,
         "runtime": runtime,
         "argv": argv,
         "prompt_file": prompt_file,
-        "env": env or {},
+        "env": spec_env,
     }
     validate_spec_shape(payload, kind)
     write_json(path, payload)
+    return path
+
+
+def trusted_runtime_path() -> str:
+    """Return a stable, owner/root-controlled tool path for background agents."""
+    candidates: list[Path] = [Path(sys.executable).resolve().parent]
+    candidates.extend(
+        Path(item).expanduser()
+        for item in os.environ.get("PATH", "").split(os.pathsep)
+        if item
+    )
+    for command in RUNTIME_COMMANDS:
+        resolved = shutil.which(command)
+        if resolved:
+            selected = Path(resolved).expanduser()
+            # Preserve the directory selected by the caller before adding
+            # generic prefixes. Also add the symlink target directory for
+            # tools whose runtime assets live beside the real executable.
+            candidates.extend((selected.parent, selected.resolve().parent))
+    candidates.extend(RUNTIME_DIRS)
+    candidates.extend(
+        sorted(
+            (Path.home() / ".local/share/llm-obsidian/docling").glob("*/venv/bin"),
+            reverse=True,
+        )
+    )
+    candidates.extend(
+        sorted((Path.home() / ".local/share/uv/python").glob("*/bin"), reverse=True)
+    )
+
+    accepted: list[str] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            directory = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        if (
+            directory in seen
+            or not runtime_directory_is_stable(directory)
+            or not runtime_directory_is_trusted(directory)
+        ):
+            continue
+        seen.add(directory)
+        accepted.append(str(directory))
+    if not accepted:
+        raise SupervisorError("no trusted runtime directories are available")
+    return os.pathsep.join(accepted)
+
+
+def runtime_directory_is_trusted(directory: Path) -> bool:
+    try:
+        stat = directory.stat()
+    except OSError:
+        return False
+    if not directory.is_dir() or stat.st_uid not in {0, os.getuid()} or stat.st_mode & 0o002:
+        return False
+    # Homebrew's prefix is commonly user-owned and group-writable on macOS.
+    # The owner already controls it. Root-owned directories remain stricter
+    # because another privileged group must not inject a command.
+    return stat.st_uid != 0 or not stat.st_mode & 0o020
+
+
+def runtime_directory_is_stable(directory: Path) -> bool:
+    """Reject cmux's per-session CLI shims from durable agent specs."""
+    return "cmux-cli-shims" not in directory.parts
+
+
+def validate_trusted_runtime_path(raw: str, runtime: str) -> None:
+    entries = raw.split(os.pathsep) if raw else []
+    if not entries or len(entries) > 128 or len(entries) != len(set(entries)):
+        raise SupervisorError("agent runtime PATH is empty, oversized, or duplicated")
+    for entry in entries:
+        candidate = Path(entry).expanduser()
+        if not candidate.is_absolute() or candidate.resolve() != candidate:
+            raise SupervisorError("agent runtime PATH must use canonical absolute directories")
+        if not runtime_directory_is_stable(candidate) or not runtime_directory_is_trusted(candidate):
+            raise SupervisorError(f"agent runtime PATH contains an untrusted directory: {candidate}")
+    for command in (runtime, "python3", "git", "bash", "cmux"):
+        if shutil.which(command, path=raw) is None:
+            raise SupervisorError(f"agent runtime PATH cannot resolve required command: {command}")
+
+
+def task_dcg_config() -> Path:
+    path = (SCRIPT_DIR.parent / "config" / "dcg" / "task.toml").resolve()
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        raise SupervisorError(f"task DCG profile is unavailable: {path}") from exc
+    if not path.is_file() or stat.st_uid not in {0, os.getuid()} or stat.st_mode & 0o022:
+        raise SupervisorError(f"task DCG profile is not trusted: {path}")
     return path
 
 
@@ -197,9 +303,25 @@ def task_codex_config_values(cmux_socket: Path) -> list[str]:
     return [
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
-        "features.network_proxy.domains={}",
+        'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }',
         f"features.network_proxy.unix_sockets={{ {socket_rule} = \"allow\" }}",
-        "features.network_proxy.allow_local_binding=false",
+        "features.network_proxy.allow_local_binding=true",
+        "features.network_proxy.allow_upstream_proxy=false",
+        "features.network_proxy.dangerously_allow_all_unix_sockets=false",
+        "features.network_proxy.dangerously_allow_non_loopback_proxy=false",
+        "features.network_proxy.enable_socks5=false",
+        "features.network_proxy.enable_socks5_udp=false",
+    ]
+
+
+def reviewer_codex_config_values() -> list[str]:
+    return [
+        'web_search="disabled"',
+        "sandbox_workspace_write.network_access=true",
+        "features.network_proxy.enabled=true",
+        'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }',
+        "features.network_proxy.unix_sockets={}",
+        "features.network_proxy.allow_local_binding=true",
         "features.network_proxy.allow_upstream_proxy=false",
         "features.network_proxy.dangerously_allow_all_unix_sockets=false",
         "features.network_proxy.dangerously_allow_non_loopback_proxy=false",
@@ -218,7 +340,8 @@ def validate_reviewer_safety(argv: list[str], runtime: str) -> None:
         require_option(argv, "-s", "workspace-write")
         require_option(argv, "-a", "never")
         require_option(argv, "--disable", "hooks")
-        require_option(argv, "-c", 'web_search="disabled"')
+        if option_values(argv, "-c") != reviewer_codex_config_values():
+            raise SupervisorError("Codex reviewer command has an unexpected network policy")
         if "--add-dir" in argv:
             raise SupervisorError("Codex reviewer command must not request additional writable roots")
         if any(item in CODEX_FORBIDDEN_OPTIONS for item in argv) or "danger-full-access" in argv:
@@ -359,6 +482,9 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         raise SupervisorError(f"{kind} supervisor surface does not match metadata")
     if spec["runtime"] != expected_runtime:
         raise SupervisorError(f"{kind} supervisor runtime does not match metadata")
+    expected_env: dict[str, str] = {}
+    if kind == "task" and task_policy["interaction_policy"] == "unattended":
+        expected_env["DCG_CONFIG"] = str(task_dcg_config())
     if spec["runtime"] == "codex":
         expected_cwd = (
             validated_review_runtime(worktree, source_meta)
@@ -367,22 +493,29 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         )
         require_option(spec["argv"], "--cd", str(expected_cwd))
         expected_home = expected_codex_home(source_meta)
-        if spec["env"].get("CODEX_HOME") != expected_home:
-            raise SupervisorError("Codex supervisor home does not match metadata")
+        if expected_home is not None:
+            expected_env["CODEX_HOME"] = expected_home
         expected_tmp = str(expected_cwd) if kind == "reviewer" else None
-        if spec["env"].get("TMPDIR") != expected_tmp:
-            raise SupervisorError("Codex supervisor TMPDIR does not match the isolated runtime")
+        if expected_tmp is not None:
+            expected_env["TMPDIR"] = expected_tmp
         expected_socket = (
             validated_cmux_socket_path()
             if kind == "task" and task_policy["interaction_policy"] == "unattended"
             else None
         )
-        if spec["env"].get("CMUX_SOCKET_PATH") != (
-            str(expected_socket) if expected_socket is not None else None
-        ):
-            raise SupervisorError("Codex supervisor cmux socket does not match the approved route")
-    elif spec["env"]:
-        raise SupervisorError("Claude supervisor command must not carry environment overrides")
+        if expected_socket is not None:
+            expected_env["CMUX_SOCKET_PATH"] = str(expected_socket)
+        actual_env = dict(spec["env"])
+        runtime_path = actual_env.pop("PATH", "")
+        validate_trusted_runtime_path(runtime_path, spec["runtime"])
+        if actual_env != expected_env:
+            raise SupervisorError("Codex supervisor environment does not match the approved runtime")
+    else:
+        actual_env = dict(spec["env"])
+        runtime_path = actual_env.pop("PATH", "")
+        validate_trusted_runtime_path(runtime_path, spec["runtime"])
+        if actual_env != expected_env:
+            raise SupervisorError("Claude supervisor environment does not match the approved runtime")
     if kind == "reviewer":
         validate_reviewer_safety(spec["argv"], spec["runtime"])
     else:
@@ -450,6 +583,8 @@ def prepare_task(worktree: Path, surface: str) -> Path:
         argv = ["claude", "--permission-mode", "auto", "--model", model or "opus"]
     else:
         raise SupervisorError("task executor runtime must be claude or codex")
+    if policy["interaction_policy"] == "unattended":
+        env["DCG_CONFIG"] = str(task_dcg_config())
     return write_agent_spec(worktree, "task", runtime, argv, PROMPT_FILES["task"], env)
 
 
