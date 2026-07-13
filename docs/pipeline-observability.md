@@ -34,9 +34,9 @@ that boundary explicit.
 | Review rounds started | Initial review or same-session verification handoffs actually sent to a live reviewer |
 | Valid / invalid callbacks | Reviewer payloads accepted or rejected by the versioned JSON contract |
 | Findings by severity | Numeric counts only; finding text and file evidence are not copied into telemetry |
-| Escalations raised / resolved | Material decisions routed back to the originating coordinator |
+| Escalations raised / resolved / delivery failures | Material decisions created, answered, or not delivered to the originating coordinator |
 | Watchdog stages | Delivered warning, alert, degraded, and recovery notifications accumulated per agent run |
-| Surfaces closed / left open | Exact-surface lifecycle outcome after the wrapped agent process returned |
+| Surface outcomes | Exact-surface lifecycle outcome: auto-closed, expected left open, or auto-close missed |
 
 Durations are reported as sample count, p50, and nearest-rank p95:
 
@@ -71,15 +71,16 @@ Useful release questions are ratios and trends, not one attractive latency:
 
 - **Completion:** validated completions compared with task runs.
 - **Review transport:** valid callbacks divided by all callback attempts.
-- **Autonomy:** escalations and surfaces left open per completed task.
+- **Autonomy:** escalations and auto-close misses per completed task; expected
+  attended surfaces left open are reported separately.
 - **Reliability:** watchdog alerts, degraded sampling, relay failures, and
-  non-zero agent exits.
+  escalation delivery failures or non-zero agent exits.
 - **Cost in time:** task end-to-end and review-round p50/p95, compared with the
   same class of work without dispatch.
 
 A review finding is not automatically a pipeline failure; catching a real defect
 is the review gate doing useful work. Repeated transport-invalid callbacks,
-orphan surfaces, or unresolved escalations are mechanism failures and should be
+auto-close misses, unresolved escalations, or delivery failures are mechanism failures and should be
 fixed before adding more orchestration.
 
 ## Dogfood acceptance window

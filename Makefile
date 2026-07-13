@@ -1,7 +1,7 @@
 # llm-obsidian Makefile
 # Test runner entry points for DragonScale and vault tooling.
 
-.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -21,6 +21,7 @@ help:
 	@echo "  make test-contract-schemas executable/published contract parity"
 	@echo "  make test-task-lifecycle unattended contract + cmux close lifecycle"
 	@echo "  make test-instruction-lint canonical skill/runtime instruction checks"
+	@echo "  make test-ci-workflow shallow-checkout whitespace gate invariants"
 	@echo "  make test-mcp-schema-lock offline MCP tool schema drift checks"
 	@echo "  make test-address     scripts/allocate-address.sh tests (shell)"
 	@echo "  make test-schema      strict frontmatter/link/address schema tests"
@@ -46,7 +47,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -125,6 +126,10 @@ test-task-lifecycle:
 test-instruction-lint:
 	@echo "=== test_instruction_lint.py ==="
 	@python3 tests/test_instruction_lint.py
+
+test-ci-workflow:
+	@echo "=== test_ci_workflow.py ==="
+	@python3 tests/test_ci_workflow.py
 
 test-mcp-schema-lock:
 	@echo "=== test_mcp_schema_lock.py ==="

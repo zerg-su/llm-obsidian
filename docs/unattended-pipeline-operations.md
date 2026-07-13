@@ -180,8 +180,9 @@ requires, in order:
    claimed to.
 4. `git status` in the worktree shows no dirty files outside the
    `.task-*`/`.review-*`/`.wiki-*`/`.obsidian/workspace*.json` handoff
-   prefixes and gitignored `.vault-meta/` derived state — nothing in-scope is
-   left uncommitted.
+   prefixes — nothing in-scope is left uncommitted. Gitignored runtime logs do
+   not appear in status; modified tracked `.vault-meta/` state deliberately
+   remains a close blocker.
 
 Only then does it write a `<kind>-close-armed.json` sentinel, send `/exit`,
 and return. The actual `cmux close-surface` call happens in
@@ -222,8 +223,9 @@ clearing before a fresh line).
 - `cat .task-close-armed.json` / `.review-close-armed.json` (if present) —
   close is armed and waiting for the agent process to exit.
 - `git status --short` inside the worktree — anything outside
-  `.task-*`/`.review-*`/`.wiki-*` and gitignored `.vault-meta/` here is what
-  blocks auto-close and what `/reap-send` will ask about.
+  `.task-*`/`.review-*`/`.wiki-*` here is what blocks auto-close and what
+  `/reap-send` will ask about. Tracked `.vault-meta/` files are intentionally
+  included; gitignored lifecycle logs are absent from this output.
 - `python3 tests/test_task_lifecycle.py`, `python3
   tests/test_contract_schemas.py`, `bash tests/test_review_dispatch.sh` —
   hermetic coverage for the contract/lifecycle/review-dispatch code in this

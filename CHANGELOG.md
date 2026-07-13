@@ -14,7 +14,7 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ### Fixed
 
-- Kept derived `.vault-meta/` lifecycle events from blocking an otherwise clean contract-bound task close.
+- Preserved the close guard for tracked `.vault-meta/` state while keeping gitignored lifecycle events outside Git status.
 - Preserved the `v2.0.5` agenda spacing repair in the consolidated release.
 
 ### Security

@@ -134,7 +134,7 @@ def non_handoff_dirty(worktree: Path) -> list[str]:
     dirty: list[str] = []
     for line in result.stdout.splitlines():
         path = line[3:].split(" -> ")[-1]
-        if path.startswith(HANDOFF_PREFIXES) or path.startswith(".vault-meta/") or path in {
+        if path.startswith(HANDOFF_PREFIXES) or path in {
             ".obsidian/workspace.json", ".obsidian/workspace-mobile.json"
         }:
             continue

@@ -149,6 +149,13 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
     except SystemExit:
         marker["status"] = "delivery-failed"
         write_json(marker_path, marker)
+        emit_lifecycle_event(
+            worktree,
+            "task-escalation",
+            actor=f"raise:{category}",
+            counts={"raised": 1, "delivery_failures": 1},
+            status="error",
+        )
         raise
     emit_lifecycle_event(
         worktree,

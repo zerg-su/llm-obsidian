@@ -91,6 +91,16 @@ def run() -> None:
             encoding="utf-8",
         )
         check("lifecycle origin vault resolved", lifecycle.origin_vault(worktree) == root.resolve())
+        standalone_review = root / "standalone-review"
+        standalone_review.mkdir()
+        (standalone_review / ".task-meta.json").write_text("{}\n", encoding="utf-8")
+        (standalone_review / ".review-meta.json").write_text(
+            json.dumps({"vault_root": str(root)}) + "\n", encoding="utf-8"
+        )
+        check(
+            "standalone review origin vault resolved",
+            lifecycle.origin_vault(standalone_review) == root.resolve(),
+        )
         check("lifecycle elapsed duration", lifecycle.elapsed_ms("2026-01-01T00:00:00Z", "2026-01-01T00:00:02Z") == 2000)
         check("lifecycle invalid counter is safe", lifecycle.nonnegative_int("broken") == 0)
 
@@ -109,8 +119,10 @@ def run() -> None:
                     "nit_findings": 1,
                 },
             ),
+            ("task-escalation", "raise:permission", {"raised": 1, "delivery_failures": 1}),
             ("task-escalation", "resolve:scope", {"resolved": 1, "duration_ms": 1200}),
             ("surface-lifecycle", "reviewer:claude", {"closed": 1, "auto_close_expected": 1}),
+            ("surface-lifecycle", "reviewer:claude", {"left_open": 1, "auto_close_expected": 0}),
             ("surface-lifecycle", "task:codex", {"left_open": 1, "auto_close_expected": 1}),
             ("task-complete", "reap", {"tasks": 1, "duration_ms": 5000}),
         ]
@@ -174,7 +186,13 @@ def run() -> None:
         check("lifecycle dogfood section", "## Unattended lifecycle dogfood" in result.stdout)
         check("callback validation rate", "| Callback schema-valid rate | 100.0% |" in result.stdout)
         check("lifecycle completion counted", "| Validated task completions | 1 |" in result.stdout)
-        check("surface outcomes counted", "| Surfaces auto-closed | 1 |" in result.stdout and "| Surfaces left open | 1 |" in result.stdout)
+        check(
+            "surface outcomes counted",
+            "| Surfaces auto-closed | 1 |" in result.stdout
+            and "| Surfaces left open (expected) | 1 |" in result.stdout
+            and "| Auto-close misses | 1 |" in result.stdout,
+        )
+        check("escalation delivery failure counted", "| Escalation delivery failures | 1 |" in result.stdout)
         check("lifecycle latency reported", "| Task end-to-end | 1 | 5.0 | 5.0 |" in result.stdout)
         check("Claude-only section explicit", "## Claude-only skill telemetry" in result.stdout)
 

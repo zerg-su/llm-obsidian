@@ -181,8 +181,14 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     subprocess.run(["git", "init", "-q"], cwd=worktree, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=worktree, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=worktree, check=True)
+    (worktree / ".gitignore").write_text(
+        ".vault-meta/pipeline-events.jsonl\n"
+        ".vault-meta/pipeline-events.jsonl.1\n"
+        ".vault-meta/.pipeline-events.lock\n",
+        encoding="utf-8",
+    )
     (worktree / "tracked.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "add", "tracked.txt"], cwd=worktree, check=True)
+    subprocess.run(["git", "add", "tracked.txt", ".gitignore"], cwd=worktree, check=True)
     subprocess.run(["git", "commit", "-qm", "base"], cwd=worktree, check=True)
 
     fake_bin = worktree / "fake-bin"
@@ -197,6 +203,8 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "    if [ \"${CMUX_SCREEN_FAIL:-0}\" = 1 ]; then echo 'temporary failure' >&2; exit 2; fi\n"
         "    cat \"$CMUX_SCREEN_FILE\"; exit 0 ;;\n"
         "  top) printf 'top\\n' >> \"$CMUX_TEST_LOG\"; cat \"$CMUX_TOP_FILE\"; exit 0 ;;\n"
+        "  notify) if [ \"${CMUX_NOTIFY_FAIL:-0}\" = 1 ]; then echo 'notify failed' >&2; exit 2; fi; "
+        "printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
         "  *) printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -387,6 +395,15 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
 
     result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=wrong_env)
     check("non-origin session cannot close task", result.returncode == 3)
+    tracked_state = worktree / ".vault-meta" / "address-counter.txt"
+    tracked_state.parent.mkdir(exist_ok=True)
+    tracked_state.write_text("1\n", encoding="utf-8")
+    subprocess.run(["git", "add", str(tracked_state)], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-qm", "track vault state fixture"], cwd=worktree, check=True)
+    tracked_state.write_text("2\n", encoding="utf-8")
+    result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=origin_env)
+    check("modified tracked vault state blocks close", result.returncode == 3)
+    tracked_state.write_text("1\n", encoding="utf-8")
     runtime_tmp = worktree / ".task-watchdog.json.tmp.999"
     runtime_tmp.write_text("{}\n", encoding="utf-8")
     result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=origin_env)
@@ -465,6 +482,25 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and escalation_events[0]["counts"].get("raised") == 1
         and escalation_events[1]["counts"].get("resolved") == 1,
     )
+    resolved_attention = dict(attention)
+    failed_notify_env = dict(env, CMUX_NOTIFY_FAIL="1")
+    result = run(
+        ESCALATION, "raise", "--category", "permission",
+        "--reason", "The reviewer needs an unavailable permission",
+        "--question", "Should the coordinator grant it?",
+        cwd=worktree, env=failed_notify_env,
+    )
+    check("failed escalation delivery is reported", result.returncode == 3)
+    failed_attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    check("failed escalation delivery stays explicit", failed_attention["status"] == "delivery-failed")
+    escalation_events = telemetry(worktree, "task-escalation")
+    check(
+        "failed escalation delivery counted",
+        escalation_events[-1]["status"] == "error"
+        and escalation_events[-1]["counts"].get("raised") == 1
+        and escalation_events[-1]["counts"].get("delivery_failures") == 1,
+    )
+    write_json(worktree / ".task-needs-attention.json", resolved_attention)
     check("task exact surface targeted", f"--surface {meta['task_surface']}" in cmux_log.read_text())
     check("Codex task composer cleared", f"send-key --surface {meta['task_surface']} backspace" in cmux_log.read_text())
 

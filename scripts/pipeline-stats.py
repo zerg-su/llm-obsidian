@@ -404,12 +404,20 @@ def main() -> int:
             ("Findings: nit", int(sum(event_count(e, "nit_findings") for e in review_rounds))),
             ("Escalations raised", int(sum(event_count(e, "raised") for e in escalations))),
             ("Escalations resolved", int(sum(event_count(e, "resolved") for e in escalations))),
+            ("Escalation delivery failures", int(sum(event_count(e, "delivery_failures") for e in escalations))),
             ("Watchdog warnings", int(sum(event_count(e, "watchdog_warnings") for e in task_runs + reviewer_runs))),
             ("Watchdog alerts", int(sum(event_count(e, "watchdog_alerts") for e in task_runs + reviewer_runs))),
             ("Watchdog degraded notices", int(sum(event_count(e, "watchdog_degraded") for e in task_runs + reviewer_runs))),
             ("Watchdog recoveries", int(sum(event_count(e, "watchdog_recoveries") for e in task_runs + reviewer_runs))),
             ("Surfaces auto-closed", int(sum(event_count(e, "closed") for e in surfaces))),
-            ("Surfaces left open", int(sum(event_count(e, "left_open") for e in surfaces))),
+            ("Surfaces left open (expected)", int(sum(
+                event_count(e, "left_open")
+                for e in surfaces if event_count(e, "auto_close_expected") == 0
+            ))),
+            ("Auto-close misses", int(sum(
+                event_count(e, "left_open")
+                for e in surfaces if event_count(e, "auto_close_expected") > 0
+            ))),
         ]
         for label, value in metrics:
             lines.append(f"| {label} | {value} |")

@@ -27,17 +27,28 @@ def read_object(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def declared_vault(value: object) -> Path | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser().resolve()
+    return candidate if (candidate / "wiki").is_dir() else None
+
+
 def origin_vault(worktree: Path) -> Path | None:
     """Resolve the coordinator vault without recording the private absolute path."""
 
     root = worktree.expanduser().resolve()
     for marker_name in (".task-reap-complete.json", ".task-reap-prepared.json"):
         marker = read_object(root / marker_name)
-        raw_vault = str(marker.get("vault_root") or "").strip()
-        if raw_vault:
-            candidate = Path(raw_vault).expanduser().resolve()
-            if (candidate / "wiki").is_dir():
-                return candidate
+        candidate = declared_vault(marker.get("vault_root"))
+        if candidate is not None:
+            return candidate
+
+    review_meta = read_object(root / ".review-meta.json")
+    candidate = declared_vault(review_meta.get("vault_root"))
+    if candidate is not None:
+        return candidate
 
     meta = read_object(root / ".task-meta.json")
     raw_plan = str(meta.get("plan_file") or "").strip()
@@ -115,6 +126,7 @@ def emit_lifecycle_event(
 
 
 __all__ = [
+    "declared_vault",
     "elapsed_ms",
     "emit_lifecycle_event",
     "nonnegative_int",
