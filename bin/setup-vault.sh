@@ -6,11 +6,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VAULT="$ROOT"
 RESET_OBSIDIAN=0
 REPAIR_EXCALIDRAW=0
+REPAIR_TASKS=0
 EXCALIDRAW_LOCK_FILE="${EXCALIDRAW_LOCK_FILE:-$ROOT/config/obsidian-excalidraw-main.lock.json}"
+TASKS_LOCK_FILE="${TASKS_LOCK_FILE:-$ROOT/config/obsidian-tasks.lock.json}"
+TASKS_DEFAULTS_FILE="${TASKS_DEFAULTS_FILE:-$ROOT/config/obsidian-tasks.defaults.json}"
+TASKS_SNIPPET_FILE="${TASKS_SNIPPET_FILE:-$ROOT/.obsidian/snippets/llm-obsidian-tasks.css}"
 
 usage() {
   cat <<'EOF'
-usage: bin/setup-vault.sh [--reset-obsidian] [--repair-excalidraw] [vault-path]
+usage: bin/setup-vault.sh [--reset-obsidian] [--repair-excalidraw] [--repair-tasks] [vault-path]
 
 Default behavior preserves every existing .obsidian file.  The explicit
 --reset-obsidian flag replaces only app.json, appearance.json, and graph.json
@@ -18,6 +22,9 @@ with repository defaults after backing up the complete .obsidian directory.
 Excalidraw main.js is installed from the pinned checksum when missing. An
 existing checksum mismatch is preserved unless --repair-excalidraw is given;
 repair also backs up the existing file before replacement.
+Obsidian Tasks 8.2.2 is installed as a verified three-asset set. Existing
+checksum mismatches are preserved unless --repair-tasks is given; Tasks user
+settings are merged only for entirely absent top-level keys.
 EOF
 }
 
@@ -25,6 +32,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --reset-obsidian) RESET_OBSIDIAN=1 ;;
     --repair-excalidraw) REPAIR_EXCALIDRAW=1 ;;
+    --repair-tasks) REPAIR_TASKS=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) printf 'ERROR: unknown option: %s\n' "$1" >&2; exit 2 ;;
     *) VAULT="$1" ;;
@@ -215,6 +223,16 @@ PY
     install_excalidraw_main 0
   fi
 fi
+
+tasks_args=(
+  --vault "$VAULT"
+  --lock "$TASKS_LOCK_FILE"
+  --defaults "$TASKS_DEFAULTS_FILE"
+  --snippet "$TASKS_SNIPPET_FILE"
+)
+[ "$REPAIR_TASKS" -eq 1 ] && tasks_args+=(--repair)
+[ "$HAD_OBSIDIAN" -eq 0 ] && tasks_args+=(--fresh)
+python3 "$ROOT/scripts/setup-obsidian-tasks.py" "${tasks_args[@]}"
 
 printf '\nSetup complete. Open this folder as an Obsidian vault: %s\n' "$VAULT"
 if [ -n "$BACKUP" ]; then

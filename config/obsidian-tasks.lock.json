@@ -1,0 +1,19 @@
+{
+  "project": "obsidian-tasks-group/obsidian-tasks",
+  "plugin_id": "obsidian-tasks-plugin",
+  "version": "8.2.2",
+  "assets": {
+    "main.js": {
+      "url": "https://github.com/obsidian-tasks-group/obsidian-tasks/releases/download/8.2.2/main.js",
+      "sha256": "5c68dd0f4e1838f3bd263df39aa508d66ed94e85cc4a48bb338170be2955e077"
+    },
+    "manifest.json": {
+      "url": "https://github.com/obsidian-tasks-group/obsidian-tasks/releases/download/8.2.2/manifest.json",
+      "sha256": "db6fe0eb4f033955cdae3e545a39f69748c87262ea8b352805662c4ccbcb714b"
+    },
+    "styles.css": {
+      "url": "https://github.com/obsidian-tasks-group/obsidian-tasks/releases/download/8.2.2/styles.css",
+      "sha256": "32b3d394b697a058f2dcaef0d38476b3c3e585aea63549a816bcc237cf3e3872"
+    }
+  }
+}

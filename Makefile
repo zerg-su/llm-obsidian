@@ -1,7 +1,7 @@
 # llm-obsidian Makefile
 # Test runner entry points for DragonScale and vault tooling.
 
-.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -16,6 +16,7 @@ help:
 	@echo "  make test-runtime-hooks Claude/Codex hook wire parity tests"
 	@echo "  make test-runtime-detection legacy + three-way runtime detection tests"
 	@echo "  make test-session-map Claude/Codex daily session grouping tests"
+	@echo "  make test-agenda      deterministic daily carry-over and report tests"
 	@echo "  make test-skill-budget enforce Codex initial skill registry budget"
 	@echo "  make test-contract-schemas executable/published contract parity"
 	@echo "  make test-task-lifecycle unattended contract + cmux close lifecycle"
@@ -45,7 +46,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -80,6 +81,10 @@ test-claude-subscription:
 test-journal-write:
 	@echo "=== test_journal_write.py ==="
 	@python3 tests/test_journal_write.py
+
+test-agenda:
+	@echo "=== test_agenda.py ==="
+	@python3 tests/test_agenda.py
 
 test-dense-worker:
 	@echo "=== test_dense_worker.py ==="

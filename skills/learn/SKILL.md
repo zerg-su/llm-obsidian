@@ -3,11 +3,9 @@ name: learn
 metadata:
   version: 2.0.0
 description: >-
-  Interactive tutor over any notes in wiki/learning/: study, quiz, practice,
-  and progress tracking. Use for /learn, учимся, давай учиться, квиз по теме,
-  проверь меня, прогресс обучения, quiz me, or study this topic. Bootstrap a
-  missing learning section from user-provided material; never assume a specific
-  course or certification.
+  Tutor over wiki/learning/: study, quiz, practice, progress. Triggers: /learn,
+  учимся, квиз по теме, проверь меня, прогресс обучения, quiz me, study this
+  topic. Can bootstrap from user material; never assumes a specific course.
 allowed-tools: Read Glob Grep Bash AskUserQuestion WebSearch WebFetch
 ---
 

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,9 +38,274 @@ GROUNDING_STOPWORDS = {
     "для", "как", "это", "при", "или", "работа", "обновление",
 }
 
+DAILY_TASK_SECTIONS = {"plans": "## Планы", "reminders": "## Напоминания"}
+TASK_STATUS_NAMES = {
+    " ": "open",
+    "/": "in_progress",
+    "x": "done",
+    "X": "done",
+    "-": "cancelled",
+    ">": "migrated",
+}
+TASK_LINE_RX = re.compile(
+    r"^(?P<indent>[ \t]*)-\s+\[(?P<status>[ /xX>\-])\]\s+(?P<body>\S.*)$"
+)
+LEGACY_REMINDER_RX = re.compile(r"^(?P<indent>[ \t]*)-\s+(?!\[[^]]*\])(?P<body>\S.*)$")
+AGENDA_BLOCK_RX = re.compile(r"(?:^|\s)\^(?P<id>agenda-[0-9a-f]{12})\s*$")
+AGENDA_MIGRATION_RX = re.compile(
+    r"(?:\s+)?#agenda/migrated\s+↪\s+\[\[[^\]\n]+\]\]",
+    re.IGNORECASE,
+)
+TASK_METADATA_MARKER_RX = re.compile(r"(?<!\S)(✅|➕|📅|⏳|🛫|❌|🔁|🆔|⛔|🏁|⏫|🔼|🔽|⏬|🔺)(?=\s|\d|$)")
+TASK_DATE_METADATA_RX = re.compile(r"(✅|➕|📅|⏳|🛫|❌)\s*(\d{4}-\d{2}-\d{2})")
+TASK_DONE_METADATA_RX = re.compile(r"(?:^|\s)✅\s*\d{4}-\d{2}-\d{2}(?=\s|$)")
+TASK_CANCELLED_METADATA_RX = re.compile(r"(?:^|\s)❌\s*\d{4}-\d{2}-\d{2}(?=\s|$)")
+TASK_METADATA_NAMES = {
+    "✅": "done",
+    "➕": "created",
+    "📅": "due",
+    "⏳": "scheduled",
+    "🛫": "start",
+    "❌": "cancelled",
+    "🔁": "recurrence",
+    "🆔": "id",
+    "⛔": "depends_on",
+    "🏁": "on_completion",
+    "⏫": "priority_highest",
+    "🔼": "priority_high",
+    "🔽": "priority_low",
+    "⏬": "priority_lowest",
+    "🔺": "priority_urgent",
+}
+
+
+@dataclass(frozen=True)
+class DailyTask:
+    """One task occurrence parsed from a daily Plans or Reminders section."""
+
+    date: str
+    section: str
+    line_no: int
+    raw: str
+    indent: str
+    symbol: str
+    status: str
+    description: str
+    metadata_suffix: str
+    metadata: dict[str, tuple[str, ...]]
+    block_id: str | None
+    legacy_plain_reminder: bool = False
+
+    @property
+    def normalized_text(self) -> str:
+        return normalize_task_text(self.description)
+
+    @property
+    def identity(self) -> str:
+        if self.block_id:
+            return f"id:{self.block_id}"
+        digest = hashlib.sha256(
+            f"{self.section}\0{self.normalized_text}".encode("utf-8")
+        ).hexdigest()[:16]
+        return f"legacy:{digest}"
+
 
 class DailyContractError(ValueError):
     """A daily evidence or summary payload violates its public contract."""
+
+
+def normalize_task_text(text: str) -> str:
+    """Return a stable, human-text identity without migration bookkeeping."""
+
+    clean = AGENDA_MIGRATION_RX.sub(" ", text)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean.casefold()
+
+
+def agenda_block_id(date: str, section: str, text: str) -> str:
+    """Create the stable ID used by new daily plans and reminders."""
+
+    validate_date(date)
+    if section not in DAILY_TASK_SECTIONS:
+        raise DailyContractError(f"unknown daily task section: {section}")
+    description, _metadata, _existing_id = _split_task_body(text)
+    normalized = normalize_task_text(description)
+    if not normalized:
+        raise DailyContractError("task text must not be empty")
+    digest = hashlib.sha256(f"{date}\0{section}\0{normalized}".encode("utf-8")).hexdigest()
+    return f"agenda-{digest[:12]}"
+
+
+def _split_task_body(body: str) -> tuple[str, str, str | None]:
+    """Split description, Tasks metadata suffix, and our terminal block ID."""
+
+    working = body.strip()
+    block_id: str | None = None
+    block_match = AGENDA_BLOCK_RX.search(working)
+    if block_match:
+        block_id = block_match.group("id")
+        working = working[: block_match.start()].rstrip()
+    working = AGENDA_MIGRATION_RX.sub(" ", working).strip()
+    markers = list(TASK_METADATA_MARKER_RX.finditer(working))
+    if not markers:
+        return working, "", block_id
+    first = markers[0].start()
+    description = working[:first].rstrip()
+    if not description:
+        return working, "", block_id
+    return description, working[first:].strip(), block_id
+
+
+def _metadata_dictionary(suffix: str) -> dict[str, tuple[str, ...]]:
+    """Parse the complete Tasks 8.x trailing metadata marker dictionary."""
+
+    values: dict[str, list[str]] = {}
+    markers = list(TASK_METADATA_MARKER_RX.finditer(suffix))
+    for index, match in enumerate(markers):
+        marker = match.group(1)
+        start = match.end()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(suffix)
+        value = suffix[start:end].strip()
+        if marker in {"⏫", "🔼", "🔽", "⏬", "🔺"}:
+            value = marker
+        elif marker in {"✅", "➕", "📅", "⏳", "🛫", "❌"}:
+            date = TASK_DATE_METADATA_RX.search(marker + value)
+            value = date.group(2) if date else value
+        values.setdefault(TASK_METADATA_NAMES[marker], []).append(value)
+    return {key: tuple(items) for key, items in values.items()}
+
+
+def _active_metadata_suffix(suffix: str) -> str:
+    """Remove terminal dates while preserving reusable Tasks metadata."""
+
+    suffix = TASK_DONE_METADATA_RX.sub(" ", suffix)
+    suffix = TASK_CANCELLED_METADATA_RX.sub(" ", suffix)
+    return re.sub(r"\s+", " ", suffix).strip()
+
+
+def parse_daily_task(
+    line: str,
+    *,
+    date: str,
+    section: str,
+    line_no: int,
+) -> DailyTask | None:
+    """Parse a task line, including legacy plain reminder bullets."""
+
+    validate_date(date)
+    if section not in DAILY_TASK_SECTIONS:
+        raise DailyContractError(f"unknown daily task section: {section}")
+    match = TASK_LINE_RX.fullmatch(line)
+    legacy = False
+    if match is None and section == "reminders":
+        match = LEGACY_REMINDER_RX.fullmatch(line)
+        legacy = match is not None
+    if match is None:
+        return None
+    symbol = " " if legacy else match.group("status")
+    body = match.group("body")
+    description, metadata_suffix, block_id = _split_task_body(body)
+    if not description:
+        return None
+    return DailyTask(
+        date=date,
+        section=section,
+        line_no=line_no,
+        raw=line,
+        indent=match.group("indent"),
+        symbol=symbol,
+        status=TASK_STATUS_NAMES[symbol],
+        description=description,
+        metadata_suffix=metadata_suffix,
+        metadata=_metadata_dictionary(metadata_suffix),
+        block_id=block_id,
+        legacy_plain_reminder=legacy,
+    )
+
+
+def task_open_line(task: DailyTask, block_id: str) -> str:
+    """Render one open target occurrence while preserving useful Tasks metadata."""
+
+    suffix = _active_metadata_suffix(task.metadata_suffix)
+    parts = [f"{task.indent}- [ ] {task.description}"]
+    if suffix:
+        parts.append(suffix)
+    parts.append(f"^{block_id}")
+    return " ".join(parts)
+
+
+def task_input_open_line(date: str, section: str, text: str) -> str:
+    """Normalize user task input into one canonical open occurrence."""
+
+    validate_date(date)
+    if section not in DAILY_TASK_SECTIONS:
+        raise DailyContractError(f"unknown daily task section: {section}")
+    description, metadata_suffix, existing_id = _split_task_body(text)
+    if not description:
+        raise DailyContractError("task text must not be empty")
+    block_id = existing_id or agenda_block_id(date, section, description)
+    suffix = _active_metadata_suffix(metadata_suffix)
+    parts = [f"- [ ] {description}"]
+    if suffix:
+        parts.append(suffix)
+    parts.append(f"^{block_id}")
+    return " ".join(parts)
+
+
+def task_done_line(task: DailyTask, done_date: str) -> str:
+    """Render a completed occurrence with a canonical done date."""
+
+    validate_date(done_date, "done_date")
+    suffix = _active_metadata_suffix(task.metadata_suffix)
+    block_id = task.block_id or agenda_block_id(task.date, task.section, task.description)
+    parts = [f"{task.indent}- [x] {task.description}"]
+    if suffix:
+        parts.append(suffix)
+    parts.extend((f"✅ {done_date}", f"^{block_id}"))
+    return " ".join(parts)
+
+
+def task_migrated_line(task: DailyTask, target_date: str, block_id: str) -> str:
+    """Close a source occurrence as migrated and point at the target day."""
+
+    validate_date(target_date, "target_date")
+    suffix = _active_metadata_suffix(task.metadata_suffix)
+    parts = [f"{task.indent}- [>] {task.description}"]
+    if suffix:
+        parts.append(suffix)
+    parts.extend((f"#agenda/migrated ↪ [[{target_date}]]", f"^{block_id}"))
+    return " ".join(parts)
+
+
+def h2_section_span(text: str, heading: str) -> tuple[int, int]:
+    """Return the zero-based half-open body span for an H2 section."""
+
+    lines = text.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == heading) + 1
+    except StopIteration as exc:
+        raise DailyContractError(f"required section missing: {heading}") from exc
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    return start, end
+
+
+def section_has_indented_children(lines: list[str], line_index: int, indent: str) -> bool:
+    """Return true when a task owns an indented Markdown subtree."""
+
+    parent_width = len(indent.expandtabs(4))
+    for candidate in lines[line_index + 1 :]:
+        if not candidate.strip():
+            continue
+        candidate_indent = re.match(r"^[ \t]*", candidate).group(0)
+        width = len(candidate_indent.expandtabs(4))
+        if width <= parent_width:
+            return False
+        return True
+    return False
 
 
 def validate_date(value: object, field: str = "date") -> str:

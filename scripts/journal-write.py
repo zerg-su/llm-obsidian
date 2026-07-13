@@ -13,7 +13,17 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from daily_contract import DailyContractError, replace_h2, update_frontmatter, validate_date
+from daily_contract import (
+    DAILY_TASK_SECTIONS,
+    DailyContractError,
+    h2_section_span,
+    parse_daily_task,
+    replace_h2,
+    task_done_line,
+    task_input_open_line,
+    update_frontmatter,
+    validate_date,
+)
 
 
 ROOT = Path(os.environ.get("LLM_OBSIDIAN_ROOT") or Path(__file__).resolve().parents[1]).resolve()
@@ -117,17 +127,28 @@ def append(date: str, section_name: str, text: str, *, dry_run: bool) -> dict:
 
     def transform(page: str) -> str:
         current = section_lines(page, heading)
-        if section_name == "plans":
-            line = f"- [ ] {text.strip()}"
-            identity = text.strip().casefold()
-            if any(re.sub(r"^- \[[ xX]\]\s*", "", item).casefold() == identity for item in current):
+        if section_name in DAILY_TASK_SECTIONS:
+            candidate = task_input_open_line(date, section_name, text)
+            candidate_task = parse_daily_task(
+                candidate,
+                date=date,
+                section=section_name,
+                line_no=1,
+            )
+            if candidate_task is None:
+                raise DailyContractError("cannot normalize task input")
+            identity = candidate_task.normalized_text
+            parsed = [
+                parse_daily_task(line, date=date, section=section_name, line_no=index + 1)
+                for index, line in enumerate(current)
+            ]
+            if any(
+                item is not None
+                and item.normalized_text == identity
+                for item in parsed
+            ):
                 return page
-            current.append(line)
-        elif section_name == "reminders":
-            line = f"- {text.strip()}"
-            if any(item.casefold() == line.casefold() for item in current):
-                return page
-            current.append(line)
+            current.append(candidate)
         else:
             current.extend(text.strip().splitlines())
         return replace_h2(page, heading, current)
@@ -135,21 +156,29 @@ def append(date: str, section_name: str, text: str, *, dry_run: bool) -> dict:
     return mutate(date, transform, dry_run=dry_run)
 
 
-def check(date: str, match: str, *, dry_run: bool) -> dict:
+def check(date: str, match: str, *, section_name: str = "plans", dry_run: bool) -> dict:
     needle = match.strip().casefold()
     if not needle:
         raise DailyContractError("check match must not be empty")
+    if section_name not in DAILY_TASK_SECTIONS:
+        raise DailyContractError("check section must be plans or reminders")
 
     def transform(page: str) -> str:
-        current = section_lines(page, "## Планы")
-        indexes = [index for index, line in enumerate(current) if line.startswith("- [ ]") and needle in line.casefold()]
-        if not indexes:
-            raise DailyContractError("no unchecked plan matches")
-        if len(indexes) > 1:
-            choices = "; ".join(current[index] for index in indexes[:5])
-            raise DailyContractError(f"multiple unchecked plans match: {choices}")
-        current[indexes[0]] = current[indexes[0]].replace("- [ ]", "- [x]", 1)
-        return replace_h2(page, "## Планы", current)
+        lines = page.splitlines()
+        start, end = h2_section_span(page, DAILY_TASK_SECTIONS[section_name])
+        matches = []
+        for index in range(start, end):
+            task = parse_daily_task(lines[index], date=date, section=section_name, line_no=index + 1)
+            if task is not None and task.status in {"open", "in_progress"} and needle in task.raw.casefold():
+                matches.append((index, task))
+        if not matches:
+            raise DailyContractError(f"no unfinished {section_name} item matches")
+        if len(matches) > 1:
+            choices = "; ".join(task.raw for _, task in matches[:5])
+            raise DailyContractError(f"multiple unfinished {section_name} items match: {choices}")
+        index, task = matches[0]
+        lines[index] = task_done_line(task, datetime.now().astimezone().strftime("%Y-%m-%d"))
+        return "\n".join(lines).rstrip() + "\n"
 
     return mutate(date, transform, dry_run=dry_run)
 
@@ -173,30 +202,54 @@ def sessions(date: str, *, dry_run: bool) -> dict:
 
 
 def carryover(source: str, target: str, *, dry_run: bool) -> dict:
-    source_path = ROOT / rel_path(source)
-    if not source_path.is_file():
-        raise DailyContractError(f"source date page does not exist: {source}")
-    pending = [line for line in section_lines(source_path.read_text(encoding="utf-8"), "## Планы") if line.startswith("- [ ]")]
-    if not pending:
-        return {"schema_version": 1, "status": "nothing", "written_paths": []}
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "agenda.py"),
+        "collect",
+        "--source",
+        source,
+        "--date",
+        target,
+        "--section",
+        "plans",
+    ]
+    if dry_run:
+        command.append("--dry-run")
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DailyContractError(f"agenda returned invalid JSON: {(result.stderr or result.stdout).strip()}") from exc
+    if result.returncode:
+        raise DailyContractError(result.stderr.strip() or "agenda carryover failed")
+    return response
 
-    def transform(page: str) -> str:
-        current = section_lines(page, "## Планы")
-        identities = {re.sub(r"^- \[[ xX]\]\s*", "", line).casefold() for line in current}
-        for line in pending:
-            identity = re.sub(r"^- \[[ xX]\]\s*", "", line).casefold()
-            if identity not in identities:
-                current.append(line)
-                identities.add(identity)
-        return replace_h2(page, "## Планы", current)
 
-    return mutate(target, transform, dry_run=dry_run)
+def today(date: str, *, dry_run: bool) -> dict:
+    ensured = ensure(date, dry_run=dry_run)
+    command = [sys.executable, str(ROOT / "scripts" / "agenda.py"), "scan", "--date", date, "--json"]
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    if result.returncode:
+        raise DailyContractError(result.stderr.strip() or "agenda scan failed")
+    try:
+        scan = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise DailyContractError("agenda scan returned invalid JSON") from exc
+    return {
+        "schema_version": 1,
+        "status": "ok",
+        "date": date,
+        "ensure": ensured,
+        "unfinished_count": scan["count"],
+        "warnings": scan["warnings"],
+        "next": f"python3 scripts/agenda.py collect --date {date}",
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("ensure", "sessions"):
+    for name in ("ensure", "sessions", "today"):
         item = sub.add_parser(name)
         item.add_argument("--date", required=True)
         item.add_argument("--dry-run", action="store_true")
@@ -208,6 +261,7 @@ def main() -> int:
     done = sub.add_parser("check")
     done.add_argument("--date", required=True)
     done.add_argument("--match", required=True)
+    done.add_argument("--section", choices=sorted(DAILY_TASK_SECTIONS), default="plans")
     done.add_argument("--dry-run", action="store_true")
     carry = sub.add_parser("carryover")
     carry.add_argument("--source", required=True)
@@ -217,10 +271,12 @@ def main() -> int:
     try:
         if args.command == "ensure":
             response = ensure(args.date, dry_run=args.dry_run)
+        elif args.command == "today":
+            response = today(args.date, dry_run=args.dry_run)
         elif args.command == "append":
             response = append(args.date, args.section, args.text, dry_run=args.dry_run)
         elif args.command == "check":
-            response = check(args.date, args.match, dry_run=args.dry_run)
+            response = check(args.date, args.match, section_name=args.section, dry_run=args.dry_run)
         elif args.command == "sessions":
             response = sessions(args.date, dry_run=args.dry_run)
         else:

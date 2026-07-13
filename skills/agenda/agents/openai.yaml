@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agenda"
+  short_description: "Collect unfinished daily plans and reminders"
+  default_prompt: "Use $agenda to scan and safely carry unfinished daily items forward."

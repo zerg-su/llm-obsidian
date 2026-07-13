@@ -9,6 +9,11 @@
 # Excalidraw main.js is 8MB — downloaded by setup-vault.sh, not tracked in git
 .obsidian/plugins/obsidian-excalidraw-plugin/main.js
 
+# Obsidian Tasks release assets are pinned and installed by setup-vault.sh.
+.obsidian/plugins/obsidian-tasks-plugin/main.js
+.obsidian/plugins/obsidian-tasks-plugin/manifest.json
+.obsidian/plugins/obsidian-tasks-plugin/styles.css
+
 # Large binary assets — add your own images to _attachments/images/
 # Uncomment the line below to exclude images from git (recommended for large vaults)
 # _attachments/images/

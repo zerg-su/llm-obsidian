@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-11
+updated: 2026-07-13
 tags:
   - meta
   - guide
@@ -37,7 +37,8 @@ sessions:
 
 ### Продуктивность
 
-- **journal** — дневник по датам: план на завтра, напоминания, carry-over.
+- **journal** — дневник по датам: планы и напоминания как Tasks-checkboxes, завершение с датой.
+- **agenda** — read-only scan незавершённого → атомарный перенос планов/напоминаний → месячный live-report.
 - **daily** — статус за день (3-7 буллетов) в Daily Status Log.
 - **backlog** — «не забыть»: одна строка в capture-инбокс; promote → /save.
 - **find-session** — найти прошлую сессию по похожей задаче.
@@ -60,10 +61,10 @@ sessions:
 
 ## Auto-triggers vs manual
 
-Роутер (`.claude/skill-rules.json`) сам подсказывает скилл по фразе: «сохрани это» → save, «что ты знаешь про» → wiki-query, «не забыть» → backlog, «напомни в пятницу» → journal, «сделай ранбук из сессии» → distill-runbook. Подсказки мягкие: игнорируй, если не в тему. Полный список паттернов — в самом rules-файле.
+Роутер (`.claude/skill-rules.json`) сам подсказывает скилл по фразе: «сохрани это» → save, «что ты знаешь про» → wiki-query, «не забыть» → backlog, «напомни в пятницу» → journal, «собери незавершённое» → agenda, «сделай ранбук из сессии» → distill-runbook. Подсказки мягкие: игнорируй, если не в тему. Полный список паттернов — в самом rules-файле.
 
 ## Типовые цепочки
 
 - Новый материал: `ingest <источник>` → `lint the wiki` (раз в неделю) → `/wiki-fold` (по нуджу).
-- Рабочий день: `/journal` утром → работа с `/save` по ходу → `/daily` вечером.
+- Рабочий день: `/journal` утром → `agenda scan` и при необходимости `agenda collect` → работа с `/save` → `/daily` вечером.
 - Большая задача: план в plan mode → auto-capture в `wiki/plans/` → `/dispatch` на исполнение → `/reap` результата.

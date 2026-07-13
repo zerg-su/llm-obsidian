@@ -11,7 +11,7 @@ from pathlib import Path
 
 DEFAULT_LIMIT = 7500
 DESCRIPTION_RX = re.compile(
-    r"(?ms)^description:\s*(.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:\s|^---\s*$)"
+    r"(?ms)^description:\s*(.*?)(?=^[A-Za-z_][A-Za-z0-9_-]*:\s|\Z)"
 )
 
 

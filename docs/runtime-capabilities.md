@@ -8,6 +8,7 @@ must not be inferred from another runtime.
 |---|---|---|---|
 | Repo skills | Claude plugin marketplace; `/skill` UI | Generated repo-local Codex plugin; `$llm-obsidian:skill` | Read and follow `skills/<name>/SKILL.md` manually |
 | Daily synthesis | Subscription preflight + read-only Sonnet low plugin agent | Read-only Terra low project agent | Same contract in the parent agent |
+| Agenda carry-over | Shared deterministic scan/collect/report scripts; optional Tasks UI | Same scripts and optional Tasks UI | Same scripts; plugin is not required for correctness |
 | Daily latency | Content-free collection/synthesis/run timings with p50/p95 | Same shared numeric events | Same shared numeric events |
 | Transactional writer, retrieval, fold | Shared Python/shell scripts | Same scripts | Same scripts |
 | Local document normalization | Shared stdlib fast path + isolated pinned Docling | Same scripts/runtime | Same scripts/runtime |
@@ -34,6 +35,13 @@ remote services and external plugins, runs with offline model flags, and uses
 prefetched EasyOCR `ru,en` plus layout/table artifacts. Missing dependencies
 return a typed coordinator escalation instead of an interactive background
 prompt. See [document ingestion](document-ingestion.md).
+
+Daily agenda operations are runtime-neutral too. `journal-write.py` creates
+Tasks-compatible plan/reminder checkboxes with stable block IDs. `agenda.py`
+previews all unfinished prior items read-only, then can close sources, create a
+single target occurrence, and refresh the monthly live-query page in one
+`vault-write.py` transaction. Obsidian Tasks 8.2.2 is a pinned UI layer; the
+Python contract remains authoritative when the plugin is absent or customized.
 
 Codex hook parity uses the documented lifecycle wire format and fixtures in
 `tests/test_runtime_hooks.py`. Current Codex interception is incomplete for

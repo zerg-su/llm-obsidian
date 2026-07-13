@@ -121,6 +121,18 @@
       "hint": "Date-keyed journal wiki/daily/ (Планы/Напоминания/Инциденты/Сделано). Modes: today/plan/remind/check. Dateless 'remind me to' → /backlog; ситуативное 'что сегодня' → /morning; EOD-статус → /daily"
     },
     {
+      "skill": "agenda",
+      "patterns": [
+        "(?i)\\b/?agenda\\b",
+        "(?i)\\bagenda\\s+(scan|collect|report)\\b",
+        "(?i)\\bсобер\\w*\\s+незаверш\\w*\\b",
+        "(?i)\\bперенеси\\s+(планы|напоминания|незаверш[её]нное)\\b",
+        "(?i)\\b(месячн\\w*|за месяц)\\b.{0,30}\\b(незаверш|план|напомин)\\w*\\b",
+        "(?i)\\bпроверь\\b.{0,40}\\b(стар\\w*|прошл\\w*)\\b.{0,40}\\b(план|напомин)\\w*\\b"
+      ],
+      "hint": "Read-only scan first; atomic collect marks sources [>], creates one target occurrence, and refreshes the monthly live Tasks report"
+    },
+    {
       "skill": "backlog",
       "patterns": [
         "(?i)\\bне\\s+забы(ть|вать|л)\\b",

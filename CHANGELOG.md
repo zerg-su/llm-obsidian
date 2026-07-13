@@ -4,6 +4,26 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
+## [2.0.4] - 2026-07-13
+
+### Added
+
+- Added the runtime-neutral `/agenda` workflow: read-only preview of unfinished plans and reminders, atomic carry-over into one target occurrence, and declarative monthly Obsidian Tasks reports.
+- Added an optional pinned Obsidian Tasks 8.2.2 UI layer with checksum-verified assets, preserved user settings, explicit backup-and-repair mode, and a small status snippet.
+
+### Changed
+
+- Journal plans and reminders now use Tasks-compatible checkboxes, stable block IDs, canonical completion dates, and exact-text deduplication while retaining legacy plain reminders as readable input.
+
+### Fixed
+
+- Agenda collection skips ambiguous legacy chains and nested subtrees, guards terminal, duplicate, or conflicting target identities, tolerates missing source sections, and restores required target headings in canonical template order.
+- Partial Tasks installations restore only missing verified assets; clean reruns and carry-over reruns remain idempotent.
+
+### Security
+
+- Source pages, the target day, and all affected monthly reports are committed through one optimistic `vault-write.py` transaction; plugin downloads are version-pinned and SHA-256 verified before installation.
+
 ## [2.0.3] - 2026-07-13
 
 ### Added

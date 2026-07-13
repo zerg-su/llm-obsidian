@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_WEB_SKILLS = ("autoresearch", "wiki-ingest", "wiki-query")
-WRITER_REQUIRED_SKILLS = ("daily", "journal")
+WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
 
 
 def frontmatter(text: str) -> str:

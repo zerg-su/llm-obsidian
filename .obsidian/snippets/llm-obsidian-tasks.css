@@ -1,0 +1,19 @@
+/* LLM Obsidian agenda status: migrated elsewhere, no longer actionable here. */
+.task-list-item[data-task=">"] > input.task-list-item-checkbox,
+input.task-list-item-checkbox[data-task=">"] {
+  border-color: var(--text-muted);
+  background-color: transparent;
+}
+
+.task-list-item[data-task=">"] > input.task-list-item-checkbox::after,
+input.task-list-item-checkbox[data-task=">"]::after {
+  content: "›";
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.task-list-item[data-task=">"] > .task-list-item-content,
+.task-list-item[data-task=">"] > p {
+  color: var(--text-muted);
+  text-decoration: none;
+}

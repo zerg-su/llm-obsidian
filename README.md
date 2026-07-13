@@ -153,7 +153,7 @@ Reviewers are launched with read-only mandates. Secrets for MCP services live ou
 | Skill routing | descriptions only | data-driven `skill-router` hook (regex rules → soft hints) + `session-nudge` maintenance hints |
 | MCP | per-session stdio servers | HTTP gateway: 1 process set per machine, secrets outside the repo, `doctor`/`smoke`/`update` tooling, profile pattern for heavy servers |
 | Orchestration | — | `/dispatch` / `/reap` worktree + split workflow with auto plan handoff |
-| Productivity layer | — | `/journal`, `/daily`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/save-plan` |
+| Productivity layer | — | `/journal`, `/agenda`, `/daily`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/save-plan` |
 | Docs language | EN | EN + RU, RU-first audience |
 
 Deliberately **not** carried over from upstream: methodology modes, `/think`, the `wiki-cli` transport layer, and the contextual-prefix chunk cascade (its best tier requires cloud API calls; our flat-subscription-friendly stack embeds locally).
@@ -186,6 +186,11 @@ The Excalidraw `main.js` bootstrap is pinned and checksum-verified. A different
 existing build is preserved with a warning; use
 `bash bin/setup-vault.sh --repair-excalidraw "$(pwd)"` (or pass the same flag
 to `setup-clean-machine.sh`) to back it up and replace it explicitly.
+Obsidian Tasks 8.2.2 is likewise pinned as a verified `main.js` +
+`manifest.json` + `styles.css` set. It powers checkbox statuses and monthly
+live agenda views, while `scripts/agenda.py` remains authoritative without the
+plugin. Existing Tasks settings are preserved; `--repair-tasks` is the explicit
+backup-and-replace path for mismatched release assets.
 Add `--install-service` after filling `~/.config/mcp-gateway/secrets.env`, and
 `--install-codex-plugin` when the Codex CLI is already installed. Docling is
 installed in an isolated Python 3.12 environment and its OCR/layout/table models
@@ -242,6 +247,7 @@ ingest ~/Downloads/some-article.pdf     # source -> structured wiki pages
 что ты знаешь про <тему>?               # cited answers from YOUR notes (also EN)
 /save                                   # file the current conversation
 /journal план на завтра: ...            # date-keyed journal
+/agenda собери незавершённое             # preview + atomic carry-over + monthly report
 /backlog add не забыть продлить домен   # one-line capture inbox
 lint the wiki                           # health check: orphans, dead links, duplicates
 ```
@@ -292,7 +298,7 @@ servers from `~/.codex/config.toml`, and writes optional profile overlays such a
 | Group | Skills |
 |---|---|
 | Wiki core | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
-| Productivity | `/journal` (date-keyed planner), `/daily` (end-of-day status), `/backlog` (capture inbox), `/find-session`, `/draft` (reply advisor), `/distill-runbook` (session commands → copy-paste runbook), `/learn` (tutor over your notes), `/save-plan` |
+| Productivity | `/journal` (date-keyed planner), `/agenda` (unfinished-item scan/carry-over/report), `/daily` (end-of-day status), `/backlog` (capture inbox), `/find-session`, `/draft` (reply advisor), `/distill-runbook` (session commands → copy-paste runbook), `/learn` (tutor over your notes), `/save-plan` |
 | Orchestration (needs cmux) | `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Reference | `obsidian-markdown`, `obsidian-bases` |
 

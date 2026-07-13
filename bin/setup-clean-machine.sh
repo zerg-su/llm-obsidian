@@ -27,6 +27,7 @@ DO_PROXY=1
 DO_DOCLING=1
 RESET_OBSIDIAN=0
 REPAIR_EXCALIDRAW=0
+REPAIR_TASKS=0
 DRY_RUN=0
 
 usage() {
@@ -46,6 +47,8 @@ Options:
   --reset-obsidian        Back up .obsidian, then restore the three managed defaults.
   --repair-excalidraw     Back up and replace a mismatched Excalidraw main.js
                           with the pinned, checksum-verified artifact.
+  --repair-tasks          Back up and replace mismatched Obsidian Tasks assets
+                          with the pinned, checksum-verified release set.
   --skip-vault            Do not run bin/setup-vault.sh.
   --skip-proxy            Do not verify/install the pinned mcp-proxy artifact.
   --skip-docling          Do not install the pinned Docling document runtime
@@ -194,6 +197,7 @@ while [ "$#" -gt 0 ]; do
     --install-codex-plugin) DO_INSTALL_CODEX=1 ;;
     --reset-obsidian) RESET_OBSIDIAN=1 ;;
     --repair-excalidraw) REPAIR_EXCALIDRAW=1 ;;
+    --repair-tasks) REPAIR_TASKS=1 ;;
     --skip-vault) DO_SETUP_VAULT=0 ;;
     --skip-proxy) DO_PROXY=0 ;;
     --skip-docling) DO_DOCLING=0 ;;
@@ -218,6 +222,7 @@ if [ "$DO_SETUP_VAULT" -eq 1 ]; then
   vault_args=()
   [ "$RESET_OBSIDIAN" -eq 1 ] && vault_args+=(--reset-obsidian)
   [ "$REPAIR_EXCALIDRAW" -eq 1 ] && vault_args+=(--repair-excalidraw)
+  [ "$REPAIR_TASKS" -eq 1 ] && vault_args+=(--repair-tasks)
   # Bash 3.2 (stock macOS) treats an empty array expansion as unbound under
   # set -u. Conditional expansion keeps the flag-less clean-machine path safe.
   run bash "$ROOT/bin/setup-vault.sh" ${vault_args[@]+"${vault_args[@]}"} "$ROOT"
