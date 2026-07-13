@@ -19,14 +19,16 @@ must not be inferred from another runtime.
 | `PostToolUse[Bash]` command capture | Shared runtime adapter, sanitized | Shared runtime adapter for supported Bash events | Manual |
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
-| Operation telemetry | Shared scripts emit `pipeline-events.jsonl` | Same | Same |
+| Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
 runtime/session identifiers, actor/operation/status, relative vault paths, and
 numeric counters. Prompt text, search queries, commands, snippets, page bodies,
 and error text are not accepted. `pipeline-stats.py` reports these shared
-operations separately from Claude-only skill telemetry.
+operations and unattended lifecycle p50/p95 separately from Claude-only skill
+telemetry. See [pipeline observability](pipeline-observability.md) for metric
+definitions, sample-size limits, and the dogfood acceptance window.
 
 Local file ingestion is also runtime-neutral. `document-normalize.py` handles
 text-like sources directly and invokes the isolated Docling runtime only for

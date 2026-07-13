@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
+from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event, nonnegative_int, read_object
 from plan_lifecycle import PlanCloseError, render_plan_close
 from task_contract import (
     ContractError,
@@ -78,6 +79,27 @@ def names(kind: str) -> tuple[str, str, str]:
     return ".task-close-armed.json", "task_surface", "executor_runtime"
 
 
+def telemetry_surface_context(worktree: Path, kind: str) -> tuple[str, int]:
+    """Read a non-authoritative telemetry label without invoking contract checks."""
+
+    task_meta = read_object(worktree / ".task-meta.json")
+    source = read_object(worktree / ".review-meta.json") if kind == "reviewer" else task_meta
+    runtime = str(
+        source.get("reviewer_runtime")
+        if kind == "reviewer"
+        else source.get("executor_runtime") or source.get("runtime")
+    ).strip()
+    if runtime not in {"claude", "codex"}:
+        runtime = "unknown"
+    surface_policy = task_meta.get("surface_policy")
+    expected = int(
+        task_meta.get("interaction_policy") == "unattended"
+        and isinstance(surface_policy, dict)
+        and surface_policy.get("auto_close") is True
+    )
+    return runtime, expected
+
+
 def surface_and_runtime(worktree: Path, kind: str) -> tuple[str, str]:
     task_meta = read_json(worktree / ".task-meta.json")
     try:
@@ -112,7 +134,7 @@ def non_handoff_dirty(worktree: Path) -> list[str]:
     dirty: list[str] = []
     for line in result.stdout.splitlines():
         path = line[3:].split(" -> ")[-1]
-        if path.startswith(HANDOFF_PREFIXES) or path in {
+        if path.startswith(HANDOFF_PREFIXES) or path.startswith(".vault-meta/") or path in {
             ".obsidian/workspace.json", ".obsidian/workspace-mobile.json"
         }:
             continue
@@ -198,6 +220,14 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     sentinel_name, _, _ = names(kind)
     sentinel = worktree / sentinel_name
     if not sentinel.exists():
+        runtime, expected = telemetry_surface_context(worktree, kind)
+        emit_lifecycle_event(
+            worktree,
+            "surface-lifecycle",
+            actor=f"{kind}:{runtime}",
+            counts={"left_open": 1, "auto_close_expected": expected},
+            status="degraded" if expected else "noop",
+        )
         print(f"{kind} surface left open: close was not armed")
         return 0
     payload = read_json(sentinel)
@@ -207,6 +237,13 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     if closed.returncode != 0:
         die((closed.stdout + closed.stderr).strip() or "cmux close-surface failed")
     sentinel.unlink(missing_ok=True)
+    runtime, expected = telemetry_surface_context(worktree, kind)
+    emit_lifecycle_event(
+        worktree,
+        "surface-lifecycle",
+        actor=f"{kind}:{runtime}",
+        counts={"closed": 1, "auto_close_expected": expected},
+    )
     print(f"closed {kind} surface {surface}")
     return 0
 
@@ -326,6 +363,21 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         "completed_at": utc_now(),
     }
     write_marker(worktree / ".task-reap-complete.json", marker)
+    review_meta = read_object(worktree / ".review-meta.json")
+    attention = read_object(worktree / ".task-needs-attention.json")
+    duration = elapsed_ms(meta.get("spawned_at"), marker["completed_at"])
+    emit_lifecycle_event(
+        worktree,
+        "task-complete",
+        actor="reap",
+        counts={
+            "tasks": 1,
+            "review_iterations": nonnegative_int(review_meta.get("iteration")),
+            "escalations": 1 if attention else 0,
+            **({"duration_ms": duration} if duration is not None else {}),
+        },
+        vault_root=vault,
+    )
     print(f"recorded validated final reap: {result}")
     return 0
 

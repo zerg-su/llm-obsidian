@@ -4,6 +4,23 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
+## [2.0.6] - 2026-07-13
+
+### Added
+
+- Added content-free unattended lifecycle telemetry for task and reviewer process latency, review callback validity and findings counts, escalations, watchdog stages, validated reap completion, and exact-surface outcomes.
+- Added a `pipeline-stats.py` dogfood section with p50/p95 durations, completion and intervention counters, privacy boundaries, and explicit small-sample guidance.
+- Added macOS GitHub Actions CI for the full hermetic suite and generated Codex marketplace drift checks.
+
+### Fixed
+
+- Kept derived `.vault-meta/` lifecycle events from blocking an otherwise clean contract-bound task close.
+- Preserved the `v2.0.5` agenda spacing repair in the consolidated release.
+
+### Security
+
+- Lifecycle events accept only safe identifiers and non-negative numeric counters; task text, review prose, decisions, commands, queries, errors, and page bodies remain outside telemetry.
+
 ## [2.0.4] - 2026-07-13
 
 ### Added

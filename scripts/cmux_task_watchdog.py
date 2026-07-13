@@ -237,7 +237,11 @@ def fresh_state(route: Route, now: float) -> dict[str, Any]:
         "unchanged_seconds": 0,
         "samples": 0,
         "read_failures": 0,
+        "read_failure_count": 0,
         "notification_failures": 0,
+        "warning_count": 0,
+        "alert_count": 0,
+        "degraded_count": 0,
         "warning_sent": False,
         "alert_sent": False,
         "degraded_sent": False,
@@ -275,6 +279,8 @@ def attempt_notification(
     state[f"{stage}_attempt_epoch"] = now
     if notify(route, stage, idle_seconds):
         state[f"{stage}_sent"] = True
+        counter = f"{stage}_count"
+        state[counter] = int(state.get(counter) or 0) + 1
     else:
         state["notification_failures"] = int(state.get("notification_failures") or 0) + 1
 
@@ -293,6 +299,7 @@ def sample_once(worktree: Path, kind: str, surface: str, now: float, reset: bool
     except WatchdogError:
         state["samples"] = int(state.get("samples") or 0) + 1
         state["read_failures"] = int(state.get("read_failures") or 0) + 1
+        state["read_failure_count"] = int(state.get("read_failure_count") or 0) + 1
         state.update({"last_sample_at": iso_time(now), "last_sample_epoch": now})
         if state["read_failures"] >= 3:
             state["status"] = "degraded"

@@ -11,9 +11,11 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, NoReturn
 
+from lifecycle_telemetry import emit_lifecycle_event, nonnegative_int, read_object
 from task_contract import ContractError, normalize, read_json as read_task_json
 
 
@@ -437,6 +439,7 @@ def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
 
 def run_agent(worktree: Path, kind: str, surface: str, raw_spec: str = "") -> int:
     spec = load_validated_spec(worktree, kind, surface, raw_spec)
+    started = time.monotonic()
     prompt = (worktree / spec["prompt_file"]).read_text(encoding="utf-8")
     argv = [*spec["argv"], prompt]
     env = os.environ.copy()
@@ -488,6 +491,39 @@ def run_agent(worktree: Path, kind: str, surface: str, raw_spec: str = "") -> in
         ],
         cwd=worktree,
         check=False,
+    )
+    watchdog_state = read_object(
+        worktree / (".review-watchdog.json" if kind == "reviewer" else ".task-watchdog.json")
+    )
+    relay = read_object(worktree / REVIEW_RELAY_FILE) if kind == "reviewer" else {}
+    normalized_agent_rc = nonnegative_int(agent_rc)
+    normalized_lifecycle_rc = nonnegative_int(lifecycle.returncode)
+    counts = {
+        "duration_ms": round((time.monotonic() - started) * 1000),
+        "agent_exit_code": normalized_agent_rc,
+        "agent_signal": abs(agent_rc) if agent_rc < 0 else 0,
+        "lifecycle_exit_code": normalized_lifecycle_rc,
+        "lifecycle_signal": abs(lifecycle.returncode) if lifecycle.returncode < 0 else 0,
+        "watchdog_warnings": nonnegative_int(watchdog_state.get("warning_count")),
+        "watchdog_alerts": nonnegative_int(watchdog_state.get("alert_count")),
+        "watchdog_degraded": nonnegative_int(watchdog_state.get("degraded_count")),
+        "watchdog_recoveries": nonnegative_int(watchdog_state.get("recovery_count")),
+        "watchdog_sampling_recoveries": nonnegative_int(
+            watchdog_state.get("sampling_recovery_count")
+        ),
+        "watchdog_read_failures": nonnegative_int(watchdog_state.get("read_failure_count")),
+        "watchdog_notification_failures": nonnegative_int(
+            watchdog_state.get("notification_failures")
+        ),
+        "relay_sent": nonnegative_int(relay.get("sent_count")),
+        "relay_failures": nonnegative_int(relay.get("failure_count")),
+    }
+    emit_lifecycle_event(
+        worktree,
+        "agent-run",
+        actor=f"{kind}:{spec['runtime']}",
+        counts=counts,
+        status="ok" if agent_rc == 0 and lifecycle.returncode == 0 else "error",
     )
     return agent_rc if agent_rc != 0 else lifecycle.returncode
 

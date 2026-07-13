@@ -29,6 +29,7 @@ from cmux_agent_supervisor import (
     CLAUDE_REVIEW_TOOL_SURFACE,
     write_agent_spec,
 )
+from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event, nonnegative_int
 
 try:
     import tomllib
@@ -92,6 +93,39 @@ def die(message: str, code: int = 1) -> NoReturn:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def review_actor(review_meta: dict[str, Any]) -> str:
+    runtime = str(review_meta.get("reviewer_runtime") or "unknown")
+    model = str(review_meta.get("reviewer_model") or "default")
+    mode = str(review_meta.get("review_mode") or "full")
+    return f"review:{runtime}:{model}:{mode}"
+
+
+def review_vault(review_meta: dict[str, Any]) -> Path | None:
+    raw = str(review_meta.get("vault_root") or "").strip()
+    return Path(raw).expanduser().resolve() if raw else None
+
+
+def emit_review_event(
+    worktree: Path,
+    review_meta: dict[str, Any],
+    op: str,
+    counts: dict[str, int | float],
+    *,
+    status: str = "ok",
+) -> None:
+    try:
+        emit_lifecycle_event(
+            worktree,
+            op,
+            actor=review_actor(review_meta),
+            counts=counts,
+            status=status,
+            vault_root=review_vault(review_meta),
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        pass
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -722,12 +756,15 @@ def cmd_start(ns: argparse.Namespace) -> int:
         review_runtime_dir,
     )
 
+    started_at = utc_now()
     review_meta = {
         "version": 4,
         "run_id": run_id,
         "task_name": task_name,
-        "started_at": utc_now(),
-        "updated_at": utc_now(),
+        "started_at": started_at,
+        "phase_started_at": started_at,
+        "updated_at": started_at,
+        "vault_root": str(vault),
         "worktree": str(worktree),
         "base_branch": base_branch,
         "branch": str(meta.get("branch") or "(unknown)"),
@@ -765,6 +802,12 @@ def cmd_start(ns: argparse.Namespace) -> int:
     review_meta["status"] = "spawned"
     review_meta["updated_at"] = utc_now()
     write_json(worktree / ".review-meta.json", review_meta)
+    emit_review_event(
+        worktree,
+        review_meta,
+        "review-round-start",
+        {"rounds_started": 1, "iteration": 1},
+    )
 
     print(f"review surface: {review_ref or review_surface}")
     print(f"review output: {worktree / output_file}")
@@ -829,6 +872,7 @@ def cmd_verify(ns: argparse.Namespace) -> int:
 
     review_meta["phase"] = "verify-fixes"
     review_meta["iteration"] = int(review_meta.get("iteration") or 1) + 1
+    review_meta["phase_started_at"] = utc_now()
     review_meta["prompt_file"] = prompt_file
     review_meta["output_file"] = output_file
     review_meta["output_json_file"] = output_json_file
@@ -848,6 +892,15 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         return 0
 
     send_to_surface(review_surface, handoff)
+    emit_review_event(
+        worktree,
+        review_meta,
+        "review-round-start",
+        {
+            "rounds_started": 1,
+            "iteration": nonnegative_int(review_meta.get("iteration")),
+        },
+    )
     print(f"sent verify prompt to reviewer: {review_meta.get('review_surface_ref') or review_surface}")
     print(f"review output: {worktree / output_file}")
     return 0
@@ -866,6 +919,18 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             ns.payload_b64, expected_run_id=run_id, expected_mode=review_mode
         )
     except ReviewContractError as exc:
+        duration = elapsed_ms(review_meta.get("phase_started_at") or review_meta.get("started_at"))
+        emit_review_event(
+            worktree,
+            review_meta,
+            "review-round",
+            {
+                "invalid_callbacks": 1,
+                "iteration": nonnegative_int(review_meta.get("iteration")),
+                **({"duration_ms": duration} if duration is not None else {}),
+            },
+            status="error",
+        )
         die(f"invalid review payload: {exc}", 3)
 
     output_file = str(review_meta.get("output_file") or ".task-review.md")
@@ -883,6 +948,32 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     except TaskContractError as exc:
         die(str(exc))
     write_json(worktree / ".review-meta.json", review_meta)
+    findings = review["findings"]
+    severities = {
+        severity: sum(1 for finding in findings if finding.get("severity") == severity)
+        for severity in ("blocking", "warning", "nit")
+    }
+    verdict = str(review.get("verdict") or "unknown").replace("-", "_")
+    action = str(review_meta.get("recommended_action") or "unknown").replace("-", "_")
+    duration = elapsed_ms(review_meta.get("phase_started_at") or review_meta.get("started_at"))
+    emit_review_event(
+        worktree,
+        review_meta,
+        "review-round",
+        {
+            "valid_callbacks": 1,
+            "iteration": nonnegative_int(review_meta.get("iteration")),
+            "findings": len(findings),
+            "blocking_findings": severities["blocking"],
+            "warning_findings": severities["warning"],
+            "nit_findings": severities["nit"],
+            "verification_gaps": len(review["verification_gaps"]),
+            "residual_risks": len(review["residual_risks"]),
+            f"verdict_{verdict}": 1,
+            f"action_{action}": 1,
+            **({"duration_ms": duration} if duration is not None else {}),
+        },
+    )
     print(f"received typed review: {worktree / output_json_file}")
     print(f"rendered review: {worktree / output_file}")
     print(f"recommended action: {review_meta['recommended_action']}")

@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
+from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event
 from task_contract import ContractError, normalize_for_runtime
 
 
@@ -149,6 +150,12 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         marker["status"] = "delivery-failed"
         write_json(marker_path, marker)
         raise
+    emit_lifecycle_event(
+        worktree,
+        "task-escalation",
+        actor=f"raise:{category}",
+        counts={"raised": 1},
+    )
     print(f"escalation {marker['id']} sent to coordinator; task must remain paused")
     return 0
 
@@ -172,6 +179,13 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
     )
     marker.update({"status": "resolved", "decision": answer, "resolved_at": utc_now()})
     write_json(marker_path, marker)
+    duration = elapsed_ms(marker.get("raised_at"), marker.get("resolved_at"))
+    emit_lifecycle_event(
+        worktree,
+        "task-escalation",
+        actor=f"resolve:{marker.get('category') or 'unknown'}",
+        counts={"resolved": 1, **({"duration_ms": duration} if duration is not None else {})},
+    )
     print(f"decision relayed to task surface {task_surface}")
     return 0
 

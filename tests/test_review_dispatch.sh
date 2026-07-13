@@ -141,6 +141,13 @@ git -C "$LINK_WORKTREE" check-ignore -q .task-reap-prepared.json
 prepared_ignored=$?
 [[ $relay_ignored -eq 0 && $prepared_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
 
+python3 - "$LIGHT/.review-meta.json" "$LIGHT" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["vault_root"] = sys.argv[2]
+open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
 run_id="$(json_get "$LIGHT/.review-meta.json" run_id)"
 review_payload=$(python3 - "$run_id" <<'PY'
 import json, sys
@@ -166,6 +173,16 @@ token="${callback##*--payload-b64 }"
 expect_eq "typed-receive-exit" "$?" 0
 expect_eq "typed-json-verdict" "$(json_get "$LIGHT/.task-review.json" verdict)" "approve"
 grep -q '^Verdict: approve$' "$LIGHT/.task-review.md" && ok "typed-markdown-render" || bad "typed-markdown-render" "derived markdown missing"
+python3 - "$LIGHT/.vault-meta/pipeline-events.jsonl" <<'PY'
+import json, sys
+events = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
+matches = [event for event in events if event.get("op") == "review-round"]
+assert len(matches) == 1
+assert matches[0]["counts"]["valid_callbacks"] == 1
+assert matches[0]["counts"]["verdict_approve"] == 1
+assert matches[0]["counts"]["action_interactive"] == 1
+PY
+[[ $? -eq 0 ]] && ok "review-callback-telemetry" || bad "review-callback-telemetry" "typed lifecycle event missing"
 python3 - "$SEND_SCRIPT" <<'PY'
 import importlib.util
 import subprocess

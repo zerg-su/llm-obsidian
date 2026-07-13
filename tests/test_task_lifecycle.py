@@ -36,6 +36,18 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def telemetry(worktree: Path, op: str) -> list[dict]:
+    path = worktree / ".vault-meta/pipeline-events.jsonl"
+    if not path.is_file():
+        return []
+    return [
+        record for record in (
+            json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+        )
+        if record.get("op") == op
+    ]
+
+
 def check(name: str, condition: bool, detail: str = "") -> None:
     if not condition:
         raise AssertionError(f"{name}: {detail}")
@@ -258,6 +270,20 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--surface", meta["task_surface"], cwd=worktree, env=failed_env,
     )
     check("supervisor preserves agent failure status", result.returncode == 7)
+    agent_events = telemetry(worktree, "agent-run")
+    check(
+        "supervisor emits content-free run outcomes",
+        len(agent_events) == 2
+        and agent_events[0]["actor"] == "task:codex"
+        and agent_events[0]["status"] == "ok"
+        and agent_events[1]["status"] == "error"
+        and agent_events[1]["counts"]["agent_exit_code"] == 7,
+    )
+    check(
+        "supervisor reserves numeric signal counters",
+        agent_events[0]["counts"]["agent_signal"] == 0
+        and agent_events[0]["counts"]["lifecycle_signal"] == 0,
+    )
     class StubbornWatchdog:
         def poll(self) -> None:
             return None
@@ -326,6 +352,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     check("validated final reap recorded", result.returncode == 0, result.stderr)
     check("reap completion marker written", (worktree / ".task-reap-complete.json").is_file())
     check(
+        "validated reap emits task completion",
+        len(telemetry(worktree, "task-complete")) == 1
+        and telemetry(worktree, "task-complete")[0]["counts"]["tasks"] == 1,
+    )
+    check(
         "reap completion marker is owner-only",
         (worktree / ".task-reap-complete.json").stat().st_mode & 0o777 == 0o600,
     )
@@ -393,6 +424,12 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     check("reviewer surface closes", result.returncode == 0, result.stderr)
     check("reviewer exact surface targeted", f"close-surface --surface {review_surface}" in cmux_log.read_text())
+    surface_events = telemetry(worktree, "surface-lifecycle")
+    check(
+        "surface lifecycle distinguishes close and left-open",
+        any(event["counts"].get("closed") == 1 for event in surface_events)
+        and any(event["counts"].get("left_open") == 1 for event in surface_events),
+    )
 
     result = run(
         ESCALATION, "raise", "--category", "scope",
@@ -421,6 +458,13 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     check("coordinator decision reaches task", result.returncode == 0, result.stderr)
     attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
     check("task escalation marked resolved", attention["status"] == "resolved")
+    escalation_events = telemetry(worktree, "task-escalation")
+    check(
+        "escalation lifecycle counted",
+        len(escalation_events) == 2
+        and escalation_events[0]["counts"].get("raised") == 1
+        and escalation_events[1]["counts"].get("resolved") == 1,
+    )
     check("task exact surface targeted", f"--surface {meta['task_surface']}" in cmux_log.read_text())
     check("Codex task composer cleared", f"send-key --surface {meta['task_surface']} backspace" in cmux_log.read_text())
 
@@ -496,6 +540,13 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     watchdog_state = json.loads(watchdog_raw)
     check("watchdog reports recovery once", result.returncode == 0 and cmux_log.read_text().count("notify ") == 3)
     check("watchdog clears stale episode", watchdog_state["status"] == "running" and watchdog_state["recovery_count"] == 1)
+    check(
+        "watchdog keeps cumulative episode counters",
+        watchdog_state["warning_count"] == 1
+        and watchdog_state["alert_count"] == 1
+        and watchdog_state["degraded_count"] == 1
+        and watchdog_state["read_failure_count"] == 3,
+    )
     check("watchdog state stores no screen content", "task alpha" not in watchdog_raw and "task beta" not in watchdog_raw)
 
     screen_file.write_text("reviewer idle\n", encoding="utf-8")

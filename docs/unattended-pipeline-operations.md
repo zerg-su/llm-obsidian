@@ -180,7 +180,8 @@ requires, in order:
    claimed to.
 4. `git status` in the worktree shows no dirty files outside the
    `.task-*`/`.review-*`/`.wiki-*`/`.obsidian/workspace*.json` handoff
-   prefixes — nothing in-scope is left uncommitted.
+   prefixes and gitignored `.vault-meta/` derived state — nothing in-scope is
+   left uncommitted.
 
 Only then does it write a `<kind>-close-armed.json` sentinel, send `/exit`,
 and return. The actual `cmux close-surface` call happens in
@@ -221,12 +222,16 @@ clearing before a fresh line).
 - `cat .task-close-armed.json` / `.review-close-armed.json` (if present) —
   close is armed and waiting for the agent process to exit.
 - `git status --short` inside the worktree — anything outside
-  `.task-*`/`.review-*`/`.wiki-*` here is what blocks auto-close and what
-  `/reap-send` will ask about.
+  `.task-*`/`.review-*`/`.wiki-*` and gitignored `.vault-meta/` here is what
+  blocks auto-close and what `/reap-send` will ask about.
 - `python3 tests/test_task_lifecycle.py`, `python3
   tests/test_contract_schemas.py`, `bash tests/test_review_dispatch.sh` —
   hermetic coverage for the contract/lifecycle/review-dispatch code in this
   document; part of `make test`.
+- `python3 scripts/pipeline-stats.py --days 30` — content-free task, review,
+  escalation, watchdog, surface, and p50/p95 dogfood measurements. Metric
+  definitions and small-sample guidance are in
+  [`pipeline-observability.md`](pipeline-observability.md).
 
 ## Known trade-offs
 
@@ -252,6 +257,8 @@ clearing before a fresh line).
 
 - [`docs/runtime-capabilities.md`](runtime-capabilities.md) — which hook
   surfaces are Claude-only vs. shared across Claude/Codex.
+- [`docs/pipeline-observability.md`](pipeline-observability.md) — lifecycle
+  metrics, privacy contract, and the real-task acceptance window.
 - `skills/dispatch/SKILL.md`, `skills/review-dispatch/SKILL.md`,
   `skills/reap-send/SKILL.md` — the authoring-level skill flow this page
   assumes.

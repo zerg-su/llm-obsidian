@@ -153,6 +153,30 @@ def parse_log_ts(raw) -> dt.datetime | None:
         return None
 
 
+def event_count(record: dict, key: str) -> float:
+    counts = record.get("counts")
+    value = counts.get(key) if isinstance(counts, dict) else None
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value >= 0
+        and math.isfinite(value)
+    ):
+        return float(value)
+    return 0.0
+
+
+def percentile(values: list[float], fraction: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(len(ordered) * fraction) - 1)]
+
+
+def seconds(value: float | None) -> str:
+    return "-" if value is None else f"{value / 1000:.1f}"
+
+
 def nudge_check(days: int) -> str:
     """Cheap retrieval-discipline probe: wiki-query router hints vs assist calls.
 
@@ -277,6 +301,7 @@ def main() -> int:
     operation_count: dict[tuple[str, str, str], int] = defaultdict(int)
     operation_last: dict[tuple[str, str, str], dt.datetime] = {}
     operation_durations: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    lifecycle_events: list[dict] = []
     for log in EVENT_LOGS:
         for rec in iter_jsonl(log):
             ts = parse_log_ts(rec.get("ts", ""))
@@ -290,6 +315,15 @@ def main() -> int:
             key = (runtime, op, status)
             operation_count[key] += 1
             operation_last[key] = max(operation_last.get(key, ts), ts)
+            if op in {
+                "agent-run",
+                "review-round-start",
+                "review-round",
+                "task-escalation",
+                "surface-lifecycle",
+                "task-complete",
+            }:
+                lifecycle_events.append(rec)
             counts = rec.get("counts")
             duration = counts.get("duration_ms") if isinstance(counts, dict) else None
             if (
@@ -327,6 +361,86 @@ def main() -> int:
             )
     else:
         lines.append("no runtime-neutral operations captured")
+    lines.append("")
+    lines.append("## Unattended lifecycle dogfood")
+    lines.append("")
+    lines.append(
+        "These counters describe orchestration mechanics only. They never contain task text, "
+        "review prose, commands, queries, or error messages."
+    )
+    lines.append("")
+    if lifecycle_events:
+        def matching(op: str, actor_prefix: str = "") -> list[dict]:
+            return [
+                event for event in lifecycle_events
+                if event.get("op") == op
+                and (not actor_prefix or str(event.get("actor") or "").startswith(actor_prefix))
+            ]
+
+        task_runs = matching("agent-run", "task:")
+        reviewer_runs = matching("agent-run", "reviewer:")
+        review_starts = matching("review-round-start")
+        review_rounds = matching("review-round")
+        escalations = matching("task-escalation")
+        surfaces = matching("surface-lifecycle")
+        completions = matching("task-complete")
+        valid_callbacks = sum(event_count(event, "valid_callbacks") for event in review_rounds)
+        invalid_callbacks = sum(event_count(event, "invalid_callbacks") for event in review_rounds)
+        callback_total = valid_callbacks + invalid_callbacks
+        callback_rate = f"{valid_callbacks / callback_total * 100:.1f}%" if callback_total else "-"
+
+        lines.append("| Metric | Value |")
+        lines.append("|---|---:|")
+        metrics = [
+            ("Task agent runs", len(task_runs)),
+            ("Validated task completions", int(sum(event_count(e, "tasks") for e in completions))),
+            ("Reviewer agent runs", len(reviewer_runs)),
+            ("Review rounds started", int(sum(event_count(e, "rounds_started") for e in review_starts))),
+            ("Valid review callbacks", int(valid_callbacks)),
+            ("Invalid review callbacks", int(invalid_callbacks)),
+            ("Callback schema-valid rate", callback_rate),
+            ("Findings: blocking", int(sum(event_count(e, "blocking_findings") for e in review_rounds))),
+            ("Findings: warning", int(sum(event_count(e, "warning_findings") for e in review_rounds))),
+            ("Findings: nit", int(sum(event_count(e, "nit_findings") for e in review_rounds))),
+            ("Escalations raised", int(sum(event_count(e, "raised") for e in escalations))),
+            ("Escalations resolved", int(sum(event_count(e, "resolved") for e in escalations))),
+            ("Watchdog warnings", int(sum(event_count(e, "watchdog_warnings") for e in task_runs + reviewer_runs))),
+            ("Watchdog alerts", int(sum(event_count(e, "watchdog_alerts") for e in task_runs + reviewer_runs))),
+            ("Watchdog degraded notices", int(sum(event_count(e, "watchdog_degraded") for e in task_runs + reviewer_runs))),
+            ("Watchdog recoveries", int(sum(event_count(e, "watchdog_recoveries") for e in task_runs + reviewer_runs))),
+            ("Surfaces auto-closed", int(sum(event_count(e, "closed") for e in surfaces))),
+            ("Surfaces left open", int(sum(event_count(e, "left_open") for e in surfaces))),
+        ]
+        for label, value in metrics:
+            lines.append(f"| {label} | {value} |")
+
+        duration_groups = [
+            ("Task end-to-end", completions),
+            ("Task agent process", task_runs),
+            ("Reviewer process", reviewer_runs),
+            ("Review round callback", review_rounds),
+            (
+                "Human escalation wait",
+                [event for event in escalations if event_count(event, "resolved") > 0],
+            ),
+        ]
+        lines.append("")
+        lines.append("| Duration | Samples | P50 s | P95 s |")
+        lines.append("|---|---:|---:|---:|")
+        for label, records in duration_groups:
+            values = [event_count(event, "duration_ms") for event in records]
+            values = [value for value in values if value > 0]
+            lines.append(
+                f"| {label} | {len(values)} | {seconds(percentile(values, 0.50))} | "
+                f"{seconds(percentile(values, 0.95))} |"
+            )
+        lines.append("")
+        lines.append(
+            "Treat p50/p95 as directional until each row has at least 10–20 real samples; "
+            "zero-duration synthetic checks are excluded."
+        )
+    else:
+        lines.append("no unattended lifecycle events captured in this window")
     lines.append("")
     lines.append("## Claude-only skill telemetry")
     lines.append("")
@@ -383,7 +497,7 @@ def main() -> int:
                      "(tag-search / semantic-search --hybrid) were never invoked — "
                      "SKILL instructions may be ignored.")
     lines.append("")
-    lines.append("> Гочи интерпретации: (1) Typed = history.jsonl (что напечатал user), "
+    lines.append("> Границы интерпретации: (1) Typed = history.jsonl (что напечатал user), "
                  "Auto = Skill tool_use из транскриптов (что Claude вызвал сам) — источники "
                  "комплементарны; (2) покрытие транскриптов ограничено их retention (~30д); "
                  "(3) hint-precision грубая (окно 1ч, без привязки к сессии); (4) reference-скиллы "

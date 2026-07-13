@@ -4,6 +4,8 @@
 
 # LLM Obsidian
 
+[![CI](https://github.com/zerg-su/llm-obsidian/actions/workflows/ci.yml/badge.svg)](https://github.com/zerg-su/llm-obsidian/actions/workflows/ci.yml)
+
 **One durable working environment for Claude Code and Codex CLI: shared memory, shared skills, bounded orchestration, and cross-model review.** It turns conversations, sources, plans, and decisions into a structured Obsidian wiki, then makes that knowledge available to the next agent session instead of starting from zero.
 
 🇷🇺 **Читайте по-русски: [README.ru.md](README.ru.md)**
@@ -86,6 +88,7 @@ The reverse direction uses the same protocol: Codex implements and Claude review
 | Review | read-only reviewer mandate, task/review IDs, baseline fingerprint, callback schema, bounded verification rounds |
 | Reap | typed wiki summary, result path and hash, task provenance, terminal outcome, close-on-exit eligibility |
 | Vault Stop | transaction recovery, sparse reindex/self-heal, strict vault validation, scoped commit, fingerprinted optional dense refresh |
+| Dogfood report | content-free completion, callback, intervention, watchdog, surface, and p50/p95 lifecycle counters |
 
 The watchdog does not blindly kill an agent that is visibly working. It reports a possible stall first; genuinely blocking decisions return to the coordinator instead of being guessed in a background window.
 
@@ -317,6 +320,17 @@ make test-gateway  # MCP gateway management layer (offline, fake MCP server)
 make test-documents # live installed Docling ru/en + Office/PDF acceptance
 ```
 
+GitHub Actions runs the same hermetic contract on `macos-latest` for pushes,
+pull requests, release tags, and manual dispatch. It also rejects generated
+Codex marketplace drift. Real unattended behavior is measured separately:
+
+```bash
+python3 scripts/pipeline-stats.py --days 30
+```
+
+See [pipeline observability](docs/pipeline-observability.md) for definitions,
+the strict no-content telemetry boundary, and the 10–20-task dogfood threshold.
+
 ## Codex CLI
 
 Codex uses a generated local plugin marketplace instead of legacy skill symlinks:
@@ -375,8 +389,9 @@ set `DCG_TEST_USE_USER_CONFIG=1` to test the machine's live allowlist/config.
 
 ## Roadmap
 
-- Close safe Codex prompt/tool hook parity gaps where the host exposes equivalent lifecycle events.
-- Publish more end-to-end macOS acceptance fixtures and operational examples.
+- Stabilize the unattended pipeline with 10–20 real-task samples in both executor directions; publish measured completion, callback, intervention, surface, and p50/p95 results.
+- Close safe Codex interception gaps for unified/streaming shell calls and native web search where the host exposes reliable lifecycle events.
+- Publish more end-to-end macOS acceptance fixtures and operational examples from the dogfood window.
 - Expand RU documentation while keeping one canonical tested behavior contract.
 - Add more example MCP profiles without loading rarely used tool schemas into every session.
 - Explore Linux and other-agent adapters only when they can preserve typed handoffs, permission boundaries, lifecycle supervision, and hermetic tests.
