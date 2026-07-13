@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -247,6 +248,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         encoding="utf-8",
     )
     fake_codex.chmod(0o755)
+    cmux_socket_path = worktree / "cmux.sock"
+    cmux_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    cmux_socket.bind(str(cmux_socket_path))
     screen_file = worktree / "cmux-screen.txt"
     screen_file.write_text("task alpha\n5H 20% used | reset in 2h\n", encoding="utf-8")
     top_file = worktree / "cmux-top.json"
@@ -259,7 +263,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     env = dict(
         os.environ, PATH=f"{fake_bin}:{os.environ.get('PATH', '')}",
         CMUX_TEST_LOG=str(cmux_log), CMUX_SCREEN_FILE=str(screen_file), CMUX_TOP_FILE=str(top_file),
-        FAKE_AGENT_LOG=str(agent_log),
+        FAKE_AGENT_LOG=str(agent_log), CMUX_SOCKET_PATH=str(cmux_socket_path),
     )
     clean_env = {k: v for k, v in env.items() if k not in {"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}}
     wrong_env = dict(clean_env, CODEX_THREAD_ID="other")
@@ -274,17 +278,33 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     check("supervisor prepares task argv", result.returncode == 0, result.stderr)
     agent_spec = json.loads((worktree / ".task-agent-command.json").read_text(encoding="utf-8"))
-    check("supervisor pins unattended Codex approvals", agent_spec["argv"][-4:] == ["-a", "never", "-s", "workspace-write"])
+    check(
+        "supervisor pins unattended Codex approvals",
+        supervisor_module.option_value(agent_spec["argv"], "-a") == "never"
+        and supervisor_module.option_value(agent_spec["argv"], "-s") == "workspace-write",
+    )
     add_dir_index = agent_spec["argv"].index("--add-dir")
     check(
         "supervisor grants only the task Git metadata root",
         agent_spec["argv"][add_dir_index + 1] == str((worktree / ".git").resolve()),
+    )
+    check(
+        "supervisor grants only the exact cmux socket",
+        supervisor_module.option_values(agent_spec["argv"], "-c")
+        == supervisor_module.task_codex_config_values(cmux_socket_path.resolve())
+        and agent_spec["env"]["CMUX_SOCKET_PATH"] == str(cmux_socket_path.resolve()),
     )
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
         "--surface", meta["task_surface"], cwd=worktree, env=env,
     )
     check("supervisor validates exact task routing", result.returncode == 0, result.stderr)
+    missing_socket_env = dict(env, CMUX_SOCKET_PATH=str(worktree / "missing.sock"))
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=missing_socket_env,
+    )
+    check("supervisor fails closed when cmux socket disappears", result.returncode == 2)
     safe_agent_spec = json.loads(json.dumps(agent_spec))
     agent_spec["argv"].extend(["-s", "danger-full-access"])
     write_json(worktree / ".task-agent-command.json", agent_spec)
@@ -303,6 +323,18 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--surface", meta["task_surface"], cwd=worktree, env=env,
     )
     check("supervisor rejects arbitrary task writable roots", result.returncode == 2)
+    write_json(worktree / ".task-agent-command.json", safe_agent_spec)
+    agent_spec = json.loads(json.dumps(safe_agent_spec))
+    config_index = agent_spec["argv"].index(
+        f'features.network_proxy.unix_sockets={{ "{cmux_socket_path.resolve()}" = "allow" }}'
+    )
+    agent_spec["argv"][config_index] = 'features.network_proxy.unix_sockets={ "/tmp/other.sock" = "allow" }'
+    write_json(worktree / ".task-agent-command.json", agent_spec)
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor rejects cmux socket policy drift", result.returncode == 2)
     write_json(worktree / ".task-agent-command.json", safe_agent_spec)
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
@@ -698,5 +730,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     (worktree / "tracked.txt").write_text("dirty\n", encoding="utf-8")
     result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=origin_env)
     check("dirty task stays open", result.returncode == 3)
+
+    cmux_socket.close()
 
 print("\nAll unattended task lifecycle tests passed.")

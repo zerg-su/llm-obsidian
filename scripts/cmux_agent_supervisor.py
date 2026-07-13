@@ -22,7 +22,7 @@ from task_contract import ContractError, normalize, read_json as read_task_json
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPEC_FILES = {"task": ".task-agent-command.json", "reviewer": ".review-agent-command.json"}
 PROMPT_FILES = {"task": ".task-prompt.md", "reviewer": ".review-prompt.md"}
-ALLOWED_ENV = {"CODEX_HOME", "TMPDIR"}
+ALLOWED_ENV = {"CODEX_HOME", "TMPDIR", "CMUX_SOCKET_PATH"}
 REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
@@ -153,20 +153,64 @@ def validate_spec_shape(spec: dict[str, Any], kind: str) -> None:
 
 
 def option_value(argv: list[str], flag: str) -> str | None:
-    positions = [index for index, item in enumerate(argv) if item == flag or item.startswith(f"{flag}=")]
-    if not positions:
+    values = option_values(argv, flag)
+    if not values:
         return None
-    if len(positions) != 1:
+    if len(values) != 1:
         raise SupervisorError(f"agent command must contain at most one {flag}")
-    index = positions[0]
-    if argv[index] != flag or index + 1 >= len(argv):
-        raise SupervisorError(f"agent command must pass {flag} as a separate option")
-    return argv[index + 1]
+    return values[0]
+
+
+def option_values(argv: list[str], flag: str) -> list[str]:
+    positions = [index for index, item in enumerate(argv) if item == flag or item.startswith(f"{flag}=")]
+    values: list[str] = []
+    for index in positions:
+        if argv[index] != flag or index + 1 >= len(argv):
+            raise SupervisorError(f"agent command must pass {flag} as a separate option")
+        values.append(argv[index + 1])
+    return values
 
 
 def require_option(argv: list[str], flag: str, expected: str) -> None:
     if option_value(argv, flag) != expected:
         raise SupervisorError(f"agent command must pin {flag} {expected}")
+
+
+def validated_cmux_socket_path() -> Path:
+    raw = os.environ.get("CMUX_SOCKET_PATH") or os.environ.get("CMUX_SOCKET")
+    if raw and ("\n" in raw or "\0" in raw):
+        raise SupervisorError("cmux socket path is malformed")
+    path = (Path(raw).expanduser() if raw else Path.home() / ".local/state/cmux/cmux.sock").resolve()
+    try:
+        stat = path.stat()
+        available = path.is_socket()
+    except OSError:
+        available = False
+        stat = None
+    if not available or stat is None or stat.st_uid != os.getuid():
+        raise SupervisorError(f"cmux socket is unavailable or not user-owned: {path}")
+    return path
+
+
+def task_codex_config_values(cmux_socket: Path) -> list[str]:
+    socket_rule = json.dumps(str(cmux_socket), ensure_ascii=False)
+    return [
+        "sandbox_workspace_write.network_access=true",
+        "features.network_proxy.enabled=true",
+        "features.network_proxy.domains={}",
+        f"features.network_proxy.unix_sockets={{ {socket_rule} = \"allow\" }}",
+        "features.network_proxy.allow_local_binding=false",
+        "features.network_proxy.allow_upstream_proxy=false",
+        "features.network_proxy.dangerously_allow_all_unix_sockets=false",
+        "features.network_proxy.dangerously_allow_non_loopback_proxy=false",
+        "features.network_proxy.enable_socks5=false",
+        "features.network_proxy.enable_socks5_udp=false",
+    ]
+
+
+def append_task_codex_network_policy(argv: list[str], cmux_socket: Path) -> None:
+    for value in task_codex_config_values(cmux_socket):
+        argv.extend(["-c", value])
 
 
 def validate_reviewer_safety(argv: list[str], runtime: str) -> None:
@@ -201,20 +245,23 @@ def validate_task_safety(
     runtime: str,
     interaction_policy: str,
     git_common_dir: Path | None = None,
+    cmux_socket: Path | None = None,
 ) -> None:
     if runtime == "codex":
         if any(item in CODEX_FORBIDDEN_OPTIONS for item in argv) or "danger-full-access" in argv:
             raise SupervisorError("Codex task command weakens the approved sandbox")
-        if option_value(argv, "-c") is not None:
-            raise SupervisorError("Codex task command has an unexpected config override")
         if interaction_policy == "unattended":
-            if git_common_dir is None:
-                raise SupervisorError("Codex unattended task is missing its Git metadata root")
+            if git_common_dir is None or cmux_socket is None:
+                raise SupervisorError("Codex unattended task is missing an approved runtime root")
             require_option(argv, "--add-dir", str(git_common_dir))
             require_option(argv, "-a", "never")
             require_option(argv, "-s", "workspace-write")
+            if option_values(argv, "-c") != task_codex_config_values(cmux_socket):
+                raise SupervisorError("Codex task command has an unexpected network policy")
         elif any(option_value(argv, flag) is not None for flag in ("-a", "-s", "--add-dir")):
             raise SupervisorError("interactive Codex task command has unexpected approval overrides")
+        elif option_values(argv, "-c"):
+            raise SupervisorError("interactive Codex task command has unexpected config overrides")
         return
     require_option(argv, "--permission-mode", "auto")
     if "--dangerously-skip-permissions" in argv or "--allowedTools" in argv:
@@ -325,6 +372,15 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         expected_tmp = str(expected_cwd) if kind == "reviewer" else None
         if spec["env"].get("TMPDIR") != expected_tmp:
             raise SupervisorError("Codex supervisor TMPDIR does not match the isolated runtime")
+        expected_socket = (
+            validated_cmux_socket_path()
+            if kind == "task" and task_policy["interaction_policy"] == "unattended"
+            else None
+        )
+        if spec["env"].get("CMUX_SOCKET_PATH") != (
+            str(expected_socket) if expected_socket is not None else None
+        ):
+            raise SupervisorError("Codex supervisor cmux socket does not match the approved route")
     elif spec["env"]:
         raise SupervisorError("Claude supervisor command must not carry environment overrides")
     if kind == "reviewer":
@@ -335,11 +391,17 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
             if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
             else None
         )
+        cmux_socket = (
+            validated_cmux_socket_path()
+            if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
+            else None
+        )
         validate_task_safety(
             spec["argv"],
             spec["runtime"],
             task_policy["interaction_policy"],
             git_common_dir,
+            cmux_socket,
         )
 
 
@@ -376,8 +438,11 @@ def prepare_task(worktree: Path, surface: str) -> Path:
         if model:
             argv.extend(["--model", model])
         if policy["interaction_policy"] == "unattended":
+            cmux_socket = validated_cmux_socket_path()
             argv.extend(["--add-dir", str(validated_task_git_common_dir(worktree, meta))])
             argv.extend(["-a", "never", "-s", "workspace-write"])
+            append_task_codex_network_policy(argv, cmux_socket)
+            env["CMUX_SOCKET_PATH"] = str(cmux_socket)
         codex_home = str(meta.get("codex_home") or "").strip()
         if codex_home:
             env["CODEX_HOME"] = str(Path(codex_home).expanduser().resolve())

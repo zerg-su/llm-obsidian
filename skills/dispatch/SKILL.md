@@ -405,9 +405,15 @@ short supervisor command. `prepare-task` pins unattended Codex to
 `-a never -s workspace-write` and adds exactly the worktree's validated Git
 common directory as a writable root. Linked worktrees keep their index,
 objects, and task-branch ref there, so this narrow grant lets the task commit
-without exposing arbitrary filesystem roots. Claude keeps `auto`. The
-supervisor appends the prompt as one argv value, runs the watchdog, and calls
-lifecycle after exit.
+without exposing arbitrary filesystem roots. The same command enables Codex's
+network proxy with an empty domain map and allows only the user-owned Unix
+socket from `CMUX_SOCKET_PATH`; loopback binding, upstream proxies, arbitrary
+Unix sockets, and SOCKS remain disabled. This lets task-side review, escalation,
+and reap callbacks reach cmux without granting outbound Internet access. The
+supervisor validates the complete fixed override list and refuses to start if
+the socket is absent, not user-owned, or replaced in the command spec. Claude
+keeps `auto`. The supervisor appends the prompt as one argv value, runs the
+watchdog, and calls lifecycle after exit.
 
 ```bash
 WORKTREE="<worktree-path>"

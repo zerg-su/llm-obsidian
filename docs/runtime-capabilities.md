@@ -78,3 +78,14 @@ final `status`; the coordinator surface is never a valid cleanup target. Pass
 `start --keep-surfaces` only for deliberate debugging. A failed synthesis can
 be resumed from its already validated artifact with
 `research-isolation.py restart-synthesis`; see `scripts/research-isolation.py`.
+
+Unattended Codex task splits use the older `workspace-write` policy because the
+installed user/profile stack still contains legacy sandbox settings. The task
+supervisor pins command networking on only behind Codex's network proxy, sets an
+empty external-domain map, and allows one exact user-owned cmux Unix socket.
+Broad local binding, upstream proxy chaining, arbitrary Unix sockets, and
+SOCKS5/UDP are explicitly disabled. The only additional writable root is the
+validated Git common directory needed by linked-worktree commits. This narrow
+exception supports task-side review, escalation, and reap callbacks while
+preserving a no-outbound-network boundary; `tests/test_task_lifecycle.py`
+rejects command-spec, writable-root, and socket-policy drift.
