@@ -33,7 +33,7 @@ write_fixture() {
   cat > "$dir/.task-meta.json" <<'JSON'
 {"task_name":"review-dispatch-test","base_branch":"HEAD","branch":"task/review-dispatch-test","executor_runtime":"codex","model":"gpt-5.6-sol"}
 JSON
-  printf '# Task: review-dispatch-test\n' > "$dir/.task-prompt.md"
+  printf '# Task: review-dispatch-test\n\n## Task description\n\nImplement a small, bounded task.\n' > "$dir/.task-prompt.md"
   printf '00000000-0000-0000-0000-000000000001\n' > "$dir/.task-cmux-surface"
 }
 
@@ -75,6 +75,16 @@ write_fixture "$LIGHT"
 "$SCRIPT" start --light --no-spawn --worktree "$LIGHT" --vault-root "$REPO_ROOT" >"$SANDBOX/light.out" 2>"$SANDBOX/light.err"
 expect_eq "start-light-exit" "$?" 0
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
+expect_eq "start-review-id-stable" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$(json_get "$LIGHT/.review-meta.json" run_id)"
+[[ -f "$LIGHT/.review-history.json" ]] && ok "start-review-history" || bad "start-review-history" "history file missing"
+python3 - "$LIGHT/.review-history.json" <<'PY'
+import json, sys
+history = json.load(open(sys.argv[1], encoding="utf-8"))
+request = history.get("request", {})
+assert request.get("review_mode") == "light"
+assert "Implement a small, bounded task" in request.get("description", "")
+PY
+[[ $? -eq 0 ]] && ok "start-review-request-snapshot" || bad "start-review-request-snapshot" "request not retained"
 grep -q 'Review mode: `light`' "$LIGHT/.review-prompt.md" && ok "start-light-prompt" || bad "start-light-prompt" "missing light marker"
 grep -q 'top 5 actionable findings' "$LIGHT/.review-prompt.md" && ok "start-light-instructions" || bad "start-light-instructions" "missing light instructions"
 LIGHT_SPEC="$LIGHT/.review-agent-command.json"
@@ -140,6 +150,11 @@ relay_ignored=$?
 git -C "$LINK_WORKTREE" check-ignore -q .task-reap-prepared.json
 prepared_ignored=$?
 [[ $relay_ignored -eq 0 && $prepared_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
+for artifact in .review-history.json .review-archive.json .review-archive-request.json; do
+  printf '{}\n' > "$LINK_WORKTREE/$artifact"
+  git -C "$LINK_WORKTREE" check-ignore -q "$artifact" || bad "linked-worktree-$artifact-ignored" "common exclude not updated"
+done
+ok "linked-worktree-review-archive-ignored"
 
 python3 - "$LIGHT/.review-meta.json" "$LIGHT" <<'PY'
 import json, sys
@@ -172,6 +187,14 @@ token="${callback##*--payload-b64 }"
 "$SCRIPT" receive --worktree "$LIGHT" --payload-b64 "$token" >/dev/null 2>"$SANDBOX/receive.err"
 expect_eq "typed-receive-exit" "$?" 0
 expect_eq "typed-json-verdict" "$(json_get "$LIGHT/.task-review.json" verdict)" "approve"
+python3 - "$LIGHT/.review-history.json" "$run_id" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+assert data["review_id"] == sys.argv[2]
+assert len(data["rounds"]) == 1
+assert data["rounds"][0]["review"]["run_id"] == sys.argv[2]
+PY
+[[ $? -eq 0 ]] && ok "receive-records-review-history" || bad "receive-records-review-history" "round not retained"
 grep -q '^Verdict: approve$' "$LIGHT/.task-review.md" && ok "typed-markdown-render" || bad "typed-markdown-render" "derived markdown missing"
 python3 - "$LIGHT/.vault-meta/pipeline-events.jsonl" <<'PY'
 import json, sys
@@ -247,6 +270,19 @@ MD
 expect_eq "verify-light-exit" "$?" 0
 expect_eq "verify-light-preserved" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
 expect_eq "verify-file-reference" "$(json_get "$LIGHT/.review-meta.json" send_mode)" "file-reference"
+expect_eq "verify-review-id-preserved" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$run_id"
+python3 - "$LIGHT/.review-history.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+assert data["rounds"][0]["resolution"].startswith("# Review Resolution")
+PY
+[[ $? -eq 0 ]] && ok "verify-snapshots-resolution" || bad "verify-snapshots-resolution" "resolution not retained"
+"$SCRIPT" archive --dry-run --worktree "$LIGHT" >"$SANDBOX/archive-dry.out" 2>"$SANDBOX/archive-dry.err"
+expect_eq "task-archive-deferred-dry" "$?" 0
+grep -q '"status": "deferred"' "$SANDBOX/archive-dry.out" && ok "task-archive-defers-to-reap" || bad "task-archive-defers-to-reap" "task attempted a vault write"
+"$SCRIPT" start --no-spawn --worktree "$LIGHT" --vault-root "$REPO_ROOT" >"$SANDBOX/restart.out" 2>"$SANDBOX/restart.err"
+expect_eq "unarchived-cycle-restart-blocked" "$?" 1
+grep -q 'previous review history is not archived' "$SANDBOX/restart.err" && ok "unarchived-cycle-preserved" || bad "unarchived-cycle-preserved" "prior cycle could be overwritten"
 grep -q 'Review mode: `light`' "$LIGHT/.review-prompt-verify.md" && ok "verify-light-prompt" || bad "verify-light-prompt" "missing light marker"
 
 FULL="$SANDBOX/full"

@@ -1,9 +1,11 @@
 # Pipeline observability
 
-The unattended pipeline records enough local evidence to answer three practical
+The unattended pipeline records enough local **content-free telemetry** to answer three practical
 questions: did the handoff finish, where did it wait, and did automation reduce
 or merely move human intervention? It deliberately does **not** record what the
-task or review said.
+task or review said. Separately, an explicitly completed cross-model review is
+filed as a normal contentful wiki page under `wiki/meta/reviews/` so a human can
+later reconstruct the technical reasoning. That page is not telemetry.
 
 ## Generate a report
 
@@ -64,6 +66,14 @@ It rejects prompt text, task descriptions, search queries, commands, snippets,
 page bodies, review prose, decisions, and error messages. Lifecycle emission is
 best-effort: a missing or corrupt telemetry destination never changes the task,
 review, escalation, reap, or close result.
+
+The durable review archive has the opposite purpose and a different trust
+boundary: it retains the bounded human task-description section plus
+schema-validated findings, executor resolutions, verification gaps, residual
+risks, and final verdict through `vault-write.py`. Task worktrees cannot write
+it directly. Raw orchestration/reviewer prompts, compressed payloads, command
+logs, sockets, and cmux IDs are excluded. The result page gets one validated
+wikilink to the archive during coordinator `/reap`.
 
 ## Reading the numbers
 

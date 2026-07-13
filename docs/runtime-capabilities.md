@@ -20,6 +20,7 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
+| Durable review history | Coordinator archives validated rounds/resolutions through `vault-write.py`; task splits only defer | Same | Explicit `spawn_review.py archive` from the coordinator vault |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
@@ -29,6 +30,11 @@ and error text are not accepted. `pipeline-stats.py` reports these shared
 operations and unattended lifecycle p50/p95 separately from Claude-only skill
 telemetry. See [pipeline observability](pipeline-observability.md) for metric
 definitions, sample-size limits, and the dogfood acceptance window.
+
+Durable review pages are intentionally separate from telemetry. In unattended
+final reap, the lifecycle contract hashes the coordinator-generated marker,
+revalidates the archived page, and requires the archive wikilink in the task
+result before it permits exact-surface close.
 
 Local file ingestion is also runtime-neutral. `document-normalize.py` handles
 text-like sources directly and invokes the isolated Docling runtime only for

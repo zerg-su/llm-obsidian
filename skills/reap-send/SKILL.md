@@ -134,9 +134,19 @@ Wait for "yes" only in interactive mode.
 Write `./.task-summary.json`, then validate and render it:
 
 ```bash
-python3 <vault-root>/scripts/parse-wiki-summary.py \
-  --json-file .task-summary.json --render-markdown > .task-summary.md
+if [ -f .review-archive.json ]; then
+  python3 <vault-root>/scripts/parse-wiki-summary.py \
+    --json-file .task-summary.json --render-markdown \
+    --review-archive-marker .review-archive.json > .task-summary.md
+else
+  python3 <vault-root>/scripts/parse-wiki-summary.py \
+    --json-file .task-summary.json --render-markdown > .task-summary.md
+fi
 ```
+
+Use the marker only when that coordinator-generated file already exists.
+Normally task-side `finish` defers archival
+and `/reap` appends the link later; never invent or edit the marker here.
 
 Exit 2 means the model-produced contract is invalid: fix the JSON before any
 callback. JSON is the source of truth; Markdown is a deterministic compatibility

@@ -61,6 +61,9 @@ HANDOFF_EXCLUDES = [
     ".task-review-resolution.md",
     ".task-review-skill",
     ".task-review-send-skill",
+    ".review-history.json",
+    ".review-archive.json",
+    ".review-archive-request.json",
     ".review-prompt.md",
     ".review-prompt-verify.md",
     ".review-meta.json",
@@ -146,6 +149,217 @@ def read_text_file(path: Path, default: str = "") -> str:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return default
+
+
+def review_request_description(worktree: Path, limit: int = 6_000) -> str:
+    """Extract the task request without retaining the orchestration prompt."""
+    text = read_text_file(worktree / ".task-prompt.md").replace("\x00", "").strip()
+    if not text:
+        return ""
+    lines = text.splitlines()
+    description_heading = next(
+        (index for index, line in enumerate(lines) if line.strip() == "## Task description"),
+        None,
+    )
+    if description_heading is not None:
+        start = description_heading + 1
+        end = next(
+            (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
+            len(lines),
+        )
+        description = "\n".join(lines[start:end]).strip()
+    else:
+        start = 1 if lines and lines[0].startswith("# Task:") else 0
+        end = next(
+            (index for index in range(start, len(lines)) if lines[index].startswith("## ")),
+            len(lines),
+        )
+        description = "\n".join(lines[start:end]).strip()
+    if len(description) > limit:
+        description = description[: limit - 1].rstrip() + "…"
+    return description
+
+
+def initialize_review_history(
+    worktree: Path,
+    review_id: str,
+    task_name: str,
+    meta: dict[str, Any],
+    review_mode: str,
+) -> None:
+    (worktree / ".review-archive.json").unlink(missing_ok=True)
+    (worktree / ".review-archive-request.json").unlink(missing_ok=True)
+    write_json(
+        worktree / ".review-history.json",
+        {
+            "schema_version": 1,
+            "review_id": review_id,
+            "task_name": task_name,
+            "request": {
+                "description": review_request_description(worktree),
+                "base_branch": str(meta.get("base_branch") or ""),
+                "branch": str(meta.get("branch") or ""),
+                "review_mode": review_mode,
+            },
+            "rounds": [],
+        },
+    )
+
+
+def ensure_review_cycle_can_start(worktree: Path) -> None:
+    history_path = worktree / ".review-history.json"
+    if not history_path.is_file():
+        if (worktree / ".task-review.json").is_file() and not (worktree / ".review-archive.json").is_file():
+            die("previous legacy review is not archived; run the archive/reap step before starting another cycle")
+        return
+    history = read_json(history_path)
+    if not isinstance(history, dict):
+        die(".review-history.json must contain an object")
+    rounds = history.get("rounds")
+    if not isinstance(rounds, list):
+        die(".review-history.json rounds must be a list")
+    if not rounds:
+        return
+    marker_path = worktree / ".review-archive.json"
+    if not marker_path.is_file():
+        die("previous review history is not archived; run the archive/reap step before starting another cycle")
+    marker = read_json(marker_path)
+    archive_path = str(marker.get("path") or "")
+    archive_title = str(marker.get("title") or "")
+    if (
+        marker.get("review_id") != history.get("review_id")
+        or marker.get("status") not in {"archived", "already-current"}
+        or not archive_path.startswith("wiki/meta/reviews/")
+        or not archive_path.endswith(".md")
+        or Path(archive_path).stem != archive_title
+        or marker.get("wikilink") != f"[[{archive_title}]]"
+    ):
+        die("previous review archive marker does not match the completed review cycle")
+
+
+def record_review_round(
+    worktree: Path,
+    review_meta: dict[str, Any],
+    review: dict[str, Any],
+) -> None:
+    path = worktree / ".review-history.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        history = {
+            "schema_version": 1,
+            "review_id": str(review_meta.get("review_id") or review["run_id"]),
+            "task_name": str(review_meta.get("task_name") or "review"),
+            "request": {
+                "description": review_request_description(worktree),
+                "base_branch": str(review_meta.get("base_branch") or ""),
+                "branch": str(review_meta.get("branch") or ""),
+                "review_mode": str(review_meta.get("review_mode") or review["mode"]),
+            },
+            "rounds": [],
+        }
+    except json.JSONDecodeError as exc:
+        die(f".review-history.json is not valid JSON: {exc}")
+    if not isinstance(history, dict):
+        die(".review-history.json must contain an object")
+    rounds = history.get("rounds")
+    if not isinstance(rounds, list):
+        die(".review-history.json rounds must be a list")
+    entry = {
+        "iteration": max(1, int(review_meta.get("iteration") or 1)),
+        "phase": str(review_meta.get("phase") or "initial-review"),
+        "received_at": utc_now(),
+        "review": review,
+        "resolution": None,
+    }
+    for index, existing in enumerate(rounds):
+        existing_review = existing.get("review") if isinstance(existing, dict) else None
+        if isinstance(existing_review, dict) and existing_review.get("run_id") == review["run_id"]:
+            entry["resolution"] = existing.get("resolution")
+            rounds[index] = entry
+            break
+    else:
+        rounds.append(entry)
+    if len(rounds) > 10:
+        die("review history exceeds 10 rounds")
+    history["schema_version"] = 1
+    history["review_id"] = str(history.get("review_id") or review_meta.get("review_id") or review["run_id"])
+    history["task_name"] = str(history.get("task_name") or review_meta.get("task_name") or "review")
+    if not isinstance(history.get("request"), dict):
+        history["request"] = {
+            "description": review_request_description(worktree),
+            "base_branch": str(review_meta.get("base_branch") or ""),
+            "branch": str(review_meta.get("branch") or ""),
+            "review_mode": str(review_meta.get("review_mode") or review["mode"]),
+        }
+    history["rounds"] = rounds
+    write_json(path, history)
+
+
+def snapshot_latest_resolution(worktree: Path) -> None:
+    history_path = worktree / ".review-history.json"
+    resolution = read_text_file(worktree / ".task-review-resolution.md")
+    if not history_path.is_file() or not resolution:
+        return
+    if len(resolution) > 20_000:
+        die(".task-review-resolution.md exceeds 20000 characters")
+    history = read_json(history_path)
+    rounds = history.get("rounds")
+    if not isinstance(rounds, list) or not rounds:
+        return
+    latest = rounds[-1]
+    if not isinstance(latest, dict):
+        die(".review-history.json latest round must be an object")
+    latest["resolution"] = resolution
+    write_json(history_path, history)
+
+
+def coordinator_repo_root() -> Path | None:
+    result = run(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd())
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return Path(result.stdout.strip()).expanduser().resolve()
+
+
+def archive_or_defer(
+    worktree: Path,
+    review_meta: dict[str, Any],
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    vault = review_vault(review_meta) or DEFAULT_VAULT
+    review_id = str(review_meta.get("review_id") or "").strip()
+    if coordinator_repo_root() != vault.resolve():
+        result = {
+            "schema_version": 1,
+            "status": "deferred",
+            "review_id": review_id,
+            "reason": "coordinator-reap-required",
+        }
+        if not dry_run:
+            write_json(worktree / ".review-archive-request.json", result)
+        return result
+    command = [
+        sys.executable,
+        str(vault / "skills" / "review-dispatch" / "scripts" / "archive_review.py"),
+        "--worktree",
+        str(worktree),
+        "--vault-root",
+        str(vault),
+        "--json",
+    ]
+    if dry_run:
+        command.append("--dry-run")
+    result = run(command, cwd=vault)
+    if result.returncode != 0:
+        die((result.stderr or result.stdout).strip() or "review archive failed")
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        die(f"review archive returned invalid JSON: {exc}")
+    if not isinstance(value, dict):
+        die("review archive result must be an object")
+    return value
 
 
 def read_task_name(worktree: Path, meta: dict[str, Any]) -> str:
@@ -668,6 +882,7 @@ def render_review_prompt(
 
 def cmd_start(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
+    ensure_review_cycle_can_start(worktree)
     vault = Path(ns.vault_root).expanduser().resolve()
     meta = read_json(worktree / ".task-meta.json")
     try:
@@ -758,7 +973,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
 
     started_at = utc_now()
     review_meta = {
-        "version": 4,
+        "version": 5,
+        "review_id": run_id,
         "run_id": run_id,
         "task_name": task_name,
         "started_at": started_at,
@@ -793,6 +1009,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "status": "prepared",
     }
     write_json(worktree / ".review-meta.json", review_meta)
+    initialize_review_history(worktree, run_id, task_name, meta, review_mode)
 
     if ns.no_spawn:
         print(command)
@@ -850,6 +1067,7 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         review_runtime_dir is None or not review_runtime_dir.is_dir()
     ):
         die("Codex reviewer runtime directory is missing; start a fresh reviewer")
+    snapshot_latest_resolution(worktree)
     submission_command = submit_command(vault, worktree, reviewer_runtime, review_runtime_dir)
 
     write_baseline(worktree)
@@ -883,6 +1101,7 @@ def cmd_verify(ns: argparse.Namespace) -> int:
     review_meta["executor_callback_command"] = executor_callback
     review_meta["send_mode"] = "file-reference"
     review_meta["status"] = "verify_sent" if not ns.no_send else "verify_prepared"
+    review_meta["archive_status"] = "pending"
     review_meta["updated_at"] = utc_now()
     write_json(worktree / ".review-meta.json", review_meta)
     handoff = verify_handoff_message(worktree, prompt_file)
@@ -938,7 +1157,9 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     task_name = str(review_meta.get("task_name") or "task")
     write_json(worktree / output_json_file, review)
     (worktree / output_file).write_text(render_markdown(review, task_name), encoding="utf-8")
+    record_review_round(worktree, review_meta, review)
     review_meta["status"] = "review_received"
+    review_meta["archive_status"] = "pending"
     review_meta["updated_at"] = utc_now()
     review_meta["sent_output_file"] = output_file
     review_meta["sent_output_json_file"] = output_json_file
@@ -948,6 +1169,12 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     except TaskContractError as exc:
         die(str(exc))
     write_json(worktree / ".review-meta.json", review_meta)
+    if review_meta.get("recommended_action") == "escalate":
+        archive_result = archive_or_defer(worktree, review_meta)
+        review_meta["archive_status"] = str(archive_result.get("status") or "unknown")
+        if archive_result.get("wikilink"):
+            review_meta["archive_wikilink"] = archive_result["wikilink"]
+        write_json(worktree / ".review-meta.json", review_meta)
     findings = review["findings"]
     severities = {
         severity: sum(1 for finding in findings if finding.get("severity") == severity)
@@ -987,6 +1214,22 @@ def cmd_status(ns: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_archive(ns: argparse.Namespace) -> int:
+    worktree = Path(ns.worktree).expanduser().resolve()
+    review_meta = read_json(worktree / ".review-meta.json")
+    if ns.vault_root:
+        review_meta["vault_root"] = str(Path(ns.vault_root).expanduser().resolve())
+    result = archive_or_defer(worktree, review_meta, dry_run=ns.dry_run)
+    if not ns.dry_run:
+        review_meta["archive_status"] = str(result.get("status") or "unknown")
+        if result.get("wikilink"):
+            review_meta["archive_wikilink"] = result["wikilink"]
+        review_meta["updated_at"] = utc_now()
+        write_json(worktree / ".review-meta.json", review_meta)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def cmd_finish(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     task_meta = read_json(worktree / ".task-meta.json")
@@ -1004,7 +1247,11 @@ def cmd_finish(ns: argparse.Namespace) -> int:
         auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
             "surface_policy"
         ].get("auto_close") is True
-        print(f"would arm close={str(auto_close).lower()} and send /exit to {runtime} reviewer surface {surface}")
+        archive_result = archive_or_defer(worktree, review_meta, dry_run=True)
+        print(
+            f"would archive={archive_result.get('status')} arm close={str(auto_close).lower()} "
+            f"and send /exit to {runtime} reviewer surface {surface}"
+        )
         return 0
 
     auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
@@ -1013,6 +1260,13 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     if auto_close:
         if review_meta.get("status") != "review_received" or review_meta.get("recommended_action") != "approve":
             die("unattended reviewer finish requires a received approve callback")
+    archive_result = archive_or_defer(worktree, review_meta)
+    review_meta["archive_status"] = str(archive_result.get("status") or "unknown")
+    if archive_result.get("wikilink"):
+        review_meta["archive_wikilink"] = archive_result["wikilink"]
+    review_meta["updated_at"] = utc_now()
+    write_json(worktree / ".review-meta.json", review_meta)
+    if auto_close:
         lifecycle = DEFAULT_VAULT / "scripts" / "cmux_surface_lifecycle.py"
         result = run(
             [sys.executable, str(lifecycle), "request-exit", "--worktree", str(worktree), "--kind", "reviewer"]
@@ -1092,6 +1346,12 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="print .review-meta.json")
     status.add_argument("--worktree", default=".", help="task worktree path")
     status.set_defaults(func=cmd_status)
+
+    archive = sub.add_parser("archive", help="archive validated review history into the coordinator wiki")
+    archive.add_argument("--worktree", default=".", help="reviewed task worktree path")
+    archive.add_argument("--vault-root", default="", help="override coordinator vault root")
+    archive.add_argument("--dry-run", action="store_true", help="validate without writing or deferring")
+    archive.set_defaults(func=cmd_archive)
 
     finish = sub.add_parser("finish", help="exit reviewer; unattended tasks arm exact-surface close")
     finish.add_argument("--worktree", default=".", help="task worktree path")

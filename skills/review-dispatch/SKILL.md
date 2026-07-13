@@ -59,6 +59,7 @@ python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py start --ligh
 `spawn` remains a backward-compatible alias for `start`.
 
 The script writes `.review-prompt.md`, `.review-meta.json`,
+`.review-history.json`,
 `.review-cmux-surface`, `.review-baseline-state.json`, and
 `.review-baseline-status.txt`, then opens a cmux right split with the opposite
 model in a product-read-only, network-disabled execution profile. It also writes `.task-review-skill` and `.task-review-send-skill` so no
@@ -123,6 +124,10 @@ Use when the reviewer split calls back after `$<plugin>:review-send` or
    file named by `.review-meta.json.output_file`:
    - `.task-review.md` for initial findings.
    - `.task-review-verify.md` for the follow-up verification pass.
+   The bounded human task-description section and every validated callback are
+   also appended idempotently to the stable `.review-history.json` cycle. A later `verify` snapshots the executor's
+   `.task-review-resolution.md` into the round it resolves before rotating to
+   the next `run_id`.
 2. Classify each finding in `.task-review-resolution.md`:
    - `applied`
    - `rejected`
@@ -172,7 +177,16 @@ After interactive approval, or immediately after unattended approve:
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py finish
 ```
 
-For unattended tasks this arms a surface-bound sentinel, queues `/exit`, and
+Before exit, `finish` archives the validated cycle when it runs in the
+coordinator vault. Inside an isolated task worktree it writes only
+`.review-archive-request.json`; coordinator `/reap` performs the authorized
+`vault-write.py` transaction and links the archive from the task result. The
+archive keeps the original task request, validated findings, per-round executor
+resolutions, verification gaps, residual risks, reviewer/runtime/model/mode,
+and final verdict. It does not copy raw orchestration/reviewer prompts,
+compressed payloads, command logs, sockets, or cmux IDs.
+
+For unattended tasks `finish` then arms a surface-bound sentinel, queues `/exit`, and
 lets the launch wrapper call `cmux close-surface` only after the agent process
 actually returns. If `/exit` is ignored or close fails, the surface stays open.
 Interactive/legacy tasks keep the old exit-without-close behavior.
@@ -192,8 +206,12 @@ Interactive/legacy tasks keep the old exit-without-close behavior.
   committed before `finish`/`reap-send`, unless no non-handoff changes remain.
 - Final `## Wiki Summary` should include:
   `Cross-model review: <not run | passed | fixes applied | blocked>`.
+- One review cycle has one stable `review_id`; each initial/verification round
+  has its own contract `run_id`. The durable page lives under
+  `wiki/meta/reviews/` and is updated idempotently through `vault-write.py`.
 
 ## Resources
 
 - `scripts/spawn_review.py` performs the cmux orchestration.
+- `scripts/archive_review.py` renders and transactionally files durable review history.
 - `references/review-prompt-template.md` is rendered for reviewer turns.

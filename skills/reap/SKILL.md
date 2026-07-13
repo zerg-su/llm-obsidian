@@ -166,6 +166,39 @@ python3 scripts/task_contract.py check-handoff \
 Any plan hash, origin session, type, title, or auto-file mismatch stops before
 address allocation or vault writes.
 
+### 1.4b Archive cross-model review history
+
+If `$WORKTREE/.review-meta.json` exists, archive the validated review cycle from
+the **coordinator vault** before drafting the result page:
+
+```bash
+python3 skills/review-dispatch/scripts/spawn_review.py archive \
+  --worktree "$WORKTREE"
+```
+
+`archived` and `already-current` are success. `no-review`, invalid history, or
+writer failure blocks a final reap: a started review must not disappear into a
+one-line summary. The command is idempotent and writes the contentful page under
+`wiki/meta/reviews/` through `vault-write.py`; it consumes any deferred
+`.review-archive-request.json` and creates `.review-archive.json` in the
+worktree. The bounded original task-description section is kept for context;
+raw orchestration/reviewer prompts, payload tokens, command logs, sockets, and
+cmux IDs are not archived. If `.review-meta.json` is absent, continue without
+an archive.
+
+Then parse the canonical summary again with the generated marker:
+
+```bash
+python3 scripts/parse-wiki-summary.py \
+  --json-file "$WORKTREE/.task-summary.json" \
+  --review-archive-marker "$WORKTREE/.review-archive.json"
+```
+
+For the legacy Markdown path, use the same marker with `--file`. The parser
+validates that the marker points only into `wiki/meta/reviews/` and appends one
+deterministic `Review archive: [[...]]` line to the result body. Never handcraft
+or trust a reviewer-provided wikilink.
+
 ### 1.5-1.6 Routing + frontmatter
 
 **Read** `references/filing-rules.md` — the full routing table (type -> target path -> new/update) and the frontmatter schema (address via `./scripts/allocate-address.sh`, sessions provenance from `.task-meta.json` + current, executor_runtime/model, suggested_agents, interim=developing / final=per pre-flight).
@@ -214,7 +247,7 @@ Wait for "yes / no / edit" only in interactive mode.
 
 ---
 
-## Phase 2: Write (one transaction)
+## Phase 2: Write the task result (one transaction)
 
 For unattended final mode, first bind the still-pending approved plan, current
 summary, intended result path, and deterministic post-`plan_close` hash. This
@@ -232,7 +265,8 @@ If preparation fails, do not write. The marker contains hashes and identifiers
 only; `complete-reap` later rejects a changed summary, metadata, result route,
 or plan that differs from the exact close transformation prepared here.
 
-Send the page, log/hot, and optional plan closure in a single dispatcher call:
+The review archive above is its own idempotent history transaction. Send the
+task result page, log/hot, and optional plan closure in one separate dispatcher call:
 
   ```bash
   python3 scripts/vault-write.py <<'PAYLOAD'
@@ -246,6 +280,11 @@ Send the page, log/hot, and optional plan closure in a single dispatcher call:
   Include `plan_close` ONLY on mode=final with a `PLAN_FILE` present (interim / no plan — omit the key). For a v2 unattended task, include its `APPROVED_PLAN_SHA256` as `expected_sha256`; a concurrent or unprepared plan mutation then aborts the whole transaction before any page/log/hot write. The script itself does: `status: pending → executed`, bump `updated:`, the exec session into `sessions:` (the plan carries BOTH sessions — planning and executing), and a `Result: <link> (reaped ...)` line at the end of the body.
 
   Update-mode uses `op:update` plus `expected_sha256`. Exit 2 = cap/lifecycle violation; exit 4 = optimistic-concurrency conflict. Fix/re-read and rerun; do not bypass with direct Edits.
+
+For unattended final mode, `prepare-reap` hashes the completed review marker.
+`complete-reap` then revalidates the archive page hash and requires its exact
+wikilink in the filed result page. A missing, changed, non-approved, or unlinked
+review archive blocks close instead of silently losing the reasoning trail.
 
 **Do not split across multiple turns.** The Stop hook (autocommit) fires once at the end of the turn — one tidy commit, not five.
 

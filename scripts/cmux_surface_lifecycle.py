@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -248,6 +249,40 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     return 0
 
 
+def validated_review_archive(worktree: Path, vault: Path) -> dict[str, Any] | None:
+    """Require a completed, immutable archive whenever a review cycle exists."""
+    review_meta_path = worktree / ".review-meta.json"
+    if not review_meta_path.is_file():
+        return None
+    review_meta = read_json(review_meta_path)
+    marker_path = worktree / ".review-archive.json"
+    marker = read_json(marker_path)
+    if marker.get("schema_version") != 1 or marker.get("status") not in {"archived", "already-current"}:
+        die("review archive marker is not complete", 3)
+    review_id = str(marker.get("review_id") or "")
+    if not review_id or (review_meta.get("review_id") and review_meta.get("review_id") != review_id):
+        die("review archive marker does not match the review cycle", 3)
+    if marker.get("verdict") != "approve":
+        die("final reap requires an approved durable review archive", 3)
+    raw_path = str(marker.get("path") or "")
+    title = str(marker.get("title") or "")
+    wikilink = str(marker.get("wikilink") or "")
+    rel = Path(raw_path)
+    if rel.is_absolute() or rel.suffix != ".md" or rel.stem != title or wikilink != f"[[{title}]]":
+        die("review archive marker has inconsistent path/title/wikilink", 3)
+    archive_page = (vault / rel).resolve()
+    try:
+        archive_page.relative_to((vault / "wiki" / "meta" / "reviews").resolve())
+    except ValueError:
+        die("review archive marker points outside wiki/meta/reviews", 3)
+    expected_hash = str(marker.get("content_sha256") or "")
+    if not archive_page.is_file() or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        die("review archive page or content hash is missing", 3)
+    if hashlib.sha256(archive_page.read_bytes()).hexdigest() != expected_hash:
+        die("durable review archive changed after archival", 3)
+    return marker
+
+
 def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
     attention_path = worktree / ".task-needs-attention.json"
@@ -263,6 +298,7 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         die(str(exc))
     result = result_path.expanduser().resolve()
     vault = vault_root.expanduser().resolve()
+    review_archive = validated_review_archive(worktree, vault)
     try:
         result.relative_to(vault / "wiki")
     except ValueError:
@@ -303,6 +339,12 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         "prepared_date": prepared_date,
         "prepared_at": utc_now(),
     }
+    if review_archive is not None:
+        marker["review_archive_marker_sha256"] = hashlib.sha256(
+            (worktree / ".review-archive.json").read_bytes()
+        ).hexdigest()
+        marker["review_archive_path"] = review_archive["path"]
+        marker["review_archive_wikilink"] = review_archive["wikilink"]
     write_marker(worktree / ".task-reap-prepared.json", marker)
     print(f"prepared contract-bound final reap: {result}")
     return 0
@@ -324,6 +366,7 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         die(str(exc))
     result = result_path.expanduser().resolve()
     vault = vault_root.expanduser().resolve()
+    review_archive = validated_review_archive(worktree, vault)
     expected_fields = {
         "task_name": meta.get("task_name"),
         "current_session": current_session,
@@ -336,12 +379,22 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
     for field, expected in expected_fields.items():
         if prepared.get(field) != expected:
             die(f"reap preparation no longer matches {field}", 3)
+    if review_archive is not None:
+        marker_hash = hashlib.sha256((worktree / ".review-archive.json").read_bytes()).hexdigest()
+        if prepared.get("review_archive_marker_sha256") != marker_hash:
+            die("reap preparation no longer matches review archive marker", 3)
+        if prepared.get("review_archive_path") != review_archive["path"]:
+            die("reap preparation points at a different review archive", 3)
     try:
         result.relative_to(vault / "wiki")
     except ValueError:
         die("validated reap result must be inside the selected vault wiki", 3)
     if not result.is_file() or result.suffix != ".md":
         die("validated reap result must be an existing wiki Markdown page", 3)
+    if review_archive is not None and review_archive["wikilink"] not in result.read_text(
+        encoding="utf-8", errors="replace"
+    ):
+        die("validated reap result does not link the durable review archive", 3)
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     if str(plan) != prepared.get("plan_path"):
         die("reap preparation points at a different approved plan", 3)

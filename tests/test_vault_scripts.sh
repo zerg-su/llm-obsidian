@@ -461,6 +461,21 @@ printf '%s' "$out" > "$SANDBOX/.rendered"
 expect_grep "pws-rendered-marker" "$SANDBOX/.rendered" '## Wiki Summary'
 expect_grep "pws-rendered-title" "$SANDBOX/.rendered" 'title: Typed Summary'
 
+cat > "$SANDBOX/.review-archive.json" <<'JSON'
+{"schema_version":1,"status":"archived","review_id":"review-1","path":"wiki/meta/reviews/Cross-model review — Task — abc.md","title":"Cross-model review — Task — abc","wikilink":"[[Cross-model review — Task — abc]]"}
+JSON
+out=$("$PW" --json-file "$SANDBOX/.task-summary.json" --review-archive-marker "$SANDBOX/.review-archive.json" 2>"$SANDBOX/.err")
+expect_exit "pws-review-link" "$?" 0
+printf '%s' "$out" > "$SANDBOX/.json"
+expect_grep "pws-review-link-body" "$SANDBOX/.json" 'Review archive: [[Cross-model review — Task — abc]]'
+out=$("$PW" --json-file "$SANDBOX/.task-summary.json" --review-archive-marker "$SANDBOX/.review-archive.json" --render-markdown 2>"$SANDBOX/.err")
+printf '%s' "$out" > "$SANDBOX/.rendered"
+expect_grep "pws-review-link-rendered" "$SANDBOX/.rendered" 'Review archive: [[Cross-model review — Task — abc]]'
+
+echo '{"schema_version":1,"review_id":"review-1","path":"../escape.md","title":"Escape"}' > "$SANDBOX/.review-archive.json"
+"$PW" --json-file "$SANDBOX/.task-summary.json" --review-archive-marker "$SANDBOX/.review-archive.json" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "pws-review-link-rejects-path" "$?" 2
+
 echo '{"schema_version":2,"type":"session","title":"Bad","session":"x","body":"body"}' > "$SANDBOX/.task-summary.json"
 "$PW" --json-file "$SANDBOX/.task-summary.json" >/dev/null 2>"$SANDBOX/.err"
 expect_exit "pws-canonical-bad-version" "$?" 2

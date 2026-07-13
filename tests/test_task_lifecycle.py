@@ -21,6 +21,7 @@ WATCHDOG = ROOT / "scripts" / "cmux_task_watchdog.py"
 SUPERVISOR = ROOT / "scripts" / "cmux_agent_supervisor.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 import cmux_agent_supervisor as supervisor_module
+import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
 
@@ -73,6 +74,33 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     plan.write_text(approved_plan_text, encoding="utf-8")
     plan_hash = hashlib.sha256(plan.read_bytes()).hexdigest()
+    archive_fixture = worktree / "archive-fixture"
+    archive_fixture.mkdir()
+    archive_page = worktree / "wiki" / "meta" / "reviews" / "Review fixture.md"
+    archive_page.parent.mkdir(parents=True)
+    archive_page.write_text("# Review fixture\n", encoding="utf-8")
+    write_json(archive_fixture / ".review-meta.json", {"review_id": "review-fixture"})
+    archive_marker = {
+        "schema_version": 1,
+        "status": "archived",
+        "review_id": "review-fixture",
+        "path": "wiki/meta/reviews/Review fixture.md",
+        "title": "Review fixture",
+        "wikilink": "[[Review fixture]]",
+        "verdict": "approve",
+        "content_sha256": hashlib.sha256(archive_page.read_bytes()).hexdigest(),
+    }
+    write_json(archive_fixture / ".review-archive.json", archive_marker)
+    validated = lifecycle_module.validated_review_archive(archive_fixture, worktree)
+    check("review archive marker validates", validated is not None and validated["review_id"] == "review-fixture")
+    archive_page.write_text("# Tampered review fixture\n", encoding="utf-8")
+    try:
+        lifecycle_module.validated_review_archive(archive_fixture, worktree)
+    except SystemExit as exc:
+        check("review archive tamper blocks finalization", exc.code == 3)
+    else:
+        check("review archive tamper blocks finalization", False)
+    archive_page.write_text("# Review fixture\n", encoding="utf-8")
     meta = {
         "version": 2,
         "task_name": "demo",

@@ -36,6 +36,39 @@ from wiki_summary_contract import TYPES, WikiSummaryError, render_markdown, vali
 
 HEADER_RX = re.compile(r"^(type|title|session):\s*(.*)$")
 MARKER = "## Wiki Summary"
+REVIEW_ARCHIVE_PREFIX = "wiki/meta/reviews/"
+
+
+def attach_review_archive(summary: dict[str, object], marker_path: Path | None) -> dict[str, object]:
+    if marker_path is None or not marker_path.is_file():
+        return summary
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise WikiSummaryError(f"invalid review archive marker: {exc}") from exc
+    if not isinstance(marker, dict) or marker.get("schema_version") != 1:
+        raise WikiSummaryError("review archive marker must be a schema_version 1 object")
+    title = str(marker.get("title") or "").strip()
+    review_id = str(marker.get("review_id") or "").strip()
+    path = str(marker.get("path") or "").strip()
+    status = str(marker.get("status") or "").strip()
+    if not title or len(title) > 500 or "\n" in title or "[[" in title or "]]" in title:
+        raise WikiSummaryError("review archive marker has an invalid title")
+    if not review_id or len(review_id) > 100:
+        raise WikiSummaryError("review archive marker has an invalid review_id")
+    if not path.startswith(REVIEW_ARCHIVE_PREFIX) or not path.endswith(".md") or ".." in Path(path).parts:
+        raise WikiSummaryError("review archive marker path is outside wiki/meta/reviews")
+    if Path(path).stem != title or marker.get("wikilink") != f"[[{title}]]":
+        raise WikiSummaryError("review archive marker title/path/wikilink do not match")
+    if status not in {"archived", "already-current"}:
+        raise WikiSummaryError("review archive marker is not a completed archive")
+    link_line = f"Review archive: [[{title}]]"
+    body = str(summary.get("body") or "").rstrip()
+    if link_line not in body.splitlines():
+        body = f"{body}\n\n{link_line}" if body else link_line
+    enriched = dict(summary)
+    enriched["body"] = body
+    return enriched
 
 
 def fail(code: int, msg: str) -> int:
@@ -48,6 +81,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--file", type=Path, help="legacy Markdown summary input")
     parser.add_argument("--json-file", type=Path, help="canonical v1 JSON summary input")
     parser.add_argument("--render-markdown", action="store_true", help="render validated canonical JSON")
+    parser.add_argument(
+        "--review-archive-marker",
+        type=Path,
+        help="optional validated .review-archive.json whose wikilink is appended to the body",
+    )
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -57,6 +95,7 @@ def main(argv: list[str]) -> int:
         try:
             raw_json = json.loads(args.json_file.read_text(encoding="utf-8"))
             summary = validate_summary(raw_json, require_schema=True)
+            summary = attach_review_archive(summary, args.review_archive_marker)
         except (OSError, json.JSONDecodeError, WikiSummaryError) as exc:
             return fail(2, f"invalid canonical JSON: {exc}")
         if not summary["session"]:
@@ -111,6 +150,7 @@ def main(argv: list[str]) -> int:
                 "body": "\n".join(body_lines).strip("\n"),
             }
         )
+        summary = attach_review_archive(summary, args.review_archive_marker)
     except WikiSummaryError as exc:
         return fail(2, str(exc))
     if not summary["session"]:

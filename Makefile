@@ -1,7 +1,7 @@
 # llm-obsidian Makefile
 # Test runner entry points for DragonScale and vault tooling.
 
-.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression retrieval-experiment test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -39,6 +39,7 @@ help:
 	@echo "  make test-fold        deterministic counter-free log fold tests"
 	@echo "  make test-router      skill-router prompt matching suite (shell)"
 	@echo "  make test-review-dispatch review-dispatch mode plumbing tests"
+	@echo "  make test-review-archive durable cross-model review history tests"
 	@echo "  make test-gateway     MCP gateway config invariants (shell, offline)"
 	@echo "  make test-codex-adapter Codex plugin packaging generator tests"
 	@echo "  make test-dcg-assets  dcg config/hooks and Codex limit helper checks"
@@ -47,7 +48,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -202,6 +203,10 @@ test-router:
 test-review-dispatch:
 	@echo "=== test_review_dispatch.sh ==="
 	@bash tests/test_review_dispatch.sh
+
+test-review-archive:
+	@echo "=== test_review_archive.py ==="
+	@python3 tests/test_review_archive.py
 
 test-gateway:
 	@echo "=== test_mcp_gateway.sh ==="

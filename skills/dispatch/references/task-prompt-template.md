@@ -236,6 +236,8 @@ When the callback returns:
 7. In `interactive`, show the result and wait for acceptance. In `unattended`,
    an `approve` verdict authorizes `<review-skill> finish` immediately; its
    close-on-exit wrapper closes only the reviewer surface after process return.
+   `finish` archives directly only in coordinator context; from this task
+   worktree it leaves a typed archive request for coordinator `/reap`.
 8. Proceed to `/reap-send` after finish. Never push, deploy, publish, delete a
    worktree/branch, or expand scope under the unattended mandate.
 
@@ -264,6 +266,8 @@ The canonical JSON format:
 
 If cross-model review ran, add one `body` line:
 `Cross-model review: <not run | passed | fixes applied | blocked>`.
+Coordinator `/reap` appends the exact `Review archive: [[...]]` link after it
+files the validated review history; do not invent that title in the task split.
 If a post-review commit was created, add:
 `Commit: <hash> <message>`; if everything was already committed,
 `Commit: no changes`.
