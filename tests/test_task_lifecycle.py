@@ -248,9 +248,18 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         encoding="utf-8",
     )
     fake_codex.chmod(0o755)
-    cmux_socket_path = worktree / "cmux.sock"
-    cmux_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    cmux_socket.bind(str(cmux_socket_path))
+    inherited_cmux_socket = os.environ.get("CMUX_SOCKET_PATH", "").strip()
+    inherited_cmux_path = Path(inherited_cmux_socket).expanduser() if inherited_cmux_socket else None
+    # Exact-socket task sandboxes intentionally cannot bind a second AF_UNIX
+    # path. Reuse their already validated cmux socket for the path/type checks;
+    # ordinary hermetic runs still create and own a private fixture socket.
+    if inherited_cmux_path is not None and inherited_cmux_path.is_socket():
+        cmux_socket_path = inherited_cmux_path.resolve()
+        cmux_socket = None
+    else:
+        cmux_socket_path = worktree / "cmux.sock"
+        cmux_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        cmux_socket.bind(str(cmux_socket_path))
     screen_file = worktree / "cmux-screen.txt"
     screen_file.write_text("task alpha\n5H 20% used | reset in 2h\n", encoding="utf-8")
     top_file = worktree / "cmux-top.json"
@@ -731,6 +740,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=origin_env)
     check("dirty task stays open", result.returncode == 3)
 
-    cmux_socket.close()
+    if cmux_socket is not None:
+        cmux_socket.close()
 
 print("\nAll unattended task lifecycle tests passed.")
