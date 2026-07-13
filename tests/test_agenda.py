@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,16 @@ with tempfile.TemporaryDirectory(prefix="agenda-test.") as raw:
     target_text = target.read_text(encoding="utf-8")
     check("collect both sections", collect.returncode == 0 and result["collected"] == 2, collect.stderr)
     check("target has one plan and one reminder", "Prepare release" in target_text and "Call supplier" in target_text)
+    check(
+        "empty target sections retain canonical spacing",
+        re.search(
+            r"## Планы\n\n- \[ \] Prepare release[^\n]*\n\n"
+            r"## Напоминания\n\n- \[ \] Call supplier[^\n]*\n\n## Инциденты",
+            target_text,
+        )
+        is not None,
+        target_text,
+    )
     check("source plan closed", "- [>] Prepare release" in daily_path(root, "2028-02-29").read_text(encoding="utf-8"))
     check("source reminder closed", "- [>] Call supplier" in daily_path(root, "2028-03-01").read_text(encoding="utf-8"))
     report = root / "wiki/daily/2028/03/2028-03 — Незавершённое.md"

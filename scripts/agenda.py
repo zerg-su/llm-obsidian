@@ -526,10 +526,18 @@ def collect(
         if not lines_to_add:
             continue
         current_text = "\n".join(target_lines).rstrip() + "\n"
-        _, end = h2_section_span(current_text, DAILY_TASK_SECTIONS[section])
-        while end > 0 and not target_lines[end - 1].strip():
-            end -= 1
-        target_lines[end:end] = lines_to_add
+        start, end = h2_section_span(current_text, DAILY_TASK_SECTIONS[section])
+        insertion = end
+        while insertion > start and not target_lines[insertion - 1].strip():
+            insertion -= 1
+        if insertion == start:
+            # Canonical empty sections keep one blank line on both sides of
+            # their task list. Replacing the whitespace-only body also repairs
+            # legacy sections that have zero or several blank lines.
+            target_lines[start:end] = ["", *lines_to_add, ""]
+            continue
+        suffix = [] if insertion < end else [""]
+        target_lines[insertion:insertion] = [*lines_to_add, *suffix]
 
     specs: list[dict[str, str]] = []
     for rel in sorted(changed_sources):
