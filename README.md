@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/zerg-su/llm-obsidian/actions/workflows/ci.yml/badge.svg)](https://github.com/zerg-su/llm-obsidian/actions/workflows/ci.yml)
 
-**One durable working environment for Claude Code and Codex CLI: shared memory, shared skills, bounded orchestration, and cross-model review.** It turns conversations, sources, plans, and decisions into a structured Obsidian wiki, then makes that knowledge available to the next agent session instead of starting from zero.
+**One durable working environment for Claude Code and Codex CLI: shared memory, shared skills, bounded orchestration, and cross-model review.** It turns conversations, PDFs and other documents, plans, and decisions into a structured Obsidian wiki, then makes that knowledge available to the next agent session instead of starting from zero.
 
 🇷🇺 **Читайте по-русски: [README.ru.md](README.ru.md)**
 
@@ -99,6 +99,7 @@ The watchdog does not blindly kill an agent that is visibly working. It reports 
 | **Claude Code** | First-class | Coordinator, executor, or opposite-model reviewer through the official CLI and the user's own account/subscription. Provider limits remain in force. |
 | **Codex CLI** | First-class | Coordinator, executor, or opposite-model reviewer through the official CLI and the user's own access. Provider limits remain in force. |
 | **Obsidian** | Core data/UX | Local Markdown vault, links, browsing, and human editing. The files remain usable without an agent. |
+| **Docling + EasyOCR** | Installed by default; optional for text-only use | Local PDF, Office, EPUB, and scanned-document normalization before model synthesis, with explicit Russian/English OCR. It is not a hosted document service. |
 | **cmux** | Optional; required for orchestration | Visible task/reviewer splits, sockets, lifecycle tracking, and resumable interactive sessions. Core wiki skills work without it. |
 | **Ollama + `bge-m3`** | Optional local model | Dense multilingual embeddings and duplicate detection without a hosted API or per-call model fee. It uses your own disk/RAM; sparse retrieval remains complete when Ollama is absent. |
 | **DCG** | Optional, recommended | Destructive-command preflight for both CLIs. Defense in depth, not a sandbox or a proof of safety. |
@@ -143,6 +144,64 @@ Reviewers are launched with read-only mandates. Secrets for MCP services live ou
 - **An industrial Stop hook.** Every turn: recover interrupted writes, reindex, self-heal sparse section retrieval, strictly validate, commit only vault-owned paths, then schedule fingerprinted dense refresh when needed without waiting. Stdlib `fcntl` serializes sessions; validation failures block the commit without hiding dirty work.
 - **MCP without the process zoo.** A local HTTP gateway (one launchd service) fronts all your MCP servers: one set of long-lived processes per machine instead of per-terminal duplicates. Ships with [context7](https://context7.com) preconfigured — add one API-key line and library docs are available in every session.
 - **Parallel work, optional.** `/dispatch` gives an approved plan one bounded unattended mandate in a separate git worktree + [cmux](https://github.com/wandb/cmux) split. Cross-model review, durable per-round review history linked from the result, contract-bound final `/reap`, validation, observer-only 15/20-minute stall notifications, and armed close-on-process-exit run without repeated prompts; blocking/scope changes return to the coordinator. Requires cmux; everything else works without it.
+
+## PDFs and other documents
+
+Give either agent a local file path; normal use does not require converting the
+file by hand:
+
+```text
+ingest ~/Downloads/architecture-report.pdf
+```
+
+Claude routes that request to `/wiki-ingest`. In Codex, the explicit equivalent
+is `$llm-obsidian:wiki-ingest ~/Downloads/architecture-report.pdf`. The result
+is not a PDF pasted into a chat: the source becomes structured, cross-linked
+wiki pages with source hash, session provenance, and stable Obsidian links.
+
+```text
+read-only local file
+  -> format, size, and page-limit checks
+  -> stdlib fast path OR isolated Docling + EasyOCR
+  -> cached Markdown, tables, and referenced images
+  -> quality gate
+  -> wiki-ingest synthesis
+  -> one transactional vault write
+```
+
+| Input | Processing path |
+|---|---|
+| Markdown, text, JSON, YAML, CSV | Python standard library; Docling is not started |
+| Local HTML | Networkless standard-library cleanup |
+| PDF, DOCX, PPTX, XLSX, ODT/ODS/ODP, EPUB | Pinned local Docling standard pipeline |
+| Scanned document image | Docling + EasyOCR with explicit `ru,en` languages |
+| Photograph, diagram, or whiteboard | Native vision path because the primary content is visual rather than document text |
+
+Docling runs before the LLM, not inside it. Its accurate-table profile and
+Russian/English OCR produce a deterministic Markdown artifact; a
+content-addressed cache avoids repeating conversion and OCR for an unchanged
+file. The original remains read-only. Remote services, external Docling
+plugins, remote HTML images, and runtime model downloads are disabled during
+ingestion.
+
+The normal bootstrap installs the isolated runtime and prefetched models. These
+commands cover diagnosis and repair:
+
+```bash
+bash bin/setup-clean-machine.sh
+python3 scripts/document-normalize.py check --json
+python3 scripts/install-docling.py install            # repair only Docling
+python3 scripts/document-normalize.py normalize \
+  "$HOME/Downloads/architecture-report.pdf" --json    # inspect raw normalization
+```
+
+If Docling is absent, text-like files still work and binary inputs return an
+actionable `needs_user_action` result. Low-quality extraction stops before wiki
+writes. A PDF is never silently sent straight to a model; model-native binary
+reading is a degraded fallback that requires explicit approval for that one
+source. Default limits are 250 MiB, 2,000 pages, and 20 minutes, with no silent
+truncation. See [local document ingestion](docs/document-ingestion.md) for the
+cache layout, result statuses, limits, and repair procedure.
 
 ## Why this fork
 
