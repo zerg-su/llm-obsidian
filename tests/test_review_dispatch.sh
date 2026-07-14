@@ -71,10 +71,23 @@ PY
 echo "== review-dispatch mode plumbing =="
 
 LIGHT="$SANDBOX/light"
+LIGHT_VAULT="$SANDBOX/light-vault"
 write_fixture "$LIGHT"
+mkdir -p "$LIGHT_VAULT/wiki" "$LIGHT_VAULT/scripts" "$LIGHT_VAULT/.codex" \
+  "$LIGHT_VAULT/skills/review-dispatch/scripts"
+printf '# fixture\n' > "$LIGHT_VAULT/scripts/vault-write.py"
+printf '# fixture\n' > "$LIGHT_VAULT/skills/review-dispatch/scripts/archive_review.py"
+printf '[codex_dispatch]\nclaude_review_effort = "medium"\n' > "$LIGHT_VAULT/.codex/dispatch-env.toml"
+python3 - "$LIGHT/.task-meta.json" "$LIGHT_VAULT" <<'PY'
+import json, sys
+path, vault = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+data["vault_root"] = vault
+open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
+PY
 printf '# stale resolution\n' > "$LIGHT/.task-review-resolution.md"
 printf '# stale verify\n' > "$LIGHT/.task-review-verify.md"
-"$SCRIPT" start --light --no-spawn --worktree "$LIGHT" --vault-root "$REPO_ROOT" >"$SANDBOX/light.out" 2>"$SANDBOX/light.err"
+"$SCRIPT" start --light --no-spawn --worktree "$LIGHT" --vault-root "$LIGHT_VAULT" >"$SANDBOX/light.out" 2>"$SANDBOX/light.err"
 expect_eq "start-light-exit" "$?" 0
 [[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify survived"
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
@@ -325,6 +338,7 @@ expect_eq "typed-submit-exit" "$?" 0
 [[ "$callback" == *"--relay-file $light_callback_path"* ]] && ok "typed-stdin-short-callback" || bad "typed-stdin-short-callback" "stdin transport did not publish relay"
 "$SCRIPT" receive --worktree "$LIGHT" --relay-file "$LIGHT/.review-callback.json" >/dev/null 2>"$SANDBOX/receive.err"
 expect_eq "typed-receive-exit" "$?" 0
+expect_eq "receive-canonical-vault-root" "$(json_get "$LIGHT/.review-meta.json" vault_root)" "$(path_resolve "$LIGHT_VAULT")"
 [[ ! -e "$LIGHT/.review-callback.json" ]] && ok "typed-receive-removes-relay" || bad "typed-receive-removes-relay" "received relay remains"
 expect_eq "typed-json-verdict" "$(json_get "$LIGHT/.task-review.json" verdict)" "approve"
 python3 - "$LIGHT/.review-history.json" "$run_id" <<'PY'
@@ -336,7 +350,7 @@ assert data["rounds"][0]["review"]["run_id"] == sys.argv[2]
 PY
 [[ $? -eq 0 ]] && ok "receive-records-review-history" || bad "receive-records-review-history" "round not retained"
 grep -q '^Verdict: approve$' "$LIGHT/.task-review.md" && ok "typed-markdown-render" || bad "typed-markdown-render" "derived markdown missing"
-python3 - "$LIGHT/.vault-meta/pipeline-events.jsonl" <<'PY'
+python3 - "$LIGHT_VAULT/.vault-meta/pipeline-events.jsonl" <<'PY'
 import json, sys
 events = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8")]
 matches = [event for event in events if event.get("op") == "review-round"]
@@ -567,7 +581,7 @@ raise SystemExit(0 if data["env"].get("TMPDIR") == sys.argv[2] else 1)
 PY
 [[ $? -eq 0 ]] && ok "codex-scratch-env" || bad "codex-scratch-env" "TMPDIR is not pinned to scratch"
 if grep -q -- '--add-dir' "$CODEX_SPEC"; then bad "codex-no-additional-write-root" "reviewer requests --add-dir"; else ok "codex-no-additional-write-root"; fi
-grep -q 'web_search=' "$CODEX_SPEC" && ok "codex-network-disabled" || bad "codex-network-disabled" "web search override missing"
+grep -q 'web_search=' "$CODEX_SPEC" && ok "codex-external-network-disabled" || bad "codex-external-network-disabled" "web search override missing"
 python3 - "$CODEX_SPEC" <<'PY'
 import json, os, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))

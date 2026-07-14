@@ -1273,6 +1273,12 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     task_meta = read_json(worktree / ".task-meta.json")
     review_meta = read_json(worktree / ".review-meta.json")
+    vault = resolve_vault_root(
+        worktree,
+        task_meta=task_meta,
+        review_meta=review_meta,
+    )
+    review_meta["vault_root"] = str(vault)
     run_id = str(review_meta.get("run_id") or "").strip()
     review_mode = normalize_review_mode(str(review_meta.get("review_mode") or "full"))
     if not run_id:

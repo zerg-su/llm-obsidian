@@ -18,6 +18,7 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Unattended task splits use a practical workspace-write profile constrained to the task worktree, exact cmux callback socket, and validated supervisor command; the coordinator owns any bounded mechanism repair.
 - Review callbacks use an atomic relay file instead of pasting large encoded payloads into the terminal composer.
 - Monthly agenda reports identify themselves as unfinished plans and reminders, improving both human navigation and sparse retrieval.
+- Bookkeeping mutations to the writer-owned `log.md` and `hot.md` no longer append every runtime session to their frontmatter; durable content pages, plans, and review archives retain explicit session provenance.
 
 ### Fixed
 
@@ -28,6 +29,7 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 ### Security
 
 - Review archives are coordinator-owned `vault-write.py` transactions. Task worktrees can only request archival; only the bounded human task-description section is retained, while raw orchestration/reviewer prompts, compressed callback payloads, command logs, sockets, and cmux identifiers stay outside the durable page.
+- Read-only Codex reviewers allow loopback client/server tests while external networking and web search remain disabled.
 - Auto-repair remains limited to local, reproducible, reversible repository mechanisms inside approved scope; permission, dependency, public-interface, migration, destructive, and external effects still require user authority.
 
 ## [2.0.6] - 2026-07-13

@@ -72,7 +72,9 @@ The script writes `.review-prompt.md`, `.review-meta.json`,
 `.review-history.json`,
 `.review-cmux-surface`, `.review-baseline-state.json`, and
 `.review-baseline-status.txt`, then opens a cmux right split with the opposite
-model in a product-read-only, network-disabled execution profile. It also writes `.task-review-skill` and `.task-review-send-skill` so no
+model in a product-read-only, loopback-only, external-network-disabled
+execution profile. It also writes `.task-review-skill` and
+`.task-review-send-skill` so no
 agent has to guess plugin/slash syntax.
 
 The split receives only a short `scripts/cmux_agent_supervisor.py` command;
