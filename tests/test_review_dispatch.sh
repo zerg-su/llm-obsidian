@@ -9,6 +9,21 @@ SUPERVISOR="$REPO_ROOT/scripts/cmux_agent_supervisor.py"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/review-dispatch-test.XXXXXX")"
 trap 'rm -rf "$SANDBOX"' EXIT
 
+# Keep this suite hermetic on clean CI runners. The production supervisor
+# requires both agent runtimes and cmux to be resolvable from its pinned PATH,
+# while --no-spawn tests only inspect the generated command specs. Provide
+# owner-only no-op executables instead of depending on developer-installed
+# Claude/Codex/cmux binaries, and isolate the configured ~/.codex path.
+TEST_HOME="$SANDBOX/home"
+TEST_RUNTIME_BIN="$SANDBOX/runtime-bin"
+mkdir -m 700 -p "$TEST_HOME/.codex" "$TEST_RUNTIME_BIN"
+for command in claude codex cmux; do
+  printf '#!/bin/sh\nexit 0\n' > "$TEST_RUNTIME_BIN/$command"
+  chmod 700 "$TEST_RUNTIME_BIN/$command"
+done
+export HOME="$TEST_HOME"
+export PATH="$TEST_RUNTIME_BIN:$PATH"
+
 pass=0
 fail=0
 failures=()
