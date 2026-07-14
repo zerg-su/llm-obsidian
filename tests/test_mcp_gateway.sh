@@ -15,8 +15,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GW="$REPO_ROOT/scripts/mcp-gateway"
 SANDBOX="$(mktemp -d /tmp/mcp-gateway-test.XXXXXX)"
-FAKE_PID=""
-trap '[ -n "$FAKE_PID" ] && kill "$FAKE_PID" 2>/dev/null; rm -rf "$SANDBOX"' EXIT
+trap 'rm -rf "$SANDBOX"' EXIT
 
 pass=0; fail=0; failures=()
 ok()  { pass=$((pass+1)); printf '  OK   %s\n' "$1"; }
@@ -212,51 +211,66 @@ python3 "$GW/update-pins.py" "$SANDBOX/gwdir/config.json" --check no-such-pkg >"
 expect_exit "E1 unknown name -> non-zero" "$?" 1
 expect_grep "E2 unknown name message" "$OUT" "unknown name(s): no-such-pkg"
 
-# ---------- F. smoke.py vs fake MCP server ----------
-echo "F. smoke.py vs fake MCP server"
-cat > "$SANDBOX/fake_mcp.py" <<'EOF'
-import http.server, json
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if self.path.startswith("/bad/"):
-            self.send_response(404); self.end_headers(); return
-        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {
-            "tools": [{"name": "a"}, {"name": "b"}],
-            "content": [{"type": "text", "text": "successfully connected"}]}}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-    def log_message(self, *a): pass
-srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-print(srv.server_address[1], flush=True)
-srv.serve_forever()
+# ---------- F. smoke.py vs deterministic fake transport ----------
+echo "F. smoke.py vs deterministic fake transport"
+cat > "$SANDBOX/smoke_fixture.py" <<'EOF'
+import importlib.util
+import json
+import sys
+import urllib.error
+
+
+class Response:
+    headers = {
+        "Content-Type": "application/json",
+        "Mcp-Session-Id": "fixture-session",
+    }
+
+    def __init__(self, body):
+        self.body = json.dumps(body).encode()
+
+    def read(self):
+        return self.body
+
+
+def fake_urlopen(request, timeout):
+    del timeout
+    if "/bad/" in request.full_url:
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+    payload = json.loads(request.data or b"{}")
+    if payload.get("method") == "tools/list":
+        result = {"tools": [{"name": "a"}, {"name": "b"}]}
+    else:
+        result = {"content": [{"type": "text", "text": "successfully connected"}]}
+    return Response({"jsonrpc": "2.0", "id": payload.get("id", 1), "result": result})
+
+
+smoke_path, config_path, *args = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("mcp_gateway_smoke_fixture", smoke_path)
+smoke = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(smoke)
+smoke.urllib.request.urlopen = fake_urlopen
+sys.argv = [smoke_path, config_path, "1", *args]
+smoke.main()
 EOF
-python3 "$SANDBOX/fake_mcp.py" > "$SANDBOX/port.txt" &
-FAKE_PID=$!
-disown
-for _ in $(seq 1 50); do [ -s "$SANDBOX/port.txt" ] && break; sleep 0.1; done
-PORT="$(cat "$SANDBOX/port.txt")"
 cat > "$SANDBOX/gwdir/routes.json" <<'EOF'
 {"mcpServers": {"good": {"command": "/x/good", "args": []}, "bad": {"command": "/x/bad", "args": []}}}
 EOF
-python3 "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" "$PORT" --routes >"$OUT" 2>&1
+python3 "$SANDBOX/smoke_fixture.py" "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" --routes >"$OUT" 2>&1
 expect_exit "F1 --routes exit 1 with a DOWN child" "$?" 1
 expect_grep "F2 routes summary" "$OUT" "routes: 1/2 active, 1 DOWN"
 expect_grep "F3 DOWN marker" "$OUT" "!bad"
 cat > "$SANDBOX/gwdir/routes-ok.json" <<'EOF'
 {"mcpServers": {"good": {"command": "/x/good", "args": []}}}
 EOF
-python3 "$GW/smoke.py" "$SANDBOX/gwdir/routes-ok.json" "$PORT" --routes >"$OUT" 2>&1
+python3 "$SANDBOX/smoke_fixture.py" "$GW/smoke.py" "$SANDBOX/gwdir/routes-ok.json" --routes >"$OUT" 2>&1
 expect_exit "F4 --routes exit 0 when all alive" "$?" 0
 expect_grep "F5 all-active summary" "$OUT" "routes: 1/1 active"
-python3 "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" "$PORT" good,bad >"$OUT" 2>&1
+python3 "$SANDBOX/smoke_fixture.py" "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" good,bad >"$OUT" 2>&1
 expect_exit "F6 handshake exit 1 (bad fails)" "$?" 1
 expect_grep "F7 handshake OK line" "$OUT" "OK   good: 2 tools"
 expect_grep "F8 handshake FAIL line" "$OUT" "FAIL bad"
-python3 "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" "$PORT" nonexistent >"$OUT" 2>&1
+python3 "$SANDBOX/smoke_fixture.py" "$GW/smoke.py" "$SANDBOX/gwdir/routes.json" nonexistent >"$OUT" 2>&1
 expect_exit "F9 unknown server -> non-zero" "$?" 1
 expect_grep "F10 unknown server message" "$OUT" "unknown server: nonexistent"
 
