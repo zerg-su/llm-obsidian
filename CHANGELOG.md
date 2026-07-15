@@ -6,6 +6,15 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Added
+
+- Added `/clarify`, a stateless one-question-at-a-time alignment gate for plans,
+  designs, and non-trivial code changes: inspect codebase facts first, explain
+  why each decision matters, recommend an answer, and block planning or
+  implementation until the user explicitly confirms shared understanding.
+- Added soft RU/EN router hints and regression cases for explicit clarification,
+  pre-code alignment, and `grill me` requests.
+
 ### Fixed
 
 - review-dispatch: a read-only Codex reviewer no longer inherits the executor's MCP

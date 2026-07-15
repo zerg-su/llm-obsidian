@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-13
+updated: 2026-07-15
 tags:
   - meta
   - guide
@@ -34,6 +34,10 @@ sessions:
 - **autoresearch** — автономный research-цикл по теме (или frontier-кандидаты без темы).
 - **canvas** — визуальные канвасы: изображения, страницы, PDF.
 - **defuddle** — очистить веб-страницу от мусора перед ингестом.
+
+### Согласование
+
+- **clarify** — один вопрос за раз: требования, ограничения, edge cases и acceptance criteria до плана или реализации. Claude: `/clarify`; Codex: `$llm-obsidian:clarify`.
 
 ### Продуктивность
 
@@ -67,4 +71,4 @@ sessions:
 
 - Новый материал: `ingest <источник>` → `lint the wiki` (раз в неделю) → `/wiki-fold` (по нуджу).
 - Рабочий день: `/journal` утром → `agenda scan` и при необходимости `agenda collect` → работа с `/save` → `/daily` вечером.
-- Большая задача: план в plan mode → auto-capture в `wiki/plans/` → `/dispatch` на исполнение → `/reap` результата.
+- Большая задача: `/clarify` → план в plan mode → auto-capture в `wiki/plans/` → `/dispatch` на исполнение → `/reap` результата.

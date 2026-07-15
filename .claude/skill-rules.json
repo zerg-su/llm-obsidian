@@ -3,6 +3,17 @@
   "description": "Single source of truth for the UserPromptSubmit skill-router. skill_rules: regex patterns -> soft skill hints. agent_rules: same for custom sub-agents (empty in the base install).",
   "skill_rules": [
     {
+      "skill": "clarify",
+      "patterns": [
+        "(?i)\\b/?grill[- ]?me\\b",
+        "(?i)\\b(погриль|грильни|допроси)\\s+меня\\b",
+        "(?i)\\b(уточни|проясни)\\b.{0,40}\\b(до кода|перед кодом|перед реализац)",
+        "(?i)\\bclarify[- ]before[- ]code\\b",
+        "(?i)\\b(stress[- ]test|clarify)\\b.{0,40}\\b(plan|design|before (code|implementation))\\b"
+      ],
+      "hint": "One question at a time; inspect codebase facts first; no plan or implementation before explicit alignment"
+    },
+    {
       "skill": "save",
       "patterns": [
         "(?i)\\b(сохрани|зафайл(ь|и)|зафайли|file (this|that)|save (this|that))\\b",

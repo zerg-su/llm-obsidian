@@ -46,6 +46,9 @@ run_case() {
 }
 
 echo "== positive skill matches =="
+run_case "clarify-grill-EN" 'grill me on this API migration plan'                     'Skill("clarify")'
+run_case "clarify-RU"       'допроси меня перед реализацией этого дизайна'            'Skill("clarify")'
+run_case "clarify-code-EN"  'use clarify-before-code for this refactor'               'Skill("clarify")'
 run_case "save-RU"          'сохрани в вики этот ответ'                               'Skill("save")'
 run_case "save-EN"          'save this to the wiki please'                            'Skill("save")'
 run_case "close-RU"         'сохрани и закрой сессию'                                 'Skill("close")'
@@ -88,6 +91,7 @@ run_case "fp-chto-segodnya" 'что сегодня было интересног
 run_case "fp-save-word"     'какие сейвы есть в этой игре'                            'EMPTY'
 run_case "fp-v-wiki"        'у нас в вики есть страница про это?'                     'EMPTY'
 run_case "fp-learn-word"    'я узнал много нового сегодня'                            'EMPTY'
+run_case "fp-grill-food"    'положи овощи на гриль перед ужином'                      'EMPTY'
 
 echo "== mute env-var =="
 run_case "mute-dispatch"    'запусти параллельную задачу'                             'EMPTY' 'SKILL_ROUTER_MUTE=1 '
