@@ -17,6 +17,8 @@ criteria, and important branches of the decision tree are resolved.
    decisions.
 3. Ask exactly one question. Explain briefly why it matters and give your
    recommended answer.
+   Use the runtime's interactive question tool when available; otherwise ask
+   in plain text. The one-question rule applies in both cases.
 4. Wait for the user's answer before continuing. Decisions belong to the user;
    do not silently choose a material tradeoff for them.
 5. Use each answer to choose the next branch. Continue until shared
