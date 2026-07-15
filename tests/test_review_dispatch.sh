@@ -186,6 +186,120 @@ if argv_has "$LIGHT_SPEC" --permission-mode auto; then bad "claude-no-auto" "aut
 if grep -q -- 'bash -lc\|WATCHDOG_PID\|REVIEW_RC=' "$SANDBOX/light.out"; then bad "review-shell-portable" "shell wrapper leaked into cmux command"; else ok "review-shell-portable"; fi
 grep -q '"schema_version": 1' "$LIGHT/.review-prompt.md" && ok "typed-review-prompt" || bad "typed-review-prompt" "JSON contract missing"
 
+# Coordinator reviews of the canonical vault must accept the sanctioned Codex
+# scratch under <vault>/.vault-meta/review-runtimes even though it sits inside
+# the reviewed worktree; every other in-worktree runtime stays rejected. The
+# matrix runs against a synthetic canonical-vault fixture entirely under SANDBOX
+# (a copy of the supervisor whose SCRIPT_DIR resolves to the fixture), so it
+# never writes under REPO_ROOT and stays hermetic even under a read-only gate.
+python3 - "$SUPERVISOR" "$SANDBOX" <<'PY'
+import importlib.util, pathlib, shutil, sys, uuid
+real_supervisor, sandbox = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
+# Synthetic canonical vault fully under SANDBOX; copy the supervisor there so its
+# SCRIPT_DIR.parent (the "canonical vault") is the fixture, not REPO_ROOT.
+vault = sandbox / "canonical-vault"
+(vault / "scripts").mkdir(parents=True, exist_ok=True)
+copy = vault / "scripts" / "cmux_agent_supervisor.py"
+shutil.copy2(real_supervisor, copy)
+# Sibling deps (lifecycle_telemetry, task_contract) resolve from the real dir.
+sys.path.insert(0, str(real_supervisor.parent))
+spec = importlib.util.spec_from_file_location("supervisor_fixture_mod", copy)
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+assert mod.SCRIPT_DIR.parent.resolve() == vault.resolve(), "fixture SCRIPT_DIR mismatch"
+live_surface = str(uuid.uuid4()).upper()
+
+def check(label, worktree, runtime_dir, expect_ok):
+    meta = {"review_runtime_dir": str(runtime_dir), "review_surface": live_surface}
+    try:
+        mod.validated_review_runtime(worktree, meta)
+        result, err = True, ""
+    except mod.SupervisorError as exc:
+        result, err = False, str(exc)
+    if result != expect_ok:
+        print(f"BAD {label}: expected ok={expect_ok}, got ok={result} ({err})")
+        sys.exit(1)
+
+runtimes_root = vault / ".vault-meta" / "review-runtimes"
+runtimes_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+scratch = runtimes_root / f"llm-review-coordinator-selftest-{uuid.uuid4().hex[:8]}"
+scratch.mkdir(mode=0o700)
+external_wt = sandbox / "task-worktree"
+external_wt.mkdir(exist_ok=True)
+try:
+    # 1. Coordinator review (worktree == canonical vault): sanctioned scratch accepted.
+    check("coordinator-accepts-canonical", vault, scratch, True)
+    # 2. Task worktree elsewhere: same scratch is outside it, stays accepted.
+    check("taskwt-accepts-external", external_wt, scratch, True)
+    # 3. Non-empty scratch is still rejected even for coordinator reviews.
+    (scratch / "stale.txt").write_text("x", encoding="utf-8")
+    check("rejects-nonempty", vault, scratch, False)
+    (scratch / "stale.txt").unlink()
+    # 4. Group-accessible scratch is still rejected.
+    scratch.chmod(0o750)
+    check("rejects-loose-perms", vault, scratch, False)
+    scratch.chmod(0o700)
+    # 5. Runtime outside the sanctioned root is rejected even for coordinator reviews.
+    rogue = vault / f"llm-review-rogue-{uuid.uuid4().hex[:8]}"
+    rogue.mkdir(mode=0o700)
+    try:
+        check("rejects-rogue-location", vault, rogue, False)
+    finally:
+        rogue.rmdir()
+finally:
+    scratch.rmdir()
+PY
+[[ $? -eq 0 ]] && ok "review-runtime-coordinator-matrix" || bad "review-runtime-coordinator-matrix" "coordinator runtime validation matrix failed"
+
+# The in-worktree scratch exception is only sound if that hierarchy is actually
+# gitignored in the shipped repo; assert it for both the final outbox and its
+# atomic temporary file. check-ignore is read-only (no writes under REPO_ROOT).
+probe=".vault-meta/review-runtimes/llm-review-probe/.review-outbox.json"
+if git -C "$REPO_ROOT" check-ignore -q "$probe" && git -C "$REPO_ROOT" check-ignore -q "$probe.tmp"; then
+  ok "review-runtimes-gitignored"
+else
+  bad "review-runtimes-gitignored" ".vault-meta/review-runtimes not gitignored (outbox or .tmp)"
+fi
+
+# Reviewer-profile precedence: a read-only reviewer must never inherit the
+# executor MCP profile when a dedicated reviewer profile is available. This is
+# the startup regression the fix prevents, so pin the whole precedence policy.
+python3 - "$SCRIPT" "$SANDBOX" <<'PY'
+import importlib.util, json, pathlib, sys
+script, sandbox = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
+sys.path.insert(0, str(script.parent))
+spec = importlib.util.spec_from_file_location("spawn_review_mod", script)
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+
+base = sandbox / "profile-fixture"
+vault = base / "vault"
+(vault / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+(vault / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "llm-obsidian"}), encoding="utf-8")
+worktree = base / "worktree"; worktree.mkdir(parents=True, exist_ok=True)
+home_with = base / "codex-with"; home_with.mkdir(parents=True, exist_ok=True)
+(home_with / "llm-obsidian-reviewer-readonly.config.toml").write_text("", encoding="utf-8")
+home_without = base / "codex-without"; home_without.mkdir(parents=True, exist_ok=True)
+
+def profile_for(meta, runtime="codex"):
+    return mod.resolve_review_env(worktree, vault, meta, runtime)["profile"]
+
+fail = []
+# a) An explicit reviewer_profile wins outright.
+if profile_for({"codex_home": str(home_with), "reviewer_profile": "custom-reviewer", "codex_profile": "llm-obsidian-mcp"}) != "custom-reviewer":
+    fail.append("explicit reviewer_profile not honored")
+# b) reviewer-readonly is auto-selected despite an executor codex_profile.
+if profile_for({"codex_home": str(home_with), "codex_profile": "llm-obsidian-mcp"}) != "llm-obsidian-reviewer-readonly":
+    fail.append("reviewer-readonly not auto-selected over executor profile")
+# c) Executor profile is used only when no dedicated reviewer profile exists.
+if profile_for({"codex_home": str(home_without), "codex_profile": "llm-obsidian-mcp"}) != "llm-obsidian-mcp":
+    fail.append("executor fallback missing when no reviewer profile")
+# d) A Claude reviewer never resolves a Codex profile.
+if profile_for({"codex_home": str(home_with), "codex_profile": "llm-obsidian-mcp"}, "claude") != "":
+    fail.append("claude reviewer must not inherit codex profile")
+if fail:
+    print("BAD reviewer-profile-precedence: " + "; ".join(fail)); sys.exit(1)
+PY
+[[ $? -eq 0 ]] && ok "reviewer-profile-precedence" || bad "reviewer-profile-precedence" "reviewer profile precedence matrix failed"
+
 LINK_ROOT="$SANDBOX/linked-root"
 LINK_WORKTREE="$SANDBOX/linked-worktree"
 mkdir -p "$LINK_ROOT"
@@ -609,6 +723,50 @@ assert "PATH" in data["env"] and data["env"]["PATH"]
 assert all(os.path.isabs(item) for item in data["env"]["PATH"].split(os.pathsep))
 PY
 [[ $? -eq 0 ]] && ok "codex-review-loopback-toolchain" || bad "codex-review-loopback-toolchain" "exact loopback/toolchain policy missing"
+# Codex `--model` resets reasoning effort to the model default, so effort must
+# ride argv as an explicit -c override; default stays un-overridden.
+if grep -q 'model_reasoning_effort' "$CODEX_SPEC"; then bad "codex-effort-default-unset" "effort override injected without a request"; else ok "codex-effort-default-unset"; fi
+
+CODEX_EFFORT="$SANDBOX/codex-effort"
+write_fixture "$CODEX_EFFORT"
+python3 - "$CODEX_EFFORT/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --effort max --worktree "$CODEX_EFFORT" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort.err"
+expect_eq "codex-effort-start" "$?" 0
+CODEX_EFFORT_SPEC="$CODEX_EFFORT/.review-agent-command.json"
+argv_has "$CODEX_EFFORT_SPEC" -c 'model_reasoning_effort="max"' && ok "codex-effort-argv" || bad "codex-effort-argv" "explicit effort missing from argv"
+python3 - "$CODEX_EFFORT_SPEC" <<'PY'
+import json, sys
+argv = json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
+raise SystemExit(0 if argv.index("--model") < argv.index('model_reasoning_effort="max"') else 1)
+PY
+[[ $? -eq 0 ]] && ok "codex-effort-after-model" || bad "codex-effort-after-model" "effort override must follow --model to survive the reset"
+expect_eq "codex-effort-meta" "$(json_get "$CODEX_EFFORT/.review-meta.json" reviewer_effort)" "max"
+
+CODEX_EFFORT_META="$SANDBOX/codex-effort-meta"
+write_fixture "$CODEX_EFFORT_META"
+python3 - "$CODEX_EFFORT_META/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"; data["codex_review_effort"]="xhigh"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$CODEX_EFFORT_META" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort-meta.err"
+expect_eq "codex-effort-meta-start" "$?" 0
+argv_has "$CODEX_EFFORT_META/.review-agent-command.json" -c 'model_reasoning_effort="xhigh"' && ok "codex-effort-from-task-meta" || bad "codex-effort-from-task-meta" "codex_review_effort from .task-meta.json not applied"
+
+CODEX_EFFORT_BAD="$SANDBOX/codex-effort-bad"
+write_fixture "$CODEX_EFFORT_BAD"
+python3 - "$CODEX_EFFORT_BAD/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"; data["codex_review_effort"]="turbo"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$CODEX_EFFORT_BAD" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort-bad.err"
+expect_eq "codex-effort-invalid-rejected" "$?" 1
+grep -q 'Codex reviewer effort must be one of' "$SANDBOX/codex-effort-bad.err" && ok "codex-effort-invalid-message" || bad "codex-effort-invalid-message" "invalid Codex effort not fail-closed"
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
 grep -qF -- "git -C $CODEX_REVIEW_RESOLVED ..." "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks worktree git guidance"

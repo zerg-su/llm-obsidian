@@ -449,7 +449,16 @@ def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
     except ValueError:
         pass
     else:
-        raise SupervisorError("Codex review runtime must be outside the product worktree")
+        # Coordinator reviews target the canonical vault checkout itself, so the
+        # sanctioned scratch root <vault>/.vault-meta/review-runtimes sits inside
+        # the reviewed worktree by construction. That exact location is still
+        # generated, empty, owner-only, gitignored runtime state (never product
+        # content); every other in-worktree runtime remains rejected.
+        coordinator_vault = (
+            not dry_run and worktree.resolve() == SCRIPT_DIR.parent.resolve()
+        )
+        if not coordinator_vault:
+            raise SupervisorError("Codex review runtime must be outside the product worktree")
     try:
         worktree.relative_to(runtime)
     except ValueError:

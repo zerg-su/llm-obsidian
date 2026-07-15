@@ -6,6 +6,36 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Added
+
+- Added `/clarify`, a stateless one-question-at-a-time alignment gate for plans,
+  designs, and non-trivial code changes: inspect codebase facts first, explain
+  why each decision matters, recommend an answer, and block planning or
+  implementation until the user explicitly confirms shared understanding.
+- Added soft RU/EN router hints and regression cases for explicit clarification,
+  pre-code alignment, and `grill me` requests.
+
+### Fixed
+
+- review-dispatch: a read-only Codex reviewer no longer inherits the executor's MCP
+  `profile`. Loading the executor's full-MCP profile into the reviewer blew past
+  subagent tool-schema limits so the reviewer never started. `resolve_review_env` now
+  prefers an explicit `reviewer_profile`, then an available `<plugin>-reviewer-readonly`
+  profile, and only falls back to the executor profile as a last resort. Precedence
+  matrix added to `tests/test_review_dispatch.sh`.
+- review-dispatch: `--coordinator-review` with a Codex reviewer no longer dies with
+  "Codex review runtime must be outside the product worktree". The supervisor now
+  accepts the sanctioned scratch root `<vault>/.vault-meta/review-runtimes/llm-review-*`
+  when the reviewed worktree is the canonical vault itself (that location is inside the
+  worktree by construction), while still rejecting non-empty, loose-permission, or
+  out-of-root runtimes. Regression matrix added to `tests/test_review_dispatch.sh`.
+- review-dispatch: Codex reviewers no longer silently downgrade reasoning effort.
+  `codex --model` resets effort to the model default even when the reviewer profile
+  pins it (observed: profile `xhigh` -> `gpt-5.6-sol high`), so `spawn_review.py`
+  now accepts `--effort` for Codex (including `max`), reads `codex_review_effort`
+  from `.task-meta.json`, and appends `-c model_reasoning_effort=...` after
+  `--model`. Covered by new checks in `tests/test_review_dispatch.sh`.
+
 ## [2.0.7] - 2026-07-14
 
 ### Added

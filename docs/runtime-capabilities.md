@@ -94,10 +94,11 @@ available Homebrew, Git, uv, Docling, cmux, Claude, and Codex directories, so a
 task does not inherit a stale GUI/session path. Unattended executors also receive
 the standalone `config/dcg/task.toml` through `DCG_CONFIG`. DCG 0.6.x replaces,
 rather than overlays, an explicit config, so this task policy repeats all base
-packs and absolute blocks. It permits local rebase/amend/cherry-pick/staging in
-the isolated branch while keeping push, hard reset, file discard, worktree or
-branch deletion, repository-wide rewriting, and infrastructure destructive
-actions blocked. Tests compare the task/base policies and exercise both allowed
+packs and absolute blocks; only branch discovery is omitted. Both policies use
+the practical local Git profile: rebase/amend/cherry-pick/deliberate bulk
+staging are allowed, while push, hard reset, file discard, worktree or branch
+deletion, repository-wide rewriting, and infrastructure destructive actions
+stay blocked. Tests compare the task/base policies and exercise both allowed
 and denied commands.
 
 Reviewers remain product-read-only but are no longer toolchain-starved: Claude

@@ -24,6 +24,18 @@ Lineage: `AgriciDaniel/claude-obsidian` (upstream) → private DevOps fork (mech
 
 ---
 
+## Clarify workflow
+
+**Author:** Matt Pocock
+**Source:** https://github.com/mattpocock/skills/tree/main/skills/productivity/grill-me
+**License:** MIT
+
+The `/clarify` alignment workflow is adapted from Matt Pocock's small,
+composable `grill-me` interview skill. This implementation adds an explicit
+pre-code alignment handoff for the llm-obsidian pipeline.
+
+---
+
 ## ITS CSS Snippets
 
 **Author:** SlRvb
