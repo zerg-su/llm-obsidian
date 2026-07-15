@@ -58,6 +58,16 @@ The script writes `.review-prompt.md`, `.review-meta.json`,
 model. It also writes `.task-review-skill` and `.task-review-send-skill` so no
 agent has to guess plugin/slash syntax.
 
+Claude reviewers must run as interactive Claude Code sessions in a cmux split.
+Never use `claude -p` or `claude --print` for review-dispatch: print-mode hides
+the reviewer as a subprocess, prevents the user from continuing the review
+session, and breaks the `/review-send` / verify / finish loop.
+
+Do not interrupt a reviewer that is visibly active: spinner, token counters,
+tool activity, or changing screen means it is working. Wait at least 15 minutes
+without visible progress before intervening; by 20 minutes, inspect and ask the
+reviewer for a concise status or verdict instead of blindly cancelling.
+
 ### Receive
 
 Use when the reviewer split calls back after `$<plugin>:review-send` or

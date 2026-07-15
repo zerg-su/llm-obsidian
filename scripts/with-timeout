@@ -1,0 +1,76 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use POSIX qw(WNOHANG);
+use Time::HiRes qw(sleep time);
+
+sub usage {
+    print STDERR "usage: scripts/with-timeout <duration> <command> [args...]\n";
+    print STDERR "duration accepts seconds by default, or suffixes: s, m, h, d\n";
+    exit 2;
+}
+
+sub parse_duration {
+    my ($raw) = @_;
+    return undef unless defined $raw;
+    return undef unless $raw =~ /\A(\d+(?:\.\d+)?)([smhd]?)\z/;
+
+    my ($value, $unit) = ($1 + 0, $2 || "s");
+    my %multiplier = (
+        s => 1,
+        m => 60,
+        h => 60 * 60,
+        d => 24 * 60 * 60,
+    );
+    return $value * $multiplier{$unit};
+}
+
+sub exit_from_status {
+    my ($status) = @_;
+    if ($status & 127) {
+        exit(128 + ($status & 127));
+    }
+    exit(($status >> 8) & 255);
+}
+
+my $duration = shift @ARGV;
+my $seconds = parse_duration($duration);
+usage() unless defined $seconds && $seconds > 0 && @ARGV;
+
+my $pid = fork();
+die "with-timeout: fork failed: $!\n" unless defined $pid;
+
+if ($pid == 0) {
+    # Put the command in its own process group so timeout cleanup also catches
+    # simple shell wrappers and their direct children.
+    setpgrp(0, 0);
+    exec { $ARGV[0] } @ARGV or do {
+        print STDERR "with-timeout: exec failed for $ARGV[0]: $!\n";
+        exit 127;
+    };
+}
+
+my $deadline = time() + $seconds;
+while (1) {
+    my $waited = waitpid($pid, WNOHANG);
+    exit_from_status($?) if $waited == $pid;
+    die "with-timeout: waitpid failed for pid $pid: $!\n" if $waited == -1;
+
+    my $remaining = $deadline - time();
+    last if $remaining <= 0;
+    sleep($remaining < 0.1 ? $remaining : 0.1);
+}
+
+kill "TERM", -$pid;
+
+my $grace_deadline = time() + 2;
+while (time() < $grace_deadline) {
+    my $waited = waitpid($pid, WNOHANG);
+    exit 124 if $waited == $pid;
+    last if $waited == -1;
+    sleep(0.1);
+}
+
+kill "KILL", -$pid;
+waitpid($pid, 0);
+exit 124;

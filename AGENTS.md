@@ -77,6 +77,20 @@ can run the same script manually after writing pages.
 Use `./scripts/current-session-id.sh` for provenance. It returns
 `CLAUDE_CODE_SESSION_ID`, then `CODEX_THREAD_ID`, then `unknown`.
 
+For local shell probes that need a wall-clock limit, do not use bare GNU
+`timeout`: this toolkit is often operated from macOS, where it is absent by
+default. Use `./scripts/with-timeout 8 <command> ...` from the repo root, or an
+MCP/API-native timeout parameter when the tool exposes one.
+
+Never use `claude -p` or `claude --print` for Claude reviewer, dispatch, or
+task-split sessions. Those flows must open an interactive Claude Code session in
+a cmux split so the user can see and continue the reviewer.
+
+Do not interrupt an interactive Claude reviewer while it is visibly active
+(spinner, token counters, tool activity, or changing screen). Wait at least
+15 minutes without visible progress before intervening; by 20 minutes, inspect
+and ask for a concise status instead of blindly cancelling.
+
 ## Danger zones
 
 - Never commit credentials; `.gitignore` blocks common secret containers and

@@ -51,6 +51,10 @@ the vault's insurance policy for «ИИ отключился».
 2. `Write` the runbook. Frontmatter per vault convention (`type: runbook`,
    `status: stable`, `sessions:` provenance, `last_validated: <today>` —
    the session that produced the commands IS the validation run).
+   **Session refs = ID, never a bare date.** `sessions:` frontmatter AND any
+   provenance / validation prose in the body reference the session by its **ID**
+   (`./scripts/current-session-id.sh`), ideally as **date + ID**. A bare date is
+   not resumable (`claude --resume <id>`) nor grep-findable in `command-log.jsonl`.
    Body requirements (this is the AI-less contract):
    - every command copy-paste ready, full paths, explicit hosts/IPs (from
      the log's `cwd` and command args) — no «подставь свой хост»;

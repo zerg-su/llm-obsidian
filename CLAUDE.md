@@ -100,6 +100,22 @@ entry в `~/.codex/hooks.json` и `~/.claude/settings.json`, делая backups
 `.bak-dcg-*`. Smoke по умолчанию изолирует user allowlist; live config:
 `DCG_TEST_USE_USER_CONFIG=1 bash scripts/dcg-test-suite.sh`.
 
+## Portable shell timeouts
+
+Локальные operational-команды часто запускаются с macOS. Не использовать голый GNU `timeout`: на macOS он отсутствует без Homebrew coreutils и ломает triage/verify-style shell fallback. Для shell-probe с wall-clock лимитом из корня репо использовать:
+
+```bash
+./scripts/with-timeout 8 kubectl --context my-cluster -n default get pod
+```
+
+Если MCP/API tool имеет собственный timeout-параметр (`timeout`, `since_seconds`, `limit`, `step`) - предпочитать его. Для долгих fan-out запросов сначала сужать selector/window, а не ставить большой shell timeout.
+
+## Claude reviewer sessions
+
+Для Claude-review, `/review-dispatch`, `/dispatch` и любых task-split'ов не использовать `claude -p` / `claude --print`. Нужна интерактивная Claude Code-сессия в cmux split, чтобы пользователь видел окно, мог продолжить диалог, отправить `/review-send`, `/exit` и прочие команды. Правильный паттерн: `cmux new-split ...`, затем запустить `claude --permission-mode auto --model <model>` и передать prompt в интерактивную сессию, а не через print-mode.
+
+Не прерывать интерактивный Claude-review, если видно, что он работает: spinner, меняются token counters, идут tool calls или обновляется экран. Ждать минимум 15 минут без видимого прогресса перед вмешательством. Через 20 минут без прогресса можно диагностировать состояние и попросить краткий статус/итог, но не делать ранний interrupt только потому, что review думает несколько минут.
+
 ## Дисциплина
 
 - **Pre-flight**: write-skill перед действием задаёт до 3 уточняющих вопросов (только по пунктам, которые не резолвятся из prompt'а). Read-only скиллы — auto-skip.
