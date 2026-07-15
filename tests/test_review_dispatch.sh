@@ -186,6 +186,120 @@ if argv_has "$LIGHT_SPEC" --permission-mode auto; then bad "claude-no-auto" "aut
 if grep -q -- 'bash -lc\|WATCHDOG_PID\|REVIEW_RC=' "$SANDBOX/light.out"; then bad "review-shell-portable" "shell wrapper leaked into cmux command"; else ok "review-shell-portable"; fi
 grep -q '"schema_version": 1' "$LIGHT/.review-prompt.md" && ok "typed-review-prompt" || bad "typed-review-prompt" "JSON contract missing"
 
+# Coordinator reviews of the canonical vault must accept the sanctioned Codex
+# scratch under <vault>/.vault-meta/review-runtimes even though it sits inside
+# the reviewed worktree; every other in-worktree runtime stays rejected. The
+# matrix runs against a synthetic canonical-vault fixture entirely under SANDBOX
+# (a copy of the supervisor whose SCRIPT_DIR resolves to the fixture), so it
+# never writes under REPO_ROOT and stays hermetic even under a read-only gate.
+python3 - "$SUPERVISOR" "$SANDBOX" <<'PY'
+import importlib.util, pathlib, shutil, sys, uuid
+real_supervisor, sandbox = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
+# Synthetic canonical vault fully under SANDBOX; copy the supervisor there so its
+# SCRIPT_DIR.parent (the "canonical vault") is the fixture, not REPO_ROOT.
+vault = sandbox / "canonical-vault"
+(vault / "scripts").mkdir(parents=True, exist_ok=True)
+copy = vault / "scripts" / "cmux_agent_supervisor.py"
+shutil.copy2(real_supervisor, copy)
+# Sibling deps (lifecycle_telemetry, task_contract) resolve from the real dir.
+sys.path.insert(0, str(real_supervisor.parent))
+spec = importlib.util.spec_from_file_location("supervisor_fixture_mod", copy)
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+assert mod.SCRIPT_DIR.parent.resolve() == vault.resolve(), "fixture SCRIPT_DIR mismatch"
+live_surface = str(uuid.uuid4()).upper()
+
+def check(label, worktree, runtime_dir, expect_ok):
+    meta = {"review_runtime_dir": str(runtime_dir), "review_surface": live_surface}
+    try:
+        mod.validated_review_runtime(worktree, meta)
+        result, err = True, ""
+    except mod.SupervisorError as exc:
+        result, err = False, str(exc)
+    if result != expect_ok:
+        print(f"BAD {label}: expected ok={expect_ok}, got ok={result} ({err})")
+        sys.exit(1)
+
+runtimes_root = vault / ".vault-meta" / "review-runtimes"
+runtimes_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+scratch = runtimes_root / f"llm-review-coordinator-selftest-{uuid.uuid4().hex[:8]}"
+scratch.mkdir(mode=0o700)
+external_wt = sandbox / "task-worktree"
+external_wt.mkdir(exist_ok=True)
+try:
+    # 1. Coordinator review (worktree == canonical vault): sanctioned scratch accepted.
+    check("coordinator-accepts-canonical", vault, scratch, True)
+    # 2. Task worktree elsewhere: same scratch is outside it, stays accepted.
+    check("taskwt-accepts-external", external_wt, scratch, True)
+    # 3. Non-empty scratch is still rejected even for coordinator reviews.
+    (scratch / "stale.txt").write_text("x", encoding="utf-8")
+    check("rejects-nonempty", vault, scratch, False)
+    (scratch / "stale.txt").unlink()
+    # 4. Group-accessible scratch is still rejected.
+    scratch.chmod(0o750)
+    check("rejects-loose-perms", vault, scratch, False)
+    scratch.chmod(0o700)
+    # 5. Runtime outside the sanctioned root is rejected even for coordinator reviews.
+    rogue = vault / f"llm-review-rogue-{uuid.uuid4().hex[:8]}"
+    rogue.mkdir(mode=0o700)
+    try:
+        check("rejects-rogue-location", vault, rogue, False)
+    finally:
+        rogue.rmdir()
+finally:
+    scratch.rmdir()
+PY
+[[ $? -eq 0 ]] && ok "review-runtime-coordinator-matrix" || bad "review-runtime-coordinator-matrix" "coordinator runtime validation matrix failed"
+
+# The in-worktree scratch exception is only sound if that hierarchy is actually
+# gitignored in the shipped repo; assert it for both the final outbox and its
+# atomic temporary file. check-ignore is read-only (no writes under REPO_ROOT).
+probe=".vault-meta/review-runtimes/llm-review-probe/.review-outbox.json"
+if git -C "$REPO_ROOT" check-ignore -q "$probe" && git -C "$REPO_ROOT" check-ignore -q "$probe.tmp"; then
+  ok "review-runtimes-gitignored"
+else
+  bad "review-runtimes-gitignored" ".vault-meta/review-runtimes not gitignored (outbox or .tmp)"
+fi
+
+# Reviewer-profile precedence: a read-only reviewer must never inherit the
+# executor MCP profile when a dedicated reviewer profile is available. This is
+# the startup regression the fix prevents, so pin the whole precedence policy.
+python3 - "$SCRIPT" "$SANDBOX" <<'PY'
+import importlib.util, json, pathlib, sys
+script, sandbox = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
+sys.path.insert(0, str(script.parent))
+spec = importlib.util.spec_from_file_location("spawn_review_mod", script)
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+
+base = sandbox / "profile-fixture"
+vault = base / "vault"
+(vault / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+(vault / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "llm-obsidian"}), encoding="utf-8")
+worktree = base / "worktree"; worktree.mkdir(parents=True, exist_ok=True)
+home_with = base / "codex-with"; home_with.mkdir(parents=True, exist_ok=True)
+(home_with / "llm-obsidian-reviewer-readonly.config.toml").write_text("", encoding="utf-8")
+home_without = base / "codex-without"; home_without.mkdir(parents=True, exist_ok=True)
+
+def profile_for(meta, runtime="codex"):
+    return mod.resolve_review_env(worktree, vault, meta, runtime)["profile"]
+
+fail = []
+# a) An explicit reviewer_profile wins outright.
+if profile_for({"codex_home": str(home_with), "reviewer_profile": "custom-reviewer", "codex_profile": "llm-obsidian-mcp"}) != "custom-reviewer":
+    fail.append("explicit reviewer_profile not honored")
+# b) reviewer-readonly is auto-selected despite an executor codex_profile.
+if profile_for({"codex_home": str(home_with), "codex_profile": "llm-obsidian-mcp"}) != "llm-obsidian-reviewer-readonly":
+    fail.append("reviewer-readonly not auto-selected over executor profile")
+# c) Executor profile is used only when no dedicated reviewer profile exists.
+if profile_for({"codex_home": str(home_without), "codex_profile": "llm-obsidian-mcp"}) != "llm-obsidian-mcp":
+    fail.append("executor fallback missing when no reviewer profile")
+# d) A Claude reviewer never resolves a Codex profile.
+if profile_for({"codex_home": str(home_with), "codex_profile": "llm-obsidian-mcp"}, "claude") != "":
+    fail.append("claude reviewer must not inherit codex profile")
+if fail:
+    print("BAD reviewer-profile-precedence: " + "; ".join(fail)); sys.exit(1)
+PY
+[[ $? -eq 0 ]] && ok "reviewer-profile-precedence" || bad "reviewer-profile-precedence" "reviewer profile precedence matrix failed"
+
 LINK_ROOT="$SANDBOX/linked-root"
 LINK_WORKTREE="$SANDBOX/linked-worktree"
 mkdir -p "$LINK_ROOT"

@@ -6,6 +6,21 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Fixed
+
+- review-dispatch: a read-only Codex reviewer no longer inherits the executor's MCP
+  `profile`. Loading the executor's full-MCP profile into the reviewer blew past
+  subagent tool-schema limits so the reviewer never started. `resolve_review_env` now
+  prefers an explicit `reviewer_profile`, then an available `<plugin>-reviewer-readonly`
+  profile, and only falls back to the executor profile as a last resort. Precedence
+  matrix added to `tests/test_review_dispatch.sh`.
+- review-dispatch: `--coordinator-review` with a Codex reviewer no longer dies with
+  "Codex review runtime must be outside the product worktree". The supervisor now
+  accepts the sanctioned scratch root `<vault>/.vault-meta/review-runtimes/llm-review-*`
+  when the reviewed worktree is the canonical vault itself (that location is inside the
+  worktree by construction), while still rejecting non-empty, loose-permission, or
+  out-of-root runtimes. Regression matrix added to `tests/test_review_dispatch.sh`.
+
 ## [2.0.7] - 2026-07-14
 
 ### Added

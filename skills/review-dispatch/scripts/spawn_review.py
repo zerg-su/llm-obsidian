@@ -595,7 +595,15 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
     merged.update(repo_env)
 
     codex_home = expand_user(merged.get("codex_home") or meta.get("codex_home") or os.environ.get("CODEX_HOME"))
-    profile = str(merged.get("profile") or meta.get("codex_profile") or "").strip()
+    # A read-only reviewer must NOT inherit the executor's `profile`: in
+    # dispatch-env that key is the EXECUTOR profile (e.g. the full-MCP
+    # `llm-obsidian-mcp`), and loading the whole MCP fleet into a reviewer blows
+    # past subagent tool-schema limits so the reviewer never comes up. Prefer an
+    # explicit `reviewer_profile`, then fall back below to
+    # `{plugin}-reviewer-readonly`; the executor profile is only a last resort.
+    reviewer_profile = str(merged.get("reviewer_profile") or meta.get("reviewer_profile") or "").strip()
+    executor_profile = str(merged.get("profile") or meta.get("codex_profile") or "").strip()
+    profile = reviewer_profile
     executor_runtime = str(meta.get("executor_runtime") or meta.get("runtime") or "codex")
     raw_review_skill = str(
         meta.get("review_skill")
@@ -623,6 +631,9 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
         candidate = f"{plugin}-reviewer-readonly"
         if (Path(codex_home) / f"{candidate}.config.toml").is_file():
             profile = candidate
+    if reviewer_runtime == "codex" and not profile:
+        # Legacy last resort only when no dedicated reviewer profile exists.
+        profile = executor_profile
 
     return {
         "codex_home": codex_home,
