@@ -723,6 +723,50 @@ assert "PATH" in data["env"] and data["env"]["PATH"]
 assert all(os.path.isabs(item) for item in data["env"]["PATH"].split(os.pathsep))
 PY
 [[ $? -eq 0 ]] && ok "codex-review-loopback-toolchain" || bad "codex-review-loopback-toolchain" "exact loopback/toolchain policy missing"
+# Codex `--model` resets reasoning effort to the model default, so effort must
+# ride argv as an explicit -c override; default stays un-overridden.
+if grep -q 'model_reasoning_effort' "$CODEX_SPEC"; then bad "codex-effort-default-unset" "effort override injected without a request"; else ok "codex-effort-default-unset"; fi
+
+CODEX_EFFORT="$SANDBOX/codex-effort"
+write_fixture "$CODEX_EFFORT"
+python3 - "$CODEX_EFFORT/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --effort max --worktree "$CODEX_EFFORT" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort.err"
+expect_eq "codex-effort-start" "$?" 0
+CODEX_EFFORT_SPEC="$CODEX_EFFORT/.review-agent-command.json"
+argv_has "$CODEX_EFFORT_SPEC" -c 'model_reasoning_effort="max"' && ok "codex-effort-argv" || bad "codex-effort-argv" "explicit effort missing from argv"
+python3 - "$CODEX_EFFORT_SPEC" <<'PY'
+import json, sys
+argv = json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
+raise SystemExit(0 if argv.index("--model") < argv.index('model_reasoning_effort="max"') else 1)
+PY
+[[ $? -eq 0 ]] && ok "codex-effort-after-model" || bad "codex-effort-after-model" "effort override must follow --model to survive the reset"
+expect_eq "codex-effort-meta" "$(json_get "$CODEX_EFFORT/.review-meta.json" reviewer_effort)" "max"
+
+CODEX_EFFORT_META="$SANDBOX/codex-effort-meta"
+write_fixture "$CODEX_EFFORT_META"
+python3 - "$CODEX_EFFORT_META/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"; data["codex_review_effort"]="xhigh"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$CODEX_EFFORT_META" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort-meta.err"
+expect_eq "codex-effort-meta-start" "$?" 0
+argv_has "$CODEX_EFFORT_META/.review-agent-command.json" -c 'model_reasoning_effort="xhigh"' && ok "codex-effort-from-task-meta" || bad "codex-effort-from-task-meta" "codex_review_effort from .task-meta.json not applied"
+
+CODEX_EFFORT_BAD="$SANDBOX/codex-effort-bad"
+write_fixture "$CODEX_EFFORT_BAD"
+python3 - "$CODEX_EFFORT_BAD/.task-meta.json" <<'PY'
+import json, sys
+p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"; data["codex_review_effort"]="turbo"
+open(p,"w").write(json.dumps(data)+"\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$CODEX_EFFORT_BAD" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/codex-effort-bad.err"
+expect_eq "codex-effort-invalid-rejected" "$?" 1
+grep -q 'Codex reviewer effort must be one of' "$SANDBOX/codex-effort-bad.err" && ok "codex-effort-invalid-message" || bad "codex-effort-invalid-message" "invalid Codex effort not fail-closed"
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
 grep -qF -- "git -C $CODEX_REVIEW_RESOLVED ..." "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks worktree git guidance"

@@ -49,6 +49,10 @@ DEFAULT_CLAUDE_MODEL = "opus"
 DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
 REVIEW_MODES = {"full", "light"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+# Codex `--model` resets reasoning effort to the model default (config/profile
+# values lose to the CLI flag), so effort must ride argv as an explicit
+# `-c model_reasoning_effort=...` override after `--model`.
+CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CMUX_PASTE_SETTLE_SECONDS = 0.2
 HANDOFF_EXCLUDES = [
     ".task-prompt.md",
@@ -623,6 +627,7 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
     codex_model = str(merged.get("codex_review_model") or DEFAULT_CODEX_MODEL).strip()
     claude_model = str(merged.get("claude_review_model") or DEFAULT_CLAUDE_MODEL).strip()
     claude_effort = str(merged.get("claude_review_effort") or meta.get("claude_review_effort") or "").strip()
+    codex_effort = str(merged.get("codex_review_effort") or meta.get("codex_review_effort") or "").strip()
     reviewer_model = claude_model if reviewer_runtime == "claude" else codex_model
 
     if reviewer_runtime == "codex" and codex_home and not Path(codex_home).exists():
@@ -641,7 +646,7 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
         "review_skill": review_skill,
         "review_send_skill": review_send_skill,
         "reviewer_model": reviewer_model,
-        "reviewer_effort": claude_effort if reviewer_runtime == "claude" else "",
+        "reviewer_effort": claude_effort if reviewer_runtime == "claude" else codex_effort,
     }
 
 
@@ -815,6 +820,11 @@ def launch_command(
         if profile:
             argv.extend(["--profile", profile])
         argv.extend(["--model", reviewer_model])
+        if reviewer_effort:
+            # After --model: the model flag resets effort to the model default,
+            # silently downgrading profile/config effort (observed 2026-07-15:
+            # profile xhigh -> TUI "gpt-5.6-sol high").
+            argv.extend(["-c", f'model_reasoning_effort="{reviewer_effort}"'])
         if codex_home:
             env["CODEX_HOME"] = str(Path(codex_home).expanduser().resolve())
         env["TMPDIR"] = str(review_runtime_dir)
@@ -1056,8 +1066,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
     reviewer_effort = ns.effort or env["reviewer_effort"]
     if reviewer_runtime == "claude" and reviewer_effort not in CLAUDE_EFFORTS | {""}:
         die(f"Claude reviewer effort must be one of {sorted(CLAUDE_EFFORTS)}")
-    if reviewer_runtime != "claude" and reviewer_effort:
-        die("--effort is supported only for Claude reviewers")
+    if reviewer_runtime != "claude" and reviewer_effort not in CODEX_EFFORTS | {""}:
+        die(f"Codex reviewer effort must be one of {sorted(CODEX_EFFORTS)}")
     review_skill = ns.review_skill or env["review_skill"]
     review_send_skill = ns.review_send_skill or env["review_send_skill"]
     output_file = ".task-review.md"
@@ -1523,7 +1533,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="reviewer model; defaults opus (currently Opus 4.8) for Claude, gpt-5.6-sol for Codex",
     )
-    start.add_argument("--effort", choices=sorted(CLAUDE_EFFORTS), default="", help="Claude reviewer reasoning effort")
+    start.add_argument("--effort", choices=sorted(CLAUDE_EFFORTS | CODEX_EFFORTS), default="", help="reviewer reasoning effort (validated per runtime; Codex gets -c model_reasoning_effort)")
     start.add_argument("--mode", choices=sorted(REVIEW_MODES), default="", help="override review depth; otherwise use task policy or full legacy default")
     start.add_argument("--light", action="store_true", help="shortcut for --mode light")
     start.add_argument("--no-spawn", action="store_true", help="write files and print launch command without cmux")

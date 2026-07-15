@@ -20,6 +20,12 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   when the reviewed worktree is the canonical vault itself (that location is inside the
   worktree by construction), while still rejecting non-empty, loose-permission, or
   out-of-root runtimes. Regression matrix added to `tests/test_review_dispatch.sh`.
+- review-dispatch: Codex reviewers no longer silently downgrade reasoning effort.
+  `codex --model` resets effort to the model default even when the reviewer profile
+  pins it (observed: profile `xhigh` -> `gpt-5.6-sol high`), so `spawn_review.py`
+  now accepts `--effort` for Codex (including `max`), reads `codex_review_effort`
+  from `.task-meta.json`, and appends `-c model_reasoning_effort=...` after
+  `--model`. Covered by new checks in `tests/test_review_dispatch.sh`.
 
 ## [2.0.7] - 2026-07-14
 

@@ -27,6 +27,11 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
   Opus 4.8). Use `--model fable` only when Fable is explicitly requested.
 - Claude reviewer effort defaults to `medium` in this repository.
 - Codex reviewer default: `gpt-5.6-sol`.
+- Codex reviewer effort: pass `--effort` (or set `codex_review_effort` in
+  `.task-meta.json`); it rides argv as `-c model_reasoning_effort=...` after
+  `--model`, because the model flag silently resets profile/config effort to
+  the model default (observed: profile `xhigh` -> TUI `gpt-5.6-sol high`).
+  Valid values include `max` for `gpt-5.6-sol`.
 - Default reviewer runtime is the opposite model family from the executor:
   Codex executor -> Claude reviewer; Claude executor -> Codex reviewer.
 
