@@ -27,6 +27,8 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
   Opus 4.8). Use `--model fable` only when Fable is explicitly requested.
 - Claude reviewer effort defaults to `medium` in this repository.
 - Codex reviewer default: `gpt-5.6-sol`.
+- Explicit Codex reviewer effort is preserved after `--model` with a bounded
+  `model_reasoning_effort` override; the default remains unset.
 - Default reviewer runtime is the opposite model family from the executor:
   Codex executor -> Claude reviewer; Claude executor -> Codex reviewer.
 
@@ -99,7 +101,10 @@ roots. The scratch lives under the canonical vault's gitignored
 `.vault-meta/review-runtimes/` hierarchy, whose project trust is already established
 by normal Codex setup, so a fresh runtime does not trigger the new-directory trust
 prompt. The supervisor accepts only an empty generated child at that exact location;
-no trust entry is added to the user's Codex config. Reviewers write typed JSON only
+no trust entry is added to the user's Codex config. For an explicit
+`--coordinator-review` of the canonical vault, the sanctioned scratch root is
+inside the reviewed checkout by construction; the supervisor permits only that
+exact generated, owner-only, empty, gitignored location. Reviewers write typed JSON only
 to the scratch `.review-outbox.json`. Codex reviewer launches also disable hooks for
 that session so user/project lifecycle hooks cannot mutate the vault from review context.
 The trusted supervisor—not the reviewer—polls that exact outbox, runs the schema
