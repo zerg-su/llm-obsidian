@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-11
+updated: 2026-07-17
 tags:
   - meta
   - log
@@ -26,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-17 05:28] dispatch | v2.0.8-rd-upstream-audit
+
+Spawned an unattended Codex task split (cmux `6915E188-1195-47DB-8853-FC6140133345`, configured default `gpt-5.6-sol`) in worktree `/Users/zak/Projects/worktrees/llm-obsidian-v2.0.8-rd-upstream-audit` on branch `task/v2.0.8-rd-upstream-audit` from `main` to critically audit `origin/test` and `origin/upstream-sync/rd-fixes`, prepare local v2.0.8, and require full Claude Opus 4.8 review. Plan: `wiki/plans/2026-07-17-052426-prepare-v2-0-8-from-test-and-upstream-rd-fixes.md`. Context: [[Unattended Pipeline]], [[daily-pipeline-guide]], [[Hot Cache]]. Awaiting final `## Wiki Summary` and `$llm-obsidian:reap`.
 
 ## [2026-07-11] release | llm-obsidian v2.0.0
 
