@@ -346,11 +346,12 @@ scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply
 | Группа | Скиллы |
 |---|---|
 | Ядро вики | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
+| Согласование | `/clarify` в Claude, `$llm-obsidian:clarify` в Codex (по одному вопросу о требованиях и дизайне до плана или реализации) |
 | Продуктивность | `/journal` (планировщик по датам), `/daily` (статус в конце дня), `/backlog` (capture-inbox), `/find-session`, `/draft` (советник по ответам), `/distill-runbook` (команды сессии → copy-paste runbook), `/learn` (тьютор по вашим заметкам), `/save-plan` |
 | Оркестрация (нужен cmux) | `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Справочные | `obsidian-markdown`, `obsidian-bases` |
 
-Роутер на `UserPromptSubmit` подсказывает подходящий скилл по regex-правилам из `.claude/skill-rules.json` (мягкие подсказки, никогда не mandatory); `session-nudge` поднимает просроченный maintenance (возраст линта, назревший fold, устаревшие бэкапы, совет skill-of-the-day).
+Роутер на `UserPromptSubmit` подсказывает подходящий скилл по regex-правилам из `.claude/skill-rules.json` (мягкие подсказки, никогда не mandatory), включая явные запросы `clarify before code` и `grill me`; `session-nudge` поднимает просроченный maintenance (возраст линта, назревший fold, устаревшие бэкапы, совет skill-of-the-day).
 
 ## Тестирование
 
