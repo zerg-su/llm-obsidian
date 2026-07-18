@@ -38,15 +38,21 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
 
     config = routing.load_config(root)
     codex = {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"}
-    claude = {"runtime": "claude", "model": "fable", "effort": "high"}
+    claude = {"runtime": "claude", "model": "opus", "effort": "high"}
+
+    check("Claude runtime default is Opus", config.runtime_default("claude")["model"] == "opus")
+    check("Claude reviewer default is Fable", config.reviewer_default("claude")["model"] == "fable")
+    check("all concrete defaults are discoverable", config.default_models() == {"gpt-5.6-sol", "opus", "fable"})
 
     route = routing.resolve(config, "dispatch", session=codex)
     check("dispatch inherits exact session", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "high"))
     route = routing.resolve(config, "daily", session=claude)
-    check("daily inherits runtime and model", (route["runtime"], route["model"]) == ("claude", "fable"))
+    check("daily inherits runtime and model", (route["runtime"], route["model"]) == ("claude", "opus"))
     check("daily uses medium effort", route["effort"] == "medium")
     route = routing.resolve(config, "review", session=codex)
     check("review defaults opposite", (route["runtime"], route["model"], route["effort"]) == ("claude", "fable", "high"))
+    route = routing.resolve(config, "review", session=codex, explicit_runtime="codex")
+    check("explicit review runtime uses its role default", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-sol"))
     route = routing.resolve(config, "review", session=codex, same_model=True, explicit_effort="xhigh")
     check("same-model review inherits with effort override", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "xhigh"))
     route = routing.resolve(config, "protected-research", session=claude)
@@ -54,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     route = routing.resolve(config, "protected-research", session=codex)
     check("protected research from Codex inherits", route["source"][0] == "session")
     route = routing.resolve(config, "unsafe-research", session=claude)
-    check("unsafe research inherits full session", (route["runtime"], route["model"], route["effort"]) == ("claude", "fable", "high"))
+    check("unsafe research inherits full session", (route["runtime"], route["model"], route["effort"]) == ("claude", "opus", "high"))
 
     for name, call in (
         ("session-required roles fail closed", lambda: routing.resolve(config, "dispatch")),
@@ -88,10 +94,16 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("native drift repaired", routing.sync_native(config, apply=False) == [])
 
     (root / "config/model-routing.local.toml").write_text(
-        '[runtimes.claude]\nmodel = "opus"\n[model_registry]\nopus = "claude"\n', encoding="utf-8"
+        '[runtimes.claude]\nmodel = "sonnet"\n'
+        '[roles.review.claude]\nmodel = "opus"\n'
+        '[model_registry]\nsonnet = "claude"\n',
+        encoding="utf-8",
     )
     local = routing.load_config(root)
-    check("local override is visible", local.local_override and local.runtime_default("claude")["model"] == "opus")
+    check("local runtime override is visible", local.local_override and local.runtime_default("claude")["model"] == "sonnet")
+    check("local reviewer override is independent", local.reviewer_default("claude")["model"] == "opus")
+    route = routing.resolve(local, "review", session=codex)
+    check("review uses local role default", route["model"] == "opus")
 
     session_dir = root / ".codex/sessions/2026/07/18"
     session_dir.mkdir(parents=True)

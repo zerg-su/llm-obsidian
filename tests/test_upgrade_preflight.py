@@ -13,6 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/upgrade-preflight.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from model_routing import load_config
 
 
 def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -43,6 +45,11 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     result = run(root, "--confirm-routing-migration", "--apply")
     check("confirmed migration succeeds", result.returncode == 0)
     check("migration writes ignored-style local config", (root / "config/model-routing.local.toml").is_file())
+    migrated = load_config(root)
+    check("migration preserves ordinary Claude default", migrated.runtime_default("claude")["model"] == "opus")
+    check("migration changes only Claude reviewer role", migrated.reviewer_default("claude") == {
+        "runtime": "claude", "model": "custom-claude", "effort": "xhigh"
+    })
 
     (root / "config/model-routing.local.toml").unlink()
     (root / ".codex/dispatch-env.toml").write_text(

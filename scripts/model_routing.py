@@ -41,6 +41,16 @@ class RoutingConfig:
         value = self.data["runtimes"][runtime]
         return {"runtime": runtime, "model": value["model"], "effort": value["effort"]}
 
+    def reviewer_default(self, runtime: str) -> dict[str, str]:
+        value = self.data["roles"]["review"][runtime]
+        return {"runtime": runtime, "model": value["model"], "effort": value["effort"]}
+
+    def default_models(self) -> set[str]:
+        return {
+            *(self.runtime_default(runtime)["model"] for runtime in RUNTIMES),
+            *(self.reviewer_default(runtime)["model"] for runtime in RUNTIMES),
+        }
+
 
 def die(message: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {message}", file=sys.stderr)
@@ -106,14 +116,27 @@ def _validate(data: dict[str, Any]) -> None:
         if registry.get(model) != runtime:
             raise RoutingError(f"default model {model!r} is not registered for {runtime}")
     roles = data.get("roles")
-    if not isinstance(roles, dict) or set(roles) != {"daily", "deep"}:
-        raise RoutingError("roles must define exactly daily and deep")
+    if not isinstance(roles, dict) or set(roles) != {"daily", "deep", "review"}:
+        raise RoutingError("roles must define exactly daily, deep, and review")
     for role in ("daily", "deep"):
         item = roles[role]
         if not isinstance(item, dict) or set(item) != {"effort"} or not isinstance(item["effort"], str):
             raise RoutingError(f"roles.{role} must contain one effort")
         for runtime in RUNTIMES:
             validate_effort(runtime, item["effort"])
+    review = roles["review"]
+    if not isinstance(review, dict) or set(review) != RUNTIMES:
+        raise RoutingError("roles.review must define exactly codex and claude")
+    for runtime in sorted(RUNTIMES):
+        item = review[runtime]
+        if not isinstance(item, dict) or set(item) != {"model", "effort"}:
+            raise RoutingError(f"roles.review.{runtime} must contain model and effort")
+        model, effort = item["model"], item["effort"]
+        if not isinstance(model, str) or not model.strip():
+            raise RoutingError(f"roles.review.{runtime}.model must be non-empty")
+        validate_effort(runtime, effort)
+        if registry.get(model) != runtime:
+            raise RoutingError(f"review model {model!r} is not registered for {runtime}")
     for model, runtime in registry.items():
         if not isinstance(model, str) or not model.strip() or runtime not in RUNTIMES:
             raise RoutingError("model_registry entries must map non-empty model names to codex or claude")
@@ -214,7 +237,7 @@ def resolve(
 
     if role == "review" and not same_model:
         base_runtime = "claude" if session and session["runtime"] == "codex" else "codex"
-        base = config.runtime_default(base_runtime)
+        base = config.reviewer_default(base_runtime)
         source.append("opposite-runtime-default")
     elif role == "protected-research":
         if session and session["runtime"] == "codex":
@@ -233,7 +256,11 @@ def resolve(
     if explicit_runtime:
         source.append("explicit-runtime")
         if explicit_runtime != base["runtime"] and not explicit_model:
-            base = config.runtime_default(explicit_runtime)
+            base = (
+                config.reviewer_default(explicit_runtime)
+                if role == "review" and not same_model
+                else config.runtime_default(explicit_runtime)
+            )
             source.append("runtime-default")
     model = explicit_model or base["model"]
     if explicit_model:

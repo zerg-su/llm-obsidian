@@ -14,7 +14,7 @@ from model_routing import load_config
 
 def main() -> int:
     config = load_config(ROOT)
-    literals = {config.runtime_default(runtime)["model"] for runtime in ("codex", "claude")}
+    literals = config.default_models()
     issues: list[str] = []
     for top in ("scripts", "skills", "agents", "hooks", ".claude"):
         base = ROOT / top

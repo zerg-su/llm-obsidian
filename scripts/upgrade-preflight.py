@@ -81,7 +81,7 @@ def legacy_routing(root: Path) -> dict[str, dict[str, str]]:
             present["model"] = model
         if isinstance(effort, str):
             present["effort"] = effort
-        defaults = tracked.runtime_default(runtime)
+        defaults = tracked.reviewer_default(runtime)
         customized = any(value != defaults[key] for key, value in present.items())
         if present and customized:
             result[runtime] = {}
@@ -98,7 +98,7 @@ def render_local(values: dict[str, dict[str, str]]) -> str:
     for runtime in ("codex", "claude"):
         if runtime not in values:
             continue
-        lines.extend([f"[runtimes.{runtime}]"])
+        lines.extend([f"[roles.review.{runtime}]"])
         for key in ("model", "effort"):
             if key in values[runtime]:
                 lines.append(f'{key} = {json.dumps(values[runtime][key])}')

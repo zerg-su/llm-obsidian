@@ -1,13 +1,13 @@
 schema_version = 1
 
-# The only hand-edited concrete runtime defaults. Native host configs are
+# The only hand-edited concrete runtime and role defaults. Native host configs are
 # synchronized from this file by scripts/model_routing.py sync-native.
 [runtimes.codex]
 model = "gpt-5.6-sol"
 effort = "high"
 
 [runtimes.claude]
-model = "fable"
+model = "opus"
 effort = "high"
 
 [roles.daily]
@@ -16,6 +16,15 @@ effort = "medium"
 [roles.deep]
 effort = "max"
 
+[roles.review.codex]
+model = "gpt-5.6-sol"
+effort = "high"
+
+[roles.review.claude]
+model = "fable"
+effort = "high"
+
 [model_registry]
 "gpt-5.6-sol" = "codex"
 fable = "claude"
+opus = "claude"

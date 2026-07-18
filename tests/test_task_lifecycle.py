@@ -601,7 +601,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     claude_spec = json.loads((worktree / ".task-agent-command.json").read_text(encoding="utf-8"))
     check(
         "supervisor pins Claude model and effort defaults",
-        supervisor_module.option_value(claude_spec["argv"], "--model") == "fable"
+        supervisor_module.option_value(claude_spec["argv"], "--model") == "opus"
         and supervisor_module.option_value(claude_spec["argv"], "--effort") == "high",
     )
     claude_trust_screen = (

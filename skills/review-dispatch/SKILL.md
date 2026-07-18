@@ -20,7 +20,9 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
 
 ## Model Defaults
 
-- Reviewer defaults are resolved once from `config/model-routing.toml`.
+- Reviewer role defaults are resolved once from `config/model-routing.toml`;
+  they are independent from ordinary runtime defaults. The tracked Claude
+  reviewer is Fable/high while ordinary Claude work defaults to Opus/high.
 - Explicit per-task or CLI model/effort choices override repository defaults;
   Codex effort is preserved after `--model` through a validated
   `model_reasoning_effort` override.
@@ -37,7 +39,7 @@ Review depth:
 - `full` is the compatibility default and keeps the normal review gate.
 - `light` is a fast independent pass for routine changes: top actionable
   correctness/regression/test/security findings only, no exhaustive checklist.
-- Both modes use the same central runtime defaults.
+- Both modes use the same central reviewer-role defaults.
 - v2/v3 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
   explicit overrides. Legacy v1 tasks keep the full interactive default.
 

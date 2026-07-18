@@ -1,7 +1,8 @@
 # Model routing
 
-`config/model-routing.toml` is the single tracked source of concrete model and
-effort defaults. A user may add the gitignored
+`config/model-routing.toml` is the single tracked source of concrete runtime
+and role-specific model/effort defaults. General Claude work defaults to Opus;
+Fable is reserved for the Claude cross-model reviewer role. A user may add the gitignored
 `config/model-routing.local.toml`; the SessionStart preflight makes that override
 visible. Native Codex configs are derived copies checked by
 `scripts/model_routing.py check`.
@@ -18,7 +19,7 @@ runtime fails closed. There is no silent alias substitution or effort coercion.
 | --- | --- |
 | Dispatch | Inherit the exact current runtime/model/effort. |
 | Daily | Inherit current runtime/model; use the configured daily effort. |
-| Review | Use the opposite runtime and its central default. `--same-model` inherits the exact current model; `--effort` may override only effort. |
+| Review | Use the opposite runtime and its central reviewer-role default. The Claude reviewer is Fable/high while ordinary Claude sessions default to Opus/high. `--same-model` inherits the exact current model; `--effort` may override only effort. |
 | Protected research | Stay Codex-isolated. From Codex inherit current model/effort; from Claude use the central Codex route. |
 | Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |
 | Deep | Inherit runtime/model and use the configured deep effort. |
@@ -66,7 +67,8 @@ python3 scripts/model-literal-lint.py
 ```
 
 Synchronize generated native Codex files after deliberately changing the
-central config:
+central config. Reviewer-role defaults are consumed directly and are not copied
+into native host defaults:
 
 ```bash
 python3 scripts/model_routing.py sync-native --apply
@@ -81,8 +83,9 @@ python3 scripts/upgrade-preflight.py
 
 The upgrade gate refuses active task/reviewer sessions and unfinished protected
 research runs. Restart them after the overlay. Stock v2.0.8 reviewer defaults
-need no migration. A customized legacy `.codex/dispatch-env.toml` model route is
-migrated only after explicit confirmation:
+need no migration. A customized legacy `.codex/dispatch-env.toml` reviewer route
+is migrated into the matching reviewer-role override only after explicit
+confirmation; it never changes the ordinary runtime default:
 
 ```bash
 python3 scripts/upgrade-preflight.py \

@@ -35,10 +35,7 @@ try:
     _ROUTING_CONFIG = load_routing_config(Path(__file__).resolve().parents[1])
 except RoutingError:  # Hermetic consumers may copy only the supervisor.
     _ROUTING_CONFIG = load_routing_config()
-DEFAULT_CODEX_MODEL = _ROUTING_CONFIG.runtime_default("codex")["model"]
 DEFAULT_CODEX_EFFORT = _ROUTING_CONFIG.runtime_default("codex")["effort"]
-DEFAULT_CLAUDE_MODEL = _ROUTING_CONFIG.runtime_default("claude")["model"]
-DEFAULT_CLAUDE_EFFORT = _ROUTING_CONFIG.runtime_default("claude")["effort"]
 CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {

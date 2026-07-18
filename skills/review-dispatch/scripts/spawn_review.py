@@ -47,11 +47,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback.
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = Path(__file__).resolve().parents[3]
-_ROUTING_CONFIG = load_routing_config(DEFAULT_VAULT)
-DEFAULT_CLAUDE_MODEL = _ROUTING_CONFIG.runtime_default("claude")["model"]
-DEFAULT_CODEX_MODEL = _ROUTING_CONFIG.runtime_default("codex")["model"]
-DEFAULT_CLAUDE_EFFORT = _ROUTING_CONFIG.runtime_default("claude")["effort"]
-DEFAULT_CODEX_EFFORT = _ROUTING_CONFIG.runtime_default("codex")["effort"]
 REVIEW_MODES = {"full", "light"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 # Codex `--model` takes precedence over profile/config reasoning settings.
