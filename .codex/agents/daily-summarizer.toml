@@ -1,7 +1,8 @@
 name = "daily_summarizer"
 description = "Read-only EOD summarizer for daily-evidence-v1 bundles. Use only when the daily skill asks for compact grounded bullets."
-model = "gpt-5.6-terra"
-model_reasoning_effort = "low"
+# Model is intentionally inherited from the current session. The daily role
+# changes only effort; scripts/model_routing.py is the source of that policy.
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 approval_policy = "never"
 web_search = "disabled"

@@ -5,10 +5,7 @@ reap_skill = "$llm-obsidian:reap"
 reap_send_skill = "$llm-obsidian:reap-send"
 review_skill = "$llm-obsidian:review-dispatch"
 review_send_skill = "$llm-obsidian:review-send"
-codex_review_model = "gpt-5.6-sol"
-codex_review_effort = "high"
-claude_review_model = "fable"
-claude_review_effort = "high"
+# Review model/effort defaults come from config/model-routing.toml.
 interaction_policy = "unattended"
 review_mode = "light"
 max_verify_iterations = 2

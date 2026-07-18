@@ -1,117 +1,96 @@
 # Model routing
 
-The dispatch pipeline chooses the executor runtime first, pins the repository
-model/effort defaults, then sends review to the opposite model family. Explicit
-per-task and command-line overrides remain authoritative.
+`config/model-routing.toml` is the single tracked source of concrete model and
+effort defaults. A user may add the gitignored
+`config/model-routing.local.toml`; the SessionStart preflight makes that override
+visible. Native Codex configs are derived copies checked by
+`scripts/model_routing.py check`.
 
-## Active routing
+## Resolution contract
 
-| Role | Default | How it is resolved |
-| --- | --- | --- |
-| Codex executor | `gpt-5.6-sol`, effort `high` | Repo-local Codex configs and the supervisor agree on the defaults; the generated task command pins both unless task metadata explicitly overrides them. |
-| Claude executor | `fable`, effort `high` | The supervisor pins both values unless task metadata explicitly overrides them. |
-| Reviewer for a Codex executor | Claude `fable`, effort `high` | Task metadata wins over `.codex/dispatch-env.toml`, then CLI flags may override that resolved choice. The subscription preflight runs before a real Claude review. |
-| Reviewer for a Claude executor | Codex `gpt-5.6-sol`, effort `high` | Task metadata wins over repository defaults; the launcher passes the model and a post-model reasoning-effort override explicitly. |
+Precedence is strict: explicit per-run override → captured current session →
+local override → tracked default. The result records runtime, model, effort,
+source steps, local-override state, and a configuration fingerprint. Invalid
+effort, a provider/model mismatch, or an unregistered model without an explicit
+runtime fails closed. There is no silent alias substitution or effort coercion.
 
-The normal full and light review modes use the same defaults. Model aliases or
-identifiers named in task metadata and CLI flags remain intentional opt-ins;
-historical task/review records are not rewritten when repository defaults move.
+| Role | Default behavior |
+| --- | --- |
+| Dispatch | Inherit the exact current runtime/model/effort. |
+| Daily | Inherit current runtime/model; use the configured daily effort. |
+| Review | Use the opposite runtime and its central default. `--same-model` inherits the exact current model; `--effort` may override only effort. |
+| Protected research | Stay Codex-isolated. From Codex inherit current model/effort; from Claude use the central Codex route. |
+| Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |
+| Deep | Inherit runtime/model and use the configured deep effort. |
 
-## Resolution order
+Legacy task/review records remain readable. Concrete top-level model/effort
+fields in old metadata are treated as explicit historical overrides. New task
+metadata carries both `routing.session` and `routing.effective`.
 
-For review, `spawn_review.py` merges the vault `.codex/dispatch-env.toml` and a
-worktree-local copy, with worktree values winning. Explicit task metadata then
-wins over those repository defaults, and command-line `--model` or `--effort`
-wins last. The resolved runtime, model, effort, and generated argv are recorded
-in `.review-meta.json` and `.review-agent-command.json`.
+## Session snapshots
 
-For a task, dispatch records `codex_home`, `codex_profile`, plus optional
-`model` and `effort` overrides in `.task-meta.json`. When either is absent, the
-supervisor pins the runtime default above. This distinction matters:
-
-- an alias such as `fable` intentionally follows the subscription alias;
-- a model identifier such as `gpt-5.6-sol` selects that named Codex model;
-- an explicit task value remains stable even if repository defaults change.
-
-Intentional repository exceptions are narrow: `.codex/profiles/deep.toml`
-keeps `max` effort for explicit deep work. The bounded daily summarizer stays
-on `gpt-5.6-terra` low for Codex and Claude `sonnet` low for Claude Code.
-Historical wiki pages, archived reviews, and test fixtures representing old
-records remain unchanged.
-
-The supervisor validates the generated command against task/review metadata and
-the required sandbox flags before starting the agent. Generated metadata is
-runtime state and must not be committed.
-
-## Safe verification
-
-Run these commands from the repository root. They print only model-routing
-fields and do not inspect credentials or provider environment variables.
-
-Show the repository reviewer defaults:
+SessionStart writes the fixed route to
+`.vault-meta/session-routing/<session-id>.json`. Child sessions use that snapshot
+until restart. When the host explicitly changes the active model or effort,
+recapture the same session id; only later children see the new route and already
+running children remain unchanged.
 
 ```bash
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
+python3 scripts/model_routing.py capture-session \
+  --session-id "$(./scripts/current-session-id.sh)" \
+  --runtime codex --model '<host-visible-model>' --effort high
 
-cfg = tomllib.loads(Path(".codex/dispatch-env.toml").read_text())["codex_dispatch"]
-keys = ("codex_review_model", "codex_review_effort", "claude_review_model", "claude_review_effort")
-print({key: cfg[key] for key in keys})
-PY
+python3 scripts/model_routing.py resolve \
+  --role dispatch --session-id "$(./scripts/current-session-id.sh)"
 ```
 
-Show the selected active Codex model without dumping the rest of either config:
+Environment integrations may instead set all three
+`LLM_OBSIDIAN_SESSION_RUNTIME`, `LLM_OBSIDIAN_SESSION_MODEL`, and
+`LLM_OBSIDIAN_SESSION_EFFORT`. Partial triples are rejected.
+
+## Drift, update, and migration
+
+Safe read-only checks:
 
 ```bash
-python3 - <<'PY'
-import tomllib
-from pathlib import Path
-
-for path in (
-    Path.home() / ".codex/config.toml",
-    Path.home() / ".codex/llm-obsidian-mcp.config.toml",
-):
-    data = tomllib.loads(path.read_text())
-    print(path, {key: data.get(key) for key in ("model", "model_reasoning_effort")})
-PY
+python3 scripts/model_routing.py check
+python3 scripts/session-preflight.py
+python3 scripts/model-literal-lint.py
 ```
 
-In a dispatched task worktree, confirm whether the executor inherits the Codex
-default or has an explicit override:
+Synchronize generated native Codex files after deliberately changing the
+central config:
 
 ```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-meta = json.loads(Path(".task-meta.json").read_text())
-keys = ("executor_runtime", "model", "effort", "codex_home", "codex_profile")
-print({key: meta.get(key) for key in keys})
-PY
+python3 scripts/model_routing.py sync-native --apply
 ```
 
-Finally, exercise the command generation and lifecycle contracts in temporary,
-hermetic fixtures:
+Before overlaying a release, run:
 
 ```bash
+python3 scripts/upgrade-preflight.py
+```
+
+The upgrade gate refuses active task/reviewer sessions. Restart those sessions
+after the overlay. A customized legacy `.codex/dispatch-env.toml` model route is
+migrated only after explicit confirmation:
+
+```bash
+python3 scripts/upgrade-preflight.py \
+  --confirm-routing-migration --apply
+```
+
+The migration writes the gitignored local override and never overwrites an
+existing one. Historical wiki pages, archived reviews, and evaluation fixtures
+are not rewritten when defaults change.
+
+## Verification
+
+```bash
+python3 tests/test_model_routing.py
+python3 tests/test_session_preflight.py
+python3 tests/test_upgrade_preflight.py
 bash tests/test_review_dispatch.sh
 python3 tests/test_task_lifecycle.py
 make test
 ```
-
-`tests/test_review_dispatch.sh` asserts Claude `fable` high, Codex
-`gpt-5.6-sol` high, explicit task/CLI override preservation, opposite-family
-selection, and supervisor rejection of weakened reviewer commands.
-
-## Updating defaults
-
-Treat a default change as a routing change, not a documentation-only edit.
-Update `.codex/dispatch-env.toml`, the fallback constants and help text in
-`spawn_review.py`, dispatch/review skill guidance, and the corresponding routing
-assertions in `tests/test_review_dispatch.sh` together. If the Codex executor
-default changes, update the managed active Codex global/profile configuration
-through the normal setup or MCP sync workflow; do not add a task-level model
-override merely to hide a stale environment. Record the resolved model in the
-acceptance result, while leaving historical wiki pages and prior evaluation
-records unchanged.

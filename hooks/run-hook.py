@@ -75,6 +75,19 @@ def session_context(root: Path, data: dict[str, Any], raw: str) -> None:
     if hot.is_file():
         emit(hot.read_text(encoding="utf-8"))
     if data.get("source") == "startup":
+        preflight = root / "scripts" / "session-preflight.py"
+        if preflight.is_file():
+            command = [sys.executable, str(preflight), "--root", str(root)]
+            session_id = str(data.get("session_id") or os.environ.get("CODEX_THREAD_ID") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "")
+            if session_id:
+                command.extend(["--session-id", session_id])
+            runtime = str(data.get("runtime") or "")
+            model = str(data.get("model") or "")
+            effort = str(data.get("effort") or data.get("model_reasoning_effort") or "")
+            if runtime and model and effort:
+                command.extend(["--runtime", runtime, "--model", model, "--effort", effort])
+            result = subprocess.run(command, text=True, capture_output=True, cwd=root, env=hook_env(root), check=False)
+            emit(result.stdout)
         result = invoke(PLUGIN_ROOT / ".claude" / "hooks" / "session-nudge.sh", raw, root)
         if result.returncode == 0:
             emit(result.stdout)

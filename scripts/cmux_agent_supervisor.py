@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from lifecycle_telemetry import emit_lifecycle_event, nonnegative_int, read_object
+from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, session_from_meta
 from task_contract import ContractError, normalize, read_json as read_task_json
 
 
@@ -28,10 +29,14 @@ REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
-DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
-DEFAULT_CODEX_EFFORT = "high"
-DEFAULT_CLAUDE_MODEL = "fable"
-DEFAULT_CLAUDE_EFFORT = "high"
+try:
+    _ROUTING_CONFIG = load_routing_config(Path(__file__).resolve().parents[1])
+except RoutingError:  # Hermetic consumers may copy only the supervisor.
+    _ROUTING_CONFIG = load_routing_config()
+DEFAULT_CODEX_MODEL = _ROUTING_CONFIG.runtime_default("codex")["model"]
+DEFAULT_CODEX_EFFORT = _ROUTING_CONFIG.runtime_default("codex")["effort"]
+DEFAULT_CLAUDE_MODEL = _ROUTING_CONFIG.runtime_default("claude")["model"]
+DEFAULT_CLAUDE_EFFORT = _ROUTING_CONFIG.runtime_default("claude")["effort"]
 CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {
@@ -424,6 +429,56 @@ def expected_codex_home(meta: dict[str, Any]) -> str | None:
     return str(Path(raw).expanduser().resolve()) if raw else None
 
 
+def resolved_task_model_route(worktree: Path, meta: dict[str, Any], runtime: str) -> dict[str, Any]:
+    """Resolve new routing envelopes while preserving concrete legacy metadata."""
+    config_root = worktree if (worktree / "config/model-routing.toml").is_file() else _ROUTING_CONFIG.root
+    try:
+        config = load_routing_config(config_root)
+        routing = meta.get("routing")
+        effective = routing.get("effective") if isinstance(routing, dict) else None
+        if isinstance(effective, dict):
+            route = {
+                "runtime": str(effective.get("runtime") or ""),
+                "model": str(effective.get("model") or ""),
+                "effort": str(effective.get("effort") or ""),
+                "source": effective.get("source") or ["metadata-envelope"],
+                "config_sha256": str(effective.get("config_sha256") or config.fingerprint),
+            }
+            if route["runtime"] != runtime or not route["model"]:
+                raise RoutingError("task routing envelope disagrees with executor runtime")
+            allowed_efforts = CODEX_EFFORTS if runtime == "codex" else CLAUDE_EFFORTS
+            if route["effort"] not in allowed_efforts:
+                raise RoutingError("task routing envelope has invalid effort")
+            registered = config.data["model_registry"].get(route["model"])
+            sources = route["source"] if isinstance(route["source"], list) else []
+            if registered not in {None, runtime}:
+                raise RoutingError("task routing envelope model/provider mismatch")
+            if registered is None and not {"explicit-model", "explicit-runtime"} <= set(sources):
+                raise RoutingError("unregistered task model requires explicit model and runtime sources")
+            return route
+        session = session_from_meta(meta)
+        explicit_model = str(meta.get("model") or "").strip()
+        explicit_effort = str(meta.get("effort") or "").strip()
+        if session is not None:
+            return resolve_model_route(
+                config,
+                "dispatch",
+                session=session,
+                explicit_runtime=runtime if runtime != session["runtime"] else "",
+                explicit_model=explicit_model,
+                explicit_effort=explicit_effort,
+            )
+        # v1/v2 metadata created before the routing envelope treats concrete
+        # fields as explicit overrides and otherwise uses the central default.
+        default = config.runtime_default(runtime)
+        default["model"] = explicit_model or default["model"]
+        default["effort"] = explicit_effort or default["effort"]
+        default.update({"source": ["legacy-metadata" if explicit_model or explicit_effort else "tracked-default"], "config_sha256": config.fingerprint})
+        return default
+    except RoutingError as exc:
+        raise SupervisorError(str(exc)) from exc
+
+
 def resolved_git_common_dir(worktree: Path) -> Path:
     result = subprocess.run(
         ["git", "-C", str(worktree), "rev-parse", "--git-common-dir"],
@@ -560,6 +615,7 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
             str(source_meta.get("reviewer_effort") or ""),
         )
     else:
+        task_route = resolved_task_model_route(worktree, source_meta, spec["runtime"])
         git_common_dir = (
             validated_task_git_common_dir(worktree, source_meta)
             if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
@@ -576,8 +632,8 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
             task_policy["interaction_policy"],
             git_common_dir,
             cmux_socket,
-            str(source_meta.get("model") or (DEFAULT_CODEX_MODEL if spec["runtime"] == "codex" else DEFAULT_CLAUDE_MODEL)),
-            str(source_meta.get("effort") or (DEFAULT_CODEX_EFFORT if spec["runtime"] == "codex" else DEFAULT_CLAUDE_EFFORT)),
+            str(task_route["model"]),
+            str(task_route["effort"]),
         )
 
 
@@ -604,8 +660,9 @@ def prepare_task(worktree: Path, surface: str) -> Path:
     runtime = str(meta.get("executor_runtime") or meta.get("runtime") or "")
     if surface != str(meta.get("task_surface") or ""):
         raise SupervisorError("task preparation surface does not match metadata")
-    model = str(meta.get("model") or "").strip()
-    effort = str(meta.get("effort") or (DEFAULT_CODEX_EFFORT if runtime == "codex" else DEFAULT_CLAUDE_EFFORT)).strip()
+    route = resolved_task_model_route(worktree, meta, runtime)
+    model = str(route["model"])
+    effort = str(route["effort"])
     env: dict[str, str] = {}
     if runtime == "codex":
         argv = ["codex", "--cd", str(worktree)]
@@ -614,7 +671,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
             argv.extend(["--profile", profile])
         if effort not in CODEX_EFFORTS:
             raise SupervisorError(f"Codex task effort must be one of {sorted(CODEX_EFFORTS)}")
-        argv.extend(["--model", model or DEFAULT_CODEX_MODEL])
+        argv.extend(["--model", model])
         if policy["interaction_policy"] == "unattended":
             cmux_socket = validated_cmux_socket_path()
             argv.extend(["--add-dir", str(validated_task_git_common_dir(worktree, meta))])
@@ -631,7 +688,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
             raise SupervisorError(f"Claude task effort must be one of {sorted(CLAUDE_EFFORTS)}")
         argv = [
             "claude", "--permission-mode", "auto",
-            "--model", model or DEFAULT_CLAUDE_MODEL,
+            "--model", model,
             "--effort", effort,
         ]
     else:

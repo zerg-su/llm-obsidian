@@ -66,8 +66,10 @@ print("CLAUDE_PACKAGE_OK")
 PYEOF
 expect_grep "A5 public Claude package metadata is aligned" "$OUT" "CLAUDE_PACKAGE_OK"
 python3 - "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
-import pathlib, sys
+import pathlib, sys, tomllib
 root = pathlib.Path(sys.argv[1])
+central = tomllib.loads((root / "config/model-routing.toml").read_text())
+codex = central["runtimes"]["codex"]
 for relative in (
     ".codex/config.toml",
     ".codex/profiles/default.toml",
@@ -75,19 +77,16 @@ for relative in (
     ".codex/profiles/reviewer-readonly.toml",
 ):
     text = (root / relative).read_text()
-    assert 'model = "gpt-5.6-sol"' in text, relative
-    assert 'model_reasoning_effort = "high"' in text, relative
+    parsed = tomllib.loads(text)
+    assert parsed["model"] == codex["model"], relative
+    assert parsed["model_reasoning_effort"] == codex["effort"], relative
 deep = (root / ".codex/profiles/deep.toml").read_text()
-assert 'model = "gpt-5.6-sol"' in deep
-assert 'model_reasoning_effort = "max"' in deep
+deep_parsed = tomllib.loads(deep)
+assert deep_parsed["model"] == codex["model"]
+assert deep_parsed["model_reasoning_effort"] == central["roles"]["deep"]["effort"]
 dispatch = (root / ".codex/dispatch-env.toml").read_text()
-for expected in (
-    'codex_review_model = "gpt-5.6-sol"',
-    'codex_review_effort = "high"',
-    'claude_review_model = "fable"',
-    'claude_review_effort = "high"',
-):
-    assert expected in dispatch, expected
+assert "_review_model" not in dispatch
+assert "_review_effort" not in dispatch
 print("MODEL_DEFAULTS_OK")
 PYEOF
 expect_grep "A6 repo model defaults are aligned" "$OUT" "MODEL_DEFAULTS_OK"

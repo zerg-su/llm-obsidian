@@ -137,7 +137,7 @@ with tempfile.TemporaryDirectory(prefix="claude-subscription-test.") as raw:
 
 agent = (ROOT / "agents" / "daily-summarizer.md").read_text(encoding="utf-8")
 frontmatter = agent.split("---", 2)[1]
-check("Sonnet low agent pinned", "model: sonnet" in frontmatter and "effort: low" in frontmatter)
+check("Claude daily inherits model at medium", "model: inherit" in frontmatter and "effort: medium" in frontmatter)
 check("Claude agent bounded", "maxTurns: 4" in frontmatter and "tools: Read" in frontmatter)
 check(
     "Claude agent has no mutation tools",

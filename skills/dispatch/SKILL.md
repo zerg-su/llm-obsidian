@@ -2,28 +2,22 @@
 name: dispatch
 metadata:
   version: 1.2.0
-description: >-
-  Spawn an isolated Claude/Codex task worktree in a cmux split and hand it an
-  approved plan. Use for parallel/offloaded implementation; requires cmux.
+description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
 
 # /dispatch — spawn a parallel task in cmux
-
 Keeps the "wiki as backbone" paradigm but moves execution into a separate cmux task split. The wiki agent (this session, Claude or Codex) does **not** execute the task — it spawns a task split and keeps dispatching other tasks in parallel. When the task is done — `/reap` it into the wiki.
 
-The task-split runtime is explicit from the prompt (`for Codex`, `для Claude`) or
-defaults to the current agent: `CODEX_THREAD_ID` means `codex`, otherwise
-`claude`. This allows a Claude wiki session to spawn Codex tasks and vice versa.
+The prompt may select either runtime; otherwise dispatch inherits the current
+session route. Claude and Codex can dispatch each other.
 
 ## Phase 0: cmux availability check
-
 `/dispatch` depends on cmux (a terminal multiplexer CLI). First thing, before any parsing:
 
 ```bash
 command -v cmux >/dev/null 2>&1 || echo "NO_CMUX"
 ```
-
 If cmux is not installed — stop with a friendly message:
 
 ```
@@ -49,9 +43,9 @@ The description is free text, spoken or typed. From "add a dark-mode toggle to t
 - `branch_intent` — `new` (create `task/<task_name>` from the default branch) or the name of a specific existing branch.
 - `description` — the substantive part for the task prompt (what exactly to do and why).
 - `runtime` — `claude | codex`. From text: "for Codex / для кодекса" → `codex`; "for Claude / для клода" → `claude`. Default = current agent (`CODEX_THREAD_ID` → `codex`, otherwise `claude`).
-- `model` — task-agent default: Claude **`fable`**, Codex
-  **`gpt-5.6-sol`**. A named alias or raw model id remains an override.
-- `effort` — default **`high`** for both runtimes; preserve explicit overrides.
+- `model` / `effort` — resolve through `scripts/model_routing.py`. The default
+  is the exact current-session route; a named model or effort remains an
+  explicit per-run override. Unknown models without an explicit runtime fail.
 - `plan_ref` — approved-plan handoff mode (resolved in Phase 1.4b): nothing said → auto-resolve the latest plan of the current session; "hand off plan <slug|path>" → that file; "no plan" → classic-mode forced.
 - `interaction_policy` — approved-plan dispatch defaults to `unattended`;
   explicit "interactive" preserves compatibility gates.
@@ -108,10 +102,7 @@ reap_skill = "$llm-obsidian:reap"
 reap_send_skill = "$llm-obsidian:reap-send"
 review_skill = "$llm-obsidian:review-dispatch"
 review_send_skill = "$llm-obsidian:review-send"
-codex_review_model = "gpt-5.6-sol"
-codex_review_effort = "high"
-claude_review_model = "fable"
-claude_review_effort = "high"
+# Model and effort defaults live only in config/model-routing.toml.
 interaction_policy = "unattended"
 review_mode = "light"
 max_verify_iterations = 2
@@ -128,8 +119,8 @@ watchdog_alert_after_seconds = 1200
   `CODEX_HOME`.
 - Reap/review command keys are persisted into `.wiki-reap-command` and
   `.task-*-skill` handoffs so neither runtime guesses plugin namespaces.
-- Reviewer defaults: Codex `gpt-5.6-sol` high; Claude `fable` high. Explicit
-  task metadata or CLI overrides remain authoritative.
+- Reviewer defaults come from `config/model-routing.toml`; explicit task
+  metadata or CLI overrides remain authoritative.
 - The remaining keys define bounded review/reap/close plus an observer-only
   15/20-minute watchdog; old metadata without the policy stays disabled.
 
@@ -137,6 +128,14 @@ If `codex_home` is configured but the directory is missing — stop before
 creating the split and tell the user to bootstrap that Codex home. Do not create
 or install plugins into a Codex home implicitly during dispatch.
 
+### 1.2c Resolve and snapshot the child route
+Before echo-confirm, refresh the current session snapshot with
+`model_routing.py capture-session`, then resolve `dispatch` for
+`$(./scripts/current-session-id.sh)`. Codex reads only model fields from that
+exact local session record; other hosts provide them through hook/env fields.
+If unavailable, capture host-visible values; never guess. Store session and
+effective results in `.task-meta.json.routing` and pass explicit overrides to
+the resolver so `source` records them.
 ### 1.3 Resolve the branch
 
 - An existing branch was named → `git -C <repo> branch --list <branch>` to verify. Not local — `git -C <repo> branch -a --list "*<branch>*"` to check remotes. Not anywhere — ask.
@@ -361,12 +360,13 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "reap_send_skill": "<reap_send_skill>",
   "review_skill": "<review_skill>",
   "review_send_skill": "<review_send_skill>",
-  "codex_review_model": "gpt-5.6-sol",
-  "codex_review_effort": "high",
-  "claude_review_model": "fable",
-  "claude_review_effort": "high",
-  "model": "<explicit override or runtime default: fable|gpt-5.6-sol>",
-  "effort": "<explicit override or high>",
+  "routing": {
+    "schema_version": 1,
+    "session": {"runtime": "<current>", "model": "<current>", "effort": "<current>"},
+    "effective": {"runtime": "<resolved>", "model": "<resolved>", "effort": "<resolved>", "source": ["session"], "config_sha256": "<sha256>"}
+  },
+  "model": "<explicit override only, otherwise omit>",
+  "effort": "<explicit override only, otherwise omit>",
   "plan_file": "/abs/path/to/wiki/plans/<file>.md",
   "approved_plan_sha256": "<sha256 captured before echo-confirm>",
   "interaction_policy": "unattended",

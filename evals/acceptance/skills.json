@@ -23,6 +23,7 @@
     "review-send": {"scenario": "dispatch-review-reap", "expected": "Submit one typed product-read-only reviewer result exactly once."},
     "save-plan": {"scenario": "vault-capture", "expected": "Persist one disposable plan without executing it."},
     "save": {"scenario": "vault-capture", "expected": "Persist and merge one disposable structured note through vault-write."},
+    "unsafe-research": {"scenario": "unsafe-web", "expected": "After one warning, run one bounded single-context web scenario on the exact current session route without a second model run."},
     "wiki-fold": {"scenario": "vault-maintenance", "expected": "Preview and commit one deterministic disposable operation-log fold."},
     "wiki-ingest": {"scenario": "ingest", "expected": "Ingest one local fixture and one bounded protected URL with provenance and deduplication."},
     "wiki-lint": {"scenario": "vault-maintenance", "expected": "Run the complete disposable-vault health check and produce deterministic findings."},

@@ -1,6 +1,25 @@
 # llm-obsidian Makefile
 # Test runner entry points for DragonScale and vault tooling.
 
+.PHONY: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight
+test: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight
+
+test-model-routing:
+	@echo "=== test_model_routing.py ==="
+	@python3 tests/test_model_routing.py
+
+test-session-preflight:
+	@echo "=== test_session_preflight.py ==="
+	@python3 tests/test_session_preflight.py
+
+test-model-literal-lint:
+	@echo "=== model-literal-lint.py ==="
+	@python3 scripts/model-literal-lint.py
+
+test-upgrade-preflight:
+	@echo "=== test_upgrade_preflight.py ==="
+	@python3 tests/test_upgrade_preflight.py
+
 .PHONY: test eval-smoke eval-live eval-regression acceptance-check retrieval-experiment test-release-acceptance test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:

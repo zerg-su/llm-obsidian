@@ -30,6 +30,7 @@ from typing import Any, NoReturn
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from research_contract import ResearchContractError, load_artifact
+from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, routing_from_environment
 
 
 DEFAULT_STATE_ROOT = ROOT / ".vault-meta" / "research-runs"
@@ -111,6 +112,9 @@ def runtime_config(
     python_executable: str,
     cmux_socket: Path,
     vault: Path | None = None,
+    *,
+    model: str,
+    effort: str,
 ) -> str:
     profile = f"research-{stage}"
     web_search = "live" if stage == "fetch" else "disabled"
@@ -118,8 +122,8 @@ def runtime_config(
         f"default_permissions = {toml_string(profile)}",
         f"web_search = {toml_string(web_search)}",
         'approval_policy = "never"',
-        'model = "gpt-5.6-sol"',
-        'model_reasoning_effort = "high"',
+        f"model = {toml_string(model)}",
+        f"model_reasoning_effort = {toml_string(effort)}",
         'history.persistence = "none"',
         "",
         "[features]",
@@ -189,12 +193,18 @@ def make_runtime_home(
     python_executable: str,
     cmux_socket: Path,
     vault: Path | None = None,
+    *,
+    model: str,
+    effort: str,
 ) -> Path:
     runtime_home = base / f"codex-home-{stage}"
     runtime_home.mkdir(parents=True, exist_ok=False)
     runtime_home.chmod(0o700)
     (runtime_home / "config.toml").write_text(
-        runtime_config(stage, workspace, python_executable, cmux_socket, vault),
+        runtime_config(
+            stage, workspace, python_executable, cmux_socket, vault,
+            model=model, effort=effort,
+        ),
         encoding="utf-8",
     )
     auth_link(runtime_home)
@@ -464,6 +474,18 @@ def state_paths(state_root: Path, run_id: str) -> tuple[Path, Path]:
     return directory, directory / "state.json"
 
 
+def stored_route(state: dict[str, Any]) -> dict[str, str]:
+    value = state.get("routing")
+    if not isinstance(value, dict):
+        die("research run is missing its routing snapshot", 3)
+    runtime = str(value.get("runtime") or "")
+    model = str(value.get("model") or "")
+    effort = str(value.get("effort") or "")
+    if runtime != "codex" or not model or effort not in {"minimal", "low", "medium", "high", "xhigh", "max"}:
+        die("research routing snapshot is invalid", 3)
+    return {"runtime": runtime, "model": model, "effort": effort}
+
+
 def cmd_start(ns: argparse.Namespace) -> int:
     surface = coordinator_surface(ns.coordinator_surface, ns.no_spawn)
     cmux_socket = cmux_socket_path(no_spawn=ns.no_spawn)
@@ -472,6 +494,12 @@ def cmd_start(ns: argparse.Namespace) -> int:
     topic = ns.topic.strip()
     if not topic:
         die("topic must not be empty", 3)
+    try:
+        routing_config = load_routing_config(ns.vault_root)
+        session, _session_source = routing_from_environment(routing_config)
+        route = resolve_model_route(routing_config, "protected-research", session=session)
+    except RoutingError as exc:
+        die(f"model routing failed: {exc}", 3)
     run_id = str(uuid.uuid4())
     state_dir, state_path = state_paths(ns.state_root.resolve(), run_id)
     state_dir.mkdir(parents=True, exist_ok=False)
@@ -480,7 +508,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
     runtime_base = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
     python_executable = str(Path(sys.executable).resolve())
     runtime_home = make_runtime_home(
-        runtime_base, "fetch", fetch_dir, python_executable, cmux_socket
+        runtime_base, "fetch", fetch_dir, python_executable, cmux_socket,
+        model=str(route["model"]), effort=str(route["effort"]),
     )
     prompt_file = fetch_dir / "fetch-prompt.md"
     prompt_file.write_text(
@@ -523,6 +552,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "surface_policy": "keep" if ns.keep_surfaces else "auto_close",
         "fetch_completion_marker": str(fetch_marker),
         "vault": str(ns.vault_root.resolve()),
+        "routing": route,
         "command": command,
     }
     write_json(state_path, state)
@@ -565,8 +595,10 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     cmux_socket = Path(
         str(state.get("cmux_socket_path") or cmux_socket_path(no_spawn=ns.no_spawn))
     ).resolve()
+    route = stored_route(state)
     runtime_home = make_runtime_home(
-        runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault
+        runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
+        model=route["model"], effort=route["effort"],
     )
     prompt_file = synth_dir / "synth-prompt.md"
     prompt_file.write_text(
@@ -677,8 +709,10 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root)
     )
     vault = Path(str(state.get("vault"))).resolve()
+    route = stored_route(state)
     runtime_home = make_runtime_home(
-        runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault
+        runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
+        model=route["model"], effort=route["effort"],
     )
     prompt_file.write_text(
         synth_prompt(

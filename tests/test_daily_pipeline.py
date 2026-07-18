@@ -242,7 +242,8 @@ with tempfile.TemporaryDirectory(prefix="daily-pipeline-test.") as raw:
 agent = (ROOT / ".codex/agents/daily-summarizer.toml").read_text(encoding="utf-8")
 agent_config = tomllib.loads(agent)
 mcp_servers = agent_config.get("mcp_servers", {})
-check("Terra low agent pinned", 'model = "gpt-5.6-terra"' in agent and 'model_reasoning_effort = "low"' in agent)
+check("daily model is not hardcoded", "\nmodel = " not in agent)
+check("daily medium effort pinned", 'model_reasoning_effort = "medium"' in agent)
 check("daily agent read-only", 'sandbox_mode = "read-only"' in agent and 'web_search = "disabled"' in agent)
 check("daily agent hooks disabled", 'hooks = false' in agent and 'approval_policy = "never"' in agent)
 check(

@@ -1,12 +1,9 @@
 ---
 name: review-dispatch
 description: >
-  Stateful cross-model review loop for dispatch task-splits: open
-  opposite-model reviewer, receive findings, optionally verify fixes in same
-  session, enforce unattended escalation policy, and close an approved reviewer
-  surface after process exit. Supports full and light review modes.
-  Triggers: review-dispatch, cross-model review, light cross-model review,
-  Codex/Claude review, ревью другой моделью, лёгкое ревью другой моделью.
+  Cross-model full/light review for dispatch tasks: findings, same-session
+  verification, escalation, and safe reviewer close. Triggers: review-dispatch,
+  cross-model review, Codex/Claude review, ревью другой моделью.
 allowed-tools: Read Write Edit Bash AskUserQuestion
 ---
 
@@ -23,8 +20,7 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
 
 ## Model Defaults
 
-- Claude reviewer default: `fable` at high effort.
-- Codex reviewer default: `gpt-5.6-sol` at high effort.
+- Reviewer defaults are resolved once from `config/model-routing.toml`.
 - Explicit per-task or CLI model/effort choices override repository defaults;
   Codex effort is preserved after `--model` through a validated
   `model_reasoning_effort` override.
@@ -38,8 +34,7 @@ Review depth:
 - `full` is the compatibility default and keeps the normal review gate.
 - `light` is a fast independent pass for routine changes: top actionable
   correctness/regression/test/security findings only, no exhaustive checklist.
-- Both modes use the same defaults: Claude `fable` high and Codex
-  `gpt-5.6-sol` high.
+- Both modes use the same central runtime defaults.
 - v2 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
   explicit overrides. Legacy v1 tasks keep the full interactive default.
 

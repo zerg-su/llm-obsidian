@@ -2,8 +2,8 @@
 name: daily-summarizer
 description: Produce grounded daily-summary-v1 JSON only when the daily skill explicitly delegates a collected evidence bundle.
 tools: Read
-model: sonnet
-effort: low
+model: inherit
+effort: medium
 maxTurns: 4
 ---
 

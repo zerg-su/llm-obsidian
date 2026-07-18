@@ -6,6 +6,41 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-07-18
+
+### Added
+
+- Added a dynamic cross-runtime release acceptance contract covering every
+  installed skill, sanitized evidence ledgers, fault visibility, and explicit
+  baseline/final phases.
+- Added a once-per-session readiness preflight for runtime routing, generated
+  config drift, CLI dependencies, and hybrid retrieval. Missing Ollama or
+  `bge-m3` produces exact repair commands while sparse retrieval stays usable.
+- Added explicit `unsafe-research` as a separate single-context escape hatch.
+  It requires direct user authorization, warns once, inherits the current
+  session, and never weakens protected research as a fallback.
+
+### Changed
+
+- Concrete Claude/Codex defaults now live only in
+  `config/model-routing.toml`. Dispatch inherits the exact current route, daily
+  inherits its model at medium effort, review defaults to the opposite runtime,
+  and protected research keeps its Codex isolation.
+- Task and review metadata now record resolved model, effort, source, and config
+  fingerprint. Same-model review is explicit and can override effort without
+  changing model.
+- Overlay upgrades refuse active task/reviewer sessions and migrate customized
+  legacy reviewer routes only after explicit confirmation into a gitignored
+  local override.
+
+### Fixed
+
+- Unknown models, provider mismatches, invalid effort, generated-config drift,
+  and incomplete session routing now fail visibly instead of silently selecting
+  another route.
+- Daily model defaults are no longer duplicated in runtime-specific agent
+  definitions, and a model-literal lint prevents new active-code hardcoding.
+
 ## [2.0.8] - 2026-07-17
 
 ### Added

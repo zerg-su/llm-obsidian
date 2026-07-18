@@ -672,6 +672,22 @@ import json, sys
 p=sys.argv[1]; data=json.load(open(p)); data["executor_runtime"]="claude"
 open(p,"w").write(json.dumps(data)+"\n")
 PY
+
+SAME_MODEL="$SANDBOX/same-model-review"
+write_fixture "$SAME_MODEL"
+"$SCRIPT" start --same-model --no-spawn --worktree "$SAME_MODEL" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/same-model.err"
+expect_eq "same-model-start" "$?" 0
+expect_eq "same-model-runtime" "$(json_get "$SAME_MODEL/.review-meta.json" reviewer_runtime)" "codex"
+expect_eq "same-model-model" "$(json_get "$SAME_MODEL/.review-meta.json" reviewer_model)" "gpt-5.6-sol"
+expect_eq "same-model-effort" "$(json_get "$SAME_MODEL/.review-meta.json" reviewer_effort)" "high"
+argv_has "$SAME_MODEL/.review-agent-command.json" --model gpt-5.6-sol && ok "same-model-argv" || bad "same-model-argv" "current model not pinned"
+
+SAME_MODEL_BAD="$SANDBOX/same-model-bad"
+write_fixture "$SAME_MODEL_BAD"
+"$SCRIPT" start --same-model --model forbidden --no-spawn --worktree "$SAME_MODEL_BAD" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/same-model-bad.err"
+expect_eq "same-model-conflict-rejected" "$?" 1
+grep -q -- '--same-model cannot be combined' "$SANDBOX/same-model-bad.err" && ok "same-model-conflict-message" || bad "same-model-conflict-message" "conflict not explained"
+
 "$SCRIPT" start --no-spawn --worktree "$CODEX_REVIEW" --vault-root "$REPO_ROOT" >"$SANDBOX/codex.out" 2>"$SANDBOX/codex.err"
 expect_eq "codex-review-start" "$?" 0
 CODEX_SPEC="$CODEX_REVIEW/.review-agent-command.json"

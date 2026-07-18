@@ -3,10 +3,8 @@ name: reap
 metadata:
   version: 1.1.0
 description: |
-  Symmetric inverse of /dispatch for cmux task-splits running Claude Code or Codex CLI: collect "## Wiki Summary", file into wiki/, update log/hot, allocate address, preserve .task-meta.json provenance.
-  Use when a task-agent produced a Wiki Summary block, or /reap directly.
-  Triggers (EN): reap, rip, finalize task-split, collect task summary, file task into wiki.
-  Triggers (RU): зафиксируй task, сними task в вики, финализируй task.
+  Finalize a Claude/Codex cmux task: collect its typed summary, file it through the vault transaction, preserve provenance, and close safely.
+  Triggers: reap, finalize task, collect task summary, зафиксируй task, финализируй task.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
 

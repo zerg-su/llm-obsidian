@@ -38,6 +38,7 @@ node_modules/
 .env
 .env.local
 *.local.md
+config/model-routing.local.toml
 
 # Local MCP runtime/client config generated from the tracked examples
 .mcp.json
@@ -148,6 +149,7 @@ _attachments/
 .vault-meta/skill-nudge-day.txt
 .vault-meta/evals/
 .vault-meta/research-runs/
+.vault-meta/session-routing/
 .vault-meta/daily-runs/
 .vault-meta/review-runtimes/
 .vault-meta/document-cache/

@@ -36,6 +36,7 @@ from cmux_agent_supervisor import (
     write_agent_spec,
 )
 from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event, nonnegative_int
+from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, session_from_meta
 
 try:
     import tomllib
@@ -45,10 +46,11 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback.
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = Path(__file__).resolve().parents[3]
-DEFAULT_CLAUDE_MODEL = "fable"
-DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
-DEFAULT_CLAUDE_EFFORT = "high"
-DEFAULT_CODEX_EFFORT = "high"
+_ROUTING_CONFIG = load_routing_config(DEFAULT_VAULT)
+DEFAULT_CLAUDE_MODEL = _ROUTING_CONFIG.runtime_default("claude")["model"]
+DEFAULT_CODEX_MODEL = _ROUTING_CONFIG.runtime_default("codex")["model"]
+DEFAULT_CLAUDE_EFFORT = _ROUTING_CONFIG.runtime_default("claude")["effort"]
+DEFAULT_CODEX_EFFORT = _ROUTING_CONFIG.runtime_default("codex")["effort"]
 REVIEW_MODES = {"full", "light"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 # Codex `--model` takes precedence over profile/config reasoning settings.
@@ -591,7 +593,7 @@ def normalize_review_mode(mode: str) -> str:
     return normalized
 
 
-def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], reviewer_runtime: str) -> dict[str, str]:
+def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], reviewer_runtime: str, *, same_model: bool = False) -> dict[str, str]:
     plugin = plugin_name(vault)
     repo_env = parse_dispatch_env(worktree / ".codex" / "dispatch-env.toml")
     vault_env = parse_dispatch_env(vault / ".codex" / "dispatch-env.toml")
@@ -621,13 +623,37 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
     review_skill = normalize_skill_command(raw_review_skill, executor_runtime, "review-dispatch", plugin)
     review_send_skill = normalize_skill_command(raw_review_send_skill, reviewer_runtime, "review-send", plugin)
 
-    # A task-level opt-in is part of the approved task contract and therefore
-    # wins over repository defaults. CLI flags still win later in cmd_start.
-    codex_model = str(meta.get("codex_review_model") or merged.get("codex_review_model") or DEFAULT_CODEX_MODEL).strip()
-    claude_model = str(meta.get("claude_review_model") or merged.get("claude_review_model") or DEFAULT_CLAUDE_MODEL).strip()
-    claude_effort = str(meta.get("claude_review_effort") or merged.get("claude_review_effort") or DEFAULT_CLAUDE_EFFORT).strip()
-    codex_effort = str(meta.get("codex_review_effort") or merged.get("codex_review_effort") or DEFAULT_CODEX_EFFORT).strip()
-    reviewer_model = claude_model if reviewer_runtime == "claude" else codex_model
+    config_root = worktree if (worktree / "config/model-routing.toml").is_file() else vault
+    if not (config_root / "config/model-routing.toml").is_file():
+        config_root = DEFAULT_VAULT
+    try:
+        config = load_routing_config(config_root)
+        session = session_from_meta(meta)
+        if session is None:
+            executor_default = config.runtime_default(executor_runtime)
+            session = {
+                "runtime": executor_runtime,
+                "model": str(meta.get("model") or executor_default["model"]),
+                "effort": str(meta.get("effort") or executor_default["effort"]),
+            }
+        legacy_model_key = f"{reviewer_runtime}_review_model"
+        legacy_effort_key = f"{reviewer_runtime}_review_effort"
+        route = resolve_model_route(
+            config,
+            "review",
+            session=session,
+            explicit_runtime=reviewer_runtime,
+            explicit_model="" if same_model else str(meta.get(legacy_model_key) or merged.get(legacy_model_key) or "").strip(),
+            explicit_effort="" if same_model else str(meta.get(legacy_effort_key) or merged.get(legacy_effort_key) or "").strip(),
+            same_model=same_model,
+        )
+    except RoutingError as exc:
+        message = str(exc)
+        if " effort must be one of " in message:
+            family = "Claude" if reviewer_runtime == "claude" else "Codex"
+            die(f"{family} reviewer effort must be one of {sorted(CLAUDE_EFFORTS if reviewer_runtime == 'claude' else CODEX_EFFORTS)}")
+        die(message)
+    reviewer_model = str(route["model"])
 
     if reviewer_runtime == "codex" and codex_home and not Path(codex_home).exists():
         die(f"CODEX_HOME for reviewer does not exist: {codex_home}")
@@ -642,7 +668,9 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
         "review_skill": review_skill,
         "review_send_skill": review_send_skill,
         "reviewer_model": reviewer_model,
-        "reviewer_effort": claude_effort if reviewer_runtime == "claude" else codex_effort,
+        "reviewer_effort": str(route["effort"]),
+        "routing_config_sha256": str(route["config_sha256"]),
+        "routing_source": json.dumps(route["source"], separators=(",", ":")),
     }
 
 
@@ -1037,7 +1065,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
     meta["base_branch"] = base_branch
 
     executor_runtime = str(meta.get("executor_runtime") or meta.get("runtime") or "").strip()
-    reviewer_runtime = ns.reviewer_runtime or opposite_runtime(executor_runtime)
+    if ns.same_model and (ns.reviewer_runtime or ns.model):
+        die("--same-model cannot be combined with --reviewer-runtime or --model")
+    reviewer_runtime = executor_runtime if ns.same_model else (ns.reviewer_runtime or opposite_runtime(executor_runtime))
     if reviewer_runtime not in {"claude", "codex"}:
         die("--reviewer-runtime must be claude or codex")
     if reviewer_runtime == "claude" and not ns.no_spawn:
@@ -1049,7 +1079,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     if not executor_surface:
         die(".task-cmux-surface missing; cannot callback executor")
 
-    env = resolve_review_env(worktree, vault, meta, reviewer_runtime)
+    env = resolve_review_env(worktree, vault, meta, reviewer_runtime, same_model=ns.same_model)
     configured_mode = str(task_policy["review_policy"].get("mode") or "")
     selected_mode = "light" if ns.light else (ns.mode or configured_mode or "full")
     if selected_mode == "skip":
@@ -1057,6 +1087,11 @@ def cmd_start(ns: argparse.Namespace) -> int:
     review_mode = normalize_review_mode(selected_mode)
     reviewer_model = ns.model or env["reviewer_model"]
     reviewer_effort = ns.effort or env["reviewer_effort"]
+    routing_source = json.loads(env.get("routing_source") or "[]")
+    if ns.model:
+        routing_source.append("cli-model")
+    if ns.effort:
+        routing_source.append("cli-effort")
     if reviewer_runtime == "claude" and reviewer_effort not in CLAUDE_EFFORTS | {""}:
         die(f"Claude reviewer effort must be one of {sorted(CLAUDE_EFFORTS)}")
     if reviewer_runtime != "claude" and reviewer_effort not in CODEX_EFFORTS | {""}:
@@ -1135,6 +1170,12 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "reviewer_runtime": reviewer_runtime,
         "reviewer_model": reviewer_model,
         "reviewer_effort": reviewer_effort or None,
+        "routing": {
+            "schema_version": 1,
+            "same_model": bool(ns.same_model),
+            "config_sha256": env.get("routing_config_sha256"),
+            "source": routing_source,
+        },
         "codex_home": env["codex_home"] or None,
         "codex_profile": env["profile"] or None,
         "review_skill": review_skill,
@@ -1519,12 +1560,13 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--task-name", default="", help="override task name")
     start.add_argument("--base-branch", default="", help="override base branch")
     start.add_argument("--reviewer-runtime", choices=["claude", "codex"], default="", help="override opposite runtime")
+    start.add_argument("--same-model", action="store_true", help="review with the current executor runtime and exact model; --effort may override effort")
     start.add_argument("--review-skill", default="", help="executor callback skill command")
     start.add_argument("--review-send-skill", default="", help="reviewer handoff skill command")
     start.add_argument(
         "--model",
         default="",
-        help="reviewer model; defaults fable for Claude, gpt-5.6-sol for Codex",
+        help="reviewer model; defaults are resolved from config/model-routing.toml",
     )
     start.add_argument(
         "--effort",

@@ -7,7 +7,7 @@ must not be inferred from another runtime.
 | Capability | Claude Code | Codex CLI | Other agents / shell |
 |---|---|---|---|
 | Repo skills | Claude plugin marketplace; `/skill` UI | Generated repo-local Codex plugin; `$llm-obsidian:skill` | Read and follow `skills/<name>/SKILL.md` manually |
-| Daily synthesis | Subscription preflight + read-only Sonnet low plugin agent | Read-only Terra low project agent | Same contract in the parent agent |
+| Daily synthesis | Subscription preflight + read-only current-model agent at medium effort | Read-only current-model project agent at medium effort | Same evidence contract when exact routing is available |
 | Agenda carry-over | Shared deterministic scan/collect/report scripts; optional Tasks UI | Same scripts and optional Tasks UI | Same scripts; plugin is not required for correctness |
 | Daily latency | Content-free collection/synthesis/run timings with p50/p95 | Same shared numeric events | Same shared numeric events |
 | Transactional writer, retrieval, fold | Shared Python/shell scripts | Same scripts | Same scripts |
@@ -101,11 +101,12 @@ deletion, repository-wide rewriting, and infrastructure destructive actions
 blocked. Tests compare the task/base policies and exercise both allowed and
 denied commands.
 
-Dispatch and cross-model review pin the current repository defaults: Claude
-`fable` high and Codex `gpt-5.6-sol` high. Explicit task metadata and CLI
+Dispatch and cross-model review resolve the current repository defaults from
+`config/model-routing.toml`. Explicit task metadata and CLI
 overrides win over those defaults and remain recorded in handoff metadata. The
-Codex deep profile intentionally keeps `max` effort, and the bounded daily
-summarizer intentionally keeps its specialized Terra/low route.
+Codex deep profile intentionally keeps `max` effort. The bounded daily
+summarizer inherits the current session's exact model and changes only effort
+to the centrally configured daily value.
 
 Reviewers remain product-read-only but are no longer toolchain-starved: Claude
 gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG

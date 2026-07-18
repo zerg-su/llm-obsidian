@@ -70,8 +70,8 @@ Any vault change goes through the wiki agent (`/reap` after your summary)
 - Wiki reap RPC: <wiki-reap-command>
 - Review gate: <review-skill>
 - Review send: <review-send-skill>
-- Review defaults: Claude reviewer `fable` high, Codex reviewer
-  `gpt-5.6-sol` high; explicit task overrides are preserved
+- Review defaults come from `config/model-routing.toml`; explicit task
+  overrides are preserved
 - Commit as you go, as usual. Never push, deploy, publish, delete the worktree
   or branch, or expand scope under this task mandate.
 - Commit messages — in this repo's style (`git log --oneline -15` for a sample).
@@ -205,8 +205,8 @@ security-sensitive review, or operationally risky review, run full mode without
 `--light`.
 
 The reviewer opens in a neighboring cmux split on the opposite model:
-Codex executor -> Claude reviewer (`fable`, high effort), Claude executor ->
-Codex reviewer (`gpt-5.6-sol`, high effort). The reviewer
+Codex executor -> central Claude default, Claude executor -> central Codex
+default. The reviewer
 writes `.task-review.md`, invokes
 `<review-send-skill>`, and stays open.
 
