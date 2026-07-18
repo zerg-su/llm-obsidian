@@ -48,6 +48,8 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Resumed reviewers no longer depend on a newly operation-scoped callback
   permission, and a failed UI notification no longer retries an already durable
   callback transition.
+- Live acceptance waits for a stable bounded regular-file outbox, tolerating a
+  short non-atomic agent write without accepting symlinks or oversized output.
 
 ## [2.0.9] - 2026-07-18
 

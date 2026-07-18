@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -25,6 +27,9 @@ SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SURFACE_RE = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
 )
+OUTBOX_MAX_BYTES = 64 * 1024
+OUTBOX_INVALID_GRACE_SECONDS = 5.0
+OUTBOX_STABLE_SECONDS = 1.0
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
@@ -376,14 +381,72 @@ def send_surface(surface: str, text: str, *, submit_key: str = "Enter") -> None:
             raise AcceptanceRunnerError((result.stdout + result.stderr).strip() or "cmux send failed")
 
 
+def settled_outbox(
+    outbox: Path,
+    state: dict[str, Any],
+    now: float,
+) -> dict[str, Any] | None:
+    """Return one stable JSON outbox, tolerating a bounded non-atomic write."""
+    try:
+        metadata = outbox.lstat()
+    except FileNotFoundError:
+        state.clear()
+        return None
+    except OSError as exc:
+        raise AcceptanceRunnerError("acceptance outbox metadata is unreadable") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise AcceptanceRunnerError("acceptance outbox must be a regular non-symlink file")
+    if metadata.st_size > OUTBOX_MAX_BYTES:
+        raise AcceptanceRunnerError("acceptance outbox exceeds the bounded size limit")
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(outbox, flags)
+    except OSError as exc:
+        raise AcceptanceRunnerError("acceptance outbox is unreadable") from exc
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_dev != metadata.st_dev
+            or opened.st_ino != metadata.st_ino
+        ):
+            raise AcceptanceRunnerError("acceptance outbox changed identity while opening")
+        payload = stream.read(OUTBOX_MAX_BYTES + 1)
+        if len(payload) > OUTBOX_MAX_BYTES:
+            raise AcceptanceRunnerError("acceptance outbox exceeds the bounded size limit")
+    first_seen = float(state.setdefault("first_seen", now))
+    try:
+        parsed = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        state.pop("digest", None)
+        state.pop("stable_since", None)
+        if now - first_seen >= OUTBOX_INVALID_GRACE_SECONDS:
+            raise AcceptanceRunnerError(
+                "acceptance outbox remained invalid after the bounded write grace period"
+            ) from exc
+        return None
+    digest = hashlib.sha256(payload).hexdigest()
+    if state.get("digest") != digest:
+        state["digest"] = digest
+        state["stable_since"] = now
+        return None
+    if now - float(state.get("stable_since", now)) < OUTBOX_STABLE_SECONDS:
+        return None
+    if not isinstance(parsed, dict):
+        raise AcceptanceRunnerError("acceptance outbox must contain a JSON object")
+    return parsed
+
+
 def wait_for_outbox(
     outbox: Path, exit_marker: Path, timeout: int, *, surface: str, runtime: str
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     trust_accepted = False
+    outbox_state: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        if outbox.is_file():
-            return read_json(outbox)
+        candidate = settled_outbox(outbox, outbox_state, time.monotonic())
+        if candidate is not None:
+            return candidate
         if exit_marker.is_file():
             raise AcceptanceRunnerError("acceptance agent exited before writing its outbox")
         if not trust_accepted:

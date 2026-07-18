@@ -145,6 +145,43 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
 
+    settling = tmp / "settling-outbox.json"
+    state: dict[str, object] = {}
+    settling.write_text('{"schema_version":', encoding="utf-8")
+    check("partial outbox waits during grace", module.settled_outbox(settling, state, 10.0) is None)
+    settling.write_text('{"schema_version": 1}', encoding="utf-8")
+    check("first valid outbox sample waits for stability", module.settled_outbox(settling, state, 10.2) is None)
+    check("stable valid outbox is accepted", module.settled_outbox(settling, state, 11.3) == {"schema_version": 1})
+
+    invalid = tmp / "invalid-outbox.json"
+    invalid.write_text("{", encoding="utf-8")
+    invalid_state: dict[str, object] = {}
+    module.settled_outbox(invalid, invalid_state, 20.0)
+    try:
+        module.settled_outbox(invalid, invalid_state, 25.1)
+    except module.AcceptanceRunnerError as exc:
+        check("persistently invalid outbox fails after bounded grace", "grace period" in str(exc))
+    else:
+        check("persistently invalid outbox fails after bounded grace", False, "no error")
+
+    symlink = tmp / "symlink-outbox.json"
+    symlink.symlink_to(settling)
+    try:
+        module.settled_outbox(symlink, {}, 30.0)
+    except module.AcceptanceRunnerError as exc:
+        check("outbox symlink is rejected", "non-symlink" in str(exc))
+    else:
+        check("outbox symlink is rejected", False, "no error")
+
+    oversized = tmp / "oversized-outbox.json"
+    oversized.write_bytes(b"x" * (module.OUTBOX_MAX_BYTES + 1))
+    try:
+        module.settled_outbox(oversized, {}, 40.0)
+    except module.AcceptanceRunnerError as exc:
+        check("oversized outbox is rejected", "size limit" in str(exc))
+    else:
+        check("oversized outbox is rejected", False, "no error")
+
     prompt = module.prompt_text(
         row(), module.load_scenarios()["conversation-readonly"], repo,
         repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
