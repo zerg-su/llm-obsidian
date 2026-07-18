@@ -265,7 +265,17 @@ class TaskSessionStore:
             if current and (
                 current.get("project_id") != project_id or current.get("task_id") != task_id
             ):
-                if not explicit:
+                try:
+                    prior = read_object(
+                        self.task_path(
+                            require_uuid(str(current.get("project_id") or ""), "project_id"),
+                            require_uuid(str(current.get("task_id") or ""), "task_id"),
+                        ),
+                        required=False,
+                    )
+                except TaskSessionError:
+                    prior = {}
+                if not explicit and prior.get("status") != "archived":
                     raise TaskSessionError("session is already bound to another task")
             value = {
                 "schema_version": SCHEMA_VERSION,
@@ -486,16 +496,30 @@ class TaskSessionStore:
             task["status"] = "archiving"
             task["updated_at"] = utc_now()
             atomic_write(task_path, task)
-            for lane_path in lanes:
-                lane = read_object(lane_path)
-                lane["status"] = "archived"
-                lane["surface"] = None
-                lane["updated_at"] = utc_now()
-                atomic_write(lane_path, lane)
-            task["status"] = "archived"
-            task["archived_at"] = utc_now()
-            task["updated_at"] = task["archived_at"]
-            atomic_write(task_path, task)
+            archived_lanes = 0
+            try:
+                for lane_path in lanes:
+                    lane = read_object(lane_path)
+                    lane["status"] = "archived"
+                    lane["surface"] = None
+                    lane["updated_at"] = utc_now()
+                    atomic_write(lane_path, lane)
+                    archived_lanes += 1
+                task["status"] = "archived"
+                task["archived_at"] = utc_now()
+                task["updated_at"] = task["archived_at"]
+                atomic_write(task_path, task)
+            except (OSError, TaskSessionError) as exc:
+                task["status"] = "degraded" if archived_lanes else "active"
+                task["archive_failure"] = "partial-lane-archive" if archived_lanes else "pre-lane-archive"
+                task["updated_at"] = utc_now()
+                try:
+                    atomic_write(task_path, task)
+                except OSError:
+                    pass
+                raise TaskSessionError(
+                    "task archive failed and was contained for an idempotent retry"
+                ) from exc
             cleanup_failures: list[str] = []
             for lane_path in lanes:
                 runtime_dir = lane_path.parent / "runtime"
@@ -700,10 +724,17 @@ def main() -> int:
             if current and not requested:
                 if current.get("project_id") != project_id:
                     raise TaskSessionError("session binding belongs to a different project")
-                print(json.dumps({
-                    "project_id": current["project_id"], "task_id": current["task_id"],
-                }, sort_keys=True))
-                return 0
+                current_task = read_object(
+                    store.task_path(str(current["project_id"]), str(current["task_id"])),
+                    required=False,
+                )
+                if current_task.get("status") in {"active", "degraded"}:
+                    print(json.dumps({
+                        "project_id": current["project_id"], "task_id": current["task_id"],
+                    }, sort_keys=True))
+                    return 0
+                if current_task.get("status") not in {"archived"}:
+                    raise TaskSessionError("session binding points to an unavailable task state")
             task_id = requested or str(uuid.uuid4())
             store.create_task(project_id, task_id, worktree=args.worktree)
             store.bind_session(

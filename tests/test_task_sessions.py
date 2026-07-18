@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+import task_sessions as task_sessions_module
 from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
@@ -249,6 +250,56 @@ with tempfile.TemporaryDirectory() as raw:
     for thread in archive_threads:
         thread.join()
     check("concurrent reap is idempotent", not archive_errors and archived_values == ["archived"] * 6)
+    rebound = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "task_sessions.py"),
+         "--vault-root", str(vault), "ensure-session-task", "--worktree", str(repo),
+         "--runtime", "codex", "--session-id", "session-a"],
+        text=True, capture_output=True, check=True,
+    )
+    rebound_value = json.loads(rebound.stdout)
+    check(
+        "archived session starts a fresh task without guessing",
+        rebound_value["project_id"] == project and rebound_value["task_id"] != task,
+    )
+
+    partial_task = str(uuid.uuid4())
+    store.create_task(project, partial_task, worktree=repo)
+    partial_op = store.enqueue_operation(
+        project, partial_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-partial",
+    )
+    partial_lane = str(partial_op["lane_id"])
+    claimed_partial = store.claim_next(project, partial_task, partial_lane)
+    assert claimed_partial is not None
+    store.transition_operation(
+        project, partial_task, partial_lane, str(partial_op["operation_id"]), "complete"
+    )
+    real_atomic_write = task_sessions_module.atomic_write
+    failed_once = False
+
+    def fail_first_lane_archive(path: Path, value: dict[str, object]) -> None:
+        global failed_once
+        if path.name == "lane.json" and value.get("status") == "archived" and not failed_once:
+            failed_once = True
+            raise OSError("injected lane archive failure")
+        real_atomic_write(path, value)
+
+    task_sessions_module.atomic_write = fail_first_lane_archive
+    try:
+        try:
+            store.archive_task(project, partial_task)
+        except TaskSessionError:
+            pass
+        else:
+            raise AssertionError("injected archive failure was accepted")
+    finally:
+        task_sessions_module.atomic_write = real_atomic_write
+    partial_state = json.loads(store.task_path(project, partial_task).read_text(encoding="utf-8"))
+    check(
+        "archive failure returns task to a retryable contained state",
+        partial_state["status"] == "active" and partial_state["archive_failure"] == "pre-lane-archive",
+    )
+    check("contained archive retry succeeds", store.archive_task(project, partial_task)["status"] == "archived")
 
     corrupt_task = str(uuid.uuid4())
     store.create_task(project, corrupt_task, worktree=repo)
