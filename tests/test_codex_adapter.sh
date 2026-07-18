@@ -65,6 +65,32 @@ assert entry["source"] == {
 print("CLAUDE_PACKAGE_OK")
 PYEOF
 expect_grep "A5 public Claude package metadata is aligned" "$OUT" "CLAUDE_PACKAGE_OK"
+python3 - "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+for relative in (
+    ".codex/config.toml",
+    ".codex/profiles/default.toml",
+    ".codex/profiles/wiki-write.toml",
+    ".codex/profiles/reviewer-readonly.toml",
+):
+    text = (root / relative).read_text()
+    assert 'model = "gpt-5.6-sol"' in text, relative
+    assert 'model_reasoning_effort = "high"' in text, relative
+deep = (root / ".codex/profiles/deep.toml").read_text()
+assert 'model = "gpt-5.6-sol"' in deep
+assert 'model_reasoning_effort = "max"' in deep
+dispatch = (root / ".codex/dispatch-env.toml").read_text()
+for expected in (
+    'codex_review_model = "gpt-5.6-sol"',
+    'codex_review_effort = "high"',
+    'claude_review_model = "fable"',
+    'claude_review_effort = "high"',
+):
+    assert expected in dispatch, expected
+print("MODEL_DEFAULTS_OK")
+PYEOF
+expect_grep "A6 repo model defaults are aligned" "$OUT" "MODEL_DEFAULTS_OK"
 
 echo "B. check/apply"
 python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --check >"$OUT" 2>&1

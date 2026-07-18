@@ -23,10 +23,11 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
 
 ## Model Defaults
 
-- Claude reviewer default: the subscription-backed `opus` alias (currently
-  Opus 4.8). Use `--model fable` only when Fable is explicitly requested.
-- Claude reviewer effort defaults to `medium` in this repository.
-- Codex reviewer default: `gpt-5.6-sol`.
+- Claude reviewer default: `fable` at high effort.
+- Codex reviewer default: `gpt-5.6-sol` at high effort.
+- Explicit per-task or CLI model/effort choices override repository defaults;
+  Codex effort is preserved after `--model` through a validated
+  `model_reasoning_effort` override.
 - Default reviewer runtime is the opposite model family from the executor:
   Codex executor -> Claude reviewer; Claude executor -> Codex reviewer.
 
@@ -37,8 +38,8 @@ Review depth:
 - `full` is the compatibility default and keeps the normal review gate.
 - `light` is a fast independent pass for routine changes: top actionable
   correctness/regression/test/security findings only, no exhaustive checklist.
-- Both modes use the same model defaults: Claude `opus` (currently Opus 4.8),
-  Codex `gpt-5.6-sol`. Fable remains an explicit opt-in.
+- Both modes use the same defaults: Claude `fable` high and Codex
+  `gpt-5.6-sol` high.
 - v2 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
   explicit overrides. Legacy v1 tasks keep the full interactive default.
 
@@ -99,7 +100,10 @@ roots. The scratch lives under the canonical vault's gitignored
 `.vault-meta/review-runtimes/` hierarchy, whose project trust is already established
 by normal Codex setup, so a fresh runtime does not trigger the new-directory trust
 prompt. The supervisor accepts only an empty generated child at that exact location;
-no trust entry is added to the user's Codex config. Reviewers write typed JSON only
+no trust entry is added to the user's Codex config. For an explicit
+`--coordinator-review` of the canonical vault, the sanctioned scratch root is
+inside the reviewed checkout by construction; the supervisor permits only that
+exact generated, owner-only, empty, gitignored location. Reviewers write typed JSON only
 to the scratch `.review-outbox.json`. Codex reviewer launches also disable hooks for
 that session so user/project lifecycle hooks cannot mutate the vault from review context.
 The trusted supervisor—not the reviewer—polls that exact outbox, runs the schema

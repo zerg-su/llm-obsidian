@@ -169,6 +169,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     synth_network = synth_parsed["permissions"]["research-synthesize"]["network"]
     synth_prompt = (Path(received["synth_dir"]) / "synth-prompt.md").read_text(encoding="utf-8")
     check("synth web disabled", 'web_search = "disabled"' in synth_config)
+    check(
+        "synth pins Codex model defaults",
+        synth_parsed["model"] == "gpt-5.6-sol"
+        and synth_parsed["model_reasoning_effort"] == "high",
+    )
     check("synth network proxy enabled", synth_proxy["enabled"] is True)
     check("synth command network policy enabled", synth_network["enabled"] is True)
     check("synth network is limited", synth_network["mode"] == "limited")

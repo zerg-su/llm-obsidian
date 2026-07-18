@@ -98,9 +98,6 @@ enabled = [
     "backup.rclone",
     "backup.restic",
 
-    # Extra git guardrails
-    "strict_git",
-
     # Package managers (npm unpublish, cargo yank, etc.)
     "package_managers",
 ]
@@ -162,12 +159,19 @@ fallback_on_timeout = true
 #-------------------------------------------------------------
 
 [overrides]
-# Additional blocks beyond packs. These remain absolute even on relaxed task
-# branches: ordinary history editing is allowed there, destructive recovery
-# and lifecycle operations stay coordinator/human-owned.
+# The strict_git pack groups amend and rebase with destructive history and
+# lifecycle operations, so it cannot express the approved base/task asymmetry.
+# Keep amend/cherry-pick/staging available, block rebase in the base profile,
+# and encode the dangerous subset explicitly. The task profile deliberately
+# omits only the rebase block for isolated task worktrees.
 block = [
     { pattern = "git\\b.*?\\bpush\\b", reason = "Only the human user should push branches/remotes from an agent workflow" },
     { pattern = "git\\b.*?\\breset\\s+--hard\\b", reason = "Hard reset is outside the practical unattended Git profile" },
     { pattern = "git\\b.*?\\bworktree\\s+(?:remove|prune)\\b", reason = "Worktree cleanup must use the validated lifecycle path" },
     { pattern = "git\\b.*?\\bbranch\\s+-D\\b", reason = "Forced branch deletion is coordinator/human-owned" },
+    { pattern = "git\\b.*?\\brebase\\b", reason = "History rebasing is limited to isolated task worktrees" },
+    { pattern = "git\\b.*?\\bfilter-(?:branch|repo)\\b", reason = "Repository-wide history rewriting is outside the practical Git profile" },
+    { pattern = "git\\b.*?\\breflog\\s+expire\\b", reason = "Recovery history must remain available" },
+    { pattern = "git\\b.*?\\bgc\\s+.*--(?:aggressive|prune)\\b", reason = "Aggressive object pruning is outside the practical Git profile" },
+    { pattern = "git\\b.*?\\bsubmodule\\s+deinit\\b", reason = "Submodule removal is outside the practical Git profile" },
 ]

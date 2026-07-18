@@ -364,11 +364,12 @@ servers from `~/.codex/config.toml`, and writes optional profile overlays such a
 | Group | Skills |
 |---|---|
 | Wiki core | `/wiki` (bootstrap), `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/close`, `/autoresearch`, `/canvas`, `/defuddle` |
+| Alignment | `/clarify` in Claude, `$llm-obsidian:clarify` in Codex (one-question-at-a-time requirements and design gate before planning or implementation) |
 | Productivity | `/journal` (date-keyed planner), `/agenda` (unfinished-item scan/carry-over/report), `/daily` (end-of-day status), `/backlog` (capture inbox), `/find-session`, `/draft` (reply advisor), `/distill-runbook` (session commands → copy-paste runbook), `/learn` (tutor over your notes), `/save-plan` |
 | Orchestration (needs cmux) | `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (Codex: `$llm-obsidian:*`) |
 | Reference | `obsidian-markdown`, `obsidian-bases` |
 
-A `UserPromptSubmit` router suggests the right skill from regex rules in `.claude/skill-rules.json` (soft hints, never mandatory); `session-nudge` surfaces overdue maintenance (lint age, fold due, stale backups, a skill-of-the-day tip).
+A `UserPromptSubmit` router suggests the right skill from regex rules in `.claude/skill-rules.json` (soft hints, never mandatory), including explicit `clarify before code` and `grill me` requests; `session-nudge` surfaces overdue maintenance (lint age, fold due, stale backups, a skill-of-the-day tip).
 
 Running an unattended `/dispatch` task end to end (supervisor/watchdog behavior, permission boundaries, typed review callbacks, auto-close, diagnostics): **[docs/unattended-pipeline-operations.md](docs/unattended-pipeline-operations.md)**.
 

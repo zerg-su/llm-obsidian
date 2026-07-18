@@ -1,10 +1,10 @@
 # Standalone DCG policy for unattended task worktrees.
 #
 # DCG_CONFIG replaces (rather than extends) the normal config in dcg 0.6.x,
-# so this file deliberately carries the complete portable policy. It omits
-# strict_git because that pack has no per-rule task exception in dcg 0.6.x;
-# the unsafe half of that pack is reintroduced below as absolute blocks, while
-# local rebase/amend/cherry-pick/staging remain usable in the isolated worktree.
+# so this file deliberately carries the complete portable policy. It mirrors
+# the base profile's explicit dangerous-operation blocks except for rebase,
+# which remains available with amend/cherry-pick/staging in isolated task
+# worktrees.
 
 [general]
 color = "auto"

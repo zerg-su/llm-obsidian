@@ -49,13 +49,9 @@ The description is free text, spoken or typed. From "add a dark-mode toggle to t
 - `branch_intent` — `new` (create `task/<task_name>` from the default branch) or the name of a specific existing branch.
 - `description` — the substantive part for the task prompt (what exactly to do and why).
 - `runtime` — `claude | codex`. From text: "for Codex / для кодекса" → `codex`; "for Claude / для клода" → `claude`. Default = current agent (`CODEX_THREAD_ID` → `codex`, otherwise `claude`).
-- `model` — model for the task agent. For `claude`, default **`opus`**
-  (currently Opus 4.8); aliases: "on sonnet / на сонете" → `sonnet`,
-  "on fable / на фейбле" → `fable` (explicit opt-in only), "on opus / на
-  опусе" → `opus`, "on haiku / на хайку" → `haiku`. For `codex`, default =
-  configured Codex default (do not pass `--model`); if the user names a raw
-  model id (`gpt-5.6-sol`, `gpt-5`, `o3`, etc.), pass it as
-  `codex --model <raw>`.
+- `model` — task-agent default: Claude **`fable`**, Codex
+  **`gpt-5.6-sol`**. A named alias or raw model id remains an override.
+- `effort` — default **`high`** for both runtimes; preserve explicit overrides.
 - `plan_ref` — approved-plan handoff mode (resolved in Phase 1.4b): nothing said → auto-resolve the latest plan of the current session; "hand off plan <slug|path>" → that file; "no plan" → classic-mode forced.
 - `interaction_policy` — approved-plan dispatch defaults to `unattended`;
   explicit "interactive" preserves compatibility gates.
@@ -113,8 +109,9 @@ reap_send_skill = "$llm-obsidian:reap-send"
 review_skill = "$llm-obsidian:review-dispatch"
 review_send_skill = "$llm-obsidian:review-send"
 codex_review_model = "gpt-5.6-sol"
-claude_review_model = "opus"
-claude_review_effort = "medium"
+codex_review_effort = "high"
+claude_review_model = "fable"
+claude_review_effort = "high"
 interaction_policy = "unattended"
 review_mode = "light"
 max_verify_iterations = 2
@@ -131,8 +128,8 @@ watchdog_alert_after_seconds = 1200
   `CODEX_HOME`.
 - Reap/review command keys are persisted into `.wiki-reap-command` and
   `.task-*-skill` handoffs so neither runtime guesses plugin namespaces.
-- Reviewer defaults: Codex `gpt-5.6-sol`; Claude `opus` (currently Opus 4.8)
-  at medium effort. Fable is used only when explicitly requested.
+- Reviewer defaults: Codex `gpt-5.6-sol` high; Claude `fable` high. Explicit
+  task metadata or CLI overrides remain authoritative.
 - The remaining keys define bounded review/reap/close plus an observer-only
   15/20-minute watchdog; old metadata without the policy stays disabled.
 
@@ -365,8 +362,11 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "review_skill": "<review_skill>",
   "review_send_skill": "<review_send_skill>",
   "codex_review_model": "gpt-5.6-sol",
-  "claude_review_model": "opus",
-  "model": "<model or null for codex configured default>",
+  "codex_review_effort": "high",
+  "claude_review_model": "fable",
+  "claude_review_effort": "high",
+  "model": "<explicit override or runtime default: fable|gpt-5.6-sol>",
+  "effort": "<explicit override or high>",
   "plan_file": "/abs/path/to/wiki/plans/<file>.md",
   "approved_plan_sha256": "<sha256 captured before echo-confirm>",
   "interaction_policy": "unattended",

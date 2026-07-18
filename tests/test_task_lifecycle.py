@@ -290,6 +290,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         encoding="utf-8",
     )
     fake_codex.chmod(0o755)
+    fake_claude = fake_bin / "claude"
+    fake_claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_claude.chmod(0o755)
     inherited_cmux_socket = os.environ.get("CMUX_SOCKET_PATH", "").strip()
     inherited_cmux_path = Path(inherited_cmux_socket).expanduser() if inherited_cmux_socket else None
     # Exact-socket task sandboxes intentionally cannot bind a second AF_UNIX
@@ -333,6 +336,12 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor pins unattended Codex approvals",
         supervisor_module.option_value(agent_spec["argv"], "-a") == "never"
         and supervisor_module.option_value(agent_spec["argv"], "-s") == "workspace-write",
+    )
+    check(
+        "supervisor pins Codex model and effort defaults",
+        supervisor_module.option_value(agent_spec["argv"], "--model") == "gpt-5.6-sol"
+        and 'model_reasoning_effort="high"'
+        in supervisor_module.option_values(agent_spec["argv"], "-c"),
     )
     add_dir_index = agent_spec["argv"].index("--add-dir")
     check(
@@ -460,6 +469,22 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         agent_events[0]["counts"]["agent_signal"] == 0
         and agent_events[0]["counts"]["lifecycle_signal"] == 0,
     )
+    claude_meta = dict(meta)
+    claude_meta["executor_runtime"] = "claude"
+    write_json(worktree / ".task-meta.json", claude_meta)
+    result = run(
+        SUPERVISOR, "prepare-task", "--worktree", str(worktree),
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor prepares Claude task defaults", result.returncode == 0, result.stderr)
+    claude_spec = json.loads((worktree / ".task-agent-command.json").read_text(encoding="utf-8"))
+    check(
+        "supervisor pins Claude model and effort defaults",
+        supervisor_module.option_value(claude_spec["argv"], "--model") == "fable"
+        and supervisor_module.option_value(claude_spec["argv"], "--effort") == "high",
+    )
+    write_json(worktree / ".task-meta.json", meta)
+    write_json(worktree / ".task-agent-command.json", safe_agent_spec)
     class StubbornWatchdog:
         def poll(self) -> None:
             return None

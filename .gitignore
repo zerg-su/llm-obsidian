@@ -149,6 +149,7 @@ _attachments/
 .vault-meta/evals/
 .vault-meta/research-runs/
 .vault-meta/daily-runs/
+.vault-meta/review-runtimes/
 .vault-meta/document-cache/
 .vault-meta/retrieval-quality.pending.json
 .vault-meta/retrieval-experiment.json

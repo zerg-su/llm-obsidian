@@ -1,45 +1,43 @@
 # Model routing
 
-The dispatch pipeline chooses the executor runtime first, then sends review to
-the opposite model family. Repository configuration pins reviewer models, but a
-Codex executor normally inherits the active Codex configuration instead of
-receiving a redundant `--model` argument.
+The dispatch pipeline chooses the executor runtime first, pins the repository
+model/effort defaults, then sends review to the opposite model family. Explicit
+per-task and command-line overrides remain authoritative.
 
 ## Active routing
 
 | Role | Default | How it is resolved |
 | --- | --- | --- |
-| Codex executor | `gpt-5.6-sol` | `skills/dispatch/SKILL.md` leaves the model unset unless the user names one. `scripts/cmux_agent_supervisor.py` then omits `--model`, so Codex loads the configured default from the selected `CODEX_HOME` and profile. |
-| Claude executor | `opus` | The supervisor passes `--model opus` when dispatch metadata has no explicit Claude model. |
-| Reviewer for a Codex executor | Claude `opus`, effort `medium` | `.codex/dispatch-env.toml` supplies `claude_review_model` and `claude_review_effort`; `skills/review-dispatch/scripts/spawn_review.py` writes both into the validated reviewer command. The subscription preflight runs before a real Claude review. |
-| Reviewer for a Claude executor | Codex `gpt-5.6-sol` | `.codex/dispatch-env.toml` supplies `codex_review_model`; the review launcher passes it explicitly with `--model`. |
+| Codex executor | `gpt-5.6-sol`, effort `high` | Repo-local Codex configs and the supervisor agree on the defaults; the generated task command pins both unless task metadata explicitly overrides them. |
+| Claude executor | `fable`, effort `high` | The supervisor pins both values unless task metadata explicitly overrides them. |
+| Reviewer for a Codex executor | Claude `fable`, effort `high` | Task metadata wins over `.codex/dispatch-env.toml`, then CLI flags may override that resolved choice. The subscription preflight runs before a real Claude review. |
+| Reviewer for a Claude executor | Codex `gpt-5.6-sol`, effort `high` | Task metadata wins over repository defaults; the launcher passes the model and a post-model reasoning-effort override explicitly. |
 
-The repository uses the subscription-backed Claude `opus` alias rather than a
-pinned provider model ID. For this acceptance the alias currently resolves to
-Opus 4.8, but the alias can advance without a repository change. By contrast,
-`gpt-5.6-sol` is the explicit Codex model identifier used by the current local
-configuration and by Codex reviewer launches.
-
-Fable is never selected by fallback routing. It is an explicit opt-in: pass
-`--model fable` to `spawn_review.py start`, or explicitly request Fable when
-dispatching a Claude task. The normal full and light review modes use the same
-model defaults.
+The normal full and light review modes use the same defaults. Model aliases or
+identifiers named in task metadata and CLI flags remain intentional opt-ins;
+historical task/review records are not rewritten when repository defaults move.
 
 ## Resolution order
 
 For review, `spawn_review.py` merges the vault `.codex/dispatch-env.toml` and a
-worktree-local copy, with the worktree values winning. A command-line `--model`
-or `--effort` then overrides the merged value for that review run. The resolved
-runtime, model, effort, and generated argv are recorded in `.review-meta.json`
-and `.review-agent-command.json`.
+worktree-local copy, with worktree values winning. Explicit task metadata then
+wins over those repository defaults, and command-line `--model` or `--effort`
+wins last. The resolved runtime, model, effort, and generated argv are recorded
+in `.review-meta.json` and `.review-agent-command.json`.
 
-For a Codex task, dispatch records `codex_home`, `codex_profile`, and an optional
-model in `.task-meta.json`. The supervisor adds `--model` only when that optional
-value is non-empty. This distinction matters:
+For a task, dispatch records `codex_home`, `codex_profile`, plus optional
+`model` and `effort` overrides in `.task-meta.json`. When either is absent, the
+supervisor pins the runtime default above. This distinction matters:
 
-- an alias such as `opus` intentionally follows the subscription alias;
+- an alias such as `fable` intentionally follows the subscription alias;
 - a model identifier such as `gpt-5.6-sol` selects that named Codex model;
-- an unset Codex task model delegates selection to the active Codex config.
+- an explicit task value remains stable even if repository defaults change.
+
+Intentional repository exceptions are narrow: `.codex/profiles/deep.toml`
+keeps `max` effort for explicit deep work. The bounded daily summarizer stays
+on `gpt-5.6-terra` low for Codex and Claude `sonnet` low for Claude Code.
+Historical wiki pages, archived reviews, and test fixtures representing old
+records remain unchanged.
 
 The supervisor validates the generated command against task/review metadata and
 the required sandbox flags before starting the agent. Generated metadata is
@@ -58,7 +56,7 @@ import tomllib
 from pathlib import Path
 
 cfg = tomllib.loads(Path(".codex/dispatch-env.toml").read_text())["codex_dispatch"]
-keys = ("codex_review_model", "claude_review_model", "claude_review_effort")
+keys = ("codex_review_model", "codex_review_effort", "claude_review_model", "claude_review_effort")
 print({key: cfg[key] for key in keys})
 PY
 ```
@@ -88,7 +86,7 @@ import json
 from pathlib import Path
 
 meta = json.loads(Path(".task-meta.json").read_text())
-keys = ("executor_runtime", "model", "codex_home", "codex_profile")
+keys = ("executor_runtime", "model", "effort", "codex_home", "codex_profile")
 print({key: meta.get(key) for key in keys})
 PY
 ```
@@ -102,9 +100,9 @@ python3 tests/test_task_lifecycle.py
 make test
 ```
 
-`tests/test_review_dispatch.sh` asserts Claude `opus` plus medium effort, Codex
-`gpt-5.6-sol`, explicit Fable preservation, opposite-family selection, and
-supervisor rejection of weakened reviewer commands.
+`tests/test_review_dispatch.sh` asserts Claude `fable` high, Codex
+`gpt-5.6-sol` high, explicit task/CLI override preservation, opposite-family
+selection, and supervisor rejection of weakened reviewer commands.
 
 ## Updating defaults
 

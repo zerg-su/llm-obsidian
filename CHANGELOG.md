@@ -6,6 +6,49 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-07-17
+
+### Added
+
+- Added `/clarify`, a one-question-at-a-time alignment workflow for explicit
+  pre-code interviews. It inspects local facts first, keeps material decisions
+  with the user, supports interactive-question tools or plain text, and avoids
+  redundant confirmation after the user already authorizes the next step.
+- Added RU/EN router hints and false-positive regression coverage for explicit
+  clarification and `grill me` requests.
+
+### Changed
+
+- Explicit Codex reviewer reasoning effort is preserved after `--model` through
+  a validated argv override.
+- Dispatch and review defaults are Claude `fable` high and Codex
+  `gpt-5.6-sol` high across runtime configs, generated commands, skills, and
+  documentation. Explicit task/CLI overrides remain authoritative; the deep
+  Codex profile intentionally remains `max` and the daily summarizer remains a
+  bounded Terra/low or Claude Sonnet/low exception, depending on runtime.
+- The plugin and both Claude/Codex marketplace surfaces now report v2.0.8.
+
+### Fixed
+
+- Read-only Codex reviewers no longer inherit the executor's full-MCP profile.
+  They use an explicit reviewer profile, an installed generated readonly
+  profile, or no profile, preventing tool-schema overflow from blocking startup.
+- Canonical-vault coordinator reviews accept only their exact generated,
+  owner-only, empty, gitignored scratch hierarchy while every other
+  in-worktree reviewer runtime remains rejected.
+- Reviewer task metadata now takes precedence over repository defaults, and
+  supervisor validation includes the resolved model and effort.
+- The DCG smoke suite clears an inherited task `DCG_CONFIG` before base-profile
+  cases, so base/task policy differences are exercised against the intended
+  files.
+
+### Security
+
+- Reviewer profile isolation fails narrow instead of falling back to executor
+  capabilities. The DCG base profile explicitly blocks rebase and destructive
+  history/lifecycle operations while allowing amend; isolated task worktrees
+  retain their existing rebase and amend allowances.
+
 ## [2.0.7] - 2026-07-14
 
 ### Added

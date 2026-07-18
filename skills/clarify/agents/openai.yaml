@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clarify"
+  short_description: "Resolve decisions before implementation"
+  default_prompt: "Use $clarify to interview me about this change before implementation."
