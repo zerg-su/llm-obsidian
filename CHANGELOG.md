@@ -25,7 +25,7 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   `gpt-5.6-sol` high across runtime configs, generated commands, skills, and
   documentation. Explicit task/CLI overrides remain authoritative; the deep
   Codex profile intentionally remains `max` and the daily summarizer remains a
-  bounded Terra/low exception.
+  bounded Terra/low or Claude Sonnet/low exception, depending on runtime.
 - The plugin and both Claude/Codex marketplace surfaces now report v2.0.8.
 
 ### Fixed

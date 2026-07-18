@@ -19,11 +19,11 @@ Lineage: `AgriciDaniel/claude-obsidian` (upstream) → private DevOps fork (mech
 ## Clarify workflow
 
 **Author:** Matt Pocock
-**Source:** https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling
+**Source:** https://github.com/mattpocock/skills/tree/main/skills/productivity/grill-me
 **License:** MIT
 
 The `/clarify` workflow adapts the one-question-at-a-time interview pattern
-from Matt Pocock's `grilling` skill and adds an explicit planning and
+from Matt Pocock's `grill-me` skill and adds an explicit planning and
 implementation alignment gate for llm-obsidian.
 
 ---

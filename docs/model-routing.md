@@ -34,10 +34,10 @@ supervisor pins the runtime default above. This distinction matters:
 - an explicit task value remains stable even if repository defaults change.
 
 Intentional repository exceptions are narrow: `.codex/profiles/deep.toml`
-keeps `max` effort for explicit deep work, and the daily summarizer stays on
-`gpt-5.6-terra` low because it is a bounded specialized subagent. Historical
-wiki pages, archived reviews, and test fixtures representing old records remain
-unchanged.
+keeps `max` effort for explicit deep work. The bounded daily summarizer stays
+on `gpt-5.6-terra` low for Codex and Claude `sonnet` low for Claude Code.
+Historical wiki pages, archived reviews, and test fixtures representing old
+records remain unchanged.
 
 The supervisor validates the generated command against task/review metadata and
 the required sandbox flags before starting the agent. Generated metadata is
