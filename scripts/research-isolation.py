@@ -118,6 +118,7 @@ def runtime_config(
         f"default_permissions = {toml_string(profile)}",
         f"web_search = {toml_string(web_search)}",
         'approval_policy = "never"',
+        'model = "gpt-5.6-sol"',
         'model_reasoning_effort = "high"',
         'history.persistence = "none"',
         "",

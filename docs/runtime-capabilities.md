@@ -94,11 +94,18 @@ available Homebrew, Git, uv, Docling, cmux, Claude, and Codex directories, so a
 task does not inherit a stale GUI/session path. Unattended executors also receive
 the standalone `config/dcg/task.toml` through `DCG_CONFIG`. DCG 0.6.x replaces,
 rather than overlays, an explicit config, so this task policy repeats all base
-packs and absolute blocks. It permits local rebase/amend/cherry-pick/staging in
-the isolated branch while keeping push, hard reset, file discard, worktree or
-branch deletion, repository-wide rewriting, and infrastructure destructive
-actions blocked. Tests compare the task/base policies and exercise both allowed
-and denied commands.
+packs and explicit dangerous-operation blocks. The base profile allows amend,
+cherry-pick, and staging but blocks rebase; the isolated task profile also
+allows rebase. Both keep push, hard reset, file discard, worktree or branch
+deletion, repository-wide rewriting, and infrastructure destructive actions
+blocked. Tests compare the task/base policies and exercise both allowed and
+denied commands.
+
+Dispatch and cross-model review pin the current repository defaults: Claude
+`fable` high and Codex `gpt-5.6-sol` high. Explicit task metadata and CLI
+overrides win over those defaults and remain recorded in handoff metadata. The
+Codex deep profile intentionally keeps `max` effort, and the bounded daily
+summarizer intentionally keeps its specialized Terra/low route.
 
 Reviewers remain product-read-only but are no longer toolchain-starved: Claude
 gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG

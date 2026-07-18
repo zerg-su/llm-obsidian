@@ -23,12 +23,11 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
 
 ## Model Defaults
 
-- Claude reviewer default: the subscription-backed `opus` alias (currently
-  Opus 4.8). Use `--model fable` only when Fable is explicitly requested.
-- Claude reviewer effort defaults to `medium` in this repository.
-- Codex reviewer default: `gpt-5.6-sol`.
-- Explicit Codex reviewer effort is preserved after `--model` with a bounded
-  `model_reasoning_effort` override; the default remains unset.
+- Claude reviewer default: `fable` at high effort.
+- Codex reviewer default: `gpt-5.6-sol` at high effort.
+- Explicit per-task or CLI model/effort choices override repository defaults;
+  Codex effort is preserved after `--model` through a validated
+  `model_reasoning_effort` override.
 - Default reviewer runtime is the opposite model family from the executor:
   Codex executor -> Claude reviewer; Claude executor -> Codex reviewer.
 
@@ -39,8 +38,8 @@ Review depth:
 - `full` is the compatibility default and keeps the normal review gate.
 - `light` is a fast independent pass for routine changes: top actionable
   correctness/regression/test/security findings only, no exhaustive checklist.
-- Both modes use the same model defaults: Claude `opus` (currently Opus 4.8),
-  Codex `gpt-5.6-sol`. Fable remains an explicit opt-in.
+- Both modes use the same defaults: Claude `fable` high and Codex
+  `gpt-5.6-sol` high.
 - v2 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
   explicit overrides. Legacy v1 tasks keep the full interactive default.
 

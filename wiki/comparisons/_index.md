@@ -15,7 +15,7 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_1 pages, updated 2026-07-05_
+_1 pages, updated 2026-07-11_
 
-- [[Wiki vs RAG]] — mature, 2026-04-26
+- [[Wiki vs RAG]] — mature, 2026-07-11 `c-000007`
 <!-- AUTO-INDEX END -->

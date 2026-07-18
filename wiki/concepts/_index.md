@@ -56,16 +56,17 @@ SORT title ASC
 ```
 
 <!-- AUTO-INDEX START -->
-_10 pages, updated 2026-07-05_
+_11 pages, updated 2026-07-11_
 
-- [[Compounding Knowledge]] — mature, 2026-04-26
-- [[DragonScale Memory]] — shipped, 2026-04-26 `c-000001`
-- [[DragonScale on macOS]] — developing, 2026-04-26 `c-000000`
-- [[Hot Cache]] — mature, 2026-04-26
-- [[LLM Wiki Pattern]] — mature, 2026-04-26
-- [[Persistent Wiki Artifact]] — developing, 2026-04-26 `c-000001`
-- [[Query-Time Retrieval]] — developing, 2026-04-26 `c-000002`
-- [[SVG Diagram Style Guide]] — evergreen, 2026-04-26
-- [[Source-First Synthesis]] — developing, 2026-04-26 `c-000003`
-- [[cherry-picks]] — current, 2026-04-26
+- [[Compounding Knowledge]] — mature, 2026-07-11
+- [[DragonScale Memory]] — shipped, 2026-07-11 `c-000001`
+- [[DragonScale on macOS]] — developing, 2026-07-11 `c-000005`
+- [[Hot Cache]] — mature, 2026-07-11
+- [[LLM Wiki Pattern]] — mature, 2026-07-11
+- [[Persistent Wiki Artifact]] — developing, 2026-07-11 `c-000006`
+- [[Query-Time Retrieval]] — developing, 2026-07-11 `c-000002`
+- [[SVG Diagram Style Guide]] — evergreen, 2026-07-11
+- [[Source-First Synthesis]] — developing, 2026-07-11 `c-000003`
+- [[Unattended Pipeline]] — evergreen, 2026-07-11 `c-000004`
+- [[cherry-picks]] — current, 2026-07-11
 <!-- AUTO-INDEX END -->

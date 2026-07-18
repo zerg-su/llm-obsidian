@@ -89,6 +89,10 @@ if [ "${DCG_TEST_USE_USER_CONFIG:-0}" != "1" ] && [ -f "$REPO_ROOT/config/dcg/co
     export XDG_CONFIG_HOME="$DCG_TEST_HOME/.config"
     export XDG_DATA_HOME="$DCG_TEST_HOME/.local/share"
 fi
+# Dispatch executors inherit DCG_CONFIG=config/dcg/task.toml. Base cases must
+# still discover the isolated base config above; live mode must discover the
+# user's config. Task cases set their explicit config at the call site.
+unset DCG_CONFIG
 
 PASS=0
 FAIL=0
@@ -180,12 +184,18 @@ run_case BLOCKED "git reset --hard HEAD~1"
 run_case BLOCKED "git push --force origin fake-branch-99999"
 run_case BLOCKED "git checkout -- fake-99999.txt"
 
-group "strict_git"
+group "base profile local Git"
 run_case BLOCKED "git filter-branch --force --tree-filter 'rm -rf .git/fake-99999' HEAD"
 run_case BLOCKED "git rebase --onto fake-99999 fake-99998"
-run_case BLOCKED "git commit --amend -m 'fake-99999'"
+run_case ALLOWED "git commit --amend -m 'fake-99999'"
+run_case ALLOWED "git cherry-pick fake-99999"
+run_case ALLOWED "git add -A"
+run_case BLOCKED "git filter-repo --force"
+run_case BLOCKED "git reflog expire --expire=now --all"
+run_case BLOCKED "git gc --prune=now"
+run_case BLOCKED "git submodule deinit --all"
 
-group "task branch practical Git"
+group "task profile practical Git"
 run_task_case ALLOWED "git rebase --onto fake-99999 fake-99998"
 run_task_case ALLOWED "git commit --amend -m 'fake-99999'"
 run_task_case ALLOWED "git cherry-pick fake-99999"

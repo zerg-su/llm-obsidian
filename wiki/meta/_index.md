@@ -15,7 +15,8 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_1 pages, updated 2026-07-05_
+_2 pages, updated 2026-07-13_
 
-- [[dashboard]] — evergreen, 2026-04-08
+- [[daily-pipeline-guide]] — evergreen, 2026-07-13
+- [[dashboard]] — evergreen, 2026-07-11
 <!-- AUTO-INDEX END -->

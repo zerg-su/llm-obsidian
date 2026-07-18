@@ -92,7 +92,7 @@ mkdir -p "$LIGHT_VAULT/wiki" "$LIGHT_VAULT/scripts" "$LIGHT_VAULT/.codex" \
   "$LIGHT_VAULT/skills/review-dispatch/scripts"
 printf '# fixture\n' > "$LIGHT_VAULT/scripts/vault-write.py"
 printf '# fixture\n' > "$LIGHT_VAULT/skills/review-dispatch/scripts/archive_review.py"
-printf '[codex_dispatch]\nclaude_review_effort = "medium"\n' > "$LIGHT_VAULT/.codex/dispatch-env.toml"
+printf '[codex_dispatch]\nclaude_review_effort = "high"\n' > "$LIGHT_VAULT/.codex/dispatch-env.toml"
 python3 - "$LIGHT/.task-meta.json" "$LIGHT_VAULT" <<'PY'
 import json, sys
 path, vault = sys.argv[1:]
@@ -178,9 +178,9 @@ data["env"]["PATH"] = module.trusted_runtime_path()
 path.write_text(json.dumps(data) + "\n", encoding="utf-8")
 PY
 [[ $(wc -c < "$SANDBOX/light.out") -lt 1000 ]] && ok "review-command-bounded" || bad "review-command-bounded" "cmux command is unexpectedly long"
-argv_has "$LIGHT_SPEC" --effort medium && ok "claude-medium-effort" || bad "claude-medium-effort" "medium effort missing"
-argv_has "$LIGHT_SPEC" --model opus && ok "claude-opus-default" || bad "claude-opus-default" "default Claude reviewer is not opus"
-expect_eq "claude-opus-meta" "$(json_get "$LIGHT/.review-meta.json" reviewer_model)" "opus"
+argv_has "$LIGHT_SPEC" --effort high && ok "claude-high-effort" || bad "claude-high-effort" "high effort missing"
+argv_has "$LIGHT_SPEC" --model fable && ok "claude-fable-default" || bad "claude-fable-default" "default Claude reviewer is not fable"
+expect_eq "claude-fable-meta" "$(json_get "$LIGHT/.review-meta.json" reviewer_model)" "fable"
 if argv_has "$LIGHT_SPEC" --permission-mode plan; then bad "claude-no-plan" "plan mode present"; else ok "claude-no-plan"; fi
 if argv_has "$LIGHT_SPEC" --permission-mode auto; then bad "claude-no-auto" "auto mode present"; else ok "claude-no-auto"; fi
 if grep -q -- 'bash -lc\|WATCHDOG_PID\|REVIEW_RC=' "$SANDBOX/light.out"; then bad "review-shell-portable" "shell wrapper leaked into cmux command"; else ok "review-shell-portable"; fi
@@ -650,12 +650,20 @@ expect_eq "findings-receive" "$?" 0
 expect_eq "findings-require-resolution" "$?" 1
 grep -q 'latest review has findings; write .task-review-resolution.md before verify' "$SANDBOX/findings-verify.err" && ok "findings-resolution-message" || bad "findings-resolution-message" "missing fail-closed guidance"
 
-FABLE="$SANDBOX/fable"
-write_fixture "$FABLE"
-"$SCRIPT" start --no-spawn --model fable --worktree "$FABLE" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/fable.err"
-expect_eq "fable-opt-in-start" "$?" 0
-argv_has "$FABLE/.review-agent-command.json" --model fable && ok "fable-opt-in-argv" || bad "fable-opt-in-argv" "explicit Fable model was not preserved"
-expect_eq "fable-opt-in-meta" "$(json_get "$FABLE/.review-meta.json" reviewer_model)" "fable"
+OPUS="$SANDBOX/opus"
+write_fixture "$OPUS"
+python3 - "$OPUS/.task-meta.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data.update({"claude_review_model": "opus", "claude_review_effort": "xhigh"})
+open(path, "w").write(json.dumps(data) + "\n")
+PY
+"$SCRIPT" start --no-spawn --worktree "$OPUS" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/opus.err"
+expect_eq "claude-opt-in-start" "$?" 0
+argv_has "$OPUS/.review-agent-command.json" --model opus && ok "claude-opt-in-model" || bad "claude-opt-in-model" "explicit Claude model was not preserved"
+argv_has "$OPUS/.review-agent-command.json" --effort xhigh && ok "claude-opt-in-effort" || bad "claude-opt-in-effort" "explicit Claude effort was not preserved"
+expect_eq "claude-opt-in-meta" "$(json_get "$OPUS/.review-meta.json" reviewer_model)" "opus"
 
 CODEX_REVIEW="$SANDBOX/codex-review"
 write_fixture "$CODEX_REVIEW"
@@ -695,11 +703,8 @@ assert "PATH" in data["env"] and data["env"]["PATH"]
 assert all(os.path.isabs(item) for item in data["env"]["PATH"].split(os.pathsep))
 PY
 [[ $? -eq 0 ]] && ok "codex-review-loopback-toolchain" || bad "codex-review-loopback-toolchain" "exact loopback/toolchain policy missing"
-if grep -q 'model_reasoning_effort' "$CODEX_SPEC"; then
-  bad "codex-effort-default-unset" "effort injected without a request"
-else
-  ok "codex-effort-default-unset"
-fi
+argv_has "$CODEX_SPEC" -c 'model_reasoning_effort="high"' && ok "codex-high-effort-default" || bad "codex-high-effort-default" "high effort default missing"
+expect_eq "codex-high-effort-meta" "$(json_get "$CODEX_REVIEW/.review-meta.json" reviewer_effort)" "high"
 
 CODEX_EFFORT="$SANDBOX/codex-effort"
 write_fixture "$CODEX_EFFORT"

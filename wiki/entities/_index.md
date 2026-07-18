@@ -45,7 +45,7 @@ Navigation: [[index]] | [[concepts/_index|Concepts]] | [[sources/_index|Sources]
 *Новые сущности добавляются здесь по мере их идентификации в ингестах.*
 
 <!-- AUTO-INDEX START -->
-_1 pages, updated 2026-07-05_
+_1 pages, updated 2026-07-11_
 
-- [[Andrej Karpathy]] — mature, 2026-04-26
+- [[Andrej Karpathy]] — mature, 2026-07-11
 <!-- AUTO-INDEX END -->

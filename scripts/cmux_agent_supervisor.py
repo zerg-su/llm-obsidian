@@ -28,6 +28,12 @@ REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
+DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
+DEFAULT_CODEX_EFFORT = "high"
+DEFAULT_CLAUDE_MODEL = "fable"
+DEFAULT_CLAUDE_EFFORT = "high"
+CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
+CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {
     "--full-auto",
     "--dangerously-bypass-approvals-and-sandbox",
@@ -298,7 +304,13 @@ def validated_cmux_socket_path() -> Path:
     return path
 
 
-def task_codex_config_values(cmux_socket: Path) -> list[str]:
+def codex_effort_config(effort: str) -> str:
+    if effort not in CODEX_EFFORTS:
+        raise SupervisorError(f"Codex effort must be one of {sorted(CODEX_EFFORTS)}")
+    return f'model_reasoning_effort="{effort}"'
+
+
+def task_codex_config_values(cmux_socket: Path, effort: str = DEFAULT_CODEX_EFFORT) -> list[str]:
     socket_rule = json.dumps(str(cmux_socket), ensure_ascii=False)
     return [
         "sandbox_workspace_write.network_access=true",
@@ -311,11 +323,12 @@ def task_codex_config_values(cmux_socket: Path) -> list[str]:
         "features.network_proxy.dangerously_allow_non_loopback_proxy=false",
         "features.network_proxy.enable_socks5=false",
         "features.network_proxy.enable_socks5_udp=false",
+        codex_effort_config(effort),
     ]
 
 
-def reviewer_codex_config_values() -> list[str]:
-    return [
+def reviewer_codex_config_values(effort: str = "") -> list[str]:
+    values = [
         'web_search="disabled"',
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
@@ -328,19 +341,28 @@ def reviewer_codex_config_values() -> list[str]:
         "features.network_proxy.enable_socks5=false",
         "features.network_proxy.enable_socks5_udp=false",
     ]
+    if effort:
+        values.append(codex_effort_config(effort))
+    return values
 
 
-def append_task_codex_network_policy(argv: list[str], cmux_socket: Path) -> None:
-    for value in task_codex_config_values(cmux_socket):
+def append_task_codex_network_policy(argv: list[str], cmux_socket: Path, effort: str) -> None:
+    for value in task_codex_config_values(cmux_socket, effort):
         argv.extend(["-c", value])
 
 
-def validate_reviewer_safety(argv: list[str], runtime: str) -> None:
+def validate_reviewer_safety(
+    argv: list[str],
+    runtime: str,
+    reviewer_model: str,
+    reviewer_effort: str = "",
+) -> None:
+    require_option(argv, "--model", reviewer_model)
     if runtime == "codex":
         require_option(argv, "-s", "workspace-write")
         require_option(argv, "-a", "never")
         require_option(argv, "--disable", "hooks")
-        if option_values(argv, "-c") != reviewer_codex_config_values():
+        if option_values(argv, "-c") != reviewer_codex_config_values(reviewer_effort):
             raise SupervisorError("Codex reviewer command has an unexpected network policy")
         if "--add-dir" in argv:
             raise SupervisorError("Codex reviewer command must not request additional writable roots")
@@ -350,6 +372,8 @@ def validate_reviewer_safety(argv: list[str], runtime: str) -> None:
 
     require_option(argv, "--permission-mode", "dontAsk")
     require_option(argv, "--tools", CLAUDE_REVIEW_TOOL_SURFACE)
+    if reviewer_effort:
+        require_option(argv, "--effort", reviewer_effort)
     if "--dangerously-skip-permissions" in argv:
         raise SupervisorError("Claude reviewer command bypasses permissions")
     allowed_positions = [index for index, item in enumerate(argv) if item == "--allowedTools"]
@@ -369,7 +393,10 @@ def validate_task_safety(
     interaction_policy: str,
     git_common_dir: Path | None = None,
     cmux_socket: Path | None = None,
+    model: str = "",
+    effort: str = "high",
 ) -> None:
+    require_option(argv, "--model", model)
     if runtime == "codex":
         if any(item in CODEX_FORBIDDEN_OPTIONS for item in argv) or "danger-full-access" in argv:
             raise SupervisorError("Codex task command weakens the approved sandbox")
@@ -379,14 +406,15 @@ def validate_task_safety(
             require_option(argv, "--add-dir", str(git_common_dir))
             require_option(argv, "-a", "never")
             require_option(argv, "-s", "workspace-write")
-            if option_values(argv, "-c") != task_codex_config_values(cmux_socket):
+            if option_values(argv, "-c") != task_codex_config_values(cmux_socket, effort):
                 raise SupervisorError("Codex task command has an unexpected network policy")
         elif any(option_value(argv, flag) is not None for flag in ("-a", "-s", "--add-dir")):
             raise SupervisorError("interactive Codex task command has unexpected approval overrides")
-        elif option_values(argv, "-c"):
+        elif option_values(argv, "-c") != [codex_effort_config(effort)]:
             raise SupervisorError("interactive Codex task command has unexpected config overrides")
         return
     require_option(argv, "--permission-mode", "auto")
+    require_option(argv, "--effort", effort)
     if "--dangerously-skip-permissions" in argv or "--allowedTools" in argv:
         raise SupervisorError("Claude task command has unexpected permission overrides")
 
@@ -525,7 +553,12 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         if actual_env != expected_env:
             raise SupervisorError("Claude supervisor environment does not match the approved runtime")
     if kind == "reviewer":
-        validate_reviewer_safety(spec["argv"], spec["runtime"])
+        validate_reviewer_safety(
+            spec["argv"],
+            spec["runtime"],
+            str(source_meta.get("reviewer_model") or ""),
+            str(source_meta.get("reviewer_effort") or ""),
+        )
     else:
         git_common_dir = (
             validated_task_git_common_dir(worktree, source_meta)
@@ -543,6 +576,8 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
             task_policy["interaction_policy"],
             git_common_dir,
             cmux_socket,
+            str(source_meta.get("model") or (DEFAULT_CODEX_MODEL if spec["runtime"] == "codex" else DEFAULT_CLAUDE_MODEL)),
+            str(source_meta.get("effort") or (DEFAULT_CODEX_EFFORT if spec["runtime"] == "codex" else DEFAULT_CLAUDE_EFFORT)),
         )
 
 
@@ -570,25 +605,35 @@ def prepare_task(worktree: Path, surface: str) -> Path:
     if surface != str(meta.get("task_surface") or ""):
         raise SupervisorError("task preparation surface does not match metadata")
     model = str(meta.get("model") or "").strip()
+    effort = str(meta.get("effort") or (DEFAULT_CODEX_EFFORT if runtime == "codex" else DEFAULT_CLAUDE_EFFORT)).strip()
     env: dict[str, str] = {}
     if runtime == "codex":
         argv = ["codex", "--cd", str(worktree)]
         profile = str(meta.get("codex_profile") or "").strip()
         if profile:
             argv.extend(["--profile", profile])
-        if model:
-            argv.extend(["--model", model])
+        if effort not in CODEX_EFFORTS:
+            raise SupervisorError(f"Codex task effort must be one of {sorted(CODEX_EFFORTS)}")
+        argv.extend(["--model", model or DEFAULT_CODEX_MODEL])
         if policy["interaction_policy"] == "unattended":
             cmux_socket = validated_cmux_socket_path()
             argv.extend(["--add-dir", str(validated_task_git_common_dir(worktree, meta))])
             argv.extend(["-a", "never", "-s", "workspace-write"])
-            append_task_codex_network_policy(argv, cmux_socket)
+            append_task_codex_network_policy(argv, cmux_socket, effort)
             env["CMUX_SOCKET_PATH"] = str(cmux_socket)
+        else:
+            argv.extend(["-c", codex_effort_config(effort)])
         codex_home = str(meta.get("codex_home") or "").strip()
         if codex_home:
             env["CODEX_HOME"] = str(Path(codex_home).expanduser().resolve())
     elif runtime == "claude":
-        argv = ["claude", "--permission-mode", "auto", "--model", model or "opus"]
+        if effort not in CLAUDE_EFFORTS:
+            raise SupervisorError(f"Claude task effort must be one of {sorted(CLAUDE_EFFORTS)}")
+        argv = [
+            "claude", "--permission-mode", "auto",
+            "--model", model or DEFAULT_CLAUDE_MODEL,
+            "--effort", effort,
+        ]
     else:
         raise SupervisorError("task executor runtime must be claude or codex")
     if policy["interaction_policy"] == "unattended":

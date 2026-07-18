@@ -49,8 +49,9 @@ packs = set(re.findall(r'"([^"]+)"', packs_match.group(1)))
 task_packs_match = re.search(r"(?ms)^\[packs\]\s*^enabled\s*=\s*\[(.*?)^\]", task_cfg_text)
 assert task_packs_match, "task packs.enabled block"
 task_packs = set(re.findall(r'"([^"]+)"', task_packs_match.group(1)))
-for name in ("core.filesystem", "core.git", "strict_git", "cloud.aws", "kubernetes.kubectl"):
+for name in ("core.filesystem", "core.git", "cloud.aws", "kubernetes.kubectl"):
     assert name in packs, name
+assert "strict_git" not in packs
 interactive_match = re.search(r"(?ms)^\[interactive\](.*?)(?:^\[|\Z)", cfg_text)
 assert interactive_match, "interactive block"
 interactive = interactive_match.group(1)
@@ -58,21 +59,34 @@ for key in ("enabled", "verification", "timeout_seconds", "code_length", "max_at
     assert key in interactive, key
 assert "git_awareness" in cfg_text
 assert "git_awareness" not in task_cfg_text
-for invariant in ("git\\\\b.*?\\\\bpush", "reset\\\\s+--hard", "worktree\\\\s+(?:remove|prune)", "branch\\\\s+-D"):
+for invariant in (
+    "git\\\\b.*?\\\\bpush",
+    "reset\\\\s+--hard",
+    "worktree\\\\s+(?:remove|prune)",
+    "branch\\\\s+-D",
+    "git\\\\b.*?\\\\brebase",
+    "filter-(?:branch|repo)",
+    "reflog\\\\s+expire",
+    "gc\\\\s+.*--(?:aggressive|prune)",
+    "submodule\\\\s+deinit",
+):
     assert invariant in cfg_text, invariant
-assert task_packs == packs - {"strict_git"}, "task/base pack drift"
+assert task_packs == packs, "task/base pack drift"
 def section(text, name):
     match = re.search(rf"(?ms)^\[{re.escape(name)}\](.*?)(?:^\[|\Z)", text)
     assert match, name
     return match.group(1)
 base_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(cfg_text, "overrides")))
 task_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(task_cfg_text, "overrides")))
-assert base_blocks <= task_blocks, "task lost a base absolute override"
+rebase_pattern = "git\\\\b.*?\\\\brebase\\\\b"
+assert base_blocks - task_blocks == {rebase_pattern}, "only base rebase block may differ"
+assert task_blocks - base_blocks == set(), "task added unexpected absolute overrides"
 def assignments(body):
     return dict(re.findall(r"(?m)^([a-z_]+)\s*=\s*([^#\n]+)", body))
 assert assignments(section(task_cfg_text, "interactive")) == assignments(section(cfg_text, "interactive")), "task/base interactive drift"
 for invariant in ("filter-(?:branch|repo)", "reflog\\\\s+expire", "gc\\\\s+.*--(?:aggressive|prune)", "submodule\\\\s+deinit"):
     assert invariant in task_cfg_text, invariant
+assert rebase_pattern not in task_blocks
 assert "/Users/" not in cfg_text
 assert "WhaleKit" not in cfg_text
 assert "/Users/" not in task_cfg_text
@@ -121,6 +135,7 @@ echo "D. portability"
 expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/"
 expect_no_grep "D2 cmux updater has no old repo path" "$REPO_ROOT/.codex/update-cmux-limits.sh" "claude-obsidian"
 expect_no_grep "D3 dcg hook has no absolute user path" "$REPO_ROOT/.github/hooks/dcg.json" "/Users/"
+expect_grep "D4 smoke clears inherited task policy" "$REPO_ROOT/scripts/dcg-test-suite.sh" "unset DCG_CONFIG"
 
 echo
 echo "dcg asset tests: $pass passed, $fail failed"

@@ -45,8 +45,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback.
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VAULT = Path(__file__).resolve().parents[3]
-DEFAULT_CLAUDE_MODEL = "opus"
+DEFAULT_CLAUDE_MODEL = "fable"
 DEFAULT_CODEX_MODEL = "gpt-5.6-sol"
+DEFAULT_CLAUDE_EFFORT = "high"
+DEFAULT_CODEX_EFFORT = "high"
 REVIEW_MODES = {"full", "light"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 # Codex `--model` takes precedence over profile/config reasoning settings.
@@ -619,10 +621,12 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
     review_skill = normalize_skill_command(raw_review_skill, executor_runtime, "review-dispatch", plugin)
     review_send_skill = normalize_skill_command(raw_review_send_skill, reviewer_runtime, "review-send", plugin)
 
-    codex_model = str(merged.get("codex_review_model") or DEFAULT_CODEX_MODEL).strip()
-    claude_model = str(merged.get("claude_review_model") or DEFAULT_CLAUDE_MODEL).strip()
-    claude_effort = str(merged.get("claude_review_effort") or meta.get("claude_review_effort") or "").strip()
-    codex_effort = str(merged.get("codex_review_effort") or meta.get("codex_review_effort") or "").strip()
+    # A task-level opt-in is part of the approved task contract and therefore
+    # wins over repository defaults. CLI flags still win later in cmd_start.
+    codex_model = str(meta.get("codex_review_model") or merged.get("codex_review_model") or DEFAULT_CODEX_MODEL).strip()
+    claude_model = str(meta.get("claude_review_model") or merged.get("claude_review_model") or DEFAULT_CLAUDE_MODEL).strip()
+    claude_effort = str(meta.get("claude_review_effort") or merged.get("claude_review_effort") or DEFAULT_CLAUDE_EFFORT).strip()
+    codex_effort = str(meta.get("codex_review_effort") or merged.get("codex_review_effort") or DEFAULT_CODEX_EFFORT).strip()
     reviewer_model = claude_model if reviewer_runtime == "claude" else codex_model
 
     if reviewer_runtime == "codex" and codex_home and not Path(codex_home).exists():
@@ -1520,13 +1524,13 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--model",
         default="",
-        help="reviewer model; defaults opus (currently Opus 4.8) for Claude, gpt-5.6-sol for Codex",
+        help="reviewer model; defaults fable for Claude, gpt-5.6-sol for Codex",
     )
     start.add_argument(
         "--effort",
         choices=sorted(CLAUDE_EFFORTS | CODEX_EFFORTS),
         default="",
-        help="reviewer reasoning effort (validated per runtime)",
+        help="reviewer reasoning effort (defaults high; validated per runtime)",
     )
     start.add_argument("--mode", choices=sorted(REVIEW_MODES), default="", help="override review depth; otherwise use task policy or full legacy default")
     start.add_argument("--light", action="store_true", help="shortcut for --mode light")
