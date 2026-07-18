@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from lib_sanitize import residual_credential_kinds, sanitize
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "evals" / "acceptance" / "skills.json"
@@ -89,17 +91,29 @@ def validate_result(row: dict[str, Any], result: Any) -> dict[str, Any]:
     if verdict not in VERDICTS:
         raise AcceptanceError(f"invalid verdict: {verdict!r}")
     bounded: dict[str, Any] = {key: result.get(key) for key in (
-        "schema_version", "phase", "skill", "runtime", "scenario", "verdict",
+        "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
         "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
         "duration_seconds",
     )}
+    bounded["expected"] = row["expected"]
     for field in ("model", "effort", "actual", "cleanup", "defect", "decision", "evidence"):
         value = bounded.get(field)
         if value is not None and (not isinstance(value, str) or len(value) > 600):
             raise AcceptanceError(f"result field {field} must be a bounded string")
+        if isinstance(value, str):
+            clean, _ = sanitize(value)
+            residual = residual_credential_kinds(clean)
+            if residual:
+                raise AcceptanceError(f"result field {field} contains residual credential patterns")
+            bounded[field] = clean
     duration = bounded.get("duration_seconds")
     if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0):
         raise AcceptanceError("duration_seconds must be non-negative")
+    required = ("model", "effort", "actual", "cleanup", "evidence")
+    if verdict in {"pass", "fail"} and any(not str(bounded.get(field) or "").strip() for field in required):
+        raise AcceptanceError(f"{verdict} requires model, effort, actual, cleanup, and evidence")
+    if verdict in {"fail", "blocked"} and not str(bounded.get("defect") or "").strip():
+        raise AcceptanceError(f"{verdict} requires a defect")
     if verdict == "n-a" and not str(bounded.get("decision") or "").strip():
         raise AcceptanceError("n-a requires an explicit decision")
     return bounded
@@ -121,14 +135,21 @@ def run_matrix(rows: list[dict[str, Any]], command: list[str], timeout: float) -
             if proc.returncode != 0:
                 raise AcceptanceError(f"runner exit {proc.returncode}")
             result = validate_result(row, json.loads(proc.stdout))
-        except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
+        except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired, OSError) as exc:
+            if isinstance(exc, subprocess.TimeoutExpired):
+                defect = "acceptance runner timed out"
+            elif isinstance(exc, OSError):
+                defect = "acceptance runner is unavailable or not executable"
+            else:
+                defect, _ = sanitize(str(exc)[:300])
             result = {
                 **row,
                 "verdict": "blocked",
                 "actual": "Acceptance runner did not return a valid bounded result.",
-                "defect": str(exc)[:300],
+                "defect": defect,
             }
-        result.setdefault("duration_seconds", (datetime.now(timezone.utc) - started).total_seconds())
+        if result.get("duration_seconds") is None:
+            result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
         results.append(result)
     return results
 
@@ -138,11 +159,15 @@ def report_payload(phase: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     for row in rows:
         counts[str(row.get("verdict") or "blocked")] += 1
     passed = counts["pass"]
+    accepted = passed + counts["n-a"]
     return {
         "schema_version": 1,
         "phase": phase,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "summary": {"total": len(rows), "passed": passed, "failed": len(rows) - passed, "verdicts": counts},
+        "summary": {
+            "total": len(rows), "passed": passed, "accepted": accepted,
+            "failed": len(rows) - accepted, "verdicts": counts,
+        },
         "rows": rows,
     }
 
