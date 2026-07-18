@@ -19,8 +19,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Added task-meta v3, namespaced review operations, multi-review archive links,
   active-broker upgrade blocking, and macOS cmux capability preflight.
 - Added a repo-shipped interactive live-acceptance runner with an exact
-  skill/runtime scenario registry, disposable committed-HEAD clones, typed
-  evidence, exact-surface cleanup, and a single `make acceptance-live` gate.
+  skill/runtime scenario registry, one required real fixture per installed
+  skill, disposable committed-HEAD clones, typed evidence, exact-surface
+  cleanup, and a single `make acceptance-live` gate.
 
 ### Changed
 

@@ -20,6 +20,7 @@ from typing import Any, NoReturn
 ROOT = Path(__file__).resolve().parents[1]
 STATE_ROOT = ROOT / ".vault-meta" / "acceptance" / "runs"
 SCENARIOS = ROOT / "evals" / "acceptance" / "scenarios.json"
+SKILLS = ROOT / "evals" / "acceptance" / "skills.json"
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SURFACE_RE = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
@@ -89,7 +90,40 @@ def load_scenarios(path: Path = SCENARIOS) -> dict[str, dict[str, Any]]:
     return result
 
 
-def validate_row(value: Any, scenarios: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def load_skill_fixtures(path: Path = SKILLS) -> dict[str, dict[str, str]]:
+    raw = read_json(path)
+    values = raw.get("skills")
+    if raw.get("schema_version") != 1 or not isinstance(values, dict):
+        raise AcceptanceRunnerError("skill fixture registry must use schema_version 1")
+    result: dict[str, dict[str, str]] = {}
+    for name, item in values.items():
+        if not isinstance(name, str) or not SAFE_ID.fullmatch(name) or not isinstance(item, dict):
+            raise AcceptanceRunnerError(f"invalid skill fixture {name!r}")
+        scenario = item.get("scenario")
+        expected = item.get("expected")
+        fixture = item.get("fixture")
+        if not isinstance(scenario, str) or not SAFE_ID.fullmatch(scenario):
+            raise AcceptanceRunnerError(f"{name}: invalid fixture scenario")
+        if not isinstance(expected, str) or not expected.strip() or len(expected) > 300:
+            raise AcceptanceRunnerError(f"{name}: invalid fixture expectation")
+        if not isinstance(fixture, str) or not fixture.strip() or len(fixture) > 1000:
+            raise AcceptanceRunnerError(f"{name}: invalid live fixture")
+        result[name] = {
+            "scenario": scenario,
+            "expected": expected.strip(),
+            "fixture": fixture.strip(),
+        }
+    discovered = {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
+    if set(result) != discovered:
+        raise AcceptanceRunnerError("skill fixture registry does not exactly cover installed skills")
+    return result
+
+
+def validate_row(
+    value: Any,
+    scenarios: dict[str, dict[str, Any]],
+    fixtures: dict[str, dict[str, str]],
+) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise AcceptanceRunnerError("input row must be a schema_version 1 object")
     for key in ("phase", "skill", "runtime", "scenario", "expected"):
@@ -105,6 +139,13 @@ def validate_row(value: Any, scenarios: dict[str, dict[str, Any]]) -> dict[str, 
         raise AcceptanceRunnerError("row skill is invalid")
     if not (ROOT / "skills" / value["skill"] / "SKILL.md").is_file():
         raise AcceptanceRunnerError("row skill is not installed in the source checkout")
+    fixture = fixtures.get(value["skill"])
+    if fixture is None:
+        raise AcceptanceRunnerError("row skill has no registered live fixture")
+    if fixture["scenario"] != value["scenario"]:
+        raise AcceptanceRunnerError("row scenario does not match the registered live fixture")
+    if fixture["expected"] != value["expected"]:
+        raise AcceptanceRunnerError("row expected result does not match the registered live fixture")
     return value
 
 
@@ -206,7 +247,7 @@ def create_sandbox(run_dir: Path) -> tuple[Path, str]:
 
 def prompt_text(
     row: dict[str, Any], scenario: dict[str, Any], sandbox: Path, outbox: Path,
-    model: str, effort: str, commit: str,
+    model: str, effort: str, commit: str, fixture: str,
 ) -> str:
     return f"""# Live release acceptance operation
 
@@ -224,6 +265,15 @@ You are running one real, bounded acceptance cell in a disposable local clone.
 
 Read `{sandbox / 'skills' / row['skill'] / 'SKILL.md'}` completely and exercise that skill faithfully.
 Scenario instructions: {scenario['instructions']}
+
+Exact skill fixture (treat this as the complete end-user request for the cell):
+
+> {fixture}
+
+Complete this fixture in one bounded agent turn. If the named skill would normally
+ask the user a question or present a quiz/draft for a later reply, that observable
+response is the end of this acceptance interaction: record it and continue to
+cleanup and the typed outbox instead of waiting for another human message.
 
 Hard boundaries:
 
@@ -428,7 +478,7 @@ def run_with_backend(row: dict[str, Any], command: list[str]) -> dict[str, Any]:
     return validate_agent_result(row, raw)
 
 
-def run_live(row: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
+def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dict[str, Any]:
     origin = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
     if not origin or shutil.which("cmux") is None:
         raise AcceptanceRunnerError("cmux and CMUX_SURFACE_ID are required for live acceptance")
@@ -443,7 +493,9 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
     try:
         sandbox, commit = create_sandbox(run_dir)
         outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
-        prompt = prompt_text(row, scenario, sandbox, outbox, route["model"], route["effort"], commit)
+        prompt = prompt_text(
+            row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture
+        )
         prompt_path = run_dir / "prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
         spec = {
@@ -521,6 +573,7 @@ def blocked(row: dict[str, Any], message: str) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenarios", type=Path, default=SCENARIOS)
+    parser.add_argument("--skills", type=Path, default=SKILLS)
     parser.add_argument("--backend-command", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     sub = parser.add_subparsers(dest="command")
     agent = sub.add_parser("agent", help=argparse.SUPPRESS)
@@ -534,11 +587,12 @@ def main() -> int:
         if args.command == "agent":
             return run_agent_process(args.spec.resolve())
         scenarios = load_scenarios(args.scenarios.resolve())
-        row = validate_row(json.load(sys.stdin), scenarios)
+        fixtures = load_skill_fixtures(args.skills.resolve())
+        row = validate_row(json.load(sys.stdin), scenarios, fixtures)
         if args.backend_command:
             result = run_with_backend(row, args.backend_command)
         else:
-            result = run_live(row, scenarios[row["scenario"]])
+            result = run_live(row, scenarios[row["scenario"]], fixtures[row["skill"]]["fixture"])
     except (AcceptanceRunnerError, SupervisorError, json.JSONDecodeError, OSError, ValueError) as exc:
         if "row" not in locals():
             die(str(exc))

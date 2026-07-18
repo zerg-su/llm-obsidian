@@ -53,11 +53,18 @@ def load_spec(path: Path, root: Path) -> dict[str, dict[str, str]]:
             raise AcceptanceError(f"invalid skill entry: {name!r}")
         scenario = item.get("scenario")
         expected = item.get("expected")
+        fixture = item.get("fixture")
         if not isinstance(scenario, str) or not SAFE_ID.fullmatch(scenario):
             raise AcceptanceError(f"{name}: invalid scenario")
         if not isinstance(expected, str) or not expected.strip() or len(expected) > 300:
             raise AcceptanceError(f"{name}: invalid expected result")
-        skills[name] = {"scenario": scenario, "expected": expected.strip()}
+        if not isinstance(fixture, str) or not fixture.strip() or len(fixture) > 1000:
+            raise AcceptanceError(f"{name}: invalid live fixture")
+        skills[name] = {
+            "scenario": scenario,
+            "expected": expected.strip(),
+            "fixture": fixture.strip(),
+        }
     discovered = set(discovered_skills(root))
     declared = set(skills)
     if discovered != declared:

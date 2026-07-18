@@ -47,10 +47,21 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
 
     stale = tmp / "stale.json"
     stale_data = json.loads(json.dumps(spec))
-    stale_data["skills"]["stale-skill"] = {"scenario": "stale", "expected": "Never exists."}
+    stale_data["skills"]["stale-skill"] = {
+        "scenario": "stale",
+        "expected": "Never exists.",
+        "fixture": "Run the impossible stale fixture.",
+    }
     stale.write_text(json.dumps(stale_data), encoding="utf-8")
     result = run("--spec", str(stale), "check")
     check("stale skill rejected", result.returncode == 3 and "coverage mismatch" in result.stderr)
+
+    no_fixture = tmp / "no-fixture.json"
+    no_fixture_data = json.loads(json.dumps(spec))
+    no_fixture_data["skills"][skills[0]].pop("fixture")
+    no_fixture.write_text(json.dumps(no_fixture_data), encoding="utf-8")
+    result = run("--spec", str(no_fixture), "check")
+    check("missing live fixture rejected", result.returncode == 3 and "invalid live fixture" in result.stderr)
 
     scenarios = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
     missing_scenario = tmp / "missing-scenario.json"

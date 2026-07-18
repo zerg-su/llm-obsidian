@@ -33,7 +33,7 @@ def row(**updates: object) -> dict[str, object]:
         "skill": "clarify",
         "runtime": "codex",
         "scenario": "conversation-readonly",
-        "expected": "Ask one material question and make no repository mutation.",
+        "expected": "Ask one material question at a time and make no repository mutation.",
     }
     value.update(updates)
     return value
@@ -101,6 +101,17 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     result = run(payload=row(scenario="unregistered"))
     check("unknown scenario fails before operation", result.returncode == 3 and not result.stdout, result.stderr)
 
+    result = run(payload=row(expected="substituted expectation"))
+    check("substituted fixture contract is rejected", result.returncode == 3 and not result.stdout, result.stderr)
+
+    fixture_registry = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
+    missing_fixture = tmp / "missing-fixture.json"
+    missing_fixture_data = json.loads(json.dumps(fixture_registry))
+    missing_fixture_data["skills"]["clarify"].pop("fixture")
+    missing_fixture.write_text(json.dumps(missing_fixture_data), encoding="utf-8")
+    result = run("--skills", str(missing_fixture), payload=row())
+    check("missing skill fixture is rejected", result.returncode == 3 and not result.stdout, result.stderr)
+
     release = subprocess.run(
         [sys.executable, str(RELEASE), "check"], cwd=ROOT,
         text=True, capture_output=True, check=False,
@@ -134,12 +145,24 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
 
+    prompt = module.prompt_text(
+        row(), module.load_scenarios()["conversation-readonly"], repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model", "high", commit, "Ask the exact fixture question and finish.",
+    )
+    check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
+    check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
+
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
 check("acceptance runtime is gitignored", ".vault-meta/acceptance/" in (ROOT / ".gitignore").read_text(encoding="utf-8"))
 check(
     "scenario registry exactly covers matrix",
     set(registry["scenarios"]) == {item["scenario"] for item in skills["skills"].values()},
+)
+check(
+    "every skill has one bounded live fixture",
+    all(isinstance(item.get("fixture"), str) and item["fixture"].strip() for item in skills["skills"].values()),
 )
 
 if failures:
