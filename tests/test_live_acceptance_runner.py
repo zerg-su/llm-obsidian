@@ -136,6 +136,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
+check("acceptance runtime is gitignored", ".vault-meta/acceptance/" in (ROOT / ".gitignore").read_text(encoding="utf-8"))
 check(
     "scenario registry exactly covers matrix",
     set(registry["scenarios"]) == {item["scenario"] for item in skills["skills"].values()},

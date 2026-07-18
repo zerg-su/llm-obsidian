@@ -148,6 +148,7 @@ _attachments/
 .vault-meta/auto-commit.disabled
 .vault-meta/skill-nudge-day.txt
 .vault-meta/evals/
+.vault-meta/acceptance/
 .vault-meta/research-runs/
 .vault-meta/session-routing/
 .vault-meta/daily-runs/

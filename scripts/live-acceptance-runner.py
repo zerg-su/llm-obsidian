@@ -442,7 +442,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
     cleanup = "sandbox retained for diagnosis"
     try:
         sandbox, commit = create_sandbox(run_dir)
-        outbox = sandbox / ".vault-meta" / "acceptance-outbox.json"
+        outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
         prompt = prompt_text(row, scenario, sandbox, outbox, route["model"], route["effort"], commit)
         prompt_path = run_dir / "prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
