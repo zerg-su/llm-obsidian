@@ -169,6 +169,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     broker_meta = {
         "version": 3, "project_id": broker_project, "task_id": broker_task,
+        "vault_root": str(worktree),
     }
     write_json(broker_worktree / ".task-meta.json", broker_meta)
     accounted = run(
@@ -827,6 +828,80 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     check("reviewer surface closes", result.returncode == 0, result.stderr)
     check("reviewer exact surface targeted", f"close-surface --surface {review_surface}" in cmux_log.read_text())
+
+    retry_review = broker_store.enqueue_operation(
+        broker_project, broker_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-retry-executor",
+    )
+    broker_store.claim_next(
+        broker_project, broker_task, retry_review["lane_id"], retry_review["operation_id"]
+    )
+    retry_surface = "66666666-6666-4666-8666-666666666666"
+    broker_store.transition_operation(
+        broker_project, broker_task, retry_review["lane_id"], retry_review["operation_id"],
+        "running", surface=retry_surface,
+    )
+    retry_state_dir = Path(retry_review["operation_dir"])
+    write_json(broker_worktree / ".task-meta.json", {
+        **meta,
+        "version": 3,
+        "project_id": broker_project,
+        "task_id": broker_task,
+        "task_name": "broker-retry",
+        "task_surface": "surface-retry-executor",
+        "wiki_surface": "surface-retry-executor",
+        "vault_root": str(worktree),
+    })
+    write_json(retry_state_dir / ".review-meta.json", {
+        "project_id": broker_project,
+        "task_id": broker_task,
+        "lane_id": retry_review["lane_id"],
+        "operation_id": retry_review["operation_id"],
+        "vault_root": str(worktree),
+        "review_surface": retry_surface,
+        "reviewer_runtime": "claude",
+        "executor_surface": "surface-retry-executor",
+    })
+    armed_retry = run(
+        LIFECYCLE, "request-exit", "--worktree", str(broker_worktree),
+        "--state-dir", str(retry_state_dir), "--kind", "reviewer",
+        cwd=broker_worktree, env=env,
+    )
+    check("broker retry fixture exit armed", armed_retry.returncode == 0, armed_retry.stderr)
+    retry_sentinel = retry_state_dir / ".review-close-armed.json"
+    retry_lane_path = broker_store.lane_dir(
+        broker_project, broker_task, retry_review["lane_id"]
+    ) / "lane.json"
+    retry_lane_original = retry_lane_path.read_text(encoding="utf-8")
+    retry_lane_path.write_text("{not-json", encoding="utf-8")
+    failed_transition = run(
+        LIFECYCLE, "after-exit", "--worktree", str(broker_worktree),
+        "--state-dir", str(retry_state_dir), "--kind", "reviewer",
+        "--surface", retry_surface, cwd=broker_worktree, env=env,
+    )
+    check(
+        "post-close broker failure preserves retry sentinel",
+        failed_transition.returncode == 3
+        and retry_sentinel.is_file()
+        and "fail-operation" in failed_transition.stderr,
+        failed_transition.stderr,
+    )
+    retry_lane_path.write_text(retry_lane_original, encoding="utf-8")
+    repaired_transition = run(
+        LIFECYCLE, "after-exit", "--worktree", str(broker_worktree),
+        "--state-dir", str(retry_state_dir), "--kind", "reviewer",
+        "--surface", retry_surface, cwd=broker_worktree, env=env,
+    )
+    retry_lane_after = broker_store.lane_state(
+        broker_project, broker_task, retry_review["lane_id"]
+    )
+    check(
+        "post-close broker transition retry completes exact operation",
+        repaired_transition.returncode == 0
+        and not retry_sentinel.exists()
+        and retry_lane_after["active_operation_id"] is None,
+        repaired_transition.stderr,
+    )
     surface_events = telemetry(worktree, "surface-lifecycle")
     check(
         "surface lifecycle distinguishes close and left-open",

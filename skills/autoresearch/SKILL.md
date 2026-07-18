@@ -66,6 +66,13 @@ fall back to WebSearch/WebFetch in the current context. Offer either:
 Report the fetch surface and run ID, then stop. Do not duplicate the research
 inside the coordinator.
 
+For persistent task lanes, a failure after claim but before the fetch/synth
+supervisor starts marks only that exact operation `failed`. If the registry
+write itself fails, report the printed `task_sessions.py fail-operation`
+command to the owning coordinator; do not guess another task/lane or describe
+the stuck operation as queued. A later `status` retry repairs a pending broker
+completion after an exact surface has already closed.
+
 ## Fetch callback
 
 When cmux sends `Protected fetch complete`, run the exact callback shown, for

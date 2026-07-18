@@ -49,6 +49,26 @@ new work FIFO; different tasks/models/domains can run concurrently. Enqueue is
 serialized against `reap`, which changes `active -> archiving -> archived`
 before enumerating lanes.
 
+Once a launcher claims an operation, every pre-supervisor failure in review,
+secure-fetch, or secure-synth transitions that exact operation to `failed`
+before propagating the error. A retry of an already-active operation reports
+the active identity and recovery guidance; it is never described as healthy
+queued work. Terminal transitions are repairable when process loss occurs
+between the operation JSON replacement and the lane JSON replacement.
+
+If the automatic transition itself cannot be persisted, the coordinator may
+release only the confirmed exact active operation:
+
+```bash
+python3 scripts/task_sessions.py --vault-root <vault> fail-operation \
+  --project-id <uuid> --task-id <uuid> --lane-id <lane-id> \
+  --operation-id <uuid> --reason "confirmed launcher/runtime failure"
+```
+
+The command is idempotent for the same already-failed operation, rejects a
+queued/foreign/complete operation, leaves FIFO entries intact, and prints the
+next queued operation ID. It never guesses identity or launches queued work.
+
 Review callbacks always include the exact operation directory. Reviewers write
 only one outbox in their owner-only runtime; the trusted relay validates the
 run/mode/baseline and publishes the canonical callback into that operation.
@@ -73,6 +93,12 @@ of the exact lane reconstructs a validated Claude/Codex resume command and
 reapplies model, effort, cwd, and permission envelope. Stored shell commands
 are ignored. Missing/corrupt checkpoints are visible and fall back to a fresh
 full-packet session without asking the absent user.
+
+If the surface closes but the broker terminal write fails, the reviewer close
+sentinel remains in place and the exact `after-exit` command can be retried.
+Protected-research `status` likewise retries a pending post-close broker
+transition. Both paths print the exact `fail-operation` fallback above if the
+registry cannot be repaired automatically.
 
 Protected research follows the same model with persistent `secure-fetch` and
 `secure-synth` lanes. Cross-operation context is retained only inside the exact

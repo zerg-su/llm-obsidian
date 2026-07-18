@@ -199,4 +199,47 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     resumed_meta = json.loads((queued_dir / ".review-meta.json").read_text(encoding="utf-8"))
     assert resumed_meta["reviewer_effort"] == "high"
 
+    failed_launch_id = str(uuid.uuid4())
+    failed_launch = run(
+        "start", "--worktree", str(worktree), "--vault-root", str(vault),
+        "--operation-id", failed_launch_id,
+        "--reviewer-runtime", "codex", "--model", "gpt-5.6-sol",
+        env=watchdog_env,
+    )
+    assert failed_launch.returncode != 0, failed_launch.stdout
+    failed_operation = next(
+        value for value in TaskSessionStore(vault).list_operations(
+            meta["project_id"], meta["task_id"], domain="review"
+        )
+        if value["operation_id"] == failed_launch_id
+    )
+    failed_lane = TaskSessionStore(vault).lane_state(
+        meta["project_id"], meta["task_id"], failed_operation["lane_id"]
+    )
+    assert failed_operation["status"] == "failed"
+    assert failed_lane["active_operation_id"] is None
+
+    stuck_id = str(uuid.uuid4())
+    store = TaskSessionStore(vault)
+    stuck_operation = store.enqueue_operation(
+        meta["project_id"], meta["task_id"], domain="review", runtime="codex",
+        model="gpt-5.6-sol", effort="high", operation_type="review",
+        coordinator_surface="executor-surface", operation_id=stuck_id,
+    )
+    store.claim_next(
+        meta["project_id"], meta["task_id"], str(stuck_operation["lane_id"]), stuck_id
+    )
+    stuck_retry = run(
+        "start", "--no-spawn", "--worktree", str(worktree), "--vault-root", str(vault),
+        "--operation-id", stuck_id,
+        "--reviewer-runtime", "codex", "--model", "gpt-5.6-sol",
+    )
+    assert stuck_retry.returncode != 0
+    assert "already claimed or active" in stuck_retry.stderr
+    assert "fail-operation" in stuck_retry.stderr
+    store.transition_operation(
+        meta["project_id"], meta["task_id"], str(stuck_operation["lane_id"]),
+        stuck_id, "failed", degradation="test cleanup",
+    )
+
 print("review operation namespacing tests passed")

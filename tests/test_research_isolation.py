@@ -7,17 +7,19 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import tomllib
+import uuid
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "research-isolation.py"
 sys.path.insert(0, str(ROOT / "scripts"))
-from task_sessions import TaskSessionStore
+from task_sessions import TaskSessionStore, project_id_for
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -51,11 +53,38 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         encoding="utf-8",
     )
     fake_cmux.chmod(0o755)
+    broken_bin = tmp / "broken-bin"
+    broken_bin.mkdir()
+    broken_cmux = broken_bin / "cmux"
+    broken_cmux.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1 $2\" = \"new-split --help\" ]; then\n"
+        "  printf '%s\\n' 'usage: cmux new-split [right] --surface ID --focus BOOL'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1 $2 $3\" = \"surface resume --help\" ]; then\n"
+        "  printf '%s\\n' 'resume get; resume set; resume show; resume clear'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1 $2 $3 $4\" = \"--id-format both new-split right\" ]; then\n"
+        "  echo 'injected anchored split failure' >&2\n"
+        "  exit 1\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    broken_cmux.chmod(0o755)
+    socket_path = tmp / "cmux.sock"
+    socket_fixture = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    socket_fixture.bind(str(socket_path))
     env = dict(os.environ)
     env.pop("CMUX_SURFACE_ID", None)
     fake_env = dict(env)
     fake_env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
     fake_env["CMUX_LOG"] = str(cmux_log)
+    broken_env = dict(env)
+    broken_env["PATH"] = str(broken_bin) + os.pathsep + env.get("PATH", "")
+    broken_env["CMUX_SOCKET_PATH"] = str(socket_path)
     result = run(
         "start", "--topic", "test", "--flow", "autoresearch",
         "--state-root", str(state_root), "--tmp-root", str(tmp), env=env,
@@ -439,6 +468,114 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     (persistent_vault / "config").mkdir()
     shutil.copy2(ROOT / "config" / "model-routing.toml", persistent_vault / "config" / "model-routing.toml")
     persistent_task = "77777777-7777-4777-8777-777777777777"
+
+    failed_fetch_task = str(uuid.uuid4())
+    failed_fetch_id = str(uuid.uuid4())
+    failed_fetch = run(
+        "start", "--topic", "claimed fetch launch failure", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", failed_fetch_task,
+        "--operation-id", failed_fetch_id, "--tmp-root", str(tmp), env=broken_env,
+    )
+    check("claimed fetch launch failure is visible", failed_fetch.returncode != 0, failed_fetch.stderr)
+    failed_fetch_store = TaskSessionStore(persistent_vault)
+    failed_fetch_operation = next(
+        value for value in failed_fetch_store.list_operations(
+            project_id_for(persistent_repo, create=False), failed_fetch_task,
+            domain="secure-fetch",
+        )
+        if value["operation_id"] == failed_fetch_id
+    )
+    failed_fetch_lane = failed_fetch_store.lane_state(
+        failed_fetch_operation["project_id"], failed_fetch_task,
+        failed_fetch_operation["lane_id"],
+    )
+    check(
+        "claimed fetch launch failure releases lane",
+        failed_fetch_operation["status"] == "failed"
+        and failed_fetch_lane["active_operation_id"] is None,
+    )
+    failed_fetch_retry = run(
+        "start", "--topic", "claimed fetch launch failure", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", failed_fetch_task,
+        "--operation-id", failed_fetch_id, "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check(
+        "terminal fetch retry is not reported queued",
+        failed_fetch_retry.returncode == 3
+        and "already terminal" in failed_fetch_retry.stderr,
+        failed_fetch_retry.stderr,
+    )
+
+    failed_synth_task = str(uuid.uuid4())
+    failed_synth_fetch = run(
+        "start", "--topic", "claimed synth launch failure", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", failed_synth_task,
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("synth failure fixture fetch prepared", failed_synth_fetch.returncode == 0, failed_synth_fetch.stderr)
+    failed_synth_state = json.loads(failed_synth_fetch.stdout)
+    failed_synth_store = TaskSessionStore(persistent_vault)
+    failed_synth_fetch_broker = failed_synth_state["fetch_broker"]
+    failed_synth_store.transition_operation(
+        failed_synth_fetch_broker["project_id"], failed_synth_fetch_broker["task_id"],
+        failed_synth_fetch_broker["lane_id"], failed_synth_fetch_broker["operation_id"],
+        "complete",
+    )
+    failed_synth_body = "# Claimed synth launch failure\n\nBounded fixture."
+    Path(failed_synth_state["fetch_dir"], "artifact.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": failed_synth_state["run_id"],
+            "topic": "claimed synth launch failure",
+            "fetched_at": "2026-07-18T00:00:00Z",
+            "sources": [{
+                "url": "https://example.com/synth-failure",
+                "title": "Synth failure",
+                "content_sha256": hashlib.sha256(failed_synth_body.encode()).hexdigest(),
+                "source_class": "third-party",
+                "clean_markdown": failed_synth_body,
+            }],
+            "fetch_errors": [],
+        }),
+        encoding="utf-8",
+    )
+    failed_synth_state_path = Path(failed_synth_state["operation_dir"]) / "state.json"
+    failed_synth_state["cmux_socket_path"] = str(socket_path)
+    failed_synth_state_path.write_text(json.dumps(failed_synth_state), encoding="utf-8")
+    failed_synth = run(
+        "receive", "--run-id", failed_synth_state["run_id"],
+        "--operation-dir", failed_synth_state["operation_dir"],
+        "--tmp-root", str(tmp), env=broken_env,
+    )
+    check("claimed synth launch failure is visible", failed_synth.returncode != 0, failed_synth.stderr)
+    failed_synth_operation = failed_synth_store.list_operations(
+        failed_synth_fetch_broker["project_id"], failed_synth_task, domain="secure-synth"
+    )[0]
+    failed_synth_lane = failed_synth_store.lane_state(
+        failed_synth_fetch_broker["project_id"], failed_synth_task,
+        failed_synth_operation["lane_id"],
+    )
+    check(
+        "claimed synth launch failure releases lane",
+        failed_synth_operation["status"] == "failed"
+        and failed_synth_lane["active_operation_id"] is None,
+    )
+    failed_synth_retry = run(
+        "receive", "--run-id", failed_synth_state["run_id"],
+        "--operation-dir", failed_synth_state["operation_dir"],
+        "--synth-operation-id", failed_synth_operation["operation_id"],
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check(
+        "terminal synth retry is not reported queued",
+        failed_synth_retry.returncode == 3
+        and "already terminal" in failed_synth_retry.stderr,
+        failed_synth_retry.stderr,
+    )
+
     persistent = run(
         "start", "--topic", "persistent context", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),

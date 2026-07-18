@@ -56,6 +56,50 @@ def die(message: str, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
+def operation_recovery_command(
+    vault: Path, broker: dict[str, Any]
+) -> str:
+    return shlex.join([
+        sys.executable,
+        str(ROOT / "scripts" / "task_sessions.py"),
+        "--vault-root",
+        str(vault),
+        "fail-operation",
+        "--project-id",
+        str(broker["project_id"]),
+        "--task-id",
+        str(broker["task_id"]),
+        "--lane-id",
+        str(broker["lane_id"]),
+        "--operation-id",
+        str(broker["operation_id"]),
+    ])
+
+
+def fail_claimed_operation(
+    store: TaskSessionStore,
+    vault: Path,
+    broker: dict[str, Any],
+    stage: str,
+) -> None:
+    try:
+        store.transition_operation(
+            str(broker["project_id"]),
+            str(broker["task_id"]),
+            str(broker["lane_id"]),
+            str(broker["operation_id"]),
+            "failed",
+            degradation=f"{stage} launcher failed before supervisor start",
+        )
+    except (KeyError, TaskSessionError, OSError) as exc:
+        command = operation_recovery_command(vault, broker)
+        print(
+            f"research-isolation: claimed {stage} operation could not be released; "
+            f"coordinator recovery required: {command} ({exc})",
+            file=sys.stderr,
+        )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -257,6 +301,41 @@ def surface_is_missing(result: subprocess.CompletedProcess[str]) -> bool:
     return any(token in text for token in ("not_found", "not found", "unknown surface"))
 
 
+def complete_broker_operation(
+    state: dict[str, Any], state_path: Path, stage: str, broker: dict[str, Any],
+    *, checkpoint: dict[str, str] | None = None, degradation: str = "",
+) -> bool:
+    """Complete or repair one exact broker transition after surface close."""
+    vault = Path(str(state["vault"]))
+    try:
+        store = TaskSessionStore(vault)
+        lane = store.lane_state(
+            str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"])
+        )
+        was_active = lane.get("active_operation_id") == str(broker["operation_id"])
+        store.transition_operation(
+            str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"]),
+            str(broker["operation_id"]), "complete", checkpoint=checkpoint,
+            degradation=degradation,
+        )
+    except (KeyError, TaskSessionError, OSError) as exc:
+        state[f"{stage}_broker_completion"] = "pending-recovery"
+        state[f"{stage}_broker_completion_error_at"] = utc_now()
+        write_json(state_path, state)
+        print(
+            "research-isolation: broker completion failed visibly; retry status or recover "
+            f"the exact operation with: {operation_recovery_command(vault, broker)} ({exc})",
+            file=sys.stderr,
+        )
+        return False
+    state[f"{stage}_broker_completion"] = "complete"
+    state.pop(f"{stage}_broker_completion_error_at", None)
+    write_json(state_path, state)
+    if was_active:
+        start_next_queued_broker_operation(state, broker)
+    return True
+
+
 def close_completed_surface(
     state: dict[str, Any], state_path: Path, run_id: str, stage: str, *, no_spawn: bool = False
 ) -> bool:
@@ -267,8 +346,13 @@ def close_completed_surface(
         return False
     surface_key, _marker_key, _marker_stage = STAGE_SURFACE_FIELDS[stage]
     closed_key = f"{stage}_surface_closed_at"
-    if state.get(closed_key) or not completion_marker_matches(state, run_id, stage):
-        return bool(state.get(closed_key))
+    broker = state.get(f"{stage}_broker")
+    if state.get(closed_key):
+        if isinstance(broker, dict) and state.get(f"{stage}_broker_completion") != "complete":
+            complete_broker_operation(state, state_path, stage, broker)
+        return True
+    if not completion_marker_matches(state, run_id, stage):
+        return False
     surface = str(state.get(surface_key) or "").strip()
     if surface == DRY_RUN_SURFACE or SURFACE_ID_RX.fullmatch(surface) is None:
         return False
@@ -283,7 +367,6 @@ def close_completed_surface(
         return False
     checkpoint: dict[str, str] | None = None
     degradation = ""
-    broker = state.get(f"{stage}_broker")
     if isinstance(broker, dict):
         try:
             checkpoint = capture_resume(surface, "codex")
@@ -318,16 +401,10 @@ def close_completed_surface(
     state[closed_key] = utc_now()
     write_json(state_path, state)
     if isinstance(broker, dict):
-        try:
-            TaskSessionStore(Path(str(state["vault"]))).transition_operation(
-                str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"]),
-                str(broker["operation_id"]), "complete", checkpoint=checkpoint,
-                degradation=degradation,
-            )
-        except (KeyError, TaskSessionError, OSError) as exc:
-            print(f"research-isolation: broker completion failed visibly: {exc}", file=sys.stderr)
-        else:
-            start_next_queued_broker_operation(state, broker)
+        complete_broker_operation(
+            state, state_path, stage, broker,
+            checkpoint=checkpoint, degradation=degradation,
+        )
     return True
 
 
@@ -598,80 +675,113 @@ def cmd_start(ns: argparse.Namespace) -> int:
                 project_id, ns.task_id, str(operation["lane_id"]), run_id
             )
             operation_dir = Path(str(operation["operation_dir"])).resolve()
-            write_json(operation_dir / "launch.json", {
-                "schema_version": 1,
-                "argv": [
-                    sys.executable, str(Path(__file__).resolve()), "start",
-                    "--flow", ns.flow, "--topic", topic,
-                    "--coordinator-surface", surface,
-                    "--vault-root", str(ns.vault_root.resolve()),
-                    "--worktree", str(ns.worktree.resolve()),
-                    "--project-id", project_id, "--task-id", ns.task_id,
-                    "--operation-id", run_id,
-                ],
-            })
             if claimed is None or claimed.get("operation_id") != run_id:
+                lane = store.lane_state(project_id, ns.task_id, str(operation["lane_id"]))
+                if lane.get("active_operation_id") == run_id:
+                    broker = {
+                        "project_id": project_id,
+                        "task_id": ns.task_id,
+                        "lane_id": operation["lane_id"],
+                        "operation_id": run_id,
+                    }
+                    die(
+                        "secure fetch operation is already claimed or active; inspect its exact "
+                        "surface/status. If its launcher is gone, recover only this operation with: "
+                        + operation_recovery_command(ns.vault_root.resolve(), broker),
+                        3,
+                    )
+                if operation.get("status") in {"complete", "failed"}:
+                    die(
+                        f"secure fetch operation is already terminal ({operation.get('status')}); "
+                        "start a new operation id instead of reporting it as queued",
+                        3,
+                    )
+                queue = lane.get("queue")
+                if not isinstance(queue, list) or run_id not in queue:
+                    die(
+                        "secure fetch operation is neither active nor queued; exact registry recovery is required",
+                        3,
+                    )
                 print(json.dumps({
                     "schema_version": 1, "status": "queued", "run_id": run_id,
                     "operation_dir": str(operation_dir),
                 }, sort_keys=True))
                 return 0
-            lane = store.lane_state(project_id, ns.task_id, str(operation["lane_id"]))
-            raw_checkpoint = lane.get("checkpoint")
-            if raw_checkpoint is not None:
-                try:
-                    checkpoint = validate_checkpoint(raw_checkpoint, "codex")
-                except TaskSessionError:
-                    print(
-                        "secure fetch checkpoint is invalid; continuing visibly with a fresh session",
-                        file=sys.stderr,
-                    )
             fetch_broker = {
                 "project_id": project_id, "task_id": ns.task_id,
                 "lane_id": operation["lane_id"], "operation_id": run_id,
             }
+            try:
+                write_json(operation_dir / "launch.json", {
+                    "schema_version": 1,
+                    "argv": [
+                        sys.executable, str(Path(__file__).resolve()), "start",
+                        "--flow", ns.flow, "--topic", topic,
+                        "--coordinator-surface", surface,
+                        "--vault-root", str(ns.vault_root.resolve()),
+                        "--worktree", str(ns.worktree.resolve()),
+                        "--project-id", project_id, "--task-id", ns.task_id,
+                        "--operation-id", run_id,
+                    ],
+                })
+                lane = store.lane_state(project_id, ns.task_id, str(operation["lane_id"]))
+                raw_checkpoint = lane.get("checkpoint")
+                if raw_checkpoint is not None:
+                    try:
+                        checkpoint = validate_checkpoint(raw_checkpoint, "codex")
+                    except TaskSessionError:
+                        print(
+                            "secure fetch checkpoint is invalid; continuing visibly with a fresh session",
+                            file=sys.stderr,
+                        )
+            except BaseException:
+                fail_claimed_operation(
+                    store, ns.vault_root.resolve(), fetch_broker, "secure-fetch"
+                )
+                raise
         except (TaskSessionError, OSError) as exc:
             die(f"persistent fetch lane failed: {exc}", 3)
-    state_dir, state_path = state_paths(ns.state_root.resolve(), run_id, operation_dir)
-    state_dir.mkdir(parents=True, exist_ok=operation_dir is not None)
-    tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
-    fetch_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-fetch-{run_id[:8]}-", dir=tmp_root))
-    runtime_base = (
-        operation_dir.parents[1] / "runtime" if operation_dir is not None
-        else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
-    )
-    python_executable = str(Path(sys.executable).resolve())
-    runtime_home = make_runtime_home(
-        runtime_base, "fetch", fetch_dir, python_executable, cmux_socket,
-        model=str(route["model"]), effort=str(route["effort"]),
-        persistent=operation_dir is not None,
-    )
-    prompt_file = fetch_dir / "fetch-prompt.md"
-    prompt_file.write_text(
-        fetch_prompt(run_id, topic, ns.flow, fetch_dir, python_executable), encoding="utf-8"
-    )
-    callback = (
-        f"Protected fetch complete. Run: {python_executable} "
-        f"{ROOT / 'scripts/research-isolation.py'} receive --run-id {run_id}"
-        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
-    )
-    fetch_marker = fetch_dir / "notify-complete.json"
-    (fetch_dir / "notify.py").write_text(
-        notifier_text(
-            surface,
-            callback,
-            python_executable,
-            fetch_marker,
-            {"schema_version": 1, "run_id": run_id, "stage": "fetch", "status": "complete"},
-        ),
-        encoding="utf-8",
-    )
-    fetch_surface, fetch_ref = spawn_split(ns.no_spawn, surface)
-    command = launch_command(
-        fetch_dir, runtime_home, prompt_file, python_executable, cmux_socket,
-        search=True, checkpoint=checkpoint,
-    )
-    state = {
+    try:
+        state_dir, state_path = state_paths(ns.state_root.resolve(), run_id, operation_dir)
+        state_dir.mkdir(parents=True, exist_ok=operation_dir is not None)
+        tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
+        fetch_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-fetch-{run_id[:8]}-", dir=tmp_root))
+        runtime_base = (
+            operation_dir.parents[1] / "runtime" if operation_dir is not None
+            else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
+        )
+        python_executable = str(Path(sys.executable).resolve())
+        runtime_home = make_runtime_home(
+            runtime_base, "fetch", fetch_dir, python_executable, cmux_socket,
+            model=str(route["model"]), effort=str(route["effort"]),
+            persistent=operation_dir is not None,
+        )
+        prompt_file = fetch_dir / "fetch-prompt.md"
+        prompt_file.write_text(
+            fetch_prompt(run_id, topic, ns.flow, fetch_dir, python_executable), encoding="utf-8"
+        )
+        callback = (
+            f"Protected fetch complete. Run: {python_executable} "
+            f"{ROOT / 'scripts/research-isolation.py'} receive --run-id {run_id}"
+            + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+        )
+        fetch_marker = fetch_dir / "notify-complete.json"
+        (fetch_dir / "notify.py").write_text(
+            notifier_text(
+                surface,
+                callback,
+                python_executable,
+                fetch_marker,
+                {"schema_version": 1, "run_id": run_id, "stage": "fetch", "status": "complete"},
+            ),
+            encoding="utf-8",
+        )
+        fetch_surface, fetch_ref = spawn_split(ns.no_spawn, surface)
+        command = launch_command(
+            fetch_dir, runtime_home, prompt_file, python_executable, cmux_socket,
+            search=True, checkpoint=checkpoint,
+        )
+        state = {
         "schema_version": 1,
         "run_id": run_id,
         "flow": ns.flow,
@@ -694,20 +804,26 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "fetch_broker": fetch_broker,
         "operation_dir": str(operation_dir) if operation_dir is not None else None,
         "resume_checkpoint": checkpoint,
-    }
-    write_json(state_path, state)
-    if ns.no_spawn:
-        print(json.dumps(state, indent=2, ensure_ascii=False))
-    else:
-        send_surface(fetch_surface, command)
+        }
+        write_json(state_path, state)
+        if ns.no_spawn:
+            print(json.dumps(state, indent=2, ensure_ascii=False))
+        else:
+            if store is not None and fetch_broker is not None:
+                store.transition_operation(
+                    fetch_broker["project_id"], fetch_broker["task_id"],
+                    fetch_broker["lane_id"], fetch_broker["operation_id"],
+                    "running", surface=fetch_surface,
+                )
+            send_surface(fetch_surface, command)
+            print(f"protected fetch surface: {fetch_ref or fetch_surface}")
+            print(f"run id: {run_id}")
+    except BaseException:
         if store is not None and fetch_broker is not None:
-            store.transition_operation(
-                fetch_broker["project_id"], fetch_broker["task_id"],
-                fetch_broker["lane_id"], fetch_broker["operation_id"],
-                "running", surface=fetch_surface,
+            fail_claimed_operation(
+                store, ns.vault_root.resolve(), fetch_broker, "secure-fetch"
             )
-        print(f"protected fetch surface: {fetch_ref or fetch_surface}")
-        print(f"run id: {run_id}")
+        raise
     return 0
 
 
@@ -771,15 +887,38 @@ def cmd_receive(ns: argparse.Namespace) -> int:
                 str(synth_operation["lane_id"]), synth_operation_id,
             )
             synth_operation_dir = Path(str(synth_operation["operation_dir"])).resolve()
-            write_json(synth_operation_dir / "launch.json", {
-                "schema_version": 1,
-                "argv": [
-                    sys.executable, str(Path(__file__).resolve()), "receive",
-                    "--run-id", ns.run_id, "--operation-dir", str(operation_dir),
-                    "--synth-operation-id", synth_operation_id,
-                ],
-            })
             if claimed is None or claimed.get("operation_id") != synth_operation_id:
+                synth_lane = broker_store.lane_state(
+                    str(fetch_broker["project_id"]),
+                    str(fetch_broker["task_id"]),
+                    str(synth_operation["lane_id"]),
+                )
+                if synth_lane.get("active_operation_id") == synth_operation_id:
+                    broker = {
+                        "project_id": fetch_broker["project_id"],
+                        "task_id": fetch_broker["task_id"],
+                        "lane_id": synth_operation["lane_id"],
+                        "operation_id": synth_operation_id,
+                    }
+                    die(
+                        "secure synthesis operation is already claimed or active; inspect its exact "
+                        "surface/status. If its launcher is gone, recover only this operation with: "
+                        + operation_recovery_command(Path(str(state["vault"])), broker),
+                        3,
+                    )
+                if synth_operation.get("status") in {"complete", "failed"}:
+                    die(
+                        "secure synthesis operation is already terminal "
+                        f"({synth_operation.get('status')}); start a new operation id instead of "
+                        "reporting it as queued",
+                        3,
+                    )
+                queue = synth_lane.get("queue")
+                if not isinstance(queue, list) or synth_operation_id not in queue:
+                    die(
+                        "secure synthesis operation is neither active nor queued; exact registry recovery is required",
+                        3,
+                    )
                 state.update({
                     "status": "synthesis_queued",
                     "updated_at": utc_now(),
@@ -795,76 +934,91 @@ def cmd_receive(ns: argparse.Namespace) -> int:
                 close_completed_surface(state, state_path, ns.run_id, "fetch", no_spawn=ns.no_spawn)
                 print(f"secure synthesis queued on busy exact lane: {synth_operation_id}")
                 return 0
-            synth_lane = broker_store.lane_state(
-                str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
-                str(synth_operation["lane_id"]),
-            )
-            raw_checkpoint = synth_lane.get("checkpoint")
-            if raw_checkpoint is not None:
-                try:
-                    synth_checkpoint = validate_checkpoint(raw_checkpoint, "codex")
-                except TaskSessionError:
-                    print(
-                        "secure synthesis checkpoint is invalid; continuing visibly with a fresh session",
-                        file=sys.stderr,
-                    )
             synth_broker = {
                 "project_id": fetch_broker["project_id"], "task_id": fetch_broker["task_id"],
                 "lane_id": synth_operation["lane_id"], "operation_id": synth_operation_id,
             }
+            try:
+                write_json(synth_operation_dir / "launch.json", {
+                    "schema_version": 1,
+                    "argv": [
+                        sys.executable, str(Path(__file__).resolve()), "receive",
+                        "--run-id", ns.run_id, "--operation-dir", str(operation_dir),
+                        "--synth-operation-id", synth_operation_id,
+                    ],
+                })
+                synth_lane = broker_store.lane_state(
+                    str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
+                    str(synth_operation["lane_id"]),
+                )
+                raw_checkpoint = synth_lane.get("checkpoint")
+                if raw_checkpoint is not None:
+                    try:
+                        synth_checkpoint = validate_checkpoint(raw_checkpoint, "codex")
+                    except TaskSessionError:
+                        print(
+                            "secure synthesis checkpoint is invalid; continuing visibly with a fresh session",
+                            file=sys.stderr,
+                        )
+            except BaseException:
+                fail_claimed_operation(
+                    broker_store, Path(str(state["vault"])), synth_broker, "secure-synth"
+                )
+                raise
         except (TaskSessionError, OSError) as exc:
             die(f"persistent synthesis lane failed: {exc}", 3)
-    runtime_base = (
-        synth_operation_dir.parents[1] / "runtime" if synth_operation_dir is not None
-        else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))
-    )
-    shutil.copy2(state_dir / "artifact.json", synth_dir / "artifact.json")
-    vault = Path(str(state.get("vault"))).resolve()
-    python_executable = str(state.get("python_executable") or Path(sys.executable).resolve())
-    cmux_socket = Path(
-        str(state.get("cmux_socket_path") or cmux_socket_path(no_spawn=ns.no_spawn))
-    ).resolve()
-    route = stored_route(state)
-    runtime_home = make_runtime_home(
-        runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
-        model=route["model"], effort=route["effort"],
-        persistent=synth_operation_dir is not None,
-    )
-    prompt_file = synth_dir / "synth-prompt.md"
-    prompt_file.write_text(
-        synth_prompt(
-            ns.run_id,
-            str(state.get("topic")),
-            str(state.get("flow")),
-            synth_dir,
-            vault,
-            python_executable,
-        ),
-        encoding="utf-8",
-    )
-    callback = (
-        f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
-        f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
-        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
-    )
-    synth_marker = synth_dir / "notify-complete.json"
-    (synth_dir / "notify.py").write_text(
-        notifier_text(
-            str(state.get("coordinator_surface")),
-            callback,
-            python_executable,
-            synth_marker,
-            {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
-        ),
-        encoding="utf-8",
-    )
-    synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
-    command = launch_command(
-        synth_dir, runtime_home, prompt_file, python_executable, cmux_socket,
-        search=False, checkpoint=synth_checkpoint,
-    )
-    state.update(
-        {
+    try:
+        runtime_base = (
+            synth_operation_dir.parents[1] / "runtime" if synth_operation_dir is not None
+            else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))
+        )
+        shutil.copy2(state_dir / "artifact.json", synth_dir / "artifact.json")
+        vault = Path(str(state.get("vault"))).resolve()
+        python_executable = str(state.get("python_executable") or Path(sys.executable).resolve())
+        cmux_socket = Path(
+            str(state.get("cmux_socket_path") or cmux_socket_path(no_spawn=ns.no_spawn))
+        ).resolve()
+        route = stored_route(state)
+        runtime_home = make_runtime_home(
+            runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
+            model=route["model"], effort=route["effort"],
+            persistent=synth_operation_dir is not None,
+        )
+        prompt_file = synth_dir / "synth-prompt.md"
+        prompt_file.write_text(
+            synth_prompt(
+                ns.run_id,
+                str(state.get("topic")),
+                str(state.get("flow")),
+                synth_dir,
+                vault,
+                python_executable,
+            ),
+            encoding="utf-8",
+        )
+        callback = (
+            f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
+            f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
+            + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+        )
+        synth_marker = synth_dir / "notify-complete.json"
+        (synth_dir / "notify.py").write_text(
+            notifier_text(
+                str(state.get("coordinator_surface")),
+                callback,
+                python_executable,
+                synth_marker,
+                {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
+            ),
+            encoding="utf-8",
+        )
+        synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
+        command = launch_command(
+            synth_dir, runtime_home, prompt_file, python_executable, cmux_socket,
+            search=False, checkpoint=synth_checkpoint,
+        )
+        state.update(
+            {
             "updated_at": utc_now(),
             "status": "synthesis_prepared" if ns.no_spawn else "synthesizing",
             "artifact_sha256": hashlib.sha256((state_dir / "artifact.json").read_bytes()).hexdigest(),
@@ -877,21 +1031,30 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             "synth_broker": synth_broker,
             "synth_operation_dir": str(synth_operation_dir) if synth_operation_dir else None,
             "synth_resume_checkpoint": synth_checkpoint,
-        }
-    )
-    write_json(state_path, state)
-    if ns.no_spawn:
-        print(json.dumps(state, indent=2, ensure_ascii=False))
-    else:
-        send_surface(synth_surface, command)
+            }
+        )
+        write_json(state_path, state)
+        if ns.no_spawn:
+            print(json.dumps(state, indent=2, ensure_ascii=False))
+        else:
+            if synth_broker is not None:
+                TaskSessionStore(Path(str(state["vault"]))).transition_operation(
+                    str(synth_broker["project_id"]), str(synth_broker["task_id"]),
+                    str(synth_broker["lane_id"]), str(synth_broker["operation_id"]),
+                    "running", surface=synth_surface,
+                )
+            send_surface(synth_surface, command)
+            close_completed_surface(state, state_path, ns.run_id, "fetch")
+            print(f"networkless synthesis surface: {synth_ref or synth_surface}")
+    except BaseException:
         if synth_broker is not None:
-            TaskSessionStore(Path(str(state["vault"]))).transition_operation(
-                str(synth_broker["project_id"]), str(synth_broker["task_id"]),
-                str(synth_broker["lane_id"]), str(synth_broker["operation_id"]),
-                "running", surface=synth_surface,
+            fail_claimed_operation(
+                TaskSessionStore(Path(str(state["vault"]))),
+                Path(str(state["vault"])),
+                synth_broker,
+                "secure-synth",
             )
-        close_completed_surface(state, state_path, ns.run_id, "fetch")
-        print(f"networkless synthesis surface: {synth_ref or synth_surface}")
+        raise
     return 0
 
 

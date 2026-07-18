@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -248,8 +249,10 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     sentinel = lifecycle_file(worktree, sentinel_name, kind)
     if not sentinel.exists():
         if kind == "reviewer" and _STATE_DIR is not None:
-            transition_broker_review(worktree, "failed", degradation="reviewer exited without an armed completion")
-            start_next_broker_review(worktree)
+            if transition_broker_review(
+                worktree, "failed", degradation="reviewer exited without an armed completion"
+            ):
+                start_next_broker_review(worktree)
         runtime, expected = telemetry_surface_context(worktree, kind)
         emit_lifecycle_event(
             worktree,
@@ -291,19 +294,35 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     close_text = (closed.stdout + closed.stderr).lower()
     if closed.returncode != 0 and not any(token in close_text for token in ("not found", "not_found", "unknown surface")):
         die((closed.stdout + closed.stderr).strip() or "cmux close-surface failed")
-    sentinel.unlink(missing_ok=True)
+    broker_transitioned = True
     if kind == "reviewer" and _STATE_DIR is not None:
-        transition_broker_review(
+        broker_transitioned = transition_broker_review(
             worktree, "complete", checkpoint=checkpoint, degradation=degradation
         )
-        start_next_broker_review(worktree)
+        if broker_transitioned:
+            start_next_broker_review(worktree)
+    if kind != "reviewer" or _STATE_DIR is None or broker_transitioned:
+        sentinel.unlink(missing_ok=True)
     runtime, expected = telemetry_surface_context(worktree, kind)
     emit_lifecycle_event(
         worktree,
         "surface-lifecycle",
         actor=f"{kind}:{runtime}",
-        counts={"closed": 1, "auto_close_expected": expected},
+        counts={
+            "closed": 1,
+            "auto_close_expected": expected,
+            "broker_transition_pending": 0 if broker_transitioned else 1,
+        },
+        status="ok" if broker_transitioned else "degraded",
     )
+    if not broker_transitioned:
+        print(
+            "reviewer surface is closed but its exact broker transition is pending; "
+            "the close sentinel was preserved, so rerun this after-exit command or use "
+            "the printed fail-operation recovery command",
+            file=sys.stderr,
+        )
+        return 3
     print(f"closed {kind} surface {surface}")
     return 0
 
@@ -314,11 +333,22 @@ def transition_broker_review(
     *,
     checkpoint: dict[str, str] | None = None,
     degradation: str = "",
-) -> None:
+) -> bool:
     meta = read_object(lifecycle_file(worktree, ".review-meta.json"))
     required = ("project_id", "task_id", "lane_id", "operation_id", "vault_root")
     if not all(str(meta.get(key) or "").strip() for key in required):
-        return
+        task_meta = read_object(worktree / ".task-meta.json")
+        operation = read_object((_STATE_DIR or worktree) / "operation.json")
+        meta = {
+            "project_id": operation.get("project_id"),
+            "task_id": operation.get("task_id"),
+            "lane_id": operation.get("lane_id"),
+            "operation_id": operation.get("operation_id"),
+            "vault_root": task_meta.get("vault_root"),
+        }
+    if not all(str(meta.get(key) or "").strip() for key in required):
+        print("review task-session transition lacks exact broker identity", file=sys.stderr)
+        return False
     try:
         store = TaskSessionStore(Path(str(meta["vault_root"])))
         store.transition_operation(
@@ -327,7 +357,28 @@ def transition_broker_review(
             degradation=degradation,
         )
     except (TaskSessionError, OSError) as exc:
-        print(f"review task-session transition failed visibly: {exc}", file=sys.stderr)
+        command = shlex.join([
+            sys.executable,
+            str(SCRIPT_DIR / "task_sessions.py"),
+            "--vault-root",
+            str(meta["vault_root"]),
+            "fail-operation",
+            "--project-id",
+            str(meta["project_id"]),
+            "--task-id",
+            str(meta["task_id"]),
+            "--lane-id",
+            str(meta["lane_id"]),
+            "--operation-id",
+            str(meta["operation_id"]),
+        ])
+        print(
+            f"review task-session transition failed visibly: {exc}; "
+            f"exact coordinator recovery: {command}",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 def start_next_broker_review(worktree: Path) -> None:

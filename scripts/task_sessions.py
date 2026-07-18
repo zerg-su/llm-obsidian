@@ -543,11 +543,26 @@ class TaskSessionStore:
             operation = read_object(operation_path)
             current_status = str(operation.get("status") or "")
             if current_status in {"complete", "failed"}:
-                if current_status == status:
-                    return operation
-                raise TaskSessionError(
-                    f"terminal operation cannot transition from {current_status} to {status}"
-                )
+                if current_status != status:
+                    raise TaskSessionError(
+                        f"terminal operation cannot transition from {current_status} to {status}"
+                    )
+                # Recover an interrupted two-file terminal transition. The
+                # operation record is written before lane.json; process loss
+                # between those writes must not leave the exact terminal
+                # operation holding the lane forever. Never touch a lane that
+                # has already advanced to a different operation.
+                if lane.get("active_operation_id") == operation_id:
+                    if checkpoint is not None:
+                        lane["checkpoint"] = validate_checkpoint(
+                            checkpoint, str(lane.get("runtime") or "")
+                        )
+                    lane["status"] = "failed" if status == "failed" else "idle"
+                    lane["active_operation_id"] = None
+                    lane.pop("surface", None)
+                    lane["updated_at"] = utc_now()
+                    atomic_write(lane_path, lane)
+                return operation
             if lane.get("active_operation_id") != operation_id:
                 raise TaskSessionError("only the lane's active operation may transition")
             now = utc_now()
@@ -780,6 +795,17 @@ def main() -> int:
     list_operations.add_argument("--project-id", required=True)
     list_operations.add_argument("--task-id", required=True)
     list_operations.add_argument("--domain", choices=sorted(DOMAINS), default="")
+    fail_operation = sub.add_parser(
+        "fail-operation",
+        help="release one exact active operation after a confirmed launcher/runtime failure",
+    )
+    fail_operation.add_argument("--project-id", required=True)
+    fail_operation.add_argument("--task-id", required=True)
+    fail_operation.add_argument("--lane-id", required=True)
+    fail_operation.add_argument("--operation-id", required=True)
+    fail_operation.add_argument(
+        "--reason", default="coordinator-confirmed operation recovery"
+    )
     args = parser.parse_args()
     try:
         if args.command == "capabilities":
@@ -865,6 +891,25 @@ def main() -> int:
             print(json.dumps(store.list_operations(
                 args.project_id, args.task_id, domain=args.domain
             ), ensure_ascii=False, sort_keys=True))
+            return 0
+        if args.command == "fail-operation":
+            operation = store.transition_operation(
+                args.project_id,
+                args.task_id,
+                args.lane_id,
+                args.operation_id,
+                "failed",
+                degradation=str(args.reason)[:300],
+            )
+            lane = store.lane_state(args.project_id, args.task_id, args.lane_id)
+            queue = lane.get("queue")
+            next_operation_id = queue[0] if isinstance(queue, list) and queue else None
+            print(json.dumps({
+                "operation_id": operation["operation_id"],
+                "status": operation["status"],
+                "lane_status": lane["status"],
+                "next_operation_id": next_operation_id,
+            }, ensure_ascii=False, sort_keys=True))
             return 0
         print(json.dumps(store.archive_task(args.project_id, args.task_id), sort_keys=True))
         return 0

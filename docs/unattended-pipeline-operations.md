@@ -33,6 +33,14 @@ off a live `cmux list-pane-surfaces` re-scan, so a stale surface record fails
 loudly (`cmux send`/`notify` returns `not_found`) instead of silently
 targeting the wrong pane.
 
+A claimed broker operation is not left busy when review/research preparation
+or anchored split launch fails: the launcher transitions its exact operation
+to `failed` before returning the error. If the provider surface has already
+closed and the terminal broker write fails, reviewer lifecycle preserves its
+close sentinel for an idempotent `after-exit` retry; protected-research
+`status` retries the equivalent pending transition. Neither path reports the
+same active operation as queued.
+
 ## Supervisor / spec flow
 
 Neither `/dispatch` nor `/review-dispatch` hand a long inline shell command to
@@ -173,7 +181,7 @@ swallow a blocking finding.
 
 `cmux_surface_lifecycle.py` is the only code path allowed to send `/exit` or
 call `cmux close-surface`, and only when `surface_policy.auto_close` is `true`
-in a `version: 2` `.task-meta.json`. Before arming task-surface close it
+in an unattended v2/v3 `.task-meta.json`. Before arming task-surface close it
 requires, in order:
 
 1. No unresolved `.task-needs-attention.json` (see below).
@@ -227,6 +235,12 @@ clearing before a fresh line).
   category, reason, question.
 - `cat .task-close-armed.json` / `.review-close-armed.json` (if present) —
   close is armed and waiting for the agent process to exit.
+- `python3 scripts/task_sessions.py --vault-root <vault> fail-operation
+  --project-id <uuid> --task-id <uuid> --lane-id <lane-id> --operation-id
+  <uuid>` — coordinator-confirmed last resort when an automatic launch or
+  post-close transition could not persist. It releases only that exact active
+  operation, is idempotent after `failed`, and never guesses or starts the next
+  FIFO entry.
 - `git status --short` inside the worktree — anything outside
   `.task-*`/`.review-*`/`.wiki-*` here is what blocks auto-close and what
   `/reap-send` will ask about. Tracked `.vault-meta/` files are intentionally

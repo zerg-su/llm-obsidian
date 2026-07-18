@@ -84,6 +84,13 @@ cannot overwrite each other's metadata, baseline, relay, or result. One
 `review_id` is the operation ID; every initial/verify round has a distinct
 `run_id`.
 
+After a v3 operation is claimed, any preparation, anchored-spawn, registry, or
+send failure before the supervisor starts marks that exact operation `failed`
+before the error returns. Retrying an already-active operation reports its
+identity and an exact `task_sessions.py fail-operation` recovery command; it
+must never be reported as ordinary queued work. Use that command only after
+the coordinator confirms the recorded launcher/surface is gone.
+
 The split receives only a short `scripts/cmux_agent_supervisor.py` command;
 validated argv/env live in `.review-agent-command.json`, so cmux cannot truncate
 a long shell wrapper. For v2 unattended tasks, the supervisor also runs
@@ -235,6 +242,9 @@ never allowed to treat its own `wiki/` as the coordinator archive target.
 For unattended tasks `finish` then arms a surface-bound sentinel, queues `/exit`, and
 lets the launch wrapper call `cmux close-surface` only after the agent process
 actually returns. If `/exit` is ignored or close fails, the surface stays open.
+If the surface closes but the broker terminal transition fails, the exact
+sentinel remains for an idempotent `cmux_surface_lifecycle.py after-exit`
+retry and the error prints the exact `fail-operation` fallback.
 Interactive/legacy tasks keep the old exit-without-close behavior.
 
 ## Review Contract

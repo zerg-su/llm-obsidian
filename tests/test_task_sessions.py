@@ -250,6 +250,143 @@ with tempfile.TemporaryDirectory() as raw:
     passed += 1
     store.transition_operation(project, task, review_lane, second_id, "complete")
 
+    recovery_task = str(uuid.uuid4())
+    store.create_task(project, recovery_task, worktree=repo)
+    recovery_first = store.enqueue_operation(
+        project, recovery_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-recovery",
+    )
+    recovery_second = store.enqueue_operation(
+        project, recovery_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-recovery",
+    )
+    recovery_lane = str(recovery_first["lane_id"])
+    store.claim_next(
+        project, recovery_task, recovery_lane, str(recovery_first["operation_id"])
+    )
+    recovered = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "task_sessions.py"),
+            "--vault-root",
+            str(vault),
+            "fail-operation",
+            "--project-id",
+            project,
+            "--task-id",
+            recovery_task,
+            "--lane-id",
+            recovery_lane,
+            "--operation-id",
+            str(recovery_first["operation_id"]),
+            "--reason",
+            "launcher failed",
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    recovered_value = json.loads(recovered.stdout)
+    recovered_lane = store.lane_state(project, recovery_task, recovery_lane)
+    check(
+        "exact fail-operation releases only the claimed operation",
+        recovered_value["status"] == "failed"
+        and recovered_value["next_operation_id"] == recovery_second["operation_id"]
+        and recovered_lane["active_operation_id"] is None
+        and recovered_lane["queue"] == [recovery_second["operation_id"]],
+    )
+    recovered_again = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "task_sessions.py"),
+            "--vault-root",
+            str(vault),
+            "fail-operation",
+            "--project-id",
+            project,
+            "--task-id",
+            recovery_task,
+            "--lane-id",
+            recovery_lane,
+            "--operation-id",
+            str(recovery_first["operation_id"]),
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    check("exact fail-operation retry is idempotent", json.loads(recovered_again.stdout)["status"] == "failed")
+    claimed_recovery_second = store.claim_next(
+        project, recovery_task, recovery_lane, str(recovery_second["operation_id"])
+    )
+    check(
+        "released lane accepts the next queued operation",
+        claimed_recovery_second is not None
+        and claimed_recovery_second["operation_id"] == recovery_second["operation_id"],
+    )
+    store.transition_operation(
+        project, recovery_task, recovery_lane, str(recovery_second["operation_id"]), "complete"
+    )
+
+    interrupted_transition_task = str(uuid.uuid4())
+    store.create_task(project, interrupted_transition_task, worktree=repo)
+    interrupted_operation = store.enqueue_operation(
+        project, interrupted_transition_task, domain="review", runtime="codex",
+        model="gpt-test", effort="high", operation_type="review",
+        coordinator_surface="surface-interrupted",
+    )
+    interrupted_lane = str(interrupted_operation["lane_id"])
+    store.claim_next(
+        project, interrupted_transition_task, interrupted_lane,
+        str(interrupted_operation["operation_id"]),
+    )
+    real_atomic_write = task_sessions_module.atomic_write
+    failed_terminal_lane_write = False
+
+    def fail_terminal_lane_write(path: Path, value: dict[str, object]) -> None:
+        global failed_terminal_lane_write
+        if (
+            path.name == "lane.json"
+            and value.get("active_operation_id") is None
+            and not failed_terminal_lane_write
+        ):
+            failed_terminal_lane_write = True
+            raise OSError("injected terminal lane write failure")
+        real_atomic_write(path, value)
+
+    task_sessions_module.atomic_write = fail_terminal_lane_write
+    try:
+        try:
+            store.transition_operation(
+                project, interrupted_transition_task, interrupted_lane,
+                str(interrupted_operation["operation_id"]), "complete",
+            )
+        except OSError:
+            pass
+        else:
+            raise AssertionError("injected terminal lane write failure was accepted")
+    finally:
+        task_sessions_module.atomic_write = real_atomic_write
+    interrupted_before_retry = store.lane_state(
+        project, interrupted_transition_task, interrupted_lane
+    )
+    check(
+        "interrupted terminal transition preserves exact active identity",
+        interrupted_before_retry["active_operation_id"] == interrupted_operation["operation_id"],
+    )
+    store.transition_operation(
+        project, interrupted_transition_task, interrupted_lane,
+        str(interrupted_operation["operation_id"]), "complete",
+    )
+    interrupted_after_retry = store.lane_state(
+        project, interrupted_transition_task, interrupted_lane
+    )
+    check(
+        "terminal transition retry repairs the lane",
+        interrupted_after_retry["active_operation_id"] is None
+        and interrupted_after_retry["status"] == "idle",
+    )
+
     concurrent_id = str(uuid.uuid4())
     values: list[str] = []
     errors: list[Exception] = []

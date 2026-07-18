@@ -168,6 +168,58 @@ def die(message: str, code: int = 1) -> NoReturn:
     raise SystemExit(code)
 
 
+def operation_recovery_command(
+    vault: Path,
+    project_id: str,
+    task_id: str,
+    lane_id: str,
+    operation_id: str,
+) -> str:
+    return shlex.join([
+        sys.executable,
+        str(vault / "scripts" / "task_sessions.py"),
+        "--vault-root",
+        str(vault),
+        "fail-operation",
+        "--project-id",
+        project_id,
+        "--task-id",
+        task_id,
+        "--lane-id",
+        lane_id,
+        "--operation-id",
+        operation_id,
+    ])
+
+
+def fail_claimed_review_operation(
+    store: TaskSessionStore,
+    vault: Path,
+    project_id: str,
+    task_id: str,
+    lane_id: str,
+    operation_id: str,
+) -> None:
+    try:
+        store.transition_operation(
+            project_id,
+            task_id,
+            lane_id,
+            operation_id,
+            "failed",
+            degradation="review launcher failed before supervisor start",
+        )
+    except (TaskSessionError, OSError) as exc:
+        command = operation_recovery_command(
+            vault, project_id, task_id, lane_id, operation_id
+        )
+        print(
+            "review-dispatch: claimed operation could not be released; "
+            f"coordinator recovery required: {command} ({exc})",
+            file=sys.stderr,
+        )
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1225,6 +1277,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     state_dir = worktree
     lane_id = ""
     store: TaskSessionStore | None = None
+    claimed_identity: tuple[str, str, str, str] | None = None
     checkpoint: dict[str, str] | None = None
     if meta.get("version", 1) == 3:
         try:
@@ -1244,86 +1297,115 @@ def cmd_start(ns: argparse.Namespace) -> int:
             die(f"cannot create review operation: {exc}")
         state_dir = Path(str(operation["operation_dir"])).resolve()
         set_review_state_dir(state_dir)
-        launch_argv = [
-            "python3", str(Path(__file__).resolve()), "start", "--worktree", str(worktree),
-            "--vault-root", str(vault), "--operation-id", review_id,
-            "--reviewer-runtime", reviewer_runtime, "--model", reviewer_model,
-            "--mode", review_mode,
-        ]
-        if reviewer_effort:
-            launch_argv.extend(["--effort", reviewer_effort])
-        if ns.coordinator_review:
-            launch_argv.append("--coordinator-review")
-        write_json(state_dir / "launch.json", {"schema_version": 1, "argv": launch_argv})
         if claimed is None or claimed.get("operation_id") != review_id:
+            lane = store.lane_state(str(meta["project_id"]), str(meta["task_id"]), lane_id)
+            if lane.get("active_operation_id") == review_id:
+                command = operation_recovery_command(
+                    vault,
+                    str(meta["project_id"]),
+                    str(meta["task_id"]),
+                    lane_id,
+                    review_id,
+                )
+                die(
+                    "review operation is already claimed or active; inspect its exact surface/status. "
+                    f"If its launcher is gone, recover only this operation with: {command}"
+                )
+            if operation.get("status") in {"complete", "failed"}:
+                die(
+                    f"review operation is already terminal ({operation.get('status')}); "
+                    "start a new operation id instead of reporting it as queued"
+                )
+            queue = lane.get("queue")
+            if not isinstance(queue, list) or review_id not in queue:
+                die("review operation is neither active nor queued; exact registry recovery is required")
             print(f"review queued on busy lane: {review_id}")
             print(f"review operation: {state_dir}")
             return 0
-        lane = store.lane_state(str(meta["project_id"]), str(meta["task_id"]), lane_id)
-        raw_checkpoint = lane.get("checkpoint")
-        if raw_checkpoint is not None:
-            try:
-                checkpoint = validate_checkpoint(raw_checkpoint, reviewer_runtime)
-            except TaskSessionError:
-                print("review-dispatch: stored checkpoint is invalid; continuing with a fresh visible reviewer", file=sys.stderr)
-    ensure_review_cycle_can_start(worktree)
-    review_runtime_dir = (
-        prepare_review_runtime(
-            worktree, vault, task_name, review_id, ns.no_spawn,
-            persistent_dir=(state_dir.parents[1] / "runtime") if state_dir != worktree else None,
+        claimed_identity = (
+            str(meta["project_id"]), str(meta["task_id"]), lane_id, review_id
         )
-        if reviewer_runtime == "codex" or state_dir != worktree
-        else None
-    )
-    executor_callback = callback_command(vault, worktree, state_dir)
-    submission_command = submit_command(
-        vault, worktree, reviewer_runtime, review_runtime_dir, state_dir
-    )
+        try:
+            launch_argv = [
+                "python3", str(Path(__file__).resolve()), "start", "--worktree", str(worktree),
+                "--vault-root", str(vault), "--operation-id", review_id,
+                "--reviewer-runtime", reviewer_runtime, "--model", reviewer_model,
+                "--mode", review_mode,
+            ]
+            if reviewer_effort:
+                launch_argv.extend(["--effort", reviewer_effort])
+            if ns.coordinator_review:
+                launch_argv.append("--coordinator-review")
+            write_json(state_dir / "launch.json", {"schema_version": 1, "argv": launch_argv})
+            lane = store.lane_state(str(meta["project_id"]), str(meta["task_id"]), lane_id)
+            raw_checkpoint = lane.get("checkpoint")
+            if raw_checkpoint is not None:
+                try:
+                    checkpoint = validate_checkpoint(raw_checkpoint, reviewer_runtime)
+                except TaskSessionError:
+                    print("review-dispatch: stored checkpoint is invalid; continuing with a fresh visible reviewer", file=sys.stderr)
+        except BaseException:
+            fail_claimed_review_operation(store, vault, *claimed_identity)
+            raise
+    try:
+        ensure_review_cycle_can_start(worktree)
+        review_runtime_dir = (
+            prepare_review_runtime(
+                worktree, vault, task_name, review_id, ns.no_spawn,
+                persistent_dir=(state_dir.parents[1] / "runtime") if state_dir != worktree else None,
+            )
+            if reviewer_runtime == "codex" or state_dir != worktree
+            else None
+        )
+        executor_callback = callback_command(vault, worktree, state_dir)
+        submission_command = submit_command(
+            vault, worktree, reviewer_runtime, review_runtime_dir, state_dir
+        )
 
-    reset_review_round_artifacts(worktree)
-    ensure_excludes(worktree)
-    review_file(worktree, ".review-relay.json").unlink(missing_ok=True)
-    review_file(worktree, ".task-review-skill").write_text(review_skill + "\n", encoding="utf-8")
-    review_file(worktree, ".task-review-send-skill").write_text(review_send_skill + "\n", encoding="utf-8")
-    write_baseline(worktree)
-    prompt = render_review_prompt(
-        worktree,
-        vault,
-        meta,
-        task_name,
-        "initial-review",
-        output_json_file,
-        run_id,
-        submission_command,
-        review_send_skill,
-        executor_callback,
-        review_mode,
-        reviewer_runtime,
-        review_runtime_dir,
-    )
-    review_file(worktree, prompt_file).write_text(prompt, encoding="utf-8")
+        reset_review_round_artifacts(worktree)
+        ensure_excludes(worktree)
+        review_file(worktree, ".review-relay.json").unlink(missing_ok=True)
+        review_file(worktree, ".task-review-skill").write_text(review_skill + "\n", encoding="utf-8")
+        review_file(worktree, ".task-review-send-skill").write_text(review_send_skill + "\n", encoding="utf-8")
+        write_baseline(worktree)
+        prompt = render_review_prompt(
+            worktree,
+            vault,
+            meta,
+            task_name,
+            "initial-review",
+            output_json_file,
+            run_id,
+            submission_command,
+            review_send_skill,
+            executor_callback,
+            review_mode,
+            reviewer_runtime,
+            review_runtime_dir,
+        )
+        review_file(worktree, prompt_file).write_text(prompt, encoding="utf-8")
 
-    review_surface, review_ref, cmux_output = spawn_cmux_split(ns.no_spawn, executor_surface)
-    review_file(worktree, ".review-cmux-surface").write_text(review_surface + "\n", encoding="utf-8")
-    command = launch_command(
-        worktree,
-        vault,
-        reviewer_runtime,
-        reviewer_model,
-        env["codex_home"],
-        env["profile"],
-        prompt_file,
-        review_surface,
-        reviewer_effort,
-        review_runtime_dir,
-        state_dir,
-        checkpoint,
-        submission_command,
-        base_branch,
-    )
+        review_surface, review_ref, cmux_output = spawn_cmux_split(ns.no_spawn, executor_surface)
+        review_file(worktree, ".review-cmux-surface").write_text(review_surface + "\n", encoding="utf-8")
+        command = launch_command(
+            worktree,
+            vault,
+            reviewer_runtime,
+            reviewer_model,
+            env["codex_home"],
+            env["profile"],
+            prompt_file,
+            review_surface,
+            reviewer_effort,
+            review_runtime_dir,
+            state_dir,
+            checkpoint,
+            submission_command,
+            base_branch,
+        )
 
-    started_at = utc_now()
-    review_meta = {
+        started_at = utc_now()
+        review_meta = {
         "version": 5,
         "review_id": review_id,
         "run_id": run_id,
@@ -1373,22 +1455,26 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "cmux_output": cmux_output,
         "command": command,
         "status": "prepared",
-    }
-    write_json(review_file(worktree, ".review-meta.json"), review_meta)
-    initialize_review_history(worktree, review_id, task_name, meta, review_mode)
+        }
+        write_json(review_file(worktree, ".review-meta.json"), review_meta)
+        initialize_review_history(worktree, review_id, task_name, meta, review_mode)
 
-    if ns.no_spawn:
-        print(command)
-        if state_dir != worktree:
-            print(f"review operation: {state_dir}")
-        return 0
+        if ns.no_spawn:
+            print(command)
+            if state_dir != worktree:
+                print(f"review operation: {state_dir}")
+            return 0
 
-    send_to_surface(review_surface, command)
-    if store is not None:
-        store.transition_operation(
-            str(meta["project_id"]), str(meta["task_id"]), lane_id, review_id,
-            "running", surface=review_surface,
-        )
+        if store is not None:
+            store.transition_operation(
+                str(meta["project_id"]), str(meta["task_id"]), lane_id, review_id,
+                "running", surface=review_surface,
+            )
+        send_to_surface(review_surface, command)
+    except BaseException:
+        if store is not None and claimed_identity is not None:
+            fail_claimed_review_operation(store, vault, *claimed_identity)
+        raise
     review_meta["status"] = "spawned"
     review_meta["updated_at"] = utc_now()
     write_json(review_file(worktree, ".review-meta.json"), review_meta)
