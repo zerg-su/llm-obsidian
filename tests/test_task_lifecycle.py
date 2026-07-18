@@ -468,6 +468,31 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
             for item in agent_spec["env"]["PATH"].split(os.pathsep)
         ),
     )
+    wrapper_root = worktree / "cmux-cli-shims" / meta["task_surface"]
+    wrapper_root.mkdir(parents=True)
+    wrapper = wrapper_root / "claude"
+    wrapper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    wrapper.chmod(0o700)
+    wrapper_env = {
+        "CMUX_CLAUDE_WRAPPER_SHIM": str(wrapper),
+        "CMUX_CLAUDE_WRAPPER_SHIM_ROOT": str(wrapper_root),
+        "CMUX_SURFACE_ID": meta["task_surface"],
+    }
+    check(
+        "supervisor accepts only the live surface Claude wrapper",
+        supervisor_module.trusted_claude_wrapper(meta["task_surface"], wrapper_env)
+        == wrapper.resolve()
+        and supervisor_module.trusted_claude_wrapper(
+            "22222222-2222-2222-2222-222222222222", wrapper_env
+        )
+        is None,
+    )
+    wrapper.chmod(0o722)
+    check(
+        "supervisor rejects writable Claude wrapper",
+        supervisor_module.trusted_claude_wrapper(meta["task_surface"], wrapper_env) is None,
+    )
+    wrapper.chmod(0o700)
     host_brew = shutil.which("brew")
     check(
         "supervisor preserves Homebrew command when installed",

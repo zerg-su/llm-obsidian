@@ -261,6 +261,41 @@ def runtime_directory_is_stable(directory: Path) -> bool:
     return "cmux-cli-shims" not in directory.parts
 
 
+def trusted_claude_wrapper(surface: str, env: dict[str, str] | None = None) -> Path | None:
+    """Return cmux's ephemeral Claude wrapper only for this exact live surface.
+
+    The wrapper stays out of durable command specs, but using the surface-bound
+    copy at execution time lets cmux publish Claude's native session checkpoint.
+    A missing or mismatched wrapper falls back to the already validated PATH.
+    """
+    values = os.environ if env is None else env
+    raw = str(values.get("CMUX_CLAUDE_WRAPPER_SHIM") or "").strip()
+    raw_root = str(values.get("CMUX_CLAUDE_WRAPPER_SHIM_ROOT") or "").strip()
+    bound_surface = str(values.get("CMUX_SURFACE_ID") or "").strip()
+    if not raw or not raw_root or bound_surface != surface:
+        return None
+    candidate = Path(raw).expanduser()
+    root = Path(raw_root).expanduser()
+    try:
+        candidate = candidate.resolve()
+        root = root.resolve()
+        stat = candidate.stat()
+    except OSError:
+        return None
+    if (
+        candidate.name != "claude"
+        or candidate.parent != root
+        or root.name != surface
+        or "cmux-cli-shims" not in root.parts
+        or not candidate.is_file()
+        or not os.access(candidate, os.X_OK)
+        or stat.st_uid != os.getuid()
+        or stat.st_mode & 0o022
+    ):
+        return None
+    return candidate
+
+
 def validate_trusted_runtime_path(raw: str, runtime: str) -> None:
     entries = raw.split(os.pathsep) if raw else []
     if not entries or len(entries) > 128 or len(entries) != len(set(entries)):
@@ -965,6 +1000,10 @@ def run_agent(
     prompt_root = state_dir if kind == "reviewer" else worktree
     prompt = (prompt_root / spec["prompt_file"]).read_text(encoding="utf-8")
     argv = [*spec["argv"], prompt]
+    if spec["runtime"] == "claude":
+        wrapper = trusted_claude_wrapper(surface)
+        if wrapper is not None:
+            argv[0] = str(wrapper)
     env = os.environ.copy()
     env.update(spec["env"])
     watchdog: subprocess.Popen[bytes] | None = None
