@@ -266,10 +266,14 @@ def agent_argv(runtime: str, sandbox: Path, model: str, effort: str, prompt: str
     env["LLM_OBSIDIAN_WORKTREES"] = str(sandbox / ".vault-meta" / "acceptance-worktrees")
     env["DCG_CONFIG"] = str(sandbox / "config" / "dcg" / "task.toml")
     if runtime == "claude":
-        return ["claude", "--permission-mode", "auto", "--model", model, "--effort", effort, prompt], env
+        return [
+            "claude", "--permission-mode", "auto", "--add-dir", str(sandbox),
+            "--model", model, "--effort", effort, prompt,
+        ], env
     socket = validated_cmux_socket_path()
     argv = [
         "codex", "--cd", str(sandbox), "-a", "never", "-s", "workspace-write",
+        "--disable", "hooks",
         "--model", model,
     ]
     for value in task_codex_config_values(socket, effort):
@@ -306,7 +310,8 @@ def run_agent_process(spec_path: Path) -> int:
         raise AcceptanceRunnerError("acceptance route drifted after preparation")
     argv, env = agent_argv(runtime, sandbox, route["model"], route["effort"], prompt_path.read_text(encoding="utf-8"))
     try:
-        return subprocess.run(argv, cwd=sandbox, env=env, check=False).returncode
+        launch_cwd = run_dir if runtime == "claude" else sandbox
+        return subprocess.run(argv, cwd=launch_cwd, env=env, check=False).returncode
     finally:
         atomic_json(run_dir / "agent-exit.json", {"schema_version": 1, "finished": True})
 
@@ -456,6 +461,14 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
         except TaskSessionError as exc:
             raise AcceptanceRunnerError(str(exc)) from exc
         surface = created["surface"]
+        spec.update(
+            {
+                "surface": surface,
+                "surface_ref": created.get("surface_ref") or "",
+                "status": "running",
+            }
+        )
+        atomic_json(spec_path, spec)
         command = shlex.join([sys.executable, str(Path(__file__).resolve()), "agent", "--spec", str(spec_path)])
         send_surface(surface, command)
         raw = wait_for_outbox(
@@ -482,6 +495,9 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any]) -> dict[str, Any]:
                 result["cleanup"] = f"{result['cleanup']}; {proof}; {cleanup}"[:600]
         else:
             result["cleanup"] = f"{result['cleanup']}; diagnostic clone retained; exact surface closed"[:600]
+        spec["status"] = "complete" if result["verdict"] in {"pass", "n-a"} else "blocked"
+        spec["verdict"] = result["verdict"]
+        atomic_json(spec_path, spec)
         return result
     except BaseException:
         if surface:

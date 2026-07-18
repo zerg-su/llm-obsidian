@@ -128,6 +128,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     clean, reason = module.sandbox_cleanup_proof(repo, commit)
     check("independent cleanup proof catches product drift", not clean and "changes" in reason)
 
+    claude_argv, _ = module.agent_argv("claude", repo, "fixture-model", "high", "prompt")
+    check("Claude acceptance runs outside project hooks", "--add-dir" in claude_argv and str(repo) in claude_argv)
+    module.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
+    codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
+    check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
+
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
 check(
