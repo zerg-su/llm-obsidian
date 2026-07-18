@@ -107,6 +107,7 @@ printf '# stale verify\n' > "$LIGHT/.task-review-verify.md"
 expect_eq "start-light-exit" "$?" 0
 [[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify survived"
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
+expect_eq "start-supervised-receive" "$(json_get "$LIGHT/.review-meta.json" callback_transport)" "supervised-receive-v1"
 expect_eq "start-review-id-stable" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$(json_get "$LIGHT/.review-meta.json" run_id)"
 [[ -f "$LIGHT/.review-history.json" ]] && ok "start-review-history" || bad "start-review-history" "history file missing"
 python3 - "$LIGHT/.review-history.json" <<'PY'
@@ -475,6 +476,60 @@ assert matches[0]["counts"]["action_interactive"] == 1
 PY
 [[ $? -eq 0 ]] && ok "review-callback-telemetry" || bad "review-callback-telemetry" "typed lifecycle event missing"
 
+python3 - "$SCRIPT" "$LIGHT" <<'PY'
+import contextlib, importlib.util, io, json, pathlib, sys
+from types import SimpleNamespace
+
+spec = importlib.util.spec_from_file_location("review_drive_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2])
+meta_path = worktree / ".review-meta.json"
+original = meta_path.read_text(encoding="utf-8")
+calls = []
+
+module.configure_existing_review_state = lambda _ns, root, _meta: root
+module.cmd_finish = lambda ns: calls.append(("finish", ns.operation_dir)) or 0
+module.cmd_verify = lambda ns: calls.append(("verify", ns.operation_dir)) or 0
+
+try:
+    meta = json.loads(original)
+    meta.update(status="review_received", recommended_action="approve")
+    meta_path.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert module.cmd_drive(SimpleNamespace(
+            worktree=str(worktree), operation_dir="", apply_action=True
+        )) == 0
+    assert calls == [("finish", str(worktree.resolve()))]
+
+    calls.clear()
+    meta["recommended_action"] = "resolve"
+    meta_path.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    (worktree / ".task-review-resolution.md").write_text("# Applied\n", encoding="utf-8")
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert module.cmd_drive(SimpleNamespace(
+            worktree=str(worktree), operation_dir="", apply_action=True
+        )) == 0
+    assert calls == [("verify", str(worktree.resolve()))]
+
+    calls.clear()
+    meta["recommended_action"] = "escalate"
+    meta_path.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    try:
+        module.cmd_drive(SimpleNamespace(
+            worktree=str(worktree), operation_dir="", apply_action=True
+        ))
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("escalation was automatically applied")
+    assert not calls
+finally:
+    meta_path.write_text(original, encoding="utf-8")
+    (worktree / ".task-review-resolution.md").unlink(missing_ok=True)
+PY
+[[ $? -eq 0 ]] && ok "review-drive-safe-actions" || bad "review-drive-safe-actions" "drive did not preserve approve/resolve/escalate boundaries"
+
 LEGACY="$SANDBOX/legacy-payload"
 write_fixture "$LEGACY"
 "$SCRIPT" start --light --no-spawn --worktree "$LEGACY" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/legacy-start.err"
@@ -524,18 +579,17 @@ def fail_send(*_):
     raise SystemExit(1)
 
 module.send_to_surface = fail_send
-try:
-    module.cmd_submit(SimpleNamespace(
-        worktree=str(worktree), input_file=str(outbox), no_send=False
-    ))
-except SystemExit:
-    pass
-else:
-    raise AssertionError("send failure did not propagate")
-assert outbox.is_file()
-assert (worktree / module.REVIEW_CALLBACK_FILE).is_file()
+assert module.cmd_submit(SimpleNamespace(
+    worktree=str(worktree), input_file=str(outbox), no_send=False
+)) == 0
+assert not outbox.exists()
+assert not (worktree / module.REVIEW_CALLBACK_FILE).exists()
+received = json.loads((worktree / ".review-meta.json").read_text(encoding="utf-8"))
+assert received["status"] == "review_received"
+assert received["recommended_action"] == "interactive"
+assert (worktree / ".task-review.json").is_file()
 PY
-[[ $? -eq 0 ]] && ok "failed-send-retains-retry-state" || bad "failed-send-retains-retry-state" "outbox/relay were lost"
+[[ $? -eq 0 ]] && ok "failed-notify-keeps-received-state" || bad "failed-notify-keeps-received-state" "durable receive was retried after a UI-only notification failure"
 python3 - "$SEND_SCRIPT" <<'PY'
 import importlib.util
 import subprocess

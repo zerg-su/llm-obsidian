@@ -31,23 +31,25 @@ owner-only lane runtime; the prompt supplies the exact operation paths for:
    - Claude: Write only `.review-outbox.json` with the Write tool.
    - Codex: atomically publish the JSON in the isolated scratch outbox named by
      the prompt.
-   - For both runtimes, the trusted supervisor invokes the submission command;
-     the reviewer never receives an operation-specific callback permission.
+   - For both runtimes, the trusted supervisor invokes submission and the
+     deterministic operation-scoped receive; the reviewer never receives an
+     operation-specific callback permission.
 
 3. The script validates schema/run/mode and blocks if any non-handoff file
    changed since the executor captured the review baseline. A valid outbox is
-   removed after callback. If blocked, report and do not callback.
+   removed after durable receive. If blocked, report and do not callback.
 4. If validation passes, the script atomically writes the canonical object to
-   the exact operation-scoped `.review-callback.json` and sends only that file reference
-   to the executor. The callback remains bounded even for a large review.
+   the exact operation-scoped `.review-callback.json`, receives and renders it,
+   then sends the executor only an already-received notification. A failed UI
+   notification does not undo or retry the durable transition.
 
 The reviewer session stays open after callback. Do not exit yourself: the
 executor may send verify, then `review-dispatch finish` arms and closes an
 approved unattended reviewer surface after process return.
 
-The executor validates the relay again, removes it after successful receipt,
-writes canonical `.task-review*.json`, and deterministically renders
-`.task-review*.md`. Legacy compressed callbacks remain receive-only compatible.
+The trusted receive writes canonical `.task-review*.json` and deterministically
+renders `.task-review*.md`. Legacy compressed callbacks and in-flight metadata
+without the supervised receive transport remain receive-only compatible.
 
 ## Do Not
 

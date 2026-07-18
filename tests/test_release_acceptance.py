@@ -52,6 +52,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     result = run("--spec", str(stale), "check")
     check("stale skill rejected", result.returncode == 3 and "coverage mismatch" in result.stderr)
 
+    scenarios = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
+    missing_scenario = tmp / "missing-scenario.json"
+    missing_scenario_data = json.loads(json.dumps(scenarios))
+    missing_scenario_data["scenarios"].pop(next(iter(missing_scenario_data["scenarios"])))
+    missing_scenario.write_text(json.dumps(missing_scenario_data), encoding="utf-8")
+    result = run("--scenarios", str(missing_scenario), "check")
+    check("missing scenario rejected", result.returncode == 3 and "scenario coverage mismatch" in result.stderr)
+
     runner = tmp / "runner.py"
     runner.write_text(
         "import json,sys\n"

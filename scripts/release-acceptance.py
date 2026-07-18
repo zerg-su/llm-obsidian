@@ -18,6 +18,7 @@ from lib_sanitize import residual_credential_kinds, sanitize
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPEC = ROOT / "evals" / "acceptance" / "skills.json"
+DEFAULT_SCENARIOS = ROOT / "evals" / "acceptance" / "scenarios.json"
 RUNTIMES = ("claude", "codex")
 PHASES = ("baseline", "final")
 VERDICTS = {"pass", "fail", "blocked", "n-a"}
@@ -64,6 +65,19 @@ def load_spec(path: Path, root: Path) -> dict[str, dict[str, str]]:
         stale = ", ".join(sorted(declared - discovered)) or "none"
         raise AcceptanceError(f"skill coverage mismatch; missing={missing}; stale={stale}")
     return skills
+
+
+def validate_scenario_coverage(path: Path, skills: dict[str, dict[str, str]]) -> None:
+    raw = read_object(path)
+    scenarios = raw.get("scenarios")
+    if raw.get("schema_version") != 1 or not isinstance(scenarios, dict):
+        raise AcceptanceError("acceptance scenarios must use schema_version 1")
+    declared = set(scenarios)
+    used = {item["scenario"] for item in skills.values()}
+    if declared != used:
+        missing = ", ".join(sorted(used - declared)) or "none"
+        stale = ", ".join(sorted(declared - used)) or "none"
+        raise AcceptanceError(f"scenario coverage mismatch; missing={missing}; stale={stale}")
 
 
 def matrix_rows(skills: dict[str, dict[str, str]], phase: str) -> list[dict[str, Any]]:
@@ -186,6 +200,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
+    parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check")
     matrix = sub.add_parser("matrix")
@@ -199,6 +214,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         skills = load_spec(args.spec, args.root.resolve())
+        validate_scenario_coverage(args.scenarios, skills)
         if args.command == "check":
             print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
             return 0

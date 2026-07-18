@@ -121,8 +121,8 @@ exact generated, owner-only, empty, gitignored location. Reviewers write typed J
 to the scratch `.review-outbox.json`. Codex reviewer launches also disable hooks for
 that session so user/project lifecycle hooks cannot mutate the vault from review context.
 For both runtimes, the trusted supervisor—not the reviewer—polls that exact outbox, runs the schema
-and baseline validator, forwards the callback through cmux, and removes the
-outbox. Neither reviewer therefore receives cmux-socket access while
+and baseline validator, performs the operation-scoped receive, notifies the
+executor, and removes the outbox. Neither reviewer therefore receives cmux-socket access while
 still being able to run diagnostics that need temporary files.
 Claude may also run the exact `bash scripts/dcg-test-suite.sh` DCG policy
 smoke; this does not grant a wildcard script permission.
@@ -143,10 +143,14 @@ reviewer for a concise status or verdict instead of blindly cancelling.
 
 ### Receive
 
-Use when the reviewer split calls back after `$<plugin>:review-send` or
-`/review-send`.
+The normal v2.1 callback is received before the executor notification arrives:
+the trusted supervisor validates the outbox and runs the exact operation-scoped
+`receive` transition itself. The executor must not run `receive` again.
 
-1. The normal callback contains only a short reference to the validated relay:
+1. New operations receive a short notification naming the rendered review and
+   `recommended_action`. For legacy/in-flight operations whose metadata lacks
+   `callback_transport: supervised-receive-v1`, the callback still contains a
+   short reference to the validated relay:
 
    ```bash
    python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py receive \
@@ -189,7 +193,16 @@ Use when the reviewer split calls back after `$<plugin>:review-send` or
    - If there is nothing to commit because the implementation was already
      committed, record `Commit: no changes` in the final summary.
 7. Interactive tasks show the combined result and wait. For unattended tasks,
-   an `approve` callback is sufficient to run `finish` and continue.
+   after the required self-review/commit or resolution, apply the mechanical
+   transition with:
+
+   ```bash
+   python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py drive \
+     --worktree <worktree> --operation-dir <exact-operation> --apply-action
+   ```
+
+   `approve` finishes the reviewer; `resolve` requires a non-empty resolution
+   and reuses the same reviewer; `escalate` always stops visibly.
 8. Never auto-resolve a blocking/scope escalation.
 
 ### Verify
@@ -218,7 +231,8 @@ changes apply only at a new start/resume boundary, never in-band.
 
 ### Finish
 
-After interactive approval, or immediately after unattended approve:
+`drive --apply-action` is the normal unattended entry point after executor
+self-review. Direct `finish` remains the explicit interactive/diagnostic form:
 
 ```bash
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py finish

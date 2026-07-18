@@ -27,7 +27,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check retrieval-experiment test-release-acceptance test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -36,6 +36,7 @@ help:
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"
 	@echo "  make acceptance-check  Validate dynamic release skill/runtime coverage"
+	@echo "  make acceptance-live   Run the repo-shipped interactive Claude/Codex acceptance matrix"
 	@echo "  make retrieval-experiment compare contextual/reranker flags without enabling"
 	@echo "  make test-research-isolation protected fetch/synthesis boundary tests"
 	@echo "  make test-document-normalize hermetic document routing/cache/fallback tests"
@@ -75,7 +76,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -91,9 +92,16 @@ eval-regression: eval-smoke bench-retrieval
 acceptance-check:
 	@python3 scripts/release-acceptance.py check
 
+acceptance-live:
+	@python3 scripts/release-acceptance.py run --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --timeout "$${ACCEPTANCE_CELL_TIMEOUT:-3700}" --report .vault-meta/acceptance/latest-live.json
+
 test-release-acceptance:
 	@echo "=== test_release_acceptance.py ==="
 	@python3 tests/test_release_acceptance.py
+
+test-live-acceptance-runner:
+	@echo "=== test_live_acceptance_runner.py ==="
+	@python3 tests/test_live_acceptance_runner.py
 
 retrieval-experiment:
 	@python3 scripts/retrieval-experiment.py

@@ -20,3 +20,12 @@ basic/hermetic, and Windows remains unsupported.
 Checkpoints are local provider/session identifiers. They are not exported,
 synced between machines, or reconstructed after registry loss. Failure remains
 visible and falls back to a fresh full-packet session in the exact lane.
+
+## Live acceptance duration
+
+The full Claude/Codex skill matrix now has a repo-shipped interactive runner,
+but it is intentionally sequential and uncached: each cell preserves its own
+first-failure and cleanup evidence. A complete release pass is therefore
+expensive. Parallel scheduling may be added only with isolated disposable
+clones and independent exact cmux surfaces; a shared mutable fixture or cached
+model verdict would weaken the acceptance contract.

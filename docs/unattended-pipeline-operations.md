@@ -159,7 +159,11 @@ The reviewer never talks back over free-form chat or invokes cmux. It writes a
 JSON object with `verdict` (`approve` /
 `changes-requested` / `blocked`) and a `findings` array of `{severity,
 title, ...}` to its isolated `.review-outbox.json`; the trusted supervisor
-submits and validates it through `spawn_review.py receive`/`submit`. `scripts/task_contract.py
+validates it, runs the deterministic `spawn_review.py receive` transition
+directly, removes the outbox only after success, and sends the executor a short
+already-received notification. A notification failure does not retry or undo
+the durable receive; the exact operation remains discoverable as
+`callback-ready`. `scripts/task_contract.py
 review-action` is the single decision function the executor calls with that
 payload plus the current verify iteration:
 
@@ -173,6 +177,13 @@ payload plus the current verify iteration:
   reviewer via `verify`, which reuses `.review-cmux-surface` rather than
   spawning a new split).
 - Otherwise → `escalate`.
+
+After the executor performs the required semantic self-review, commit, or
+warning/nit resolution, `spawn_review.py drive --apply-action` applies the
+mechanical next transition. It maps `approve` to `finish`, maps a non-empty
+resolution to same-session `verify`, and refuses `escalate` or unknown states.
+Callback parsing and lifecycle transitions are code-owned while substantive
+fixes and security/scope decisions remain agent-owned.
 
 `review_policy.escalate_severities` is contract-locked to exactly
 `["blocking"]` — an unattended task cannot configure itself to silently

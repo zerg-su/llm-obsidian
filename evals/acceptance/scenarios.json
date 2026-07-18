@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "scenarios": {
+    "agenda-carry": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Use disposable dated journal fixtures. Exercise preview, carry, idempotent rerun, and transactional cleanup without touching the source checkout."
+    },
+    "protected-web": {
+      "timeout_seconds": 1200,
+      "network": "protected",
+      "instructions": "Use one bounded public documentation URL. Exercise the protected fetch boundary and, where the named skill requires it, networkless synthesis. Never use credentials or submit external writes."
+    },
+    "vault-capture": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Create uniquely named disposable vault content through the canonical writer, verify provenance and deduplication, then remove or transactionally close every fixture."
+    },
+    "obsidian-authoring": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Create one uniquely named disposable artifact for the named skill, validate its Obsidian syntax and links, then remove the artifact without changing unrelated pages."
+    },
+    "conversation-readonly": {
+      "timeout_seconds": 600,
+      "network": "none",
+      "instructions": "Run one small realistic interaction for the named skill. Confirm the response contract and prove that the repository and vault remain unchanged."
+    },
+    "cmux-lifecycle": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Use a nested disposable cmux surface. Verify exact-surface save/exit behavior without closing or repurposing the acceptance-agent surface."
+    },
+    "daily-summary": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Generate bounded disposable session/git evidence, run the runtime-specific daily path, verify grounded replacement and idempotency, then clean the dated fixture."
+    },
+    "dispatch-review-reap": {
+      "timeout_seconds": 1800,
+      "network": "none",
+      "instructions": "Use a tiny disposable script change and nested task worktree. Exercise the named lifecycle skill with exact task/operation identity, typed handoff, and complete cleanup. Never push or publish."
+    },
+    "retrieval": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Use a tiny disposable corpus. Verify ranked retrieval and the explicitly degraded sparse fallback without relying on the source vault's private content."
+    },
+    "unsafe-web": {
+      "timeout_seconds": 900,
+      "network": "direct-readonly",
+      "instructions": "Use one bounded public documentation URL, acknowledge the unsafe single-context warning exactly once, perform no external write, and verify that no second model session was opened."
+    },
+    "vault-maintenance": {
+      "timeout_seconds": 900,
+      "network": "none",
+      "instructions": "Create a minimal disposable maintenance fixture, exercise preview and commit/diagnostic behavior for the named skill, verify determinism, then clean it completely."
+    },
+    "ingest": {
+      "timeout_seconds": 1200,
+      "network": "protected",
+      "instructions": "Ingest one local text fixture and one bounded public documentation URL through the protected path, verify provenance/deduplication, then remove all disposable pages and raw artifacts."
+    }
+  }
+}

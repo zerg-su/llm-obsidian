@@ -18,6 +18,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   fallback, per-lane FIFO, and task-scoped reap cleanup.
 - Added task-meta v3, namespaced review operations, multi-review archive links,
   active-broker upgrade blocking, and macOS cmux capability preflight.
+- Added a repo-shipped interactive live-acceptance runner with an exact
+  skill/runtime scenario registry, disposable committed-HEAD clones, typed
+  evidence, exact-surface cleanup, and a single `make acceptance-live` gate.
 
 ### Changed
 
@@ -29,6 +32,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Protected research retains context only inside the exact task and isolation
   domain. Each operation still receives fresh scratch; runtime homes are
   removed only after the task is archived by final reap.
+- Trusted review submission now receives and renders callbacks before notifying
+  the executor. `review-dispatch drive --apply-action` owns safe approve/verify
+  transitions while semantic fixes and escalations remain agent decisions.
 
 ### Fixed
 
@@ -38,6 +44,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Reviewer exit now closes only the exact armed surface after process return;
   crash/checkpoint loss is visible and releases the lane instead of leaving a
   permanent busy state.
+- Resumed reviewers no longer depend on a newly operation-scoped callback
+  permission, and a failed UI notification no longer retries an already durable
+  callback transition.
 
 ## [2.0.9] - 2026-07-18
 

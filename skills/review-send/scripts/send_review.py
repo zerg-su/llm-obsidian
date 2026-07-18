@@ -68,6 +68,7 @@ HANDOFF_EXCLUDES = [
 ]
 CMUX_PASTE_SETTLE_SECONDS = 0.2
 REVIEW_CALLBACK_FILE = ".review-callback.json"
+SUPERVISED_RECEIVE_TRANSPORT = "supervised-receive-v1"
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -176,6 +177,34 @@ def send_to_surface(surface: str, text: str) -> None:
         die((enter.stdout + "\n" + enter.stderr).strip() or "cmux send-key failed")
 
 
+def receive_callback(
+    worktree: Path, state_dir: Path, relay_path: Path
+) -> tuple[str, Path]:
+    """Run the deterministic receive half in the trusted supervisor process."""
+    script = VAULT_ROOT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
+    argv = [
+        sys.executable,
+        str(script),
+        "receive",
+        "--worktree",
+        str(worktree),
+    ]
+    if state_dir != worktree:
+        argv.extend(["--operation-dir", str(state_dir)])
+    argv.extend(["--relay-file", str(relay_path)])
+    received = run(argv, cwd=worktree)
+    if received.returncode != 0:
+        die(
+            (received.stdout + "\n" + received.stderr).strip()
+            or "trusted review receive failed",
+            3,
+        )
+    current = read_json(state_dir / ".review-meta.json")
+    action = str(current.get("recommended_action") or "unknown")
+    output = state_dir / str(current.get("output_file") or ".task-review.md")
+    return action, output
+
+
 def cmd_send(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     state_dir = resolve_state_dir(worktree, getattr(ns, "state_dir", ""))
@@ -278,10 +307,42 @@ def cmd_submit(ns: argparse.Namespace) -> int:
             input_path.unlink(missing_ok=True)
         print(message)
         return 0
-    send_to_surface(surface, message)
+    if meta.get("callback_transport") == SUPERVISED_RECEIVE_TRANSPORT:
+        action, output = receive_callback(worktree, state_dir, relay_path)
+        drive_argv = [
+            sys.executable,
+            str(VAULT_ROOT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"),
+            "drive",
+            "--worktree",
+            str(worktree),
+        ]
+        if state_dir != worktree:
+            drive_argv.extend(["--operation-dir", str(state_dir)])
+        drive_argv.append("--apply-action")
+        message = (
+            "Cross-model review callback was validated and received automatically by the trusted "
+            f"supervisor. Review: {output}. Recommended action: {action}. "
+            "Continue the Review Gate without running receive again. After the required executor "
+            f"self-review or resolution, run this exact command: {shlex.join(drive_argv)}"
+        )
+    try:
+        send_to_surface(surface, message)
+    except SystemExit:
+        if meta.get("callback_transport") != SUPERVISED_RECEIVE_TRANSPORT:
+            raise
+        # The durable callback was already received and classified. A failed
+        # UI notification must not make the relay retry the same completed
+        # transition forever; the executor can discover it from operation state.
+        print(
+            "review callback was received, but the executor surface notification failed",
+            file=sys.stderr,
+        )
     if input_path is not None:
         input_path.unlink(missing_ok=True)
-    print(f"submitted typed review callback to executor surface: {surface}")
+    if meta.get("callback_transport") == SUPERVISED_RECEIVE_TRANSPORT:
+        print(f"received and notified typed review callback on executor surface: {surface}")
+    else:
+        print(f"submitted typed review callback to executor surface: {surface}")
     return 0
 
 

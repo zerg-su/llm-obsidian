@@ -1429,6 +1429,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "review_mode": review_mode,
         "archive_mode": "coordinator" if ns.coordinator_review else "reap",
         "executor_callback_command": executor_callback,
+        "callback_transport": "supervised-receive-v1",
         "phase": "initial-review",
         "iteration": 1,
         "prompt_file": prompt_file,
@@ -1716,6 +1717,54 @@ def cmd_status(ns: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_drive(ns: argparse.Namespace) -> int:
+    """Apply only the deterministic next transition after a received review."""
+    worktree = Path(ns.worktree).expanduser().resolve()
+    task_meta = read_json(worktree / ".task-meta.json")
+    state_dir = configure_existing_review_state(ns, worktree, task_meta)
+    review_meta = read_json(review_file(worktree, ".review-meta.json"))
+    if review_meta.get("status") != "review_received":
+        die("review-dispatch drive requires a received callback")
+    action = str(review_meta.get("recommended_action") or "")
+    payload = {
+        "schema_version": 1,
+        "operation_dir": str(state_dir),
+        "action": action,
+        "applied": False,
+    }
+    if not ns.apply_action:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 0
+    if action == "approve":
+        finish_ns = argparse.Namespace(
+            worktree=str(worktree), operation_dir=str(state_dir), no_send=False
+        )
+        cmd_finish(finish_ns)
+        payload["applied"] = True
+        payload["transition"] = "finish"
+    elif action == "resolve":
+        resolution = review_file(worktree, ".task-review-resolution.md")
+        if not resolution.is_file() or not resolution.read_text(encoding="utf-8").strip():
+            die("resolve action requires a non-empty .task-review-resolution.md")
+        verify_ns = argparse.Namespace(
+            worktree=str(worktree),
+            operation_dir=str(state_dir),
+            vault_root="",
+            task_name="",
+            review_send_skill="",
+            no_send=False,
+        )
+        cmd_verify(verify_ns)
+        payload["applied"] = True
+        payload["transition"] = "verify"
+    elif action == "escalate":
+        die("review action requires coordinator escalation; drive will not guess", 2)
+    else:
+        die(f"review action {action or 'unknown'} is not automatically applicable")
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def cmd_archive(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
     task_meta = read_json(worktree / ".task-meta.json")
@@ -1878,6 +1927,16 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--worktree", default=".", help="task worktree path")
     status.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
     status.set_defaults(func=cmd_status)
+
+    drive = sub.add_parser("drive", help="apply the deterministic next review-gate transition")
+    drive.add_argument("--worktree", default=".", help="task worktree path")
+    drive.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    drive.add_argument(
+        "--apply-action",
+        action="store_true",
+        help="finish approve or verify a resolved warning/nit; never applies escalations",
+    )
+    drive.set_defaults(func=cmd_drive)
 
     archive = sub.add_parser("archive", help="archive validated review history into the coordinator wiki")
     archive.add_argument("--worktree", default=".", help="reviewed task worktree path")
