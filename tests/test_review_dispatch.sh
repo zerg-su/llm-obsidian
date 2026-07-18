@@ -130,6 +130,8 @@ PY
 argv_has "$LIGHT_SPEC" --tools Read,Glob,Grep,Write,Bash && ok "claude-tool-surface" || bad "claude-tool-surface" "restricted tools missing"
 grep -q -- "Bash(python3 \*send_review.py submit \*)" "$LIGHT_SPEC" && ok "claude-callback-allowed" || bad "claude-callback-allowed" "typed callback allow rule missing"
 grep -qF -- 'Bash(python3 tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-python-tests-allowed" || bad "claude-python-tests-allowed" "bounded Python test rule missing"
+grep -qF -- 'Bash(python3 */tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-v3-absolute-python-tests-allowed" || bad "claude-v3-absolute-python-tests-allowed" "bounded absolute Python test rule missing"
+grep -qF -- 'Bash(bash */tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-v3-absolute-shell-tests-allowed" || bad "claude-v3-absolute-shell-tests-allowed" "bounded absolute shell test rule missing"
 grep -qF -- 'Bash(bash tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-shell-tests-allowed" || bad "claude-shell-tests-allowed" "bounded shell test rule missing"
 grep -qF -- 'Bash(bash scripts/dcg-test-suite.sh)' "$LIGHT_SPEC" && ok "claude-dcg-smoke-allowed" || bad "claude-dcg-smoke-allowed" "exact DCG smoke rule missing"
 grep -qF -- '`bash scripts/dcg-test-suite.sh`' "$LIGHT/.review-prompt.md" && ok "claude-dcg-smoke-advertised" || bad "claude-dcg-smoke-advertised" "DCG smoke command missing from prompt"

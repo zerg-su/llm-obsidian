@@ -69,9 +69,16 @@ CLAUDE_REVIEW_ALLOWED_TOOLS = (
     # still match. The prompt therefore requires the exact no-argument form.
     "Bash(python3 tests/test_*.py)",
     "Bash(bash tests/test_*.sh)",
+    # v3 reviewers execute from their isolated writable runtime root and read
+    # the product through --add-dir, so their prompt uses an absolute product
+    # path for the same bounded test entrypoints.
+    "Bash(python3 */tests/test_*.py)",
+    "Bash(bash */tests/test_*.sh)",
     "Bash(python3 scripts/lint-instructions.py)",
+    "Bash(python3 */scripts/lint-instructions.py)",
     "Bash(python3 scripts/document-normalize.py check *)",
     "Bash(bash scripts/dcg-test-suite.sh)",
+    "Bash(bash */scripts/dcg-test-suite.sh)",
     "Bash(make test)",
     "Bash(cmux --help)",
     "Bash(cmux notify --help)",
