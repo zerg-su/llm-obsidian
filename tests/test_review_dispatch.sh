@@ -688,6 +688,12 @@ write_fixture "$SAME_MODEL_BAD"
 expect_eq "same-model-conflict-rejected" "$?" 1
 grep -q -- '--same-model cannot be combined' "$SANDBOX/same-model-bad.err" && ok "same-model-conflict-message" || bad "same-model-conflict-message" "conflict not explained"
 
+CROSS_PROVIDER="$SANDBOX/cross-provider-review"
+write_fixture "$CROSS_PROVIDER"
+"$SCRIPT" start --reviewer-runtime codex --model fable --no-spawn --worktree "$CROSS_PROVIDER" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/cross-provider.err"
+expect_eq "cross-provider-model-rejected" "$?" 1
+grep -q -- "registered for claude, not codex" "$SANDBOX/cross-provider.err" && ok "cross-provider-model-message" || bad "cross-provider-model-message" "provider mismatch not explained"
+
 "$SCRIPT" start --no-spawn --worktree "$CODEX_REVIEW" --vault-root "$REPO_ROOT" >"$SANDBOX/codex.out" 2>"$SANDBOX/codex.err"
 expect_eq "codex-review-start" "$?" 0
 CODEX_SPEC="$CODEX_REVIEW/.review-agent-command.json"

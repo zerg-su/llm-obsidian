@@ -130,6 +130,29 @@ def load_config(root: Path | str = ROOT) -> RoutingConfig:
     return RoutingConfig(root, data, hashlib.sha256(canonical.encode()).hexdigest(), local)
 
 
+def load_tracked_config(root: Path | str = ROOT) -> RoutingConfig:
+    """Load only the release-owned defaults, ignoring any local override."""
+    root = Path(root).expanduser().resolve()
+    data = _read_toml(root / TRACKED_CONFIG)
+    _validate(data)
+    canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return RoutingConfig(root, data, hashlib.sha256(canonical.encode()).hexdigest(), False)
+
+
+def validate_local_config(root: Path | str, text: str) -> RoutingConfig:
+    """Validate prospective local TOML without installing it."""
+    root = Path(root).expanduser().resolve()
+    tracked = _read_toml(root / TRACKED_CONFIG)
+    try:
+        overlay = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise RoutingError(f"invalid prospective {LOCAL_CONFIG}: {exc}") from exc
+    data = _merge(tracked, overlay)
+    _validate(data)
+    canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return RoutingConfig(root, data, hashlib.sha256(canonical.encode()).hexdigest(), True)
+
+
 def session_from_meta(meta: dict[str, Any]) -> dict[str, str] | None:
     routing = meta.get("routing")
     candidate: Any = routing.get("session") if isinstance(routing, dict) else None
@@ -148,7 +171,11 @@ def session_from_meta(meta: dict[str, Any]) -> dict[str, str] | None:
     if runtime not in RUNTIMES or not model or not effort:
         raise RoutingError("session routing requires runtime, model, and effort")
     validate_effort(runtime, effort)
-    return {"runtime": runtime, "model": model, "effort": effort}
+    result = {"runtime": runtime, "model": model, "effort": effort}
+    source = str(candidate.get("source") or "")
+    if source:
+        result["source"] = source
+    return result
 
 
 def resolve(
@@ -172,22 +199,33 @@ def resolve(
         raise RoutingError("explicit runtime must be codex or claude")
 
     source: list[str] = []
+    session_source = str(session.get("source") or "") if session else ""
+
+    def inherit_session() -> dict[str, str]:
+        if session is None:  # pragma: no cover - guarded by callers below
+            raise RoutingError(f"{role} routing requires a captured current session")
+        if session_source == "tracked-default":
+            raise RoutingError(
+                f"{role} routing requires a host-confirmed current session route; "
+                "the SessionStart snapshot contains only the tracked default"
+            )
+        source.append(f"session:{session_source}" if session_source else "session")
+        return dict(session)
+
     if role == "review" and not same_model:
         base_runtime = "claude" if session and session["runtime"] == "codex" else "codex"
         base = config.runtime_default(base_runtime)
         source.append("opposite-runtime-default")
     elif role == "protected-research":
         if session and session["runtime"] == "codex":
-            base = dict(session)
-            source.append("session")
+            base = inherit_session()
         else:
             base = config.runtime_default("codex")
             source.append("tracked-default")
     elif role in {"dispatch", "daily", "unsafe-research", "deep"} or (role == "review" and same_model):
         if session is None:
             raise RoutingError(f"{role} routing requires a captured current session")
-        base = dict(session)
-        source.append("session")
+        base = inherit_session()
     else:  # pragma: no cover
         raise RoutingError(f"unhandled routing role: {role}")
 

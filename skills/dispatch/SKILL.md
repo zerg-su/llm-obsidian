@@ -133,9 +133,9 @@ Before echo-confirm, refresh the current session snapshot with
 `model_routing.py capture-session`, then resolve `dispatch` for
 `$(./scripts/current-session-id.sh)`. Codex reads only model fields from that
 exact local session record; other hosts provide them through hook/env fields.
-If unavailable, capture host-visible values; never guess. Store session and
-effective results in `.task-meta.json.routing` and pass explicit overrides to
-the resolver so `source` records them.
+If unavailable, capture host-visible values; never guess. Store the session's
+discovery `source` with session/effective results in `.task-meta.json.routing`,
+and pass explicit overrides to the resolver so its `source` records them.
 ### 1.3 Resolve the branch
 
 - An existing branch was named → `git -C <repo> branch --list <branch>` to verify. Not local — `git -C <repo> branch -a --list "*<branch>*"` to check remotes. Not anywhere — ask.
@@ -362,7 +362,7 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "review_send_skill": "<review_send_skill>",
   "routing": {
     "schema_version": 1,
-    "session": {"runtime": "<current>", "model": "<current>", "effort": "<current>"},
+    "session": {"runtime": "<current>", "model": "<current>", "effort": "<current>", "source": "<runtime-environment|codex-session-log|host-field>"},
     "effective": {"runtime": "<resolved>", "model": "<resolved>", "effort": "<resolved>", "source": ["session"], "config_sha256": "<sha256>"}
   },
   "model": "<explicit override only, otherwise omit>",

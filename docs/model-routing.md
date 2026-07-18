@@ -35,6 +35,13 @@ until restart. When the host explicitly changes the active model or effort,
 recapture the same session id; only later children see the new route and already
 running children remain unchanged.
 
+The snapshot records how the route was discovered. A host-confirmed route is
+required for dispatch, daily, unsafe research, deep work, same-model review, and
+Codex-origin protected research. If a host exposes no current model metadata,
+SessionStart reports `session-routing` degradation and stores only a visibly
+labelled `tracked-default` snapshot; exact-inheritance roles then fail closed
+until the host-visible route is captured.
+
 ```bash
 python3 scripts/model_routing.py capture-session \
   --session-id "$(./scripts/current-session-id.sh)" \
@@ -65,14 +72,16 @@ central config:
 python3 scripts/model_routing.py sync-native --apply
 ```
 
-Before overlaying a release, run:
+Overlay the v2.0.9 files while no agent sessions are running, then run the new
+gate before starting a replacement session:
 
 ```bash
 python3 scripts/upgrade-preflight.py
 ```
 
-The upgrade gate refuses active task/reviewer sessions. Restart those sessions
-after the overlay. A customized legacy `.codex/dispatch-env.toml` model route is
+The upgrade gate refuses active task/reviewer sessions and unfinished protected
+research runs. Restart them after the overlay. Stock v2.0.8 reviewer defaults
+need no migration. A customized legacy `.codex/dispatch-env.toml` model route is
 migrated only after explicit confirmation:
 
 ```bash

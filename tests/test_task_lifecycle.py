@@ -59,6 +59,22 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     worktree = Path(raw)
+    try:
+        supervisor_module.resolved_task_model_route(
+            ROOT, {"model": "fable", "effort": "high"}, "codex"
+        )
+    except supervisor_module.SupervisorError:
+        check("legacy task model/provider mismatch fails early", True)
+    else:
+        check("legacy task model/provider mismatch fails early", False)
+    try:
+        supervisor_module.resolved_task_model_route(
+            ROOT, {"model": "gpt-5.6-sol", "effort": "ultra"}, "codex"
+        )
+    except supervisor_module.SupervisorError:
+        check("legacy task effort validation fails early", True)
+    else:
+        check("legacy task effort validation fails early", False)
     check("watchdog atomic tmp keeps handoff prefix", watchdog_module.atomic_tmp_path(worktree / ".task-watchdog.json").name.startswith(".task-"))
     check("supervisor atomic tmp keeps handoff prefix", supervisor_module.atomic_tmp_path(worktree / ".review-agent-command.json").name.startswith(".review-"))
     check(

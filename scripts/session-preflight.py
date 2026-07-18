@@ -10,15 +10,16 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from model_routing import RoutingError, capture_session, load_config, routing_from_environment, sync_native
+if sys.version_info >= (3, 11):
+    from model_routing import RoutingError, capture_session, load_config, routing_from_environment, sync_native
 
 
-def probe(command: list[str], *, seconds: float = 2.0) -> subprocess.CompletedProcess[str] | None:
+def probe(command: list[str], *, seconds: float = 2.0) -> Optional[subprocess.CompletedProcess[str]]:
     try:
         return subprocess.run(command, text=True, capture_output=True, timeout=seconds, check=False)
     except (OSError, subprocess.TimeoutExpired):
@@ -36,6 +37,17 @@ def run_preflight(root: Path, *, session_id: str, runtime: str, model: str, effo
     if session_id and session_id != "unknown":
         capture_session(config, session_id, **route, source=route_source)
 
+    if route_source == "tracked-default":
+        issues.append({
+            "id": "session-routing",
+            "severity": "required",
+            "repair": (
+                "python3 scripts/model_routing.py capture-session --session-id "
+                "\"$(./scripts/current-session-id.sh)\" --runtime <codex|claude> "
+                "--model <host-visible-model> --effort <host-visible-effort>"
+            ),
+        })
+
     if sys.version_info < (3, 11):
         issues.append({"id": "python", "severity": "required", "repair": "brew install python@3.14"})
     for binary, repair in (
@@ -46,7 +58,10 @@ def run_preflight(root: Path, *, session_id: str, runtime: str, model: str, effo
         if shutil.which(binary) is None:
             issues.append({"id": binary, "severity": "required" if binary != "cmux" else "feature", "repair": repair})
 
-    drift = sync_native(config, apply=False)
+    try:
+        drift = sync_native(config, apply=False)
+    except RoutingError:
+        drift = ["unreadable-native-config"]
     if drift:
         issues.append({"id": "routing-drift", "severity": "required", "repair": "python3 scripts/model_routing.py sync-native --apply"})
 
@@ -67,6 +82,7 @@ def run_preflight(root: Path, *, session_id: str, runtime: str, model: str, effo
 
     return {
         "schema_version": 1,
+        "interpreter": {"executable": sys.executable, "version": ".".join(map(str, sys.version_info[:3]))},
         "status": "ready" if not issues else "degraded",
         "routing": {**route, "source": route_source, "config_sha256": config.fingerprint, "local_override": config.local_override},
         "issues": issues,
@@ -95,10 +111,25 @@ def main() -> int:
     parser.add_argument("--effort", default="")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if sys.version_info < (3, 11):
+        payload = {
+            "schema_version": 1,
+            "status": "degraded",
+            "interpreter": {"executable": sys.executable, "version": ".".join(map(str, sys.version_info[:3]))},
+            "routing": {
+                "runtime": args.runtime or "unknown", "model": args.model or "unknown",
+                "effort": args.effort or "unknown", "source": "unavailable", "local_override": False,
+            },
+            "issues": [{"id": "python", "severity": "required", "repair": "brew install python@3.14"}],
+            "retrieval": "sparse-fallback",
+            "blocking": False,
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True) if args.json else render(payload))
+        return 0
     try:
         payload = run_preflight(args.root.resolve(), session_id=args.session_id, runtime=args.runtime, model=args.model, effort=args.effort)
     except RoutingError as exc:
-        payload = {"schema_version": 1, "status": "degraded", "routing": {"runtime": args.runtime or "unknown", "model": args.model or "unknown", "effort": args.effort or "unknown", "source": "error", "local_override": False}, "issues": [{"id": "routing", "severity": "required", "repair": "python3 scripts/model_routing.py check"}], "retrieval": "sparse-fallback", "blocking": False, "error": type(exc).__name__}
+        payload = {"schema_version": 1, "status": "degraded", "interpreter": {"executable": sys.executable, "version": ".".join(map(str, sys.version_info[:3]))}, "routing": {"runtime": args.runtime or "unknown", "model": args.model or "unknown", "effort": args.effort or "unknown", "source": "error", "local_override": False}, "issues": [{"id": "routing", "severity": "required", "repair": "python3 scripts/model_routing.py check"}], "retrieval": "sparse-fallback", "blocking": False, "error": type(exc).__name__}
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True) if args.json else render(payload))
     return 0
 

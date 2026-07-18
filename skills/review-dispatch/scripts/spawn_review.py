@@ -1087,6 +1087,19 @@ def cmd_start(ns: argparse.Namespace) -> int:
     review_mode = normalize_review_mode(selected_mode)
     reviewer_model = ns.model or env["reviewer_model"]
     reviewer_effort = ns.effort or env["reviewer_effort"]
+    if ns.model:
+        config_root = worktree if (worktree / "config/model-routing.toml").is_file() else vault
+        if not (config_root / "config/model-routing.toml").is_file():
+            config_root = DEFAULT_VAULT
+        try:
+            registry = load_routing_config(config_root).data["model_registry"]
+        except RoutingError as exc:
+            die(str(exc))
+        registered_runtime = registry.get(ns.model)
+        if registered_runtime is None and not ns.reviewer_runtime:
+            die("an unregistered --model requires explicit --reviewer-runtime")
+        if registered_runtime not in {None, reviewer_runtime}:
+            die(f"model {ns.model!r} is registered for {registered_runtime}, not {reviewer_runtime}")
     routing_source = json.loads(env.get("routing_source") or "[]")
     if ns.model:
         routing_source.append("cli-model")

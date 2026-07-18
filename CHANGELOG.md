@@ -29,9 +29,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Task and review metadata now record resolved model, effort, source, and config
   fingerprint. Same-model review is explicit and can override effort without
   changing model.
-- Overlay upgrades refuse active task/reviewer sessions and migrate customized
-  legacy reviewer routes only after explicit confirmation into a gitignored
-  local override.
+- Overlay upgrades refuse active task/reviewer/research sessions, ignore stock
+  v2.0.8 reviewer defaults, and migrate only customized legacy routes after
+  pre-install validation and explicit confirmation into a gitignored override.
 
 ### Fixed
 

@@ -30,11 +30,34 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     )
     check("preflight never blocks session", result.returncode == 0)
     payload = json.loads(result.stdout)
+    check("selected interpreter is visible", payload["interpreter"]["executable"] == sys.executable)
     check("effective route is visible", payload["routing"]["model"] == "gpt-5.6-sol" and payload["routing"]["source"] == "runtime-environment")
     check("retrieval degradation is explicit", payload["retrieval"] in {"hybrid", "sparse-fallback"})
     check("repairs are exact commands", all(item["repair"] for item in payload["issues"]))
     snapshot = ROOT / ".vault-meta/session-routing/test-session.json"
     check("session route snapshot created", snapshot.is_file())
     snapshot.unlink()
+
+    guessed_root = Path(raw) / "guessed"
+    (guessed_root / "config").mkdir(parents=True)
+    (guessed_root / "config/model-routing.toml").write_text(
+        (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    guessed_env = dict(env)
+    for key in (
+        "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "LLM_OBSIDIAN_SESSION_RUNTIME",
+        "LLM_OBSIDIAN_SESSION_MODEL", "LLM_OBSIDIAN_SESSION_EFFORT",
+    ):
+        guessed_env.pop(key, None)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(guessed_root), "--session-id", "claude-session", "--json"],
+        text=True, capture_output=True, env=guessed_env, check=False,
+    )
+    guessed_payload = json.loads(result.stdout)
+    guessed_snapshot = json.loads(
+        (guessed_root / ".vault-meta/session-routing/claude-session.json").read_text(encoding="utf-8")
+    )
+    check("Claude fallback snapshot is labelled", guessed_snapshot["source"] == "tracked-default")
+    check("unconfirmed session routing is visible", any(item["id"] == "session-routing" for item in guessed_payload["issues"]))
 
 print("session preflight tests passed")

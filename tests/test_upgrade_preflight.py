@@ -44,6 +44,35 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check("confirmed migration succeeds", result.returncode == 0)
     check("migration writes ignored-style local config", (root / "config/model-routing.local.toml").is_file())
 
+    (root / "config/model-routing.local.toml").unlink()
+    (root / ".codex/dispatch-env.toml").write_text(
+        '[codex_dispatch]\n'
+        'codex_review_model = "gpt-5.6-sol"\n'
+        'codex_review_effort = "high"\n'
+        'claude_review_model = "fable"\n'
+        'claude_review_effort = "high"\n',
+        encoding="utf-8",
+    )
+    result = run(root)
+    check("stock v2.0.8 routes need no migration", result.returncode == 0)
+    check("stock routes write no local override", not (root / "config/model-routing.local.toml").exists())
+
+    (root / ".codex/dispatch-env.toml").write_text(
+        '[codex_dispatch]\nclaude_review_model = "custom-claude"\nclaude_review_effort = "ultra"\n',
+        encoding="utf-8",
+    )
+    result = run(root, "--confirm-routing-migration", "--apply")
+    check("invalid migration fails before install", result.returncode == 3)
+    check("invalid migration leaves no local override", not (root / "config/model-routing.local.toml").exists())
+
+    (root / ".vault-meta/research-runs/11111111-1111-1111-1111-111111111111").mkdir(parents=True)
+    (root / ".vault-meta/research-runs/11111111-1111-1111-1111-111111111111/state.json").write_text(
+        json.dumps({"schema_version": 1, "status": "fetch_ready"}), encoding="utf-8"
+    )
+    result = run(root)
+    check("unfinished legacy research blocks upgrade", result.returncode == 4 and "research:" in result.stderr)
+    shutil.rmtree(root / ".vault-meta")
+
     (root / ".task-meta.json").write_text(json.dumps({"version": 1, "task_name": "active"}), encoding="utf-8")
     result = run(root)
     check("active task blocks upgrade", result.returncode == 4)

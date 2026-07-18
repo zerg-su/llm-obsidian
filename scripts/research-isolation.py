@@ -496,7 +496,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
         die("topic must not be empty", 3)
     try:
         routing_config = load_routing_config(ns.vault_root)
-        session, _session_source = routing_from_environment(routing_config)
+        session, session_source = routing_from_environment(routing_config)
+        session["source"] = session_source
         route = resolve_model_route(routing_config, "protected-research", session=session)
     except RoutingError as exc:
         die(f"model routing failed: {exc}", 3)

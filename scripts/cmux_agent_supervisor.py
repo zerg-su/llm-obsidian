@@ -471,8 +471,15 @@ def resolved_task_model_route(worktree: Path, meta: dict[str, Any], runtime: str
         # v1/v2 metadata created before the routing envelope treats concrete
         # fields as explicit overrides and otherwise uses the central default.
         default = config.runtime_default(runtime)
+        if explicit_model:
+            registered = config.data["model_registry"].get(explicit_model)
+            if registered not in {None, runtime}:
+                raise RoutingError("legacy task metadata model/provider mismatch")
         default["model"] = explicit_model or default["model"]
         default["effort"] = explicit_effort or default["effort"]
+        allowed_efforts = CODEX_EFFORTS if runtime == "codex" else CLAUDE_EFFORTS
+        if default["effort"] not in allowed_efforts:
+            raise RoutingError("legacy task metadata has invalid effort")
         default.update({"source": ["legacy-metadata" if explicit_model or explicit_effort else "tracked-default"], "config_sha256": config.fingerprint})
         return default
     except RoutingError as exc:

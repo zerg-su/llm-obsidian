@@ -71,6 +71,15 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     saved = routing.capture_session(config, "session-1", **codex, source="test")
     loaded = routing.load_session(config, "session-1")
     check("session snapshot round trip", loaded["config_sha256"] == saved["config_sha256"] and loaded["model"] == codex["model"])
+    route = routing.resolve(config, "dispatch", session=loaded)
+    check("session discovery source is preserved", route["source"][0] == "session:test")
+    guessed = dict(codex, source="tracked-default")
+    try:
+        routing.resolve(config, "dispatch", session=guessed)
+    except routing.RoutingError:
+        check("guessed session default fails exact inheritance", True)
+    else:
+        check("guessed session default fails exact inheritance", False)
     check("native configs initially synchronized", routing.sync_native(config, apply=False) == [])
     path = root / ".codex/profiles/default.toml"
     path.write_text(path.read_text().replace('model = "gpt-5.6-sol"', 'model = "drift"'), encoding="utf-8")

@@ -2,7 +2,7 @@
 type: meta
 title: "Getting Started"
 created: 2026-04-26
-updated: 2026-07-11
+updated: 2026-07-18
 tags:
   - meta
   - onboarding
@@ -15,6 +15,7 @@ related:
   - "[[Wiki Map]]"
 sessions:
   - public-template-v2
+  - 019f6ddd-d07e-7a30-b018-f6358753fb91
 ---
 
 # С чего начать в llm-obsidian
@@ -84,6 +85,7 @@ Claude читает hot cache, сканирует index, drill в релеван
 | `что ты знаешь про X?` | Запрашивает вики, цитирует страницы |
 | `/save` | Файлит текущий разговор как wiki-заметку |
 | `/autoresearch <тема>` | Ищет в вебе, ингестит результаты автономно |
+| `/unsafe-research <тема>` | Только по явному небезопасному запросу: веб-поиск в текущей сессии без изоляции |
 | `lint the wiki` | Health check — находит orphans, пробелы, stale links |
 | `update hot cache` | Обновляет саммари контекста сессии |
 

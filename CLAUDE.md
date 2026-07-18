@@ -3,7 +3,7 @@
 Этот репозиторий — одновременно Claude Code/Codex plugin и Obsidian-вольт. Открой каталог как вольт в Obsidian, работай с ним из Claude Code или Codex CLI, и вики будет расти по мере того как ты с чем-то сталкиваешься, что-то узнаёшь или планируешь.
 
 **Plugin name:** `llm-obsidian`
-**Skills:** `/wiki`, `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/save-plan`, `/close`, `/autoresearch`, `/canvas`, `/daily`, `/journal`, `/agenda`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/learn`, `/defuddle`, `/clarify`, `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (+ reference: obsidian-markdown, obsidian-bases)
+**Skills:** `/wiki`, `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/save-plan`, `/close`, `/autoresearch`, `/unsafe-research` (explicit request only), `/canvas`, `/daily`, `/journal`, `/agenda`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/learn`, `/defuddle`, `/clarify`, `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (+ reference: obsidian-markdown, obsidian-bases)
 **Vault path:** этот каталог (открывать в Obsidian напрямую)
 
 > Этот файл — шаблон. После установки перепиши разделы «Назначение» и «Источники» под себя: чем конкретнее описан твой use case, тем лучше ассистент работает с вольтом.

@@ -15,7 +15,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from model_routing import LOCAL_CONFIG, RoutingError, load_config
+from model_routing import (
+    LOCAL_CONFIG,
+    RoutingError,
+    load_tracked_config,
+    validate_local_config,
+)
 
 
 def worktrees(root: Path) -> list[Path]:
@@ -42,6 +47,14 @@ def active_sessions(root: Path) -> list[str]:
         review = read_object(tree / ".review-meta.json")
         if review and review.get("status") not in {"finish_sent", "finished", "archived"}:
             active.append(f"review:{tree.name}")
+    state_root = root / ".vault-meta/research-runs"
+    if state_root.is_dir():
+        for state_path in sorted(state_root.glob("*/state.json")):
+            state = read_object(state_path)
+            if not state or state.get("status") in {"complete", "fetch_rejected", "rejected"}:
+                continue
+            suffix = ":legacy-route" if not isinstance(state.get("routing"), dict) else ""
+            active.append(f"research:{state_path.parent.name}{suffix}")
     return sorted(set(active))
 
 
@@ -51,11 +64,19 @@ def legacy_routing(root: Path) -> dict[str, dict[str, str]]:
         data = tomllib.loads(path.read_text(encoding="utf-8")).get("codex_dispatch", {})
     except (OSError, tomllib.TOMLDecodeError):
         return {}
+    tracked = load_tracked_config(root)
     result: dict[str, dict[str, str]] = {}
     for runtime in ("codex", "claude"):
         model = data.get(f"{runtime}_review_model")
         effort = data.get(f"{runtime}_review_effort")
-        if isinstance(model, str) or isinstance(effort, str):
+        present: dict[str, str] = {}
+        if isinstance(model, str):
+            present["model"] = model
+        if isinstance(effort, str):
+            present["effort"] = effort
+        defaults = tracked.runtime_default(runtime)
+        customized = any(value != defaults[key] for key, value in present.items())
+        if present and customized:
             result[runtime] = {}
             if isinstance(model, str):
                 result[runtime]["model"] = model
@@ -106,15 +127,16 @@ def main() -> int:
             if target.exists():
                 print(f"upgrade-preflight: refusing to overwrite existing {LOCAL_CONFIG}", file=sys.stderr)
                 return 5
+            rendered = render_local(legacy)
+            validate_local_config(root, rendered)
             if args.apply:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(f"{target.name}.tmp.{os.getpid()}")
                 try:
-                    tmp.write_text(render_local(legacy), encoding="utf-8")
+                    tmp.write_text(rendered, encoding="utf-8")
                     os.replace(tmp, target)
                 finally:
                     tmp.unlink(missing_ok=True)
-                load_config(root)
         print(json.dumps({"status": "ready", "active_sessions": [], "legacy_routing": bool(legacy), "migration_applied": bool(legacy and args.apply)}, sort_keys=True))
         return 0
     except RoutingError as exc:
