@@ -55,6 +55,13 @@ def active_sessions(root: Path) -> list[str]:
                 continue
             suffix = ":legacy-route" if not isinstance(state.get("routing"), dict) else ""
             active.append(f"research:{state_path.parent.name}{suffix}")
+    broker_root = root / ".vault-meta/task-sessions/projects"
+    if broker_root.is_dir():
+        for task_path in sorted(broker_root.glob("*/tasks/*/task.json")):
+            task = read_object(task_path)
+            if not task or task.get("status") == "archived":
+                continue
+            active.append(f"broker-task:{task.get('task_id') or task_path.parent.name}")
     return sorted(set(active))
 
 

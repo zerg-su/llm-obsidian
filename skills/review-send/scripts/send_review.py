@@ -107,6 +107,18 @@ def write_callback(path: Path, data: dict[str, Any]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def resolve_state_dir(worktree: Path, raw: str) -> Path:
+    state_dir = Path(raw).expanduser().resolve() if raw else worktree
+    meta = read_json(state_dir / ".review-meta.json")
+    if Path(str(meta.get("worktree") or "")).expanduser().resolve() != worktree:
+        die("review state does not match the inspected worktree", 3)
+    if state_dir != worktree:
+        operation_dir = str(meta.get("operation_dir") or "")
+        if operation_dir != str(state_dir) or state_dir.is_symlink():
+            die("review state is not the exact broker operation directory", 3)
+    return state_dir
+
+
 def is_handoff(path: str) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in HANDOFF_EXCLUDES)
 
@@ -139,8 +151,8 @@ def current_state(worktree: Path) -> dict[str, str | None]:
     return files
 
 
-def changed_non_handoff(worktree: Path) -> list[str]:
-    baseline = read_json(worktree / ".review-baseline-state.json")
+def changed_non_handoff(worktree: Path, state_dir: Path) -> list[str]:
+    baseline = read_json(state_dir / ".review-baseline-state.json")
     before = baseline.get("files")
     if not isinstance(before, dict):
         die(".review-baseline-state.json has no files object")
@@ -166,13 +178,14 @@ def send_to_surface(surface: str, text: str) -> None:
 
 def cmd_send(ns: argparse.Namespace) -> int:
     worktree = Path(ns.worktree).expanduser().resolve()
-    meta = read_json(worktree / ".review-meta.json")
+    state_dir = resolve_state_dir(worktree, getattr(ns, "state_dir", ""))
+    meta = read_json(state_dir / ".review-meta.json")
     output_file = ns.output or str(meta.get("output_file") or ".task-review.md")
-    output_path = worktree / output_file
+    output_path = state_dir / output_file
     if not output_path.exists() or output_path.stat().st_size == 0:
         die(f"{output_file} is missing or empty; write the review before review-send")
 
-    changed = changed_non_handoff(worktree)
+    changed = changed_non_handoff(worktree, state_dir)
     if changed:
         report = (
             "# Review Send Blocked\n\n"
@@ -182,7 +195,7 @@ def cmd_send(ns: argparse.Namespace) -> int:
             + "\n".join(f"- {rel}" for rel in changed)
             + "\n"
         )
-        (worktree / ".review-send-blocked.md").write_text(report, encoding="utf-8")
+        (state_dir / ".review-send-blocked.md").write_text(report, encoding="utf-8")
         print(report, file=sys.stderr)
         return 2
 
@@ -197,7 +210,7 @@ def cmd_send(ns: argparse.Namespace) -> int:
         meta["status"] = "review_validated"
         meta["updated_at"] = utc_now()
         meta["sent_output_file"] = output_file
-        write_json(worktree / ".review-meta.json", meta)
+        write_json(state_dir / ".review-meta.json", meta)
         print(callback)
         return 0
 
@@ -205,7 +218,7 @@ def cmd_send(ns: argparse.Namespace) -> int:
     meta["status"] = "review_sent"
     meta["updated_at"] = utc_now()
     meta["sent_output_file"] = output_file
-    write_json(worktree / ".review-meta.json", meta)
+    write_json(state_dir / ".review-meta.json", meta)
     print(f"sent review callback to executor surface: {surface}")
     print(f"output: {output_path}")
     return 0
@@ -214,7 +227,8 @@ def cmd_send(ns: argparse.Namespace) -> int:
 def cmd_submit(ns: argparse.Namespace) -> int:
     """Validate a typed JSON payload and callback without product-file writes."""
     worktree = Path(ns.worktree).expanduser().resolve()
-    meta = read_json(worktree / ".review-meta.json")
+    state_dir = resolve_state_dir(worktree, getattr(ns, "state_dir", ""))
+    meta = read_json(state_dir / ".review-meta.json")
     expected_run_id = str(meta.get("run_id") or "").strip()
     expected_mode = str(meta.get("review_mode") or "").strip()
     if not expected_run_id:
@@ -225,7 +239,9 @@ def cmd_submit(ns: argparse.Namespace) -> int:
         if not input_path.is_absolute():
             input_path = worktree / input_path
         input_path = input_path.resolve()
-        expected = (worktree / ".review-outbox.json").resolve()
+        raw_runtime = str(meta.get("review_runtime_dir") or "").strip()
+        runtime_dir = Path(raw_runtime).expanduser().resolve() if raw_runtime else worktree
+        expected = (runtime_dir / ".review-outbox.json").resolve()
         if input_path != expected:
             die("--input-file is restricted to .review-outbox.json", 3)
         try:
@@ -241,7 +257,7 @@ def cmd_submit(ns: argparse.Namespace) -> int:
     except ReviewContractError as exc:
         die(f"invalid review payload: {exc}", 3)
 
-    changed = changed_non_handoff(worktree)
+    changed = changed_non_handoff(worktree, state_dir)
     if changed:
         print(
             "Review submission blocked: non-handoff files changed since baseline:\n"
@@ -254,7 +270,7 @@ def cmd_submit(ns: argparse.Namespace) -> int:
     surface = str(meta.get("executor_surface") or "").strip()
     if not callback or not surface:
         die("review metadata is missing executor callback or surface")
-    relay_path = worktree / REVIEW_CALLBACK_FILE
+    relay_path = state_dir / REVIEW_CALLBACK_FILE
     write_callback(relay_path, review)
     message = f"{callback} --relay-file {shlex.quote(str(relay_path))}"
     if ns.no_send:
@@ -274,11 +290,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     send = sub.add_parser("send", help="validate handoff files and callback executor")
     send.add_argument("--worktree", default=".", help="task worktree path")
+    send.add_argument("--state-dir", default="", help="exact broker operation directory")
     send.add_argument("--output", default="", help="override review output file")
     send.add_argument("--no-send", action="store_true", help="validate and print callback without cmux send")
     send.set_defaults(func=cmd_send)
     submit = sub.add_parser("submit", help="validate typed JSON and send a product-write-free callback")
     submit.add_argument("--worktree", default=".", help="task worktree path")
+    submit.add_argument("--state-dir", default="", help="exact broker operation directory")
     submit.add_argument("--input-file", default="", help="Claude-only isolated .review-outbox.json transport")
     submit.add_argument("--no-send", action="store_true", help="validate and print callback without cmux send")
     submit.set_defaults(func=cmd_submit)

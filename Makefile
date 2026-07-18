@@ -3,7 +3,13 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight
+.PHONY: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+
+test-task-sessions:
+	@echo "=== test_task_sessions.py ==="
+	@python3 tests/test_task_sessions.py
+	@echo "=== test_review_operation_namespacing.py ==="
+	@python3 tests/test_review_operation_namespacing.py
 
 test-model-routing:
 	@echo "=== test_model_routing.py ==="
@@ -69,7 +75,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 

@@ -26,6 +26,9 @@ target the primary vault checkout itself. Both paths expect `.task-prompt.md`,
   `model_reasoning_effort` override.
 - Default reviewer runtime is the opposite model family from the executor:
   Codex executor -> Claude reviewer; Claude executor -> Codex reviewer.
+- A generic request for bounded same-model review/work should use the host's
+  internal subagent mechanism. `--same-model` is only for an explicit visible
+  separate-window request; it creates/reuses a normal cmux review lane.
 
 ## Modes
 
@@ -35,7 +38,7 @@ Review depth:
 - `light` is a fast independent pass for routine changes: top actionable
   correctness/regression/test/security findings only, no exhaustive checklist.
 - Both modes use the same central runtime defaults.
-- v2 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
+- v2/v3 unattended tasks take the mode from `.task-meta.json`; CLI flags remain
   explicit overrides. Legacy v1 tasks keep the full interactive default.
 
 ### Start
@@ -64,7 +67,7 @@ This mode rejects linked worktrees, inferred vaults, and non-primary checkouts.
 
 `spawn` remains a backward-compatible alias for `start`.
 
-The script writes `.review-prompt.md`, `.review-meta.json`,
+For legacy metadata the script writes `.review-prompt.md`, `.review-meta.json`,
 `.review-history.json`,
 `.review-cmux-surface`, `.review-baseline-state.json`, and
 `.review-baseline-status.txt`, then opens a cmux right split with the opposite
@@ -72,6 +75,14 @@ model in a product-read-only, loopback-only, external-network-disabled
 execution profile. It also writes `.task-review-skill` and
 `.task-review-send-skill` so no
 agent has to guess plugin/slash syntax.
+
+For v3 metadata those artifacts live under the exact namespaced broker
+operation directory printed by `start`; follow-up `receive`, `verify`,
+`status`, `archive`, and `finish` commands must carry that exact
+`--operation-dir`. Two coordinators or two model lanes in one project therefore
+cannot overwrite each other's metadata, baseline, relay, or result. One
+`review_id` is the operation ID; every initial/verify round has a distinct
+`run_id`.
 
 The split receives only a short `scripts/cmux_agent_supervisor.py` command;
 validated argv/env live in `.review-agent-command.json`, so cmux cannot truncate
@@ -189,6 +200,13 @@ the existing reviewer TUI, avoiding large pasted prompts in cmux.
 
 `verify` preserves the original review mode from `.review-meta.json`; a light
 review remains light during the follow-up.
+
+Approval finishes one review cycle, not the task. `finish` captures typed cmux
+resume metadata, exits the agent, closes only the exact surface after process
+return, and leaves the lane checkpoint for a later review of the same exact
+task/model/domain. Missing or corrupt resume data is reported visibly and the
+later operation continues in a fresh session with its full packet. Effort
+changes apply only at a new start/resume boundary, never in-band.
 
 ### Finish
 

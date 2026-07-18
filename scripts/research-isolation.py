@@ -31,6 +31,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from research_contract import ResearchContractError, load_artifact
 from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, routing_from_environment
+from task_sessions import (
+    TaskSessionError,
+    TaskSessionStore,
+    capture_resume,
+    project_id_for,
+    spawn_right,
+)
 
 
 DEFAULT_STATE_ROOT = ROOT / ".vault-meta" / "research-runs"
@@ -115,6 +122,7 @@ def runtime_config(
     *,
     model: str,
     effort: str,
+    persistent: bool = False,
 ) -> str:
     profile = f"research-{stage}"
     web_search = "live" if stage == "fetch" else "disabled"
@@ -124,7 +132,7 @@ def runtime_config(
         'approval_policy = "never"',
         f"model = {toml_string(model)}",
         f"model_reasoning_effort = {toml_string(effort)}",
-        'history.persistence = "none"',
+        f'history.persistence = {toml_string("save-all" if persistent else "none")}',
         "",
         "[features]",
         "apps = false",
@@ -196,18 +204,20 @@ def make_runtime_home(
     *,
     model: str,
     effort: str,
+    persistent: bool = False,
 ) -> Path:
     runtime_home = base / f"codex-home-{stage}"
-    runtime_home.mkdir(parents=True, exist_ok=False)
+    runtime_home.mkdir(parents=True, exist_ok=persistent)
     runtime_home.chmod(0o700)
     (runtime_home / "config.toml").write_text(
         runtime_config(
             stage, workspace, python_executable, cmux_socket, vault,
-            model=model, effort=effort,
+            model=model, effort=effort, persistent=persistent,
         ),
         encoding="utf-8",
     )
-    auth_link(runtime_home)
+    if not (runtime_home / "auth.json").exists():
+        auth_link(runtime_home)
     return runtime_home
 
 
@@ -270,6 +280,18 @@ def close_completed_surface(
             file=sys.stderr,
         )
         return False
+    checkpoint: dict[str, str] | None = None
+    degradation = ""
+    broker = state.get(f"{stage}_broker")
+    if isinstance(broker, dict):
+        try:
+            checkpoint = capture_resume(surface, "codex")
+        except (TaskSessionError, OSError) as exc:
+            degradation = f"resume checkpoint unavailable: {exc}"
+            print(
+                f"research-isolation: {stage} context could not be retained; next operation will start fresh: {exc}",
+                file=sys.stderr,
+            )
     state[f"{stage}_surface_cleanup_attempted_at"] = utc_now()
     try:
         closed = run(["cmux", "close-surface", "--surface", surface])
@@ -294,16 +316,66 @@ def close_completed_surface(
     )
     state[closed_key] = utc_now()
     write_json(state_path, state)
+    if isinstance(broker, dict):
+        try:
+            TaskSessionStore(Path(str(state["vault"]))).transition_operation(
+                str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"]),
+                str(broker["operation_id"]), "complete", checkpoint=checkpoint,
+                degradation=degradation,
+            )
+        except (KeyError, TaskSessionError, OSError) as exc:
+            print(f"research-isolation: broker completion failed visibly: {exc}", file=sys.stderr)
+        else:
+            start_next_queued_broker_operation(state, broker)
     return True
 
 
-def spawn_split(no_spawn: bool) -> tuple[str, str]:
+def start_next_queued_broker_operation(
+    state: dict[str, Any], broker: dict[str, Any]
+) -> None:
+    try:
+        store = TaskSessionStore(Path(str(state["vault"])))
+        lane = store.lane_state(
+            str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"])
+        )
+        queue = lane.get("queue")
+        if not isinstance(queue, list) or not queue:
+            return
+        next_id = str(queue[0])
+        operation_dir = store.lane_dir(
+            str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"])
+        ) / "operations" / next_id
+        launch = read_json(operation_dir / "launch.json")
+        argv = launch.get("argv")
+        exact_script = str(Path(__file__).resolve())
+        subcommand = argv[2] if isinstance(argv, list) and len(argv) > 2 else ""
+        identity_flag = "--operation-id" if subcommand == "start" else "--synth-operation-id"
+        if (
+            not isinstance(argv, list) or len(argv) > 32
+            or argv[:2] != [sys.executable, exact_script]
+            or subcommand not in {"start", "receive"}
+            or identity_flag not in argv
+            or argv[argv.index(identity_flag) + 1] != next_id
+            or any(not isinstance(item, str) or not item or "\0" in item for item in argv)
+        ):
+            raise ValueError("queued protected-research launch packet is invalid")
+        subprocess.Popen(
+            argv, cwd=ROOT, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (KeyError, IndexError, OSError, TaskSessionError, ValueError) as exc:
+        print(f"research-isolation: queued operation could not auto-start: {exc}", file=sys.stderr)
+
+
+def spawn_split(no_spawn: bool, origin_surface: str) -> tuple[str, str]:
     if no_spawn:
         return "00000000-0000-0000-0000-000000000000", "surface:dry-run"
-    result = run(["cmux", "--id-format", "both", "new-split", "right", "--focus", "false"])
-    if result.returncode != 0:
-        die((result.stdout + result.stderr).strip() or "cmux new-split failed")
-    return parse_surface(result.stdout + result.stderr)
+    try:
+        created = spawn_right(origin_surface)
+    except TaskSessionError as exc:
+        die(str(exc))
+    return created["surface"], created["surface_ref"]
 
 
 def send_surface(surface: str, command: str) -> None:
@@ -447,6 +519,7 @@ def launch_command(
     cmux_socket: Path,
     *,
     search: bool,
+    checkpoint: dict[str, str] | None = None,
 ) -> str:
     python_bin = str(Path(python_executable).resolve().parent)
     parts = [
@@ -463,14 +536,18 @@ def launch_command(
     ]
     if search:
         parts.append("--search")
+    if checkpoint is not None:
+        parts.extend(["resume", shlex.quote(checkpoint["checkpoint_id"])])
     parts.append(f'"$(cat {shlex.quote(str(prompt_file))})"')
     return "; ".join(parts[:2]) + "; " + " ".join(parts[2:])
 
 
-def state_paths(state_root: Path, run_id: str) -> tuple[Path, Path]:
+def state_paths(
+    state_root: Path, run_id: str, operation_dir: Path | None = None
+) -> tuple[Path, Path]:
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", run_id):
         die("invalid run id", 3)
-    directory = state_root / run_id
+    directory = operation_dir.resolve() if operation_dir is not None else state_root / run_id
     return directory, directory / "state.json"
 
 
@@ -501,16 +578,64 @@ def cmd_start(ns: argparse.Namespace) -> int:
         route = resolve_model_route(routing_config, "protected-research", session=session)
     except RoutingError as exc:
         die(f"model routing failed: {exc}", 3)
-    run_id = str(uuid.uuid4())
-    state_dir, state_path = state_paths(ns.state_root.resolve(), run_id)
-    state_dir.mkdir(parents=True, exist_ok=False)
+    run_id = str(uuid.UUID(ns.operation_id)) if ns.operation_id else str(uuid.uuid4())
+    store: TaskSessionStore | None = None
+    fetch_broker: dict[str, Any] | None = None
+    checkpoint: dict[str, str] | None = None
+    operation_dir: Path | None = None
+    if ns.task_id:
+        try:
+            project_id = ns.project_id or project_id_for(ns.worktree, create=True)
+            store = TaskSessionStore(ns.vault_root)
+            store.create_task(project_id, ns.task_id, worktree=ns.worktree)
+            operation = store.enqueue_operation(
+                project_id, ns.task_id, domain="secure-fetch", runtime="codex",
+                model=str(route["model"]), effort=str(route["effort"]),
+                operation_type=ns.flow, coordinator_surface=surface, operation_id=run_id,
+            )
+            claimed = store.claim_next(project_id, ns.task_id, str(operation["lane_id"]))
+            operation_dir = Path(str(operation["operation_dir"])).resolve()
+            write_json(operation_dir / "launch.json", {
+                "schema_version": 1,
+                "argv": [
+                    sys.executable, str(Path(__file__).resolve()), "start",
+                    "--flow", ns.flow, "--topic", topic,
+                    "--coordinator-surface", surface,
+                    "--vault-root", str(ns.vault_root.resolve()),
+                    "--worktree", str(ns.worktree.resolve()),
+                    "--project-id", project_id, "--task-id", ns.task_id,
+                    "--operation-id", run_id,
+                ],
+            })
+            if claimed is None or claimed.get("operation_id") != run_id:
+                print(json.dumps({
+                    "schema_version": 1, "status": "queued", "run_id": run_id,
+                    "operation_dir": str(operation_dir),
+                }, sort_keys=True))
+                return 0
+            lane = store.lane_state(project_id, ns.task_id, str(operation["lane_id"]))
+            raw_checkpoint = lane.get("checkpoint")
+            if isinstance(raw_checkpoint, dict) and raw_checkpoint.get("kind") == "codex":
+                checkpoint = {str(key): str(value) for key, value in raw_checkpoint.items()}
+            fetch_broker = {
+                "project_id": project_id, "task_id": ns.task_id,
+                "lane_id": operation["lane_id"], "operation_id": run_id,
+            }
+        except (TaskSessionError, OSError) as exc:
+            die(f"persistent fetch lane failed: {exc}", 3)
+    state_dir, state_path = state_paths(ns.state_root.resolve(), run_id, operation_dir)
+    state_dir.mkdir(parents=True, exist_ok=operation_dir is not None)
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
     fetch_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-fetch-{run_id[:8]}-", dir=tmp_root))
-    runtime_base = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
+    runtime_base = (
+        operation_dir.parents[1] / "runtime" if operation_dir is not None
+        else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
+    )
     python_executable = str(Path(sys.executable).resolve())
     runtime_home = make_runtime_home(
         runtime_base, "fetch", fetch_dir, python_executable, cmux_socket,
         model=str(route["model"]), effort=str(route["effort"]),
+        persistent=operation_dir is not None,
     )
     prompt_file = fetch_dir / "fetch-prompt.md"
     prompt_file.write_text(
@@ -519,6 +644,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     callback = (
         f"Protected fetch complete. Run: {python_executable} "
         f"{ROOT / 'scripts/research-isolation.py'} receive --run-id {run_id}"
+        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
     )
     fetch_marker = fetch_dir / "notify-complete.json"
     (fetch_dir / "notify.py").write_text(
@@ -531,9 +657,10 @@ def cmd_start(ns: argparse.Namespace) -> int:
         ),
         encoding="utf-8",
     )
-    fetch_surface, fetch_ref = spawn_split(ns.no_spawn)
+    fetch_surface, fetch_ref = spawn_split(ns.no_spawn, surface)
     command = launch_command(
-        fetch_dir, runtime_home, prompt_file, python_executable, cmux_socket, search=True
+        fetch_dir, runtime_home, prompt_file, python_executable, cmux_socket,
+        search=True, checkpoint=checkpoint,
     )
     state = {
         "schema_version": 1,
@@ -555,21 +682,33 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "vault": str(ns.vault_root.resolve()),
         "routing": route,
         "command": command,
+        "fetch_broker": fetch_broker,
+        "operation_dir": str(operation_dir) if operation_dir is not None else None,
+        "resume_checkpoint": checkpoint,
     }
     write_json(state_path, state)
     if ns.no_spawn:
         print(json.dumps(state, indent=2, ensure_ascii=False))
     else:
         send_surface(fetch_surface, command)
+        if store is not None and fetch_broker is not None:
+            store.transition_operation(
+                fetch_broker["project_id"], fetch_broker["task_id"],
+                fetch_broker["lane_id"], fetch_broker["operation_id"],
+                "running", surface=fetch_surface,
+            )
         print(f"protected fetch surface: {fetch_ref or fetch_surface}")
         print(f"run id: {run_id}")
     return 0
 
 
 def cmd_receive(ns: argparse.Namespace) -> int:
-    state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id)
+    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
     state = read_json(state_path)
-    if state.get("status") not in {"fetching", "fetch_prepared", "fetch_ready", "fetch_received"}:
+    if state.get("status") not in {
+        "fetching", "fetch_prepared", "fetch_ready", "fetch_received", "synthesis_queued"
+    }:
         die(f"run cannot receive artifact from status {state.get('status')!r}", 3)
     fetch_dir = Path(str(state.get("fetch_dir"))).resolve()
     artifact_path = fetch_dir / "artifact.json"
@@ -582,6 +721,17 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         state["fetch_artifact_status"] = "rejected"
         state["updated_at"] = utc_now()
         write_json(state_path, state)
+        broker = state.get("fetch_broker")
+        if isinstance(broker, dict):
+            try:
+                TaskSessionStore(Path(str(state["vault"]))).transition_operation(
+                    str(broker["project_id"]), str(broker["task_id"]), str(broker["lane_id"]),
+                    str(broker["operation_id"]), "failed", degradation="fetch artifact rejected",
+                )
+            except (KeyError, TaskSessionError, OSError) as broker_exc:
+                print(f"research-isolation: broker rejection transition failed: {broker_exc}", file=sys.stderr)
+            state.pop("fetch_broker", None)
+            write_json(state_path, state)
         close_completed_surface(state, state_path, ns.run_id, "fetch", no_spawn=ns.no_spawn)
         die(f"artifact rejected: {exc}", 3)
     write_json(state_dir / "artifact.json", artifact)
@@ -589,7 +739,70 @@ def cmd_receive(ns: argparse.Namespace) -> int:
 
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
     synth_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-synth-{ns.run_id[:8]}-", dir=tmp_root))
-    runtime_base = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))
+    synth_broker: dict[str, Any] | None = None
+    synth_checkpoint: dict[str, str] | None = None
+    synth_operation_dir: Path | None = None
+    fetch_broker = state.get("fetch_broker")
+    if isinstance(fetch_broker, dict):
+        try:
+            synth_operation_id = (
+                str(uuid.UUID(ns.synth_operation_id))
+                if ns.synth_operation_id else str(uuid.uuid4())
+            )
+            broker_store = TaskSessionStore(Path(str(state["vault"])))
+            synth_operation = broker_store.enqueue_operation(
+                str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
+                domain="secure-synth", runtime="codex", model=stored_route(state)["model"],
+                effort=stored_route(state)["effort"], operation_type=str(state.get("flow")),
+                coordinator_surface=str(state.get("coordinator_surface")),
+                operation_id=synth_operation_id,
+            )
+            claimed = broker_store.claim_next(
+                str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
+                str(synth_operation["lane_id"]),
+            )
+            synth_operation_dir = Path(str(synth_operation["operation_dir"])).resolve()
+            write_json(synth_operation_dir / "launch.json", {
+                "schema_version": 1,
+                "argv": [
+                    sys.executable, str(Path(__file__).resolve()), "receive",
+                    "--run-id", ns.run_id, "--operation-dir", str(operation_dir),
+                    "--synth-operation-id", synth_operation_id,
+                ],
+            })
+            if claimed is None or claimed.get("operation_id") != synth_operation_id:
+                state.update({
+                    "status": "synthesis_queued",
+                    "updated_at": utc_now(),
+                    "synth_operation_dir": str(synth_operation_dir),
+                    "synth_broker": {
+                        "project_id": fetch_broker["project_id"],
+                        "task_id": fetch_broker["task_id"],
+                        "lane_id": synth_operation["lane_id"],
+                        "operation_id": synth_operation_id,
+                    },
+                })
+                write_json(state_path, state)
+                close_completed_surface(state, state_path, ns.run_id, "fetch", no_spawn=ns.no_spawn)
+                print(f"secure synthesis queued on busy exact lane: {synth_operation_id}")
+                return 0
+            synth_lane = broker_store.lane_state(
+                str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
+                str(synth_operation["lane_id"]),
+            )
+            raw_checkpoint = synth_lane.get("checkpoint")
+            if isinstance(raw_checkpoint, dict) and raw_checkpoint.get("kind") == "codex":
+                synth_checkpoint = {str(key): str(value) for key, value in raw_checkpoint.items()}
+            synth_broker = {
+                "project_id": fetch_broker["project_id"], "task_id": fetch_broker["task_id"],
+                "lane_id": synth_operation["lane_id"], "operation_id": synth_operation_id,
+            }
+        except (TaskSessionError, OSError) as exc:
+            die(f"persistent synthesis lane failed: {exc}", 3)
+    runtime_base = (
+        synth_operation_dir.parents[1] / "runtime" if synth_operation_dir is not None
+        else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))
+    )
     shutil.copy2(state_dir / "artifact.json", synth_dir / "artifact.json")
     vault = Path(str(state.get("vault"))).resolve()
     python_executable = str(state.get("python_executable") or Path(sys.executable).resolve())
@@ -600,6 +813,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     runtime_home = make_runtime_home(
         runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
         model=route["model"], effort=route["effort"],
+        persistent=synth_operation_dir is not None,
     )
     prompt_file = synth_dir / "synth-prompt.md"
     prompt_file.write_text(
@@ -616,6 +830,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     callback = (
         f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
         f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
+        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
     )
     synth_marker = synth_dir / "notify-complete.json"
     (synth_dir / "notify.py").write_text(
@@ -628,9 +843,10 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         ),
         encoding="utf-8",
     )
-    synth_surface, synth_ref = spawn_split(ns.no_spawn)
+    synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
     command = launch_command(
-        synth_dir, runtime_home, prompt_file, python_executable, cmux_socket, search=False
+        synth_dir, runtime_home, prompt_file, python_executable, cmux_socket,
+        search=False, checkpoint=synth_checkpoint,
     )
     state.update(
         {
@@ -643,6 +859,9 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             "synth_surface_ref": synth_ref,
             "synth_command": command,
             "synth_completion_marker": str(synth_marker),
+            "synth_broker": synth_broker,
+            "synth_operation_dir": str(synth_operation_dir) if synth_operation_dir else None,
+            "synth_resume_checkpoint": synth_checkpoint,
         }
     )
     write_json(state_path, state)
@@ -650,13 +869,20 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         print(json.dumps(state, indent=2, ensure_ascii=False))
     else:
         send_surface(synth_surface, command)
+        if synth_broker is not None:
+            TaskSessionStore(Path(str(state["vault"]))).transition_operation(
+                str(synth_broker["project_id"]), str(synth_broker["task_id"]),
+                str(synth_broker["lane_id"]), str(synth_broker["operation_id"]),
+                "running", surface=synth_surface,
+            )
         close_completed_surface(state, state_path, ns.run_id, "fetch")
         print(f"networkless synthesis surface: {synth_ref or synth_surface}")
     return 0
 
 
 def cmd_status(ns: argparse.Namespace) -> int:
-    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id)
+    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
     state = read_json(state_path)
     fetch_marker = Path(str(state.get("fetch_completion_marker") or ""))
     if state.get("status") in {"fetching", "fetch_prepared"} and str(fetch_marker) not in {"", "."} and fetch_marker.is_file():
@@ -672,6 +898,7 @@ def cmd_status(ns: argparse.Namespace) -> int:
             state["next_command"] = (
                 f"{state.get('python_executable')} {ROOT / 'scripts/research-isolation.py'} "
                 f"receive --run-id {ns.run_id}"
+                + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
             )
             write_json(state_path, state)
     synth_dir = Path(str(state.get("synth_dir") or ""))
@@ -691,7 +918,8 @@ def cmd_status(ns: argparse.Namespace) -> int:
 
 def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
     """Restart only the networkless stage from an already accepted artifact."""
-    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id)
+    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
     state = read_json(state_path)
     if state.get("status") not in {"synthesizing", "synthesis_prepared"}:
         die(f"synthesis cannot restart from status {state.get('status')!r}", 3)
@@ -706,14 +934,17 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         str(state.get("cmux_socket_path") or cmux_socket_path(no_spawn=ns.no_spawn))
     ).resolve()
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
-    runtime_base = Path(
-        tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root)
+    synth_operation_raw = str(state.get("synth_operation_dir") or "").strip()
+    synth_operation_dir = Path(synth_operation_raw).resolve() if synth_operation_raw else None
+    runtime_base = (
+        synth_operation_dir.parents[1] / "runtime" if synth_operation_dir is not None
+        else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))
     )
     vault = Path(str(state.get("vault"))).resolve()
     route = stored_route(state)
     runtime_home = make_runtime_home(
         runtime_base, "synthesize", synth_dir, python_executable, cmux_socket, vault,
-        model=route["model"], effort=route["effort"],
+        model=route["model"], effort=route["effort"], persistent=synth_operation_dir is not None,
     )
     prompt_file.write_text(
         synth_prompt(
@@ -729,6 +960,7 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
     callback = (
         f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
         f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
+        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
     )
     synth_marker = synth_dir / "notify-complete.json"
     (synth_dir / "notify.py").write_text(
@@ -741,9 +973,11 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         ),
         encoding="utf-8",
     )
-    synth_surface, synth_ref = spawn_split(ns.no_spawn)
+    synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
     command = launch_command(
-        synth_dir, runtime_home, prompt_file, python_executable, cmux_socket, search=False
+        synth_dir, runtime_home, prompt_file, python_executable, cmux_socket,
+        search=False,
+        checkpoint=state.get("synth_resume_checkpoint") if isinstance(state.get("synth_resume_checkpoint"), dict) else None,
     )
     state.update(
         {
@@ -772,6 +1006,10 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--topic", required=True)
     start.add_argument("--flow", choices=sorted(FLOWS), required=True)
     start.add_argument("--coordinator-surface", default="")
+    start.add_argument("--task-id", default="", help="exact task UUID for persistent isolated lanes")
+    start.add_argument("--operation-id", default="", help="exact queued operation UUID for idempotent restart")
+    start.add_argument("--project-id", default="", help="exact project UUID; otherwise derive from --worktree")
+    start.add_argument("--worktree", type=Path, default=ROOT)
     start.add_argument("--vault-root", type=Path, default=ROOT)
     start.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     start.add_argument("--tmp-root", type=Path)
@@ -784,18 +1022,22 @@ def parser() -> argparse.ArgumentParser:
     start.set_defaults(func=cmd_start)
     receive = sub.add_parser("receive")
     receive.add_argument("--run-id", required=True)
+    receive.add_argument("--operation-dir", default="")
+    receive.add_argument("--synth-operation-id", default="")
     receive.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     receive.add_argument("--tmp-root", type=Path)
     receive.add_argument("--no-spawn", action="store_true")
     receive.set_defaults(func=cmd_receive)
     restart = sub.add_parser("restart-synthesis")
     restart.add_argument("--run-id", required=True)
+    restart.add_argument("--operation-dir", default="")
     restart.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     restart.add_argument("--tmp-root", type=Path)
     restart.add_argument("--no-spawn", action="store_true")
     restart.set_defaults(func=cmd_restart_synthesis)
     status = sub.add_parser("status")
     status.add_argument("--run-id", required=True)
+    status.add_argument("--operation-dir", default="")
     status.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     status.set_defaults(func=cmd_status)
     return out

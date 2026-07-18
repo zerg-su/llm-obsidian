@@ -77,4 +77,13 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     result = run(root)
     check("active task blocks upgrade", result.returncode == 4)
 
+    (root / ".task-meta.json").unlink()
+    broker = root / ".vault-meta/task-sessions/projects/11111111-1111-4111-8111-111111111111/tasks/22222222-2222-4222-8222-222222222222"
+    broker.mkdir(parents=True)
+    (broker / "task.json").write_text(json.dumps({
+        "task_id": "22222222-2222-4222-8222-222222222222", "status": "active"
+    }), encoding="utf-8")
+    result = run(root)
+    check("active broker task blocks upgrade", result.returncode == 4 and "broker-task:" in result.stderr)
+
 print("upgrade preflight tests passed")

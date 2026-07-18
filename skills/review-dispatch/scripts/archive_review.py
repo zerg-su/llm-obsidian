@@ -236,8 +236,6 @@ def load_history(worktree: Path, meta: dict[str, Any]) -> dict[str, Any]:
     run_ids = [round_["review"]["run_id"] for round_ in rounds]
     if len(run_ids) != len(set(run_ids)):
         raise ArchiveError(".review-history.json contains duplicate round run_id values")
-    if run_ids[0] != review_id:
-        raise ArchiveError(".review-history.json review_id must match the initial round run_id")
     request = history.get("request") or {}
     if not isinstance(request, dict):
         raise ArchiveError(".review-history.json request must be an object")
@@ -490,6 +488,7 @@ def archive_review(
     worktree: Path,
     vault: Path,
     *,
+    state_dir: Path | None = None,
     session: str,
     allocate: Callable[[Path], str] = default_allocate,
     write: Callable[[Path, dict[str, Any]], None] = default_write,
@@ -497,11 +496,24 @@ def archive_review(
 ) -> dict[str, Any]:
     worktree = worktree.expanduser().resolve()
     vault = vault.expanduser().resolve()
-    meta = read_object(worktree / ".review-meta.json", required=True)
+    state_dir = state_dir.expanduser().resolve() if state_dir is not None else worktree
+    meta = read_object(state_dir / ".review-meta.json", required=True)
+    if Path(str(meta.get("worktree") or worktree)).expanduser().resolve() != worktree:
+        raise ArchiveError("review state does not match the inspected worktree")
     task_meta = read_object(worktree / ".task-meta.json")
-    history = load_history(worktree, meta)
+    history = load_history(state_dir, meta)
     if not history:
         return {"schema_version": 1, "status": "no-review"}
+    # Legacy fallback reconstructs its stable identity from the first surviving
+    # review artifact.  Older metadata could carry a separate cycle identifier,
+    # so only explicit durable histories participate in the strict identity
+    # check.  Namespaced v3 operations always have an explicit history.
+    if (
+        not history.get("legacy_fallback")
+        and meta.get("review_id")
+        and meta.get("review_id") != history.get("review_id")
+    ):
+        raise ArchiveError("review metadata and history have different review_id values")
 
     review_id = history["review_id"]
     task_name = history["task_name"]
@@ -585,8 +597,8 @@ def archive_review(
 
     marker = dict(result)
     marker["updated_at"] = utc_now()
-    atomic_json(worktree / ARCHIVE_MARKER, marker)
-    (worktree / ARCHIVE_REQUEST).unlink(missing_ok=True)
+    atomic_json(state_dir / ARCHIVE_MARKER, marker)
+    (state_dir / ARCHIVE_REQUEST).unlink(missing_ok=True)
     return result
 
 
@@ -604,6 +616,7 @@ def current_session(vault: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", required=True, help="reviewed task worktree")
+    parser.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
     parser.add_argument("--vault-root", default=str(DEFAULT_VAULT), help="coordinator vault root")
     parser.add_argument("--session", default="", help="coordinator/executor session provenance")
     parser.add_argument("--dry-run", action="store_true", help="validate and render metadata without writing")
@@ -615,6 +628,7 @@ def main(argv: list[str] | None = None) -> int:
         result = archive_review(
             worktree,
             vault,
+            state_dir=Path(args.operation_dir) if args.operation_dir else None,
             session=args.session or current_session(vault),
             dry_run=args.dry_run,
         )

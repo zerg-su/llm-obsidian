@@ -41,6 +41,10 @@ assert task_meta["properties"]["forbidden_actions"]["const"] == task_contract.FO
 watchdog_props = task_meta["properties"]["watchdog_policy"]["properties"]
 assert watchdog_props["poll_seconds"]["minimum"] == 5
 assert watchdog_props["alert_after_seconds"]["maximum"] == 14400
+task_meta_v3 = load("task-meta-v3.schema.json")
+assert task_meta_v3["properties"]["version"] == {"const": 3}
+assert {"project_id", "task_id"} <= set(task_meta_v3["required"])
+assert task_meta_v3["properties"]["forbidden_actions"]["const"] == task_contract.FORBIDDEN_ACTIONS
 research = load("research-artifact-v1.schema.json")
 source_props = research["properties"]["sources"]["items"]["properties"]
 assert set(source_props["source_class"]["enum"]) == research_contract.SOURCE_CLASSES

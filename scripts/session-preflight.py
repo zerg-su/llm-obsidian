@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 if sys.version_info >= (3, 11):
     from model_routing import RoutingError, capture_session, load_config, routing_from_environment, sync_native
+    from task_sessions import cmux_capabilities
 
 
 def probe(command: list[str], *, seconds: float = 2.0) -> Optional[subprocess.CompletedProcess[str]]:
@@ -57,6 +58,19 @@ def run_preflight(root: Path, *, session_id: str, runtime: str, model: str, effo
     ):
         if shutil.which(binary) is None:
             issues.append({"id": binary, "severity": "required" if binary != "cmux" else "feature", "repair": repair})
+
+    if shutil.which("cmux") is not None:
+        capabilities = cmux_capabilities()
+        if not capabilities["anchored_split"]:
+            issues.append({
+                "id": "cmux-anchored-split", "severity": "feature",
+                "repair": "upgrade cmux to a build with new-split --surface support",
+            })
+        if not capabilities["typed_resume"]:
+            issues.append({
+                "id": "cmux-session-resume", "severity": "feature",
+                "repair": "upgrade cmux to a build with surface resume get/set/show/clear",
+            })
 
     try:
         drift = sync_native(config, apply=False)

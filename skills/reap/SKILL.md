@@ -166,8 +166,22 @@ address allocation or vault writes.
 
 ### 1.4b Archive cross-model review history
 
-If `$WORKTREE/.review-meta.json` exists, archive the validated review cycle from
-the **coordinator vault** before drafting the result page:
+For v3 metadata, archive every exact broker review operation from the
+**coordinator vault** before drafting the result page:
+
+```bash
+REVIEW_ARCHIVES=$(python3 scripts/archive_task_reviews.py \
+  --worktree "$WORKTREE" \
+  --vault-root "$(git rev-parse --show-toplevel)")
+```
+
+The returned JSON `markers` array contains the exact operation-scoped archive
+markers. Pass each marker to `parse-wiki-summary.py` with a repeated
+`--review-archive-marker`; never select one by task name or recency. Any
+queued/running/failed/unarchived review blocks final reap.
+
+For legacy v1/v2 metadata, if `$WORKTREE/.review-meta.json` exists, keep the
+compatibility command:
 
 ```bash
 python3 skills/review-dispatch/scripts/spawn_review.py archive \
@@ -185,12 +199,13 @@ raw orchestration/reviewer prompts, payload tokens, command logs, sockets, and
 cmux IDs are not archived. If `.review-meta.json` is absent, continue without
 an archive.
 
-Then parse the canonical summary again with the generated marker:
+Then parse the canonical summary again with every generated marker:
 
 ```bash
 python3 scripts/parse-wiki-summary.py \
   --json-file "$WORKTREE/.task-summary.json" \
-  --review-archive-marker "$WORKTREE/.review-archive.json"
+  --review-archive-marker <exact-marker-1> \
+  --review-archive-marker <exact-marker-2-if-present>
 ```
 
 For the legacy Markdown path, use the same marker with `--file`. The parser

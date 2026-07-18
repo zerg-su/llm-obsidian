@@ -58,6 +58,10 @@ CLAUDE_REVIEW_ALLOWED_TOOLS = (
     "Bash(git status *)",
     "Bash(git log *)",
     "Bash(git show *)",
+    "Bash(git -C * status *)",
+    "Bash(git -C * diff *)",
+    "Bash(git -C * log *)",
+    "Bash(git -C * show *)",
     # Repository test entrypoints are executable code, but reviewers already
     # need to run changed tests to verify a task. These end-anchored patterns
     # deny the observed pipe/redirect/wrapper forms, but the embedded wildcard
@@ -388,8 +392,14 @@ def validate_reviewer_safety(
     allowed_index, model_index = allowed_positions[0], model_positions[0]
     if allowed_index >= model_index:
         raise SupervisorError("Claude reviewer allowed tools are malformed")
-    if tuple(argv[allowed_index + 1:model_index]) != CLAUDE_REVIEW_ALLOWED_TOOLS:
+    allowed_end = allowed_index + 1 + len(CLAUDE_REVIEW_ALLOWED_TOOLS)
+    if tuple(argv[allowed_index + 1:allowed_end]) != CLAUDE_REVIEW_ALLOWED_TOOLS:
         raise SupervisorError("Claude reviewer command has an unexpected permission allowlist")
+    extras = argv[allowed_end:model_index]
+    while extras:
+        if len(extras) < 2 or extras[0] not in {"--add-dir", "--resume"}:
+            raise SupervisorError("Claude reviewer command has unexpected pre-model options")
+        extras = extras[2:]
 
 
 def validate_task_safety(
@@ -523,8 +533,13 @@ def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
     runtime = Path(raw).expanduser().resolve()
     if not runtime.is_dir():
         raise SupervisorError("Codex review runtime directory does not exist")
+    operation_raw = str(meta.get("operation_dir") or "").strip()
+    operation_dir = Path(operation_raw).expanduser().resolve() if operation_raw else None
+    persistent = operation_dir is not None and runtime == operation_dir.parents[1] / "runtime"
     dry_run = str(meta.get("review_surface") or "") == "00000000-0000-0000-0000-000000000000"
-    if dry_run:
+    if persistent:
+        expected_location = operation_dir.name == str(meta.get("operation_id") or "")
+    elif dry_run:
         expected_location = runtime.parent == worktree.parent and runtime.name.startswith(".review-runtime-")
     else:
         root = (SCRIPT_DIR.parent / ".vault-meta" / "review-runtimes").resolve()
@@ -557,12 +572,14 @@ def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
     stat = runtime.stat()
     if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
         raise SupervisorError("Codex review runtime must be owner-only")
-    if any(runtime.iterdir()):
+    if any(runtime.iterdir()) and not persistent:
         raise SupervisorError("Codex review runtime must be empty before launch")
     return runtime
 
 
-def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, Any]) -> None:
+def validate_routing(
+    worktree: Path, state_dir: Path, kind: str, surface: str, spec: dict[str, Any]
+) -> None:
     task_meta = read_task_json(worktree / ".task-meta.json")
     try:
         task_policy = normalize(task_meta)
@@ -573,7 +590,7 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         expected_surface = str(task_meta.get("task_surface") or "")
         expected_runtime = str(task_meta.get("executor_runtime") or task_meta.get("runtime") or "")
     else:
-        source_meta = read_json(worktree / ".review-meta.json")
+        source_meta = read_json(state_dir / ".review-meta.json")
         expected_surface = str(source_meta.get("review_surface") or "")
         expected_runtime = str(source_meta.get("reviewer_runtime") or "")
     if surface != expected_surface or not surface:
@@ -614,6 +631,8 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         validate_trusted_runtime_path(runtime_path, spec["runtime"])
         if actual_env != expected_env:
             raise SupervisorError("Claude supervisor environment does not match the approved runtime")
+        if kind == "reviewer" and str(source_meta.get("review_runtime_dir") or "").strip():
+            require_option(spec["argv"], "--add-dir", str(worktree))
     if kind == "reviewer":
         validate_reviewer_safety(
             spec["argv"],
@@ -644,15 +663,18 @@ def validate_routing(worktree: Path, kind: str, surface: str, spec: dict[str, An
         )
 
 
-def load_validated_spec(worktree: Path, kind: str, surface: str, raw_path: str = "") -> dict[str, Any]:
-    spec = read_json(exact_spec_path(worktree, kind, raw_path))
+def load_validated_spec(
+    worktree: Path, state_dir: Path, kind: str, surface: str, raw_path: str = ""
+) -> dict[str, Any]:
+    spec = read_json(exact_spec_path(state_dir, kind, raw_path))
     validate_spec_shape(spec, kind)
-    validate_routing(worktree, kind, surface, spec)
-    prompt = (worktree / PROMPT_FILES[kind]).resolve()
+    validate_routing(worktree, state_dir, kind, surface, spec)
+    prompt_root = state_dir if kind == "reviewer" else worktree
+    prompt = (prompt_root / PROMPT_FILES[kind]).resolve()
     try:
-        prompt.relative_to(worktree)
+        prompt.relative_to(prompt_root)
     except ValueError as exc:
-        raise SupervisorError("agent prompt resolves outside the worktree") from exc
+        raise SupervisorError("agent prompt resolves outside its state root") from exc
     if not prompt.is_file():
         raise SupervisorError(f"agent prompt is missing: {prompt}")
     return spec
@@ -705,8 +727,8 @@ def prepare_task(worktree: Path, surface: str) -> Path:
     return write_agent_spec(worktree, "task", runtime, argv, PROMPT_FILES["task"], env)
 
 
-def relay_state(worktree: Path) -> dict[str, Any]:
-    path = worktree / REVIEW_RELAY_FILE
+def relay_state(state_dir: Path) -> dict[str, Any]:
+    path = state_dir / REVIEW_RELAY_FILE
     if path.exists():
         try:
             value = read_json(path)
@@ -728,6 +750,8 @@ def relay_review_outbox_once(
     worktree: Path,
     runtime: Path,
     runner: Any = subprocess.run,
+    *,
+    state_dir: Path | None = None,
 ) -> bool:
     """Validate and forward one stable outbox payload outside the reviewer sandbox."""
     outbox = runtime / REVIEW_OUTBOX_FILE
@@ -738,7 +762,8 @@ def relay_review_outbox_once(
     if not raw:
         return False
     digest = hashlib.sha256(raw).hexdigest()
-    state = relay_state(worktree)
+    state_dir = state_dir or worktree
+    state = relay_state(state_dir)
     if state.get("status") == "failed" and state.get("last_payload_sha256") == digest:
         return False
 
@@ -750,6 +775,8 @@ def relay_review_outbox_once(
         "submit",
         "--worktree",
         str(worktree),
+        "--state-dir",
+        str(state_dir),
     ]
     try:
         result = runner(
@@ -772,21 +799,21 @@ def relay_review_outbox_once(
     else:
         state["status"] = "failed"
         state["failure_count"] = int(state.get("failure_count") or 0) + 1
-    write_json(worktree / REVIEW_RELAY_FILE, state)
+    write_json(state_dir / REVIEW_RELAY_FILE, state)
     return succeeded
 
 
-def run_review_relay(worktree: Path, runtime: Path, stop: threading.Event) -> None:
-    state = relay_state(worktree)
+def run_review_relay(worktree: Path, state_dir: Path, runtime: Path, stop: threading.Event) -> None:
+    state = relay_state(state_dir)
     state["status"] = "waiting"
-    write_json(worktree / REVIEW_RELAY_FILE, state)
+    write_json(state_dir / REVIEW_RELAY_FILE, state)
     while not stop.wait(REVIEW_RELAY_POLL_SECONDS):
-        relay_review_outbox_once(worktree, runtime)
-    relay_review_outbox_once(worktree, runtime)
-    state = relay_state(worktree)
+        relay_review_outbox_once(worktree, runtime, state_dir=state_dir)
+    relay_review_outbox_once(worktree, runtime, state_dir=state_dir)
+    state = relay_state(state_dir)
     if state.get("status") != "failed":
         state["status"] = "stopped"
-        write_json(worktree / REVIEW_RELAY_FILE, state)
+        write_json(state_dir / REVIEW_RELAY_FILE, state)
 
 
 def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
@@ -803,33 +830,39 @@ def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
             pass
 
 
-def run_agent(worktree: Path, kind: str, surface: str, raw_spec: str = "") -> int:
-    spec = load_validated_spec(worktree, kind, surface, raw_spec)
+def run_agent(
+    worktree: Path, state_dir: Path, kind: str, surface: str, raw_spec: str = ""
+) -> int:
+    spec = load_validated_spec(worktree, state_dir, kind, surface, raw_spec)
     started = time.monotonic()
-    prompt = (worktree / spec["prompt_file"]).read_text(encoding="utf-8")
+    prompt_root = state_dir if kind == "reviewer" else worktree
+    prompt = (prompt_root / spec["prompt_file"]).read_text(encoding="utf-8")
     argv = [*spec["argv"], prompt]
     env = os.environ.copy()
     env.update(spec["env"])
     watchdog: subprocess.Popen[bytes] | None = None
     relay_stop: threading.Event | None = None
     relay_thread: threading.Thread | None = None
+    review_runtime: Path | None = None
     agent_rc = 127
     try:
-        if kind == "reviewer" and spec["runtime"] == "codex":
-            review_meta = read_json(worktree / ".review-meta.json")
-            runtime = validated_review_runtime(worktree, review_meta)
-            relay_stop = threading.Event()
-            relay_thread = threading.Thread(
-                target=run_review_relay,
-                args=(worktree, runtime, relay_stop),
-                name="review-outbox-relay",
-                daemon=True,
-            )
-            relay_thread.start()
+        if kind == "reviewer" and str(read_json(state_dir / ".review-meta.json").get("review_runtime_dir") or "").strip():
+            review_meta = read_json(state_dir / ".review-meta.json")
+            review_runtime = validated_review_runtime(worktree, review_meta)
+            if spec["runtime"] == "codex":
+                relay_stop = threading.Event()
+                relay_thread = threading.Thread(
+                    target=run_review_relay,
+                    args=(worktree, state_dir, review_runtime, relay_stop),
+                    name="review-outbox-relay",
+                    daemon=True,
+                )
+                relay_thread.start()
         watchdog = subprocess.Popen(
             [
                 sys.executable, str(SCRIPT_DIR / "cmux_task_watchdog.py"), "run",
                 "--worktree", str(worktree), "--kind", kind, "--surface", surface,
+                "--state-dir", str(state_dir),
             ],
             cwd=worktree,
             stdout=subprocess.DEVNULL,
@@ -838,7 +871,8 @@ def run_agent(worktree: Path, kind: str, surface: str, raw_spec: str = "") -> in
         if sys.stdout.isatty():
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.flush()
-        agent_rc = subprocess.run(argv, cwd=worktree, env=env, check=False).returncode
+        agent_cwd = review_runtime or worktree
+        agent_rc = subprocess.run(argv, cwd=agent_cwd, env=env, check=False).returncode
     except KeyboardInterrupt:
         agent_rc = 130
     except OSError as exc:
@@ -854,14 +888,15 @@ def run_agent(worktree: Path, kind: str, surface: str, raw_spec: str = "") -> in
         [
             sys.executable, str(SCRIPT_DIR / "cmux_surface_lifecycle.py"), "after-exit",
             "--worktree", str(worktree), "--kind", kind, "--surface", surface,
+            "--state-dir", str(state_dir),
         ],
         cwd=worktree,
         check=False,
     )
     watchdog_state = read_object(
-        worktree / (".review-watchdog.json" if kind == "reviewer" else ".task-watchdog.json")
+        state_dir / (".review-watchdog.json" if kind == "reviewer" else ".task-watchdog.json")
     )
-    relay = read_object(worktree / REVIEW_RELAY_FILE) if kind == "reviewer" else {}
+    relay = read_object(state_dir / REVIEW_RELAY_FILE) if kind == "reviewer" else {}
     normalized_agent_rc = nonnegative_int(agent_rc)
     normalized_lifecycle_rc = nonnegative_int(lifecycle.returncode)
     counts = {
@@ -903,6 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("validate", "run"):
         command = sub.add_parser(name)
         command.add_argument("--worktree", default=".")
+        command.add_argument("--state-dir", default="")
         command.add_argument("--kind", choices=sorted(SPEC_FILES), required=True)
         command.add_argument("--surface", required=True)
         command.add_argument("--spec", default="")
@@ -912,15 +948,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
+    state_dir = Path(getattr(args, "state_dir", "") or worktree).expanduser().resolve()
     try:
         if args.command == "prepare-task":
             print(prepare_task(worktree, args.surface))
             return 0
         if args.command == "validate":
-            spec = load_validated_spec(worktree, args.kind, args.surface, args.spec)
+            spec = load_validated_spec(worktree, state_dir, args.kind, args.surface, args.spec)
             print(shlex.join([*spec["argv"], f"<{spec['prompt_file']}>"]))
             return 0
-        return run_agent(worktree, args.kind, args.surface, args.spec)
+        return run_agent(worktree, state_dir, args.kind, args.surface, args.spec)
     except (ContractError, SupervisorError, OSError, ValueError) as exc:
         die(str(exc))
 

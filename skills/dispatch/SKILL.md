@@ -164,7 +164,7 @@ PLAN_FILE=$(grep -l "session_id: $SESSION_ID" wiki/plans/*.md 2>/dev/null | sort
 
 (file names start with a timestamp, so sort by name = sort by time).
 
-- Found → **plan-mode**: hash the plan and write v2 unattended metadata.
+- Found → **plan-mode**: hash the plan and write v3 unattended metadata.
 - Not found → do not spawn by default. Shape and approve the plan in the
   coordinator, then file it with `/save-plan` (or the runtime equivalent).
   Only explicit `interactive` / `no plan` uses classic-mode v1.
@@ -295,7 +295,7 @@ WIKI_SURFACE_REF=$(echo "$SURFACES" | awk '/^\*/ {print $2; exit}')
 The `*` prefix marks the selected surface — that is the wiki agent (we are in it right now). If the UUID cannot be determined — report and stop (the RPC mode in /reap-send does not work without it). `WIKI_SURFACE_REF` is only for human-readable echo/log.
 
 ```bash
-SURFACE_LINE=$(cmux --id-format both new-split right --focus false 2>&1)
+SURFACE_LINE=$(cmux --id-format both new-split right --surface "$WIKI_SURFACE" --focus false 2>&1)
 # Output can be "OK surface:N <UUID> ..." or "OK surface:N (<UUID>) ...".
 # Persist UUID, ref only for echo/log.
 SURFACE_ID=$(printf '%s\n' "$SURFACE_LINE" | grep -oE "$CMUX_UUID_RE" | head -1)
@@ -333,13 +333,28 @@ findings to the executor split.
 `.task-agent-command.json` is the shell-free argv/env handoff consumed by the
 cmux supervisor; it is runtime state, never a commit target.
 
-**Additionally** — approved-plan mode writes v2 `.task-meta.json` with the
-origin binding and unattended mandate. Classic interactive mode keeps v1.
+**Additionally** — approved-plan mode initializes the persistent task identity,
+then writes v3 `.task-meta.json` with the origin binding and unattended mandate.
+Classic interactive mode keeps v1 and is not resumable.
+
+```bash
+TASK_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+IDENTITY=$(python3 <vault-root>/scripts/task_sessions.py --vault-root <vault-root> \
+  init-task --worktree <worktree-path> --task-id "$TASK_ID" \
+  --runtime "$WIKI_RUNTIME" --session-id "$(./scripts/current-session-id.sh)")
+PROJECT_ID=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["project_id"])')
+```
+
+Never derive either ID from a task name, branch, path, or existing candidate.
+Attaching another coordinator requires the exact opaque `task_id` and an
+explicit `init-task --task-id ...` binding.
 
 ```bash
 cat > <worktree-path>/.task-meta.json <<EOF
 {
-  "version": 2,
+  "version": 3,
+  "project_id": "$PROJECT_ID",
+  "task_id": "$TASK_ID",
   "task_name": "<task_name>",
   "wiki_runtime": "$WIKI_RUNTIME",
   "executor_runtime": "<claude|codex>",

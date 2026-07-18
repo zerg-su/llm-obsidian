@@ -60,4 +60,21 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     check("Claude fallback snapshot is labelled", guessed_snapshot["source"] == "tracked-default")
     check("unconfirmed session routing is visible", any(item["id"] == "session-routing" for item in guessed_payload["issues"]))
 
+    fake_bin = Path(raw) / "fake-bin"
+    fake_bin.mkdir()
+    fake_cmux = fake_bin / "cmux"
+    fake_cmux.write_text("#!/bin/sh\necho 'legacy cmux without required flags'\n", encoding="utf-8")
+    fake_cmux.chmod(0o755)
+    capability_env = dict(os.environ)
+    capability_env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(ROOT), "--session-id", "capability-session", "--runtime", "codex", "--model", "gpt-5.6-sol", "--effort", "high", "--json"],
+        text=True, capture_output=True, env=capability_env, check=False,
+    )
+    capability_payload = json.loads(result.stdout)
+    capability_ids = {item["id"] for item in capability_payload["issues"]}
+    check("missing anchored split is visible", "cmux-anchored-split" in capability_ids)
+    check("missing typed resume is visible", "cmux-session-resume" in capability_ids)
+    (ROOT / ".vault-meta/session-routing/capability-session.json").unlink(missing_ok=True)
+
 print("session preflight tests passed")

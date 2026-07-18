@@ -72,7 +72,7 @@ central config:
 python3 scripts/model_routing.py sync-native --apply
 ```
 
-Overlay the v2.0.9 files while no agent sessions are running, then run the new
+Overlay the v2.1.0 files while no agent sessions are running, then run the new
 gate before starting a replacement session:
 
 ```bash

@@ -37,10 +37,25 @@ only for deliberate debugging.
 From the vault root run:
 
 ```bash
+SESSION_ID=$(./scripts/current-session-id.sh)
+RUNTIME=claude
+[ -n "${CODEX_THREAD_ID:-}" ] && RUNTIME=codex
+TASK_ID=$(python3 -c 'import json, pathlib; p=pathlib.Path(".task-meta.json"); print(json.loads(p.read_text()).get("task_id", "") if p.is_file() else "")')
+if [ -z "$TASK_ID" ]; then
+  IDENTITY=$(python3 scripts/task_sessions.py ensure-session-task \
+    --worktree "$(pwd)" --runtime "$RUNTIME" --session-id "$SESSION_ID")
+  TASK_ID=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task_id"])')
+fi
 python3 scripts/research-isolation.py start \
   --flow autoresearch \
+  --task-id "$TASK_ID" \
   --topic '<user-approved topic>'
 ```
+
+This keeps follow-up research context only inside the exact task's
+`secure-fetch` lane; synthesis uses a separate `secure-synth` lane. Start an
+unrelated topic under a new task ID, or explicitly bind a fresh task ID when a
+clean secure context is desired.
 
 Pre-flight is fail-closed. If cmux or `CMUX_SURFACE_ID` is unavailable, do not
 fall back to WebSearch/WebFetch in the current context. Offer either:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -202,6 +203,30 @@ class ReviewArchiveTests(unittest.TestCase):
         self.assertEqual(result["status"], "dry-run")
         self.assertEqual(self.allocations, 0)
         self.assertEqual(self.payloads, [])
+        self.assertFalse((self.worktree / ".review-archive.json").exists())
+
+    def test_operation_scoped_archive_keeps_worktree_clean(self) -> None:
+        state_dir = Path(self.tmp.name) / "operation"
+        state_dir.mkdir()
+        for name in (".review-meta.json", ".review-history.json"):
+            shutil.move(self.worktree / name, state_dir / name)
+        meta = json.loads((state_dir / ".review-meta.json").read_text(encoding="utf-8"))
+        meta["worktree"] = str(self.worktree)
+        meta["review_id"] = "operation-review-id"
+        (state_dir / ".review-meta.json").write_text(json.dumps(meta), encoding="utf-8")
+        history = json.loads((state_dir / ".review-history.json").read_text(encoding="utf-8"))
+        history["review_id"] = "operation-review-id"
+        (state_dir / ".review-history.json").write_text(json.dumps(history), encoding="utf-8")
+        result = archive.archive_review(
+            self.worktree,
+            self.vault,
+            state_dir=state_dir,
+            session="archive-session",
+            allocate=self.allocate,
+            write=self.write,
+        )
+        self.assertEqual(result["status"], "archived")
+        self.assertTrue((state_dir / ".review-archive.json").is_file())
         self.assertFalse((self.worktree / ".review-archive.json").exists())
 
     def test_free_text_cannot_create_spurious_wikilinks(self) -> None:

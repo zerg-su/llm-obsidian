@@ -20,7 +20,8 @@ must not be inferred from another runtime.
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
-| Durable review history | Explicit primary-checkout reviews archive on finish; task splits defer to coordinator `reap` | Same | Explicit `spawn_review.py archive` from the coordinator vault |
+| Durable review history | v3 operation-scoped cycles archive at reap; legacy primary reviews archive on finish | Same | Explicit exact-operation archive from the coordinator vault |
+| Persistent task lanes | Exact task/model/domain cmux resume with anchored right splits | Same broker and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
@@ -58,9 +59,11 @@ remain observability/guardrails rather than a security boundary. `ExitPlanMode`
 capture remains Claude-only because Codex exposes no equivalent tool event.
 
 Protected web flows (`autoresearch`, URL ingest, and deep-query supplements)
-use separate runtime homes: a web-enabled fetch context without vault access,
-then a networkless vault synthesizer. They require cmux and fail closed outside
-it. On macOS both profiles expose `/opt/homebrew` and Xcode Command Line Tools
+use separate persistent task lanes: a web-enabled fetch context without vault
+access, then a networkless vault synthesizer. Each operation gets fresh scratch,
+while provider context is retained only within the exact task and isolation
+domain until reap. They require cmux and fail closed outside it. On macOS both
+profiles expose `/opt/homebrew` and Xcode Command Line Tools
 as runtime roots so the selected Python and its dynamic libraries work inside
 the sandbox; narrower filesystem rules keep those tool roots read-only. The
 network proxy runs in limited mode with no external-domain allowlist and one
@@ -108,7 +111,10 @@ Codex deep profile intentionally keeps `max` effort. The bounded daily
 summarizer inherits the current session's exact model and changes only effort
 to the centrally configured daily value.
 
-Reviewers remain product-read-only but are no longer toolchain-starved: Claude
+Reviewers remain product-read-only but are no longer toolchain-starved. v3
+review metadata, callbacks, baselines, watchdog state, and results live in exact
+broker operation directories, so several sessions in one project do not share
+singleton `.review-*` files. Claude
 gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG
 smoke `bash scripts/dcg-test-suite.sh`; Codex gets a
 private scratch directory, exact loopback access/binding, disabled web search,

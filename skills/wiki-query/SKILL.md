@@ -67,8 +67,13 @@ Steps:
 4. If wiki coverage is thin AND the user opted in, run:
 
    ```bash
-   python3 scripts/research-isolation.py start --flow deep-query --topic '<approved question/gap>'
+   python3 scripts/research-isolation.py start --flow deep-query \
+     --task-id '<exact current task UUID>' --topic '<approved question/gap>'
    ```
+
+   Take the exact v3 `task_id` from `.task-meta.json`; in a primary session,
+   lazily create/read it with `scripts/task_sessions.py ensure-session-task`
+   as documented by `autoresearch`. Never select a task by name or recency.
 
    Do not call WebSearch/WebFetch in this context. The protected synthesizer
    writes `answer.md` in its isolated workspace, remains visible while active,

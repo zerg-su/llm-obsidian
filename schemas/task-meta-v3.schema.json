@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/task-meta-v3.schema.json",
+  "title": "Dispatch task metadata v3",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["version", "project_id", "task_id", "task_name", "origin_session", "executor_runtime", "plan_file", "approved_plan_sha256", "interaction_policy", "review_policy", "reap_policy", "surface_policy", "forbidden_actions"],
+  "properties": {
+    "version": {"const": 3},
+    "project_id": {"type": "string", "format": "uuid"},
+    "task_id": {"type": "string", "format": "uuid"},
+    "task_name": {"type": "string", "minLength": 1},
+    "origin_session": {"type": "string", "minLength": 1},
+    "executor_runtime": {"enum": ["claude", "codex"]},
+    "vault_root": {"type": "string", "minLength": 1},
+    "plan_file": {"type": "string", "minLength": 1},
+    "approved_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "interaction_policy": {"enum": ["interactive", "unattended"]},
+    "review_policy": {"type": "object", "additionalProperties": false, "required": ["mode", "max_verify_iterations", "auto_resolve_severities", "escalate_severities"], "properties": {"mode": {"enum": ["light", "full", "skip"]}, "max_verify_iterations": {"type": "integer", "minimum": 0, "maximum": 5}, "auto_resolve_severities": {"type": "array", "uniqueItems": true, "items": {"enum": ["warning", "nit"]}}, "escalate_severities": {"type": "array", "uniqueItems": true, "items": {"enum": ["blocking"]}}}},
+    "reap_policy": {"type": "object", "additionalProperties": false, "required": ["mode", "auto_file", "allowed_types", "title"], "properties": {"mode": {"const": "final"}, "auto_file": {"type": "boolean"}, "allowed_types": {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": {"enum": ["session", "decision", "runbook", "incident", "service-update", "repo-touch"]}}, "title": {"type": "string", "minLength": 1}}},
+    "surface_policy": {"type": "object", "additionalProperties": false, "required": ["auto_close"], "properties": {"auto_close": {"type": "boolean"}}},
+    "watchdog_policy": {"type": "object", "additionalProperties": false, "required": ["enabled", "poll_seconds", "warn_after_seconds", "alert_after_seconds"], "properties": {"enabled": {"type": "boolean"}, "poll_seconds": {"type": "integer", "minimum": 5, "maximum": 300}, "warn_after_seconds": {"type": "integer", "minimum": 300, "maximum": 7200}, "alert_after_seconds": {"type": "integer", "minimum": 600, "maximum": 14400}}},
+    "forbidden_actions": {"const": ["push", "deploy", "publish", "delete-worktree", "delete-branch", "expand-scope"]}
+  }
+}

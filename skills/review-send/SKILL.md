@@ -15,7 +15,8 @@ task-side pair of `reap`.
 
 ## Preconditions
 
-The current directory must be a dispatch task worktree and must contain:
+Legacy reviewers start in a dispatch task worktree. v3 reviewers start in an
+owner-only lane runtime; the prompt supplies the exact operation paths for:
 
 - `.review-meta.json`
 - `.review-baseline-state.json`
@@ -36,7 +37,7 @@ The current directory must be a dispatch task worktree and must contain:
    changed since the executor captured the review baseline. A valid Claude
    outbox is removed after callback. If blocked, report and do not callback.
 4. If validation passes, the script atomically writes the canonical object to
-   `<worktree>/.review-callback.json` and sends only that exact file reference
+   the exact operation-scoped `.review-callback.json` and sends only that file reference
    to the executor. The callback remains bounded even for a large review.
 
 The reviewer session stays open after callback. Do not exit yourself: the

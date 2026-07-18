@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "research-isolation.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from task_sessions import TaskSessionStore
 
 
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -37,7 +40,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fake_cmux.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$CMUX_LOG\"\n"
-        "if [ \"$1 $2 $3\" = \"--id-format both new-split\" ]; then\n"
+        "if [ \"$1 $2\" = \"new-split --help\" ]; then\n"
+        "  printf '%s\\n' 'usage: cmux new-split [right] --surface ID --focus BOOL'\n"
+        "elif [ \"$1 $2 $3\" = \"surface resume --help\" ]; then\n"
+        "  printf '%s\\n' 'resume get; resume set; resume show; resume clear'\n"
+        "elif [ \"$1 $2 $3 $4\" = \"--id-format both new-split right\" ]; then\n"
         "  printf '%s\\n' 'surface:9 22222222-2222-2222-2222-222222222222'\n"
         "fi\n"
         "exit 0\n",
@@ -422,6 +429,111 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check(
         "rejected exact surface targeted",
         f"close-surface --surface {rejected_surface}" in cmux_log.read_text(encoding="utf-8"),
+    )
+
+    persistent_repo = tmp / "persistent-project"
+    persistent_repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(persistent_repo)], check=True)
+    persistent_vault = tmp / "persistent-vault"
+    (persistent_vault / "wiki").mkdir(parents=True)
+    (persistent_vault / "config").mkdir()
+    shutil.copy2(ROOT / "config" / "model-routing.toml", persistent_vault / "config" / "model-routing.toml")
+    persistent_task = "77777777-7777-4777-8777-777777777777"
+    persistent = run(
+        "start", "--topic", "persistent context", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", persistent_task,
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("persistent fetch starts", persistent.returncode == 0, persistent.stderr)
+    persistent_state = json.loads(persistent.stdout)
+    persistent_operation = Path(persistent_state["operation_dir"])
+    check("persistent fetch uses broker operation", persistent_operation.name == persistent_state["run_id"])
+    persistent_config = Path(persistent_state["fetch_runtime_home"], "config.toml").read_text(encoding="utf-8")
+    check("persistent fetch retains provider history", 'history.persistence = "save-all"' in persistent_config)
+    check("persistent fetch domain is isolated", persistent_state["fetch_broker"]["task_id"] == persistent_task)
+    queued_persistent = run(
+        "start", "--topic", "queued follow-up", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", persistent_task,
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    queued_value = json.loads(queued_persistent.stdout)
+    check("same secure lane queues without overwrite", queued_value["status"] == "queued")
+    check("queued fetch preserves first state", (persistent_operation / "state.json").is_file())
+
+    persistent_store = TaskSessionStore(persistent_vault)
+    first_fetch = persistent_state["fetch_broker"]
+    persistent_store.transition_operation(
+        first_fetch["project_id"], first_fetch["task_id"], first_fetch["lane_id"],
+        first_fetch["operation_id"], "complete",
+    )
+    resumed_fetch = run(
+        "start", "--topic", "queued follow-up", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", persistent_task,
+        "--operation-id", queued_value["run_id"], "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("queued persistent fetch becomes runnable", resumed_fetch.returncode == 0, resumed_fetch.stderr)
+    resumed_fetch_state = json.loads(resumed_fetch.stdout)
+
+    def write_persistent_artifact(value: dict[str, object], topic: str) -> None:
+        body = f"# {topic}\n\nBounded untrusted fixture."
+        Path(str(value["fetch_dir"]), "artifact.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "run_id": value["run_id"],
+                "topic": topic,
+                "fetched_at": "2026-07-18T00:00:00Z",
+                "sources": [{
+                    "url": "https://example.com/persistent",
+                    "title": topic,
+                    "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
+                    "source_class": "third-party",
+                    "clean_markdown": body,
+                }],
+                "fetch_errors": [],
+            }),
+            encoding="utf-8",
+        )
+
+    write_persistent_artifact(persistent_state, "persistent context")
+    first_synth_result = run(
+        "receive", "--run-id", persistent_state["run_id"],
+        "--operation-dir", str(persistent_operation), "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("persistent synthesis starts", first_synth_result.returncode == 0, first_synth_result.stderr)
+    first_synth = json.loads(first_synth_result.stdout)
+    first_synth_broker = first_synth["synth_broker"]
+    check("fetch and synth permission lanes differ", first_synth_broker["lane_id"] != first_fetch["lane_id"])
+    first_synth_config = Path(first_synth["synth_runtime_home"], "config.toml").read_text(encoding="utf-8")
+    check("persistent synth retains provider history", 'history.persistence = "save-all"' in first_synth_config)
+    persistent_store.transition_operation(
+        first_synth_broker["project_id"], first_synth_broker["task_id"],
+        first_synth_broker["lane_id"], first_synth_broker["operation_id"], "complete",
+        checkpoint={
+            "kind": "codex", "checkpoint_id": "checkpoint-synth-1",
+            "cwd": first_synth["synth_runtime_home"],
+        },
+    )
+
+    second_fetch = resumed_fetch_state["fetch_broker"]
+    persistent_store.transition_operation(
+        second_fetch["project_id"], second_fetch["task_id"], second_fetch["lane_id"],
+        second_fetch["operation_id"], "complete",
+    )
+    second_operation = Path(resumed_fetch_state["operation_dir"])
+    write_persistent_artifact(resumed_fetch_state, "queued follow-up")
+    resumed_synth_result = run(
+        "receive", "--run-id", resumed_fetch_state["run_id"],
+        "--operation-dir", str(second_operation), "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("later synthesis starts", resumed_synth_result.returncode == 0, resumed_synth_result.stderr)
+    resumed_synth = json.loads(resumed_synth_result.stdout)
+    check(
+        "secure synth resumes exact checkpoint",
+        "checkpoint-synth-1" in resumed_synth["synth_command"],
+        resumed_synth["synth_command"],
     )
 
 print("\nAll research isolation tests passed.")

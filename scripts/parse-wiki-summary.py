@@ -84,6 +84,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--review-archive-marker",
         type=Path,
+        action="append",
+        default=[],
         help="optional validated .review-archive.json whose wikilink is appended to the body",
     )
     try:
@@ -95,7 +97,8 @@ def main(argv: list[str]) -> int:
         try:
             raw_json = json.loads(args.json_file.read_text(encoding="utf-8"))
             summary = validate_summary(raw_json, require_schema=True)
-            summary = attach_review_archive(summary, args.review_archive_marker)
+            for marker in args.review_archive_marker:
+                summary = attach_review_archive(summary, marker)
         except (OSError, json.JSONDecodeError, WikiSummaryError) as exc:
             return fail(2, f"invalid canonical JSON: {exc}")
         if not summary["session"]:
@@ -150,7 +153,8 @@ def main(argv: list[str]) -> int:
                 "body": "\n".join(body_lines).strip("\n"),
             }
         )
-        summary = attach_review_archive(summary, args.review_archive_marker)
+        for marker in args.review_archive_marker:
+            summary = attach_review_archive(summary, marker)
     except WikiSummaryError as exc:
         return fail(2, str(exc))
     if not summary["session"]:

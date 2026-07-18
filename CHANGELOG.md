@@ -6,6 +6,39 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-18
+
+### Added
+
+- Added owner-only task/session registry state keyed by opaque project, task,
+  permission-domain, runtime, and pinned-model identities. Exact session
+  bindings support multiple coordinators without guessing by name or recency.
+- Added persistent product-read-only review, protected fetch, and protected
+  synthesis lanes with typed cmux checkpoint capture, visible fresh-session
+  fallback, per-lane FIFO, and task-scoped reap cleanup.
+- Added task-meta v3, namespaced review operations, multi-review archive links,
+  active-broker upgrade blocking, and macOS cmux capability preflight.
+
+### Changed
+
+- Every cmux workflow anchors a new split explicitly to the caller's captured
+  surface and opens it to the right. Initial/verify review rounds stay in one
+  surface; later rounds of the same task/model/domain resume its checkpoint.
+- Same-model bounded work defaults to an internal subagent. A visible
+  same-model review requires an explicit separate-window request.
+- Protected research retains context only inside the exact task and isolation
+  domain. Each operation still receives fresh scratch; runtime homes are
+  removed only after the task is archived by final reap.
+
+### Fixed
+
+- Concurrent reviews in one project no longer overwrite singleton
+  `.review-*` metadata, baselines, callbacks, results, watchdog state, or close
+  sentinels.
+- Reviewer exit now closes only the exact armed surface after process return;
+  crash/checkpoint loss is visible and releases the lane instead of leaving a
+  permanent busy state.
+
 ## [2.0.9] - 2026-07-18
 
 ### Added

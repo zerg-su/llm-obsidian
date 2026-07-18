@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -54,6 +55,31 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def v3_session_is_bound(meta: dict[str, Any], session_id: str) -> bool:
+    if meta.get("version") != 3 or not session_id:
+        return False
+    raw_vault = str(meta.get("vault_root") or "").strip()
+    if not raw_vault:
+        return False
+    root = Path(raw_vault).expanduser().resolve() / ".vault-meta" / "task-sessions" / "session-bindings"
+    if not root.is_dir():
+        return False
+    for path in root.glob("*/*.json"):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        if (
+            value.get("session_id") == session_id
+            and value.get("project_id") == meta.get("project_id")
+            and value.get("task_id") == meta.get("task_id")
+        ):
+            return True
+    return False
+
+
 def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
     version = meta.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int):
@@ -77,8 +103,18 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             "surface_policy": {"auto_close": False},
             "watchdog_policy": dict(DEFAULT_WATCHDOG_POLICY),
         }
-    if version != 2:
+    if version not in {2, 3}:
         raise ContractError(f"unsupported task metadata version: {version!r}")
+
+    if version == 3:
+        for field in ("project_id", "task_id"):
+            value = meta.get(field)
+            try:
+                normalized = str(uuid.UUID(str(value)))
+            except (ValueError, TypeError, AttributeError):
+                raise ContractError(f"v3 {field} must be a UUID") from None
+            if normalized != value:
+                raise ContractError(f"v3 {field} must be a canonical lowercase UUID")
 
     for field in ("task_name", "origin_session"):
         if not isinstance(meta.get(field), str) or not meta[field].strip():
@@ -94,7 +130,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""
     plan_hash = hash_value.strip() if isinstance(hash_value, str) else ""
     if not plan_raw or len(plan_hash) != 64 or any(c not in "0123456789abcdef" for c in plan_hash):
-        raise ContractError("v2 metadata requires plan_file and lowercase approved_plan_sha256")
+        raise ContractError(f"v{version} metadata requires plan_file and lowercase approved_plan_sha256")
     plan = Path(plan_raw).expanduser().resolve()
     if not plan.is_file():
         raise ContractError(f"approved plan is missing: {plan}")
@@ -173,7 +209,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     if meta.get("forbidden_actions") != FORBIDDEN_ACTIONS:
         raise ContractError("forbidden_actions must match the unattended safety boundary")
     return {
-        "version": 2,
+        "version": version,
         "interaction_policy": policy,
         "review_policy": review,
         "reap_policy": reap,
@@ -191,7 +227,7 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
     All other plan drift remains fail-closed.
     """
     policy = normalize(meta, verify_plan_hash=False)
-    if policy["version"] != 2:
+    if policy["version"] not in {2, 3}:
         return policy
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     approved = str(meta.get("approved_plan_sha256") or "")
@@ -208,7 +244,11 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
             raise ContractError("unsupported reap preparation marker")
         if prepared.get("task_name") != meta.get("task_name"):
             raise ContractError("reap preparation task mismatch")
-        if prepared.get("current_session") != meta.get("origin_session"):
+        prepared_session = str(prepared.get("current_session") or "")
+        if meta.get("version") == 3:
+            if not v3_session_is_bound(meta, prepared_session):
+                raise ContractError("reap preparation session is not bound to the exact v3 task")
+        elif prepared_session != meta.get("origin_session"):
             raise ContractError("reap preparation session mismatch")
         if prepared.get("approved_plan_sha256") != approved:
             raise ContractError("reap preparation approval mismatch")
@@ -239,7 +279,10 @@ def validate_handoff(
     if policy["interaction_policy"] != "unattended":
         raise ContractError("legacy/interactive task requires user confirmation")
     origin = str(meta.get("origin_session") or "")
-    if not origin or not current_session or origin != current_session:
+    if meta.get("version") == 3:
+        if not v3_session_is_bound(meta, current_session):
+            raise ContractError("current session is not bound to the exact v3 task")
+    elif not origin or not current_session or origin != current_session:
         raise ContractError("origin session mismatch; unattended filing refused")
     reap = policy["reap_policy"]
     if not reap["auto_file"]:

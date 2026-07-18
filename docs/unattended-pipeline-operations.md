@@ -21,12 +21,14 @@ workspace:
 - **Task/executor surface** — the split running the implementation agent
   (`executor_runtime`: `claude` or `codex`) in the task worktree. Recorded as
   `task_surface`.
-- **Reviewer surface** — opened by `/review-dispatch` for the opposite model
-  family (`reviewer_runtime` in `.review-meta.json`, `review_surface`).
+- **Reviewer surface** — opened to the right of the captured caller for the
+  opposite model family. v3 state lives in the exact broker operation; legacy
+  state uses worktree `.review-meta.json`.
 
 All surface identity is by UUID, not the human-readable `surface:N` ref —
 refs shift when panes are reordered or closed. Watchdog, escalation, and
-close-arming code all key off `.task-meta.json` / `.review-meta.json`, never
+close-arming code keys off `.task-meta.json` plus the exact operation review
+metadata, never
 off a live `cmux list-pane-surfaces` re-scan, so a stale surface record fails
 loudly (`cmux send`/`notify` returns `not_found`) instead of silently
 targeting the wrong pane.
@@ -39,12 +41,14 @@ Neither `/dispatch` nor `/review-dispatch` hand a long inline shell command to
 1. `cmux_agent_supervisor.py prepare-task` (task) or `spawn_review.py start`
    (reviewer) writes a validated JSON spec: `.task-agent-command.json` or
    `.review-agent-command.json` — `{version, kind, runtime, argv, prompt_file,
-   env}`.
+   env}`. For v3 reviewers these files are operation-scoped, not worktree
+   singletons.
 2. `cmux send` carries only a short, fixed supervisor invocation:
-   `python3 scripts/cmux_agent_supervisor.py run --worktree <wt> --kind
+   `python3 scripts/cmux_agent_supervisor.py run --worktree <wt> --state-dir
+   <exact-operation> --kind
    <task|reviewer> --surface <uuid>`.
 3. The supervisor re-reads the spec from disk, revalidates it byte-for-byte
-   against `.task-meta.json`/`.review-meta.json` (`validate_routing` in
+   against `.task-meta.json`/the exact review metadata (`validate_routing` in
    `scripts/cmux_agent_supervisor.py`), then execs the real agent
    (`claude ...` or `codex ...`) with the prompt file content appended as the
    final argv value — never interpolated through a shell string.

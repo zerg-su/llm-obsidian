@@ -23,10 +23,20 @@ from task_contract import (
     normalize_for_runtime,
     read_json as read_contract_json,
     validate_handoff,
+    v3_session_is_bound,
 )
+from task_sessions import TaskSessionError, TaskSessionStore, capture_resume
 
 
 HANDOFF_PREFIXES = (".task-", ".review-", ".wiki-")
+SCRIPT_DIR = Path(__file__).resolve().parent
+_STATE_DIR: Path | None = None
+
+
+def lifecycle_file(worktree: Path, name: str, kind: str = "reviewer") -> Path:
+    if kind == "reviewer" and _STATE_DIR is not None:
+        return _STATE_DIR / name
+    return worktree / name
 
 
 def die(message: str, code: int = 2) -> NoReturn:
@@ -66,7 +76,11 @@ def require_origin_session(worktree: Path, supplied: str = "") -> None:
     meta = read_json(worktree / ".task-meta.json")
     origin = str(meta.get("origin_session") or "")
     actual = current_session_id()
-    if actual == "unknown" or not origin or actual != origin or (supplied and supplied != actual):
+    if meta.get("version") == 3:
+        valid = actual != "unknown" and v3_session_is_bound(meta, actual)
+    else:
+        valid = actual != "unknown" and bool(origin) and actual == origin
+    if not valid or (supplied and supplied != actual):
         die("only the originating coordinator session may finalize or close this task", 3)
 
 
@@ -84,7 +98,7 @@ def telemetry_surface_context(worktree: Path, kind: str) -> tuple[str, int]:
     """Read a non-authoritative telemetry label without invoking contract checks."""
 
     task_meta = read_object(worktree / ".task-meta.json")
-    source = read_object(worktree / ".review-meta.json") if kind == "reviewer" else task_meta
+    source = read_object(lifecycle_file(worktree, ".review-meta.json")) if kind == "reviewer" else task_meta
     runtime = str(
         source.get("reviewer_runtime")
         if kind == "reviewer"
@@ -120,7 +134,7 @@ def surface_and_runtime(worktree: Path, kind: str) -> tuple[str, str]:
     _, surface_key, runtime_key = names(kind)
     source = task_meta
     if kind == "reviewer":
-        source = read_json(worktree / ".review-meta.json")
+        source = read_json(lifecycle_file(worktree, ".review-meta.json"))
     surface = str(source.get(surface_key) or "").strip()
     runtime = str(source.get(runtime_key) or source.get("runtime") or "").strip()
     if not surface or runtime not in {"claude", "codex"}:
@@ -183,7 +197,7 @@ def arm(worktree: Path, kind: str) -> tuple[Path, str, str]:
         if dirty:
             die("task worktree has non-handoff changes: " + ", ".join(dirty), 3)
     sentinel_name, _, _ = names(kind)
-    sentinel = worktree / sentinel_name
+    sentinel = lifecycle_file(worktree, sentinel_name, kind)
     write_marker(
         sentinel,
         {"version": 1, "kind": kind, "surface": surface, "armed_at": utc_now()},
@@ -219,8 +233,11 @@ def request_exit(worktree: Path, kind: str) -> int:
 
 def after_exit(worktree: Path, kind: str, surface: str) -> int:
     sentinel_name, _, _ = names(kind)
-    sentinel = worktree / sentinel_name
+    sentinel = lifecycle_file(worktree, sentinel_name, kind)
     if not sentinel.exists():
+        if kind == "reviewer" and _STATE_DIR is not None:
+            transition_broker_review(worktree, "failed", degradation="reviewer exited without an armed completion")
+            start_next_broker_review(worktree)
         runtime, expected = telemetry_surface_context(worktree, kind)
         emit_lifecycle_event(
             worktree,
@@ -234,10 +251,25 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     payload = read_json(sentinel)
     if payload.get("kind") != kind or payload.get("surface") != surface:
         die("close sentinel does not match the exiting surface", 3)
+    checkpoint: dict[str, str] | None = None
+    degradation = ""
+    if kind == "reviewer" and _STATE_DIR is not None:
+        meta = read_json(lifecycle_file(worktree, ".review-meta.json"))
+        try:
+            checkpoint = capture_resume(surface, str(meta.get("reviewer_runtime") or ""))
+        except (TaskSessionError, OSError) as exc:
+            degradation = f"resume checkpoint unavailable: {exc}"
+            print(f"review session context could not be retained; the next round will start fresh: {exc}", file=sys.stderr)
     closed = run(["cmux", "close-surface", "--surface", surface])
-    if closed.returncode != 0:
+    close_text = (closed.stdout + closed.stderr).lower()
+    if closed.returncode != 0 and not any(token in close_text for token in ("not found", "not_found", "unknown surface")):
         die((closed.stdout + closed.stderr).strip() or "cmux close-surface failed")
     sentinel.unlink(missing_ok=True)
+    if kind == "reviewer" and _STATE_DIR is not None:
+        transition_broker_review(
+            worktree, "complete", checkpoint=checkpoint, degradation=degradation
+        )
+        start_next_broker_review(worktree)
     runtime, expected = telemetry_surface_context(worktree, kind)
     emit_lifecycle_event(
         worktree,
@@ -249,13 +281,75 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     return 0
 
 
-def validated_review_archive(worktree: Path, vault: Path) -> dict[str, Any] | None:
+def transition_broker_review(
+    worktree: Path,
+    status: str,
+    *,
+    checkpoint: dict[str, str] | None = None,
+    degradation: str = "",
+) -> None:
+    meta = read_object(lifecycle_file(worktree, ".review-meta.json"))
+    required = ("project_id", "task_id", "lane_id", "operation_id", "vault_root")
+    if not all(str(meta.get(key) or "").strip() for key in required):
+        return
+    try:
+        store = TaskSessionStore(Path(str(meta["vault_root"])))
+        store.transition_operation(
+            str(meta["project_id"]), str(meta["task_id"]), str(meta["lane_id"]),
+            str(meta["operation_id"]), status, checkpoint=checkpoint,
+            degradation=degradation,
+        )
+    except (TaskSessionError, OSError) as exc:
+        print(f"review task-session transition failed visibly: {exc}", file=sys.stderr)
+
+
+def start_next_broker_review(worktree: Path) -> None:
+    meta = read_object(lifecycle_file(worktree, ".review-meta.json"))
+    required = ("project_id", "task_id", "lane_id", "vault_root")
+    if not all(str(meta.get(key) or "").strip() for key in required):
+        return
+    try:
+        store = TaskSessionStore(Path(str(meta["vault_root"])))
+        lane = store.lane_state(str(meta["project_id"]), str(meta["task_id"]), str(meta["lane_id"]))
+        queue = lane.get("queue")
+        if not isinstance(queue, list) or not queue:
+            return
+        next_id = str(queue[0])
+        operation_dir = store.lane_dir(
+            str(meta["project_id"]), str(meta["task_id"]), str(meta["lane_id"])
+        ) / "operations" / next_id
+        launch = read_json(operation_dir / "launch.json")
+        argv = launch.get("argv")
+        expected_script = str(
+            SCRIPT_DIR.parent / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
+        )
+        if (
+            not isinstance(argv, list) or len(argv) > 32
+            or argv[:3] != ["python3", expected_script, "start"]
+            or "--operation-id" not in argv
+            or argv[argv.index("--operation-id") + 1] != next_id
+            or any(not isinstance(item, str) or not item or "\0" in item for item in argv)
+        ):
+            raise ValueError("queued review launch packet is invalid")
+        subprocess.Popen(
+            argv, cwd=worktree, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (OSError, TaskSessionError, ValueError, IndexError) as exc:
+        print(f"queued review could not auto-start; continuing visibly: {exc}", file=sys.stderr)
+
+
+def validated_review_archive(
+    worktree: Path, vault: Path, state_dir: Path | None = None
+) -> dict[str, Any] | None:
     """Require a completed, immutable archive whenever a review cycle exists."""
-    review_meta_path = worktree / ".review-meta.json"
+    root = state_dir or worktree
+    review_meta_path = root / ".review-meta.json"
     if not review_meta_path.is_file():
         return None
     review_meta = read_json(review_meta_path)
-    marker_path = worktree / ".review-archive.json"
+    marker_path = root / ".review-archive.json"
     marker = read_json(marker_path)
     if marker.get("schema_version") != 1 or marker.get("status") not in {"archived", "already-current"}:
         die("review archive marker is not complete", 3)
@@ -281,6 +375,50 @@ def validated_review_archive(worktree: Path, vault: Path) -> dict[str, Any] | No
     if hashlib.sha256(archive_page.read_bytes()).hexdigest() != expected_hash:
         die("durable review archive changed after archival", 3)
     return marker
+
+
+def validated_review_archives(
+    worktree: Path, vault: Path, meta: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if meta.get("version") != 3:
+        value = validated_review_archive(worktree, vault)
+        if value is None:
+            return []
+        return [{**value, "marker_path": str(worktree / ".review-archive.json")}]
+    try:
+        operations = TaskSessionStore(vault).list_operations(
+            str(meta["project_id"]), str(meta["task_id"]), domain="review"
+        )
+    except (KeyError, TaskSessionError, OSError) as exc:
+        die(f"cannot enumerate exact v3 review operations: {exc}", 3)
+    archives: list[dict[str, Any]] = []
+    for operation in operations:
+        state_dir = Path(str(operation["operation_dir"])).resolve()
+        if not (state_dir / ".review-meta.json").is_file():
+            die(
+                f"v3 review operation {operation.get('operation_id')} has no completed review metadata",
+                3,
+            )
+        if operation.get("status") != "complete":
+            die(f"v3 review operation {operation.get('operation_id')} is not complete", 3)
+        value = validated_review_archive(worktree, vault, state_dir)
+        if value is None:
+            die("started v3 review has no durable archive", 3)
+        archives.append({**value, "marker_path": str(state_dir / ".review-archive.json")})
+    return archives
+
+
+def review_archive_records(archives: list[dict[str, Any]]) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for archive in archives:
+        marker_path = Path(str(archive["marker_path"])).resolve()
+        records.append({
+            "marker_path": str(marker_path),
+            "marker_sha256": hashlib.sha256(marker_path.read_bytes()).hexdigest(),
+            "path": str(archive["path"]),
+            "wikilink": str(archive["wikilink"]),
+        })
+    return records
 
 
 def result_wikilink(summary_title: str, result_path: Path) -> str:
@@ -359,7 +497,8 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
         die(str(exc))
     result = result_path.expanduser().resolve()
     vault = vault_root.expanduser().resolve()
-    review_archive = validated_review_archive(worktree, vault)
+    review_archives = validated_review_archives(worktree, vault, meta)
+    archive_records = review_archive_records(review_archives)
     try:
         result.relative_to(vault / "wiki")
     except ValueError:
@@ -410,12 +549,8 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
                     die(f"prior reap preparation no longer matches {field}", 3)
             if prior_marker.get("closed_plan_sha256") != plan_hash:
                 die("approved plan is neither pending nor the prior prepared close", 3)
-            if review_archive is not None:
-                marker_hash = hashlib.sha256(
-                    (worktree / ".review-archive.json").read_bytes()
-                ).hexdigest()
-                if prior_marker.get("review_archive_marker_sha256") != marker_hash:
-                    die("prior reap preparation no longer matches review archive marker", 3)
+            if prior_marker.get("review_archives", []) != archive_records:
+                die("prior reap preparation no longer matches review archive markers", 3)
             closed_plan = reroute_closed_plan(
                 plan_text,
                 str(prior_marker.get("result_link") or ""),
@@ -443,12 +578,11 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
     if prior_marker:
         marker["previous_closed_plan_sha256"] = plan_hash
         marker["previous_result_link"] = str(prior_marker.get("result_link") or "")
-    if review_archive is not None:
-        marker["review_archive_marker_sha256"] = hashlib.sha256(
-            (worktree / ".review-archive.json").read_bytes()
-        ).hexdigest()
-        marker["review_archive_path"] = review_archive["path"]
-        marker["review_archive_wikilink"] = review_archive["wikilink"]
+    marker["review_archives"] = archive_records
+    if len(archive_records) == 1:
+        marker["review_archive_marker_sha256"] = archive_records[0]["marker_sha256"]
+        marker["review_archive_path"] = archive_records[0]["path"]
+        marker["review_archive_wikilink"] = archive_records[0]["wikilink"]
     write_marker(worktree / ".task-reap-prepared.json", marker)
     print(f"prepared contract-bound final reap: {result}")
     return 0
@@ -470,7 +604,8 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         die(str(exc))
     result = result_path.expanduser().resolve()
     vault = vault_root.expanduser().resolve()
-    review_archive = validated_review_archive(worktree, vault)
+    review_archives = validated_review_archives(worktree, vault, meta)
+    archive_records = review_archive_records(review_archives)
     expected_fields = {
         "task_name": meta.get("task_name"),
         "current_session": current_session,
@@ -483,22 +618,18 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
     for field, expected in expected_fields.items():
         if prepared.get(field) != expected:
             die(f"reap preparation no longer matches {field}", 3)
-    if review_archive is not None:
-        marker_hash = hashlib.sha256((worktree / ".review-archive.json").read_bytes()).hexdigest()
-        if prepared.get("review_archive_marker_sha256") != marker_hash:
-            die("reap preparation no longer matches review archive marker", 3)
-        if prepared.get("review_archive_path") != review_archive["path"]:
-            die("reap preparation points at a different review archive", 3)
+    if prepared.get("review_archives", []) != archive_records:
+        die("reap preparation no longer matches review archive markers", 3)
     try:
         result.relative_to(vault / "wiki")
     except ValueError:
         die("validated reap result must be inside the selected vault wiki", 3)
     if not result.is_file() or result.suffix != ".md":
         die("validated reap result must be an existing wiki Markdown page", 3)
-    if review_archive is not None and review_archive["wikilink"] not in result.read_text(
-        encoding="utf-8", errors="replace"
-    ):
-        die("validated reap result does not link the durable review archive", 3)
+    result_text = result.read_text(encoding="utf-8", errors="replace")
+    missing_links = [record["wikilink"] for record in archive_records if record["wikilink"] not in result_text]
+    if missing_links:
+        die("validated reap result does not link durable review archives: " + ", ".join(missing_links), 3)
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     if str(plan) != prepared.get("plan_path"):
         die("reap preparation points at a different approved plan", 3)
@@ -519,7 +650,17 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         "validated": True,
         "completed_at": utc_now(),
     }
+    if meta.get("version") == 3:
+        try:
+            broker_task = TaskSessionStore(vault).archive_task(
+                str(meta["project_id"]), str(meta["task_id"])
+            )
+        except (KeyError, TaskSessionError, OSError) as exc:
+            die(f"task-session archive failed before final reap completion: {exc}", 3)
+        marker["task_session_status"] = broker_task.get("status")
     write_marker(worktree / ".task-reap-complete.json", marker)
+    if meta.get("version") == 3:
+        (worktree / ".task-session-binding.json").unlink(missing_ok=True)
     review_meta = read_object(worktree / ".review-meta.json")
     attention = read_object(worktree / ".task-needs-attention.json")
     duration = elapsed_ms(meta.get("spawned_at"), marker["completed_at"])
@@ -529,7 +670,10 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         actor="reap",
         counts={
             "tasks": 1,
-            "review_iterations": nonnegative_int(review_meta.get("iteration")),
+            "review_iterations": (
+                sum(nonnegative_int(archive.get("rounds")) for archive in review_archives)
+                if review_archives else nonnegative_int(review_meta.get("iteration"))
+            ),
             "escalations": 1 if attention else 0,
             **({"duration_ms": duration} if duration is not None else {}),
         },
@@ -540,13 +684,16 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
 
 
 def main() -> int:
+    global _STATE_DIR
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     request = sub.add_parser("request-exit")
     request.add_argument("--worktree", default=".")
+    request.add_argument("--state-dir", default="")
     request.add_argument("--kind", choices=["reviewer", "task"], required=True)
     after = sub.add_parser("after-exit")
     after.add_argument("--worktree", default=".")
+    after.add_argument("--state-dir", default="")
     after.add_argument("--kind", choices=["reviewer", "task"], required=True)
     after.add_argument("--surface", required=True)
     complete = sub.add_parser("complete-reap")
@@ -561,6 +708,8 @@ def main() -> int:
     prepare.add_argument("--vault-root", default=str(Path(__file__).resolve().parents[1]))
     args = parser.parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
+    raw_state = str(getattr(args, "state_dir", "") or "").strip()
+    _STATE_DIR = Path(raw_state).expanduser().resolve() if raw_state else None
     if args.command == "request-exit":
         return request_exit(worktree, args.kind)
     if args.command == "after-exit":

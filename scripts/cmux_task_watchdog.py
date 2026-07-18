@@ -24,6 +24,11 @@ from task_contract import ContractError, normalize, normalize_for_runtime
 
 STATE_FILES = {"task": ".task-watchdog.json", "reviewer": ".review-watchdog.json"}
 LOCK_FILES = {"task": ".task-watchdog.lock", "reviewer": ".review-watchdog.lock"}
+_STATE_DIR: Path | None = None
+
+
+def watchdog_file(worktree: Path, name: str) -> Path:
+    return (_STATE_DIR or worktree) / name
 ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 DECORATIVE_RE = re.compile(r"^[\s─━═╭╮╰╯├┤┬┴┼│▏▎▍▌▋▊▉█░▒▓]+$")
 VOLATILE_STATUS_RE = re.compile(
@@ -85,6 +90,37 @@ def run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, capture_output=True, check=False)
 
 
+def recover_gone_reviewer_surface(worktree: Path, route: Route) -> None:
+    """Release an exact v3 review lane even if the agent wrapper has not exited yet."""
+    if route.kind != "reviewer" or _STATE_DIR is None:
+        return
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().with_name("cmux_surface_lifecycle.py")),
+            "after-exit",
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(_STATE_DIR),
+            "--kind",
+            "reviewer",
+            "--surface",
+            route.surface,
+        ],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(
+            "review surface disappeared and task-session recovery failed visibly: "
+            + ((result.stderr or result.stdout).strip() or "unknown lifecycle error"),
+            file=sys.stderr,
+        )
+
+
 def resolve_route(worktree: Path, kind: str, surface: str) -> Route:
     meta = read_json(worktree / ".task-meta.json")
     try:
@@ -102,7 +138,7 @@ def resolve_route(worktree: Path, kind: str, surface: str) -> Route:
         coordinator = str(meta.get("wiki_surface") or "").strip()
         runtime = str(meta.get("executor_runtime") or meta.get("runtime") or "").strip()
     else:
-        review = read_json(worktree / ".review-meta.json")
+        review = read_json(watchdog_file(worktree, ".review-meta.json"))
         expected = str(review.get("review_surface") or "").strip()
         coordinator = str(review.get("executor_surface") or "").strip()
         runtime = str(review.get("reviewer_runtime") or "").strip()
@@ -287,7 +323,7 @@ def attempt_notification(
 
 def sample_once(worktree: Path, kind: str, surface: str, now: float, reset: bool = False) -> str:
     route = resolve_route(worktree, kind, surface)
-    state_path = worktree / STATE_FILES[kind]
+    state_path = watchdog_file(worktree, STATE_FILES[kind])
     state = load_state(state_path, route, now, reset)
     if route.policy.get("enabled") is not True:
         state.update({"status": "disabled", "last_sample_at": iso_time(now), "last_sample_epoch": now})
@@ -309,7 +345,9 @@ def sample_once(worktree: Path, kind: str, surface: str, now: float, reset: bool
 
     if not exists:
         state.update({"status": "surface-gone", "last_sample_at": iso_time(now), "last_sample_epoch": now})
+        attempt_notification(state, route, "degraded", 0, now)
         write_json(state_path, state)
+        recover_gone_reviewer_surface(worktree, route)
         return "stop"
 
     fingerprint = screen_hash(screen)
@@ -373,7 +411,7 @@ def sample_once(worktree: Path, kind: str, surface: str, now: float, reset: bool
 
 
 def record_terminal_status(worktree: Path, kind: str, status: str, now: float) -> None:
-    path = worktree / STATE_FILES[kind]
+    path = watchdog_file(worktree, STATE_FILES[kind])
     try:
         state = read_json(path)
     except WatchdogError:
@@ -389,7 +427,7 @@ def safe_sample(
         return sample_once(worktree, route.kind, route.surface, now, reset)
     except (WatchdogError, OSError, ValueError):
         try:
-            state_path = worktree / STATE_FILES[route.kind]
+            state_path = watchdog_file(worktree, STATE_FILES[route.kind])
             state = load_state(state_path, route, now, False)
             state.update({"status": "failed", "last_sample_at": iso_time(now), "last_sample_epoch": now})
             attempt_notification(state, route, "degraded", 0, now)
@@ -400,7 +438,7 @@ def safe_sample(
 
 
 def run_loop(worktree: Path, kind: str, surface: str) -> int:
-    lock_path = worktree / LOCK_FILES[kind]
+    lock_path = watchdog_file(worktree, LOCK_FILES[kind])
     lock_path.touch(mode=0o600, exist_ok=True)
     with lock_path.open("r+", encoding="utf-8") as lock:
         try:
@@ -438,6 +476,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("run", "sample"):
         command = sub.add_parser(name)
         command.add_argument("--worktree", default=".")
+        command.add_argument("--state-dir", default="")
         command.add_argument("--kind", choices=sorted(STATE_FILES), required=True)
         command.add_argument("--surface", required=True)
         if name == "sample":
@@ -445,15 +484,18 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--reset", action="store_true")
     status = sub.add_parser("status")
     status.add_argument("--worktree", default=".")
+    status.add_argument("--state-dir", default="")
     status.add_argument("--kind", choices=sorted(STATE_FILES), required=True)
     return parser
 
 
 def main() -> int:
+    global _STATE_DIR
     args = build_parser().parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
+    _STATE_DIR = Path(args.state_dir).expanduser().resolve() if args.state_dir else None
     if args.command == "status":
-        print(json.dumps(read_json(worktree / STATE_FILES[args.kind]), indent=2, sort_keys=True))
+        print(json.dumps(read_json(watchdog_file(worktree, STATE_FILES[args.kind])), indent=2, sort_keys=True))
         return 0
     if args.command == "run":
         return run_loop(worktree, args.kind, args.surface)

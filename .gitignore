@@ -152,10 +152,12 @@ _attachments/
 .vault-meta/session-routing/
 .vault-meta/daily-runs/
 .vault-meta/review-runtimes/
+.vault-meta/task-sessions/
 .vault-meta/document-cache/
 .vault-meta/retrieval-quality.pending.json
 .vault-meta/retrieval-experiment.json
 .vault-meta/memory-backup.json
+.task-session-binding.json
 
 # Infrastructure secret containers (defense-in-depth for a public template)
 # Terraform state can hold plaintext secrets even if the .tf files don't
