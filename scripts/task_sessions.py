@@ -515,7 +515,7 @@ class TaskSessionStore:
                 task["updated_at"] = utc_now()
                 try:
                     atomic_write(task_path, task)
-                except OSError:
+                except (OSError, TaskSessionError):
                     pass
                 raise TaskSessionError(
                     "task archive failed and was contained for an idempotent retry"
