@@ -412,7 +412,7 @@ def validated_review_archives(
     if failed_operations and not archives:
         die(
             "failed v3 review cycles are accounted for, but final reap still requires "
-            "a later approved durable review archive",
+            "at least one approved durable review archive",
             3,
         )
     return archives

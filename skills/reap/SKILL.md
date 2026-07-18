@@ -179,8 +179,8 @@ The returned JSON `markers` array contains the exact operation-scoped approved
 archive markers. Pass each marker to `parse-wiki-summary.py` with a repeated
 `--review-archive-marker`; never select one by task name or recency. Terminal
 failed cycles are listed in `failed_operations` and remain auditable broker
-records, but they do not count as approval: at least one later approved durable
-review archive is required. Queued, running, or unarchived completed reviews
+records, but they do not count as approval: at least one approved durable review
+archive is required. Queued, running, or unarchived completed reviews
 still block final reap.
 
 For legacy v1/v2 metadata, if `$WORKTREE/.review-meta.json` exists, keep the

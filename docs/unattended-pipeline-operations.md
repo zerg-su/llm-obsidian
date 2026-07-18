@@ -76,9 +76,10 @@ escape the following:
 - Claude: `--permission-mode dontAsk`, tool surface pinned to exactly
   `Read,Glob,Grep,Write,Bash`, and `--allowedTools` locked to a fixed list:
   `Read`, `Glob`, `Grep`, one `Edit(./.review-outbox.json)` scoped write, a
-  handful of read-only `git`/test/lint `Bash(...)` allowlist entries, and the
-  typed submit command (`*send_review.py submit *`). Nothing else — a reviewer
-  cannot touch product files, and it cannot run arbitrary Bash.
+  handful of exact read-only `git` entries, filename-bounded test/lint entries,
+  and the exact operation-scoped typed submit command. Interpreter-adjacent and
+  trailing Git/callback wildcards are forbidden, so a reviewer cannot append
+  pipes, redirects, wrappers, or `python3 -c` while matching an approved rule.
 - Codex: `-s read-only -a never -c web_search="disabled"`. Same forbidden-flag
   set as the task runtime, so a reviewer can't be pointed at
   `danger-full-access` or given network back.

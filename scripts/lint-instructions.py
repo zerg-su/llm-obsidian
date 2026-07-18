@@ -216,10 +216,16 @@ def check_repo(root: Path) -> list[str]:
             issues.append(f"Codex reviewer missing isolated relay invariant {required!r}")
     for required in (
         '"--permission-mode", "dontAsk"', 'CLAUDE_REVIEW_TOOL_SURFACE = "Read,Glob,Grep,Write,Bash"',
-        "Edit(./.review-outbox.json)", "send_review.py submit", "cmux_agent_supervisor.py",
+        "Edit(./.review-outbox.json)", "submission_command", "cmux_agent_supervisor.py",
     ):
         if required not in review_contract:
             issues.append(f"Claude reviewer missing unattended read-only invariant {required!r}")
+    for forbidden in (
+        "Bash(python3 */", "Bash(bash */", "Bash(git diff *)", "Bash(git -C *",
+        "Bash(python3 *send_review.py",
+    ):
+        if forbidden in supervisor:
+            issues.append(f"Claude reviewer has a broad shell wildcard {forbidden!r}")
     for required in (
         "Bash(python3 tests/test_*.py)",
         "Bash(bash tests/test_*.sh)",

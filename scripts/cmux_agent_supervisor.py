@@ -49,19 +49,11 @@ CODEX_FORBIDDEN_OPTIONS = {
     "-C",
 }
 CLAUDE_REVIEW_TOOL_SURFACE = "Read,Glob,Grep,Write,Bash"
-CLAUDE_REVIEW_ALLOWED_TOOLS = (
+CLAUDE_REVIEW_BASE_ALLOWED_TOOLS = (
     "Read",
     "Glob",
     "Grep",
     "Edit(./.review-outbox.json)",
-    "Bash(git diff *)",
-    "Bash(git status *)",
-    "Bash(git log *)",
-    "Bash(git show *)",
-    "Bash(git -C * status *)",
-    "Bash(git -C * diff *)",
-    "Bash(git -C * log *)",
-    "Bash(git -C * show *)",
     # Repository test entrypoints are executable code, but reviewers already
     # need to run changed tests to verify a task. These end-anchored patterns
     # deny the observed pipe/redirect/wrapper forms, but the embedded wildcard
@@ -69,23 +61,60 @@ CLAUDE_REVIEW_ALLOWED_TOOLS = (
     # still match. The prompt therefore requires the exact no-argument form.
     "Bash(python3 tests/test_*.py)",
     "Bash(bash tests/test_*.sh)",
-    # v3 reviewers execute from their isolated writable runtime root and read
-    # the product through --add-dir, so their prompt uses an absolute product
-    # path for the same bounded test entrypoints.
-    "Bash(python3 */tests/test_*.py)",
-    "Bash(bash */tests/test_*.sh)",
     "Bash(python3 scripts/lint-instructions.py)",
-    "Bash(python3 */scripts/lint-instructions.py)",
-    "Bash(python3 scripts/document-normalize.py check *)",
     "Bash(bash scripts/dcg-test-suite.sh)",
-    "Bash(bash */scripts/dcg-test-suite.sh)",
     "Bash(make test)",
     "Bash(cmux --help)",
     "Bash(cmux notify --help)",
     "Bash(cmux read-screen --help)",
     "Bash(cmux top --help)",
-    "Bash(python3 *send_review.py submit *)",
 )
+
+
+def claude_review_allowed_tools(
+    worktree: Path,
+    *,
+    base_branch: str = "",
+    submission_command: str = "",
+) -> tuple[str, ...]:
+    """Return a reviewer allowlist pinned to one exact product worktree."""
+    root = worktree.expanduser().resolve()
+
+    def command_pattern(relative: str) -> str:
+        placeholder = "__LLM_OBSIDIAN_REVIEW_FILE__"
+        rendered = shlex.quote(str(root / relative.replace("*", placeholder)))
+        return rendered.replace(placeholder, "*")
+
+    cwd_git_commands = [
+        ["git", "status", "--porcelain=v1"],
+        ["git", "status", "--short"],
+        ["git", "diff"],
+        ["git", "diff", "--stat"],
+        ["git", "log", "--oneline", "-10"],
+        ["git", "show", "--stat", "HEAD"],
+    ]
+    exact_git_commands = list(cwd_git_commands)
+    if base_branch:
+        revision_range = f"{base_branch}...HEAD"
+        exact_git_commands.extend([
+            ["git", "diff", revision_range],
+            ["git", "diff", revision_range, "--stat"],
+            ["git", "log", "--oneline", revision_range],
+        ])
+    anchored_git_commands = [
+        ["git", "-C", str(root), *command[1:]] for command in exact_git_commands
+    ]
+    dynamic = [
+        f"Bash(python3 {command_pattern('tests/test_*.py')})",
+        f"Bash(bash {command_pattern('tests/test_*.sh')})",
+        f"Bash(python3 {shlex.quote(str(root / 'scripts' / 'lint-instructions.py'))})",
+        f"Bash(bash {shlex.quote(str(root / 'scripts' / 'dcg-test-suite.sh'))})",
+        *(f"Bash({shlex.join(command)})" for command in exact_git_commands),
+        *(f"Bash({shlex.join(command)})" for command in anchored_git_commands),
+    ]
+    if submission_command:
+        dynamic.append(f"Bash({submission_command})")
+    return CLAUDE_REVIEW_BASE_ALLOWED_TOOLS + tuple(dynamic)
 
 RUNTIME_COMMANDS = ("python3", "git", "bash", "make", "uv", "brew", "cmux", "codex", "claude")
 RUNTIME_DIRS = (
@@ -372,6 +401,9 @@ def validate_reviewer_safety(
     runtime: str,
     reviewer_model: str,
     reviewer_effort: str = "",
+    worktree: Path | None = None,
+    base_branch: str = "",
+    submission_command: str = "",
 ) -> None:
     require_option(argv, "--model", reviewer_model)
     if runtime == "codex":
@@ -396,11 +428,18 @@ def validate_reviewer_safety(
     model_positions = [index for index, item in enumerate(argv) if item == "--model"]
     if len(allowed_positions) != 1 or len(model_positions) != 1:
         raise SupervisorError("Claude reviewer command must pin allowed tools and model")
+    if worktree is None:
+        raise SupervisorError("Claude reviewer command is missing its exact product worktree")
+    expected_allowed_tools = claude_review_allowed_tools(
+        worktree,
+        base_branch=base_branch,
+        submission_command=submission_command,
+    )
     allowed_index, model_index = allowed_positions[0], model_positions[0]
     if allowed_index >= model_index:
         raise SupervisorError("Claude reviewer allowed tools are malformed")
-    allowed_end = allowed_index + 1 + len(CLAUDE_REVIEW_ALLOWED_TOOLS)
-    if tuple(argv[allowed_index + 1:allowed_end]) != CLAUDE_REVIEW_ALLOWED_TOOLS:
+    allowed_end = allowed_index + 1 + len(expected_allowed_tools)
+    if tuple(argv[allowed_index + 1:allowed_end]) != expected_allowed_tools:
         raise SupervisorError("Claude reviewer command has an unexpected permission allowlist")
     extras = argv[allowed_end:model_index]
     while extras:
@@ -646,6 +685,9 @@ def validate_routing(
             spec["runtime"],
             str(source_meta.get("reviewer_model") or ""),
             str(source_meta.get("reviewer_effort") or ""),
+            worktree,
+            str(source_meta.get("base_branch") or ""),
+            str(source_meta.get("submission_command") or ""),
         )
     else:
         task_route = resolved_task_model_route(worktree, source_meta, spec["runtime"])

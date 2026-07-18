@@ -219,7 +219,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         broker_worktree, worktree, broker_meta
     )
     check(
-        "later approved review unblocks failed-cycle accounting",
+        "approved review unblocks failed-cycle accounting",
         len(recovered_archives) == 1
         and recovered_archives[0]["review_id"] == approved_review["operation_id"],
     )

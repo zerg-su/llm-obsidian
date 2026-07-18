@@ -30,8 +30,8 @@ from review_contract import (
 )
 from task_contract import ContractError as TaskContractError, normalize as normalize_task_contract, review_action
 from cmux_agent_supervisor import (
-    CLAUDE_REVIEW_ALLOWED_TOOLS,
     CLAUDE_REVIEW_TOOL_SURFACE,
+    claude_review_allowed_tools,
     reviewer_codex_config_values,
     write_agent_spec,
 )
@@ -870,6 +870,8 @@ def launch_command(
     review_runtime_dir: Path | None,
     state_dir: Path | None = None,
     checkpoint: dict[str, str] | None = None,
+    submission_command: str = "",
+    base_branch: str = "",
 ) -> str:
     state_dir = state_dir or worktree
     env: dict[str, str] = {}
@@ -881,7 +883,11 @@ def launch_command(
         argv = [
             "claude", "--permission-mode", "dontAsk",
             "--tools", CLAUDE_REVIEW_TOOL_SURFACE,
-            "--allowedTools", *CLAUDE_REVIEW_ALLOWED_TOOLS,
+            "--allowedTools", *claude_review_allowed_tools(
+                worktree,
+                base_branch=base_branch,
+                submission_command=submission_command,
+            ),
         ]
         if review_runtime_dir is not None:
             argv.extend(["--add-dir", str(worktree)])
@@ -1016,19 +1022,42 @@ def repository_diagnostics(reviewer_runtime: str, worktree: Path) -> str:
     return ", ".join(f"`{shlex.join(command)}`" for command in commands)
 
 
-def repository_inspection_instructions(reviewer_runtime: str, worktree: Path) -> str:
+def repository_inspection_instructions(
+    reviewer_runtime: str, worktree: Path, base_branch: str
+) -> str:
+    revision_range = f"{base_branch}...HEAD" if base_branch else ""
     if reviewer_runtime == "claude" and _REVIEW_STATE_DIR is None:
+        commands = ["git status --porcelain=v1", "git diff", "git diff --stat"]
+        if revision_range:
+            commands.extend([
+                f"git diff {shlex.quote(revision_range)}",
+                f"git diff {shlex.quote(revision_range)} --stat",
+                f"git log --oneline {shlex.quote(revision_range)}",
+            ])
         return (
             "Your process starts in the product worktree. Resolve repository-relative paths from the current "
-            "directory and use cwd-relative `git status ...`, `git diff ...`, `git log ...`, or `git show ...` "
-            "commands. Do not prefix them with `git -C`: the locked-down Claude allowlist intentionally "
-            "recognizes only these cwd-relative, read-only forms."
+            "directory. The only pre-approved Git commands are "
+            + ", ".join(f"`{command}`" for command in commands)
+            + ". Use Read, Grep, or Glob for narrower inspection; do not add arguments, pipes, redirects, or "
+            "wrappers. Do not prefix them with `git -C` in this cwd-relative reviewer."
         )
+    commands = [
+        ["git", "-C", str(worktree), "status", "--porcelain=v1"],
+        ["git", "-C", str(worktree), "diff"],
+        ["git", "-C", str(worktree), "diff", "--stat"],
+    ]
+    if revision_range:
+        commands.extend([
+            ["git", "-C", str(worktree), "diff", revision_range],
+            ["git", "-C", str(worktree), "diff", revision_range, "--stat"],
+            ["git", "-C", str(worktree), "log", "--oneline", revision_range],
+        ])
     return (
         f"Your process starts in an isolated owner-only scratch directory. Resolve every repository-relative "
-        f"path against `{worktree}` and use `git -C {worktree} ...` for git inspection. "
-        "Read product files by absolute path; use the prompt's approved read-only "
-        "repository diagnostics exactly and never write inside the product worktree."
+        f"path against `{worktree}`. The only pre-approved Git commands are "
+        + ", ".join(f"`{shlex.join(command)}`" for command in commands)
+        + ". Use Read, Grep, or Glob for narrower inspection; do not add arguments, pipes, redirects, or "
+        "wrappers. Read product files by absolute path and never write inside the product worktree."
     )
 
 
@@ -1107,7 +1136,7 @@ def render_review_prompt(
                 reviewer_runtime, submission_command, worktree, review_runtime_dir
             ),
             "repository_inspection_instructions": repository_inspection_instructions(
-                reviewer_runtime, worktree
+                reviewer_runtime, worktree, str(meta.get("base_branch") or "").strip()
             ),
             "repository_diagnostics": repository_diagnostics(reviewer_runtime, worktree),
             "previous_review": previous_review,
@@ -1289,6 +1318,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
         review_runtime_dir,
         state_dir,
         checkpoint,
+        submission_command,
+        base_branch,
     )
 
     started_at = utc_now()

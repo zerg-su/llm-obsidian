@@ -88,6 +88,7 @@ echo "== review-dispatch mode plumbing =="
 LIGHT="$SANDBOX/light"
 LIGHT_VAULT="$SANDBOX/light-vault"
 write_fixture "$LIGHT"
+LIGHT_RESOLVED="$(cd "$LIGHT" && pwd -P)"
 mkdir -p "$LIGHT_VAULT/wiki" "$LIGHT_VAULT/scripts" "$LIGHT_VAULT/.codex" \
   "$LIGHT_VAULT/skills/review-dispatch/scripts"
 printf '# fixture\n' > "$LIGHT_VAULT/scripts/vault-write.py"
@@ -128,10 +129,18 @@ assert env["PATH"] and all(os.path.isabs(item) for item in env["PATH"].split(os.
 PY
 [[ $? -eq 0 ]] && ok "claude-review-trusted-path" || bad "claude-review-trusted-path" "reviewer PATH is not pinned"
 argv_has "$LIGHT_SPEC" --tools Read,Glob,Grep,Write,Bash && ok "claude-tool-surface" || bad "claude-tool-surface" "restricted tools missing"
-grep -q -- "Bash(python3 \*send_review.py submit \*)" "$LIGHT_SPEC" && ok "claude-callback-allowed" || bad "claude-callback-allowed" "typed callback allow rule missing"
+python3 - "$LIGHT_SPEC" "$LIGHT/.review-meta.json" <<'PY'
+import json, sys
+argv = json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
+meta = json.load(open(sys.argv[2], encoding="utf-8"))
+assert f"Bash({meta['submission_command']})" in argv
+assert not any(item.startswith("Bash(git ") and "*" in item for item in argv)
+PY
+[[ $? -eq 0 ]] && ok "claude-callback-and-git-exact" || bad "claude-callback-and-git-exact" "callback or Git rule contains a broad wildcard"
 grep -qF -- 'Bash(python3 tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-python-tests-allowed" || bad "claude-python-tests-allowed" "bounded Python test rule missing"
-grep -qF -- 'Bash(python3 */tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-v3-absolute-python-tests-allowed" || bad "claude-v3-absolute-python-tests-allowed" "bounded absolute Python test rule missing"
-grep -qF -- 'Bash(bash */tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-v3-absolute-shell-tests-allowed" || bad "claude-v3-absolute-shell-tests-allowed" "bounded absolute shell test rule missing"
+grep -qF -- "Bash(python3 $LIGHT_RESOLVED/tests/test_*.py)" "$LIGHT_SPEC" && ok "claude-v3-absolute-python-tests-allowed" || bad "claude-v3-absolute-python-tests-allowed" "exact-worktree Python test rule missing"
+grep -qF -- "Bash(bash $LIGHT_RESOLVED/tests/test_*.sh)" "$LIGHT_SPEC" && ok "claude-v3-absolute-shell-tests-allowed" || bad "claude-v3-absolute-shell-tests-allowed" "exact-worktree shell test rule missing"
+if grep -qF -- 'Bash(python3 */' "$LIGHT_SPEC" || grep -qF -- 'Bash(bash */' "$LIGHT_SPEC"; then bad "claude-no-interpreter-adjacent-wildcard" "interpreter can consume wildcard-matched arguments"; else ok "claude-no-interpreter-adjacent-wildcard"; fi
 grep -qF -- 'Bash(bash tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-shell-tests-allowed" || bad "claude-shell-tests-allowed" "bounded shell test rule missing"
 grep -qF -- 'Bash(bash scripts/dcg-test-suite.sh)' "$LIGHT_SPEC" && ok "claude-dcg-smoke-allowed" || bad "claude-dcg-smoke-allowed" "exact DCG smoke rule missing"
 grep -qF -- '`bash scripts/dcg-test-suite.sh`' "$LIGHT/.review-prompt.md" && ok "claude-dcg-smoke-advertised" || bad "claude-dcg-smoke-advertised" "DCG smoke command missing from prompt"
@@ -778,7 +787,7 @@ expect_eq "codex-effort-invalid-rejected" "$?" 1
 grep -q 'Codex reviewer effort must be one of' "$SANDBOX/codex-effort-bad.err" && ok "codex-effort-invalid-message" || bad "codex-effort-invalid-message" "invalid effort not rejected"
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
-grep -qF -- "git -C $CODEX_REVIEW_RESOLVED ..." "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks worktree git guidance"
+grep -qF -- "git -C $CODEX_REVIEW_RESOLVED status --porcelain=v1" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks exact worktree git guidance"
 "$SUPERVISOR" validate --worktree "$CODEX_REVIEW" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/codex-supervisor.err"
 expect_eq "codex-review-supervisor-valid" "$?" 0
 python3 - "$CODEX_SPEC" <<'PY'
