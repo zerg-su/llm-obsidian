@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,7 @@ with tempfile.TemporaryDirectory() as raw:
     check("multiple coordinator bindings", binding_a["task_id"] == binding_b["task_id"] == task)
 
     cli_task = str(uuid.uuid4())
+    linked_mode = stat.S_IMODE(linked.stat().st_mode)
     initialized = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "task_sessions.py"),
          "--vault-root", str(vault), "init-task", "--worktree", str(linked),
@@ -79,6 +81,11 @@ with tempfile.TemporaryDirectory() as raw:
     check("init-task returns exact identities", initialized_value == {"project_id": project, "task_id": cli_task})
     pointer = json.loads((linked / ".task-session-binding.json").read_text(encoding="utf-8"))
     check("init-task writes exact pointer", pointer["project_id"] == project and pointer["task_id"] == cli_task)
+    check("init-task preserves product worktree mode", stat.S_IMODE(linked.stat().st_mode) == linked_mode)
+    check(
+        "init-task pointer is owner-only",
+        stat.S_IMODE((linked / ".task-session-binding.json").stat().st_mode) == 0o600,
+    )
     binding_meta = {"version": 3, "vault_root": str(vault), "project_id": project, "task_id": cli_task}
     check("v3 exact coordinator binding accepted", v3_session_is_bound(binding_meta, "session-cli"))
     check("v3 unrelated coordinator rejected", not v3_session_is_bound(binding_meta, "session-other"))
@@ -180,11 +187,23 @@ with tempfile.TemporaryDirectory() as raw:
         project, task, domain="review", runtime="claude", model="fable", effort="xhigh",
         operation_type="review", coordinator_surface="surface-b", operation_id=second_id,
     )
-    claimed = store.claim_next(project, task, review_lane)
+    check(
+        "exact claimant does not steal a foreign FIFO head",
+        store.claim_next(project, task, review_lane, second_id) is None
+        and store.lane_state(project, task, review_lane)["queue"] == [operation_id, second_id],
+    )
+    try:
+        store.transition_operation(project, task, review_lane, second_id, "running")
+    except TaskSessionError:
+        pass
+    else:
+        raise AssertionError("non-active queued operation transitioned")
+    passed += 1
+    claimed = store.claim_next(project, task, review_lane, operation_id)
     check("FIFO claims first", claimed is not None and claimed["operation_id"] == operation_id)
     check("busy lane does not double claim", store.claim_next(project, task, review_lane) is None)
     store.transition_operation(project, task, review_lane, operation_id, "failed", degradation="process exited")
-    claimed_second = store.claim_next(project, task, review_lane)
+    claimed_second = store.claim_next(project, task, review_lane, second_id)
     check("failed operation drains queue", claimed_second is not None and claimed_second["operation_id"] == second_id)
     stale = store.transition_operation(project, task, review_lane, operation_id, "failed")
     still_active = store.lane_state(project, task, review_lane)
@@ -221,7 +240,7 @@ with tempfile.TemporaryDirectory() as raw:
     check("concurrent enqueue has no errors", not errors)
     check("concurrent enqueue idempotent", values == [concurrent_id] * 8)
     codex_lane = lane_id_for(project, task, "review", "codex", "gpt-test")
-    claimed_concurrent = store.claim_next(project, task, codex_lane)
+    claimed_concurrent = store.claim_next(project, task, codex_lane, concurrent_id)
     check("concurrent operation queued once", claimed_concurrent is not None and claimed_concurrent["operation_id"] == concurrent_id)
     store.transition_operation(project, task, codex_lane, concurrent_id, "complete")
 
@@ -300,6 +319,52 @@ with tempfile.TemporaryDirectory() as raw:
         partial_state["status"] == "active" and partial_state["archive_failure"] == "pre-lane-archive",
     )
     check("contained archive retry succeeds", store.archive_task(project, partial_task)["status"] == "archived")
+
+    interrupted_task = str(uuid.uuid4())
+    store.create_task(project, interrupted_task, worktree=repo)
+    interrupted_path = store.task_path(project, interrupted_task)
+    interrupted_state = json.loads(interrupted_path.read_text(encoding="utf-8"))
+    interrupted_state["status"] = "archiving"
+    task_sessions_module.atomic_write(interrupted_path, interrupted_state)
+    check(
+        "archive resumes after process loss in archiving state",
+        store.archive_task(project, interrupted_task)["status"] == "archived",
+    )
+
+    for broken_kind in ("missing", "corrupt"):
+        broken_task = str(uuid.uuid4())
+        store.create_task(project, broken_task, worktree=repo)
+        broken_first = store.enqueue_operation(
+            project, broken_task, domain="review", runtime="codex",
+            model=f"gpt-broken-{broken_kind}", effort="high", operation_type="review",
+            coordinator_surface="surface-broken",
+        )
+        broken_second = store.enqueue_operation(
+            project, broken_task, domain="review", runtime="codex",
+            model=f"gpt-broken-{broken_kind}", effort="high", operation_type="review",
+            coordinator_surface="surface-broken",
+        )
+        broken_first_path = Path(str(broken_first["operation_dir"])) / "operation.json"
+        if broken_kind == "missing":
+            broken_first_path.unlink()
+        else:
+            broken_first_path.write_text("{not-json", encoding="utf-8")
+        recovered = store.claim_next(
+            project, broken_task, str(broken_second["lane_id"]),
+            str(broken_second["operation_id"]),
+        )
+        recovered_lane = store.lane_state(project, broken_task, str(broken_second["lane_id"]))
+        check(
+            f"{broken_kind} FIFO head is tombstoned without blocking the lane",
+            recovered is not None
+            and recovered["operation_id"] == broken_second["operation_id"]
+            and recovered_lane["discarded_queue_entries"][-1]["operation_id"]
+            == broken_first["operation_id"],
+        )
+        store.transition_operation(
+            project, broken_task, str(broken_second["lane_id"]),
+            str(broken_second["operation_id"]), "complete",
+        )
 
     corrupt_task = str(uuid.uuid4())
     store.create_task(project, corrupt_task, worktree=repo)

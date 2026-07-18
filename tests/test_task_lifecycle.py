@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 
@@ -26,6 +27,7 @@ import cmux_agent_supervisor as supervisor_module
 import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
+from task_sessions import TaskSessionStore
 
 
 def run(script: Path, *args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -147,6 +149,80 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     else:
         check("review archive tamper blocks finalization", False)
     archive_page.write_text("# Review fixture\n", encoding="utf-8")
+    broker_store = TaskSessionStore(worktree)
+    broker_project = str(uuid.uuid4())
+    broker_task = str(uuid.uuid4())
+    broker_worktree = worktree / "broker-worktree"
+    broker_worktree.mkdir()
+    broker_store.create_task(broker_project, broker_task, worktree=broker_worktree)
+    failed_review = broker_store.enqueue_operation(
+        broker_project, broker_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-failed",
+    )
+    broker_store.claim_next(
+        broker_project, broker_task, failed_review["lane_id"], failed_review["operation_id"]
+    )
+    broker_store.transition_operation(
+        broker_project, broker_task, failed_review["lane_id"], failed_review["operation_id"],
+        "failed", degradation="reviewer-exit",
+    )
+    broker_meta = {
+        "version": 3, "project_id": broker_project, "task_id": broker_task,
+    }
+    write_json(broker_worktree / ".task-meta.json", broker_meta)
+    accounted = run(
+        ROOT / "scripts" / "archive_task_reviews.py",
+        "--worktree", str(broker_worktree), "--vault-root", str(worktree),
+        cwd=ROOT,
+    )
+    accounted_value = json.loads(accounted.stdout)
+    check(
+        "terminal failed review is accountably skippable by the archive pass",
+        accounted.returncode == 0
+        and accounted_value["failed_operations"] == [failed_review["operation_id"]]
+        and accounted_value["markers"] == [],
+        accounted.stderr,
+    )
+    try:
+        lifecycle_module.validated_review_archives(broker_worktree, worktree, broker_meta)
+    except SystemExit as exc:
+        check("failed review alone never satisfies final approval", exc.code == 3)
+    else:
+        check("failed review alone never satisfies final approval", False)
+
+    approved_review = broker_store.enqueue_operation(
+        broker_project, broker_task, domain="review", runtime="claude", model="fable",
+        effort="high", operation_type="review", coordinator_surface="surface-approved",
+    )
+    broker_store.claim_next(
+        broker_project, broker_task, approved_review["lane_id"], approved_review["operation_id"]
+    )
+    broker_store.transition_operation(
+        broker_project, broker_task, approved_review["lane_id"], approved_review["operation_id"],
+        "complete",
+    )
+    approved_state_dir = Path(approved_review["operation_dir"])
+    approved_page = worktree / "wiki" / "meta" / "reviews" / "Approved replacement review.md"
+    approved_page.write_text("# Approved replacement review\n", encoding="utf-8")
+    write_json(approved_state_dir / ".review-meta.json", {"review_id": approved_review["operation_id"]})
+    write_json(approved_state_dir / ".review-archive.json", {
+        "schema_version": 1,
+        "status": "archived",
+        "review_id": approved_review["operation_id"],
+        "path": "wiki/meta/reviews/Approved replacement review.md",
+        "title": "Approved replacement review",
+        "wikilink": "[[Approved replacement review]]",
+        "verdict": "approve",
+        "content_sha256": hashlib.sha256(approved_page.read_bytes()).hexdigest(),
+    })
+    recovered_archives = lifecycle_module.validated_review_archives(
+        broker_worktree, worktree, broker_meta
+    )
+    check(
+        "later approved review unblocks failed-cycle accounting",
+        len(recovered_archives) == 1
+        and recovered_archives[0]["review_id"] == approved_review["operation_id"],
+    )
     meta = {
         "version": 2,
         "task_name": "demo",

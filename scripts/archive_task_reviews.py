@@ -35,8 +35,12 @@ def main() -> int:
             str(meta["project_id"]), str(meta["task_id"]), domain="review"
         )
         markers: list[str] = []
+        failed_operations: list[str] = []
         for operation in operations:
             state_dir = Path(str(operation["operation_dir"])).resolve()
+            if operation.get("status") == "failed":
+                failed_operations.append(str(operation["operation_id"]))
+                continue
             review_meta = state_dir / ".review-meta.json"
             if not review_meta.is_file():
                 if operation.get("status") in {"queued", "starting", "running", "callback-ready"}:
@@ -64,6 +68,7 @@ def main() -> int:
             "schema_version": 1,
             "status": "dry-run" if args.dry_run else "archived",
             "markers": markers,
+            "failed_operations": failed_operations,
         }, ensure_ascii=False, sort_keys=True))
         return 0
     except (KeyError, OSError, json.JSONDecodeError, TaskSessionError) as exc:

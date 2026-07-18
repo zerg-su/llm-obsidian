@@ -37,6 +37,7 @@ from task_sessions import (
     capture_resume,
     project_id_for,
     spawn_right,
+    validate_checkpoint,
 )
 
 
@@ -593,7 +594,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
                 model=str(route["model"]), effort=str(route["effort"]),
                 operation_type=ns.flow, coordinator_surface=surface, operation_id=run_id,
             )
-            claimed = store.claim_next(project_id, ns.task_id, str(operation["lane_id"]))
+            claimed = store.claim_next(
+                project_id, ns.task_id, str(operation["lane_id"]), run_id
+            )
             operation_dir = Path(str(operation["operation_dir"])).resolve()
             write_json(operation_dir / "launch.json", {
                 "schema_version": 1,
@@ -615,8 +618,14 @@ def cmd_start(ns: argparse.Namespace) -> int:
                 return 0
             lane = store.lane_state(project_id, ns.task_id, str(operation["lane_id"]))
             raw_checkpoint = lane.get("checkpoint")
-            if isinstance(raw_checkpoint, dict) and raw_checkpoint.get("kind") == "codex":
-                checkpoint = {str(key): str(value) for key, value in raw_checkpoint.items()}
+            if raw_checkpoint is not None:
+                try:
+                    checkpoint = validate_checkpoint(raw_checkpoint, "codex")
+                except TaskSessionError:
+                    print(
+                        "secure fetch checkpoint is invalid; continuing visibly with a fresh session",
+                        file=sys.stderr,
+                    )
             fetch_broker = {
                 "project_id": project_id, "task_id": ns.task_id,
                 "lane_id": operation["lane_id"], "operation_id": run_id,
@@ -759,7 +768,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             )
             claimed = broker_store.claim_next(
                 str(fetch_broker["project_id"]), str(fetch_broker["task_id"]),
-                str(synth_operation["lane_id"]),
+                str(synth_operation["lane_id"]), synth_operation_id,
             )
             synth_operation_dir = Path(str(synth_operation["operation_dir"])).resolve()
             write_json(synth_operation_dir / "launch.json", {
@@ -791,8 +800,14 @@ def cmd_receive(ns: argparse.Namespace) -> int:
                 str(synth_operation["lane_id"]),
             )
             raw_checkpoint = synth_lane.get("checkpoint")
-            if isinstance(raw_checkpoint, dict) and raw_checkpoint.get("kind") == "codex":
-                synth_checkpoint = {str(key): str(value) for key, value in raw_checkpoint.items()}
+            if raw_checkpoint is not None:
+                try:
+                    synth_checkpoint = validate_checkpoint(raw_checkpoint, "codex")
+                except TaskSessionError:
+                    print(
+                        "secure synthesis checkpoint is invalid; continuing visibly with a fresh session",
+                        file=sys.stderr,
+                    )
             synth_broker = {
                 "project_id": fetch_broker["project_id"], "task_id": fetch_broker["task_id"],
                 "lane_id": synth_operation["lane_id"], "operation_id": synth_operation_id,

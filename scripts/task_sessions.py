@@ -100,6 +100,25 @@ def atomic_write(path: Path, value: dict[str, Any]) -> None:
         temp.unlink(missing_ok=True)
 
 
+def atomic_write_file_only(path: Path, value: dict[str, Any]) -> None:
+    """Atomically write an owner-only file without changing its parent mode."""
+    parent = path.parent
+    if parent.is_symlink() or not parent.is_dir() or parent.stat().st_uid != os.getuid():
+        raise TaskSessionError(f"state file parent is missing or not owned by the current user: {parent}")
+    temp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
+    try:
+        descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+        path.chmod(0o600)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def remove_owned_research_scratch(path: Path, vault_root: Path) -> bool:
     """Remove only a coordinator-created fetch/synth temp directory."""
     try:
@@ -389,7 +408,17 @@ class TaskSessionStore:
                 atomic_write(lane_path, lane)
                 return operation
 
-    def claim_next(self, project_id: str, task_id: str, lane_id: str) -> dict[str, Any] | None:
+    def claim_next(
+        self,
+        project_id: str,
+        task_id: str,
+        lane_id: str,
+        expected_operation_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        expected = (
+            require_uuid(expected_operation_id, "expected_operation_id")
+            if expected_operation_id is not None else None
+        )
         lane_dir = self.lane_dir(project_id, task_id, lane_id)
         lane_path = lane_dir / "lane.json"
         with file_lock(lane_dir / "lane.lock"):
@@ -398,14 +427,59 @@ class TaskSessionStore:
             if active:
                 return None
             queue = lane.get("queue")
-            if not isinstance(queue, list):
+            if not isinstance(queue, list) or any(not isinstance(item, str) for item in queue):
                 raise TaskSessionError("lane queue is corrupt")
+            expected_discarded = False
             while queue:
-                operation_id = queue.pop(0)
-                operation_path = lane_dir / "operations" / operation_id / "operation.json"
-                operation = read_object(operation_path)
-                if operation.get("status") != "queued":
+                raw_operation_id = queue[0]
+                try:
+                    operation_id = require_uuid(raw_operation_id, "queued operation_id")
+                    operation_path = lane_dir / "operations" / operation_id / "operation.json"
+                    operation = read_object(operation_path)
+                    if any(operation.get(key) != value for key, value in {
+                        "project_id": project_id,
+                        "task_id": task_id,
+                        "lane_id": lane_id,
+                        "operation_id": operation_id,
+                    }.items()):
+                        raise TaskSessionError("queued operation identity is corrupt")
+                except TaskSessionError:
+                    queue.pop(0)
+                    now = utc_now()
+                    discarded = lane.get("discarded_queue_entries", [])
+                    if not isinstance(discarded, list):
+                        discarded = []
+                    discarded.append({
+                        "operation_id": raw_operation_id if UUID_RE.fullmatch(raw_operation_id) else None,
+                        "entry_sha256": hashlib.sha256(raw_operation_id.encode()).hexdigest(),
+                        "reason": "invalid-operation-state",
+                        "discarded_at": now,
+                    })
+                    lane["discarded_queue_entries"] = discarded[-50:]
+                    lane["queue"] = queue
+                    lane["status"] = "failed"
+                    lane["updated_at"] = now
+                    atomic_write(lane_path, lane)
+                    print(
+                        "task-sessions: skipped corrupt queued operation "
+                        f"{raw_operation_id if UUID_RE.fullmatch(raw_operation_id) else '<invalid-id>'}; "
+                        "the exact lane remains available",
+                        file=sys.stderr,
+                    )
+                    if expected == raw_operation_id:
+                        expected_discarded = True
                     continue
+                if operation.get("status") != "queued":
+                    queue.pop(0)
+                    lane["queue"] = queue
+                    lane["updated_at"] = utc_now()
+                    atomic_write(lane_path, lane)
+                    continue
+                if expected_discarded:
+                    raise TaskSessionError("expected queued operation state was corrupt and was discarded")
+                if expected is not None and operation_id != expected:
+                    return None
+                queue.pop(0)
                 now = utc_now()
                 operation["status"] = "starting"
                 operation["updated_at"] = now
@@ -416,6 +490,8 @@ class TaskSessionStore:
                 atomic_write(operation_path, operation)
                 atomic_write(lane_path, lane)
                 return operation
+            if expected_discarded:
+                raise TaskSessionError("expected queued operation state was corrupt and was discarded")
             lane["queue"] = []
             lane["status"] = "idle"
             lane["updated_at"] = utc_now()
@@ -444,6 +520,8 @@ class TaskSessionStore:
     ) -> dict[str, Any]:
         if status not in OPERATION_STATES:
             raise TaskSessionError("operation status is invalid")
+        if status == "queued":
+            raise TaskSessionError("queued state is created only by enqueue_operation")
         lane_dir = self.lane_dir(project_id, task_id, lane_id)
         lane_path = lane_dir / "lane.json"
         operation_path = lane_dir / "operations" / require_uuid(operation_id, "operation_id") / "operation.json"
@@ -457,6 +535,8 @@ class TaskSessionStore:
                 raise TaskSessionError(
                     f"terminal operation cannot transition from {current_status} to {status}"
                 )
+            if lane.get("active_operation_id") != operation_id:
+                raise TaskSessionError("only the lane's active operation may transition")
             now = utc_now()
             operation["status"] = status
             operation["updated_at"] = now
@@ -485,7 +565,7 @@ class TaskSessionStore:
             task = read_object(task_path)
             if task.get("status") == "archived":
                 return task
-            if task.get("status") not in {"active", "degraded"}:
+            if task.get("status") not in {"active", "degraded", "archiving"}:
                 raise TaskSessionError("task cannot enter archive from its current state")
             lanes_root = self.task_dir(project_id, task_id) / "lanes"
             lanes = sorted(lanes_root.glob("*/lane.json")) if lanes_root.is_dir() else []
@@ -493,9 +573,10 @@ class TaskSessionStore:
                 lane = read_object(lane_path)
                 if lane.get("active_operation_id") or lane.get("queue"):
                     raise TaskSessionError("task has active or queued operations")
-            task["status"] = "archiving"
-            task["updated_at"] = utc_now()
-            atomic_write(task_path, task)
+            if task.get("status") != "archiving":
+                task["status"] = "archiving"
+                task["updated_at"] = utc_now()
+                atomic_write(task_path, task)
             archived_lanes = 0
             try:
                 for lane_path in lanes:
@@ -709,7 +790,7 @@ def main() -> int:
                 current.get("project_id") != project_id or current.get("task_id") != task_id
             ):
                 raise TaskSessionError("worktree is already bound to another active task")
-            atomic_write(pointer, {
+            atomic_write_file_only(pointer, {
                 "schema_version": SCHEMA_VERSION,
                 "project_id": project_id,
                 "task_id": task_id,

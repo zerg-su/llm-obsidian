@@ -37,7 +37,7 @@ from cmux_agent_supervisor import (
 )
 from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event, nonnegative_int
 from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, session_from_meta
-from task_sessions import TaskSessionError, TaskSessionStore, spawn_right
+from task_sessions import TaskSessionError, TaskSessionStore, spawn_right, validate_checkpoint
 
 try:
     import tomllib
@@ -1208,7 +1208,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
                 operation_id=review_id,
             )
             lane_id = str(operation["lane_id"])
-            claimed = store.claim_next(str(meta["project_id"]), str(meta["task_id"]), lane_id)
+            claimed = store.claim_next(
+                str(meta["project_id"]), str(meta["task_id"]), lane_id, review_id
+            )
         except (TaskSessionError, KeyError, OSError) as exc:
             die(f"cannot create review operation: {exc}")
         state_dir = Path(str(operation["operation_dir"])).resolve()
@@ -1230,10 +1232,10 @@ def cmd_start(ns: argparse.Namespace) -> int:
             return 0
         lane = store.lane_state(str(meta["project_id"]), str(meta["task_id"]), lane_id)
         raw_checkpoint = lane.get("checkpoint")
-        if isinstance(raw_checkpoint, dict):
-            if raw_checkpoint.get("kind") == reviewer_runtime and raw_checkpoint.get("checkpoint_id"):
-                checkpoint = {str(key): str(value) for key, value in raw_checkpoint.items()}
-            else:
+        if raw_checkpoint is not None:
+            try:
+                checkpoint = validate_checkpoint(raw_checkpoint, reviewer_runtime)
+            except TaskSessionError:
                 print("review-dispatch: stored checkpoint is invalid; continuing with a fresh visible reviewer", file=sys.stderr)
     ensure_review_cycle_can_start(worktree)
     review_runtime_dir = (

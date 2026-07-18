@@ -468,6 +468,16 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         first_fetch["project_id"], first_fetch["task_id"], first_fetch["lane_id"],
         first_fetch["operation_id"], "complete",
     )
+    fetch_lane_path = (
+        persistent_store.lane_dir(
+            first_fetch["project_id"], first_fetch["task_id"], first_fetch["lane_id"]
+        ) / "lane.json"
+    )
+    fetch_lane_state = json.loads(fetch_lane_path.read_text(encoding="utf-8"))
+    fetch_lane_state["checkpoint"] = {
+        "kind": "claude", "checkpoint_id": "wrong-runtime", "cwd": str(tmp),
+    }
+    fetch_lane_path.write_text(json.dumps(fetch_lane_state), encoding="utf-8")
     resumed_fetch = run(
         "start", "--topic", "queued follow-up", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
@@ -475,6 +485,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "--operation-id", queued_value["run_id"], "--tmp-root", str(tmp), "--no-spawn",
     )
     check("queued persistent fetch becomes runnable", resumed_fetch.returncode == 0, resumed_fetch.stderr)
+    check(
+        "invalid secure fetch checkpoint falls back visibly",
+        "secure fetch checkpoint is invalid" in resumed_fetch.stderr,
+        resumed_fetch.stderr,
+    )
     resumed_fetch_state = json.loads(resumed_fetch.stdout)
 
     def write_persistent_artifact(value: dict[str, object], topic: str) -> None:
@@ -534,6 +549,48 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "secure synth resumes exact checkpoint",
         "checkpoint-synth-1" in resumed_synth["synth_command"],
         resumed_synth["synth_command"],
+    )
+    second_synth_broker = resumed_synth["synth_broker"]
+    persistent_store.transition_operation(
+        second_synth_broker["project_id"], second_synth_broker["task_id"],
+        second_synth_broker["lane_id"], second_synth_broker["operation_id"], "complete",
+    )
+
+    third_fetch_result = run(
+        "start", "--topic", "invalid synth checkpoint", "--flow", "autoresearch",
+        "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
+        "--worktree", str(persistent_repo), "--task-id", persistent_task,
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("third persistent fetch starts", third_fetch_result.returncode == 0, third_fetch_result.stderr)
+    third_fetch = json.loads(third_fetch_result.stdout)
+    third_fetch_broker = third_fetch["fetch_broker"]
+    persistent_store.transition_operation(
+        third_fetch_broker["project_id"], third_fetch_broker["task_id"],
+        third_fetch_broker["lane_id"], third_fetch_broker["operation_id"], "complete",
+    )
+    write_persistent_artifact(third_fetch, "invalid synth checkpoint")
+    synth_lane_path = (
+        persistent_store.lane_dir(
+            second_synth_broker["project_id"], second_synth_broker["task_id"],
+            second_synth_broker["lane_id"],
+        ) / "lane.json"
+    )
+    synth_lane_state = json.loads(synth_lane_path.read_text(encoding="utf-8"))
+    synth_lane_state["checkpoint"] = {
+        "kind": "claude", "checkpoint_id": "wrong-runtime", "cwd": str(tmp),
+    }
+    synth_lane_path.write_text(json.dumps(synth_lane_state), encoding="utf-8")
+    invalid_synth_result = run(
+        "receive", "--run-id", third_fetch["run_id"],
+        "--operation-dir", third_fetch["operation_dir"],
+        "--tmp-root", str(tmp), "--no-spawn",
+    )
+    check("invalid checkpoint synthesis starts", invalid_synth_result.returncode == 0, invalid_synth_result.stderr)
+    check(
+        "invalid secure synthesis checkpoint falls back visibly",
+        "secure synthesis checkpoint is invalid" in invalid_synth_result.stderr,
+        invalid_synth_result.stderr,
     )
 
 print("\nAll research isolation tests passed.")

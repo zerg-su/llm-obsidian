@@ -392,8 +392,12 @@ def validated_review_archives(
     except (KeyError, TaskSessionError, OSError) as exc:
         die(f"cannot enumerate exact v3 review operations: {exc}", 3)
     archives: list[dict[str, Any]] = []
+    failed_operations = 0
     for operation in operations:
         state_dir = Path(str(operation["operation_dir"])).resolve()
+        if operation.get("status") == "failed":
+            failed_operations += 1
+            continue
         if not (state_dir / ".review-meta.json").is_file():
             die(
                 f"v3 review operation {operation.get('operation_id')} has no completed review metadata",
@@ -405,6 +409,12 @@ def validated_review_archives(
         if value is None:
             die("started v3 review has no durable archive", 3)
         archives.append({**value, "marker_path": str(state_dir / ".review-archive.json")})
+    if failed_operations and not archives:
+        die(
+            "failed v3 review cycles are accounted for, but final reap still requires "
+            "a later approved durable review archive",
+            3,
+        )
     return archives
 
 
