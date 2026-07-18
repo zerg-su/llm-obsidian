@@ -29,6 +29,8 @@ REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
+WORKSPACE_TRUST_POLL_SECONDS = 0.1
+WORKSPACE_TRUST_TIMEOUT_SECONDS = 15
 try:
     _ROUTING_CONFIG = load_routing_config(Path(__file__).resolve().parents[1])
 except RoutingError:  # Hermetic consumers may copy only the supervisor.
@@ -879,6 +881,82 @@ def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
             pass
 
 
+def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
+    """Recognize only the native first-run trust dialog for one runtime."""
+    markers = {
+        "claude": (
+            "Accessing workspace:",
+            "Quick safety check: Is this a project you created or one you trust?",
+            "Yes, I trust this folder",
+            "Enter to confirm",
+        ),
+        "codex": (
+            "Do you trust the contents of this directory?",
+            "Yes, continue",
+            "Press enter to continue",
+        ),
+    }
+    expected = markers.get(runtime)
+    return expected is not None and all(marker in screen for marker in expected)
+
+
+def automatic_workspace_trust_allowed(worktree: Path) -> bool:
+    """Allow bootstrap only for a plan-bound unattended dispatch task."""
+    try:
+        meta = read_task_json(worktree / ".task-meta.json")
+        policy = normalize(meta)
+    except (ContractError, OSError, ValueError):
+        return False
+    return meta.get("version") in {2, 3} and policy["interaction_policy"] == "unattended"
+
+
+def auto_accept_workspace_trust(
+    surface: str,
+    runtime: str,
+    stop: threading.Event,
+    state: dict[str, int],
+    runner: Any = subprocess.run,
+    *,
+    timeout_seconds: float = WORKSPACE_TRUST_TIMEOUT_SECONDS,
+    poll_seconds: float = WORKSPACE_TRUST_POLL_SECONDS,
+) -> None:
+    """Accept one exact native trust prompt on the supervisor-owned surface."""
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while time.monotonic() < deadline and not stop.wait(max(0.001, poll_seconds)):
+        try:
+            result = runner(
+                ["cmux", "read-screen", "--surface", surface, "--lines", "80"],
+                text=True,
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            state["read_failures"] = state.get("read_failures", 0) + 1
+            continue
+        if result.returncode != 0:
+            state["read_failures"] = state.get("read_failures", 0) + 1
+            continue
+        if not workspace_trust_prompt_visible(runtime, result.stdout):
+            continue
+        try:
+            accepted = runner(
+                ["cmux", "send-key", "--surface", surface, "Enter"],
+                text=True,
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            state["send_failures"] = state.get("send_failures", 0) + 1
+            return
+        if accepted.returncode == 0:
+            state["accepts"] = state.get("accepts", 0) + 1
+        else:
+            state["send_failures"] = state.get("send_failures", 0) + 1
+        return
+
+
 def run_agent(
     worktree: Path, state_dir: Path, kind: str, surface: str, raw_spec: str = ""
 ) -> int:
@@ -892,6 +970,9 @@ def run_agent(
     watchdog: subprocess.Popen[bytes] | None = None
     relay_stop: threading.Event | None = None
     relay_thread: threading.Thread | None = None
+    trust_stop: threading.Event | None = None
+    trust_thread: threading.Thread | None = None
+    trust_state: dict[str, int] = {}
     review_runtime: Path | None = None
     agent_rc = 127
     try:
@@ -920,6 +1001,15 @@ def run_agent(
         if sys.stdout.isatty():
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.flush()
+        if automatic_workspace_trust_allowed(worktree):
+            trust_stop = threading.Event()
+            trust_thread = threading.Thread(
+                target=auto_accept_workspace_trust,
+                args=(surface, spec["runtime"], trust_stop, trust_state),
+                name="workspace-trust-bootstrap",
+                daemon=True,
+            )
+            trust_thread.start()
         agent_cwd = review_runtime or worktree
         agent_rc = subprocess.run(argv, cwd=agent_cwd, env=env, check=False).returncode
     except KeyboardInterrupt:
@@ -932,6 +1022,10 @@ def run_agent(
             relay_stop.set()
         if relay_thread is not None:
             relay_thread.join(timeout=REVIEW_RELAY_TIMEOUT_SECONDS + 1)
+        if trust_stop is not None:
+            trust_stop.set()
+        if trust_thread is not None:
+            trust_thread.join(timeout=3)
 
     lifecycle = subprocess.run(
         [
@@ -967,6 +1061,9 @@ def run_agent(
         ),
         "relay_sent": nonnegative_int(relay.get("sent_count")),
         "relay_failures": nonnegative_int(relay.get("failure_count")),
+        "workspace_trust_accepts": nonnegative_int(trust_state.get("accepts")),
+        "workspace_trust_read_failures": nonnegative_int(trust_state.get("read_failures")),
+        "workspace_trust_send_failures": nonnegative_int(trust_state.get("send_failures")),
     }
     emit_lifecycle_event(
         worktree,

@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -574,6 +575,42 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor pins Claude model and effort defaults",
         supervisor_module.option_value(claude_spec["argv"], "--model") == "fable"
         and supervisor_module.option_value(claude_spec["argv"], "--effort") == "high",
+    )
+    claude_trust_screen = (
+        "Accessing workspace:\nQuick safety check: Is this a project you created or one you trust?\n"
+        "1. Yes, I trust this folder\nEnter to confirm\n"
+    )
+    codex_trust_screen = (
+        "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue\n"
+    )
+    check(
+        "supervisor recognizes only complete native trust prompts",
+        supervisor_module.workspace_trust_prompt_visible("claude", claude_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible("codex", codex_trust_screen)
+        and not supervisor_module.workspace_trust_prompt_visible("claude", codex_trust_screen)
+        and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
+    )
+    trust_commands: list[list[str]] = []
+
+    def trust_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        trust_commands.append(command)
+        stdout = codex_trust_screen if command[1] == "read-screen" else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    trust_state: dict[str, int] = {}
+    supervisor_module.auto_accept_workspace_trust(
+        meta["task_surface"], "codex", threading.Event(), trust_state,
+        runner=trust_runner, timeout_seconds=0.1, poll_seconds=0.001,
+    )
+    check(
+        "supervisor accepts one exact trust prompt on the bound surface",
+        trust_state.get("accepts") == 1
+        and trust_commands[-1]
+        == ["cmux", "send-key", "--surface", meta["task_surface"], "Enter"],
+    )
+    check(
+        "automatic trust requires an unattended approved task",
+        supervisor_module.automatic_workspace_trust_allowed(worktree),
     )
     write_json(worktree / ".task-meta.json", meta)
     write_json(worktree / ".task-agent-command.json", safe_agent_spec)

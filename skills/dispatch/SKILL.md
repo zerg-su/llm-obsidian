@@ -278,8 +278,12 @@ For Codex, run `codex-sync --apply --only-profile <dispatch-profile>` after the
 upfront approval and before `new-split`. The scoped sync unions only already
 trusted global hook hashes into that profile, never changes other Codex
 profiles, and never accepts a new/conflicting hash.
-If Codex still presents hook trust, stop at startup and surface that single new
-trust decision immediately instead of letting the task appear active.
+For an approved v2/v3 unattended task, the supervisor recognizes only the
+runtime's complete native first-run workspace-trust dialog on the exact bound
+task/reviewer surface and presses Enter once. Codex or Claude persists its own
+native trust decision; the pipeline never edits global trust files directly.
+Partial/unknown prompts, interactive tasks, other surfaces, and later dialogs
+remain untouched and visible to the user.
 
 Paradigm: the task agent lives as a **split surface to the right** of the wiki agent in the very same cmux workspace, **not** in a separate workspace or window. The user sees both sessions at once, switches between them as panes, and parallel tasks accumulate as extra surfaces in the same split stack.
 
@@ -385,18 +389,8 @@ cat > <worktree-path>/.task-meta.json <<EOF
   "plan_file": "/abs/path/to/wiki/plans/<file>.md",
   "approved_plan_sha256": "<sha256 captured before echo-confirm>",
   "interaction_policy": "unattended",
-  "review_policy": {
-    "mode": "light|full|skip",
-    "max_verify_iterations": 2,
-    "auto_resolve_severities": ["warning", "nit"],
-    "escalate_severities": ["blocking"]
-  },
-  "reap_policy": {
-    "mode": "final",
-    "auto_file": true,
-    "allowed_types": ["session"],
-    "title": "<exact approved wiki title>"
-  },
+  "review_policy": {"mode": "light|full|skip", "max_verify_iterations": 2, "auto_resolve_severities": ["warning", "nit"], "escalate_severities": ["blocking"]},
+  "reap_policy": {"mode": "final", "auto_file": true, "allowed_types": ["session"], "title": "<exact approved wiki title>"},
   "surface_policy": {"auto_close": true},
   "watchdog_policy": {"enabled": true, "poll_seconds": 30, "warn_after_seconds": 900, "alert_after_seconds": 1200},
   "forbidden_actions": ["push", "deploy", "publish", "delete-worktree", "delete-branch", "expand-scope"],
@@ -407,31 +401,17 @@ EOF
 
 Why `.task-meta.json`:
 - `origin_session` — `/reap` compares it with current `./scripts/current-session-id.sh`; on mismatch (the wiki agent restarted between dispatch and reap, or another session runs reap) — WARNING and an explicit confirm before filing. Does not block, but stays visible. See Edge case 6.
-- `vault_root` — binds review archives, callbacks, lifecycle telemetry, and reap
-  to the canonical coordinator vault even when this repository reviews a linked
-  worktree copy of itself. Older v2 metadata derives the same root from
-  `plan_file`; script-location inference is only a legacy fallback.
+- `vault_root` — binds review archives, callbacks, lifecycle telemetry, and reap to the canonical coordinator vault even for a linked worktree. Older v2 metadata derives it from `plan_file`; script-location inference is only a legacy fallback.
 - `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude, or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
 - `executor_runtime` / `runtime` / `model` — `/reap` preserves executor provenance in result-page frontmatter and echo output (`runtime` stays as a legacy alias for old consumers).
 - `suggested_agents` — `/reap` can add them to the saved page's frontmatter or use them for cross-refs.
-- `approved_plan_sha256` prevents post-approval drift; validate it with
-  `scripts/task_contract.py validate` before task work.
-- `reap_policy` binds unattended filing to one exact type/title; drift,
-  collision, or session mismatch escalates instead of filing.
+- `approved_plan_sha256` prevents post-approval drift; validate it with `scripts/task_contract.py validate` before task work.
+- `reap_policy` binds unattended filing to one exact type/title; drift, collision, or session mismatch escalates instead of filing.
 - `watchdog_policy` only observes/alerts; it never sends input, kills, or closes.
 
 Prepare the shell-free task argv, then send only the short supervisor command.
-`prepare-task` pins Codex to `-a never -s workspace-write` and adds only the
-validated Git common directory, enough for linked-worktree commits. Its proxy allows client
-connections only to `localhost`, `127.0.0.1`, `::1`, and the exact user-owned
-cmux Unix socket from `CMUX_SOCKET_PATH`; loopback binding is allowed, while
-external domains, non-loopback proxying, upstream proxies, arbitrary Unix
-sockets, and SOCKS remain disabled. The
-supervisor pins a trusted `PATH` with Python, Homebrew, Docling, Git, cmux,
-Claude, and Codex, plus the standalone task profile through `DCG_CONFIG`.
-That profile permits local rebase/amend/cherry-pick/staging but blocks push,
-hard reset, file discard, worktree/branch deletion, repository-wide history
-rewriting, deployment, publication, and the other destructive packs.
+`prepare-task` pins Codex to `-a never -s workspace-write` and adds only the validated Git common directory, enough for linked-worktree commits. Its proxy allows clients only to `localhost`, `127.0.0.1`, `::1`, and the exact user-owned cmux socket from `CMUX_SOCKET_PATH`; external domains, non-loopback/upstream proxying, arbitrary Unix sockets, and SOCKS remain disabled.
+The supervisor pins a trusted `PATH` with Python, Homebrew, Docling, Git, cmux, Claude, and Codex, plus the task profile through `DCG_CONFIG`. That profile permits local rebase/amend/cherry-pick/staging but blocks push, hard reset, file discard, worktree/branch deletion, repository-wide history rewriting, deployment, publication, and the other destructive packs.
 Claude keeps `auto` while using the same trusted `PATH` and task DCG profile.
 The supervisor validates the command/environment contract, refuses drift,
 appends one prompt argv, runs the watchdog, and calls lifecycle after exit.
