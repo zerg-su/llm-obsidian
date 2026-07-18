@@ -362,6 +362,8 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     fake_cmux.write_text(
         "#!/bin/sh\n"
         "case \"$1\" in\n"
+        "  surface) if [ \"$2 $3\" = \"resume get\" ]; then "
+        "printf '{\"resume_binding\":{\"kind\":\"claude\",\"checkpoint_id\":\"review-checkpoint-1\",\"cwd\":\"%s\"}}\\n' \"$PWD\"; exit 0; fi ;;\n"
         "  read-screen)\n"
         "    if [ \"${CMUX_SCREEN_GONE:-0}\" = 1 ]; then echo 'not_found: surface' >&2; exit 1; fi\n"
         "    if [ \"${CMUX_SCREEN_FAIL:-0}\" = 1 ]; then echo 'temporary failure' >&2; exit 2; fi\n"
@@ -783,6 +785,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     })
     result = run(LIFECYCLE, "request-exit", "--kind", "reviewer", cwd=worktree, env=env)
     check("reviewer exit armed", result.returncode == 0, result.stderr)
+    review_close = json.loads(
+        (worktree / ".review-close-armed.json").read_text(encoding="utf-8")
+    )
+    check(
+        "reviewer resume checkpoint captured before agent exit",
+        review_close.get("checkpoint") == {
+            "kind": "claude",
+            "checkpoint_id": "review-checkpoint-1",
+            "cwd": str(worktree.resolve()),
+        },
+    )
     result = run(
         LIFECYCLE, "after-exit", "--kind", "reviewer",
         "--surface", review_surface, cwd=worktree, env=env,

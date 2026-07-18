@@ -25,7 +25,7 @@ from task_contract import (
     validate_handoff,
     v3_session_is_bound,
 )
-from task_sessions import TaskSessionError, TaskSessionStore, capture_resume
+from task_sessions import TaskSessionError, TaskSessionStore, capture_resume, validate_checkpoint
 
 
 HANDOFF_PREFIXES = (".task-", ".review-", ".wiki-")
@@ -198,10 +198,22 @@ def arm(worktree: Path, kind: str) -> tuple[Path, str, str]:
             die("task worktree has non-handoff changes: " + ", ".join(dirty), 3)
     sentinel_name, _, _ = names(kind)
     sentinel = lifecycle_file(worktree, sentinel_name, kind)
-    write_marker(
-        sentinel,
-        {"version": 1, "kind": kind, "surface": surface, "armed_at": utc_now()},
-    )
+    payload: dict[str, Any] = {
+        "version": 1, "kind": kind, "surface": surface, "armed_at": utc_now()
+    }
+    if kind == "reviewer":
+        try:
+            # Provider hooks may clear their cmux resume binding as the agent
+            # exits. Capture it while the interactive process is still alive,
+            # before request_exit submits /exit.
+            payload["checkpoint"] = capture_resume(surface, runtime)
+        except (TaskSessionError, OSError) as exc:
+            payload["degradation"] = f"resume checkpoint unavailable: {exc}"
+            print(
+                f"review session context could not be retained; the next round will start fresh: {exc}",
+                file=sys.stderr,
+            )
+    write_marker(sentinel, payload)
     return sentinel, surface, runtime
 
 
@@ -255,11 +267,26 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     degradation = ""
     if kind == "reviewer" and _STATE_DIR is not None:
         meta = read_json(lifecycle_file(worktree, ".review-meta.json"))
-        try:
-            checkpoint = capture_resume(surface, str(meta.get("reviewer_runtime") or ""))
-        except (TaskSessionError, OSError) as exc:
-            degradation = f"resume checkpoint unavailable: {exc}"
-            print(f"review session context could not be retained; the next round will start fresh: {exc}", file=sys.stderr)
+        runtime = str(meta.get("reviewer_runtime") or "")
+        raw_checkpoint = payload.get("checkpoint")
+        degradation = str(payload.get("degradation") or "")
+        if raw_checkpoint is not None:
+            try:
+                checkpoint = validate_checkpoint(raw_checkpoint, runtime)
+            except TaskSessionError as exc:
+                degradation = f"resume checkpoint unavailable: {exc}"
+        elif not degradation:
+            # Backward compatibility for a close armed by an older script.
+            try:
+                checkpoint = capture_resume(surface, runtime)
+            except (TaskSessionError, OSError) as exc:
+                degradation = f"resume checkpoint unavailable: {exc}"
+        if degradation:
+            print(
+                "review session context could not be retained; "
+                f"the next round will start fresh: {degradation.removeprefix('resume checkpoint unavailable: ')}",
+                file=sys.stderr,
+            )
     closed = run(["cmux", "close-surface", "--surface", surface])
     close_text = (closed.stdout + closed.stderr).lower()
     if closed.returncode != 0 and not any(token in close_text for token in ("not found", "not_found", "unknown surface")):
