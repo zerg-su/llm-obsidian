@@ -352,6 +352,10 @@ PROJECT_ID=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.l
 Never derive either ID from a task name, branch, path, or existing candidate.
 Attaching another coordinator requires the exact opaque `task_id` and an
 explicit `init-task --task-id ...` binding.
+The same coordinator session may explicitly bind several concurrent task IDs;
+each binding is preserved independently. A command that omits `task_id` may
+reuse a session only when exactly one active task remains, otherwise it fails
+closed instead of guessing.
 
 ```bash
 cat > <worktree-path>/.task-meta.json <<EOF

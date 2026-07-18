@@ -13,6 +13,11 @@ collector; final `reap` is the normal archive/cleanup boundary.
   `scripts/task_sessions.py ensure-session-task`, or explicitly attached by
   exact ID. Names, branches, paths, recency, and “only candidate” matching are
   never used.
+- One coordinator provider session may explicitly own several concurrent task
+  IDs, including tasks in the same project. Bindings are task-scoped rather
+  than a single mutable session slot. Implicit reuse succeeds only when exactly
+  one active task is bound; multiple active tasks fail closed and require an
+  explicit `task_id`.
 - A lane key hashes `project_id + task_id + permission_domain + runtime +
   pinned_model`. Effort is an operation launch parameter, not lane identity.
 - Domains are `normal`, `review`, `secure-fetch`, and `secure-synth`. A
@@ -38,7 +43,7 @@ Canonical state is:
       prompt/result/callback/baseline and bounded lifecycle artifacts
 ```
 
-Task and lane transitions use short `fcntl` locks plus atomic JSON replacement.
+Task, session-binding, and lane transitions use short `fcntl` locks plus atomic JSON replacement.
 Duplicate operation IDs are idempotent. One lane runs one operation and drains
 new work FIFO; different tasks/models/domains can run concurrently. Enqueue is
 serialized against `reap`, which changes `active -> archiving -> archived`

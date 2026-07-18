@@ -276,47 +276,60 @@ class TaskSessionStore:
         if runtime not in RUNTIMES:
             raise TaskSessionError("binding runtime is invalid")
         session_id = require_token(session_id, "session_id")
-        binding_id = hashlib.sha256(f"{runtime}\0{session_id}".encode()).hexdigest()
+        project_id = require_uuid(project_id, "project_id")
+        task_id = require_uuid(task_id, "task_id")
+        session_key = hashlib.sha256(f"{runtime}\0{session_id}".encode()).hexdigest()
+        binding_id = hashlib.sha256(
+            f"{runtime}\0{session_id}\0{project_id}\0{task_id}".encode()
+        ).hexdigest()
         path = self.root / "session-bindings" / runtime / f"{binding_id}.json"
-        lock = path.with_suffix(".lock")
+        lock = self.root / "session-bindings" / runtime / f"{session_key}.lock"
         with file_lock(lock):
-            current = read_object(path, required=False)
-            if current and (
-                current.get("project_id") != project_id or current.get("task_id") != task_id
-            ):
-                try:
+            if not explicit:
+                for current in self.session_bindings(runtime=runtime, session_id=session_id):
+                    if current.get("project_id") == project_id and current.get("task_id") == task_id:
+                        continue
                     prior = read_object(
-                        self.task_path(
-                            require_uuid(str(current.get("project_id") or ""), "project_id"),
-                            require_uuid(str(current.get("task_id") or ""), "task_id"),
-                        ),
+                        self.task_path(str(current["project_id"]), str(current["task_id"])),
                         required=False,
                     )
-                except TaskSessionError:
-                    prior = {}
-                if not explicit and prior.get("status") != "archived":
-                    raise TaskSessionError("session is already bound to another task")
+                    if prior.get("status") != "archived":
+                        raise TaskSessionError("session is already bound to another active task")
             value = {
                 "schema_version": SCHEMA_VERSION,
                 "runtime": runtime,
                 "session_id": session_id,
-                "project_id": require_uuid(project_id, "project_id"),
-                "task_id": require_uuid(task_id, "task_id"),
+                "project_id": project_id,
+                "task_id": task_id,
                 "explicit": bool(explicit),
                 "updated_at": utc_now(),
             }
             atomic_write(path, value)
             return value
 
-    def session_binding(self, *, runtime: str, session_id: str) -> dict[str, Any]:
+    def session_bindings(self, *, runtime: str, session_id: str) -> list[dict[str, Any]]:
+        """Return every task explicitly associated with one provider session."""
         if runtime not in RUNTIMES:
             raise TaskSessionError("binding runtime is invalid")
         session_id = require_token(session_id, "session_id")
-        binding_id = hashlib.sha256(f"{runtime}\0{session_id}".encode()).hexdigest()
-        return read_object(
-            self.root / "session-bindings" / runtime / f"{binding_id}.json",
-            required=False,
-        )
+        root = self.root / "session-bindings" / runtime
+        values: dict[tuple[str, str], dict[str, Any]] = {}
+        for path in sorted(root.glob("*.json")) if root.is_dir() else []:
+            current = read_object(path)
+            if current.get("runtime") != runtime or current.get("session_id") != session_id:
+                continue
+            project_id = require_uuid(str(current.get("project_id") or ""), "project_id")
+            task_id = require_uuid(str(current.get("task_id") or ""), "task_id")
+            values[(project_id, task_id)] = current
+        return [values[key] for key in sorted(values)]
+
+    def session_binding(self, *, runtime: str, session_id: str) -> dict[str, Any]:
+        values = self.session_bindings(runtime=runtime, session_id=session_id)
+        if len(values) > 1:
+            raise TaskSessionError(
+                "session is bound to multiple tasks; an explicit task_id is required"
+            )
+        return values[0] if values else {}
 
     def enqueue_operation(
         self,
@@ -800,22 +813,37 @@ def main() -> int:
             return 0
         if args.command == "ensure-session-task":
             project_id = project_id_for(args.worktree, create=True)
-            current = store.session_binding(runtime=args.runtime, session_id=args.session_id)
             requested = require_uuid(args.task_id, "task_id") if args.task_id else ""
-            if current and not requested:
-                if current.get("project_id") != project_id:
-                    raise TaskSessionError("session binding belongs to a different project")
-                current_task = read_object(
-                    store.task_path(str(current["project_id"]), str(current["task_id"])),
-                    required=False,
-                )
-                if current_task.get("status") in {"active", "degraded"}:
+            if not requested:
+                active: list[dict[str, Any]] = []
+                for current in store.session_bindings(
+                    runtime=args.runtime, session_id=args.session_id
+                ):
+                    if current.get("project_id") != project_id:
+                        current_task = read_object(
+                            store.task_path(str(current["project_id"]), str(current["task_id"])),
+                            required=False,
+                        )
+                        if current_task.get("status") in {"active", "degraded", "archiving"}:
+                            raise TaskSessionError("session binding belongs to a different active project")
+                        continue
+                    current_task = read_object(
+                        store.task_path(str(current["project_id"]), str(current["task_id"])),
+                        required=False,
+                    )
+                    if current_task.get("status") in {"active", "degraded"}:
+                        active.append(current)
+                    elif current_task.get("status") not in {"archived"}:
+                        raise TaskSessionError("session binding points to an unavailable task state")
+                if len(active) > 1:
+                    raise TaskSessionError(
+                        "session has multiple active tasks; pass an explicit task_id"
+                    )
+                if active:
                     print(json.dumps({
-                        "project_id": current["project_id"], "task_id": current["task_id"],
+                        "project_id": active[0]["project_id"], "task_id": active[0]["task_id"],
                     }, sort_keys=True))
                     return 0
-                if current_task.get("status") not in {"archived"}:
-                    raise TaskSessionError("session binding points to an unavailable task state")
             task_id = requested or str(uuid.uuid4())
             store.create_task(project_id, task_id, worktree=args.worktree)
             store.bind_session(

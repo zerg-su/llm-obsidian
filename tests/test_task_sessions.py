@@ -89,6 +89,36 @@ with tempfile.TemporaryDirectory() as raw:
     binding_meta = {"version": 3, "vault_root": str(vault), "project_id": project, "task_id": cli_task}
     check("v3 exact coordinator binding accepted", v3_session_is_bound(binding_meta, "session-cli"))
     check("v3 unrelated coordinator rejected", not v3_session_is_bound(binding_meta, "session-other"))
+    parallel_task = str(uuid.uuid4())
+    store.create_task(project, parallel_task, worktree=repo)
+    store.bind_session(
+        project, cli_task, runtime="codex", session_id="session-parallel", explicit=True
+    )
+    store.bind_session(
+        project, parallel_task, runtime="codex", session_id="session-parallel", explicit=True
+    )
+    parallel_meta = {
+        "version": 3, "vault_root": str(vault), "project_id": project,
+        "task_id": parallel_task,
+    }
+    check(
+        "one coordinator session binds multiple explicit tasks",
+        v3_session_is_bound(
+            {**binding_meta, "task_id": cli_task}, "session-parallel"
+        )
+        and v3_session_is_bound(parallel_meta, "session-parallel")
+        and len(store.session_bindings(runtime="codex", session_id="session-parallel")) == 2,
+    )
+    ambiguous = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "task_sessions.py"),
+         "--vault-root", str(vault), "ensure-session-task", "--worktree", str(repo),
+         "--runtime", "codex", "--session-id", "session-parallel"],
+        text=True, capture_output=True, check=False,
+    )
+    check(
+        "implicit routing fails closed for multiple active tasks",
+        ambiguous.returncode == 3 and "multiple active tasks" in ambiguous.stderr,
+    )
     ensured = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "task_sessions.py"),
          "--vault-root", str(vault), "ensure-session-task", "--worktree", str(repo),
