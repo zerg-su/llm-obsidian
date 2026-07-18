@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "skills": {
+    "agenda": {"scenario": "agenda-carry", "expected": "Preview and carry unfinished dated work with one atomic vault transaction."},
+    "autoresearch": {"scenario": "protected-web", "expected": "Complete one bounded read-only protected web research flow and file validated output."},
+    "backlog": {"scenario": "vault-capture", "expected": "Add, list, and promote one disposable backlog item without duplicate writes."},
+    "canvas": {"scenario": "obsidian-authoring", "expected": "Create and validate one disposable Obsidian canvas artifact."},
+    "clarify": {"scenario": "conversation-readonly", "expected": "Ask one material question at a time and make no repository mutation."},
+    "close": {"scenario": "cmux-lifecycle", "expected": "Save and terminate the agent process without closing its cmux surface."},
+    "daily": {"scenario": "daily-summary", "expected": "Produce one grounded disposable daily summary through the runtime-specific bounded agent."},
+    "defuddle": {"scenario": "protected-web", "expected": "Clean one bounded public page into readable Markdown without unrelated content."},
+    "dispatch": {"scenario": "dispatch-review-reap", "expected": "Start one isolated task worktree and deliver its approved plan exactly once."},
+    "distill-runbook": {"scenario": "vault-capture", "expected": "Create a human-executable runbook from sanitized disposable command evidence."},
+    "draft": {"scenario": "conversation-readonly", "expected": "Return alternative redacted drafts without sending external communication."},
+    "find-session": {"scenario": "retrieval", "expected": "Return ranked prior-session candidates without mutating the vault."},
+    "journal": {"scenario": "agenda-carry", "expected": "Create and update disposable dated journal data atomically."},
+    "learn": {"scenario": "conversation-readonly", "expected": "Run one bounded study and quiz interaction grounded in disposable learning notes."},
+    "obsidian-bases": {"scenario": "obsidian-authoring", "expected": "Create and validate one disposable Obsidian Base."},
+    "obsidian-markdown": {"scenario": "obsidian-authoring", "expected": "Produce valid Obsidian-flavoured Markdown with links and properties."},
+    "reap-send": {"scenario": "dispatch-review-reap", "expected": "Validate and deliver one typed task summary callback exactly once."},
+    "reap": {"scenario": "dispatch-review-reap", "expected": "Collect the typed task summary and finalize the approved lifecycle state."},
+    "review-dispatch": {"scenario": "dispatch-review-reap", "expected": "Complete an opposite-runtime review and bounded same-session verification loop."},
+    "review-send": {"scenario": "dispatch-review-reap", "expected": "Submit one typed product-read-only reviewer result exactly once."},
+    "save-plan": {"scenario": "vault-capture", "expected": "Persist one disposable plan without executing it."},
+    "save": {"scenario": "vault-capture", "expected": "Persist and merge one disposable structured note through vault-write."},
+    "wiki-fold": {"scenario": "vault-maintenance", "expected": "Preview and commit one deterministic disposable operation-log fold."},
+    "wiki-ingest": {"scenario": "ingest", "expected": "Ingest one local fixture and one bounded protected URL with provenance and deduplication."},
+    "wiki-lint": {"scenario": "vault-maintenance", "expected": "Run the complete disposable-vault health check and produce deterministic findings."},
+    "wiki-query": {"scenario": "retrieval", "expected": "Answer from hybrid retrieval and from an explicitly degraded sparse fallback."},
+    "wiki": {"scenario": "obsidian-authoring", "expected": "Route one supported wiki authoring request to the correct workflow."}
+  }
+}
