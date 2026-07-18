@@ -133,10 +133,11 @@ python3 - "$LIGHT_SPEC" "$LIGHT/.review-meta.json" <<'PY'
 import json, sys
 argv = json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
 meta = json.load(open(sys.argv[2], encoding="utf-8"))
-assert f"Bash({meta['submission_command']})" in argv
+assert meta["submission_command"].startswith("supervisor relay watches ")
+assert not any("send_review.py" in item for item in argv)
 assert not any(item.startswith("Bash(git ") and "*" in item for item in argv)
 PY
-[[ $? -eq 0 ]] && ok "claude-callback-and-git-exact" || bad "claude-callback-and-git-exact" "callback or Git rule contains a broad wildcard"
+[[ $? -eq 0 ]] && ok "claude-supervised-callback" || bad "claude-supervised-callback" "Claude reviewer received an operation-specific callback permission"
 grep -qF -- 'Bash(python3 tests/test_*.py)' "$LIGHT_SPEC" && ok "claude-python-tests-allowed" || bad "claude-python-tests-allowed" "bounded Python test rule missing"
 grep -qF -- "Bash(python3 $LIGHT_RESOLVED/tests/test_*.py)" "$LIGHT_SPEC" && ok "claude-v3-absolute-python-tests-allowed" || bad "claude-v3-absolute-python-tests-allowed" "exact-worktree Python test rule missing"
 grep -qF -- "Bash(bash $LIGHT_RESOLVED/tests/test_*.sh)" "$LIGHT_SPEC" && ok "claude-v3-absolute-shell-tests-allowed" || bad "claude-v3-absolute-shell-tests-allowed" "exact-worktree shell test rule missing"
@@ -146,7 +147,8 @@ grep -qF -- 'Bash(bash scripts/dcg-test-suite.sh)' "$LIGHT_SPEC" && ok "claude-d
 grep -qF -- '`bash scripts/dcg-test-suite.sh`' "$LIGHT/.review-prompt.md" && ok "claude-dcg-smoke-advertised" || bad "claude-dcg-smoke-advertised" "DCG smoke command missing from prompt"
 grep -qF -- '`python3 tests/test_document_normalize.py 2>&1 | tail -50`' "$LIGHT/.review-prompt.md" && ok "claude-test-shell-composition-denied" || bad "claude-test-shell-composition-denied" "prompt does not explain bounded test form"
 grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-only-write" || bad "claude-outbox-only-write" "cwd-anchored outbox Edit rule missing"
-grep -q -- '--input-file.*/.review-outbox.json' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "outbox callback missing"
+grep -qF -- 'supervisor relay watches' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "supervised outbox callback missing"
+grep -q 'Do not run `review-send`' "$LIGHT/.review-prompt.md" && ok "claude-no-callback-command" || bad "claude-no-callback-command" "Claude reviewer is still told to invoke the callback command"
 grep -qF -- 'Do not prefix them with `git -C`' "$LIGHT/.review-prompt.md" && ok "claude-cwd-git-prompt" || bad "claude-cwd-git-prompt" "cwd-relative git guidance missing"
 if grep -qF -- "git -C $LIGHT ..." "$LIGHT/.review-prompt.md"; then bad "claude-no-git-c-escape" "Claude prompt requests a denied git -C command"; else ok "claude-no-git-c-escape"; fi
 grep -q -- 'cmux_agent_supervisor.py run' "$SANDBOX/light.out" && ok "review-supervisor-wrapper" || bad "review-supervisor-wrapper" "short supervisor command missing"
@@ -881,6 +883,8 @@ def success(args, **kwargs):
     return subprocess.CompletedProcess(args, 0, "ok", "")
 
 assert module.relay_review_outbox_once(worktree, runtime, success)
+assert module.reviewer_uses_supervised_relay("claude")
+assert module.reviewer_uses_supervised_relay("codex")
 assert not outbox.exists()
 state = json.loads((worktree / module.REVIEW_RELAY_FILE).read_text(encoding="utf-8"))
 assert state["sent_count"] == 1 and state["failure_count"] == 0

@@ -216,7 +216,7 @@ def check_repo(root: Path) -> list[str]:
             issues.append(f"Codex reviewer missing isolated relay invariant {required!r}")
     for required in (
         '"--permission-mode", "dontAsk"', 'CLAUDE_REVIEW_TOOL_SURFACE = "Read,Glob,Grep,Write,Bash"',
-        "Edit(./.review-outbox.json)", "submission_command", "cmux_agent_supervisor.py",
+        "Edit(./.review-outbox.json)", "run_review_relay", "cmux_agent_supervisor.py",
     ):
         if required not in review_contract:
             issues.append(f"Claude reviewer missing unattended read-only invariant {required!r}")

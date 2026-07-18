@@ -74,7 +74,6 @@ def claude_review_allowed_tools(
     worktree: Path,
     *,
     base_branch: str = "",
-    submission_command: str = "",
 ) -> tuple[str, ...]:
     """Return a reviewer allowlist pinned to one exact product worktree."""
     root = worktree.expanduser().resolve()
@@ -111,8 +110,6 @@ def claude_review_allowed_tools(
         *(f"Bash({shlex.join(command)})" for command in exact_git_commands),
         *(f"Bash({shlex.join(command)})" for command in anchored_git_commands),
     ]
-    if submission_command:
-        dynamic.append(f"Bash({submission_command})")
     return CLAUDE_REVIEW_BASE_ALLOWED_TOOLS + tuple(dynamic)
 
 RUNTIME_COMMANDS = ("python3", "git", "bash", "make", "uv", "brew", "cmux", "codex", "claude")
@@ -437,7 +434,6 @@ def validate_reviewer_safety(
     reviewer_effort: str = "",
     worktree: Path | None = None,
     base_branch: str = "",
-    submission_command: str = "",
 ) -> None:
     require_option(argv, "--model", reviewer_model)
     if runtime == "codex":
@@ -467,7 +463,6 @@ def validate_reviewer_safety(
     expected_allowed_tools = claude_review_allowed_tools(
         worktree,
         base_branch=base_branch,
-        submission_command=submission_command,
     )
     allowed_index, model_index = allowed_positions[0], model_positions[0]
     if allowed_index >= model_index:
@@ -721,7 +716,6 @@ def validate_routing(
             str(source_meta.get("reviewer_effort") or ""),
             worktree,
             str(source_meta.get("base_branch") or ""),
-            str(source_meta.get("submission_command") or ""),
         )
     else:
         task_route = resolved_task_model_route(worktree, source_meta, spec["runtime"])
@@ -899,6 +893,11 @@ def run_review_relay(worktree: Path, state_dir: Path, runtime: Path, stop: threa
         write_json(state_dir / REVIEW_RELAY_FILE, state)
 
 
+def reviewer_uses_supervised_relay(runtime: str) -> bool:
+    """Both reviewer runtimes use the trusted, operation-scoped outbox relay."""
+    return runtime in {"claude", "codex"}
+
+
 def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
     if process is None or process.poll() is not None:
         return
@@ -1012,10 +1011,15 @@ def run_agent(
     review_runtime: Path | None = None
     agent_rc = 127
     try:
-        if kind == "reviewer" and str(read_json(state_dir / ".review-meta.json").get("review_runtime_dir") or "").strip():
+        if kind == "reviewer":
             review_meta = read_json(state_dir / ".review-meta.json")
-            review_runtime = validated_review_runtime(worktree, review_meta)
-            if spec["runtime"] == "codex":
+            raw_review_runtime = str(review_meta.get("review_runtime_dir") or "").strip()
+            review_runtime = (
+                validated_review_runtime(worktree, review_meta)
+                if raw_review_runtime
+                else worktree
+            )
+            if reviewer_uses_supervised_relay(spec["runtime"]):
                 relay_stop = threading.Event()
                 relay_thread = threading.Thread(
                     target=run_review_relay,

@@ -95,8 +95,9 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
 
     (root / "config/model-routing.local.toml").write_text(
         '[runtimes.claude]\nmodel = "sonnet"\n'
+        '[roles.review.codex]\nmodel = "codex-review"\n'
         '[roles.review.claude]\nmodel = "opus"\n'
-        '[model_registry]\nsonnet = "claude"\n',
+        '[model_registry]\nsonnet = "claude"\ncodex-review = "codex"\n',
         encoding="utf-8",
     )
     local = routing.load_config(root)
@@ -104,6 +105,11 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("local reviewer override is independent", local.reviewer_default("claude")["model"] == "opus")
     route = routing.resolve(local, "review", session=codex)
     check("review uses local role default", route["model"] == "opus")
+    reviewer_profile = local.root / ".codex/profiles/reviewer-readonly.toml"
+    check(
+        "native reviewer profile uses reviewer role default",
+        routing.native_targets(local)[reviewer_profile]["model"] == "codex-review",
+    )
 
     session_dir = root / ".codex/sessions/2026/07/18"
     session_dir.mkdir(parents=True)

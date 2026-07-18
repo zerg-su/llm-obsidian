@@ -105,10 +105,9 @@ Claude reviewers run in locked-down `dontAsk` with Read/Glob/Grep, recognized
 read-only Bash/git inspection, exact cwd-relative Python/shell test entrypoints
 whose permission patterns end in `.py`/`.sh`, one cwd-anchored `Edit`
 permission covering the Write tool only for `.review-outbox.json`, and the
-typed callback command. The prompt requires no arguments or shell composition;
-the Claude wildcard matcher is not treated as an argv validator. The callback
-validates and removes that isolated
-outbox; anything else is denied without prompting. Codex reviewers keep
+bounded diagnostic commands. Claude receives no callback command or cmux
+permission; the Claude wildcard matcher is not treated as an argv validator.
+Anything except the isolated outbox is denied without prompting. Codex reviewers keep
 `approval=never`, start with `workspace-write` rooted at an owner-only temporary
 scratch directory outside the product worktree, and receive no additional write
 roots. The scratch lives under the canonical vault's gitignored
@@ -121,9 +120,9 @@ inside the reviewed checkout by construction; the supervisor permits only that
 exact generated, owner-only, empty, gitignored location. Reviewers write typed JSON only
 to the scratch `.review-outbox.json`. Codex reviewer launches also disable hooks for
 that session so user/project lifecycle hooks cannot mutate the vault from review context.
-The trusted supervisor—not the reviewer—polls that exact outbox, runs the schema
+For both runtimes, the trusted supervisor—not the reviewer—polls that exact outbox, runs the schema
 and baseline validator, forwards the callback through cmux, and removes the
-outbox. The Codex reviewer therefore never receives cmux-socket access while
+outbox. Neither reviewer therefore receives cmux-socket access while
 still being able to run diagnostics that need temporary files.
 Claude may also run the exact `bash scripts/dcg-test-suite.sh` DCG policy
 smoke; this does not grant a wildcard script permission.

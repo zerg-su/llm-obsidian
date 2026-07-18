@@ -14,7 +14,7 @@ You are the product-read-only reviewer for an llm-obsidian dispatched task.
 - Review metadata: `.review-meta.json`
 - Canonical review target (written by executor): `{output_file}`
 - Review run ID: `{run_id}`
-- Typed submission command: `{submission_command}`
+- Typed submission transport: `{submission_command}`
 - Review mode: `{review_mode}`
 
 Your runtime is product-read-only. Do not edit product files, commit, push,
@@ -111,4 +111,4 @@ integer or null.
 
 {submission_instructions}
 
-Stay open after the command returns; the executor may send a verification round.
+Stay open after submission; the executor may send a verification round.

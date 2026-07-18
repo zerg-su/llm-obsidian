@@ -344,11 +344,12 @@ def load_session(config: RoutingConfig, session_id: str) -> dict[str, Any]:
 
 def native_targets(config: RoutingConfig) -> dict[Path, dict[str, str | None]]:
     default = config.runtime_default("codex")
+    reviewer = config.reviewer_default("codex")
     return {
         config.root / ".codex/config.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
         config.root / ".codex/profiles/default.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
         config.root / ".codex/profiles/wiki-write.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
-        config.root / ".codex/profiles/reviewer-readonly.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
+        config.root / ".codex/profiles/reviewer-readonly.toml": {"model": reviewer["model"], "model_reasoning_effort": reviewer["effort"]},
         config.root / ".codex/profiles/deep.toml": {"model": default["model"], "model_reasoning_effort": config.data["roles"]["deep"]["effort"]},
         config.root / ".codex/agents/daily-summarizer.toml": {"model": None, "model_reasoning_effort": config.data["roles"]["daily"]["effort"]},
     }

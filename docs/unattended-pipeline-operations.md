@@ -85,9 +85,10 @@ escape the following:
   `Read,Glob,Grep,Write,Bash`, and `--allowedTools` locked to a fixed list:
   `Read`, `Glob`, `Grep`, one `Edit(./.review-outbox.json)` scoped write, a
   handful of exact read-only `git` entries, filename-bounded test/lint entries,
-  and the exact operation-scoped typed submit command. Interpreter-adjacent and
-  trailing Git/callback wildcards are forbidden, so a reviewer cannot append
-  pipes, redirects, wrappers, or `python3 -c` while matching an approved rule.
+  and no callback/cmux command. Interpreter-adjacent and trailing Git wildcards
+  are forbidden, so a reviewer cannot append pipes, redirects, wrappers, or
+  `python3 -c` while matching an approved rule. The trusted supervisor polls
+  the outbox and owns the operation-scoped callback.
 - Codex: `-s read-only -a never -c web_search="disabled"`. Same forbidden-flag
   set as the task runtime, so a reviewer can't be pointed at
   `danger-full-access` or given network back.
@@ -154,11 +155,11 @@ not to cancel it.
 
 ## Typed review callbacks
 
-The reviewer never talks back over free-form chat. `/review-send` (or the
-Codex-side equivalent) submits a JSON object with `verdict` (`approve` /
+The reviewer never talks back over free-form chat or invokes cmux. It writes a
+JSON object with `verdict` (`approve` /
 `changes-requested` / `blocked`) and a `findings` array of `{severity,
-title, ...}`, either directly or via `.review-outbox.json` (Claude) validated
-by `spawn_review.py receive`/`submit`. `scripts/task_contract.py
+title, ...}` to its isolated `.review-outbox.json`; the trusted supervisor
+submits and validates it through `spawn_review.py receive`/`submit`. `scripts/task_contract.py
 review-action` is the single decision function the executor calls with that
 payload plus the current verify iteration:
 

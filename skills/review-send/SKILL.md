@@ -28,14 +28,15 @@ owner-only lane runtime; the prompt supplies the exact operation paths for:
 1. Assemble the JSON object described in the active `.review-prompt*.md`.
 2. Follow the runtime-specific typed transport:
 
-   - Claude: Write only `.review-outbox.json`, then run the prompt's exact
-     `submission_command --input-file ...` with no pipe/heredoc.
+   - Claude: Write only `.review-outbox.json` with the Write tool.
    - Codex: atomically publish the JSON in the isolated scratch outbox named by
-     the prompt; the trusted supervisor invokes the submission command.
+     the prompt.
+   - For both runtimes, the trusted supervisor invokes the submission command;
+     the reviewer never receives an operation-specific callback permission.
 
 3. The script validates schema/run/mode and blocks if any non-handoff file
-   changed since the executor captured the review baseline. A valid Claude
-   outbox is removed after callback. If blocked, report and do not callback.
+   changed since the executor captured the review baseline. A valid outbox is
+   removed after callback. If blocked, report and do not callback.
 4. If validation passes, the script atomically writes the canonical object to
    the exact operation-scoped `.review-callback.json` and sends only that file reference
    to the executor. The callback remains bounded even for a large review.
@@ -50,7 +51,9 @@ writes canonical `.task-review*.json`, and deterministically renders
 
 ## Do Not
 
-- Do not write product or handoff files. Claude's sole write exception is
-  `.review-outbox.json`; Codex writes no file.
+- Do not write product or handoff files. The sole write exception is the
+  runtime-local `.review-outbox.json` transport.
+- Do not invoke `review-send` or `cmux` yourself; the trusted supervisor owns
+  callback delivery.
 - Do not close the cmux surface or agent process yourself.
 - Do not guess a callback surface if `.review-meta.json` is stale.

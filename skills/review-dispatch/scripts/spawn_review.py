@@ -933,7 +933,6 @@ def launch_command(
             "--allowedTools", *claude_review_allowed_tools(
                 worktree,
                 base_branch=base_branch,
-                submission_command=submission_command,
             ),
         ]
         if review_runtime_dir is not None:
@@ -1012,19 +1011,8 @@ def submit_command(
     review_runtime_dir: Path | None,
     state_dir: Path,
 ) -> str:
-    script = vault / "skills" / "review-send" / "scripts" / "send_review.py"
-    if reviewer_runtime == "codex":
-        if review_runtime_dir is None:
-            die("Codex reviewer runtime directory is missing")
-        return f"supervisor relay watches {review_runtime_dir / '.review-outbox.json'}"
-    command = (
-        f"python3 {shlex.quote(str(script))} submit --worktree {shlex.quote(str(worktree))} "
-        f"--state-dir {shlex.quote(str(state_dir))}"
-    )
-    if reviewer_runtime == "claude":
-        outbox_root = review_runtime_dir or worktree
-        command += f" --input-file {shlex.quote(str(outbox_root / '.review-outbox.json'))}"
-    return command
+    outbox_root = review_runtime_dir or worktree
+    return f"supervisor relay watches {outbox_root / '.review-outbox.json'}"
 
 
 def submission_instructions(
@@ -1035,9 +1023,11 @@ def submission_instructions(
 ) -> str:
     if reviewer_runtime == "claude":
         return (
-            "Write the JSON object only to `.review-outbox.json` with the Write tool, "
-            f"then run `{command}` with no pipe or heredoc. This isolated outbox is the only file you may write; "
-            "the callback validates and removes it."
+            "Write the JSON object only to `.review-outbox.json` with the Write tool. "
+            "This isolated outbox is the only file you may write. Do not run `review-send`, "
+            "do not call `cmux`, and do not try to access its socket. The trusted supervisor "
+            "watches this exact file, validates and forwards the payload, then removes it. "
+            "After the outbox disappears, stay open for a possible verification round."
         )
     if review_runtime_dir is None:
         die("Codex reviewer runtime directory is missing")
