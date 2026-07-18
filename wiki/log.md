@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-17
+updated: 2026-07-18
 tags:
   - meta
   - log
@@ -26,6 +26,14 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-18] reap | v2.0.8-rd-upstream-audit
+
+`c-000010` [[LLM Obsidian v2.0.8 RD upstream audit]]. Подготовлен локальный релиз-кандидат v2.0.8 после критического аудита `origin/test` и `origin/upstream-sync/rd-fixes`: устаревший timeout-патч отклонён, остальные изменения адаптированы под текущий пайплайн. Политика DCG теперь разрешает amend, блокирует rebase в базовом профиле и сохраняет рабочие разрешения task-worktree; дефолты закреплены как Codex `gpt-5.6-sol` high и Claude `fable` high. Полный Fable/high review и повторная проверка исправлений прошли; история сохранена в [[Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2]], связанный [[daily-pipeline-guide]] обновлён.
+
+## [2026-07-18] review | v2.0.8-rd-upstream-audit
+
+`c-000009` [[Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-17 05:28] dispatch | v2.0.8-rd-upstream-audit
 

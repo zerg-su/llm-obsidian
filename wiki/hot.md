@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-07-11
+updated: 2026-07-18
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-07-18: [[LLM Obsidian v2.0.8 RD upstream audit]] — подготовлен и проверен Fable/high локальный релиз-кандидат v2.0.8 (`c-000010`)
 - 2026-07-11: [[Unattended Pipeline]] — public v2 pipeline and strict contracts (c-000004)
 - 2026-07-06: [[Dispatch Reap Live Smoke gpt-5.5]] - live Codex gpt-5.5 dispatch/reap-send smoke filed (`c-000004`)
 - 2026-07-05: вольт инициализирован из шаблона llm-obsidian v1.0.0
