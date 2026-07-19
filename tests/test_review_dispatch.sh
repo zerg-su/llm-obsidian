@@ -150,6 +150,7 @@ grep -qF -- '`python3 tests/test_document_normalize.py 2>&1 | tail -50`' "$LIGHT
 grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-only-write" || bad "claude-outbox-only-write" "cwd-anchored outbox Edit rule missing"
 grep -qF -- 'supervisor relay watches' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "supervised outbox callback missing"
 grep -q 'Do not run `review-send`' "$LIGHT/.review-prompt.md" && ok "claude-no-callback-command" || bad "claude-no-callback-command" "Claude reviewer is still told to invoke the callback command"
+grep -qF -- 'Do not exit on your own, call wait/poll tools, start a polling loop' "$LIGHT/.review-prompt.md" && ok "reviewer-returns-idle-after-submit" || bad "reviewer-returns-idle-after-submit" "reviewer may busy-wait after submitting its outbox"
 grep -qF -- 'Do not prefix them with `git -C`' "$LIGHT/.review-prompt.md" && ok "claude-cwd-git-prompt" || bad "claude-cwd-git-prompt" "cwd-relative git guidance missing"
 if grep -qF -- "git -C $LIGHT ..." "$LIGHT/.review-prompt.md"; then bad "claude-no-git-c-escape" "Claude prompt requests a denied git -C command"; else ok "claude-no-git-c-escape"; fi
 grep -q -- 'cmux_agent_supervisor.py run' "$SANDBOX/light.out" && ok "review-supervisor-wrapper" || bad "review-supervisor-wrapper" "short supervisor command missing"

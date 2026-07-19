@@ -59,14 +59,15 @@ If phase is `initial-review`:
 
 - Read `.task-prompt.md`, `.task-meta.json`, and relevant diffs.
 - Submit findings through the typed transport below.
-- Stay open after sending; the executor may send fixes back to this same session.
+- After sending, follow the idle-session rule below; the executor may send fixes
+  back to this same session.
 
 If phase is `verify-fixes`:
 
 - Read the prior review and executor resolution below.
 - Check whether the new diff resolves each accepted finding.
 - Submit the verification JSON through the typed transport below.
-- Stay open after callback. The executor either sends another verify turn or,
+- Follow the idle-session rule below after callback. The executor either sends another verify turn or,
   after an approved unattended result, arms close and sends `/exit`.
 
 ## Prior Review
@@ -111,4 +112,4 @@ integer or null.
 
 {submission_instructions}
 
-Stay open after submission; the executor may send a verification round.
+{idle_after_submission}

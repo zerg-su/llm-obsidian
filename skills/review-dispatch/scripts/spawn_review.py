@@ -994,6 +994,14 @@ def send_to_surface(surface: str, text: str) -> None:
         die((enter.stdout + "\n" + enter.stderr).strip() or "cmux send-key failed")
 
 
+IDLE_AFTER_SUBMISSION = (
+    "After publishing the outbox, finish the current review turn and return the "
+    "interactive session to its idle prompt. Do not exit on your own, call wait/poll "
+    "tools, start a polling loop, or keep reasoning merely to stay open; the idle "
+    "session itself preserves context for a possible verification prompt."
+)
+
+
 def verify_handoff_message(
     worktree: Path,
     prompt_file: str,
@@ -1004,7 +1012,7 @@ def verify_handoff_message(
         f"Read `{prompt_path}` and follow it exactly. "
         "Do not review this short handoff message; the full instructions are in that file.\n\n"
         "Submit the typed JSON review using the transport in that prompt.\n"
-        "Stay open after sending; the executor may send another round."
+        f"{IDLE_AFTER_SUBMISSION}"
     )
 
 
@@ -1031,7 +1039,7 @@ def submission_instructions(
             "This isolated outbox is the only file you may write. Do not run `review-send`, "
             "do not call `cmux`, and do not try to access its socket. The trusted supervisor "
             "watches this exact file, validates and forwards the payload, then removes it. "
-            "After the outbox disappears, stay open for a possible verification round."
+            f"{IDLE_AFTER_SUBMISSION}"
         )
     if review_runtime_dir is None:
         die("Codex reviewer runtime directory is missing")
@@ -1042,7 +1050,7 @@ def submission_instructions(
         "the JSON is complete. This isolated outbox is inside your only writable "
         "scratch directory. Do not run `review-send`, do not call `cmux`, and do not try to access its socket. "
         "The supervisor watches this exact file, validates and forwards the payload, then removes it. "
-        "After the outbox disappears, stay open for a possible verification round."
+        f"{IDLE_AFTER_SUBMISSION}"
     )
 
 
@@ -1182,6 +1190,7 @@ def render_review_prompt(
             "repository_diagnostics": repository_diagnostics(reviewer_runtime, worktree),
             "previous_review": previous_review,
             "resolution": resolution,
+            "idle_after_submission": IDLE_AFTER_SUBMISSION,
         }
     )
     return render_template(template, values)
