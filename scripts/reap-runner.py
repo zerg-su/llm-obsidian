@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from task_contract import ContractError, validate_handoff  # noqa: E402
+from vault_schema import unresolved_wikilinks  # noqa: E402
 from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
 
 
@@ -181,6 +182,16 @@ def approved_plan_state(meta: dict[str, Any]) -> tuple[Path, str]:
     raise ReapError("approved plan must be pending or executed recovery state")
 
 
+def validate_summary_wikilinks(vault: Path, summary: dict[str, Any]) -> None:
+    missing = unresolved_wikilinks(vault / "wiki", str(summary.get("body") or ""))
+    if missing:
+        rendered = ", ".join(f"[[{target}]]" for target in missing[:10])
+        raise ReapError(
+            "summary contains unresolved wikilinks before vault mutation: "
+            f"{rendered}; use an existing vault filename or alias"
+        )
+
+
 def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     started = time.monotonic()
     meta = read_json(worktree / ".task-meta.json")
@@ -191,6 +202,7 @@ def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         validate_handoff(meta, raw_summary, current, verify_plan_hash=False)
     except ContractError as exc:
         raise ReapError(str(exc)) from exc
+    validate_summary_wikilinks(vault, raw_summary)
     plan_before, plan_state = approved_plan_state(meta)
     validated_at = time.monotonic()
     markers = archive_reviews(vault, worktree)

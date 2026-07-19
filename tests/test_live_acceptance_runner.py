@@ -329,6 +329,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "do not reproduce its setup commands manually" in dispatch_prompt,
     )
     check(
+        "dispatch acceptance forbids invented summary links",
+        "typed summary body free of invented" in dispatch_prompt
+        and "attaches the validated review archive link itself" in dispatch_prompt,
+    )
+    check(
         "dispatch coordinator returns idle for typed callbacks",
         "finish the coordinator turn and return" in dispatch_prompt
         and "Do not shell-poll task files" in dispatch_prompt

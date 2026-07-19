@@ -353,7 +353,8 @@ def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
         f"`{fixture['nested_worktree']}`. Create only `{fixture['fixture_rel']}` with exact bytes "
         f"`{fixture['fixture_text'].rstrip()}` plus one newline and commit it in exactly one commit. "
         "Run one light opposite-model review, require its typed approve callback, then perform final reap "
-        f"as a session titled `{fixture['result_title']}`. The runner already prepared local runtime "
+        f"as a session titled `{fixture['result_title']}`. Keep the typed summary body free of invented "
+        "wikilinks; the reap runner attaches the validated review archive link itself. The runner already prepared local runtime "
         "configuration and owns setup, artifact proof, and disposable-clone cleanup. Do not make a second "
         "plan, repeat configuration setup, remove result/review/plan artifacts, or ask for approval again."
     )

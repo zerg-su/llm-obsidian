@@ -57,6 +57,26 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     check("page records effective model", 'executor_model: "gpt-5.6-sol"' in page)
     check("page address is reusable by log and hot payload", runner.page_address(page) == "c-000123")
     check("page derives bounded related links", '"[[Dispatch safety]]"' in page)
+    concepts = vault / "wiki/concepts"
+    concepts.mkdir()
+    (concepts / "Dispatch safety.md").write_text("# Dispatch safety\n", encoding="utf-8")
+    try:
+        runner.validate_summary_wikilinks(vault, summary)
+    except runner.ReapError:
+        check("existing summary wikilink passes before mutation", False)
+    else:
+        check("existing summary wikilink passes before mutation", True)
+    try:
+        runner.validate_summary_wikilinks(
+            vault, {**summary, "body": "Invented [[Display title without alias]]."}
+        )
+    except runner.ReapError as exc:
+        check(
+            "unresolved summary wikilink fails before mutation",
+            "[[Display title without alias]]" in str(exc),
+        )
+    else:
+        check("unresolved summary wikilink fails before mutation", False)
     existing = vault / "wiki/meta/sessions/existing.md"
     existing.write_text("---\nupdated: 2026-01-01\n---\n# Existing\n", encoding="utf-8")
     updated, expected = runner.update_page(existing, summary, "task-one")

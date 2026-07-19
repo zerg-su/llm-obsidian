@@ -244,6 +244,20 @@ def _catalog(wiki: Path) -> tuple[set[str], dict[str, list[str]], set[str]]:
     return exact, by_stem, aliases
 
 
+def unresolved_wikilinks(wiki: Path, text: str) -> list[str]:
+    """Return unresolved targets in prospective text without mutating the vault."""
+    exact, by_stem, aliases = _catalog(wiki)
+    missing: list[str] = []
+    for target in iter_wikilinks(text):
+        normalized = _normal_target(target)
+        stem = Path(normalized).name
+        if normalized in exact or stem in by_stem or normalized in aliases:
+            continue
+        if target not in missing:
+            missing.append(target)
+    return missing
+
+
 def validate_schema(repo_root: Path) -> list[SchemaIssue]:
     """Validate frontmatter, addresses, pathless links, and derived address state."""
     wiki = repo_root / "wiki"
