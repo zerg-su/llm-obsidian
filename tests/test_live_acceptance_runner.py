@@ -122,6 +122,21 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     spec = importlib.util.spec_from_file_location("live_acceptance_runner_test", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    override_repo = tmp / "override-repo"
+    (override_repo / "config").mkdir(parents=True)
+    module.install_acceptance_model_overrides(override_repo, {"claude": "sonnet"})
+    override_text = (override_repo / "config/model-routing.local.toml").read_text(encoding="utf-8")
+    from model_routing import validate_local_config
+
+    validated_override = validate_local_config(ROOT, override_text)
+    check(
+        "live acceptance supports sandbox-only cheaper model aliases",
+        '[runtimes.claude]' in override_text
+        and '[roles.review.claude]' in override_text
+        and 'model = "sonnet"' in override_text
+        and '"sonnet" = "claude"' in override_text
+        and validated_override.runtime_default("claude")["model"] == "sonnet",
+    )
     repo = tmp / "cleanup-repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)

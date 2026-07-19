@@ -264,6 +264,45 @@ def create_sandbox(run_dir: Path) -> tuple[Path, str]:
     return sandbox, commit
 
 
+def install_acceptance_model_overrides(
+    sandbox: Path, overrides: dict[str, str] | None = None
+) -> None:
+    """Install ignored, sandbox-local model aliases for cost-aware live tests."""
+    if overrides is None:
+        overrides = {
+            runtime: str(
+                os.environ.get(f"LLM_OBSIDIAN_ACCEPTANCE_{runtime.upper()}_MODEL") or ""
+            ).strip()
+            for runtime in ("claude", "codex")
+        }
+    selected = {runtime: model for runtime, model in overrides.items() if model}
+    if not selected:
+        return
+    if set(selected) - {"claude", "codex"}:
+        raise AcceptanceRunnerError("acceptance model override names an unknown runtime")
+    for runtime, model in selected.items():
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model):
+            raise AcceptanceRunnerError(f"invalid {runtime} acceptance model override")
+    lines = ["schema_version = 1", ""]
+    for runtime, model in sorted(selected.items()):
+        lines.extend(
+            (
+                f"[runtimes.{runtime}]",
+                f'model = "{model}"',
+                "",
+                f"[roles.review.{runtime}]",
+                f'model = "{model}"',
+                "",
+            )
+        )
+    lines.append("[model_registry]")
+    lines.extend(f'"{model}" = "{runtime}"' for runtime, model in sorted(selected.items()))
+    path = sandbox / "config" / "model-routing.local.toml"
+    if path.exists():
+        raise AcceptanceRunnerError("acceptance sandbox unexpectedly contains a local routing override")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run_checked(argv: list[str], *, cwd: Path, input_text: str | None = None) -> str:
     result = subprocess.run(
         argv, cwd=cwd, input=input_text, text=True, capture_output=True, check=False,
@@ -996,8 +1035,6 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     origin = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
     if not origin or shutil.which("cmux") is None:
         raise AcceptanceRunnerError("cmux and CMUX_SURFACE_ID are required for live acceptance")
-    config = load_config(ROOT)
-    route = config.runtime_default(row["runtime"])
     run_id = str(uuid.uuid4())
     run_dir = STATE_ROOT / run_id
     run_dir.mkdir(parents=True, mode=0o700)
@@ -1007,6 +1044,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     prepared_dispatch: dict[str, str] | None = None
     try:
         sandbox, commit = create_sandbox(run_dir)
+        install_acceptance_model_overrides(sandbox)
+        route = load_config(sandbox).runtime_default(row["runtime"])
         if row["skill"] == "dispatch":
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
             fixture = dispatch_fixture_prompt(prepared_dispatch)

@@ -258,6 +258,50 @@ def unresolved_wikilinks(wiki: Path, text: str) -> list[str]:
     return missing
 
 
+def neutralize_unresolved_wikilinks(wiki: Path, text: str) -> tuple[str, list[str]]:
+    """Render unresolved prose wikilinks as plain text without guessing a target.
+
+    Existing links and wikilink-looking examples inside fenced/inline code stay
+    byte-for-byte intact.  The returned list is the de-duplicated set of targets
+    that were neutralized.
+    """
+    exact, by_stem, aliases = _catalog(wiki)
+    missing: list[str] = []
+
+    def replace(segment: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            raw = (match.group(1) or match.group(2) or "").replace(r"\|", "|")
+            target = raw.split("|", 1)[0].split("#", 1)[0].strip()
+            normalized = _normal_target(target)
+            stem = Path(normalized).name
+            if normalized in exact or stem in by_stem or normalized in aliases:
+                return match.group(0)
+            if target and target not in missing:
+                missing.append(target)
+            display = raw.split("|", 1)[1].strip() if "|" in raw else raw.strip()
+            return display
+
+        return WIKILINK_RX.sub(repl, segment)
+
+    rendered: list[str] = []
+    fence: str | None = None
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        marker = stripped[:3] if stripped.startswith(("```", "~~~")) else ""
+        if fence is not None:
+            rendered.append(line)
+            if marker == fence:
+                fence = None
+            continue
+        if marker:
+            fence = marker
+            rendered.append(line)
+            continue
+        parts = re.split(r"(`[^`\n]*`)", line)
+        rendered.extend(part if index % 2 else replace(part) for index, part in enumerate(parts))
+    return "".join(rendered), missing
+
+
 def validate_schema(repo_root: Path) -> list[SchemaIssue]:
     """Validate frontmatter, addresses, pathless links, and derived address state."""
     wiki = repo_root / "wiki"

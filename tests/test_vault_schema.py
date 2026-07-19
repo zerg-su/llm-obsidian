@@ -11,7 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from vault_schema import FrontmatterError, parse_frontmatter, validate_schema  # noqa: E402
+from vault_schema import (  # noqa: E402
+    FrontmatterError,
+    neutralize_unresolved_wikilinks,
+    parse_frontmatter,
+    validate_schema,
+)
 
 
 passed = 0
@@ -101,6 +106,23 @@ with tempfile.TemporaryDirectory(prefix="vault-schema-") as tmp:
     )
     issues = validate_schema(root)
     assert_true("canvas/base/alias/escaped links resolve", not [i for i in issues if i.level == "fail"])
+    cleaned, neutralized = neutralize_unresolved_wikilinks(
+        wiki,
+        "Keep [[Two]] and `[[Inline Example]]`; strip [[Missing Plan|the plan]].\n"
+        "```md\n[[Fenced Example]]\n```\n",
+    )
+    assert_true(
+        "summary neutralizer preserves valid links and code",
+        "[[Two]]" in cleaned
+        and "`[[Inline Example]]`" in cleaned
+        and "[[Fenced Example]]" in cleaned,
+    )
+    assert_true(
+        "summary neutralizer de-links only unresolved prose",
+        "strip the plan" in cleaned
+        and "[[Missing Plan" not in cleaned
+        and neutralized == ["Missing Plan"],
+    )
 
     (meta / "address-counter.txt").write_text("5\n", encoding="utf-8")
     issues = validate_schema(root)

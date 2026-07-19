@@ -45,7 +45,18 @@ def read_text(path: Path, label: str) -> str:
     return value
 
 
-def callback(worktree: Path) -> dict[str, str]:
+def write_summary_views(worktree: Path, summary: dict[str, Any], render_markdown: Any) -> None:
+    json_path = worktree / ".task-summary.json"
+    markdown_path = worktree / ".task-summary.md"
+    json_tmp = json_path.with_name(f".{json_path.name}.tmp")
+    markdown_tmp = markdown_path.with_name(f".{markdown_path.name}.tmp")
+    json_tmp.write_text(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
+    markdown_tmp.write_text(render_markdown(summary), encoding="utf-8")
+    json_tmp.replace(json_path)
+    markdown_tmp.replace(markdown_path)
+
+
+def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
     meta = read_json(worktree / ".task-meta.json")
     summary = read_json(worktree / ".task-summary.json")
     vault = Path(str(meta.get("vault_root") or "")).expanduser().resolve()
@@ -53,13 +64,23 @@ def callback(worktree: Path) -> dict[str, str]:
         raise SendError("task metadata does not identify a coordinator reap runner")
     sys.path.insert(0, str(vault / "scripts"))
     from task_contract import ContractError, normalize  # type: ignore
-    from wiki_summary_contract import WikiSummaryError, validate_summary  # type: ignore
+    from vault_schema import neutralize_unresolved_wikilinks  # type: ignore
+    from wiki_summary_contract import (  # type: ignore
+        WikiSummaryError,
+        render_markdown,
+        validate_summary,
+    )
 
     try:
         normalize(meta)
         typed = validate_summary(summary, allow_missing_session=False, require_schema=True)
     except (ContractError, WikiSummaryError) as exc:
         raise SendError(str(exc)) from exc
+    body, neutralized = neutralize_unresolved_wikilinks(vault / "wiki", typed["body"])
+    if neutralized:
+        typed = {**typed, "body": body}
+        if persist_repairs:
+            write_summary_views(worktree, typed, render_markdown)
     if meta.get("version") == 3 and meta.get("interaction_policy") == "unattended":
         reap = meta.get("reap_policy")
         if not isinstance(reap, dict):
@@ -89,10 +110,16 @@ def callback(worktree: Path) -> dict[str, str]:
     surface = read_text(worktree / ".wiki-cmux-surface", "wiki surface")
     if surface != str(meta.get("wiki_surface") or ""):
         raise SendError("wiki surface handoff drifted from task metadata")
-    return {"surface": surface, "message": message, "command": command, "mode": mode}
+    return {
+        "surface": surface,
+        "message": message,
+        "command": command,
+        "mode": mode,
+        "neutralized_wikilinks": len(neutralized),
+    }
 
 
-def send(value: dict[str, str]) -> None:
+def send(value: dict[str, Any]) -> None:
     commands = (
         (["cmux", "send", "--surface", value["surface"], value["message"]], "callback send"),
         (["cmux", "send-key", "--surface", value["surface"], "Enter"], "callback submit"),
@@ -112,7 +139,9 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
-        value = callback(args.worktree.expanduser().resolve())
+        value = callback(
+            args.worktree.expanduser().resolve(), persist_repairs=not args.dry_run
+        )
         if not args.dry_run:
             send(value)
         print(json.dumps({"schema_version": 1, "status": "validated" if args.dry_run else "sent", **value}, sort_keys=True))

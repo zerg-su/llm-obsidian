@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
     (vault / "scripts").mkdir(parents=True)
     (vault / "wiki/plans").mkdir(parents=True)
     worktree.mkdir()
-    for name in ("task_contract.py", "wiki_summary_contract.py"):
+    for name in ("task_contract.py", "vault_schema.py", "wiki_summary_contract.py"):
         shutil.copy2(ROOT / "scripts" / name, vault / "scripts" / name)
     (vault / "scripts/reap-runner.py").write_text("# fixture\n", encoding="utf-8")
     plan = vault / "wiki/plans/approved.md"
@@ -67,6 +67,31 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
     check("callback targets exact coordinator surface", value["surface"] == surface)
     check("callback contains one exact reap runner command", value["message"].count("reap-runner.py") == 1)
     check("callback shell-quotes paths with spaces", "'" in value["command"] and str(worktree) in value["command"])
+    linked = dict(
+        summary,
+        body="Keep [[approved]] and `[[Example]]`; de-link [[Invented plan|the plan]].",
+    )
+    (worktree / ".task-summary.json").write_text(json.dumps(linked), encoding="utf-8")
+    value = sender.callback(worktree.resolve())
+    repaired = json.loads((worktree / ".task-summary.json").read_text(encoding="utf-8"))
+    rendered = (worktree / ".task-summary.md").read_text(encoding="utf-8")
+    check(
+        "callback neutralizes unresolved prose links before delivery",
+        value["neutralized_wikilinks"] == 1
+        and "[[approved]]" in repaired["body"]
+        and "`[[Example]]`" in repaired["body"]
+        and "de-link the plan" in repaired["body"]
+        and "[[Invented plan" not in repaired["body"]
+        and repaired["body"] in rendered,
+    )
+    (worktree / ".task-summary.json").write_text(json.dumps(linked), encoding="utf-8")
+    sender.callback(worktree.resolve(), persist_repairs=False)
+    check(
+        "dry callback reports repair without mutating canonical summary",
+        "[[Invented plan|the plan]]"
+        in json.loads((worktree / ".task-summary.json").read_text(encoding="utf-8"))["body"],
+    )
+    (worktree / ".task-summary.json").write_text(json.dumps(summary), encoding="utf-8")
     send_calls: list[list[str]] = []
     sleeps: list[float] = []
     original_run = sender.subprocess.run

@@ -165,6 +165,13 @@ Exit 2 means the model-produced contract is invalid: fix the JSON before any
 callback. JSON is the source of truth; Markdown is a deterministic compatibility
 view for old reap flows and humans.
 
+The code-owned sender also resolves one safe model-output mismatch before
+delivery: prose wikilinks whose targets do not exist are rendered as their plain
+display text in both canonical JSON and derived Markdown. Existing links and
+wikilink-looking examples inside inline/fenced code remain unchanged. The
+coordinator-side reap runner still rejects any unresolved link that bypasses
+this preparation, before vault mutation.
+
 ### 2.3 Read the wiki-surface ID, reap command, and task name (compatibility only)
 
 ```bash
