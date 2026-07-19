@@ -33,6 +33,7 @@ OUTBOX_MAX_BYTES = 64 * 1024
 OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
 AGENT_EXIT_GRACE_SECONDS = 300.0
+CHILD_SURFACE_SETTLE_SECONDS = 10.0
 DISPOSABLE_VAULT_BOOKKEEPING = {
     ".vault-meta/address-counter.txt",
     ".vault-meta/address-map.tsv",
@@ -925,10 +926,8 @@ def safe_cleanup(run_dir: Path) -> None:
             shutil.rmtree(scratch)
 
 
-def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[int, list[str]]:
-    """Close only exact child surfaces durably bound to this coordinator."""
-    closed = 0
-    failures: list[str] = []
+def operation_child_surfaces(sandbox: Path, coordinator_surface: str) -> set[str]:
+    """Return exact child surfaces durably bound to this coordinator."""
     surfaces: set[str] = set()
     task_root = sandbox / ".vault-meta" / "task-sessions"
     candidates = list(task_root.glob("projects/*/tasks/*/lanes/*/operations/*/state.json"))
@@ -958,6 +957,41 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
         task_surface = str(task_meta.get("task_surface") or "")
         if task_surface != coordinator_surface and SURFACE_RE.fullmatch(task_surface):
             surfaces.add(task_surface)
+    return surfaces
+
+
+def surface_is_open(surface: str) -> bool:
+    result = subprocess.run(
+        ["cmux", "read-screen", "--surface", surface, "--lines", "1"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    output = (result.stdout + result.stderr).lower()
+    return not any(token in output for token in ("not found", "not_found", "unknown surface"))
+
+
+def wait_for_operation_children(
+    sandbox: Path, coordinator_surface: str, grace_seconds: float = CHILD_SURFACE_SETTLE_SECONDS
+) -> None:
+    """Give armed task/reviewer wrappers a bounded chance to close themselves."""
+    surfaces = operation_child_surfaces(sandbox, coordinator_surface)
+    if not surfaces or grace_seconds <= 0:
+        return
+    deadline = time.monotonic() + grace_seconds
+    while any(surface_is_open(surface) for surface in surfaces):
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.25)
+
+
+def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[int, list[str]]:
+    """Close only exact child surfaces durably bound to this coordinator."""
+    closed = 0
+    failures: list[str] = []
+    surfaces = operation_child_surfaces(sandbox, coordinator_surface)
     for surface in sorted(surfaces):
         result = subprocess.run(
             ["cmux", "close-surface", "--surface", surface],
@@ -981,6 +1015,7 @@ def settle_operation_surfaces(
 ) -> tuple[str, int, list[str]]:
     """Stop child creation before enumerating exact operation descendants."""
     coordinator_close = close_surface(coordinator_surface, runtime, exit_marker)
+    wait_for_operation_children(sandbox, coordinator_surface)
     children_closed, child_failures = close_operation_children(sandbox, coordinator_surface)
     return coordinator_close, children_closed, child_failures
 

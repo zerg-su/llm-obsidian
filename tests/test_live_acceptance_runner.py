@@ -549,7 +549,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     surface_order: list[str] = []
     original_close_surface = module.close_surface
     original_close_children = module.close_operation_children
+    original_wait_children = module.wait_for_operation_children
     module.close_surface = lambda *_args, **_kwargs: surface_order.append("coordinator") or "exact surface closed"
+    module.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
     module.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
     try:
         settled = module.settle_operation_surfaces(
@@ -560,10 +562,13 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         )
     finally:
         module.close_surface = original_close_surface
+        module.wait_for_operation_children = original_wait_children
         module.close_operation_children = original_close_children
     check(
-        "cleanup stops coordinator before enumerating late children",
-        surface_order == ["coordinator", "children"] and settled == ("exact surface closed", 2, []),
+        "cleanup stops coordinator and gives children an auto-close grace",
+        surface_order == ["coordinator", "wait", "children"]
+        and settled == ("exact surface closed", 2, [])
+        and module.CHILD_SURFACE_SETTLE_SECONDS >= 5,
     )
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))

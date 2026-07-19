@@ -79,8 +79,8 @@ def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
     body, neutralized = neutralize_unresolved_wikilinks(vault / "wiki", typed["body"])
     if neutralized:
         typed = {**typed, "body": body}
-        if persist_repairs:
-            write_summary_views(worktree, typed, render_markdown)
+    if persist_repairs:
+        write_summary_views(worktree, typed, render_markdown)
     if meta.get("version") == 3 and meta.get("interaction_policy") == "unattended":
         reap = meta.get("reap_policy")
         if not isinstance(reap, dict):

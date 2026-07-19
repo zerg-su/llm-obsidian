@@ -129,6 +129,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("prompt has no branch control markers", "<!-- BRANCH" not in prompt)
     check("prompt binds reap skill", "$llm-obsidian:reap" in prompt)
     check(
+        "unattended finalization uses the code-owned reap sender",
+        "do not depend on runtime skill discovery" in prompt
+        and "skills/reap-send/scripts/send_reap.py --worktree ." in prompt,
+    )
+    check(
         "prompt trusts one successful supervised review transition",
         "drive ... --apply-action" in prompt
         and "run that command exactly" in prompt

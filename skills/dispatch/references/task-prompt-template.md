@@ -256,14 +256,19 @@ When the callback returns:
 
 ## Finalization
 
-If review already passed, invoke `/reap-send` (Claude) or `<reap-send-skill>` /
-natural trigger `reap-send` (Codex). It assembles the
-typed summary, validates `./.task-summary.json`, renders the legacy
+If review already passed, write the canonical `./.task-summary.json`. For a v3
+`unattended` task, do not depend on runtime skill discovery: invoke the
+code-owned sender exactly once with
+`python3 <vault-root>/skills/reap-send/scripts/send_reap.py --worktree .`.
+It validates the JSON, deterministically renders the legacy
 `./.task-summary.md` view, and via
 `cmux send` triggers `/reap final` in unattended mode (plain `/reap` in
 interactive mode) or the exact command stored in
 `./.wiki-reap-command` in the left wiki split — the wiki agent automatically
 picks it up and files it into the vault.
+
+Interactive/legacy tasks may instead invoke `/reap-send` (Claude) or
+`<reap-send-skill>` / natural trigger `reap-send` (Codex).
 
 The canonical JSON format:
 
