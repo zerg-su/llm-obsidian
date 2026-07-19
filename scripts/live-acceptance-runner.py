@@ -302,8 +302,9 @@ Hard boundaries:
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
 - The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
   and its run-scoped temporary directory. Do not run `git restore`, `git checkout`, `git stash`,
-  or manually delete those runner-owned paths. Remove the fixture's product output and close
-  external processes/surfaces; the runner validates allowed vault bookkeeping and deletes the clone.
+  manually delete those runner-owned paths, pass `--tmp-root`/`--state-root`, or override
+  `TMPDIR`/`TMP`/`TEMP`. Remove the fixture's product output and close external processes/surfaces;
+  the runner validates allowed vault bookkeeping and deletes the clone.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 
 Finally write exactly one JSON object to `{outbox}` using this shape:

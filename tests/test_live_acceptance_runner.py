@@ -253,6 +253,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
     check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
     check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
+    check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
 
     cleanup_run = tmp / "cleanup-run"
     cleanup_sandbox = cleanup_run / "sandbox"
