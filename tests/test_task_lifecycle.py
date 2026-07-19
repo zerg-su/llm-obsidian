@@ -704,6 +704,38 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and trust_commands[-1]
         == ["cmux", "send-key", "--surface", meta["task_surface"], "Enter"],
     )
+    claude_mcp_screen = (
+        "New MCP server found in this project: context7\n"
+        "MCP servers may execute code or access system resources.\n"
+        "1. Use this MCP server\n"
+        "2. Use this and all future MCP servers in this project\n"
+        "3. Continue without using this MCP server\n"
+        "Enter to confirm\n"
+    )
+    check(
+        "supervisor recognizes only the complete Claude MCP trust prompt",
+        supervisor_module.claude_mcp_trust_prompt_visible(claude_mcp_screen)
+        and not supervisor_module.claude_mcp_trust_prompt_visible(
+            "New MCP server found in this project: context7\n1. Use this MCP server\n"
+        ),
+    )
+    mcp_commands: list[list[str]] = []
+
+    def mcp_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        mcp_commands.append(command)
+        stdout = claude_mcp_screen if command[1] == "read-screen" else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    mcp_state: dict[str, int] = {}
+    supervisor_module.auto_accept_workspace_trust(
+        meta["task_surface"], "claude", threading.Event(), mcp_state,
+        runner=mcp_runner, timeout_seconds=0.1, poll_seconds=0.001,
+    )
+    check(
+        "supervisor declines one exact untrusted project MCP prompt",
+        mcp_state.get("mcp_declines") == 1
+        and [command[-1] for command in mcp_commands[1:]] == ["down", "down", "Enter"],
+    )
     check(
         "automatic trust requires an unattended approved task",
         supervisor_module.automatic_workspace_trust_allowed(worktree),

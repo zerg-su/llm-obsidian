@@ -344,7 +344,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     subprocess.run(["git", "init", "-q"], cwd=proof_repo, check=True)
     subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=proof_repo, check=True)
     subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=proof_repo, check=True)
-    (proof_repo / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
+    (proof_repo / ".gitignore").write_text(
+        ".vault-meta/task-sessions/\n", encoding="utf-8",
+    )
     (proof_repo / "base.txt").write_text("base\n", encoding="utf-8")
     subprocess.run(["git", "add", ".gitignore", "base.txt"], cwd=proof_repo, check=True)
     subprocess.run(["git", "commit", "-qm", "base"], cwd=proof_repo, check=True)
@@ -398,7 +400,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     review_page.write_text("# Acceptance dispatch proof review\n", encoding="utf-8")
     (operation / ".review-archive.json").write_text(json.dumps({
         "schema_version": 1,
-        "status": "archived",
+        "status": "already-current",
         "path": "wiki/meta/reviews/Acceptance dispatch proof review.md",
         "content_sha256": module.hashlib.sha256(review_page.read_bytes()).hexdigest(),
     }) + "\n", encoding="utf-8")

@@ -1024,6 +1024,20 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
     return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
 
 
+def claude_mcp_trust_prompt_visible(screen: str) -> bool:
+    """Recognize only Claude's complete native project-MCP trust dialog."""
+    markers = (
+        "New MCP server found in this project:",
+        "MCP servers may execute code or access system resources.",
+        "Use this MCP server",
+        "Use this and all future MCP servers in this project",
+        "Continue without using this MCP server",
+        "Enter to confirm",
+    )
+    compact_screen = re.sub(r"\s+", "", screen)
+    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)
+
+
 def automatic_workspace_trust_allowed(worktree: Path) -> bool:
     """Allow bootstrap only for a plan-bound unattended dispatch task."""
     try:
@@ -1044,8 +1058,9 @@ def auto_accept_workspace_trust(
     timeout_seconds: float = WORKSPACE_TRUST_TIMEOUT_SECONDS,
     poll_seconds: float = WORKSPACE_TRUST_POLL_SECONDS,
 ) -> None:
-    """Accept one exact native trust prompt on the supervisor-owned surface."""
+    """Handle only exact native bootstrap prompts on the owned surface."""
     deadline = time.monotonic() + max(0.0, timeout_seconds)
+    workspace_handled = False
     while time.monotonic() < deadline and not stop.wait(max(0.001, poll_seconds)):
         try:
             result = runner(
@@ -1061,7 +1076,26 @@ def auto_accept_workspace_trust(
         if result.returncode != 0:
             state["read_failures"] = state.get("read_failures", 0) + 1
             continue
-        if not workspace_trust_prompt_visible(runtime, result.stdout):
+        if runtime == "claude" and claude_mcp_trust_prompt_visible(result.stdout):
+            commands = [
+                ["cmux", "send-key", "--surface", surface, "down"],
+                ["cmux", "send-key", "--surface", surface, "down"],
+                ["cmux", "send-key", "--surface", surface, "Enter"],
+            ]
+            for command in commands:
+                try:
+                    declined = runner(
+                        command, text=True, capture_output=True, timeout=2, check=False,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    state["send_failures"] = state.get("send_failures", 0) + 1
+                    return
+                if declined.returncode != 0:
+                    state["send_failures"] = state.get("send_failures", 0) + 1
+                    return
+            state["mcp_declines"] = state.get("mcp_declines", 0) + 1
+            return
+        if workspace_handled or not workspace_trust_prompt_visible(runtime, result.stdout):
             continue
         try:
             accepted = runner(
@@ -1076,9 +1110,12 @@ def auto_accept_workspace_trust(
             return
         if accepted.returncode == 0:
             state["accepts"] = state.get("accepts", 0) + 1
+            workspace_handled = True
+            if runtime != "claude":
+                return
         else:
             state["send_failures"] = state.get("send_failures", 0) + 1
-        return
+            return
 
 
 def run_agent(
@@ -1195,6 +1232,7 @@ def run_agent(
         "relay_sent": nonnegative_int(relay.get("sent_count")),
         "relay_failures": nonnegative_int(relay.get("failure_count")),
         "workspace_trust_accepts": nonnegative_int(trust_state.get("accepts")),
+        "workspace_mcp_declines": nonnegative_int(trust_state.get("mcp_declines")),
         "workspace_trust_read_failures": nonnegative_int(trust_state.get("read_failures")),
         "workspace_trust_send_failures": nonnegative_int(trust_state.get("send_failures")),
     }

@@ -468,7 +468,7 @@ def dispatch_acceptance_proof(
         except AcceptanceRunnerError as exc:
             return False, str(exc)
         archive_rel = str(marker.get("path") or "")
-        if marker.get("status") != "archived" or not archive_rel.startswith("wiki/"):
+        if marker.get("status") not in {"archived", "already-current"} or not archive_rel.startswith("wiki/"):
             return False, "dispatch review archive marker is inconsistent"
         archive_path = sandbox / archive_rel
         if not archive_path.is_file() or marker.get("content_sha256") != hashlib.sha256(archive_path.read_bytes()).hexdigest():
@@ -488,7 +488,11 @@ def dispatch_acceptance_proof(
         if not line:
             continue
         path = line[3:]
-        if path == ".acceptance-sandbox.json" or path in allowed_pages:
+        if (
+            path == ".acceptance-sandbox.json"
+            or path.startswith(".vault-meta/acceptance-worktrees/")
+            or path in allowed_pages
+        ):
             continue
         if is_disposable_bookkeeping(path, line[:2]):
             continue
