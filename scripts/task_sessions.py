@@ -732,6 +732,44 @@ def parse_surface(output: str) -> tuple[str, str]:
     return uuid_match.group(0), ref_match.group(0) if ref_match else ""
 
 
+def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
+    """Resolve an exact surface to its workspace without consulting focus."""
+
+    result = runner(
+        ["cmux", "rpc", "system.tree", '{"all":true}'],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise TaskSessionError("cmux surface workspace lookup failed")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise TaskSessionError("cmux surface workspace lookup returned invalid JSON") from exc
+    matches: list[str] = []
+    for window in payload.get("windows", []) if isinstance(payload, dict) else []:
+        if not isinstance(window, dict):
+            continue
+        for workspace in window.get("workspaces", []):
+            if not isinstance(workspace, dict):
+                continue
+            for pane in workspace.get("panes", []):
+                if not isinstance(pane, dict):
+                    continue
+                for candidate in pane.get("surfaces", []):
+                    if not isinstance(candidate, dict):
+                        continue
+                    if surface not in {str(candidate.get("id") or ""), str(candidate.get("ref") or "")}:
+                        continue
+                    workspace_id = str(workspace.get("id") or workspace.get("ref") or "")
+                    if workspace_id and workspace_id not in matches:
+                        matches.append(workspace_id)
+    if len(matches) != 1:
+        raise TaskSessionError("cmux surface does not resolve to one exact workspace")
+    return matches[0]
+
+
 def spawn_right(origin_surface: str, runner: Any = subprocess.run) -> dict[str, str]:
     origin_surface = require_token(origin_surface, "origin_surface")
     caps = cmux_capabilities(runner)
@@ -743,6 +781,18 @@ def spawn_right(origin_surface: str, runner: Any = subprocess.run) -> dict[str, 
         capture_output=True,
         check=False,
     )
+    if result.returncode != 0:
+        workspace = surface_workspace(origin_surface, runner)
+        result = runner(
+            [
+                "cmux", "--id-format", "both", "new-split", "right",
+                "--workspace", workspace, "--surface", origin_surface,
+                "--focus", "false",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
         raise TaskSessionError("anchored cmux split failed")

@@ -580,6 +580,35 @@ caps = cmux_capabilities(fake_cmux)
 check("cmux capabilities", caps["anchored_split"] and caps["typed_resume"])
 spawn = spawn_right("origin-1", fake_cmux)
 check("spawn returns exact surface", spawn["surface"] == "11111111-1111-4111-8111-111111111111")
+
+
+def cmux_workspace_retry(args: list[str], **_: object) -> Result:
+    if args == ["cmux", "new-split", "--help"]:
+        return Result(stdout="Usage --surface <id> --focus")
+    if args[:5] == ["cmux", "--id-format", "both", "new-split", "right"]:
+        if "--workspace" not in args:
+            return Result(returncode=1, stderr="Error: not_found: Surface not found")
+        check(
+            "workspace retry keeps exact anchors",
+            args[args.index("--workspace") + 1] == "workspace-1"
+            and args[args.index("--surface") + 1] == "origin-1",
+        )
+        return Result(stdout="OK surface:10 (22222222-2222-4222-8222-222222222222)")
+    if args == ["cmux", "rpc", "system.tree", '{"all":true}']:
+        return Result(stdout=json.dumps({
+            "windows": [{"workspaces": [{
+                "id": "workspace-1",
+                "panes": [{"surfaces": [{"id": "origin-1", "ref": "surface:1"}]}],
+            }]}],
+        }))
+    return Result(returncode=1)
+
+
+retry_spawn = spawn_right("origin-1", cmux_workspace_retry)
+check(
+    "spawn retries with exact workspace for current cmux",
+    retry_spawn["surface"] == "22222222-2222-4222-8222-222222222222",
+)
 checkpoint = capture_resume("surface-1", "codex", fake_cmux)
 check(
     "checkpoint ignores stored command",
