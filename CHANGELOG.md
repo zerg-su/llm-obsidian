@@ -25,6 +25,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Dispatch anchors callbacks to the caller's explicit cmux surface instead of
   the globally selected tab, and generated semantic-tiling reports now include
   required session provenance.
+- Dispatch records only verified vault context links and stays within the
+  enforced skill-size budget; schema validation ignores illustrative links in
+  lint reports, log archives, and folder-index templates so reports cannot
+  amplify their own findings.
 
 ## [2.1.0] - 2026-07-18
 

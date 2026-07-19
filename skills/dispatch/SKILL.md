@@ -8,10 +8,8 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # /dispatch — spawn a parallel task in cmux
 Keeps the "wiki as backbone" paradigm but moves execution into a separate cmux task split. The wiki agent (this session, Claude or Codex) does **not** execute the task — it spawns a task split and keeps dispatching other tasks in parallel. When the task is done — `/reap` it into the wiki.
-
 The prompt may select either runtime; otherwise dispatch inherits the current
 session route. Claude and Codex can dispatch each other.
-
 ## Phase 0: cmux availability check
 `/dispatch` depends on cmux (a terminal multiplexer CLI). First thing, before any parsing:
 
@@ -19,7 +17,6 @@ session route. Claude and Codex can dispatch each other.
 command -v cmux >/dev/null 2>&1 || echo "NO_CMUX"
 ```
 If cmux is not installed — stop with a friendly message:
-
 ```
 /dispatch requires cmux (terminal multiplexer) to spawn a parallel split.
 See the "Parallel tasks" section of README.md for setup.
@@ -27,7 +24,6 @@ See the "Parallel tasks" section of README.md for setup.
 Alternative: I can run this task right here in the current session instead —
 say the word and describe the task.
 ```
-
 Do not attempt workarounds (background Bash, tmux, etc.).
 
 ## Input
@@ -149,7 +145,7 @@ Find 3-5 relevant pages for the pre-prompt:
 2. `Glob wiki/**/*.md` by keywords from the description (via Grep `-l`).
 3. `wiki/repos/<repo>.md` if it exists.
 
-Do not chase exhaustive context — 3-5 [[links]] with a one-line description each is enough. The task agent will read the rest itself via live vault access.
+Do not chase exhaustive context — 3-5 [[links]] with a one-line description each is enough. Before echoing or logging a link, verify that its exact target exists under `wiki/`; omit unresolved links copied from hot/log prose. The task agent will read the rest itself via live vault access.
 
 ### 1.4b Resolve the approved plan (plan-mode vs classic-mode)
 
@@ -236,9 +232,7 @@ Wait for "yes / no / edit". Do not proceed to Phase 2 without explicit consent.
 ---
 
 ## Phase 2: Spawn (batched Bash)
-
 ### 2.1 Worktree
-
 ```bash
 WORKTREES_DIR="${LLM_OBSIDIAN_WORKTREES:-$HOME/Projects/worktrees}"
 mkdir -p "$WORKTREES_DIR"
@@ -456,7 +450,6 @@ If the output shows a running `claude` or `codex` process — success.
 ---
 
 ## Phase 3: Log (vault-write, log-only)
-
 Payload goes through the dispatcher script (NOT a direct Edit):
 
 ```bash

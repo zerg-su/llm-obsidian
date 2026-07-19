@@ -58,6 +58,8 @@ dispatch = (ROOT / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" in dispatch
 assert "never substitute the selected surface" in dispatch
 assert "awk '/^\\*/" not in dispatch
+assert "verify that its exact target exists under `wiki/`" in dispatch
+assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch anchors the explicit caller surface")
 
 print("\nAll instruction lint tests passed.")

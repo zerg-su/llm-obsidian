@@ -117,6 +117,33 @@ with tempfile.TemporaryDirectory(prefix="vault-schema-") as tmp:
     issues = validate_schema(root)
     assert_true("dead link fails", any(i.code == "wikilink" for i in issues))
 
+    reports = wiki / "meta" / "reports"
+    reports.mkdir(parents=True)
+    report_path = reports / "lint-report-2026-07-19.md"
+    report_path.write_text(
+        page("Lint Report", "Validator evidence: [[Missing Page]]", address="c-000003"),
+        encoding="utf-8",
+    )
+    (meta / "address-counter.txt").write_text("4\n", encoding="utf-8")
+    (meta / "address-map.tsv").write_text(
+        "c-000001\twiki/concepts/One.md\n"
+        "c-000002\twiki/concepts/Two.md\n"
+        "c-000003\twiki/meta/reports/lint-report-2026-07-19.md\n",
+        encoding="utf-8",
+    )
+    issues = validate_schema(root)
+    assert_true(
+        "lint report source links are excluded",
+        not [i for i in issues if i.code == "wikilink" and "lint-report-" in i.message],
+    )
+    report_path.unlink()
+    (meta / "address-counter.txt").write_text("3\n", encoding="utf-8")
+    (meta / "address-map.tsv").write_text(
+        "c-000001\twiki/concepts/One.md\n"
+        "c-000002\twiki/concepts/Two.md\n",
+        encoding="utf-8",
+    )
+
     one_path.write_text(page("One"), encoding="utf-8")
     (wiki / "other").mkdir()
     (wiki / "other" / "one.md").write_text(

@@ -355,6 +355,15 @@ def validate_schema(repo_root: Path) -> list[SchemaIssue]:
             )
     for path, _, text in pages:
         rel = path.relative_to(repo_root)
+        # These pages deliberately quote illustrative or historical findings.
+        # Re-reading those examples as live link intent makes lint reports
+        # amplify their own unresolved-link findings on every validation pass.
+        if (
+            path.stem.startswith("lint-report-")
+            or path.stem.startswith("log-archive-")
+            or path.name == "_index.md"
+        ):
+            continue
         for target in iter_wikilinks(text):
             normalized = _normal_target(target)
             stem = Path(normalized).name
