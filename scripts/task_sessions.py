@@ -732,8 +732,10 @@ def parse_surface(output: str) -> tuple[str, str]:
     return uuid_match.group(0), ref_match.group(0) if ref_match else ""
 
 
-def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
-    """Resolve an exact surface to its workspace without consulting focus."""
+def surface_context(
+    surface: str, runner: Any = subprocess.run, *, missing_ok: bool = False
+) -> dict[str, str] | None:
+    """Resolve an exact surface to its window/workspace without consulting focus."""
 
     result = runner(
         ["cmux", "rpc", "system.tree", '{"all":true}'],
@@ -747,7 +749,7 @@ def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise TaskSessionError("cmux surface workspace lookup returned invalid JSON") from exc
-    matches: list[str] = []
+    matches: list[dict[str, str]] = []
     for window in payload.get("windows", []) if isinstance(payload, dict) else []:
         if not isinstance(window, dict):
             continue
@@ -762,12 +764,56 @@ def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
                         continue
                     if surface not in {str(candidate.get("id") or ""), str(candidate.get("ref") or "")}:
                         continue
-                    workspace_id = str(workspace.get("id") or workspace.get("ref") or "")
-                    if workspace_id and workspace_id not in matches:
-                        matches.append(workspace_id)
+                    context = {
+                        "surface": str(candidate.get("id") or ""),
+                        "surface_ref": str(candidate.get("ref") or ""),
+                        "workspace": str(workspace.get("id") or ""),
+                        "workspace_ref": str(workspace.get("ref") or ""),
+                        "window": str(window.get("id") or ""),
+                        "window_ref": str(window.get("ref") or ""),
+                    }
+                    if context not in matches:
+                        matches.append(context)
+    if not matches and missing_ok:
+        return None
     if len(matches) != 1:
         raise TaskSessionError("cmux surface does not resolve to one exact workspace")
     return matches[0]
+
+
+def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
+    """Resolve an exact surface to its workspace without consulting focus."""
+
+    context = surface_context(surface, runner)
+    assert context is not None
+    return context["workspace"] or context["workspace_ref"]
+
+
+def close_surface_exact(surface: str, runner: Any = subprocess.run) -> str:
+    """Close one exact surface with its anchors and prove it left the cmux tree."""
+
+    surface = require_token(surface, "surface")
+    for _attempt in range(2):
+        context = surface_context(surface, runner, missing_ok=True)
+        if context is None:
+            return "already-gone"
+        target = context["surface_ref"] or context["surface"]
+        workspace = context["workspace_ref"] or context["workspace"]
+        window = context["window_ref"] or context["window"]
+        if not target or not workspace or not window:
+            raise TaskSessionError("cmux surface close context is incomplete")
+        runner(
+            [
+                "cmux", "close-surface", "--surface", target,
+                "--workspace", workspace, "--window", window,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if surface_context(surface, runner, missing_ok=True) is None:
+            return "closed"
+    raise TaskSessionError("cmux close-surface returned but the exact surface remained open")
 
 
 def spawn_right(origin_surface: str, runner: Any = subprocess.run) -> dict[str, str]:

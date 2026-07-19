@@ -84,6 +84,35 @@ def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]
     return values
 
 
+def cell_dependency_hashes(
+    root: Path, dependencies: Iterable[str], *, skill: str, scenario: str
+) -> list[dict[str, str]]:
+    """Hash shared registries by the exact row fragment, not as all-cell blobs."""
+
+    fragment_keys = {
+        "evals/acceptance/skills.json": ("skills", skill),
+        "evals/acceptance/scenarios.json": ("scenarios", scenario),
+    }
+    values: list[dict[str, str]] = []
+    for rel in sorted(set(dependencies)):
+        fragment = fragment_keys.get(rel)
+        if fragment is None:
+            values.extend(file_hashes(root, [rel]))
+            continue
+        path = root / rel
+        try:
+            registry = json.loads(path.read_text(encoding="utf-8"))
+            value = registry[fragment[0]][fragment[1]]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise FingerprintError(f"cannot read acceptance registry fragment {rel}#{fragment[1]}") from exc
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        values.append({
+            "path": rel,
+            "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        })
+    return values
+
+
 def command_version(command: str) -> str:
     try:
         result = subprocess.run(
@@ -153,7 +182,12 @@ def cell_metadata(
         "runtime": row["runtime"],
         "scenario": row["scenario"],
         "expected": row["expected"],
-        "dependencies": file_hashes(root, dependencies),
+        "dependencies": cell_dependency_hashes(
+            root,
+            dependencies,
+            skill=str(row["skill"]),
+            scenario=str(row["scenario"]),
+        ),
         "environment": environment or environment_contract(),
         "generation": generation,
     }

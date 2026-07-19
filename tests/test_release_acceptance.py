@@ -15,6 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "release-acceptance.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from acceptance_fingerprints import cell_metadata, read_manifest
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -39,6 +41,36 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     check("matrix exit", result.returncode == 0, result.stderr)
     check("matrix complete", len(data["rows"]) == len(skills) * 2)
     check("matrix runtime parity", {row["runtime"] for row in data["rows"]} == {"claude", "codex"})
+
+    fragment_root = tmp / "fragment-root"
+    (fragment_root / "evals/acceptance").mkdir(parents=True)
+    (fragment_root / "skills/close").mkdir(parents=True)
+    (fragment_root / "skills/clarify").mkdir(parents=True)
+    for rel in ("evals/acceptance/skills.json", "evals/acceptance/scenarios.json"):
+        (fragment_root / rel).write_bytes((ROOT / rel).read_bytes())
+    (fragment_root / "skills/close/SKILL.md").write_text("# Close\n", encoding="utf-8")
+    (fragment_root / "skills/clarify/SKILL.md").write_text("# Clarify\n", encoding="utf-8")
+    fragment_manifest = read_manifest(ROOT)
+    fixed_environment = {"os": "test", "os_release": "1", "architecture": "test", "cmux": "1", "claude": "1", "codex": "1"}
+    fixed_generations = {
+        "claude": {"model": "opus", "generation": "claude:opus-4.8"},
+        "codex": {"model": "gpt-5.6-sol", "generation": "codex:5.6"},
+    }
+    close_row = next(row for row in data["rows"] if row["skill"] == "close" and row["runtime"] == "claude")
+    clarify_row = next(row for row in data["rows"] if row["skill"] == "clarify" and row["runtime"] == "claude")
+    close_before = cell_metadata(fragment_root, fragment_manifest, close_row, environment=fixed_environment, generations=fixed_generations)
+    clarify_before = cell_metadata(fragment_root, fragment_manifest, clarify_row, environment=fixed_environment, generations=fixed_generations)
+    fragment_skills_path = fragment_root / "evals/acceptance/skills.json"
+    fragment_skills = json.loads(fragment_skills_path.read_text(encoding="utf-8"))
+    fragment_skills["skills"]["close"]["fixture"] += " changed"
+    fragment_skills_path.write_text(json.dumps(fragment_skills), encoding="utf-8")
+    close_after = cell_metadata(fragment_root, fragment_manifest, close_row, environment=fixed_environment, generations=fixed_generations)
+    clarify_after = cell_metadata(fragment_root, fragment_manifest, clarify_row, environment=fixed_environment, generations=fixed_generations)
+    check(
+        "shared registry hashes only the exact cell fragment",
+        close_before["cell_fingerprint"] != close_after["cell_fingerprint"]
+        and clarify_before["cell_fingerprint"] == clarify_after["cell_fingerprint"],
+    )
 
     spec = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
     missing = tmp / "missing.json"

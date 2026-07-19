@@ -38,7 +38,7 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
-from task_sessions import TaskSessionError, spawn_right  # noqa: E402
+from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 
 
@@ -880,12 +880,10 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
                              counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
                              status="error", vault_root=request["vault_root"])
         if child is not None and not launched:
-            subprocess.run(
-                ["cmux", "close-surface", "--surface", child["surface"]],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            try:
+                close_surface_exact(child["surface"])
+            except (TaskSessionError, OSError):
+                pass
         mark_failed(state_path, stage, str(exc))
         raise DispatchError(
             f"{stage} failed for request {request['request_id']}; no retry was attempted: {exc}"

@@ -146,6 +146,21 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and '"sonnet" = "claude"' in override_text
         and validated_override.runtime_default("claude")["model"] == "sonnet",
     )
+    previous_claude_override = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL")
+    os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = "sonnet"
+    try:
+        blocked_override = module.blocked(
+            row(runtime="claude"), "bounded fixture timeout"
+        )
+    finally:
+        if previous_claude_override is None:
+            os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL", None)
+        else:
+            os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = previous_claude_override
+    check(
+        "blocked live evidence records the actual test model override",
+        blocked_override["model"] == "sonnet",
+    )
     repo = tmp / "cleanup-repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
@@ -252,21 +267,20 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     close_calls: list[list[str]] = []
     original_run = module.subprocess.run
     original_send_surface = module.send_surface
+    original_close_exact = module.close_surface_exact
     module.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError("already-exited agent must not receive /exit")
     )
-    module.subprocess.run = lambda argv, **_kwargs: (
-        close_calls.append(list(argv))
-        or subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
-    )
+    module.close_surface_exact = lambda surface, _runner: close_calls.append([surface]) or "closed"
     try:
         close_result = module.close_surface("00000000-0000-0000-0000-000000000001", "codex", exited)
     finally:
         module.subprocess.run = original_run
         module.send_surface = original_send_surface
+        module.close_surface_exact = original_close_exact
     check("interrupted exited agent closes without a second command", close_result == "exact surface closed")
     check("interrupted cleanup targets exact surface once", close_calls == [[
-        "cmux", "close-surface", "--surface", "00000000-0000-0000-0000-000000000001"
+        "00000000-0000-0000-0000-000000000001"
     ]])
 
     confirming_exit = tmp / "confirming-agent-exit.json"
@@ -280,11 +294,15 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             confirming_exit.write_text('{"schema_version": 1}\n', encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
     module.subprocess.run = confirm_run
+    module.close_surface_exact = lambda surface, _runner: confirm_calls.append(
+        ["close-exact", surface]
+    ) or "closed"
     try:
         close_result = module.close_surface("00000000-0000-0000-0000-000000000002", "claude", confirming_exit)
     finally:
         module.subprocess.run = original_run
         module.send_surface = original_send_surface
+        module.close_surface_exact = original_close_exact
     check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
     check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
     check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 300)
@@ -304,6 +322,65 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check(
         "prompt permits native subscription without exposing credentials",
         "already authenticated" in prompt and "Never read, copy, print, export" in prompt,
+    )
+
+    close_fixture = module.close_acceptance_fixture("abcdef12-0000-0000-0000-000000000000")
+    close_prompt = module.prompt_text(
+        row(
+            skill="close",
+            scenario="cmux-lifecycle",
+            expected="Save and terminate the agent process without closing its cmux surface.",
+        ),
+        module.load_scenarios()["cmux-lifecycle"],
+        repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model",
+        "high",
+        commit,
+        module.close_fixture_prompt(close_fixture),
+    )
+    check(
+        "close fixture reuses the runner-created surface",
+        "do not create another cmux surface" in close_prompt
+        and "do not create another surface"
+        in module.load_skill_fixtures()["close"]["fixture"].lower(),
+    )
+    check(
+        "close outbox precedes one final graceful exit",
+        "typed outbox is the penultimate action" in close_prompt
+        and "python3 scripts/queue-session-exit.py" in close_prompt,
+    )
+
+    close_repo = tmp / "close-proof"
+    close_page = close_repo / close_fixture["page_rel"]
+    close_page.parent.mkdir(parents=True)
+    close_page.write_text(
+        f"---\ntype: session\n---\n\n# {close_fixture['title']}\n",
+        encoding="utf-8",
+    )
+    original_checked = module.run_checked
+    original_run = module.subprocess.run
+    delete_payloads: list[dict[str, object]] = []
+    module.subprocess.run = lambda argv, **_kwargs: subprocess.CompletedProcess(
+        argv, 0, stdout="OK", stderr=""
+    )
+
+    def fake_checked(_argv, *, cwd, input_text=None):
+        delete_payloads.append(json.loads(input_text or "{}"))
+        close_page.unlink()
+        return "{}"
+
+    module.run_checked = fake_checked
+    try:
+        close_clean, close_proof = module.close_acceptance_proof(close_repo, close_fixture)
+    finally:
+        module.run_checked = original_checked
+        module.subprocess.run = original_run
+    check(
+        "runner proves and transactionally deletes the close fixture",
+        close_clean
+        and "transactionally removed" in close_proof
+        and delete_payloads[0]["pages"][0]["op"] == "delete",
     )
 
     dispatch_fixture = module.load_skill_fixtures()["dispatch"]["fixture"]
@@ -539,18 +616,15 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "task_surface": "00000000-0000-0000-0000-000000000006",
     }), encoding="utf-8")
     child_calls: list[list[str]] = []
-    module.subprocess.run = lambda argv, **_kwargs: (
-        child_calls.append(list(argv))
-        or subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
-    )
+    module.close_surface_exact = lambda surface, _runner: child_calls.append([surface]) or "closed"
     try:
         child_closed, child_failures = module.close_operation_children(
             child_root, "00000000-0000-0000-0000-000000000003"
         )
     finally:
-        module.subprocess.run = original_run
+        module.close_surface_exact = original_close_exact
     check("interrupted operation closes exact registered children", child_closed == 3 and not child_failures)
-    check("registered child close never targets coordinator", {call[-1] for call in child_calls} == {
+    check("registered child close never targets coordinator", {call[0] for call in child_calls} == {
         "00000000-0000-0000-0000-000000000004",
         "00000000-0000-0000-0000-000000000005",
         "00000000-0000-0000-0000-000000000006",

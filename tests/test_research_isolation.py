@@ -42,11 +42,19 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fake_cmux.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$CMUX_LOG\"\n"
-        "if [ \"$1 $2\" = \"new-split --help\" ]; then\n"
+        "if [ \"$1 $2\" = \"rpc system.tree\" ]; then\n"
+        "  python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ[\"CMUX_CLOSED_FILE\"]); "
+        "closed=set(p.read_text().splitlines()) if p.exists() else set(); "
+        "surfaces=[{\"id\":s,\"ref\":\"\"} for s in os.environ[\"CMUX_TEST_SURFACES\"].split(\",\") if s and s not in closed]; "
+        "print(json.dumps({\"windows\":[{\"id\":\"window-id\",\"ref\":\"window:1\",\"workspaces\":[{\"id\":\"workspace-id\",\"ref\":\"workspace:1\",\"panes\":[{\"surfaces\":surfaces}]}]}]}))'\n"
+        "elif [ \"$1\" = \"close-surface\" ]; then\n"
+        "  printf '%s\\n' \"$3\" >> \"$CMUX_CLOSED_FILE\"\n"
+        "elif [ \"$1 $2\" = \"new-split --help\" ]; then\n"
         "  printf '%s\\n' 'usage: cmux new-split [right] --surface ID --focus BOOL'\n"
         "elif [ \"$1 $2 $3\" = \"surface resume --help\" ]; then\n"
         "  printf '%s\\n' 'resume get; resume set; resume show; resume clear'\n"
         "elif [ \"$1 $2 $3 $4\" = \"--id-format both new-split right\" ]; then\n"
+        "  if [ -f \"$CMUX_CLOSED_FILE\" ]; then grep -v '^22222222-2222-2222-2222-222222222222$' \"$CMUX_CLOSED_FILE\" > \"$CMUX_CLOSED_FILE.tmp\" || true; mv \"$CMUX_CLOSED_FILE.tmp\" \"$CMUX_CLOSED_FILE\"; fi\n"
         "  printf '%s\\n' 'surface:9 22222222-2222-2222-2222-222222222222'\n"
         "fi\n"
         "exit 0\n",
@@ -82,6 +90,15 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fake_env = dict(env)
     fake_env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
     fake_env["CMUX_LOG"] = str(cmux_log)
+    fake_env["CMUX_CLOSED_FILE"] = str(tmp / "cmux-closed.txt")
+    fake_env["CMUX_TEST_SURFACES"] = ",".join((
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+        "55555555-5555-5555-5555-555555555555",
+        "77777777-7777-4777-8777-777777777777",
+    ))
     broken_env = dict(env)
     broken_env["PATH"] = str(broken_bin) + os.pathsep + env.get("PATH", "")
     broken_env["CMUX_SOCKET_PATH"] = str(socket_path)

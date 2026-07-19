@@ -49,7 +49,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
 from model_routing import load_config  # noqa: E402
 from pipeline_events import emit_event  # noqa: E402
-from task_sessions import TaskSessionError, spawn_right  # noqa: E402
+from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
 from cmux_agent_supervisor import (  # noqa: E402
     SupervisorError,
     resolved_git_common_dir,
@@ -401,6 +401,68 @@ def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
     )
 
 
+def close_acceptance_fixture(run_id: str) -> dict[str, str]:
+    """Return one exact save target for the runner-owned close surface."""
+
+    token = run_id.split("-", 1)[0]
+    title = f"Acceptance Close Fixture {token}"
+    return {"title": title, "page_rel": f"wiki/meta/sessions/{title}.md"}
+
+
+def close_fixture_prompt(fixture: dict[str, str]) -> str:
+    return (
+        "Use this current runner-created acceptance surface as the disposable close fixture; "
+        "do not create another cmux surface or launch another agent. "
+        f"Save one short reusable session note titled `{fixture['title']}` at exactly "
+        f"`{fixture['page_rel']}` through the documented save workflow and one vault-write transaction. "
+        "State only that it is a disposable local acceptance record for exact-surface graceful exit. "
+        "Validate the saved page but do not delete it: the outer runner owns proof and deletion after exit."
+    )
+
+
+def close_acceptance_proof(sandbox: Path, fixture: dict[str, str]) -> tuple[bool, str]:
+    """Validate and transactionally remove the exact close fixture after agent exit."""
+
+    page = sandbox / fixture["page_rel"]
+    if page.is_symlink() or not page.is_file():
+        return False, "close fixture page is missing"
+    content = page.read_text(encoding="utf-8")
+    if f"# {fixture['title']}" not in content or "type: session" not in content:
+        return False, "close fixture page does not match the required session note"
+    validated = subprocess.run(
+        [sys.executable, str(sandbox / "scripts" / "validate-vault.py"), "--summary"],
+        cwd=sandbox,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if validated.returncode != 0:
+        return False, "close fixture page failed vault validation"
+    digest = hashlib.sha256(page.read_bytes()).hexdigest()
+    payload = {
+        "schema_version": 1,
+        "request_id": f"acceptance-close-cleanup-{digest[:16]}",
+        "actor": "acceptance",
+        "session": "acceptance-close-cleanup",
+        "pages": [{
+            "op": "delete",
+            "path": fixture["page_rel"],
+            "expected_sha256": digest,
+        }],
+    }
+    try:
+        run_checked(
+            [sys.executable, str(sandbox / "scripts" / "vault-write.py"), "--output", "json"],
+            cwd=sandbox,
+            input_text=json.dumps(payload, ensure_ascii=False),
+        )
+    except AcceptanceRunnerError:
+        return False, "close fixture page cleanup failed"
+    if page.exists():
+        return False, "close fixture page remained after cleanup"
+    return True, "saved page validated and transactionally removed after exact agent exit"
+
+
 def write_dispatch_acceptance_request(
     sandbox: Path, fixture: dict[str, str], *, source_commit: str, coordinator_surface: str,
     coordinator_model: str, coordinator_effort: str,
@@ -575,7 +637,12 @@ def prompt_text(
     model: str, effort: str, commit: str, fixture: str,
     runner_fixture: dict[str, str] | None = None,
 ) -> str:
-    if runner_fixture is None:
+    if row["skill"] == "close":
+        cleanup_contract = f"""- This current acceptance surface is the only session fixture. Do not create or close another surface.
+- Leave the exact saved page in place for runner proof. The runner owns its transactional deletion,
+  disposable bookkeeping, operation outbox, clone, scratch directory, and exact surface cleanup.
+- Do not remove `.acceptance-sandbox.json`, pass `--tmp-root`/`--state-root`, or override `TMPDIR`/`TMP`/`TEMP`."""
+    elif runner_fixture is None:
         cleanup_contract = f"""- Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
 - The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
@@ -612,6 +679,13 @@ def prompt_text(
   that independent durable-proof check before accepting the cell.
 - Validate the task result before the typed outbox. The runner independently proves the exact commit,
   typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
+    if row["skill"] == "close":
+        final_contract = f"""For this close fixture only, the typed outbox is the penultimate action. Write it before exit,
+then make your final tool call exactly `python3 scripts/queue-session-exit.py`. Perform no tool calls
+after that command and end the turn immediately. The outer runner independently proves process exit,
+surface retention, exact-surface cleanup, and removal of the saved fixture page."""
+    else:
+        final_contract = "Do not merely describe a hypothetical test. The outbox is the final action after cleanup."
     return f"""# Live release acceptance operation
 
 You are running one real, bounded acceptance cell in a disposable local clone.
@@ -671,7 +745,7 @@ Finally write exactly one JSON object to `{outbox}` using this shape:
 }}
 ```
 
-Do not merely describe a hypothetical test. The outbox is the final action after cleanup.
+{final_contract}
 """
 
 
@@ -898,11 +972,9 @@ def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
         time.sleep(0.5)
     if not exit_marker.is_file():
         return "agent did not exit; surface left visible"
-    closed = subprocess.run(
-        ["cmux", "close-surface", "--surface", surface], text=True, capture_output=True, check=False
-    )
-    text = (closed.stdout + closed.stderr).lower()
-    if closed.returncode != 0 and not any(token in text for token in ("not found", "not_found", "unknown surface")):
+    try:
+        close_surface_exact(surface, subprocess.run)
+    except (TaskSessionError, OSError):
         return "exact surface close failed; surface left visible"
     return "exact surface closed"
 
@@ -994,17 +1066,15 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
     failures: list[str] = []
     surfaces = operation_child_surfaces(sandbox, coordinator_surface)
     for surface in sorted(surfaces):
-        result = subprocess.run(
-            ["cmux", "close-surface", "--surface", surface],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        output = (result.stdout + result.stderr).lower()
-        if result.returncode == 0:
-            closed += 1
-        elif not any(token in output for token in ("not found", "not_found", "unknown surface")):
+        try:
+            status = close_surface_exact(surface, subprocess.run)
+        except (TaskSessionError, OSError):
             failures.append(surface)
+        else:
+            if status == "closed":
+                closed += 1
+            elif status != "already-gone":
+                failures.append(surface)
     return closed, failures
 
 
@@ -1086,6 +1156,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     surface = ""
     cleanup = "sandbox retained for diagnosis"
     prepared_dispatch: dict[str, str] | None = None
+    prepared_close: dict[str, str] | None = None
     stage = "setup"
     stage_started = time.monotonic()
     try:
@@ -1095,6 +1166,9 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         if row["skill"] == "dispatch":
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
             fixture = dispatch_fixture_prompt(prepared_dispatch)
+        elif row["skill"] == "close":
+            prepared_close = close_acceptance_fixture(run_id)
+            fixture = close_fixture_prompt(prepared_close)
         scratch_root = scratch_root_for(run_dir)
         scratch_root.mkdir(mode=0o700)
         atomic_json(
@@ -1159,6 +1233,10 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             surface=surface,
             runtime=row["runtime"],
         )
+        if prepared_close is not None:
+            exit_deadline = time.monotonic() + 10.0
+            while time.monotonic() < exit_deadline and not (run_dir / "agent-exit.json").is_file():
+                time.sleep(0.25)
         emit_event(
             "acceptance-cell-stage", actor="model-wait", session=run_id,
             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)}, root=ROOT,
@@ -1181,6 +1259,11 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         elif result["verdict"] in {"pass", "n-a"}:
             if prepared_dispatch is not None:
                 clean, proof = dispatch_acceptance_proof(sandbox, commit, prepared_dispatch)
+            elif prepared_close is not None:
+                clean, proof = close_acceptance_proof(sandbox, prepared_close)
+                if clean:
+                    clean, cleanup_proof = sandbox_cleanup_proof(sandbox, commit)
+                    proof = f"{proof}; {cleanup_proof}"
             else:
                 clean, proof = sandbox_cleanup_proof(sandbox, commit)
             if not clean:
@@ -1240,6 +1323,11 @@ def blocked(row: dict[str, Any], message: str) -> dict[str, Any]:
         route = load_config(ROOT).runtime_default(row["runtime"])
     except Exception:
         route = {"model": "unknown", "effort": "unknown"}
+    override = str(
+        os.environ.get(f"LLM_OBSIDIAN_ACCEPTANCE_{str(row['runtime']).upper()}_MODEL") or ""
+    ).strip()
+    if override:
+        route = {**route, "model": override}
     clean, _ = sanitize(message[:300])
     return result_payload(
         row, verdict="blocked", model=route["model"], effort=route["effort"],

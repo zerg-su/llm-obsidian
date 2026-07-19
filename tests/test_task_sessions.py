@@ -22,10 +22,12 @@ from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
     capture_resume,
+    close_surface_exact,
     cmux_capabilities,
     lane_id_for,
     project_id_for,
     spawn_right,
+    surface_context,
 )
 from task_contract import v3_session_is_bound
 
@@ -609,6 +611,56 @@ check(
     "spawn retries with exact workspace for current cmux",
     retry_spawn["surface"] == "22222222-2222-4222-8222-222222222222",
 )
+
+exact_surface = "33333333-3333-4333-8333-333333333333"
+exact_open = True
+exact_close_attempts = 0
+exact_calls: list[list[str]] = []
+
+
+def exact_close_runner(args: list[str], **_: object) -> Result:
+    global exact_close_attempts, exact_open
+    exact_calls.append(args)
+    if args == ["cmux", "rpc", "system.tree", '{"all":true}']:
+        surfaces = [{"id": exact_surface, "ref": "surface:33"}] if exact_open else []
+        return Result(stdout=json.dumps({
+            "windows": [{
+                "id": "window-id",
+                "ref": "window:7",
+                "workspaces": [{
+                    "id": "workspace-id",
+                    "ref": "workspace:8",
+                    "panes": [{"surfaces": surfaces}],
+                }],
+            }],
+        }))
+    if args[:2] == ["cmux", "close-surface"]:
+        exact_close_attempts += 1
+        check(
+            "exact close carries surface workspace and window anchors",
+            args == [
+                "cmux", "close-surface", "--surface", "surface:33",
+                "--workspace", "workspace:8", "--window", "window:7",
+            ],
+        )
+        if exact_close_attempts == 1:
+            return Result(returncode=1, stderr="not_found: surface")
+        exact_open = False
+        return Result(stdout="OK")
+    return Result(returncode=1)
+
+
+context = surface_context(exact_surface, exact_close_runner)
+check(
+    "surface context resolves exact vertical workspace",
+    context is not None
+    and context["surface_ref"] == "surface:33"
+    and context["workspace_ref"] == "workspace:8"
+    and context["window_ref"] == "window:7",
+)
+check("exact close proves disappearance", close_surface_exact(exact_surface, exact_close_runner) == "closed")
+check("not-found without tree disappearance receives one bounded retry", exact_close_attempts == 2)
+check("exact close is idempotent only after tree proof", close_surface_exact(exact_surface, exact_close_runner) == "already-gone")
 checkpoint = capture_resume("surface-1", "codex", fake_cmux)
 check(
     "checkpoint ignores stored command",

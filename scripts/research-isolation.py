@@ -35,6 +35,7 @@ from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
     capture_resume,
+    close_surface_exact,
     project_id_for,
     spawn_right,
     validate_checkpoint,
@@ -379,8 +380,8 @@ def close_completed_surface(
             )
     state[f"{stage}_surface_cleanup_attempted_at"] = utc_now()
     try:
-        closed = run(["cmux", "close-surface", "--surface", surface])
-    except OSError:
+        close_status = close_surface_exact(surface)
+    except (TaskSessionError, OSError):
         state[f"{stage}_surface_cleanup"] = "failed"
         write_json(state_path, state)
         print(
@@ -388,17 +389,7 @@ def close_completed_surface(
             file=sys.stderr,
         )
         return False
-    if closed.returncode != 0 and not surface_is_missing(closed):
-        state[f"{stage}_surface_cleanup"] = "failed"
-        write_json(state_path, state)
-        print(
-            f"research-isolation: warning: completed {stage} surface could not be closed",
-            file=sys.stderr,
-        )
-        return False
-    state[f"{stage}_surface_cleanup"] = (
-        "already-gone" if closed.returncode != 0 else "closed"
-    )
+    state[f"{stage}_surface_cleanup"] = close_status
     state[closed_key] = utc_now()
     write_json(state_path, state)
     if isinstance(broker, dict):

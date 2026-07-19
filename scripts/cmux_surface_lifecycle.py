@@ -26,7 +26,13 @@ from task_contract import (
     validate_handoff,
     v3_session_is_bound,
 )
-from task_sessions import TaskSessionError, TaskSessionStore, capture_resume, validate_checkpoint
+from task_sessions import (
+    TaskSessionError,
+    TaskSessionStore,
+    capture_resume,
+    close_surface_exact,
+    validate_checkpoint,
+)
 
 
 HANDOFF_PREFIXES = (".task-", ".review-", ".wiki-")
@@ -290,10 +296,10 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
                 f"the next round will start fresh: {degradation.removeprefix('resume checkpoint unavailable: ')}",
                 file=sys.stderr,
             )
-    closed = run(["cmux", "close-surface", "--surface", surface])
-    close_text = (closed.stdout + closed.stderr).lower()
-    if closed.returncode != 0 and not any(token in close_text for token in ("not found", "not_found", "unknown surface")):
-        die((closed.stdout + closed.stderr).strip() or "cmux close-surface failed")
+    try:
+        close_surface_exact(surface)
+    except (TaskSessionError, OSError) as exc:
+        die(str(exc) or "cmux close-surface failed")
     broker_transitioned = True
     if kind == "reviewer" and _STATE_DIR is not None:
         broker_transitioned = transition_broker_review(

@@ -392,6 +392,14 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "  top) printf 'top\\n' >> \"$CMUX_TEST_LOG\"; cat \"$CMUX_TOP_FILE\"; exit 0 ;;\n"
         "  notify) if [ \"${CMUX_NOTIFY_FAIL:-0}\" = 1 ]; then echo 'notify failed' >&2; exit 2; fi; "
         "printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
+        "  rpc) if [ \"$2\" = system.tree ]; then "
+        "python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ[\"CMUX_CLOSED_FILE\"]); "
+        "closed=set(p.read_text().splitlines()) if p.exists() else set(); "
+        "surfaces=[{\"id\":s,\"ref\":\"\"} for s in os.environ[\"CMUX_TEST_SURFACES\"].split(\",\") if s and s not in closed]; "
+        "print(json.dumps({\"windows\":[{\"id\":\"window-id\",\"ref\":\"window:1\",\"workspaces\":[{\"id\":\"workspace-id\",\"ref\":\"workspace:1\",\"panes\":[{\"surfaces\":surfaces}]}]}]}))'; "
+        "exit 0; fi ;;\n"
+        "  close-surface) printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; "
+        "printf '%s\\n' \"$3\" >> \"$CMUX_CLOSED_FILE\"; exit 0 ;;\n"
         "  *) printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -433,6 +441,16 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     env = dict(
         os.environ, PATH=f"{fake_bin}:{os.environ.get('PATH', '')}",
         CMUX_TEST_LOG=str(cmux_log), CMUX_SCREEN_FILE=str(screen_file), CMUX_TOP_FILE=str(top_file),
+        CMUX_CLOSED_FILE=str(worktree / "cmux-closed.txt"),
+        CMUX_TEST_SURFACES=",".join((
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "33333333-3333-3333-3333-333333333333",
+            "66666666-6666-4666-8666-666666666666",
+            "surface-retry-executor",
+        )),
         FAKE_AGENT_LOG=str(agent_log), CMUX_SOCKET_PATH=str(cmux_socket_path),
     )
     clean_env = {k: v for k, v in env.items() if k not in {"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}}
