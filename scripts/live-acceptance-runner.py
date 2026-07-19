@@ -49,6 +49,7 @@ from model_routing import load_config  # noqa: E402
 from task_sessions import TaskSessionError, spawn_right  # noqa: E402
 from cmux_agent_supervisor import (  # noqa: E402
     SupervisorError,
+    resolved_git_common_dir,
     task_codex_config_values,
     validated_cmux_socket_path,
     workspace_trust_prompt_visible,
@@ -358,6 +359,7 @@ def agent_argv(
     argv = [
         "codex", "--cd", str(sandbox), "-a", "never", "-s", "workspace-write",
         "--disable", "hooks",
+        "--add-dir", str(resolved_git_common_dir(sandbox)),
         "--model", model,
     ]
     for value in task_codex_config_values(socket, effort):

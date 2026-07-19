@@ -169,6 +169,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
     check("Codex acceptance keeps Fast user-only", 'service_tier="default"' in codex_argv)
+    check(
+        "Codex acceptance grants only disposable Git metadata",
+        codex_argv[codex_argv.index("--add-dir") + 1] == str(module.resolved_git_common_dir(repo)),
+    )
     scratch = tmp / "scratch"
     scratch.mkdir()
     _argv, scratch_env = module.agent_argv(
@@ -326,6 +330,11 @@ check(
 check(
     "every skill has one bounded live fixture",
     all(isinstance(item.get("fixture"), str) and item["fixture"].strip() for item in skills["skills"].values()),
+)
+check(
+    "autoresearch fixture pins its bounded URL and topic boundary",
+    "https://docs.python.org/3/library/functions.html#len" in skills["skills"]["autoresearch"]["fixture"]
+    and "only the research request" in skills["skills"]["autoresearch"]["fixture"],
 )
 
 if failures:
