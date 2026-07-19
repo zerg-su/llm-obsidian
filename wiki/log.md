@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-19
+updated: 2026-07-20
 tags:
   - meta
   - log
@@ -26,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-19] review | v2.1.1 code-owned optimization plan review
+
+`c-000012` [[Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030]]. 3 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-19 05:00] backlog | add — cmux-acceptance-surface-cleanup
 
