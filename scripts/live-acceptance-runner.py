@@ -48,6 +48,7 @@ DISPOSABLE_VAULT_BOOKKEEPING = {
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
 from model_routing import load_config  # noqa: E402
+from pipeline_events import emit_event  # noqa: E402
 from task_sessions import TaskSessionError, spawn_right  # noqa: E402
 from cmux_agent_supervisor import (  # noqa: E402
     SupervisorError,
@@ -1085,6 +1086,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     surface = ""
     cleanup = "sandbox retained for diagnosis"
     prepared_dispatch: dict[str, str] | None = None
+    stage = "setup"
+    stage_started = time.monotonic()
     try:
         sandbox, commit = create_sandbox(run_dir)
         install_acceptance_model_overrides(sandbox)
@@ -1143,6 +1146,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             )
         command = shlex.join([sys.executable, str(Path(__file__).resolve()), "agent", "--spec", str(spec_path)])
         send_surface(surface, command)
+        emit_event(
+            "acceptance-cell-stage", actor="setup", session=run_id,
+            counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)}, root=ROOT,
+        )
+        stage_started = time.monotonic()
+        stage = "model-wait"
         raw = wait_for_outbox(
             outbox,
             run_dir / "agent-exit.json",
@@ -1150,6 +1159,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             surface=surface,
             runtime=row["runtime"],
         )
+        emit_event(
+            "acceptance-cell-stage", actor="model-wait", session=run_id,
+            counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)}, root=ROOT,
+        )
+        stage_started = time.monotonic()
+        stage = "proof"
         result = validate_agent_result(row, raw)
         close, children_closed, child_failures = settle_operation_surfaces(
             sandbox, surface, row["runtime"], run_dir / "agent-exit.json"
@@ -1173,7 +1188,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 result["defect"] = proof
                 result["cleanup"] = f"{result['cleanup']}; diagnostic clone retained"[:600]
             else:
+                cleanup_started = time.monotonic()
                 safe_cleanup(run_dir)
+                emit_event(
+                    "acceptance-cell-stage", actor="cleanup", session=run_id,
+                    counts={"duration_ms": round((time.monotonic() - cleanup_started) * 1000)}, root=ROOT,
+                )
                 cleanup = "disposable clone removed; exact surface closed"
                 result["cleanup"] = f"{result['cleanup']}; {proof}; {cleanup}"[:600]
                 result["evidence"] = f"{result['evidence']}; runner proof: {proof}"[:600]
@@ -1183,8 +1203,18 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         spec["verdict"] = result["verdict"]
         atomic_json(run_dir / "result.json", result)
         atomic_json(spec_path, spec)
+        emit_event(
+            "acceptance-cell-stage", actor="proof", session=run_id,
+            counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
+            status="ok" if result["verdict"] in {"pass", "n-a"} else "degraded", root=ROOT,
+        )
         return result
     except BaseException:
+        emit_event(
+            "acceptance-cell-stage", actor=stage, session=run_id,
+            counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
+            status="error", root=ROOT,
+        )
         close = "surface was not created"
         if surface:
             close, _children_closed, _child_failures = settle_operation_surfaces(

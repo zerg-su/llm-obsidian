@@ -22,6 +22,7 @@ STOP = {
     "this", "that", "with", "from", "into", "для", "это", "как", "чтобы",
     "сделать", "нужно", "надо", "the", "and", "или", "наш", "наша", "наши",
 }
+RETRIEVAL_TIMEOUT_SECONDS = 8.0
 
 
 class ResolveError(ValueError):
@@ -162,15 +163,23 @@ def context_candidates(vault: Path, description: str, repo_name: str) -> tuple[l
     """Prefer the canonical hybrid retriever without mutating derived state."""
     query = f"{repo_name} {description}".strip()
     script = vault / "scripts" / "retrieve.py"
+    fallback_reason = "canonical read-only retriever unavailable"
     if script.is_file():
-        result = subprocess.run(
-            [sys.executable, str(script), query, "--top", "5", "--json", "--dense", "auto", "--read-only"],
-            cwd=vault,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
+        try:
+            result = subprocess.run(
+                [sys.executable, str(script), query, "--top", "5", "--json", "--dense", "auto", "--read-only"],
+                cwd=vault,
+                text=True,
+                capture_output=True,
+                timeout=RETRIEVAL_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            result = None
+            fallback_reason = "canonical read-only retriever timed out"
+        if result is not None and result.returncode != 0:
+            fallback_reason = "canonical read-only retriever failed"
+        if result is not None and result.returncode == 0:
             try:
                 payload = json.loads(result.stdout)
             except json.JSONDecodeError:
@@ -193,9 +202,10 @@ def context_candidates(vault: Path, description: str, repo_name: str) -> tuple[l
                     "degraded": bool(meta.get("degraded")),
                     "reason": str(meta.get("reason") or ""),
                 }
+            fallback_reason = "canonical read-only retriever returned malformed output"
     return lexical_context_candidates(vault, description, repo_name), {
         "source": "bounded-lexical-fallback", "mode": "sparse", "degraded": True,
-        "reason": "canonical read-only retriever unavailable",
+        "reason": fallback_reason,
     }
 
 

@@ -1,403 +1,100 @@
 ---
 name: dispatch
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
 
-# /dispatch — spawn a parallel task in cmux
-Keeps the "wiki as backbone" paradigm but moves execution into a separate cmux task split. The wiki agent (this session, Claude or Codex) does **not** execute the task — it spawns a task split and keeps dispatching other tasks in parallel. When the task is done — `/reap` it into the wiki.
-The prompt may select either runtime; otherwise dispatch inherits the current
-session route. Claude and Codex can dispatch each other.
-
-## Canonical approved-plan runner
-
-For an approved unattended plan, deterministic setup is code-owned. Do not
-manually reproduce Phase 2 worktree, routing, prompt, metadata, surface, launch,
-or log commands. After Phase 1 resolves the values, write one unique ignored
-request under `.vault-meta/dispatch-requests/<request-id>.json`:
-
-```json
-{
-  "schema_version": 1,
-  "request_id": "<canonical UUID>",
-  "task_name": "<kebab-case>",
-  "description": "<approved bounded mandate>",
-  "vault_root": "<absolute coordinator vault>",
-  "target_repo": "<absolute Git repository>",
-  "worktree": "<absolute new worktree>",
-  "branch": "task/<task_name>",
-  "base_branch": "<approved branch or commit>",
-  "plan_file": "<absolute pending plan>",
-  "executor": {"runtime": "", "model": "", "effort": ""},
-  "wiki_context": [{"title": "Existing Page", "summary": "why it matters"}],
-  "suggested_agents": [],
-  "reap": {"type": "session", "title": "<exact approved title>"},
-  "review_mode": "light"
-}
-```
-
-The runner binds `origin_surface`, `origin_session`, and `session_route` to the
-current process when those fields are omitted. This is safe because it uses the
-surface-local `CMUX_SURFACE_ID`, the exact host session ID, and host-confirmed
-routing; it never inspects the globally focused surface or falls back to a
-tracked model default. Explicit fields remain available for acceptance fixtures
-and diagnostics.
-
-Before echo-confirm, validate and show its typed route/hash result:
-
-```bash
-python3 <vault-root>/scripts/dispatch-runner.py validate --spec <request.json>
-```
-
-After the user approves that exact block, start it exactly once:
-
-```bash
-python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json>
-```
-
-`start` claims the UUID before mutation and is idempotent after launch. It
-creates one branch/worktree/task identity, renders only the approved-plan prompt
-branch, writes and validates v3 metadata, opens one split anchored right of the
-caller, launches the supervisor, verifies the surface, and logs through
-`vault-write.py`. Repeating a `preparing` or `failed` request fails closed rather
-than opening a second surface. A launched request returns its original typed
-result. If a blank child surface was created but launch did not begin, the
-runner closes only that exact surface.
-
-After `start` returns `coordinator_action: return-to-idle-without-polling`,
-show the bounded launch result and finish the current coordinator turn. Do not
-run shell monitors, poll cmux/task files, call agent wait tools, or keep the
-turn alive. Typed review, escalation, and final-reap callbacks are submitted to
-the idle coordinator surface and begin the next turn automatically. Returning
-to idle is therefore part of dispatch orchestration, not completion of the
-child task.
-
-The remainder of Phase 2 documents the compatibility mechanics enforced by the
-runner. For approved v3 tasks it is a contract/reference, not an instruction to
-execute those commands individually. Classic interactive mode still follows
-the compatibility path.
-
-## Phase 0: cmux availability check
-`/dispatch` depends on cmux (a terminal multiplexer CLI). First thing, before any parsing:
-
-```bash
-command -v cmux >/dev/null 2>&1 || echo "NO_CMUX"
-```
-If cmux is not installed — stop with a friendly message:
-```
-/dispatch requires cmux (terminal multiplexer) to spawn a parallel split.
-See the "Parallel tasks" section of README.md for setup.
-
-Alternative: I can run this task right here in the current session instead —
-say the word and describe the task.
-```
-Do not attempt workarounds (background Bash, tmux, etc.).
-
-## Input
-```
-/dispatch <free-form description>
-```
-
-The description is free text, spoken or typed. From "add a dark-mode toggle to the blog, repo `my-blog`, new branch" parse:
-
-- `task_name` — kebab-case from the essence (`blog-dark-mode`). Short, ASCII, no slashes.
-- `target_repo` — repo name (`my-blog`).
-- `branch_intent` — `new` (create `task/<task_name>` from the default branch) or the name of a specific existing branch.
-- `description` — the substantive part for the task prompt (what exactly to do and why).
-- `runtime` — `claude | codex`. From text: "for Codex / для кодекса" → `codex`; "for Claude / для клода" → `claude`. Default = current agent (`CODEX_THREAD_ID` → `codex`, otherwise `claude`).
-- `model` / `effort` — resolve through `scripts/model_routing.py`. The default
-  is the exact current-session route; a named model or effort remains an
-  explicit per-run override. Unknown models without an explicit runtime fail.
-- `plan_ref` — approved-plan handoff mode (resolved in Phase 1.4b): nothing said → auto-resolve the latest plan of the current session; "hand off plan <slug|path>" → that file; "no plan" → classic-mode forced.
-- `interaction_policy` — approved-plan dispatch defaults to `unattended`;
-  explicit "interactive" preserves compatibility gates.
-
-If something cannot be extracted from the text — ask with a single question, do not dance around it.
-
----
-
-## Phase 1: Parse + Resolve (no writes, no spawn)
-
-Use `scripts/dispatch-resolver.py --request <phase1.json>` for repo, approved
-plan, and ranked context candidates. It returns `resolved` only for one exact
-repo and plan; missing/ambiguous candidates are explicit blockers and must be
-shown for selection, never guessed. The coordinator still interprets the user
-description and decides which returned context pages are actually relevant.
-
-### 1.1 Parse
-Extract `task_name`, `target_repo`, `branch_intent`, `description` from the input.
-
-### 1.2 Resolve the repo via a fallback chain
-**a) wiki/repos** (optional — only if this vault keeps repo pages) — exact or fuzzy match:
-```
-Glob wiki/repos/*<target_repo>*.md
-```
-If found — Read the frontmatter; if it records a local `path:`, use it. Otherwise fall through to (b).
-
-**b) Local search** under a configurable projects root:
-```bash
-PROJECTS_ROOT="${LLM_OBSIDIAN_PROJECTS_ROOT:-$HOME/Projects}"
-find "$PROJECTS_ROOT" -maxdepth 4 -name <target_repo> -type d 2>/dev/null | head -5
-```
-Exactly one hit — take that path. Several — list the candidates and wait for a choice.
-
-**c) Ask the user** — if nothing was found locally, ask for the absolute path to the repo (or offer to cancel). Never clone anything without an explicit path and an explicit "yes".
-
-**d) Ambiguous** — list candidates, wait for the user's choice.
-
-### 1.2b Resolve the Codex skill environment
-
-For `runtime=codex`, do **not** rely on the parent process' `CODEX_HOME`.
-Installed Codex plugins are scoped to `CODEX_HOME`, so inheriting the wrong home
-mixes work and personal skills. Resolve the task agent's Codex environment
-before echo-confirm:
-
-1. Prefer `<repo-path>/.codex/dispatch-env.toml` if the target repo provides it.
-2. Otherwise use `<vault-root>/.codex/dispatch-env.toml` from the repo where
-   `/dispatch` is running.
-3. If neither exists, inherit the current `CODEX_HOME` only as a fallback and
-   mark it clearly in the echo-confirm.
-
-Supported TOML shape:
-
-```toml
-[codex_dispatch]
-codex_home = "~/.codex"
-profile = "llm-obsidian-mcp"
-reap_skill = "$llm-obsidian:reap"
-reap_send_skill = "$llm-obsidian:reap-send"
-review_skill = "$llm-obsidian:review-dispatch"
-review_send_skill = "$llm-obsidian:review-send"
-# Model and effort defaults live only in config/model-routing.toml.
-interaction_policy = "unattended"
-review_mode = "light"
-max_verify_iterations = 2
-auto_close_surfaces = true
-default_reap_type = "session"
-watchdog_enabled = true
-watchdog_poll_seconds = 30
-watchdog_warn_after_seconds = 900
-watchdog_alert_after_seconds = 1200
-```
-
-- `codex_home` is expanded with `~` and must already exist before spawning.
-- `profile` is optional and is passed as `--profile <name>` inside that
-  `CODEX_HOME`.
-- Reap/review command keys are persisted into `.wiki-reap-command` and
-  `.task-*-skill` handoffs so neither runtime guesses plugin namespaces.
-- Reviewer defaults come from `config/model-routing.toml`; explicit task
-  metadata or CLI overrides remain authoritative.
-- The remaining keys define bounded review/reap/close plus an observer-only
-  15/20-minute watchdog; old metadata without the policy stays disabled.
-
-If `codex_home` is configured but the directory is missing — stop before
-creating the split and tell the user to bootstrap that Codex home. Do not create
-or install plugins into a Codex home implicitly during dispatch.
-
-### 1.2c Resolve and snapshot the child route
-Before echo-confirm, refresh the current session snapshot with
-`model_routing.py capture-session`, then resolve `dispatch` for
-`$(./scripts/current-session-id.sh)`. Codex reads only model fields from that
-exact local session record; other hosts provide them through hook/env fields.
-If unavailable, capture host-visible values; never guess. Store the session's
-discovery `source` with session/effective results in `.task-meta.json.routing`,
-and pass explicit overrides to the resolver so its `source` records them.
-### 1.3 Resolve the branch
-
-- An existing branch was named → `git -C <repo> branch --list <branch>` to verify. Not local — `git -C <repo> branch -a --list "*<branch>*"` to check remotes. Not anywhere — ask.
-- `new` or unspecified → `task_name` → branch name `task/<task_name>`. Base — `git -C <repo> symbolic-ref refs/remotes/origin/HEAD | sed 's|^refs/remotes/origin/||'` (usually `main` or `master`).
-
-### 1.4 Collect wiki context
-
-Find 3-5 relevant pages for the pre-prompt:
-
-1. `wiki/hot.md` — Read, extract mentions of the target repo / task topic.
-2. `Glob wiki/**/*.md` by keywords from the description (via Grep `-l`).
-3. `wiki/repos/<repo>.md` if it exists.
-
-Do not chase exhaustive context — 3-5 [[links]] with a one-line description each is enough. Before echoing or logging a link, verify that its exact target exists under `wiki/`; omit unresolved links copied from hot/log prose. The task agent will read the rest itself via live vault access.
-
-### 1.4b Resolve the approved plan (plan-mode vs classic-mode)
-
-Every approved plan is auto-saved by the plan-capture hook (`.claude/hooks/plan-capture.sh`) into `wiki/plans/<TS>-<slug>.md` (`type: plan`, `session_id:`, `status: pending`). Target workflow: the wiki agent gathers context and shapes the plan; the split executes — the plan is handed off as a file, no re-planning.
-
-Default — auto-resolve the latest plan of the current session:
-
-```bash
-SESSION_ID=$(./scripts/current-session-id.sh)
-PLAN_FILE=$(grep -l "session_id: $SESSION_ID" wiki/plans/*.md 2>/dev/null | sort | tail -1)
-```
-
-(file names start with a timestamp, so sort by name = sort by time).
-
-- Found → **plan-mode**: hash the plan and write v3 unattended metadata.
-- Not found → do not spawn by default. Shape and approve the plan in the
-  coordinator, then file it with `/save-plan` (or the runtime equivalent).
-  Only explicit `interactive` / `no plan` uses classic-mode v1.
-- The user explicitly named a plan → take it from `wiki/plans/`, even if it belongs to another session (cross-window is valid — note it in the echo).
-- "No plan" → classic-mode forced.
-
-### 1.6 Resolve sub-agents for the task scope
-
-`/dispatch` does **not** pick agents inside the task split itself — that would duplicate the router hook's logic. Instead: read `.claude/skill-rules.json` (single source of truth, already used by the UserPromptSubmit hook), match `description` against `agent_rules.patterns`, pick the top-2 candidates by match count.
-
-```bash
-# pseudo-code; real script inline:
-matches=$(python3 -c "
-import json, re, sys
-rules = json.load(open('.claude/skill-rules.json'))
-desc = sys.stdin.read()
-scored = []
-for rule in rules.get('agent_rules', []):
-    hits = sum(1 for p in rule.get('patterns', []) if re.search(p, desc))
-    if hits > 0:
-        scored.append((hits, rule['agent'], rule.get('hint') or ''))
-scored.sort(reverse=True)
-for hits, name, hint in scored[:2]:
-    print(f'{name}\t{hint}')
-" <<< "$description")
-```
-
-The result — 0-2 lines of `<agent_name>\t<hint>`. Goes into `.task-meta.json` (see Phase 2.3) and is mentioned in the pre-prompt as "Suggested agents for deep audit-type work". The task agent **may** delegate to them via the Agent tool if the runtime supports it, it is **not obliged** — a hint, not a command.
-
-Note: `agent_rules` ships as an empty array in this repo — with 0 matches the section is omitted from the pre-prompt entirely (this is the default for a fresh install; populate `agent_rules` if you add custom agents).
-
-### 1.5 Echo-confirm
-
-Show the user the plan **in a single block**:
-
-```
-Parsing as:
-  task:        blog-dark-mode
-  repo:        ~/Projects/my-blog
-  base branch: main
-  new branch:  task/blog-dark-mode
-  worktree:    ~/Projects/worktrees/my-blog-blog-dark-mode
-  runtime:     codex (explicit)
-  model:       gpt-5-codex
-  codex home:  ~/.codex
-  codex profile: llm-obsidian-mcp
-  wiki reap:   $llm-obsidian:reap
-  review:      $llm-obsidian:review-dispatch
-  review send: $llm-obsidian:review-send
-  interaction: unattended (one approved mandate)
-  review policy: light, max verify 2; blocking escalates
-  reap policy: final session → "<approved result title>"
-  surfaces:    close reviewer/task after armed process exit
-  watchdog:    observe every 30s; notify at 15m/20m; never interrupt
-  plan:        wiki/plans/2026-07-03-113935-<slug>.md (approved in this session)
-  wiki context:
-    - [[Blog]] — main page about the blog setup
-    - [[Dark Mode Research]] — notes from an earlier comparison
-    - [[CSS Conventions]] — styling rules used across projects
-Spawn the task split?
-```
-
-The plan, exact result type/title, review depth, forbidden actions, and surface
-policy are part of this single approval. A wrong target is corrected here
-instead of interrupting the background task later.
-
-Wait for "yes / no / edit". Do not proceed to Phase 2 without explicit consent.
-
----
-
-## Phase 2: Spawn compatibility reference
-
-Approved unattended v3 dispatches use `scripts/dispatch-runner.py start` from
-the canonical runner section above. The detailed mechanics below define what
-that code must enforce and remain only for classic interactive compatibility or
-read-only diagnosis. Do not execute them one by one for v3.
-
-### 2.1 Runner-enforced mechanics
-
-For approved unattended v3, `dispatch-runner.py start` performs this exact
-sequence as one typed operation:
-
-- Verify the pending approved plan, Git base, new branch/worktree path,
-  exact existing wiki links, current session route, and caller surface.
-- Claim the request UUID before mutation and create the branch/worktree.
-- Initialize the opaque project/task binding and render `.task-prompt.md`
-  with only Branch A from `references/task-prompt-template.md`.
-- Resolve the Codex dispatch environment, sync only its approved profile,
-  and write validated v3 `.task-meta.json` plus exact handoff files.
-- Call the existing anchored `task_sessions.spawn_right`, prepare the
-  shell-free supervisor spec, send one bounded launch command, and verify
-  that exact surface by UUID.
-- Append the dispatch entry through `vault-write.py` and return typed JSON.
-
-The task prompt keeps the same safety contract: the coordinator vault is
-read-only to the task, the approved plan hash is immutable, review/reap
-policies are explicit, and push/deploy/publish/worktree deletion/scope
-expansion remain forbidden. `cmux_agent_supervisor.py` continues to own
-runtime argv, permissions, DCG, trust-dialog handling, watchdog, and
-close-after-exit behavior.
-
-The validated metadata retains `approved_plan_sha256`, `forbidden_actions`,
-and the complete bounded `watchdog_policy`. Unattended Codex launch remains
-`-a never` plus `workspace-write`, exact Git/session write roots, a loopback
-proxy restricted to `localhost`/the owned cmux socket, pinned `DCG_CONFIG`, and
-the supervisor's trusted `PATH`; the runner does not weaken those controls.
-
-Classic interactive compatibility may still construct these artifacts
-manually, but it is not resumable and must never be used as an unattended
-fallback. Operational details and recovery semantics live in
-`docs/task-sessions.md`; the executable contract is covered by
-`tests/test_dispatch_runner.py` and `tests/test_task_lifecycle.py`.
-
-## Phase 3: Log (vault-write, log-only)
-
-For approved v3, the runner performs this transaction and returns
-`log_status: ok|degraded`; do not write a duplicate log entry. The command below
-is the classic compatibility path.
-Payload goes through the dispatcher script (NOT a direct Edit):
-
-```bash
-python3 scripts/vault-write.py <<'PAYLOAD'
-{"log_entry": "## [YYYY-MM-DD HH:MM] dispatch | <task_name>\n\nSpawned a task split (cmux `<surface-id>`, runtime <claude|codex>, model <model-or-default>) to the right of the wiki agent in worktree `<worktree-path>` for: <one-line description>. Target repo <[[repo-page]] or path>, branch `task/<task_name>` from `<base-branch>`. Plan: <`wiki/plans/<file>.md` handed to the split | none (plan-first in the split)>. Pre-loaded context: [[X]], [[Y]], [[Z]]. Surface ID in `<worktree>/.task-cmux-surface` for /reap. Awaiting `## Wiki Summary`, then `/reap`."}
-PAYLOAD
-```
-
-Do **not** touch `wiki/hot.md` — dispatches are not save events and must not clutter Recent Changes. Only the result lands in hot.md, via /reap.
-
-### Final message to the user
-
-```
-Spawned task split:
-  worktree:  <worktree-path>
-  branch:    task/<task_name>
-  cmux:      <surface-id> (split right of the wiki agent)
-
-The approved task now runs unattended. It returns only for a blocking/scope
-escalation; otherwise review, verify, final reap, and exact task/reviewer
-surface closure happen automatically. Branch and worktree remain local.
-```
-
-End the coordinator turn immediately after this message. Do not poll the child;
-the typed callback transport resumes the coordinator when action is required.
-
----
-
-## Edge cases
-
-1. **Worktree already exists** — `git worktree add` fails. Report; never silently delete someone else's worktree.
-2. **Repo not found after the fallback chain** — ask for the path by hand or offer to cancel.
-3. **cmux not responding** — check `cmux ping` or `cmux list-workspaces`. If the cmux daemon is down — ask the user to bring it up.
-4. **Duplicate task_name** — `<worktree-path>/.task-cmux-surface` already exists. Report, do not overwrite (suggest `/reap`-ing the old task or picking another name).
-5. **Several parallel tasks** — each /dispatch adds another split surface on the right. If 3-4 splits make one workspace cramped — that is a signal to reap the old ones, not to spawn more. cmux does not forbid it, but usability suffers.
-6. **Cross-session reap** — the wiki agent restarted between dispatch and reap (or another session runs /reap). `.task-meta.json.origin_session` != current `./scripts/current-session-id.sh`. Reap must WARN (explicit prompt: "dispatch came from session A 2 hours ago, you are session B — continue filing?") and never file silently. Does not block, but stays visible.
-7. **Stale .task-meta.json without .task-cmux-surface** (or vice versa) — the worktree was partially created, dispatch crashed. Reap cannot find the surface for the read-screen fallback or the meta for the origin check. Report, do not guess.
-8. **Plan named explicitly but the file is missing / `status:` is not pending** — show today's candidates from `wiki/plans/` (`ls -t wiki/plans/ | head -5`), ask which to take (or classic-mode).
-9. **Plan from another session, named explicitly** — valid (cross-window: planned in another window/session). Do not block; just note "plan from another session, named explicitly" in the echo-confirm.
-
----
-
-## Do not
-
-- Do NOT clone anything without an explicit "yes" from the user.
-- Do NOT automatically delete/overwrite an existing worktree.
-- Do NOT write into `wiki/hot.md` (log.md only, via vault-write).
-- Do NOT try to execute the task from the wiki agent — that is the task split's job.
-- Do NOT create `$WORKTREES_DIR/<repo>-<task_name>` if it already contains a `.git` file (worktree marker).
-- Do NOT use `cmux new-workspace` (old paradigm) — a split surface gives the side-by-side view, which is what the user wants.
+# /dispatch — approved task handoff
+
+Use this skill to open an isolated task to the right of the current cmux
+surface. The coordinator shapes and approves the plan; the task executes it.
+The default route inherits the current session. Do not use a same-runtime
+external split when an internal agent satisfies the request unless the user
+explicitly asks for a visible persistent session.
+
+## Normal path
+
+1. Require `cmux` before parsing. If unavailable, explain the dependency and
+   offer to continue in the current session; do not substitute tmux/background
+   shell work.
+2. Parse a bounded description, `task_name`, repo name/path, base/branch intent,
+   optional runtime/model/effort override, and optional explicit plan.
+3. Resolve read-only Phase 1 through code:
+
+   ```bash
+   python3 scripts/dispatch-resolver.py --request <phase1.json>
+   ```
+
+   It must return one exact repo and one pending approved plan. Missing or
+   ambiguous candidates are shown for selection; never guess. An explicitly
+   named cross-session plan is allowed and remains visible as such. It returns
+   at most five ranked context candidates; the model selects semantic relevance.
+   Before echoing/logging a wikilink, verify that its exact target exists under `wiki/`.
+4. Resolve the child route through `scripts/model_routing.py`. No override means
+   the exact current-session route; named model/effort is explicit. Unknown
+   model routing fails closed. Codex home/profile/plugin commands come from the
+   target repo or coordinator `.codex/dispatch-env.toml`; never install or
+   create them implicitly.
+5. Write one unique ignored request at
+   `.vault-meta/dispatch-requests/<request-id>.json` containing schema version,
+   canonical UUID, task/description, absolute vault/repo/worktree, branch/base,
+   absolute pending `plan_file`, optional executor override, verified context,
+   reap type/title, and review mode. Omit caller identity fields normally: the
+   runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
+   It never inspects the globally focused surface.
+6. Show the typed route/hash and one echo-confirm block:
+
+   ```bash
+   python3 <vault-root>/scripts/dispatch-runner.py validate --spec <request.json>
+   ```
+
+   Include exact repo/base/branch/worktree, runtime/model/effort, plan, selected
+   context, `interaction_policy`, review/reap/surface/watchdog policy, and all
+   forbidden effects. Ask once. Do not mutate or spawn before explicit approval.
+7. After approval, start the exact UUID once:
+
+   ```bash
+   python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json>
+   ```
+
+8. Show the bounded typed launch result. When it returns
+   `coordinator_action: return-to-idle-without-polling`, end this turn. Do not
+   poll, wait, or run monitors; typed callbacks resume the idle coordinator.
+
+## Runner contract
+
+`dispatch-runner.py` owns worktree creation, route sync, prompt rendering,
+v3 `.task-meta.json`, exact task identity, an anchored right split, supervisor
+launch, verification, and one `vault-write.py` log transaction. A UUID is
+claimed before mutation; launched requests are idempotent, while preparing or
+failed requests fail closed. A pre-launch blank child may close only by its
+exact surface UUID.
+
+The metadata retains `interaction_policy`, `approved_plan_sha256`,
+`forbidden_actions`, and `watchdog_policy`. `cmux_agent_supervisor.py` owns
+runtime argv, trust prompts, process lifecycle, watchdog, and close-after-exit.
+Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
+write roots, `DCG_CONFIG`, localhost-only loopback policy, and trusted `PATH`.
+Never weaken those controls or reproduce their shell commands manually.
+
+The task may auto-repair only eligible repo-owned mechanism failures under the
+central failure-repair contract. Scope/security/permission/external decisions
+escalate to the coordinator. Push, deploy, publish, worktree deletion, and
+scope expansion remain forbidden.
+
+## Output
+
+Report task name, branch, worktree, exact cmux surface, runtime/model, and that
+the task returns only for escalation or final lifecycle callbacks. Branch and
+worktree remain local. A successful dispatch is a launch, not task completion.
+
+## Compatibility and recovery
+
+Only for explicit classic interactive mode, old metadata, or read-only failure
+diagnosis, load [compatibility.md](references/compatibility.md). <!-- context:conditional -->
+
+Never clone without explicit approval, overwrite/delete an existing worktree,
+write `wiki/hot.md`, use `cmux new-workspace`, or execute the delegated task in
+the coordinator.

@@ -43,7 +43,7 @@ dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
 dependencies = ["hooks/run-hook.py", ".claude/hooks/skill-router.py"]
 
 [scenarios.cmux-lifecycle]
-dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py"]
+dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/queue-session-exit.py"]
 
 [scenarios.daily-summary]
 dependencies = ["scripts/daily-collect.py", "scripts/daily-apply.py", "scripts/daily-summary-save.py"]
