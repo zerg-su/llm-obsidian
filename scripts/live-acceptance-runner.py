@@ -305,6 +305,7 @@ Hard boundaries:
   manually delete those runner-owned paths, pass `--tmp-root`/`--state-root`, or override
   `TMPDIR`/`TMP`/`TEMP`. Remove the fixture's product output and close external processes/surfaces;
   the runner validates allowed vault bookkeeping and deletes the clone.
+- Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 
 Finally write exactly one JSON object to `{outbox}` using this shape:
@@ -580,11 +581,11 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
     """Close only exact child surfaces durably bound to this coordinator."""
     closed = 0
     failures: list[str] = []
-    root = sandbox / ".vault-meta" / "task-sessions"
-    if not root.is_dir():
-        return closed, failures
     surfaces: set[str] = set()
-    for path in root.glob("projects/*/tasks/*/lanes/*/operations/*/state.json"):
+    task_root = sandbox / ".vault-meta" / "task-sessions"
+    candidates = list(task_root.glob("projects/*/tasks/*/lanes/*/operations/*/state.json"))
+    candidates.extend((sandbox / ".vault-meta" / "research-runs").glob("*/state.json"))
+    for path in candidates:
         if path.is_symlink() or not path.is_file():
             continue
         try:
@@ -612,6 +613,14 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
     return closed, failures
 
 
+def is_disposable_bookkeeping(path: str, status: str) -> bool:
+    if status.startswith("??"):
+        return False
+    return path in DISPOSABLE_VAULT_BOOKKEEPING or re.fullmatch(
+        r"wiki(?:/[^/]+)*/_index\.md", path
+    ) is not None
+
+
 def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=sandbox,
@@ -631,7 +640,7 @@ def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
         path = line[3:]
         if path == ".acceptance-sandbox.json":
             continue
-        if path in DISPOSABLE_VAULT_BOOKKEEPING and not line.startswith("??"):
+        if is_disposable_bookkeeping(path, line[:2]):
             bookkeeping.append(path)
             continue
         dirty.append(line)

@@ -140,13 +140,22 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("independent cleanup proof catches product drift", not clean and "changes" in reason)
     (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
     (repo / ".vault-meta").mkdir()
+    (repo / "wiki" / "sources").mkdir(parents=True)
     (repo / ".vault-meta" / "address-counter.txt").write_text("1\n", encoding="utf-8")
-    subprocess.run(["git", "add", ".vault-meta/address-counter.txt"], cwd=repo, check=True)
+    (repo / "wiki" / "sources" / "_index.md").write_text("# Sources\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".vault-meta/address-counter.txt", "wiki/sources/_index.md"],
+        cwd=repo,
+        check=True,
+    )
     subprocess.run(["git", "commit", "-qm", "bookkeeping fixture"], cwd=repo, check=True)
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
     ).stdout.strip()
     (repo / ".vault-meta" / "address-counter.txt").write_text("2\n", encoding="utf-8")
+    (repo / "wiki" / "sources" / "_index.md").write_text(
+        "# Sources\n- disposable\n", encoding="utf-8"
+    )
     clean, reason = module.sandbox_cleanup_proof(repo, commit)
     check("runner accepts disposable vault bookkeeping", clean and "bookkeeping" in reason, reason)
     (repo / "unexpected.md").write_text("product residue\n", encoding="utf-8")
@@ -254,6 +263,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
     check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
     check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
+    check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
 
     cleanup_run = tmp / "cleanup-run"
     cleanup_sandbox = cleanup_run / "sandbox"
@@ -282,6 +292,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "coordinator_surface": "00000000-0000-0000-0000-000000000003",
         "fetch_surface": "00000000-0000-0000-0000-000000000004",
     }), encoding="utf-8")
+    standalone_state = child_root / ".vault-meta/research-runs/r/state.json"
+    standalone_state.parent.mkdir(parents=True)
+    standalone_state.write_text(json.dumps({
+        "coordinator_surface": "00000000-0000-0000-0000-000000000003",
+        "synth_surface": "00000000-0000-0000-0000-000000000005",
+    }), encoding="utf-8")
     child_calls: list[list[str]] = []
     module.subprocess.run = lambda argv, **_kwargs: (
         child_calls.append(list(argv))
@@ -293,8 +309,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         )
     finally:
         module.subprocess.run = original_run
-    check("interrupted operation closes exact registered child", child_closed == 1 and not child_failures)
-    check("registered child close never targets coordinator", all(call[-1] == "00000000-0000-0000-0000-000000000004" for call in child_calls))
+    check("interrupted operation closes exact registered children", child_closed == 2 and not child_failures)
+    check("registered child close never targets coordinator", {call[-1] for call in child_calls} == {
+        "00000000-0000-0000-0000-000000000004",
+        "00000000-0000-0000-0000-000000000005",
+    })
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
