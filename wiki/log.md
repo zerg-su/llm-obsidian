@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-18
+updated: 2026-07-19
 tags:
   - meta
   - log
@@ -26,6 +26,8 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-19 05:00] backlog | add — cmux-acceptance-surface-cleanup
 
 ## [2026-07-18] reap | v2.0.8-rd-upstream-audit
 

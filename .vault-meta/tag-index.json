@@ -9,10 +9,14 @@
     "wiki/concepts/DragonScale Memory.md"
   ],
   "backlog": [
+    "wiki/backlog.md",
     "wiki/concepts/cherry-picks.md"
   ],
   "brand": [
     "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "capture": [
+    "wiki/backlog.md"
   ],
   "cherry-picks": [
     "wiki/concepts/cherry-picks.md"
@@ -172,6 +176,9 @@
   ],
   "synthesis": [
     "wiki/concepts/Source-First Synthesis.md"
+  ],
+  "todo": [
+    "wiki/backlog.md"
   ],
   "v2-0-8": [
     "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md"
