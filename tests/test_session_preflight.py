@@ -60,6 +60,25 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     check("Claude fallback snapshot is labelled", guessed_snapshot["source"] == "tracked-default")
     check("unconfirmed session routing is visible", any(item["id"] == "session-routing" for item in guessed_payload["issues"]))
 
+    (guessed_root / "config/acceptance-cells.toml").write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generation_file = guessed_root / ".vault-meta/acceptance/model-generations.json"
+    generation_file.parent.mkdir(parents=True, exist_ok=True)
+    generation_file.write_text(
+        json.dumps({"schema_version": 1, "generations": {"claude": "claude:old", "codex": "codex:5.5"}}),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(guessed_root), "--session-id", "generation-session", "--json"],
+        text=True, capture_output=True, env=guessed_env, check=False,
+    )
+    generation_payload = json.loads(result.stdout)
+    check(
+        "major model generation drift proposes acceptance once at startup",
+        any(item["id"] == "model-generation-changed" and item["repair"] == "make acceptance-live" for item in generation_payload["issues"]),
+    )
+
     fake_bin = Path(raw) / "fake-bin"
     fake_bin.mkdir()
     fake_cmux = fake_bin / "cmux"

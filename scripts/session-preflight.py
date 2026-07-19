@@ -16,6 +16,7 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 if sys.version_info >= (3, 11):
+    from acceptance_fingerprints import generation_snapshot, read_manifest
     from model_routing import RoutingError, capture_session, load_config, routing_from_environment, sync_native
     from task_sessions import cmux_capabilities
 
@@ -78,6 +79,20 @@ def run_preflight(root: Path, *, session_id: str, runtime: str, model: str, effo
         drift = ["unreadable-native-config"]
     if drift:
         issues.append({"id": "routing-drift", "severity": "required", "repair": "python3 scripts/model_routing.py sync-native --apply"})
+
+    generation_file = root / ".vault-meta" / "acceptance" / "model-generations.json"
+    if generation_file.is_file() and (root / "config" / "acceptance-cells.toml").is_file():
+        try:
+            prior_generation = json.loads(generation_file.read_text(encoding="utf-8"))
+            current_generation = generation_snapshot(root, read_manifest(root))
+        except (OSError, ValueError, json.JSONDecodeError):
+            prior_generation = current_generation = None
+        if prior_generation is not None and prior_generation != current_generation:
+            issues.append({
+                "id": "model-generation-changed",
+                "severity": "feature",
+                "repair": "make acceptance-live",
+            })
 
     adapter = probe([sys.executable, str(root / "scripts/codex-adapter.py"), "--repo-root", str(root), "--check"])
     if adapter is None or adapter.returncode != 0:

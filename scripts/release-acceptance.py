@@ -17,6 +17,15 @@ from pathlib import Path
 from typing import Any
 
 from lib_sanitize import residual_credential_kinds, sanitize
+from acceptance_fingerprints import (
+    FingerprintError,
+    cell_metadata,
+    changed_paths,
+    environment_contract,
+    generation_snapshot,
+    production_generations,
+    read_manifest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -162,6 +171,53 @@ def matrix_fingerprint(rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+RESULT_FIELDS = (
+    "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
+    "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
+    "duration_seconds",
+)
+
+
+def integrity_sha256(result: dict[str, Any], fingerprint: str, provenance: dict[str, Any]) -> str:
+    payload = {
+        "typed_result": {key: result.get(key) for key in RESULT_FIELDS},
+        "cell_fingerprint": fingerprint,
+        "provenance": provenance,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def evidence_age_seconds(provenance: dict[str, Any]) -> int:
+    try:
+        recorded = datetime.fromisoformat(str(provenance["recorded_at"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return 0
+    if recorded.tzinfo is None:
+        recorded = recorded.replace(tzinfo=timezone.utc)
+    return max(0, round((datetime.now(timezone.utc) - recorded.astimezone(timezone.utc)).total_seconds()))
+
+
+def decorate_result(
+    result: dict[str, Any], metadata: dict[str, Any], *, commit: str,
+    reason: str = "executed", provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    proof = provenance or {
+        "source_commit": commit,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "actual_model": str(result.get("model") or "unknown"),
+    }
+    value = {
+        **result,
+        **metadata,
+        "provenance": proof,
+        "reason": reason,
+        "evidence_age_seconds": evidence_age_seconds(proof),
+    }
+    value["row_integrity_sha256"] = integrity_sha256(value, metadata["cell_fingerprint"], proof)
+    return value
+
+
 def load_resume_results(
     path: Path,
     rows: list[dict[str, Any]],
@@ -169,20 +225,25 @@ def load_resume_results(
     phase: str,
     commit: str,
     fingerprint: str,
+    metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    root: Path,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     report = read_object(path)
-    if (
-        report.get("schema_version") != 1
-        or report.get("phase") != phase
-        or report.get("source_commit") != commit
-        or report.get("matrix_fingerprint") != fingerprint
-        or not isinstance(report.get("rows"), list)
-    ):
+    schema = report.get("schema_version")
+    if schema not in {1, 2} or report.get("phase") != phase or not isinstance(report.get("rows"), list):
         raise AcceptanceError(
-            "existing acceptance report does not match this commit/matrix; use --restart"
+            "existing acceptance report does not match this phase/matrix; use --restart"
         )
+    prior_commit = str(report.get("source_commit") or "")
+    if schema == 1 and (
+        prior_commit != commit or report.get("matrix_fingerprint") != fingerprint
+    ):
+        raise AcceptanceError("schema-1 acceptance evidence cannot cross commits; use --restart")
+    changed = set() if prior_commit == commit else changed_paths(root, prior_commit)
+    declared = {path for item in metadata.values() for path in item["dependencies"]}
+    unknown_changed = changed is None or bool(changed - declared)
     expected = {row_key(row): row for row in rows}
     resumed: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str, str]] = set()
@@ -195,8 +256,30 @@ def load_resume_results(
             raise AcceptanceError("existing acceptance report contains a malformed row") from exc
         if key in seen or key not in expected:
             raise AcceptanceError("existing acceptance report contains duplicate or stale rows")
-        resumed.append(validate_result(expected[key], raw))
+        result = validate_result(expected[key], raw)
         seen.add(key)
+        if result.get("verdict") not in {"pass", "n-a"}:
+            continue
+        current = metadata[key]
+        if schema == 1:
+            resumed.append(decorate_result(result, current, commit=commit, reason="legacy-same-commit"))
+            continue
+        provenance = raw.get("provenance")
+        if (
+            unknown_changed
+            or raw.get("cell_fingerprint") != current["cell_fingerprint"]
+            or raw.get("dependencies") != current["dependencies"]
+            or raw.get("generation") != current["generation"]
+            or not isinstance(provenance, dict)
+            or raw.get("row_integrity_sha256")
+            != integrity_sha256(result, current["cell_fingerprint"], provenance)
+        ):
+            continue
+        resumed.append(
+            decorate_result(
+                result, current, commit=commit, reason="reused-identical", provenance=provenance
+            )
+        )
     return resumed
 
 
@@ -207,6 +290,8 @@ def run_matrix(
     *,
     prior: list[dict[str, Any]] | None = None,
     checkpoint: Any = None,
+    metadata: dict[tuple[str, str, str, str, str], dict[str, Any]] | None = None,
+    commit: str = "",
 ) -> list[dict[str, Any]]:
     prior_by_key = {row_key(item): item for item in (prior or [])}
     results: list[dict[str, Any]] = []
@@ -261,6 +346,8 @@ def run_matrix(
             }
         if result.get("duration_seconds") is None:
             result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
+        if metadata is not None:
+            result = decorate_result(result, metadata[row_key(row)], commit=commit)
         results.append(result)
         if checkpoint is not None:
             checkpoint(results)
@@ -282,7 +369,7 @@ def report_payload(
     passed = counts["pass"]
     accepted = passed + counts["n-a"]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "phase": phase,
         "source_commit": commit,
         "matrix_fingerprint": fingerprint,
@@ -318,6 +405,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
+    parser.add_argument("--manifest", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check")
     matrix = sub.add_parser("matrix")
@@ -333,17 +421,37 @@ def main() -> int:
     try:
         skills = load_spec(args.spec, args.root.resolve())
         validate_scenario_coverage(args.scenarios, skills)
+        manifest = read_manifest(args.root.resolve(), args.manifest)
         if args.command == "check":
             print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
             return 0
         rows = matrix_rows(skills, args.phase)
+        environment = environment_contract()
+        generations = production_generations(args.root.resolve(), manifest)
+        metadata = {
+            row_key(row): cell_metadata(
+                args.root.resolve(), manifest, row,
+                environment=environment, generations=generations,
+            )
+            for row in rows
+        }
         if args.command == "matrix":
-            write_json({"schema_version": 1, "phase": args.phase, "rows": rows}, args.output)
+            write_json(
+                {
+                    "schema_version": 2,
+                    "phase": args.phase,
+                    "rows": [{**row, **metadata[row_key(row)]} for row in rows],
+                },
+                args.output,
+            )
             return 0
         commit = source_commit(args.root.resolve())
-        fingerprint = matrix_fingerprint(rows)
+        fingerprint = matrix_fingerprint(
+            [{**row, "cell_fingerprint": metadata[row_key(row)]["cell_fingerprint"]} for row in rows]
+        )
         prior = [] if args.restart else load_resume_results(
-            args.report, rows, phase=args.phase, commit=commit, fingerprint=fingerprint
+            args.report, rows, phase=args.phase, commit=commit, fingerprint=fingerprint,
+            metadata=metadata, root=args.root.resolve(),
         )
 
         def checkpoint(completed: list[dict[str, Any]]) -> None:
@@ -359,14 +467,26 @@ def main() -> int:
         checkpoint(prior)
         results = run_matrix(
             rows, shlex.split(args.runner), args.timeout,
-            prior=prior, checkpoint=checkpoint,
+            prior=prior, checkpoint=checkpoint, metadata=metadata, commit=commit,
         )
         report = report_payload(
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint
         )
         write_json(report, args.report)
+        canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
+        try:
+            args.report.resolve().relative_to(canonical_acceptance_root)
+            canonical_report = True
+        except ValueError:
+            canonical_report = False
+        if canonical_report and report["summary"]["failed"] == 0 and report["summary"]["complete"]:
+            write_json(
+                generation_snapshot(args.root.resolve(), manifest),
+                args.root.resolve() / ".vault-meta" / "acceptance" / "model-generations.json",
+                announce=False,
+            )
         return 0 if report["summary"]["failed"] == 0 else 1
-    except AcceptanceError as exc:
+    except (AcceptanceError, FingerprintError) as exc:
         print(f"release-acceptance: {exc}", file=sys.stderr)
         return 3
     except KeyboardInterrupt:

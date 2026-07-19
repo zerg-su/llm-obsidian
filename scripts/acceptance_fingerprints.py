@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Deterministic acceptance-cell dependencies, generations, and fingerprints."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
+import re
+import subprocess
+import tomllib
+from pathlib import Path
+from typing import Any, Iterable
+
+from model_routing import load_config
+
+
+DEFAULT_MANIFEST = "config/acceptance-cells.toml"
+SAFE_REL = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+
+class FingerprintError(ValueError):
+    pass
+
+
+def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
+    source = path or root / DEFAULT_MANIFEST
+    try:
+        value = tomllib.loads(source.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise FingerprintError(f"cannot read acceptance manifest: {exc}") from exc
+    if value.get("schema_version") != 1 or value.get("runner_contract_version") != 2:
+        raise FingerprintError("acceptance manifest must use schema 1 and runner contract 2")
+    if not isinstance(value.get("global_dependencies"), list):
+        raise FingerprintError("acceptance manifest global_dependencies must be an array")
+    return value
+
+
+def safe_dependencies(values: Iterable[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        item = str(value or "").strip().replace("\\", "/")
+        if not item or not SAFE_REL.fullmatch(item) or item.startswith("/") or ".." in Path(item).parts:
+            raise FingerprintError(f"unsafe acceptance dependency: {item!r}")
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scenario: str) -> list[str]:
+    scenario_table = manifest.get("scenarios")
+    if not isinstance(scenario_table, dict) or not isinstance(scenario_table.get(scenario), dict):
+        raise FingerprintError(f"scenario {scenario!r} is missing from acceptance manifest")
+    values = list(manifest["global_dependencies"])
+    values.extend(scenario_table[scenario].get("dependencies") or [])
+    skill_table = manifest.get("skills") or {}
+    if not isinstance(skill_table, dict):
+        raise FingerprintError("acceptance manifest skills must be a table")
+    override = skill_table.get(skill) or {}
+    if not isinstance(override, dict):
+        raise FingerprintError(f"acceptance manifest skill {skill!r} must be a table")
+    values.extend(override.get("dependencies") or [])
+    skill_root = root / "skills" / skill
+    if not (skill_root / "SKILL.md").is_file():
+        raise FingerprintError(f"skill {skill!r} is not installed")
+    values.extend(
+        path.relative_to(root).as_posix()
+        for path in sorted(skill_root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+    return sorted(safe_dependencies(values))
+
+
+def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]:
+    values: list[dict[str, str]] = []
+    for rel in sorted(set(dependencies)):
+        path = root / rel
+        if path.is_file():
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        else:
+            digest = "missing"
+        values.append({"path": rel, "sha256": digest})
+    return values
+
+
+def command_version(command: str) -> str:
+    try:
+        result = subprocess.run(
+            [command, "--version"], text=True, capture_output=True, timeout=5, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unavailable"
+    line = (result.stdout or result.stderr).splitlines()
+    return line[0].strip()[:120] if result.returncode == 0 and line else "unavailable"
+
+
+def environment_contract() -> dict[str, str]:
+    return {
+        "os": platform.system().lower(),
+        "os_release": platform.release(),
+        "architecture": platform.machine().lower(),
+        "cmux": command_version("cmux"),
+        "claude": command_version("claude"),
+        "codex": command_version("codex"),
+    }
+
+
+def canonical_generation(model: str, manifest: dict[str, Any]) -> str:
+    registered = manifest.get("model_generations")
+    if not isinstance(registered, dict):
+        raise FingerprintError("acceptance manifest model_generations must be a table")
+    explicit = registered.get(model)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    match = re.fullmatch(r"gpt-(\d+\.\d+)(?:-[A-Za-z0-9._-]+)?", model)
+    if match:
+        return f"codex:{match.group(1)}"
+    raise FingerprintError(f"production model {model!r} has no registered major generation")
+
+
+def production_generations(root: Path, manifest: dict[str, Any]) -> dict[str, dict[str, str]]:
+    routes = manifest.get("generation_routes")
+    if not isinstance(routes, dict):
+        raise FingerprintError("acceptance manifest generation_routes must be a table")
+    include = routes.get("include")
+    exclude = routes.get("exclude")
+    if include != ["runtimes.codex", "runtimes.claude"] or not isinstance(exclude, list):
+        raise FingerprintError("generation routes must explicitly include both production runtimes")
+    config = load_config(root)
+    result: dict[str, dict[str, str]] = {}
+    for runtime in ("claude", "codex"):
+        model = str(config.runtime_default(runtime)["model"])
+        result[runtime] = {"model": model, "generation": canonical_generation(model, manifest)}
+    return result
+
+
+def cell_metadata(
+    root: Path,
+    manifest: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    environment: dict[str, str] | None = None,
+    generations: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    dependencies = expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
+    generation_map = generations or production_generations(root, manifest)
+    generation = generation_map[str(row["runtime"])]["generation"]
+    payload = {
+        "runner_contract_version": manifest["runner_contract_version"],
+        "phase": row["phase"],
+        "skill": row["skill"],
+        "runtime": row["runtime"],
+        "scenario": row["scenario"],
+        "expected": row["expected"],
+        "dependencies": file_hashes(root, dependencies),
+        "environment": environment or environment_contract(),
+        "generation": generation,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {
+        "cell_fingerprint": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "dependencies": dependencies,
+        "generation": generation,
+    }
+
+
+def generation_snapshot(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    routes = production_generations(root, manifest)
+    return {
+        "schema_version": 1,
+        "generations": {runtime: item["generation"] for runtime, item in routes.items()},
+    }
+
+
+def changed_paths(root: Path, prior_commit: str) -> set[str] | None:
+    if not re.fullmatch(r"[0-9a-f]{40}", prior_commit):
+        return None
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", prior_commit, "HEAD"],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    if ancestry.returncode != 0:
+        return None
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", prior_commit, "HEAD"],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    if diff.returncode != 0 or status.returncode != 0:
+        return None
+    values = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
+    for line in status.stdout.splitlines():
+        if len(line) >= 4:
+            values.add(line[3:].split(" -> ")[-1])
+    return values
+
+
+__all__ = [
+    "FingerprintError",
+    "cell_metadata",
+    "changed_paths",
+    "environment_contract",
+    "expanded_dependencies",
+    "generation_snapshot",
+    "production_generations",
+    "read_manifest",
+]

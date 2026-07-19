@@ -1,0 +1,69 @@
+schema_version = 1
+runner_contract_version = 2
+
+global_dependencies = [
+  "config/acceptance-cells.toml",
+  "config/model-routing.toml",
+  "evals/acceptance/scenarios.json",
+  "evals/acceptance/skills.json",
+  "scripts/acceptance_fingerprints.py",
+  "scripts/live-acceptance-runner.py",
+  "scripts/release-acceptance.py",
+  "scripts/model_routing.py",
+  "scripts/task_sessions.py",
+  "scripts/cmux_agent_supervisor.py",
+  "scripts/cmux_surface_lifecycle.py",
+  "scripts/pipeline_events.py",
+]
+
+[model_generations]
+"gpt-5.6-sol" = "codex:5.6"
+"gpt-5.6-terra" = "codex:5.6"
+opus = "claude:opus-4.8"
+fable = "claude:fable"
+sonnet = "claude:sonnet"
+
+[generation_routes]
+include = ["runtimes.codex", "runtimes.claude"]
+exclude = ["roles.review.codex", "roles.review.claude"]
+
+[scenarios.agenda-carry]
+dependencies = ["scripts/agenda.py", "scripts/vault-write.py"]
+
+[scenarios.protected-web]
+dependencies = ["scripts/research-isolation.py", "scripts/research_contract.py", "scripts/vault-write.py"]
+
+[scenarios.vault-capture]
+dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
+
+[scenarios.obsidian-authoring]
+dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
+
+[scenarios.conversation-readonly]
+dependencies = ["hooks/run-hook.py", ".claude/hooks/skill-router.py"]
+
+[scenarios.cmux-lifecycle]
+dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py"]
+
+[scenarios.daily-summary]
+dependencies = ["scripts/daily-collect.py", "scripts/daily-apply.py", "scripts/daily-summary-save.py"]
+
+[scenarios.dispatch-review-reap]
+dependencies = [
+  "scripts/dispatch-runner.py",
+  "scripts/reap-runner.py",
+  "scripts/task_contract.py",
+  "skills/review-dispatch/scripts/spawn_review.py",
+]
+
+[scenarios.retrieval]
+dependencies = ["scripts/retrieve.py", "scripts/bm25-index.py", "scripts/dense-refresh-worker.py"]
+
+[scenarios.unsafe-web]
+dependencies = ["scripts/research-isolation.py", "scripts/research_contract.py", "hooks/run-hook.py"]
+
+[scenarios.vault-maintenance]
+dependencies = ["scripts/validate-vault.py", "scripts/vault-write.py"]
+
+[scenarios.ingest]
+dependencies = ["scripts/document-normalize.py", "scripts/research-isolation.py", "scripts/research_contract.py", "scripts/vault-write.py"]

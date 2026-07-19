@@ -89,6 +89,15 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("green report", result.returncode == 0 and payload["summary"]["failed"] == 0, result.stderr)
+    check("schema-2 evidence", payload["schema_version"] == 2)
+    check(
+        "rows carry content-addressed proof",
+        all(
+            row["cell_fingerprint"] and row["dependencies"] and row["generation"]
+            and row["row_integrity_sha256"] and row["reason"] == "executed"
+            for row in payload["rows"]
+        ),
+    )
     check("expected retained", all(row["expected"] for row in payload["rows"]))
     check("duration measured", all(row["duration_seconds"] is not None for row in payload["rows"]))
     check("completed report is checkpoint-compatible", payload["summary"]["complete"] is True and payload["summary"]["pending"] == 0)
@@ -99,6 +108,26 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "--timeout", "5", "--report", str(report),
     )
     check("matching completed report resumes without rerunning cells", result.returncode == 0, result.stderr)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    check(
+        "reuse reason and evidence age are visible",
+        all(row["reason"] == "reused-identical" and row["evidence_age_seconds"] >= 0 for row in payload["rows"]),
+    )
+
+    payload["rows"][0]["row_integrity_sha256"] = "0" * 64
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    result = run(
+        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "--timeout", "5", "--report", str(report),
+    )
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    check(
+        "tampered row reruns while intact rows reuse",
+        result.returncode == 1
+        and payload["summary"]["verdicts"]["blocked"] == 1
+        and sum(row["reason"] == "reused-identical" for row in payload["rows"]) == len(payload["rows"]) - 1,
+        result.stderr,
+    )
 
     stale_report = json.loads(report.read_text(encoding="utf-8"))
     stale_report["source_commit"] = "0" * 40
@@ -107,7 +136,12 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
-    check("resume rejects a different source commit", result.returncode == 3 and "use --restart" in result.stderr)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    check(
+        "unknown prior commit reruns instead of guessing",
+        result.returncode == 1 and payload["summary"]["verdicts"]["blocked"] == len(payload["rows"]),
+        result.stderr,
+    )
 
     runner.write_text(
         "import json,sys\n"
@@ -200,5 +234,81 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     _stdout, interrupt_stderr = interrupted.communicate(timeout=15)
     check("matrix interrupt reaches active runner cleanup", interrupt_marker.is_file())
     check("matrix interrupt exits without traceback", interrupted.returncode == 130 and "Traceback" not in interrupt_stderr)
+
+    incremental = tmp / "incremental"
+    (incremental / "skills/demo-a").mkdir(parents=True)
+    (incremental / "skills/demo-b").mkdir(parents=True)
+    (incremental / "config").mkdir()
+    (incremental / "evals").mkdir()
+    (incremental / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
+    (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n", encoding="utf-8")
+    (incremental / "skills/demo-b/SKILL.md").write_text("# Demo B\n", encoding="utf-8")
+    (incremental / "config/model-routing.toml").write_text(
+        (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    manifest = incremental / "config/acceptance-cells.toml"
+    manifest.write_text(
+        "schema_version = 1\nrunner_contract_version = 2\n"
+        "global_dependencies = [\"config/acceptance-cells.toml\", \"config/model-routing.toml\"]\n"
+        "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
+        "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"
+        "[generation_routes]\ninclude = [\"runtimes.codex\", \"runtimes.claude\"]\nexclude = []\n"
+        "[scenarios.demo]\ndependencies = []\n",
+        encoding="utf-8",
+    )
+    mini_spec = incremental / "evals/skills.json"
+    mini_spec.write_text(json.dumps({
+        "schema_version": 1,
+        "skills": {
+            name: {"scenario": "demo", "expected": "bounded", "fixture": "bounded fixture"}
+            for name in ("demo-a", "demo-b")
+        },
+    }), encoding="utf-8")
+    mini_scenarios = incremental / "evals/scenarios.json"
+    mini_scenarios.write_text(json.dumps({"schema_version": 1, "scenarios": {"demo": {}}}), encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=incremental, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=incremental, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=incremental, check=True)
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=incremental, check=True)
+    invocation_log = tmp / "incremental-invocations.jsonl"
+    incremental_runner = tmp / "incremental-runner.py"
+    incremental_runner.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "row=json.load(sys.stdin)\n"
+        "with Path(sys.argv[1]).open('a') as f: f.write(json.dumps([row['skill'],row['runtime']])+'\\n')\n"
+        "print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'high','actual':'ok','cleanup':'ok','evidence':'ok'}))\n",
+        encoding="utf-8",
+    )
+    incremental_report = incremental / ".vault-meta/acceptance/latest-live.json"
+
+    def incremental_run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run([
+            sys.executable, str(SCRIPT), "--root", str(incremental), "--spec", str(mini_spec),
+            "--scenarios", str(mini_scenarios), "--manifest", str(manifest), "run",
+            "--phase", "final", "--runner", f"{sys.executable} {incremental_runner} {invocation_log}",
+            "--timeout", "5", "--report", str(incremental_report),
+        ], text=True, capture_output=True, check=False)
+
+    result = incremental_run()
+    check("incremental fixture starts green", result.returncode == 0, result.stderr)
+    invocation_log.write_text("", encoding="utf-8")
+    (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n\nchanged\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "change one cell"], cwd=incremental, check=True)
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "cross-commit reuse reruns only affected skill cells",
+        result.returncode == 0 and {item[0] for item in calls} == {"demo-a"} and len(calls) == 2,
+        result.stderr,
+    )
+    invocation_log.write_text("", encoding="utf-8")
+    (incremental / "unknown.txt").write_text("unknown dependency\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "unknown dependency"], cwd=incremental, check=True)
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check("unknown changed path reruns every cell", result.returncode == 0 and len(calls) == 4, result.stderr)
 
 print("\nAll release acceptance tests passed.")

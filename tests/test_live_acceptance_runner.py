@@ -127,6 +127,15 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module.install_acceptance_model_overrides(override_repo, {"claude": "sonnet"})
     override_text = (override_repo / "config/model-routing.local.toml").read_text(encoding="utf-8")
     from model_routing import validate_local_config
+    from acceptance_fingerprints import canonical_generation, read_manifest
+
+    manifest = read_manifest(ROOT)
+    check(
+        "Codex Sol and Terra share one major generation",
+        canonical_generation("gpt-5.6-sol", manifest)
+        == canonical_generation("gpt-5.6-terra", manifest)
+        == "codex:5.6",
+    )
 
     validated_override = validate_local_config(ROOT, override_text)
     check(
