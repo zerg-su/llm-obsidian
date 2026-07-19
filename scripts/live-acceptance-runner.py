@@ -31,6 +31,7 @@ SURFACE_RE = re.compile(
 OUTBOX_MAX_BYTES = 64 * 1024
 OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
+AGENT_EXIT_GRACE_SECONDS = 60.0
 DISPOSABLE_VAULT_BOOKKEEPING = {
     ".vault-meta/address-counter.txt",
     ".vault-meta/address-map.tsv",
@@ -520,7 +521,7 @@ def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
                 send_surface(surface, "/exit")
         except AcceptanceRunnerError:
             return "exit-request-failed; surface left visible"
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + AGENT_EXIT_GRACE_SECONDS
     exit_confirmation_sent = False
     while time.monotonic() < deadline and not exit_marker.is_file():
         if runtime == "claude" and not exit_confirmation_sent:

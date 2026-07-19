@@ -253,6 +253,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         module.send_surface = original_send_surface
     check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
     check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
+    check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 60)
 
     prompt = module.prompt_text(
         row(), module.load_scenarios()["conversation-readonly"], repo,

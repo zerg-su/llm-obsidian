@@ -32,6 +32,17 @@ def required_text(value: Any, field: str, limit: int) -> str:
     return value
 
 
+def required_content(value: Any, field: str, limit: int) -> str:
+    """Validate source content without changing the bytes covered by its digest."""
+    if not isinstance(value, str) or not value.strip():
+        raise ResearchContractError(f"{field} must be a non-empty string")
+    if len(value) > limit:
+        raise ResearchContractError(f"{field} exceeds {limit} characters")
+    if "\x00" in value:
+        raise ResearchContractError(f"{field} contains NUL")
+    return value
+
+
 def validate_artifact(
     raw: Any, *, expected_run_id: str | None = None, expected_topic: str | None = None
 ) -> dict[str, Any]:
@@ -62,7 +73,9 @@ def validate_artifact(
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ResearchContractError(f"{field}.url must be HTTP(S)")
-        content = required_text(source.get("clean_markdown"), f"{field}.clean_markdown", MAX_SOURCE_CHARS)
+        content = required_content(
+            source.get("clean_markdown"), f"{field}.clean_markdown", MAX_SOURCE_CHARS
+        )
         total += len(content)
         digest = required_text(source.get("content_sha256"), f"{field}.content_sha256", 64)
         actual = hashlib.sha256(content.encode("utf-8")).hexdigest()

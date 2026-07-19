@@ -369,6 +369,9 @@ def main() -> int:
     except AcceptanceError as exc:
         print(f"release-acceptance: {exc}", file=sys.stderr)
         return 3
+    except KeyboardInterrupt:
+        print("release-acceptance: interrupted after active runner cleanup", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

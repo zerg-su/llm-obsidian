@@ -197,7 +197,8 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         time.sleep(0.05)
     check("interrupt fixture starts", interrupt_marker.with_suffix('.started').is_file())
     os.kill(interrupted.pid, signal.SIGINT)
-    interrupted.communicate(timeout=15)
+    _stdout, interrupt_stderr = interrupted.communicate(timeout=15)
     check("matrix interrupt reaches active runner cleanup", interrupt_marker.is_file())
+    check("matrix interrupt exits without traceback", interrupted.returncode == 130 and "Traceback" not in interrupt_stderr)
 
 print("\nAll release acceptance tests passed.")
