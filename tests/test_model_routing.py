@@ -57,6 +57,8 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("same-model review inherits with effort override", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "xhigh"))
     route = routing.resolve(config, "dispatch", session=codex, explicit_model="sonnet")
     check("registered Sonnet override infers Claude runtime", (route["runtime"], route["model"]) == ("claude", "sonnet"))
+    route = routing.resolve(config, "dispatch", session=claude, explicit_model="gpt-5.6-tera")
+    check("registered Tera override infers Codex runtime", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-tera"))
     route = routing.resolve(config, "protected-research", session=claude)
     check("protected research from Claude uses Codex default", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-sol"))
     route = routing.resolve(config, "protected-research", session=codex)
