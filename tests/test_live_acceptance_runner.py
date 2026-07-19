@@ -359,6 +359,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "Do not publish the acceptance agent outbox in that launch turn" in dispatch_prompt
         and "returning idle without an outbox keeps this cell running" in dispatch_prompt,
     )
+    check(
+        "dispatch start failure has a bounded immediate outbox path",
+        "start` invocation exits non-zero" in dispatch_prompt
+        and "not retry it, perform open-ended diagnosis" in dispatch_prompt
+        and "Publish the typed fail/blocked outbox immediately" in dispatch_prompt,
+    )
     module.write_dispatch_acceptance_request(
         repo,
         prepared,

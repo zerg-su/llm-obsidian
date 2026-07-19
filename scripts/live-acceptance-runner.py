@@ -600,6 +600,10 @@ def prompt_text(
 - Do not publish the acceptance agent outbox in that launch turn. Publish it only
   in the later final-reap callback turn, after the durable lifecycle proof below
   has been validated; returning idle without an outbox keeps this cell running.
+- If the single exact `dispatch-runner.py start` invocation exits non-zero, do
+  not retry it, perform open-ended diagnosis, or clean runner-owned state.
+  Publish the typed fail/blocked outbox immediately with that bounded error;
+  the acceptance runner owns containment and exact cleanup for this path.
 - Validate the task result before the typed outbox. The runner independently proves the exact commit,
   typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
     return f"""# Live release acceptance operation
