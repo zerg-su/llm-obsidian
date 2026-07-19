@@ -58,6 +58,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   leaves disposable clone/bookkeeping cleanup to the runner, rejects residual
   product outputs, and gives an interrupted cell time to close its exact
   surface before the matrix process exits.
+- Protected fetch and synthesis send cmux a bounded operation-owned launcher
+  path instead of an inline command containing long task/runtime paths, so
+  persistent lanes cannot be truncated in the terminal composer.
 
 ## [2.0.9] - 2026-07-18
 

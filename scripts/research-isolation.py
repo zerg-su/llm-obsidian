@@ -602,11 +602,11 @@ def launch_command(
 ) -> str:
     python_bin = str(Path(python_executable).resolve().parent)
     parts = [
-        f"cd {shlex.quote(str(workspace))}",
-        "clear",
+        "env",
         f"PATH={shlex.quote(python_bin)}:$PATH",
         f"CMUX_SOCKET_PATH={shlex.quote(str(cmux_socket))}",
-        f"CODEX_HOME={shlex.quote(str(runtime_home))} codex",
+        f"CODEX_HOME={shlex.quote(str(runtime_home))}",
+        "codex",
         "--strict-config",
         "--cd",
         shlex.quote(str(workspace)),
@@ -618,7 +618,17 @@ def launch_command(
     if checkpoint is not None:
         parts.extend(["resume", shlex.quote(checkpoint["checkpoint_id"])])
     parts.append(f'"$(cat {shlex.quote(str(prompt_file))})"')
-    return "; ".join(parts[:2]) + "; " + " ".join(parts[2:])
+    launcher = workspace / "launch-agent.sh"
+    launcher.write_text(
+        "#!/bin/zsh\n"
+        "set -eu\n"
+        f"cd {shlex.quote(str(workspace))}\n"
+        "clear\n"
+        f"exec {' '.join(parts)}\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o700)
+    return f"exec /bin/zsh {shlex.quote(str(launcher))}"
 
 
 def state_paths(

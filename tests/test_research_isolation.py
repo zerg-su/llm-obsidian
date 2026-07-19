@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fetch_config = Path(state["fetch_runtime_home"]) / "config.toml"
     python_executable = str(Path(sys.executable).resolve())
     fetch_prompt = (fetch_dir / "fetch-prompt.md").read_text(encoding="utf-8")
+    fetch_launcher = (fetch_dir / "launch-agent.sh").read_text(encoding="utf-8")
     notifier = (fetch_dir / "notify.py").read_text(encoding="utf-8")
     cmux_socket = state["cmux_socket_path"]
     config_text = fetch_config.read_text(encoding="utf-8")
@@ -151,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("fetch socket allowlist", f'"{cmux_socket}" = "allow"' in config_text)
     check("fetch socket directory readable", f'"{Path(cmux_socket).parent}" = "read"' in config_text)
     check("fetch has no vault path", str(ROOT) not in config_text)
-    check("fetch isolated home", f"CODEX_HOME={state['fetch_runtime_home']}" in state["command"])
+    check("fetch isolated home", f"CODEX_HOME={state['fetch_runtime_home']}" in fetch_launcher)
     check("fetch no inherited MCP", "mcp_servers" not in config_text)
     check("fetch pins coordinator Python", state["python_executable"] == python_executable)
     if Path("/opt/homebrew").is_dir() and Path("/opt/homebrew") in Path(python_executable).parents:
@@ -159,9 +160,18 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check("fetch has Homebrew runtime root", '"/opt/homebrew" = true' in config_text)
     check(
         "fetch prepends Python bin to PATH",
-        f"PATH={Path(python_executable).parent}:$PATH" in state["command"],
+        f"PATH={Path(python_executable).parent}:$PATH" in fetch_launcher,
     )
-    check("fetch exports cmux socket", f"CMUX_SOCKET_PATH={cmux_socket}" in state["command"])
+    check("fetch exports cmux socket", f"CMUX_SOCKET_PATH={cmux_socket}" in fetch_launcher)
+    check("fetch cmux command is bounded", len(state["command"].encode("utf-8")) < 512)
+    check("fetch launcher is owner-executable", (fetch_dir / "launch-agent.sh").stat().st_mode & 0o777 == 0o700)
+    launcher_syntax = subprocess.run(
+        ["/bin/zsh", "-n", str(fetch_dir / "launch-agent.sh")],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check("fetch launcher parses in target shell", launcher_syntax.returncode == 0, launcher_syntax.stderr)
     check("fetch prompt uses pinned Python", f"{python_executable} notify.py" in fetch_prompt)
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
@@ -205,6 +215,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     synth_proxy = synth_parsed["features"]["network_proxy"]
     synth_network = synth_parsed["permissions"]["research-synthesize"]["network"]
     synth_prompt = (Path(received["synth_dir"]) / "synth-prompt.md").read_text(encoding="utf-8")
+    synth_launcher = (Path(received["synth_dir"]) / "launch-agent.sh").read_text(encoding="utf-8")
     check("synth web disabled", 'web_search = "disabled"' in synth_config)
     check("synth keeps automated Codex off Fast service", synth_parsed["service_tier"] == "default")
     check(
@@ -252,9 +263,10 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("synth prompt uses pinned Python", f"{python_executable} notify.py" in synth_prompt)
     check(
         "synth prepends Python bin to PATH",
-        f"PATH={Path(python_executable).parent}:$PATH" in received["synth_command"],
+        f"PATH={Path(python_executable).parent}:$PATH" in synth_launcher,
     )
-    check("synth exports cmux socket", f"CMUX_SOCKET_PATH={cmux_socket}" in received["synth_command"])
+    check("synth exports cmux socket", f"CMUX_SOCKET_PATH={cmux_socket}" in synth_launcher)
+    check("synth cmux command is bounded", len(received["synth_command"].encode("utf-8")) < 512)
 
     restarted = run(
         "restart-synthesis", "--run-id", run_id, "--state-root", str(state_root),
@@ -684,10 +696,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     )
     check("later synthesis starts", resumed_synth_result.returncode == 0, resumed_synth_result.stderr)
     resumed_synth = json.loads(resumed_synth_result.stdout)
+    resumed_launcher = (Path(resumed_synth["synth_dir"]) / "launch-agent.sh").read_text(encoding="utf-8")
     check(
         "secure synth resumes exact checkpoint",
-        "checkpoint-synth-1" in resumed_synth["synth_command"],
-        resumed_synth["synth_command"],
+        "checkpoint-synth-1" in resumed_launcher,
+        resumed_launcher,
     )
     second_synth_broker = resumed_synth["synth_broker"]
     persistent_store.transition_operation(
