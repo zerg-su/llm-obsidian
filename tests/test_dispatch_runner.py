@@ -128,6 +128,13 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("prompt omits empty agents", "## Suggested sub-agents" not in prompt)
     check("prompt has no branch control markers", "<!-- BRANCH" not in prompt)
     check("prompt binds reap skill", "$llm-obsidian:reap" in prompt)
+    check(
+        "prompt trusts one successful supervised review transition",
+        "drive ... --apply-action" in prompt
+        and "run that command exactly" in prompt
+        and "do not\n   re-read operation/review artifacts" in prompt
+        and "call a separate `finish`" in prompt,
+    )
 
     tracked = json.loads(json.dumps(raw_request))
     tracked["session_route"]["source"] = "tracked-default"

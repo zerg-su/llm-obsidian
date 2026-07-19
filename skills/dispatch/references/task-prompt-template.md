@@ -246,6 +246,11 @@ When the callback returns:
    close-on-exit wrapper closes only the reviewer surface after process return.
    `finish` archives directly only in coordinator context; from this task
    worktree it leaves a typed archive request for coordinator `/reap`.
+   When a trusted supervisor callback supplies an exact
+   `spawn_review.py drive ... --apply-action` command, run that command exactly
+   once. A zero exit and its reported transition are authoritative: do not
+   re-read operation/review artifacts, call a separate `finish`, or inspect the
+   already-applied transition again.
 8. Proceed to `/reap-send` after finish. Never push, deploy, publish, delete a
    worktree/branch, or expand scope under the unattended mandate.
 
