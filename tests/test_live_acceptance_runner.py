@@ -355,7 +355,19 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     close_page = close_repo / close_fixture["page_rel"]
     close_page.parent.mkdir(parents=True)
     close_page.write_text(
-        f"---\ntype: session\n---\n\n# {close_fixture['title']}\n",
+        f"---\ntype: session\ntitle: \"{close_fixture['title']}\"\n"
+        "sessions:\n  - fixture-session\n---\n",
+        encoding="utf-8",
+    )
+    missing_address_clean, _ = module.close_acceptance_proof(close_repo, close_fixture)
+    check(
+        "close proof enforces the save contract address",
+        not missing_address_clean and close_page.exists(),
+    )
+    close_page.write_text(
+        f"---\ntype: session\ntitle: \"{close_fixture['title']}\"\n"
+        "address: c-000001\nsessions:\n  - fixture-session\n---\n\n"
+        "Disposable local acceptance record for exact-surface graceful exit.\n",
         encoding="utf-8",
     )
     original_checked = module.run_checked

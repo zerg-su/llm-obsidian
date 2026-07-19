@@ -50,6 +50,7 @@ from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
 from model_routing import load_config  # noqa: E402
 from pipeline_events import emit_event  # noqa: E402
 from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
+from vault_schema import FrontmatterError, parse_frontmatter, split_frontmatter  # noqa: E402
 from cmux_agent_supervisor import (  # noqa: E402
     SupervisorError,
     resolved_git_common_dir,
@@ -415,6 +416,8 @@ def close_fixture_prompt(fixture: dict[str, str]) -> str:
         "do not create another cmux surface or launch another agent. "
         f"Save one short reusable session note titled `{fixture['title']}` at exactly "
         f"`{fixture['page_rel']}` through the documented save workflow and one vault-write transaction. "
+        "The save contract still requires a DragonScale `address: c-NNNNNN` and session provenance; "
+        "do not use the schema's session-type address exemption. "
         "State only that it is a disposable local acceptance record for exact-surface graceful exit. "
         "Validate the saved page but do not delete it: the outer runner owns proof and deletion after exit."
     )
@@ -427,7 +430,19 @@ def close_acceptance_proof(sandbox: Path, fixture: dict[str, str]) -> tuple[bool
     if page.is_symlink() or not page.is_file():
         return False, "close fixture page is missing"
     content = page.read_text(encoding="utf-8")
-    if f"# {fixture['title']}" not in content or "type: session" not in content:
+    block = split_frontmatter(content)
+    try:
+        frontmatter = parse_frontmatter(block) if block is not None else {}
+    except FrontmatterError:
+        frontmatter = {}
+    sessions = frontmatter.get("sessions")
+    if (
+        frontmatter.get("type") != "session"
+        or frontmatter.get("title") != fixture["title"]
+        or re.fullmatch(r"c-\d{6}", str(frontmatter.get("address") or "")) is None
+        or not isinstance(sessions, list)
+        or not sessions
+    ):
         return False, "close fixture page does not match the required session note"
     validated = subprocess.run(
         [sys.executable, str(sandbox / "scripts" / "validate-vault.py"), "--summary"],
