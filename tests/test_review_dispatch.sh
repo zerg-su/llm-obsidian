@@ -125,7 +125,9 @@ argv_has "$LIGHT_SPEC" --permission-mode dontAsk && ok "claude-unattended-mode" 
 python3 - "$LIGHT_SPEC" <<'PY'
 import json, os, sys
 env = json.load(open(sys.argv[1], encoding="utf-8"))["env"]
-assert set(env) == {"PATH"}
+assert set(env) == {"PATH", "LLM_OBSIDIAN_PROJECT_ROOT", "LLM_OBSIDIAN_SESSION_ROLE"}
+assert env["LLM_OBSIDIAN_SESSION_ROLE"] == "reviewer"
+assert os.path.isabs(env["LLM_OBSIDIAN_PROJECT_ROOT"])
 assert env["PATH"] and all(os.path.isabs(item) for item in env["PATH"].split(os.pathsep))
 PY
 [[ $? -eq 0 ]] && ok "claude-review-trusted-path" || bad "claude-review-trusted-path" "reviewer PATH is not pinned"

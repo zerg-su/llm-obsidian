@@ -927,7 +927,10 @@ def launch_command(
     base_branch: str = "",
 ) -> str:
     state_dir = state_dir or worktree
-    env: dict[str, str] = {}
+    env: dict[str, str] = {
+        "LLM_OBSIDIAN_PROJECT_ROOT": str(vault),
+        "LLM_OBSIDIAN_SESSION_ROLE": "reviewer",
+    }
     if reviewer_runtime == "claude":
         # Claude Code documents Edit(...) as the canonical scoped permission
         # for every built-in file editor, including the Write tool.  Anchor the

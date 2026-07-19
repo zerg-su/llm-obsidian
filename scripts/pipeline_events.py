@@ -151,4 +151,4 @@ def emit_event(
         return False
 
 
-__all__ = ["build_event", "emit_event", "runtime_name", "safe_path"]
+__all__ = ["build_event", "emit_event", "runtime_name", "safe_path", "safe_token"]

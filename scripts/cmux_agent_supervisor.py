@@ -25,7 +25,15 @@ from task_contract import ContractError, normalize, read_json as read_task_json
 SCRIPT_DIR = Path(__file__).resolve().parent
 SPEC_FILES = {"task": ".task-agent-command.json", "reviewer": ".review-agent-command.json"}
 PROMPT_FILES = {"task": ".task-prompt.md", "reviewer": ".review-prompt.md"}
-ALLOWED_ENV = {"CODEX_HOME", "TMPDIR", "CMUX_SOCKET_PATH", "DCG_CONFIG", "PATH"}
+ALLOWED_ENV = {
+    "CODEX_HOME",
+    "TMPDIR",
+    "CMUX_SOCKET_PATH",
+    "DCG_CONFIG",
+    "PATH",
+    "LLM_OBSIDIAN_PROJECT_ROOT",
+    "LLM_OBSIDIAN_SESSION_ROLE",
+}
 REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
@@ -753,6 +761,10 @@ def validate_routing(
     if spec["runtime"] != expected_runtime:
         raise SupervisorError(f"{kind} supervisor runtime does not match metadata")
     expected_env: dict[str, str] = {}
+    expected_env["LLM_OBSIDIAN_PROJECT_ROOT"] = str(
+        Path(str(task_meta.get("vault_root") or "")).expanduser().resolve()
+    )
+    expected_env["LLM_OBSIDIAN_SESSION_ROLE"] = kind
     if kind == "task" and task_policy["interaction_policy"] == "unattended":
         expected_env["DCG_CONFIG"] = str(task_dcg_config(task_meta))
     if spec["runtime"] == "codex":
@@ -855,7 +867,10 @@ def prepare_task(worktree: Path, surface: str) -> Path:
     route = resolved_task_model_route(worktree, meta, runtime)
     model = str(route["model"])
     effort = str(route["effort"])
-    env: dict[str, str] = {}
+    env: dict[str, str] = {
+        "LLM_OBSIDIAN_PROJECT_ROOT": str(Path(str(meta.get("vault_root") or "")).expanduser().resolve()),
+        "LLM_OBSIDIAN_SESSION_ROLE": "task",
+    }
     if runtime == "codex":
         argv = ["codex", "--cd", str(worktree)]
         profile = str(meta.get("codex_profile") or "").strip()

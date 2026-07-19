@@ -12,6 +12,10 @@ from typing import Any
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
+
+from lifecycle_telemetry import origin_vault  # noqa: E402
+from turn_telemetry import clear_stale, finish_turn, start_turn  # noqa: E402
 
 
 def payload() -> tuple[dict[str, Any], str]:
@@ -24,6 +28,14 @@ def payload() -> tuple[dict[str, Any], str]:
 
 
 def vault_root(data: dict[str, Any]) -> Path | None:
+    raw = data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    if raw:
+        path = Path(str(raw)).expanduser().resolve()
+        for candidate in (path, *path.parents):
+            if (candidate / ".task-meta.json").is_file():
+                declared = origin_vault(candidate)
+                if declared is not None:
+                    return declared
     candidates = [
         os.environ.get("LLM_OBSIDIAN_PROJECT_ROOT"),
         os.environ.get("CLAUDE_PROJECT_DIR"),
@@ -71,6 +83,7 @@ def emit(text: str) -> None:
 
 
 def session_context(root: Path, data: dict[str, Any], raw: str) -> None:
+    clear_stale(root, data)
     hot = root / "wiki" / "hot.md"
     if hot.is_file():
         emit(hot.read_text(encoding="utf-8"))
@@ -112,6 +125,8 @@ def main() -> int:
     if root is None:
         return 0
     if route == "router":
+        context = Path(str(data.get("cwd") or os.getcwd())).expanduser().resolve()
+        start_turn(root, data, context_root=context)
         emit(invoke(PLUGIN_ROOT / ".claude" / "hooks" / "skill-router.py", raw, root).stdout)
     elif route == "command-capture":
         tool_name = str(data.get("tool_name") or "")
@@ -135,6 +150,7 @@ def main() -> int:
             )
         )
     elif route == "stop":
+        finish_turn(root, data)
         stop_pipeline(root, raw)
     return 0
 
