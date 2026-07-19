@@ -54,8 +54,19 @@ def read_json(path: Path) -> dict[str, Any]:
 def run(argv: list[str], *, cwd: Path, input_text: str | None = None, label: str) -> str:
     result = subprocess.run(argv, cwd=cwd, input=input_text, text=True, capture_output=True, check=False)
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise ReapError(f"{label} failed" + (f": {detail[-1][:300]}" if detail else ""))
+        raw = (result.stdout or result.stderr).strip()
+        detail = ""
+        try:
+            payload = json.loads(raw)
+            error = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(error, dict):
+                detail = str(error.get("message") or "").strip()
+        except json.JSONDecodeError:
+            pass
+        if not detail:
+            lines = raw.splitlines()
+            detail = lines[-1] if lines else ""
+        raise ReapError(f"{label} failed" + (f": {detail[:1000]}" if detail else ""))
     return result.stdout
 
 
@@ -151,6 +162,13 @@ def update_page(path: Path, summary: dict[str, Any], task_name: str) -> tuple[st
     return text, expected
 
 
+def page_address(content: str) -> str:
+    match = re.search(r"(?m)^address:\s*(c-\d{6})\s*$", content)
+    if match is None or match.group(1) == "c-000000":
+        raise ReapError("reap result page must carry one non-zero c-NNNNNN address")
+    return match.group(1)
+
+
 def approved_plan_state(meta: dict[str, Any]) -> tuple[Path, str]:
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     text = plan.read_text(encoding="utf-8")
@@ -208,14 +226,15 @@ def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
             if result.is_file():
                 raise ReapError("prepared new result path already exists")
             page = {"op": "create", "path": rel, "content": frontmatter_page(vault, meta, summary, current)}
+        address = page_address(page["content"])
         payload: dict[str, Any] = {
             "schema_version": 1,
             "request_id": f"reap-{meta['task_id']}",
             "actor": "reap",
             "session": current,
             "pages": [page],
-            "log_entry": f"## [{today}] reap | {meta['task_name']}\n\n{link}. {summary['body'][:500]}",
-            "hot_bullet": f"{today}: {link} — finalized task result",
+            "log_entry": f"## [{today}] reap | {meta['task_name']}\n\n`{address}` {link}. {summary['body'][:500]}",
+            "hot_bullet": f"{today}: {link} — finalized task result (`{address}`)",
         }
         payload["plan_close"] = {
             "file": plan.relative_to(vault).as_posix(),

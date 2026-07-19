@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -53,6 +55,7 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         runner.run = original_run
     check("page preserves provenance chain", all(item in page for item in ("origin-session", "executor-session", "reap-session")))
     check("page records effective model", 'executor_model: "gpt-5.6-sol"' in page)
+    check("page address is reusable by log and hot payload", runner.page_address(page) == "c-000123")
     check("page derives bounded related links", '"[[Dispatch safety]]"' in page)
     existing = vault / "wiki/meta/sessions/existing.md"
     existing.write_text("---\nupdated: 2026-01-01\n---\n# Existing\n", encoding="utf-8")
@@ -75,6 +78,23 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     check("pending plan hash validates", runner.approved_plan_state(meta)[1] == "pending")
     plan.write_text("---\nstatus: executed\n---\n", encoding="utf-8")
     check("executed plan is accepted only as recovery", runner.approved_plan_state(meta)[1] == "executed")
+    try:
+        runner.page_address("---\ntype: session\n---\n")
+    except runner.ReapError:
+        check("missing result address fails before vault write", True)
+    else:
+        check("missing result address fails before vault write", False)
+    structured = json.dumps({"error": {"message": "exact writer validation reason"}})
+    try:
+        runner.run(
+            [sys.executable, "-c", f"import sys; print({structured!r}); sys.exit(3)"],
+            cwd=vault,
+            label="writer",
+        )
+    except runner.ReapError as exc:
+        check("structured writer error remains actionable", "exact writer validation reason" in str(exc))
+    else:
+        check("structured writer error remains actionable", False)
 
 if failures:
     raise SystemExit(f"{len(failures)} reap runner test(s) failed")
