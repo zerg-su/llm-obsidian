@@ -495,6 +495,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "coordinator_surface": "00000000-0000-0000-0000-000000000003",
         "synth_surface": "00000000-0000-0000-0000-000000000005",
     }), encoding="utf-8")
+    dispatched_meta = child_root / ".vault-meta/acceptance-worktrees/task-one/.task-meta.json"
+    dispatched_meta.parent.mkdir(parents=True)
+    dispatched_meta.write_text(json.dumps({
+        "wiki_surface": "00000000-0000-0000-0000-000000000003",
+        "task_surface": "00000000-0000-0000-0000-000000000006",
+    }), encoding="utf-8")
     child_calls: list[list[str]] = []
     module.subprocess.run = lambda argv, **_kwargs: (
         child_calls.append(list(argv))
@@ -506,10 +512,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         )
     finally:
         module.subprocess.run = original_run
-    check("interrupted operation closes exact registered children", child_closed == 2 and not child_failures)
+    check("interrupted operation closes exact registered children", child_closed == 3 and not child_failures)
     check("registered child close never targets coordinator", {call[-1] for call in child_calls} == {
         "00000000-0000-0000-0000-000000000004",
         "00000000-0000-0000-0000-000000000005",
+        "00000000-0000-0000-0000-000000000006",
     })
     surface_order: list[str] = []
     original_close_surface = module.close_surface

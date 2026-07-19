@@ -899,6 +899,18 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
             value = str(state.get(key) or "")
             if value != coordinator_surface and SURFACE_RE.fullmatch(value):
                 surfaces.add(value)
+    for path in (sandbox / ".vault-meta" / "acceptance-worktrees").glob("*/.task-meta.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            task_meta = read_json(path)
+        except AcceptanceRunnerError:
+            continue
+        if task_meta.get("wiki_surface") != coordinator_surface:
+            continue
+        task_surface = str(task_meta.get("task_surface") or "")
+        if task_surface != coordinator_surface and SURFACE_RE.fullmatch(task_surface):
+            surfaces.add(task_surface)
     for surface in sorted(surfaces):
         result = subprocess.run(
             ["cmux", "close-surface", "--surface", surface],
