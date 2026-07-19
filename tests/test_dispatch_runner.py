@@ -117,6 +117,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     prompt = runner.render_task_prompt(request, config)
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
+    check(
+        "runner tells coordinator to return idle without polling",
+        runner.COORDINATOR_ACTION == "return-to-idle-without-polling",
+    )
     check("route preview does not persist session state", not (vault / ".vault-meta/session-routing/unit-session.json").exists())
     check("prompt keeps approved plan branch", "## Approved plan (already reviewed — execute)" in prompt)
     check("prompt removes classic approval branch", "## IMPORTANT: plan-first workflow" not in prompt)

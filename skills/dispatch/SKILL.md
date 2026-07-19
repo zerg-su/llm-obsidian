@@ -66,6 +66,14 @@ than opening a second surface. A launched request returns its original typed
 result. If a blank child surface was created but launch did not begin, the
 runner closes only that exact surface.
 
+After `start` returns `coordinator_action: return-to-idle-without-polling`,
+show the bounded launch result and finish the current coordinator turn. Do not
+run shell monitors, poll cmux/task files, call agent wait tools, or keep the
+turn alive. Typed review, escalation, and final-reap callbacks are submitted to
+the idle coordinator surface and begin the next turn automatically. Returning
+to idle is therefore part of dispatch orchestration, not completion of the
+child task.
+
 The remainder of Phase 2 documents the compatibility mechanics enforced by the
 runner. For approved v3 tasks it is a contract/reference, not an instruction to
 execute those commands individually. Classic interactive mode still follows
@@ -365,6 +373,9 @@ The approved task now runs unattended. It returns only for a blocking/scope
 escalation; otherwise review, verify, final reap, and exact task/reviewer
 surface closure happen automatically. Branch and worktree remain local.
 ```
+
+End the coordinator turn immediately after this message. Do not poll the child;
+the typed callback transport resumes the coordinator when action is required.
 
 ---
 

@@ -328,6 +328,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "dispatch-runner.py start --spec" in dispatch_prompt
         and "do not reproduce its setup commands manually" in dispatch_prompt,
     )
+    check(
+        "dispatch coordinator returns idle for typed callbacks",
+        "finish the coordinator turn and return" in dispatch_prompt
+        and "Do not shell-poll task files" in dispatch_prompt
+        and "agent wait tools" in dispatch_prompt,
+    )
     module.write_dispatch_acceptance_request(
         repo,
         prepared,

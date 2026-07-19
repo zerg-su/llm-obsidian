@@ -554,6 +554,9 @@ def prompt_text(
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
 - Use only the exact runner-bound nested worktree `{runner_fixture['nested_worktree']}`.
   Do not pass `--tmp-root`/`--state-root` or override `TMPDIR`/`TMP`/`TEMP`.
+- After `dispatch-runner.py start` returns, finish the coordinator turn and return
+  to the idle prompt. Do not shell-poll task files, inspect cmux in a loop, or call
+  agent wait tools. Typed review/reap callbacks begin later turns automatically.
 - Validate the task result before the typed outbox. The runner independently proves the exact commit,
   typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
     return f"""# Live release acceptance operation

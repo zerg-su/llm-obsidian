@@ -47,6 +47,7 @@ RUNTIMES = {"claude", "codex"}
 REVIEW_MODES = {"light", "full", "skip"}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
+COORDINATOR_ACTION = "return-to-idle-without-polling"
 DEFAULT_DISPATCH = {
     "codex_home": "",
     "profile": "",
@@ -859,6 +860,7 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
             "task_surface_ref": child["surface_ref"],
             "origin_surface": origin["surface_id"],
             "log_status": log_status,
+            "coordinator_action": COORDINATOR_ACTION,
             "setup_duration_ms": round((time.monotonic() - run_started) * 1000),
             "idempotent": False,
         }
