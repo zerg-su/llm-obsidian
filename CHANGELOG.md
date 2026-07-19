@@ -33,6 +33,11 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   bootstraps fresh-clone MCP JSON before scoped Codex sync, and prevents task
   Stop hooks from committing coordinator-owned derived indexes. Vault writes
   now support optimistic, journaled page deletion for canonical cleanup.
+- Dispatch acceptance now prepares its exact approved fixture in runner code
+  and proves the one-commit/review/reap lifecycle from durable artifacts before
+  accepting an agent pass. Claude reviewers ignore project MCP discovery, and
+  v3 task launch pins the coordinator's canonical DCG profile across linked
+  supervisor copies.
 
 ## [2.1.0] - 2026-07-18
 

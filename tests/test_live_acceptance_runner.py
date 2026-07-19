@@ -283,11 +283,40 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
     dispatch_fixture = module.load_skill_fixtures()["dispatch"]["fixture"]
     check(
-        "dispatch fixture cleans plan and prepares local runtime config",
-        "disposable plan/result/review pages" in dispatch_fixture
-        and "runtime.env.example" in dispatch_fixture
-        and "sync-config --apply" in dispatch_fixture
-        and "optimistic vault-write page deletion" in dispatch_fixture,
+        "dispatch fixture delegates deterministic proof and cleanup to the runner",
+        "runner-prepared approved plan" in dispatch_fixture
+        and "typed approve review" in dispatch_fixture
+        and "independent runner proof" in dispatch_fixture
+        and "substitute narrative evidence" in dispatch_fixture,
+    )
+
+    prepared = {
+        "task_name": "acceptance-dispatch-deadbeef",
+        "branch": "task/acceptance-dispatch-deadbeef",
+        "plan_path": str(repo / "wiki/plans/acceptance.md"),
+        "fixture_rel": "acceptance-dispatch-deadbeef.txt",
+        "fixture_text": "dispatch acceptance deadbeef\n",
+        "result_title": "Acceptance dispatch deadbeef result",
+        "nested_worktree": str(repo / ".vault-meta/acceptance-worktrees/sandbox-acceptance-dispatch-deadbeef"),
+    }
+    exact_dispatch = module.dispatch_fixture_prompt(prepared)
+    dispatch_prompt = module.prompt_text(
+        row(skill="dispatch", scenario="dispatch-review-reap",
+            expected="Start one isolated task worktree and deliver its approved plan exactly once."),
+        module.load_scenarios()["dispatch-review-reap"], repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model", "high", commit, exact_dispatch, prepared,
+    )
+    check(
+        "dispatch prompt pins one exact runner-prepared operation",
+        all(value in dispatch_prompt for value in (
+            prepared["task_name"], prepared["branch"], prepared["plan_path"],
+            prepared["nested_worktree"], prepared["result_title"],
+        )),
+    )
+    check(
+        "dispatch prompt preserves durable proof artifacts",
+        "Leave them in place" in dispatch_prompt and "independently proves the exact commit" in dispatch_prompt,
     )
 
     cleanup_run = tmp / "cleanup-run"
@@ -309,6 +338,92 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module.safe_cleanup(cleanup_run)
     module.tempfile.gettempdir = original_gettempdir
     check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
+
+    proof_repo = tmp / "dispatch-proof"
+    proof_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=proof_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=proof_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=proof_repo, check=True)
+    (proof_repo / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
+    (proof_repo / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore", "base.txt"], cwd=proof_repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=proof_repo, check=True)
+    source = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=proof_repo, text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    nested = proof_repo / ".vault-meta/acceptance-worktrees/sandbox-acceptance-dispatch-proof"
+    nested.parent.mkdir(parents=True)
+    subprocess.run(["git", "clone", "-q", str(proof_repo), str(nested)], check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=nested, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=nested, check=True)
+    fixture_text = "dispatch acceptance proof\n"
+    (nested / "acceptance-dispatch-proof.txt").write_text(fixture_text, encoding="utf-8")
+    subprocess.run(["git", "add", "acceptance-dispatch-proof.txt"], cwd=nested, check=True)
+    subprocess.run(["git", "commit", "-qm", "add exact acceptance fixture"], cwd=nested, check=True)
+    plan = proof_repo / "wiki/plans/acceptance-dispatch-proof.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text(
+        "---\ntype: plan\nstatus: executed\n---\n# Proof plan\n\nРезультат: [[Acceptance dispatch proof result]]\n",
+        encoding="utf-8",
+    )
+    result_page = proof_repo / "wiki/meta/sessions/Acceptance dispatch proof result.md"
+    result_page.parent.mkdir(parents=True)
+    result_page.write_text("# Acceptance dispatch proof result\n", encoding="utf-8")
+    project_id = "11111111-1111-4111-8111-111111111111"
+    task_id = "22222222-2222-4222-8222-222222222222"
+    meta = {
+        "version": 3,
+        "project_id": project_id,
+        "task_id": task_id,
+        "task_name": "acceptance-dispatch-proof",
+        "branch": "task/acceptance-dispatch-proof",
+        "plan_file": str(plan),
+        "review_policy": {"mode": "light"},
+        "reap_policy": {"mode": "final", "title": "Acceptance dispatch proof result"},
+    }
+    (nested / ".task-meta.json").write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    task_root = proof_repo / ".vault-meta/task-sessions/projects" / project_id / "tasks" / task_id
+    operation = task_root / "lanes/review/operations/one"
+    operation.mkdir(parents=True)
+    (task_root / "task.json").write_text(json.dumps({
+        "project_id": project_id, "task_id": task_id,
+        "status": "archived", "worktrees": [str(nested.resolve())],
+    }) + "\n", encoding="utf-8")
+    review = operation / ".task-review.json"
+    review.write_text(json.dumps({
+        "schema_version": 1, "mode": "light", "verdict": "approve",
+    }) + "\n", encoding="utf-8")
+    review_page = proof_repo / "wiki/meta/reviews/Acceptance dispatch proof review.md"
+    review_page.parent.mkdir(parents=True)
+    review_page.write_text("# Acceptance dispatch proof review\n", encoding="utf-8")
+    (operation / ".review-archive.json").write_text(json.dumps({
+        "schema_version": 1,
+        "status": "archived",
+        "path": "wiki/meta/reviews/Acceptance dispatch proof review.md",
+        "content_sha256": module.hashlib.sha256(review_page.read_bytes()).hexdigest(),
+    }) + "\n", encoding="utf-8")
+    (nested / ".task-reap-complete.json").write_text(json.dumps({
+        "validated": True,
+        "task_session_status": "archived",
+        "plan_path": str(plan),
+        "result_path": str(result_page),
+        "result_sha256": module.hashlib.sha256(result_page.read_bytes()).hexdigest(),
+    }) + "\n", encoding="utf-8")
+    proof_fixture = {
+        "task_name": "acceptance-dispatch-proof",
+        "branch": "task/acceptance-dispatch-proof",
+        "plan_rel": "wiki/plans/acceptance-dispatch-proof.md",
+        "plan_path": str(plan.resolve()),
+        "fixture_rel": "acceptance-dispatch-proof.txt",
+        "fixture_text": fixture_text,
+        "result_title": "Acceptance dispatch proof result",
+        "nested_worktree": str(nested.resolve()),
+    }
+    proved, reason = module.dispatch_acceptance_proof(proof_repo, source, proof_fixture)
+    check("dispatch proof accepts the complete durable lifecycle", proved, reason)
+    review.unlink()
+    proved, reason = module.dispatch_acceptance_proof(proof_repo, source, proof_fixture)
+    check("dispatch proof rejects a narrative-only pass without typed review", not proved and "typed approve" in reason, reason)
 
     owned_nested = repo / ".vault-meta" / "acceptance-worktrees" / "task-one"
     owned_nested.mkdir(parents=True)

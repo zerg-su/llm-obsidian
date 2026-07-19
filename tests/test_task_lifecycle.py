@@ -471,6 +471,8 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     v3_meta = dict(meta)
     v3_meta.update({"version": 3, "project_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4())})
+    (worktree / "config" / "dcg").mkdir(parents=True)
+    shutil.copy2(ROOT / "config" / "dcg" / "task.toml", worktree / "config" / "dcg" / "task.toml")
     task_registry = (
         worktree / ".vault-meta" / "task-sessions" / "projects" / v3_meta["project_id"]
         / "tasks" / v3_meta["task_id"]
@@ -488,6 +490,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and supervisor_module.option_values(v3_spec["argv"], "--add-dir")
         == [str((worktree / ".git").resolve()), str(task_registry.resolve())],
         result.stderr,
+    )
+    check(
+        "v3 task pins coordinator DCG config",
+        v3_spec["env"]["DCG_CONFIG"]
+        == str((worktree / "config" / "dcg" / "task.toml").resolve()),
     )
     result = run(
         SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",

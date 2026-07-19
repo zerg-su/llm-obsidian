@@ -751,6 +751,14 @@ PY
 expect_eq "claude-opt-in-start" "$?" 0
 argv_has "$OPUS/.review-agent-command.json" --model opus && ok "claude-opt-in-model" || bad "claude-opt-in-model" "explicit Claude model was not preserved"
 argv_has "$OPUS/.review-agent-command.json" --effort xhigh && ok "claude-opt-in-effort" || bad "claude-opt-in-effort" "explicit Claude effort was not preserved"
+argv_has "$OPUS/.review-agent-command.json" --strict-mcp-config && ok "claude-review-strict-mcp" || bad "claude-review-strict-mcp" "project MCP discovery remains enabled"
+python3 - "$OPUS/.review-agent-command.json" <<'PY'
+import json, sys
+argv=json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
+idx=argv.index("--mcp-config")
+assert json.loads(argv[idx+1]) == {"mcpServers": {}}
+PY
+[[ $? -eq 0 ]] && ok "claude-review-empty-mcp" || bad "claude-review-empty-mcp" "reviewer MCP config is not empty"
 expect_eq "claude-opt-in-meta" "$(json_get "$OPUS/.review-meta.json" reviewer_model)" "opus"
 
 CODEX_REVIEW="$SANDBOX/codex-review"

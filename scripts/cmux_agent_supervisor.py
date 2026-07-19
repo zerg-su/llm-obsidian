@@ -343,8 +343,15 @@ def validate_trusted_runtime_path(raw: str, runtime: str) -> None:
             raise SupervisorError(f"agent runtime PATH cannot resolve required command: {command}")
 
 
-def task_dcg_config() -> Path:
-    path = (SCRIPT_DIR.parent / "config" / "dcg" / "task.toml").resolve()
+def task_dcg_config(meta: dict[str, Any] | None = None) -> Path:
+    root = SCRIPT_DIR.parent
+    if meta is not None and meta.get("version") == 3:
+        raw = str(meta.get("vault_root") or "").strip()
+        candidate = Path(raw).expanduser() if raw else Path()
+        if not raw or not candidate.is_absolute():
+            raise SupervisorError("v3 task metadata has no absolute coordinator vault root")
+        root = candidate.resolve()
+    path = (root / "config" / "dcg" / "task.toml").resolve()
     try:
         stat = path.stat()
     except OSError as exc:
@@ -744,7 +751,7 @@ def validate_routing(
         raise SupervisorError(f"{kind} supervisor runtime does not match metadata")
     expected_env: dict[str, str] = {}
     if kind == "task" and task_policy["interaction_policy"] == "unattended":
-        expected_env["DCG_CONFIG"] = str(task_dcg_config())
+        expected_env["DCG_CONFIG"] = str(task_dcg_config(task_meta))
     if spec["runtime"] == "codex":
         expected_cwd = (
             validated_review_runtime(worktree, source_meta)
@@ -880,7 +887,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
     else:
         raise SupervisorError("task executor runtime must be claude or codex")
     if policy["interaction_policy"] == "unattended":
-        env["DCG_CONFIG"] = str(task_dcg_config())
+        env["DCG_CONFIG"] = str(task_dcg_config(meta))
     return write_agent_spec(worktree, "task", runtime, argv, PROMPT_FILES["task"], env)
 
 

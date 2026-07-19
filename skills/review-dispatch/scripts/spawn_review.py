@@ -932,6 +932,7 @@ def launch_command(
         # rules are not matched consistently by current Claude Code releases.
         argv = [
             "claude", "--permission-mode", "dontAsk",
+            "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
             "--tools", CLAUDE_REVIEW_TOOL_SURFACE,
             "--allowedTools", *claude_review_allowed_tools(
                 worktree,

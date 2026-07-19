@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -263,10 +264,268 @@ def create_sandbox(run_dir: Path) -> tuple[Path, str]:
     return sandbox, commit
 
 
+def run_checked(argv: list[str], *, cwd: Path, input_text: str | None = None) -> str:
+    result = subprocess.run(
+        argv, cwd=cwd, input=input_text, text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise AcceptanceRunnerError(detail[:600] or f"command exited {result.returncode}: {argv[0]}")
+    return result.stdout
+
+
+def dispatch_acceptance_fixture(
+    sandbox: Path, run_id: str, runtime: str,
+) -> dict[str, str]:
+    """Create deterministic dispatch inputs before the interactive skill run."""
+    token = run_id.split("-", 1)[0]
+    task_name = f"acceptance-dispatch-{token}"
+    plan_rel = f"wiki/plans/{date.today().isoformat()}-{task_name}.md"
+    fixture_rel = f"{task_name}.txt"
+    fixture_text = f"dispatch acceptance {token}\n"
+    result_title = f"Acceptance dispatch {token} result"
+    nested_worktree = sandbox / ".vault-meta" / "acceptance-worktrees" / f"sandbox-{task_name}"
+    plan_title = f"Acceptance dispatch {token} plan"
+    plan_text = f"""---
+type: plan
+title: "{plan_title}"
+status: pending
+created: {date.today().isoformat()}
+updated: {date.today().isoformat()}
+tags:
+  - plan
+  - acceptance
+sessions: []
+---
+
+# {plan_title}
+
+## Approved scope
+
+1. Create only `{fixture_rel}` with the exact single line `dispatch acceptance {token}`.
+2. Commit that file in exactly one product commit on `task/{task_name}`.
+3. Run one light opposite-model review and require an approved typed callback.
+4. Finalize through reap as a session titled “{result_title}”.
+
+Do not merge, push, publish, deploy, delete the task worktree, or expand scope.
+"""
+    payload = {
+        "schema_version": 1,
+        "request_id": f"acceptance-dispatch-{token}",
+        "actor": "acceptance",
+        "session": f"acceptance-{token}",
+        "pages": [{"op": "create", "path": plan_rel, "content": plan_text}],
+    }
+    run_checked(
+        [sys.executable, str(sandbox / "scripts" / "vault-write.py"), "--output", "json"],
+        cwd=sandbox,
+        input_text=json.dumps(payload, ensure_ascii=False),
+    )
+    if runtime == "codex":
+        runtime_env = sandbox / "scripts" / "mcp-gateway" / "runtime.env"
+        if not runtime_env.exists():
+            shutil.copy2(runtime_env.with_name("runtime.env.example"), runtime_env)
+        gateway = sandbox / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
+        run_checked([str(gateway), "sync-config", "--apply"], cwd=sandbox)
+        profile = "llm-obsidian-mcp"
+        dispatch_env = sandbox / ".codex" / "dispatch-env.toml"
+        if dispatch_env.is_file() and sys.version_info >= (3, 11):
+            import tomllib
+
+            raw = tomllib.loads(dispatch_env.read_text(encoding="utf-8")).get("codex_dispatch", {})
+            if isinstance(raw, dict) and str(raw.get("profile") or "").strip():
+                profile = str(raw["profile"]).strip()
+        run_checked(
+            [str(gateway), "codex-sync", "--apply", "--only-profile", profile], cwd=sandbox,
+        )
+    fixture = {
+        "task_name": task_name,
+        "branch": f"task/{task_name}",
+        "plan_rel": plan_rel,
+        "plan_path": str((sandbox / plan_rel).resolve()),
+        "fixture_rel": fixture_rel,
+        "fixture_text": fixture_text,
+        "fixture_sha256": hashlib.sha256(fixture_text.encode("utf-8")).hexdigest(),
+        "result_title": result_title,
+        "nested_worktree": str(nested_worktree.resolve()),
+    }
+    atomic_json(sandbox / ".vault-meta" / "acceptance" / "dispatch-fixture.json", fixture)
+    return fixture
+
+
+def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
+    return (
+        f"Execute the already-approved plan `{fixture['plan_path']}` exactly once. "
+        f"Use task name `{fixture['task_name']}`, branch `{fixture['branch']}`, and exact worktree "
+        f"`{fixture['nested_worktree']}`. Create only `{fixture['fixture_rel']}` with exact bytes "
+        f"`{fixture['fixture_text'].rstrip()}` plus one newline and commit it in exactly one commit. "
+        "Run one light opposite-model review, require its typed approve callback, then perform final reap "
+        f"as a session titled `{fixture['result_title']}`. The runner already prepared local runtime "
+        "configuration and owns setup, artifact proof, and disposable-clone cleanup. Do not make a second "
+        "plan, repeat configuration setup, remove result/review/plan artifacts, or ask for approval again."
+    )
+
+
+def git_output(repo: Path, *args: str) -> tuple[bool, str]:
+    result = subprocess.run(
+        ["git", *args], cwd=repo, text=True, capture_output=True, check=False,
+    )
+    return result.returncode == 0, result.stdout
+
+
+def dispatch_acceptance_proof(
+    sandbox: Path, source_commit: str, fixture: dict[str, str],
+) -> tuple[bool, str]:
+    """Validate the complete dispatch/review/reap lifecycle from durable artifacts."""
+    expected_worktree = Path(fixture["nested_worktree"]).resolve()
+    root = sandbox / ".vault-meta" / "acceptance-worktrees"
+    worktrees = sorted(path.resolve() for path in root.iterdir()) if root.is_dir() else []
+    if worktrees != [expected_worktree] or not expected_worktree.is_dir():
+        return False, "dispatch did not retain exactly the runner-bound task worktree"
+    ok, head = git_output(expected_worktree, "rev-parse", "HEAD")
+    if not ok:
+        return False, "dispatch task HEAD is unreadable"
+    head = head.strip()
+    ok, parent = git_output(expected_worktree, "rev-parse", "HEAD^")
+    if not ok or parent.strip() != source_commit:
+        return False, "dispatch task did not create exactly one commit from the source commit"
+    ok, changed = git_output(expected_worktree, "diff", "--name-only", source_commit, head)
+    if not ok or changed.splitlines() != [fixture["fixture_rel"]]:
+        return False, "dispatch task commit changed files outside the exact fixture"
+    ok, content = git_output(expected_worktree, "show", f"{head}:{fixture['fixture_rel']}")
+    if not ok or content != fixture["fixture_text"]:
+        return False, "dispatch task commit does not contain the exact fixture bytes"
+    try:
+        meta = read_json(expected_worktree / ".task-meta.json")
+    except AcceptanceRunnerError as exc:
+        return False, str(exc)
+    if (
+        meta.get("version") != 3
+        or meta.get("task_name") != fixture["task_name"]
+        or meta.get("branch") != fixture["branch"]
+        or str(Path(str(meta.get("plan_file") or "")).resolve()) != fixture["plan_path"]
+        or not isinstance(meta.get("review_policy"), dict)
+        or meta["review_policy"].get("mode") != "light"
+        or not isinstance(meta.get("reap_policy"), dict)
+        or meta["reap_policy"].get("mode") != "final"
+        or meta["reap_policy"].get("title") != fixture["result_title"]
+    ):
+        return False, "dispatch task metadata drifted from the runner-bound contract"
+    project_id = str(meta.get("project_id") or "")
+    task_id = str(meta.get("task_id") or "")
+    task_root = sandbox / ".vault-meta" / "task-sessions" / "projects" / project_id / "tasks" / task_id
+    try:
+        task = read_json(task_root / "task.json")
+    except AcceptanceRunnerError as exc:
+        return False, str(exc)
+    if (
+        task.get("project_id") != project_id
+        or task.get("task_id") != task_id
+        or task.get("status") != "archived"
+        or task.get("worktrees") != [str(expected_worktree)]
+    ):
+        return False, "dispatch task session was not archived with its exact worktree"
+    review_files = sorted(task_root.glob("lanes/*/operations/*/.task-review*.json"))
+    try:
+        reviews = [read_json(path) for path in review_files]
+    except AcceptanceRunnerError as exc:
+        return False, str(exc)
+    if (
+        len(reviews) != 1
+        or reviews[0].get("schema_version") != 1
+        or reviews[0].get("mode") != "light"
+        or reviews[0].get("verdict") != "approve"
+    ):
+        return False, "dispatch did not produce exactly one typed approve review"
+    try:
+        reap = read_json(expected_worktree / ".task-reap-complete.json")
+    except AcceptanceRunnerError as exc:
+        return False, str(exc)
+    result_path = Path(str(reap.get("result_path") or "")).resolve()
+    plan_path = Path(fixture["plan_path"])
+    try:
+        result_rel = result_path.relative_to(sandbox.resolve()).as_posix()
+    except ValueError:
+        return False, "dispatch reap result escaped the disposable coordinator clone"
+    if (
+        reap.get("validated") is not True
+        or reap.get("task_session_status") != "archived"
+        or Path(str(reap.get("plan_path") or "")).resolve() != plan_path.resolve()
+        or not result_path.is_file()
+        or reap.get("result_sha256") != hashlib.sha256(result_path.read_bytes()).hexdigest()
+    ):
+        return False, "dispatch final reap marker is missing or inconsistent"
+    try:
+        plan_text = plan_path.read_text(encoding="utf-8")
+    except OSError:
+        return False, "dispatch approved plan is missing after reap"
+    if not re.search(r"(?m)^status: executed$", plan_text) or "Результат:" not in plan_text:
+        return False, "dispatch approved plan was not closed by final reap"
+    archive_paths: set[str] = set()
+    for marker_path in task_root.glob("lanes/*/operations/*/.review-archive.json"):
+        try:
+            marker = read_json(marker_path)
+        except AcceptanceRunnerError as exc:
+            return False, str(exc)
+        archive_rel = str(marker.get("path") or "")
+        if marker.get("status") != "archived" or not archive_rel.startswith("wiki/"):
+            return False, "dispatch review archive marker is inconsistent"
+        archive_path = sandbox / archive_rel
+        if not archive_path.is_file() or marker.get("content_sha256") != hashlib.sha256(archive_path.read_bytes()).hexdigest():
+            return False, "dispatch durable review archive is missing or changed"
+        archive_paths.add(archive_rel)
+    if not archive_paths:
+        return False, "dispatch durable review archive is missing"
+    ok, coordinator_head = git_output(sandbox, "rev-parse", "HEAD")
+    if not ok or coordinator_head.strip() != source_commit:
+        return False, "dispatch changed the disposable coordinator HEAD"
+    ok, status = git_output(sandbox, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if not ok:
+        return False, "dispatch coordinator status is unreadable"
+    allowed_pages = {fixture["plan_rel"], result_rel, *archive_paths}
+    unexpected: list[str] = []
+    for line in status.split("\0"):
+        if not line:
+            continue
+        path = line[3:]
+        if path == ".acceptance-sandbox.json" or path in allowed_pages:
+            continue
+        if is_disposable_bookkeeping(path, line[:2]):
+            continue
+        unexpected.append(path)
+    if unexpected:
+        return False, "dispatch retained unexpected coordinator changes: " + ", ".join(unexpected[:5])
+    return True, "exact one-commit dispatch, typed approve review, archived task, and validated final reap"
+
+
 def prompt_text(
     row: dict[str, Any], scenario: dict[str, Any], sandbox: Path, outbox: Path,
     model: str, effort: str, commit: str, fixture: str,
+    runner_fixture: dict[str, str] | None = None,
 ) -> str:
+    if runner_fixture is None:
+        cleanup_contract = f"""- Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
+- Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
+- The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
+  `{sandbox / '.vault-meta' / 'acceptance-worktrees'}`, and its run-scoped temporary directory.
+  Use `LLM_OBSIDIAN_WORKTREES` for every nested dispatch; do not invent another worktree root.
+  Do not run `git restore`, `git checkout`, `git stash`,
+  manually delete those runner-owned paths, pass `--tmp-root`/`--state-root`, or override
+  `TMPDIR`/`TMP`/`TEMP`. Remove the fixture's product output and close external processes/surfaces;
+  the runner validates allowed vault bookkeeping and deletes the clone.
+- Validate product output before removing disposable pages. After removal, append-only log/hot/index
+  bookkeeping may still name those discarded pages; report it as runner-owned disposable bookkeeping
+  instead of requiring a second whole-vault validation or treating it as a product failure."""
+    else:
+        cleanup_contract = f"""- This cell's plan, result page, review archive, task branch, exact nested worktree,
+  task-session registry, and lifecycle markers are runner-owned proof artifacts. Leave them in place.
+- Close the task and reviewer agent processes through their documented lifecycle. Do not manually close,
+  delete, merge, restore, stash, or rewrite their branches, worktrees, registry, or proof artifacts.
+- Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
+- Use only the exact runner-bound nested worktree `{runner_fixture['nested_worktree']}`.
+  Do not pass `--tmp-root`/`--state-root` or override `TMPDIR`/`TMP`/`TEMP`.
+- Validate the task result before the typed outbox. The runner independently proves the exact commit,
+  typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
     return f"""# Live release acceptance operation
 
 You are running one real, bounded acceptance cell in a disposable local clone.
@@ -302,18 +561,7 @@ Hard boundaries:
 - A public web read is allowed only when the declared network class permits it.
 - If authentication is required, return `blocked` and name only the credential class; never print a value.
 - Install nothing unless it is already covered by an explicit local noninteractive fixture. Missing optional dependencies must produce a visible blocked/degraded result.
-- Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
-- Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
-- The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
-  `{sandbox / '.vault-meta' / 'acceptance-worktrees'}`, and its run-scoped temporary directory.
-  Use `LLM_OBSIDIAN_WORKTREES` for every nested dispatch; do not invent another worktree root.
-  Do not run `git restore`, `git checkout`, `git stash`,
-  manually delete those runner-owned paths, pass `--tmp-root`/`--state-root`, or override
-  `TMPDIR`/`TMP`/`TEMP`. Remove the fixture's product output and close external processes/surfaces;
-  the runner validates allowed vault bookkeeping and deletes the clone.
-- Validate product output before removing disposable pages. After removal, append-only log/hot/index
-  bookkeeping may still name those discarded pages; report it as runner-owned disposable bookkeeping
-  instead of requiring a second whole-vault validation or treating it as a product failure.
+{cleanup_contract}
 - Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 
@@ -695,8 +943,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     run_dir.chmod(0o700)
     surface = ""
     cleanup = "sandbox retained for diagnosis"
+    prepared_dispatch: dict[str, str] | None = None
     try:
         sandbox, commit = create_sandbox(run_dir)
+        if row["skill"] == "dispatch":
+            prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
+            fixture = dispatch_fixture_prompt(prepared_dispatch)
         scratch_root = scratch_root_for(run_dir)
         scratch_root.mkdir(mode=0o700)
         atomic_json(
@@ -705,7 +957,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         )
         outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
         prompt = prompt_text(
-            row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture
+            row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture,
+            prepared_dispatch,
         )
         prompt_path = run_dir / "prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
@@ -719,6 +972,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             "scratch_root": str(scratch_root),
             "prompt_file": str(prompt_path),
         }
+        if prepared_dispatch is not None:
+            spec["dispatch_fixture"] = prepared_dispatch
         spec_path = run_dir / "operation.json"
         atomic_json(spec_path, spec)
         try:
@@ -756,7 +1011,10 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             result["verdict"] = "blocked"
             result["defect"] = close
         elif result["verdict"] in {"pass", "n-a"}:
-            clean, proof = sandbox_cleanup_proof(sandbox, commit)
+            if prepared_dispatch is not None:
+                clean, proof = dispatch_acceptance_proof(sandbox, commit, prepared_dispatch)
+            else:
+                clean, proof = sandbox_cleanup_proof(sandbox, commit)
             if not clean:
                 result["verdict"] = "blocked"
                 result["defect"] = proof
@@ -765,6 +1023,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 safe_cleanup(run_dir)
                 cleanup = "disposable clone removed; exact surface closed"
                 result["cleanup"] = f"{result['cleanup']}; {proof}; {cleanup}"[:600]
+                result["evidence"] = f"{result['evidence']}; runner proof: {proof}"[:600]
         else:
             result["cleanup"] = f"{result['cleanup']}; diagnostic clone retained; exact surface closed"[:600]
         spec["status"] = "complete" if result["verdict"] in {"pass", "n-a"} else "blocked"
