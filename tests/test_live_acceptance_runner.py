@@ -334,6 +334,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "Do not shell-poll task files" in dispatch_prompt
         and "agent wait tools" in dispatch_prompt,
     )
+    check(
+        "dispatch launch turn cannot publish final acceptance",
+        "Do not publish the acceptance agent outbox in that launch turn" in dispatch_prompt
+        and "returning idle without an outbox keeps this cell running" in dispatch_prompt,
+    )
     module.write_dispatch_acceptance_request(
         repo,
         prepared,

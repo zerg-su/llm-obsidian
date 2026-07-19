@@ -557,6 +557,9 @@ def prompt_text(
 - After `dispatch-runner.py start` returns, finish the coordinator turn and return
   to the idle prompt. Do not shell-poll task files, inspect cmux in a loop, or call
   agent wait tools. Typed review/reap callbacks begin later turns automatically.
+- Do not publish the acceptance agent outbox in that launch turn. Publish it only
+  in the later final-reap callback turn, after the durable lifecycle proof below
+  has been validated; returning idle without an outbox keeps this cell running.
 - Validate the task result before the typed outbox. The runner independently proves the exact commit,
   typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
     return f"""# Live release acceptance operation
