@@ -77,9 +77,20 @@ def read_object(path: Path, *, required: bool = True) -> dict[str, Any]:
 
 
 def ensure_owner_only_dir(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.chmod(0o700)
-    info = path.stat()
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
+        info = path.stat()
+    else:
+        if path.is_symlink() or not path.is_dir():
+            raise TaskSessionError(f"state directory is not an owned directory: {path}")
+        if info.st_uid != os.getuid():
+            raise TaskSessionError(f"state directory is not owner-only: {path}")
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            path.chmod(0o700)
+            info = path.stat()
     if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
         raise TaskSessionError(f"state directory is not owner-only: {path}")
     return path

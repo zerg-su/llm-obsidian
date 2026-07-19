@@ -19,6 +19,12 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   distinguishes disposable append-only bookkeeping from product residue.
 - Defuddle's no-CLI fallback now performs and verifies bounded boilerplate
   removal instead of treating raw fetched Markdown as cleaned output.
+- V3 Codex task launch now validates both exact writable roots, avoids parent
+  mutations for an already secure registry directory, and recognizes wrapped
+  native Claude trust dialogs in narrow panes.
+- Dispatch anchors callbacks to the caller's explicit cmux surface instead of
+  the globally selected tab, and generated semantic-tiling reports now include
+  required session provenance.
 
 ## [2.1.0] - 2026-07-18
 

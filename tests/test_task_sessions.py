@@ -12,6 +12,7 @@ import tempfile
 import threading
 import uuid
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +47,14 @@ class Result:
 
 with tempfile.TemporaryDirectory() as raw:
     tmp = Path(raw)
+    existing_owner_only = tmp / "existing-owner-only"
+    existing_owner_only.mkdir(mode=0o700)
+    with mock.patch.object(Path, "mkdir", side_effect=AssertionError("unexpected mkdir")), \
+         mock.patch.object(Path, "chmod", side_effect=AssertionError("unexpected chmod")):
+        check(
+            "existing owner-only registry needs no parent mutation",
+            task_sessions_module.ensure_owner_only_dir(existing_owner_only) == existing_owner_only,
+        )
     repo = tmp / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)

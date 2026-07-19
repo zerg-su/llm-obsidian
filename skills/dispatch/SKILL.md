@@ -287,16 +287,24 @@ remain untouched and visible to the user.
 
 Paradigm: the task agent lives as a **split surface to the right** of the wiki agent in the very same cmux workspace, **not** in a separate workspace or window. The user sees both sessions at once, switches between them as panes, and parallel tasks accumulate as extra surfaces in the same split stack.
 
-**First** — capture the wiki surface UUID **before** the new-split (in case focus shifts). Do not persist short `surface:N` refs in handoff files: refs are convenient for humans, but UUIDs are safer when tabs/surfaces are moved or closed.
+**First** — capture the calling wiki surface UUID **before** the new-split (in
+case focus shifts). Anchor it to this process's `CMUX_SURFACE_ID`; the globally
+selected `*` surface may belong to another task when background work is running.
+Do not persist short `surface:N` refs in handoff files: refs are convenient for
+humans, but UUIDs are safer when tabs/surfaces are moved or closed.
 
 ```bash
 CMUX_UUID_RE='[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-SURFACES=$(cmux --id-format both list-pane-surfaces 2>&1)
-WIKI_SURFACE=$(printf '%s\n' "$SURFACES" | awk '/^\*/ {print; exit}' | grep -oE "$CMUX_UUID_RE" | head -1)
-WIKI_SURFACE_REF=$(echo "$SURFACES" | awk '/^\*/ {print $2; exit}')
+test -n "${CMUX_SURFACE_ID:-}" || { echo "CMUX_SURFACE_ID is missing" >&2; exit 1; }
+IDENTITY=$(cmux --id-format both identify --surface "$CMUX_SURFACE_ID" --no-caller 2>&1)
+WIKI_SURFACE=$(printf '%s\n' "$IDENTITY" | grep -oE '"surface_id"[[:space:]]*:[[:space:]]*"[0-9A-Fa-f-]{36}"' | grep -oE "$CMUX_UUID_RE" | head -1)
+WIKI_SURFACE_REF=$(printf '%s\n' "$IDENTITY" | sed -nE 's/.*"surface_ref"[[:space:]]*:[[:space:]]*"(surface:[0-9]+)".*/\1/p' | head -1)
+test "$WIKI_SURFACE" = "$CMUX_SURFACE_ID" || { echo "caller surface identity mismatch" >&2; exit 1; }
 ```
 
-The `*` prefix marks the selected surface — that is the wiki agent (we are in it right now). If the UUID cannot be determined — report and stop (the RPC mode in /reap-send does not work without it). `WIKI_SURFACE_REF` is only for human-readable echo/log.
+If the explicit caller UUID cannot be determined or differs from
+`CMUX_SURFACE_ID` — report and stop; never substitute the selected surface or
+guess by recency. `WIKI_SURFACE_REF` is only for human-readable echo/log.
 
 ```bash
 SURFACE_LINE=$(cmux --id-format both new-split right --surface "$WIKI_SURFACE" --focus false 2>&1)

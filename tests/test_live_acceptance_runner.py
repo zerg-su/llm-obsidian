@@ -176,9 +176,14 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     scratch = tmp / "scratch"
     scratch.mkdir()
     _argv, scratch_env = module.agent_argv(
-        "claude", repo, "fixture-model", "high", "prompt", scratch_root=scratch
+        "claude", repo, "fixture-model", "high", "prompt", scratch_root=scratch,
+        surface="00000000-0000-0000-0000-000000000003",
     )
     check("acceptance temp files are operation-scoped", all(scratch_env[name] == str(scratch) for name in ("TMPDIR", "TMP", "TEMP")))
+    check(
+        "acceptance agent is anchored to its exact surface",
+        scratch_env["CMUX_SURFACE_ID"] == "00000000-0000-0000-0000-000000000003",
+    )
 
     settling = tmp / "settling-outbox.json"
     state: dict[str, object] = {}
@@ -271,6 +276,17 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
     check("prompt pins runner-owned nested worktrees", "Use `LLM_OBSIDIAN_WORKTREES`" in prompt)
     check("prompt validates before disposable cleanup", "Validate product output before removing" in prompt)
+    check(
+        "prompt permits native subscription without exposing credentials",
+        "already authenticated" in prompt and "Never read, copy, print, export" in prompt,
+    )
+
+    dispatch_fixture = module.load_skill_fixtures()["dispatch"]["fixture"]
+    check(
+        "dispatch fixture cleans plan and prepares local runtime config",
+        "disposable approved plan page" in dispatch_fixture
+        and "runtime.env.example" in dispatch_fixture,
+    )
 
     cleanup_run = tmp / "cleanup-run"
     cleanup_sandbox = cleanup_run / "sandbox"

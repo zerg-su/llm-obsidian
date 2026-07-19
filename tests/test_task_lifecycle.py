@@ -469,6 +469,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         == [str((worktree / ".git").resolve()), str(task_registry.resolve())],
         result.stderr,
     )
+    result = run(
+        SUPERVISOR, "validate", "--worktree", str(worktree), "--kind", "task",
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("supervisor validates exact v3 task writable roots", result.returncode == 0, result.stderr)
     write_json(worktree / ".task-meta.json", meta)
     result = run(
         SUPERVISOR, "prepare-task", "--worktree", str(worktree),
@@ -639,12 +644,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "Accessing workspace:\nQuick safety check: Is this a project you created or one you trust?\n"
         "1. Yes, I trust this folder\nEnter to confirm\n"
     )
+    wrapped_claude_trust_screen = (
+        "Accessing workspace:\nQuick safety check: Is this a project you crea\n"
+        "ted or one you trust?\n1. Yes, I trust this fol\nder\nEnter to confirm\n"
+    )
     codex_trust_screen = (
         "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue\n"
     )
     check(
         "supervisor recognizes only complete native trust prompts",
         supervisor_module.workspace_trust_prompt_visible("claude", claude_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible("claude", wrapped_claude_trust_screen)
         and supervisor_module.workspace_trust_prompt_visible("codex", codex_trust_screen)
         and not supervisor_module.workspace_trust_prompt_visible("claude", codex_trust_screen)
         and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),

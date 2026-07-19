@@ -407,6 +407,12 @@ def run_check(
     out_lines.append("  - meta")
     out_lines.append("  - report")
     out_lines.append("  - tiling")
+    session = (os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "").strip()
+    if session:
+        out_lines.append("sessions:")
+        out_lines.append(f"  - {session}")
+    else:
+        out_lines.append("sessions: []")
     out_lines.append("---")
     out_lines.append("")
     out_lines.append("# Semantic Tiling Report")

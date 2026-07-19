@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -501,7 +502,6 @@ def validate_task_safety(
         if interaction_policy == "unattended":
             if git_common_dir is None or cmux_socket is None:
                 raise SupervisorError("Codex unattended task is missing an approved runtime root")
-            require_option(argv, "--add-dir", str(git_common_dir))
             expected_roots = [str(git_common_dir)]
             if task_session_dir is not None:
                 expected_roots.append(str(task_session_dir))
@@ -971,7 +971,13 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
         ),
     }
     expected = markers.get(runtime)
-    return expected is not None and all(marker in screen for marker in expected)
+    if expected is None:
+        return False
+    # cmux read-screen reports visual terminal rows.  A narrow pane may split
+    # native dialog markers at arbitrary character boundaries, so compare the
+    # exact marker text after removing layout whitespace only.
+    compact_screen = re.sub(r"\s+", "", screen)
+    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
 
 
 def automatic_workspace_trust_allowed(worktree: Path) -> bool:

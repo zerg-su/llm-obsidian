@@ -190,6 +190,11 @@ def test_refresh_only():
                               ollama_url="x", model="m", refresh_only=True)
             assert_eq("refresh-only warm exit 0", 0, rc)
 
+            rc = tc.run_check(rebuild=False, report_path=report,
+                              ollama_url="x", model="m", refresh_only=False)
+            assert_eq("report exit 0", 0, rc)
+            assert_true("report carries sessions provenance", "sessions:" in report.read_text())
+
             # page changed -> exactly that one re-embedded
             calls = []
             tc.embed = lambda text, model, url: (calls.append(1), [0.9, 0.1])[1]

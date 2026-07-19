@@ -296,7 +296,9 @@ cleanup and the typed outbox instead of waiting for another human message.
 Hard boundaries:
 
 - Work only inside `{sandbox}` and disposable nested paths it creates.
-- Never push, publish, deploy, send communication, use credentials, or mutate the source checkout.
+- Never push, publish, deploy, send communication, access credential material, or mutate the source checkout.
+- Native Claude/Codex processes and their opposite-model reviewers may use an already authenticated
+  subscription session. Never read, copy, print, export, or request its credential material.
 - A public web read is allowed only when the declared network class permits it.
 - If authentication is required, return `blocked` and name only the credential class; never print a value.
 - Install nothing unless it is already covered by an explicit local noninteractive fixture. Missing optional dependencies must produce a visible blocked/degraded result.
@@ -347,11 +349,16 @@ def agent_argv(
     prompt: str,
     *,
     scratch_root: Path | None = None,
+    surface: str = "",
 ) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env["LLM_OBSIDIAN_ACCEPTANCE"] = "1"
     env["LLM_OBSIDIAN_WORKTREES"] = str(sandbox / ".vault-meta" / "acceptance-worktrees")
     env["DCG_CONFIG"] = str(sandbox / "config" / "dcg" / "task.toml")
+    if surface:
+        if SURFACE_RE.fullmatch(surface) is None:
+            raise AcceptanceRunnerError("acceptance agent surface is invalid")
+        env["CMUX_SURFACE_ID"] = surface
     if scratch_root is not None:
         for name in ("TMPDIR", "TMP", "TEMP"):
             env[name] = str(scratch_root)
@@ -409,6 +416,7 @@ def run_agent_process(spec_path: Path) -> int:
         route["effort"],
         prompt_path.read_text(encoding="utf-8"),
         scratch_root=scratch_root,
+        surface=str(spec.get("surface") or ""),
     )
     try:
         launch_cwd = run_dir if runtime == "claude" else sandbox
