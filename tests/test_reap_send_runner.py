@@ -67,6 +67,25 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
     check("callback targets exact coordinator surface", value["surface"] == surface)
     check("callback contains one exact reap runner command", value["message"].count("reap-runner.py") == 1)
     check("callback shell-quotes paths with spaces", "'" in value["command"] and str(worktree) in value["command"])
+    send_calls: list[list[str]] = []
+    sleeps: list[float] = []
+    original_run = sender.subprocess.run
+    original_sleep = sender.time.sleep
+    sender.subprocess.run = lambda argv, **_kwargs: (
+        send_calls.append(list(argv))
+        or sender.subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
+    )
+    sender.time.sleep = lambda seconds: sleeps.append(seconds)
+    try:
+        sender.send(value)
+    finally:
+        sender.subprocess.run = original_run
+        sender.time.sleep = original_sleep
+    check(
+        "callback settles paste before Enter",
+        [call[1] for call in send_calls] == ["send", "send-key"]
+        and sleeps == [sender.CMUX_PASTE_SETTLE_SECONDS],
+    )
     drifted = dict(summary, title="Different")
     (worktree / ".task-summary.json").write_text(json.dumps(drifted), encoding="utf-8")
     try:

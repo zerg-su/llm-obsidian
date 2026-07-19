@@ -8,8 +8,12 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, NoReturn
+
+
+CMUX_PASTE_SETTLE_SECONDS = 0.2
 
 
 class SendError(ValueError):
@@ -89,14 +93,17 @@ def callback(worktree: Path) -> dict[str, str]:
 
 
 def send(value: dict[str, str]) -> None:
-    for argv, label in (
+    commands = (
         (["cmux", "send", "--surface", value["surface"], value["message"]], "callback send"),
         (["cmux", "send-key", "--surface", value["surface"], "Enter"], "callback submit"),
-    ):
+    )
+    for index, (argv, label) in enumerate(commands):
         result = subprocess.run(argv, text=True, capture_output=True, check=False)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
             raise SendError(f"{label} failed" + (f": {detail[:300]}" if detail else ""))
+        if index == 0:
+            time.sleep(CMUX_PASTE_SETTLE_SECONDS)
 
 
 def main() -> int:
