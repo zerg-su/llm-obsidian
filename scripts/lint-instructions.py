@@ -261,7 +261,10 @@ def check_repo(root: Path) -> list[str]:
     for required in ("task_escalation.py", "Treat `.task-meta.json` as read-only", "Never push, deploy, publish", "it never sends you input"):
         if required not in task_prompt:
             issues.append(f"dispatch task prompt missing safety invariant {required!r}")
-    for required in ("interaction_policy=unattended", "task_contract.py", "final"):
+    for required in (
+        "interaction_policy=unattended", "task_contract.py", "final",
+        "send_reap.py", "reap-runner.py", "Do not send a separate `/reap`",
+    ):
         if required not in reap_send_text:
             issues.append(f"reap-send missing unattended handoff invariant {required!r}")
     for required in (

@@ -10,6 +10,19 @@ allowed-tools: Read Write Edit Bash
 
 The symmetric counterpart to /dispatch (wiki-side spawn) and /reap (wiki-side ingest). Runs from the task worktree — any CWD that contains the `.wiki-cmux-surface` file placed there by /dispatch. Requires cmux. It never closes a surface directly; approved unattended final reap later arms task `/exit` and close-on-process-return.
 
+For v3 unattended tasks, callback delivery is code-owned. After writing and
+rendering the typed summary, run exactly once:
+
+```bash
+python3 <vault-root>/skills/reap-send/scripts/send_reap.py --worktree <exact-worktree>
+```
+
+The sender validates task metadata, summary schema, approved type/title, and
+the exact coordinator surface. It sends one operation-bound `reap-runner.py`
+command, so the coordinator does not rediscover the task or reproduce reap
+phases. Do not send a separate `/reap`, call `finish`, or resend after success.
+The remaining RPC section is the legacy/interactive compatibility reference.
+
 ## Context: how this works in the pipeline
 
 ```
@@ -152,7 +165,7 @@ Exit 2 means the model-produced contract is invalid: fix the JSON before any
 callback. JSON is the source of truth; Markdown is a deterministic compatibility
 view for old reap flows and humans.
 
-### 2.3 Read the wiki-surface ID, reap command, and task name
+### 2.3 Read the wiki-surface ID, reap command, and task name (compatibility only)
 
 ```bash
 WIKI_SURFACE=$(cat .wiki-cmux-surface)
@@ -168,7 +181,7 @@ INTERACTION_POLICY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[
 
 If `WIKI_SURFACE` or `TASK_NAME` is empty — stop, tell the user that `.task-prompt.md` is broken / `.wiki-cmux-surface` is missing.
 
-### 2.4 RPC: cmux send the /reap command into the wiki split
+### 2.4 RPC: cmux send the /reap command into the wiki split (compatibility only)
 
 ```bash
 if [ -n "$WIKI_REAP_COMMAND" ]; then

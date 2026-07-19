@@ -64,6 +64,11 @@ the vault, archives the broker task, and arms exact-surface exit. Legacy,
 interactive, ambiguous, conflicted, and already-executed recovery cases stay
 visible and use the diagnostic contract rather than an implicit retry.
 
+The task-side `skills/reap-send/scripts/send_reap.py` validates the typed
+summary against that task contract and sends one exact runner command to the
+bound coordinator surface. A v3 unattended handoff never asks the coordinator
+to resolve the task from `wiki/log.md` or reconstruct reap phases from prose.
+
 ## Layout and concurrency
 
 Canonical state is:

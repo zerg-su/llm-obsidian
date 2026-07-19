@@ -17,6 +17,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   has one contract-bound runner, and both paths emit content-free stage timing
   so repeated model turns are reserved for semantic choices rather than
   mechanical orchestration.
+- Unattended `reap-send` now validates and sends the exact `reap-runner.py`
+  callback instead of asking the coordinator to rediscover the task and replay
+  the finalization phases. Reap log/hot entries reuse the result page address,
+  and structured writer failures retain their actionable reason.
 
 - Codex task sessions now receive write access only to their exact v3 task
   registry subtree, allowing operation-scoped review callbacks without exposing

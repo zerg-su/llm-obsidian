@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import inspect
 import os
 import subprocess
 import sys
@@ -288,6 +289,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "typed approve review" in dispatch_fixture
         and "independent runner proof" in dispatch_fixture
         and "substitute narrative evidence" in dispatch_fixture,
+    )
+    check(
+        "Codex dispatch fixture provisions ignored runtime config only",
+        "runtime.env.example" in inspect.getsource(module.dispatch_acceptance_fixture)
+        and "codex-sync" not in inspect.getsource(module.dispatch_acceptance_fixture),
     )
 
     prepared = {

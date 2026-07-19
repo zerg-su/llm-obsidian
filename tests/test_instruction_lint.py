@@ -67,4 +67,10 @@ assert '"sync-config", "--apply"' in dispatch_runner
 assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch delegates anchored mechanics to typed runner")
 
+reap_send = (ROOT / "skills" / "reap-send" / "SKILL.md").read_text(encoding="utf-8")
+assert "send_reap.py --worktree" in reap_send
+assert "Do not send a separate `/reap`" in reap_send
+assert (ROOT / "skills/reap-send/scripts/send_reap.py").is_file()
+print("OK   reap-send delegates exact unattended callback to code")
+
 print("\nAll instruction lint tests passed.")

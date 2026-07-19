@@ -321,6 +321,10 @@ Do not merge, push, publish, deploy, delete the task worktree, or expand scope.
         cwd=sandbox,
         input_text=json.dumps(payload, ensure_ascii=False),
     )
+    if runtime == "codex":
+        runtime_env = sandbox / "scripts" / "mcp-gateway" / "runtime.env"
+        if not runtime_env.exists():
+            shutil.copy2(runtime_env.with_name("runtime.env.example"), runtime_env)
     fixture = {
         "task_name": task_name,
         "branch": f"task/{task_name}",
