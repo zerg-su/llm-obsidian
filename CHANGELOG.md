@@ -4,9 +4,34 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
-## [Unreleased]
+## [2.1.1] - 2026-07-20
+
+### Added
+
+- Added content-free per-turn and runner-stage timing to the existing bounded
+  pipeline event stream, including incomplete-turn accounting and p50/p95
+  reporting without prompts, responses, commands, or error text.
+- Added content-addressed acceptance evidence with exact per-cell dependencies,
+  production model-generation tracking, row integrity hashes, evidence age,
+  atomic checkpoints, and fail-closed selective reuse.
+
+### Changed
+
+- Compacted the normal dispatch, review, reap, reap-send, and close skill paths
+  around deterministic repo-owned runners and conditional compatibility
+  references, reducing normal-path orchestration context by about 30% while
+  retaining semantic decisions and safety gates in the model.
+- Live acceptance can select bounded skills, hashes only the exact fixture and
+  scenario registry fragments for each cell, and records the actual cheaper
+  Sonnet/Terra test model separately from the production generation.
 
 ### Fixed
+
+- Exact cmux cleanup now resolves and supplies the surface's window/workspace
+  anchors, verifies disappearance in the cmux tree, and retries once instead of
+  treating a misleading `not_found` response as success. The `/close` live
+  fixture reuses its runner-created surface and delegates proof/page cleanup to
+  code, eliminating nested-agent quoting failures and orphan tabs.
 
 - Approved-plan dispatch now uses a typed, idempotent post-approval runner for
   route capture, worktree/task identity, prompt/meta rendering, anchored spawn,
