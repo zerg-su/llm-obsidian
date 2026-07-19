@@ -449,6 +449,32 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor grants only the task Git metadata root",
         agent_spec["argv"][add_dir_index + 1] == str((worktree / ".git").resolve()),
     )
+    v3_meta = dict(meta)
+    v3_meta.update({"version": 3, "project_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4())})
+    task_registry = (
+        worktree / ".vault-meta" / "task-sessions" / "projects" / v3_meta["project_id"]
+        / "tasks" / v3_meta["task_id"]
+    )
+    task_registry.mkdir(parents=True)
+    write_json(worktree / ".task-meta.json", v3_meta)
+    result = run(
+        SUPERVISOR, "prepare-task", "--worktree", str(worktree),
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    v3_spec = json.loads((worktree / ".task-agent-command.json").read_text(encoding="utf-8"))
+    check(
+        "v3 task receives only its exact coordinator registry subtree",
+        result.returncode == 0
+        and supervisor_module.option_values(v3_spec["argv"], "--add-dir")
+        == [str((worktree / ".git").resolve()), str(task_registry.resolve())],
+        result.stderr,
+    )
+    write_json(worktree / ".task-meta.json", meta)
+    result = run(
+        SUPERVISOR, "prepare-task", "--worktree", str(worktree),
+        "--surface", meta["task_surface"], cwd=worktree, env=env,
+    )
+    check("v2 task keeps the narrow legacy writable root", result.returncode == 0, result.stderr)
     check(
         "supervisor grants only the exact cmux socket",
         supervisor_module.option_values(agent_spec["argv"], "-c")

@@ -6,6 +6,20 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex task sessions now receive write access only to their exact v3 task
+  registry subtree, allowing operation-scoped review callbacks without exposing
+  the broader coordinator registry.
+- Review archival now resolves the coordinator from the reviewed worktree
+  instead of the caller's current directory, so linked-task reviews defer
+  correctly even when invoked from the coordinator checkout.
+- Live acceptance now contains runner-owned nested worktrees, waits for slow
+  interactive agent shutdown, uses bounded scenario-specific timeouts, and
+  distinguishes disposable append-only bookkeeping from product residue.
+- Defuddle's no-CLI fallback now performs and verifies bounded boilerplate
+  removal instead of treating raw fetched Markdown as cleaned output.
+
 ## [2.1.0] - 2026-07-18
 
 ### Added

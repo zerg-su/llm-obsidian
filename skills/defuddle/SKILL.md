@@ -73,7 +73,13 @@ If defuddle is not installed, check:
 which defuddle 2>/dev/null || echo "not installed"
 ```
 
-If not installed: use WebFetch directly. The content will be less clean but still workable.
+If not installed: use WebFetch, then perform a bounded local cleanup before returning or
+filing the Markdown. Keep the page title and main article/documentation body; remove site
+navigation, breadcrumb-only blocks, project/version selectors, search/help chrome,
+copyright/footer blocks, and unrelated previous/next-page lists. Verify that at least one
+main-content heading or paragraph remains and that known navigation/footer labels from the
+fetched page are absent. Report this visibly as `manual fallback`; never describe raw
+WebFetch output as defuddled content.
 
 ---
 

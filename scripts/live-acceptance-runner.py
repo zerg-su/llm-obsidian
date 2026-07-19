@@ -31,7 +31,7 @@ SURFACE_RE = re.compile(
 OUTBOX_MAX_BYTES = 64 * 1024
 OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
-AGENT_EXIT_GRACE_SECONDS = 60.0
+AGENT_EXIT_GRACE_SECONDS = 300.0
 DISPOSABLE_VAULT_BOOKKEEPING = {
     ".vault-meta/address-counter.txt",
     ".vault-meta/address-map.tsv",
@@ -303,10 +303,15 @@ Hard boundaries:
 - Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
 - The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
-  and its run-scoped temporary directory. Do not run `git restore`, `git checkout`, `git stash`,
+  `{sandbox / '.vault-meta' / 'acceptance-worktrees'}`, and its run-scoped temporary directory.
+  Use `LLM_OBSIDIAN_WORKTREES` for every nested dispatch; do not invent another worktree root.
+  Do not run `git restore`, `git checkout`, `git stash`,
   manually delete those runner-owned paths, pass `--tmp-root`/`--state-root`, or override
   `TMPDIR`/`TMP`/`TEMP`. Remove the fixture's product output and close external processes/surfaces;
   the runner validates allowed vault bookkeeping and deletes the clone.
+- Validate product output before removing disposable pages. After removal, append-only log/hot/index
+  bookkeeping may still name those discarded pages; report it as runner-owned disposable bookkeeping
+  instead of requiring a second whole-vault validation or treating it as a product failure.
 - Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 
@@ -643,15 +648,14 @@ def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
         path = line[3:]
         if path == ".acceptance-sandbox.json":
             continue
+        if path.startswith(".vault-meta/acceptance-worktrees/"):
+            continue
         if is_disposable_bookkeeping(path, line[:2]):
             bookkeeping.append(path)
             continue
         dirty.append(line)
     if dirty:
         return False, "disposable clone retained product or vault changes"
-    nested = sandbox / ".vault-meta" / "acceptance-worktrees"
-    if nested.is_dir() and any(nested.iterdir()):
-        return False, "nested acceptance worktrees remain"
     if bookkeeping:
         return True, "product outputs removed; only disposable vault bookkeeping remains"
     return True, "committed HEAD and worktree restored"

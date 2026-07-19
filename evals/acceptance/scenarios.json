@@ -52,12 +52,12 @@
       "instructions": "Use one bounded public documentation URL, acknowledge the unsafe single-context warning exactly once, perform no external write, and verify that no second model session was opened."
     },
     "vault-maintenance": {
-      "timeout_seconds": 900,
+      "timeout_seconds": 1200,
       "network": "none",
       "instructions": "Create a minimal disposable maintenance fixture, exercise preview and commit/diagnostic behavior for the named skill, verify determinism, then clean it completely."
     },
     "ingest": {
-      "timeout_seconds": 1200,
+      "timeout_seconds": 1500,
       "network": "protected",
       "instructions": "Ingest one local text fixture and one bounded public documentation URL through the protected path, verify provenance/deduplication, then remove all disposable pages and raw artifacts."
     }

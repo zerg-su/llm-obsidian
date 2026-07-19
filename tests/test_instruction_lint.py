@@ -48,4 +48,10 @@ assert any("mechanism-failure category" in issue for issue in issues)
 assert any("reference missing" in issue for issue in issues)
 print("OK   failure-repair auto-repair boundary drift detected")
 
+defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")
+assert "manual fallback" in defuddle
+assert "never describe raw" in defuddle
+assert "copyright/footer" in defuddle
+print("OK   defuddle fallback requires actual cleanup")
+
 print("\nAll instruction lint tests passed.")

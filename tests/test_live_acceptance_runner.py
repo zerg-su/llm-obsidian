@@ -257,7 +257,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         module.send_surface = original_send_surface
     check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
     check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
-    check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 60)
+    check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 300)
 
     prompt = module.prompt_text(
         row(), module.load_scenarios()["conversation-readonly"], repo,
@@ -269,6 +269,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
     check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
     check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
+    check("prompt pins runner-owned nested worktrees", "Use `LLM_OBSIDIAN_WORKTREES`" in prompt)
+    check("prompt validates before disposable cleanup", "Validate product output before removing" in prompt)
 
     cleanup_run = tmp / "cleanup-run"
     cleanup_sandbox = cleanup_run / "sandbox"
@@ -289,6 +291,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module.safe_cleanup(cleanup_run)
     module.tempfile.gettempdir = original_gettempdir
     check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
+
+    owned_nested = repo / ".vault-meta" / "acceptance-worktrees" / "task-one"
+    owned_nested.mkdir(parents=True)
+    (owned_nested / "fixture.txt").write_text("runner owned\n", encoding="utf-8")
+    clean, reason = module.sandbox_cleanup_proof(repo, commit)
+    check("runner contains its exact nested worktree root", clean, reason)
 
     child_root = tmp / "child-sandbox"
     child_state = child_root / ".vault-meta/task-sessions/projects/p/tasks/t/lanes/l/operations/o/state.json"

@@ -492,6 +492,7 @@ def validate_task_safety(
     cmux_socket: Path | None = None,
     model: str = "",
     effort: str = "high",
+    task_session_dir: Path | None = None,
 ) -> None:
     require_option(argv, "--model", model)
     if runtime == "codex":
@@ -501,6 +502,11 @@ def validate_task_safety(
             if git_common_dir is None or cmux_socket is None:
                 raise SupervisorError("Codex unattended task is missing an approved runtime root")
             require_option(argv, "--add-dir", str(git_common_dir))
+            expected_roots = [str(git_common_dir)]
+            if task_session_dir is not None:
+                expected_roots.append(str(task_session_dir))
+            if option_values(argv, "--add-dir") != expected_roots:
+                raise SupervisorError("Codex task command has unexpected writable roots")
             require_option(argv, "-a", "never")
             require_option(argv, "-s", "workspace-write")
             if option_values(argv, "-c") != task_codex_config_values(cmux_socket, effort):
@@ -608,6 +614,24 @@ def validated_task_git_common_dir(worktree: Path, meta: dict[str, Any]) -> Path:
     if not target.is_dir() or resolved_git_common_dir(target) != common:
         raise SupervisorError("task worktree does not belong to target_repo")
     return common
+
+
+def validated_task_session_dir(meta: dict[str, Any]) -> Path | None:
+    """Return the sole coordinator registry subtree owned by a v3 task."""
+    if meta.get("version") != 3:
+        return None
+    vault = Path(str(meta.get("vault_root") or "")).expanduser().resolve()
+    project_id = str(meta.get("project_id") or "").strip()
+    task_id = str(meta.get("task_id") or "").strip()
+    root = (vault / ".vault-meta" / "task-sessions").resolve()
+    task_dir = (root / "projects" / project_id / "tasks" / task_id).resolve()
+    try:
+        task_dir.relative_to(root)
+    except ValueError as exc:
+        raise SupervisorError("task registry root escapes the coordinator registry") from exc
+    if not task_dir.is_dir() or task_dir.stat().st_uid != os.getuid():
+        raise SupervisorError("exact task registry root is missing or not owned by the current user")
+    return task_dir
 
 
 def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
@@ -738,6 +762,11 @@ def validate_routing(
             if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
             else None
         )
+        task_session_dir = (
+            validated_task_session_dir(source_meta)
+            if spec["runtime"] == "codex" and task_policy["interaction_policy"] == "unattended"
+            else None
+        )
         validate_task_safety(
             spec["argv"],
             spec["runtime"],
@@ -746,6 +775,7 @@ def validate_routing(
             cmux_socket,
             str(task_route["model"]),
             str(task_route["effort"]),
+            task_session_dir=task_session_dir,
         )
 
 
@@ -790,6 +820,9 @@ def prepare_task(worktree: Path, surface: str) -> Path:
         if policy["interaction_policy"] == "unattended":
             cmux_socket = validated_cmux_socket_path()
             argv.extend(["--add-dir", str(validated_task_git_common_dir(worktree, meta))])
+            task_session_dir = validated_task_session_dir(meta)
+            if task_session_dir is not None:
+                argv.extend(["--add-dir", str(task_session_dir)])
             argv.extend(["-a", "never", "-s", "workspace-write"])
             append_task_codex_network_policy(argv, cmux_socket, effort)
             env["CMUX_SOCKET_PATH"] = str(cmux_socket)

@@ -576,7 +576,10 @@ def archive_or_defer(
     # A task worktree must never become its own coordinator merely because a
     # script copy was executed there.  Only the distinct canonical vault may
     # perform the contentful archive transaction.
-    if worktree.resolve() == vault.resolve() or coordinator_repo_root() != vault.resolve():
+    if (
+        worktree.resolve() == vault.resolve()
+        or coordinator_repo_root(worktree) != vault.resolve()
+    ):
         result = {
             "schema_version": 1,
             "status": "deferred",

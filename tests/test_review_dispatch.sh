@@ -360,6 +360,27 @@ assert result["status"] == "deferred"
 PY
 expect_eq "worktree-never-self-archives" "$?" 0
 
+python3 - "$SCRIPT" "$LINK_WORKTREE" "$REPO_ROOT" <<'PY'
+import importlib.util
+import os
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("review_dispatch_coordinator_cwd_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2]).resolve()
+vault = pathlib.Path(sys.argv[3]).resolve()
+os.chdir(vault)
+result = module.archive_or_defer(
+    worktree,
+    {"vault_root": str(vault), "review_id": "linked-from-coordinator-cwd"},
+    dry_run=True,
+)
+assert result["status"] == "deferred"
+PY
+expect_eq "linked-task-defers-even-from-coordinator-cwd" "$?" 0
+
 COORDINATOR="$SANDBOX/coordinator"
 write_fixture "$COORDINATOR"
 mkdir -p "$COORDINATOR/wiki" "$COORDINATOR/scripts" \
