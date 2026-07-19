@@ -365,6 +365,13 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "not retry it, perform open-ended diagnosis" in dispatch_prompt
         and "Publish the typed fail/blocked outbox immediately" in dispatch_prompt,
     )
+    check(
+        "dispatch successful reap avoids duplicate model-side proof",
+        "final reap runner returns `status: complete`" in dispatch_prompt
+        and "publish the\n  typed pass outbox immediately" in dispatch_prompt
+        and "Do not enumerate proof files" in dispatch_prompt
+        and "outer acceptance runner performs" in dispatch_prompt,
+    )
     module.write_dispatch_acceptance_request(
         repo,
         prepared,

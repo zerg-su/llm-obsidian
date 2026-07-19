@@ -287,6 +287,35 @@ assert profile({"codex_home": str(home_with), "codex_profile": "executor"}, "cla
 PY
 [[ $? -eq 0 ]] && ok "reviewer-profile-precedence" || bad "reviewer-profile-precedence" "reviewer profile isolation failed"
 
+# Reviewer routing belongs to the coordinator vault. A task worktree may carry
+# the tracked config, but it cannot inherit the vault's ignored local override.
+python3 - "$SCRIPT" "$SANDBOX" "$REPO_ROOT" <<'PY'
+import importlib.util, pathlib, shutil, sys
+
+script, sandbox, repo = (pathlib.Path(p).resolve() for p in sys.argv[1:4])
+sys.path.insert(0, str(script.parent))
+spec = importlib.util.spec_from_file_location("spawn_review_routing_mod", script)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+base = sandbox / "routing-precedence"
+vault = base / "vault"
+worktree = base / "worktree"
+(vault / "config").mkdir(parents=True)
+(worktree / "config").mkdir(parents=True)
+tracked = (repo / "config/model-routing.toml").read_text(encoding="utf-8")
+(vault / "config/model-routing.toml").write_text(tracked, encoding="utf-8")
+(worktree / "config/model-routing.toml").write_text(tracked, encoding="utf-8")
+(vault / "config/model-routing.local.toml").write_text(
+    '[roles.review.claude]\nmodel = "sonnet"\n[model_registry]\nsonnet = "claude"\n',
+    encoding="utf-8",
+)
+route = mod.resolve_review_env(
+    worktree, vault, {"executor_runtime": "codex", "model": "gpt-5.6-sol"}, "claude"
+)
+assert route["reviewer_model"] == "sonnet", route
+PY
+[[ $? -eq 0 ]] && ok "reviewer-routing-prefers-coordinator-config" || bad "reviewer-routing-prefers-coordinator-config" "vault-local reviewer override was lost"
+
 LINK_ROOT="$SANDBOX/linked-root"
 LINK_WORKTREE="$SANDBOX/linked-worktree"
 mkdir -p "$LINK_ROOT"

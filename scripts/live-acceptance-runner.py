@@ -604,6 +604,10 @@ def prompt_text(
   not retry it, perform open-ended diagnosis, or clean runner-owned state.
   Publish the typed fail/blocked outbox immediately with that bounded error;
   the acceptance runner owns containment and exact cleanup for this path.
+- After the exact final reap runner returns `status: complete`, publish the
+  typed pass outbox immediately. Do not enumerate proof files or invoke
+  `dispatch_acceptance_proof` yourself: the outer acceptance runner performs
+  that independent durable-proof check before accepting the cell.
 - Validate the task result before the typed outbox. The runner independently proves the exact commit,
   typed review, archived task, final reap, and plan closure, then deletes the disposable clone."""
     return f"""# Live release acceptance operation

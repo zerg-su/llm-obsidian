@@ -727,7 +727,10 @@ def resolve_review_env(worktree: Path, vault: Path, meta: dict[str, Any], review
     review_skill = normalize_skill_command(raw_review_skill, executor_runtime, "review-dispatch", plugin)
     review_send_skill = normalize_skill_command(raw_review_send_skill, reviewer_runtime, "review-send", plugin)
 
-    config_root = worktree if (worktree / "config/model-routing.toml").is_file() else vault
+    # Reviewer defaults are coordinator policy.  A dispatched product worktree
+    # may contain a tracked copy of the config but cannot carry the coordinator's
+    # ignored local override, so prefer the canonical vault whenever available.
+    config_root = vault if (vault / "config/model-routing.toml").is_file() else worktree
     if not (config_root / "config/model-routing.toml").is_file():
         config_root = DEFAULT_VAULT
     try:
@@ -1242,7 +1245,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     reviewer_model = ns.model or env["reviewer_model"]
     reviewer_effort = ns.effort or env["reviewer_effort"]
     if ns.model:
-        config_root = worktree if (worktree / "config/model-routing.toml").is_file() else vault
+        config_root = vault if (vault / "config/model-routing.toml").is_file() else worktree
         if not (config_root / "config/model-routing.toml").is_file():
             config_root = DEFAULT_VAULT
         try:
