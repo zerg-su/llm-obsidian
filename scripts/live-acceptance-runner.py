@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -384,7 +385,7 @@ def run_agent_process(spec_path: Path) -> int:
         raise AcceptanceRunnerError("acceptance sandbox is not bound to its run directory")
     if prompt_path != run_dir / "prompt.md" or not prompt_path.is_file():
         raise AcceptanceRunnerError("acceptance prompt is not operation-scoped")
-    if scratch_root != run_dir / "scratch" or not (scratch_root / ".acceptance-scratch.json").is_file():
+    if scratch_root != scratch_root_for(run_dir) or not (scratch_root / ".acceptance-scratch.json").is_file():
         raise AcceptanceRunnerError("acceptance scratch directory is not operation-scoped")
     runtime = str(spec.get("runtime") or "")
     config = load_config(sandbox)
@@ -518,7 +519,30 @@ def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
         except AcceptanceRunnerError:
             return "exit-request-failed; surface left visible"
     deadline = time.monotonic() + 30
+    exit_confirmation_sent = False
     while time.monotonic() < deadline and not exit_marker.is_file():
+        if runtime == "claude" and not exit_confirmation_sent:
+            screen = subprocess.run(
+                ["cmux", "read-screen", "--surface", surface, "--lines", "40"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if (
+                screen.returncode == 0
+                and "1. Exit anyway" in screen.stdout
+                and "2. Move to background and exit" in screen.stdout
+                and "3. Stay" in screen.stdout
+            ):
+                confirmed = subprocess.run(
+                    ["cmux", "send-key", "--surface", surface, "Enter"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if confirmed.returncode != 0:
+                    return "exit-confirmation-failed; surface left visible"
+                exit_confirmation_sent = True
         time.sleep(0.5)
     if not exit_marker.is_file():
         return "agent did not exit; surface left visible"
@@ -531,15 +555,60 @@ def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
     return "exact surface closed"
 
 
+def scratch_root_for(run_dir: Path) -> Path:
+    return Path(tempfile.gettempdir()).resolve() / f"llm-obsidian-acceptance-{run_dir.name}"
+
+
 def safe_cleanup(run_dir: Path) -> None:
     sandbox = run_dir / "sandbox"
     marker = sandbox / ".acceptance-sandbox.json"
     if sandbox.is_dir() and marker.is_file() and sandbox.parent == run_dir:
         shutil.rmtree(sandbox)
-    scratch = run_dir / "scratch"
+    scratch = scratch_root_for(run_dir)
     scratch_marker = scratch / ".acceptance-scratch.json"
-    if scratch.is_dir() and scratch_marker.is_file() and scratch.parent == run_dir:
-        shutil.rmtree(scratch)
+    if scratch.is_dir() and not scratch.is_symlink() and scratch_marker.is_file() and not scratch_marker.is_symlink():
+        try:
+            marker_value = read_json(scratch_marker)
+        except AcceptanceRunnerError:
+            marker_value = {}
+        if marker_value == {"schema_version": 1, "run_dir": str(run_dir)}:
+            shutil.rmtree(scratch)
+
+
+def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[int, list[str]]:
+    """Close only exact child surfaces durably bound to this coordinator."""
+    closed = 0
+    failures: list[str] = []
+    root = sandbox / ".vault-meta" / "task-sessions"
+    if not root.is_dir():
+        return closed, failures
+    surfaces: set[str] = set()
+    for path in root.glob("projects/*/tasks/*/lanes/*/operations/*/state.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            state = read_json(path)
+        except AcceptanceRunnerError:
+            continue
+        if state.get("coordinator_surface") != coordinator_surface:
+            continue
+        for key in ("surface", "fetch_surface", "synth_surface"):
+            value = str(state.get(key) or "")
+            if value != coordinator_surface and SURFACE_RE.fullmatch(value):
+                surfaces.add(value)
+    for surface in sorted(surfaces):
+        result = subprocess.run(
+            ["cmux", "close-surface", "--surface", surface],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        output = (result.stdout + result.stderr).lower()
+        if result.returncode == 0:
+            closed += 1
+        elif not any(token in output for token in ("not found", "not_found", "unknown surface")):
+            failures.append(surface)
+    return closed, failures
 
 
 def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
@@ -603,7 +672,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     cleanup = "sandbox retained for diagnosis"
     try:
         sandbox, commit = create_sandbox(run_dir)
-        scratch_root = run_dir / "scratch"
+        scratch_root = scratch_root_for(run_dir)
         scratch_root.mkdir(mode=0o700)
         atomic_json(
             scratch_root / ".acceptance-scratch.json",
@@ -650,8 +719,15 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             runtime=row["runtime"],
         )
         result = validate_agent_result(row, raw)
+        children_closed, child_failures = close_operation_children(sandbox, surface)
         close = close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
-        if close != "exact surface closed":
+        if child_failures:
+            result["verdict"] = "blocked"
+            result["defect"] = "exact operation child surface close failed"
+        elif children_closed and result["verdict"] in {"pass", "n-a"}:
+            result["verdict"] = "blocked"
+            result["defect"] = f"runner had to close {children_closed} leftover operation child surface(s)"
+        elif close != "exact surface closed":
             result["verdict"] = "blocked"
             result["defect"] = close
         elif result["verdict"] in {"pass", "n-a"}:
@@ -674,6 +750,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     except BaseException:
         close = "surface was not created"
         if surface:
+            close_operation_children(locals().get("sandbox", run_dir / "sandbox"), surface)
             close = close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
         spec_path = run_dir / "operation.json"
         if spec_path.is_file():

@@ -226,6 +226,25 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "cmux", "close-surface", "--surface", "00000000-0000-0000-0000-000000000001"
     ]])
 
+    confirming_exit = tmp / "confirming-agent-exit.json"
+    confirm_calls: list[list[str]] = []
+    module.send_surface = lambda *_args, **_kwargs: None
+    def confirm_run(argv, **_kwargs):
+        confirm_calls.append(list(argv))
+        if argv[1] == "read-screen":
+            return subprocess.CompletedProcess(argv, 0, stdout="1. Exit anyway\n2. Move to background and exit\n3. Stay\n", stderr="")
+        if argv[1] == "send-key":
+            confirming_exit.write_text('{"schema_version": 1}\n', encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
+    module.subprocess.run = confirm_run
+    try:
+        close_result = module.close_surface("00000000-0000-0000-0000-000000000002", "claude", confirming_exit)
+    finally:
+        module.subprocess.run = original_run
+        module.send_surface = original_send_surface
+    check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
+    check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
+
     prompt = module.prompt_text(
         row(), module.load_scenarios()["conversation-readonly"], repo,
         repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
@@ -237,15 +256,44 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
     cleanup_run = tmp / "cleanup-run"
     cleanup_sandbox = cleanup_run / "sandbox"
-    cleanup_scratch = cleanup_run / "scratch"
+    system_tmp = tmp / "system-tmp"
+    system_tmp.mkdir()
+    original_gettempdir = module.tempfile.gettempdir
+    module.tempfile.gettempdir = lambda: str(system_tmp)
+    cleanup_scratch = module.scratch_root_for(cleanup_run)
     cleanup_sandbox.mkdir(parents=True)
     cleanup_scratch.mkdir()
     (cleanup_sandbox / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
-    (cleanup_scratch / ".acceptance-scratch.json").write_text("{}\n", encoding="utf-8")
+    (cleanup_scratch / ".acceptance-scratch.json").write_text(
+        json.dumps({"schema_version": 1, "run_dir": str(cleanup_run)}) + "\n",
+        encoding="utf-8",
+    )
     (cleanup_scratch / "nested").mkdir()
     (cleanup_scratch / "nested" / "artifact.json").write_text("{}\n", encoding="utf-8")
     module.safe_cleanup(cleanup_run)
+    module.tempfile.gettempdir = original_gettempdir
     check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
+
+    child_root = tmp / "child-sandbox"
+    child_state = child_root / ".vault-meta/task-sessions/projects/p/tasks/t/lanes/l/operations/o/state.json"
+    child_state.parent.mkdir(parents=True)
+    child_state.write_text(json.dumps({
+        "coordinator_surface": "00000000-0000-0000-0000-000000000003",
+        "fetch_surface": "00000000-0000-0000-0000-000000000004",
+    }), encoding="utf-8")
+    child_calls: list[list[str]] = []
+    module.subprocess.run = lambda argv, **_kwargs: (
+        child_calls.append(list(argv))
+        or subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
+    )
+    try:
+        child_closed, child_failures = module.close_operation_children(
+            child_root, "00000000-0000-0000-0000-000000000003"
+        )
+    finally:
+        module.subprocess.run = original_run
+    check("interrupted operation closes exact registered child", child_closed == 1 and not child_failures)
+    check("registered child close never targets coordinator", all(call[-1] == "00000000-0000-0000-0000-000000000004" for call in child_calls))
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
