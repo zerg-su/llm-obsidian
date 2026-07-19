@@ -686,6 +686,10 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and not supervisor_module.workspace_trust_prompt_visible("claude", codex_trust_screen)
         and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
     )
+    check(
+        "supervisor keeps trust bootstrap alive through slow native startup",
+        supervisor_module.WORKSPACE_TRUST_TIMEOUT_SECONDS >= 60,
+    )
     trust_commands: list[list[str]] = []
 
     def trust_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:

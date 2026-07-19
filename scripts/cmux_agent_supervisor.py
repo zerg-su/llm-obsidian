@@ -31,7 +31,10 @@ REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
 WORKSPACE_TRUST_POLL_SECONDS = 0.1
-WORKSPACE_TRUST_TIMEOUT_SECONDS = 15
+# Codex may spend tens of seconds loading before its native workspace-trust
+# dialog is painted.  Keep this a bounded startup bootstrap, but do not expire
+# before a slow authenticated CLI has reached its first interactive screen.
+WORKSPACE_TRUST_TIMEOUT_SECONDS = 120
 try:
     _ROUTING_CONFIG = load_routing_config(Path(__file__).resolve().parents[1])
 except RoutingError:  # Hermetic consumers may copy only the supervisor.
