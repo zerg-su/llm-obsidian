@@ -189,6 +189,31 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("missing runner blocks every row", result.returncode == 1 and payload["summary"]["verdicts"]["blocked"] == len(payload["rows"]))
 
+    selected_report = tmp / "selected-report.json"
+    runner.write_text(
+        "import json,sys\nrow=json.load(sys.stdin)\n"
+        "print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'high','actual':'ok','cleanup':'ok','evidence':'ok'}))\n",
+        encoding="utf-8",
+    )
+    result = run(
+        "run", "--phase", "final", "--skill", skills[0],
+        "--runner", f"{sys.executable} {runner}", "--timeout", "5", "--report", str(selected_report),
+    )
+    selected_payload = json.loads(selected_report.read_text(encoding="utf-8"))
+    check(
+        "skill selection executes two cells and stays visibly partial",
+        result.returncode == 0
+        and selected_payload["summary"]["completed"] == 2
+        and selected_payload["summary"]["pending"] == len(skills) * 2 - 2
+        and {row["skill"] for row in selected_payload["rows"]} == {skills[0]},
+        result.stderr,
+    )
+    result = run(
+        "run", "--restart", "--phase", "final", "--skill", skills[0],
+        "--runner", f"{sys.executable} {runner}", "--timeout", "5", "--report", str(selected_report),
+    )
+    check("restart cannot silently become partial", result.returncode == 3 and "full matrix" in result.stderr)
+
     runner.write_text(
         "import json,sys\n"
         "row=json.load(sys.stdin)\n"

@@ -292,6 +292,7 @@ def run_matrix(
     checkpoint: Any = None,
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]] | None = None,
     commit: str = "",
+    selected_skills: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     prior_by_key = {row_key(item): item for item in (prior or [])}
     results: list[dict[str, Any]] = []
@@ -299,6 +300,8 @@ def run_matrix(
         previous = prior_by_key.get(row_key(row))
         if previous is not None:
             results.append(previous)
+            continue
+        if selected_skills is not None and row["skill"] not in selected_skills:
             continue
         started = datetime.now(timezone.utc)
         try:
@@ -417,6 +420,10 @@ def main() -> int:
     run.add_argument("--timeout", type=float, default=900.0)
     run.add_argument("--report", type=Path, required=True)
     run.add_argument("--restart", action="store_true", help="ignore a matching partial/completed report")
+    run.add_argument(
+        "--skill", action="append", default=[],
+        help="execute only this skill's runtime cells and leave the report partial; repeatable",
+    )
     args = parser.parse_args()
     try:
         skills = load_spec(args.spec, args.root.resolve())
@@ -446,6 +453,12 @@ def main() -> int:
             )
             return 0
         commit = source_commit(args.root.resolve())
+        selected_skills = set(args.skill)
+        unknown_skills = selected_skills - set(skills)
+        if unknown_skills:
+            raise AcceptanceError("unknown selected skill(s): " + ", ".join(sorted(unknown_skills)))
+        if args.restart and selected_skills:
+            raise AcceptanceError("--restart always means the full matrix and cannot combine with --skill")
         fingerprint = matrix_fingerprint(
             [{**row, "cell_fingerprint": metadata[row_key(row)]["cell_fingerprint"]} for row in rows]
         )
@@ -468,6 +481,7 @@ def main() -> int:
         results = run_matrix(
             rows, shlex.split(args.runner), args.timeout,
             prior=prior, checkpoint=checkpoint, metadata=metadata, commit=commit,
+            selected_skills=selected_skills or None,
         )
         report = report_payload(
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint
