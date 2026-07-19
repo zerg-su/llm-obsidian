@@ -913,6 +913,18 @@ def close_operation_children(sandbox: Path, coordinator_surface: str) -> tuple[i
     return closed, failures
 
 
+def settle_operation_surfaces(
+    sandbox: Path,
+    coordinator_surface: str,
+    runtime: str,
+    exit_marker: Path,
+) -> tuple[str, int, list[str]]:
+    """Stop child creation before enumerating exact operation descendants."""
+    coordinator_close = close_surface(coordinator_surface, runtime, exit_marker)
+    children_closed, child_failures = close_operation_children(sandbox, coordinator_surface)
+    return coordinator_close, children_closed, child_failures
+
+
 def is_disposable_bookkeeping(path: str, status: str) -> bool:
     if status.startswith("??"):
         return False
@@ -1044,8 +1056,9 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             runtime=row["runtime"],
         )
         result = validate_agent_result(row, raw)
-        children_closed, child_failures = close_operation_children(sandbox, surface)
-        close = close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
+        close, children_closed, child_failures = settle_operation_surfaces(
+            sandbox, surface, row["runtime"], run_dir / "agent-exit.json"
+        )
         if child_failures:
             result["verdict"] = "blocked"
             result["defect"] = "exact operation child surface close failed"
@@ -1079,8 +1092,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     except BaseException:
         close = "surface was not created"
         if surface:
-            close_operation_children(locals().get("sandbox", run_dir / "sandbox"), surface)
-            close = close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
+            close, _children_closed, _child_failures = settle_operation_surfaces(
+                locals().get("sandbox", run_dir / "sandbox"),
+                surface,
+                row["runtime"],
+                run_dir / "agent-exit.json",
+            )
         spec_path = run_dir / "operation.json"
         if spec_path.is_file():
             try:

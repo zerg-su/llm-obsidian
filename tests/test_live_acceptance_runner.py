@@ -506,6 +506,25 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "00000000-0000-0000-0000-000000000004",
         "00000000-0000-0000-0000-000000000005",
     })
+    surface_order: list[str] = []
+    original_close_surface = module.close_surface
+    original_close_children = module.close_operation_children
+    module.close_surface = lambda *_args, **_kwargs: surface_order.append("coordinator") or "exact surface closed"
+    module.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
+    try:
+        settled = module.settle_operation_surfaces(
+            child_root,
+            "00000000-0000-0000-0000-000000000003",
+            "codex",
+            child_root / "agent-exit.json",
+        )
+    finally:
+        module.close_surface = original_close_surface
+        module.close_operation_children = original_close_children
+    check(
+        "cleanup stops coordinator before enumerating late children",
+        surface_order == ["coordinator", "children"] and settled == ("exact surface closed", 2, []),
+    )
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
