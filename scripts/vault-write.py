@@ -23,6 +23,8 @@ Payload (stdin or --file), all mutation keys optional:
       "pages": [
         {"op": "create", "path": "wiki/concepts/New.md", "content": "..."},
         {"op": "update", "path": "wiki/index.md", "content": "...",
+         "expected_sha256": "<hash of current file>"},
+        {"op": "delete", "path": "wiki/concepts/Disposable.md",
          "expected_sha256": "<hash of current file>"}
       ],
       "moves": [
@@ -445,12 +447,15 @@ def validate_page_content(rel: str, content: str) -> None:
             raise PayloadError(f"{rel}: source content_sha256 must be lowercase SHA-256")
 
 
-def page_writes(specs: object) -> list[tuple[Path, str]]:
+def page_mutations(
+    specs: object,
+) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
     if specs is None:
-        return []
+        return [], []
     if not isinstance(specs, list):
         raise PayloadError("pages must be an array")
     writes: list[tuple[Path, str]] = []
+    deletes: list[tuple[Path, str]] = []
     for index, spec in enumerate(specs):
         if not isinstance(spec, dict):
             raise PayloadError(f"pages[{index}] must be an object")
@@ -460,16 +465,31 @@ def page_writes(specs: object) -> list[tuple[Path, str]]:
         op = spec.get("op")
         rel = str(spec.get("path") or "")
         content = spec.get("content")
-        if op not in {"create", "update"}:
-            raise PayloadError(f"pages[{index}].op must be create|update")
-        if not isinstance(content, str):
-            raise PayloadError(f"pages[{index}].content must be a string")
+        if op not in {"create", "update", "delete"}:
+            raise PayloadError(f"pages[{index}].op must be create|update|delete")
         path = safe_repo_path(rel, prefix="wiki/")
         if path in {HOT_FILE.resolve(), LOG_FILE.resolve()}:
             key = "hot_*" if path == HOT_FILE.resolve() else "log_entry"
             raise PayloadError(
                 f"pages[{index}].path {rel!r} is writer-owned; use the dedicated {key} payload"
             )
+        if op == "delete":
+            if content is not None:
+                raise PayloadError(f"pages[{index}]: delete must not carry content")
+            if not path.is_file():
+                raise ConflictError(f"delete target missing: {rel}")
+            expected = str(spec.get("expected_sha256") or "")
+            if not re.fullmatch(r"[0-9a-f]{64}", expected):
+                raise PayloadError(f"pages[{index}]: delete requires lowercase SHA-256")
+            actual = sha256_text(path.read_text(encoding="utf-8"))
+            if actual != expected:
+                raise ConflictError(
+                    f"delete conflict: {rel} is {actual}, expected {expected}"
+                )
+            deletes.append((path, expected))
+            continue
+        if not isinstance(content, str):
+            raise PayloadError(f"pages[{index}].content must be a string")
         validate_page_content(rel, content)
         if op == "create":
             if path.exists():
@@ -488,7 +508,7 @@ def page_writes(specs: object) -> list[tuple[Path, str]]:
                     f"update conflict: {rel} is {actual}, expected {expected}"
                 )
         writes.append((path, content))
-    return writes
+    return writes, deletes
 
 
 def page_moves(specs: object) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
@@ -815,9 +835,10 @@ def main(argv: list[str]) -> int:
             return 0
 
         today = time.strftime("%Y-%m-%d")
-        writes = page_writes(payload.get("pages"))
-        move_writes, deletes = page_moves(payload.get("moves"))
+        writes, deletes = page_mutations(payload.get("pages"))
+        move_writes, move_deletes = page_moves(payload.get("moves"))
         writes.extend(move_writes)
+        deletes.extend(move_deletes)
         warnings: list[str] = []
 
         manifest = manifest_write(payload.get("manifest_update"))
@@ -865,7 +886,7 @@ def main(argv: list[str]) -> int:
             actual = sha256_text(path.read_text(encoding="utf-8")) if path.is_file() else None
             if actual != expected:
                 raise ConflictError(
-                    f"delete conflict during move: {path.relative_to(REPO_ROOT)} is {actual}, expected {expected}"
+                    f"delete conflict during transaction: {path.relative_to(REPO_ROOT)} is {actual}, expected {expected}"
                 )
             path.unlink()
         JOURNAL_FILE.unlink()
@@ -880,6 +901,7 @@ def main(argv: list[str]) -> int:
                 "writes": len(writes) + len(deletes),
                 "page_creates": sum(1 for spec in page_specs if spec.get("op") == "create"),
                 "page_updates": sum(1 for spec in page_specs if spec.get("op") == "update"),
+                "page_deletes": sum(1 for spec in page_specs if spec.get("op") == "delete"),
                 "page_moves": len(payload.get("moves") or []),
                 "manifest_updates": int(bool(payload.get("manifest_update"))),
                 "hot_updates": int(

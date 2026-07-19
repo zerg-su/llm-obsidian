@@ -338,6 +338,20 @@ rm "$SANDBOX/.vault-meta/auto-commit.disabled"
 out=$(run_hook)
 [[ "$(commit_count)" == "$((before + 1))" ]] && ok "sh-optout-reenable" || bad "sh-optout-reenable" "commit did not resume"
 
+# A dispatched linked worktree never runs coordinator-owned vault maintenance.
+printf '\ntask split probe\n' >> "$SANDBOX/wiki/seed.md"
+cat > "$SANDBOX/.task-meta.json" <<EOF
+{"version":3,"project_id":"00000000-0000-0000-0000-000000000001","task_id":"00000000-0000-0000-0000-000000000002","vault_root":"$SANDBOX-coordinator"}
+EOF
+before=$(commit_count)
+out=$(run_hook); rc=$?
+printf '%s' "$out" | grep -q 'TASK_SPLIT_STOP_SKIPPED' && ok "sh-task-split-hint" || bad "sh-task-split-hint" "no task split notice"
+[[ "$(commit_count)" == "$before" ]] && ok "sh-task-split-no-commit" || bad "sh-task-split-no-commit" "task split committed coordinator state"
+git -C "$SANDBOX" status --short wiki/seed.md | grep -q . && ok "sh-task-split-leaves-wiki" || bad "sh-task-split-leaves-wiki" "task split changed wiki state"
+rm "$SANDBOX/.task-meta.json"
+out=$(run_hook)
+[[ "$(commit_count)" == "$((before + 1))" ]] && ok "sh-task-split-coordinator-catchup" || bad "sh-task-split-coordinator-catchup" "coordinator did not catch up"
+
 # Explicit opt-in owns .claude-memory; disabled mode leaves that path untouched.
 mkdir -p "$SANDBOX/memory-source"
 printf 'safe memory\n' > "$SANDBOX/memory-source/clean.md"

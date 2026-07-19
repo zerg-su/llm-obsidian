@@ -80,6 +80,26 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         check("legacy task effort validation fails early", False)
     check("watchdog atomic tmp keeps handoff prefix", watchdog_module.atomic_tmp_path(worktree / ".task-watchdog.json").name.startswith(".task-"))
     check("supervisor atomic tmp keeps handoff prefix", supervisor_module.atomic_tmp_path(worktree / ".review-agent-command.json").name.startswith(".review-"))
+    exact_surface = "00000000-0000-0000-0000-000000000001"
+    caller = supervisor_module.validated_caller_identity(
+        {
+            "caller": {"surface_id": exact_surface, "surface_ref": "surface:7"},
+            "focused": {
+                "surface_id": "00000000-0000-0000-0000-000000000002",
+                "surface_ref": "surface:8",
+            },
+        },
+        exact_surface,
+    )
+    check("caller identity ignores unrelated focus", caller["surface_ref"] == "surface:7")
+    try:
+        supervisor_module.validated_caller_identity(
+            {"caller": None, "focused": {"surface_id": exact_surface}}, exact_surface
+        )
+    except supervisor_module.SupervisorError:
+        check("missing caller identity fails closed", True)
+    else:
+        check("missing caller identity fails closed", False)
     check(
         "reap result link uses filename alias on collision",
         lifecycle_module.result_wikilink(

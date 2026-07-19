@@ -30,14 +30,36 @@
     "pages": {
       "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["op", "path", "content"],
-        "properties": {
-          "op": {"enum": ["create", "update"]},
-          "path": {"type": "string", "pattern": "^wiki/"},
-          "content": {"type": "string"},
-          "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-        }
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["op", "path", "content"],
+            "properties": {
+              "op": {"const": "create"},
+              "path": {"type": "string", "pattern": "^wiki/"},
+              "content": {"type": "string"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["op", "path", "content", "expected_sha256"],
+            "properties": {
+              "op": {"const": "update"},
+              "path": {"type": "string", "pattern": "^wiki/"},
+              "content": {"type": "string"},
+              "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["op", "path", "expected_sha256"],
+            "properties": {
+              "op": {"const": "delete"},
+              "path": {"type": "string", "pattern": "^wiki/"},
+              "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        ]
       }
     }
   },

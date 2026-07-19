@@ -256,6 +256,21 @@ echo '{"moves":[{"from":"wiki/concepts/Transaction Page Renamed.md","to":"wiki/c
   | "$VW" >/dev/null 2>&1
 expect_exit "vw-page-move-stale-sha" "$?" 4
 
+sed 's/Transaction Page Updated/Disposable Page/g; s/c-000001/c-000099/' \
+  "$SANDBOX/.page-updated.md" > "$SANDBOX/.delete-page.md"
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"create","path":"wiki/concepts/Disposable Page.md","content":open(sys.argv[1]).read()}]}))' "$SANDBOX/.delete-page.md" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-delete-fixture" "$?" 0
+echo '{"pages":[{"op":"delete","path":"wiki/concepts/Disposable Page.md","expected_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}' \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-delete-stale-sha" "$?" 4
+[[ -f "$SANDBOX/wiki/concepts/Disposable Page.md" ]] && ok "vw-page-delete-conflict-preserves" || bad "vw-page-delete-conflict-preserves" "file disappeared"
+hash=$(shasum -a 256 "$SANDBOX/wiki/concepts/Disposable Page.md" | awk '{print $1}')
+python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"delete","path":"wiki/concepts/Disposable Page.md","expected_sha256":sys.argv[1]}]}))' "$hash" \
+  | "$VW" >/dev/null 2>&1
+expect_exit "vw-page-delete-matching-sha" "$?" 0
+[[ ! -e "$SANDBOX/wiki/concepts/Disposable Page.md" ]] && ok "vw-page-deleted" || bad "vw-page-deleted" "file remains"
+
 cat > "$SANDBOX/.source.md" <<EOF
 ---
 type: source

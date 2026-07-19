@@ -27,7 +27,6 @@ say the word and describe the task.
 Do not attempt workarounds (background Bash, tmux, etc.).
 
 ## Input
-
 ```
 /dispatch <free-form description>
 ```
@@ -53,11 +52,9 @@ If something cannot be extracted from the text — ask with a single question, d
 ## Phase 1: Parse + Resolve (no writes, no spawn)
 
 ### 1.1 Parse
-
 Extract `task_name`, `target_repo`, `branch_intent`, `description` from the input.
 
 ### 1.2 Resolve the repo via a fallback chain
-
 **a) wiki/repos** (optional — only if this vault keeps repo pages) — exact or fuzzy match:
 ```
 Glob wiki/repos/*<target_repo>*.md
@@ -269,7 +266,9 @@ Key template invariants (preserve them if you edit the reference):
 ### 2.3 Spawn a split surface in the current workspace
 
 For Codex, run `codex-sync --apply --only-profile <dispatch-profile>` after the
-upfront approval and before `new-split`. The scoped sync unions only already
+upfront approval and before `new-split`, preceded by
+`mcp-gateway.sh sync-config --apply` so a fresh clone has its ignored local MCP
+JSON. The scoped sync unions only already
 trusted global hook hashes into that profile, never changes other Codex
 profiles, and never accepts a new/conflicting hash.
 For an approved v2/v3 unattended task, the supervisor recognizes only the
@@ -290,9 +289,10 @@ humans, but UUIDs are safer when tabs/surfaces are moved or closed.
 ```bash
 CMUX_UUID_RE='[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
 test -n "${CMUX_SURFACE_ID:-}" || { echo "CMUX_SURFACE_ID is missing" >&2; exit 1; }
-IDENTITY=$(cmux --id-format both identify --surface "$CMUX_SURFACE_ID" --no-caller 2>&1)
-WIKI_SURFACE=$(printf '%s\n' "$IDENTITY" | grep -oE '"surface_id"[[:space:]]*:[[:space:]]*"[0-9A-Fa-f-]{36}"' | grep -oE "$CMUX_UUID_RE" | head -1)
-WIKI_SURFACE_REF=$(printf '%s\n' "$IDENTITY" | sed -nE 's/.*"surface_ref"[[:space:]]*:[[:space:]]*"(surface:[0-9]+)".*/\1/p' | head -1)
+SUPERVISOR="<vault-root>/scripts/cmux_agent_supervisor.py"
+IDENTITY=$(python3 "$SUPERVISOR" identify-caller --surface "$CMUX_SURFACE_ID")
+WIKI_SURFACE=$(printf '%s\n' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["surface_id"])')
+WIKI_SURFACE_REF=$(printf '%s\n' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["surface_ref"])')
 test "$WIKI_SURFACE" = "$CMUX_SURFACE_ID" || { echo "caller surface identity mismatch" >&2; exit 1; }
 ```
 
@@ -424,7 +424,6 @@ appends one prompt argv, runs the watchdog, and calls lifecycle after exit.
 
 ```bash
 WORKTREE="<worktree-path>"
-SUPERVISOR="<vault-root>/scripts/cmux_agent_supervisor.py"
 WORKTREE_Q=$(printf '%q' "$WORKTREE")
 SUPERVISOR_Q=$(printf '%q' "$SUPERVISOR")
 python3 "$SUPERVISOR" prepare-task --worktree "$WORKTREE" --surface "$SURFACE_ID"

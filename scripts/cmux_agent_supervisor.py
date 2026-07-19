@@ -291,6 +291,43 @@ def trusted_claude_wrapper(surface: str, env: dict[str, str] | None = None) -> P
     return candidate
 
 
+def validated_caller_identity(payload: object, surface: str) -> dict[str, str]:
+    """Return the explicit cmux target identity, never the focused surface."""
+    if not isinstance(payload, dict):
+        raise SupervisorError("cmux identify returned a non-object payload")
+    caller = payload.get("caller")
+    if not isinstance(caller, dict):
+        raise SupervisorError("cmux identify returned no caller identity")
+    surface_id = str(caller.get("surface_id") or "").strip()
+    surface_ref = str(caller.get("surface_ref") or "").strip()
+    if surface_id.casefold() != surface.casefold():
+        raise SupervisorError("caller surface identity mismatch")
+    if not re.fullmatch(r"surface:\d+", surface_ref):
+        raise SupervisorError("cmux identify returned an invalid caller surface ref")
+    return {"surface_id": surface_id, "surface_ref": surface_ref}
+
+
+def identify_caller(surface: str) -> dict[str, str]:
+    """Resolve one exact surface through cmux's caller-preserving JSON output."""
+    cmux = shutil.which("cmux", path=trusted_runtime_path())
+    if not cmux:
+        raise SupervisorError("cmux is unavailable")
+    result = subprocess.run(
+        [cmux, "--id-format", "both", "identify", "--surface", surface],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise SupervisorError(f"cmux identify failed: {detail[:300]}")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SupervisorError("cmux identify returned invalid JSON") from exc
+    return validated_caller_identity(payload, surface)
+
+
 def validate_trusted_runtime_path(raw: str, runtime: str) -> None:
     entries = raw.split(os.pathsep) if raw else []
     if not entries or len(entries) > 128 or len(entries) != len(set(entries)):
@@ -1170,6 +1207,8 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = sub.add_parser("prepare-task")
     prepare.add_argument("--worktree", default=".")
     prepare.add_argument("--surface", required=True)
+    identify = sub.add_parser("identify-caller")
+    identify.add_argument("--surface", required=True)
     for name in ("validate", "run"):
         command = sub.add_parser(name)
         command.add_argument("--worktree", default=".")
@@ -1182,9 +1221,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    worktree = Path(args.worktree).expanduser().resolve()
+    worktree = Path(getattr(args, "worktree", ".")).expanduser().resolve()
     state_dir = Path(getattr(args, "state_dir", "") or worktree).expanduser().resolve()
     try:
+        if args.command == "identify-caller":
+            print(json.dumps(identify_caller(args.surface), sort_keys=True))
+            return 0
         if args.command == "prepare-task":
             print(prepare_task(worktree, args.surface))
             return 0

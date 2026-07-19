@@ -284,8 +284,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     dispatch_fixture = module.load_skill_fixtures()["dispatch"]["fixture"]
     check(
         "dispatch fixture cleans plan and prepares local runtime config",
-        "disposable approved plan page" in dispatch_fixture
-        and "runtime.env.example" in dispatch_fixture,
+        "disposable plan/result/review pages" in dispatch_fixture
+        and "runtime.env.example" in dispatch_fixture
+        and "sync-config --apply" in dispatch_fixture
+        and "optimistic vault-write page deletion" in dispatch_fixture,
     )
 
     cleanup_run = tmp / "cleanup-run"

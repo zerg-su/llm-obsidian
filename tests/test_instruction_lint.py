@@ -55,10 +55,12 @@ assert "copyright/footer" in defuddle
 print("OK   defuddle fallback requires actual cleanup")
 
 dispatch = (ROOT / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8")
-assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" in dispatch
+assert "identify-caller --surface \"$CMUX_SURFACE_ID\"" in dispatch
+assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never substitute the selected surface" in dispatch
 assert "awk '/^\\*/" not in dispatch
 assert "verify that its exact target exists under `wiki/`" in dispatch
+assert "mcp-gateway.sh sync-config --apply" in dispatch
 assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch anchors the explicit caller surface")
 

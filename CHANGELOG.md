@@ -29,6 +29,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   enforced skill-size budget; schema validation ignores illustrative links in
   lint reports, log archives, and folder-index templates so reports cannot
   amplify their own findings.
+- Dispatch resolves its exact cmux caller through a parsed caller identity,
+  bootstraps fresh-clone MCP JSON before scoped Codex sync, and prevents task
+  Stop hooks from committing coordinator-owned derived indexes. Vault writes
+  now support optimistic, journaled page deletion for canonical cleanup.
 
 ## [2.1.0] - 2026-07-18
 

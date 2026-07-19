@@ -164,6 +164,23 @@ def read_json_object(path: Path) -> dict:
         return {}
 
 
+def dispatched_task_worktree() -> bool:
+    """Task splits leave coordinator-owned vault maintenance to the coordinator."""
+    meta = read_json_object(ROOT / ".task-meta.json")
+    if meta.get("version") not in {2, 3}:
+        return False
+    raw_vault = str(meta.get("vault_root") or "").strip()
+    if not raw_vault:
+        return False
+    vault = Path(raw_vault).expanduser()
+    if not vault.is_absolute():
+        return False
+    try:
+        return vault.resolve() != ROOT
+    except OSError:
+        return False
+
+
 def sparse_fingerprint() -> str:
     index = read_json_object(META / "retrieval" / "index.json")
     return str(index.get("source_fingerprint") or "")
@@ -334,6 +351,12 @@ def timed(timings: dict[str, float], name: str, fn):
 
 
 def main() -> int:
+    if dispatched_task_worktree():
+        emit(
+            "TASK_SPLIT_STOP_SKIPPED: coordinator-owned vault maintenance is "
+            "disabled in the dispatched worktree."
+        )
+        return 0
     if OPT_OUT.is_file():
         emit(
             "AUTO_COMMIT_DISABLED: .vault-meta/auto-commit.disabled present — "
