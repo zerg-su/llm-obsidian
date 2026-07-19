@@ -568,7 +568,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "cleanup stops coordinator and gives children an auto-close grace",
         surface_order == ["coordinator", "wait", "children"]
         and settled == ("exact surface closed", 2, [])
-        and module.CHILD_SURFACE_SETTLE_SECONDS >= 5,
+        and module.CHILD_SURFACE_SETTLE_SECONDS >= 30,
     )
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
