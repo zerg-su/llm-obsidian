@@ -27,7 +27,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -36,7 +36,8 @@ help:
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"
 	@echo "  make acceptance-check  Validate dynamic release skill/runtime coverage"
-	@echo "  make acceptance-live   Run the repo-shipped interactive Claude/Codex acceptance matrix"
+	@echo "  make acceptance-live   Run/resume the repo-shipped interactive Claude/Codex acceptance matrix"
+	@echo "  make acceptance-live-restart  Discard matching checkpoint and rerun the full matrix"
 	@echo "  make retrieval-experiment compare contextual/reranker flags without enabling"
 	@echo "  make test-research-isolation protected fetch/synthesis boundary tests"
 	@echo "  make test-document-normalize hermetic document routing/cache/fallback tests"
@@ -94,6 +95,9 @@ acceptance-check:
 
 acceptance-live:
 	@python3 scripts/release-acceptance.py run --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --timeout "$${ACCEPTANCE_CELL_TIMEOUT:-3700}" --report .vault-meta/acceptance/latest-live.json
+
+acceptance-live-restart:
+	@python3 scripts/release-acceptance.py run --restart --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --timeout "$${ACCEPTANCE_CELL_TIMEOUT:-3700}" --report .vault-meta/acceptance/latest-live.json
 
 test-release-acceptance:
 	@echo "=== test_release_acceptance.py ==="

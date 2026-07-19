@@ -386,9 +386,15 @@ def codex_effort_config(effort: str) -> str:
     return f'model_reasoning_effort="{effort}"'
 
 
+def codex_automation_service_tier_config() -> str:
+    """Keep repo-spawned Codex runs off user-only Fast/priority service."""
+    return 'service_tier="default"'
+
+
 def task_codex_config_values(cmux_socket: Path, effort: str = DEFAULT_CODEX_EFFORT) -> list[str]:
     socket_rule = json.dumps(str(cmux_socket), ensure_ascii=False)
     return [
+        codex_automation_service_tier_config(),
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
         'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }',
@@ -405,6 +411,7 @@ def task_codex_config_values(cmux_socket: Path, effort: str = DEFAULT_CODEX_EFFO
 
 def reviewer_codex_config_values(effort: str = "") -> list[str]:
     values = [
+        codex_automation_service_tier_config(),
         'web_search="disabled"',
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
@@ -500,7 +507,9 @@ def validate_task_safety(
                 raise SupervisorError("Codex task command has an unexpected network policy")
         elif any(option_value(argv, flag) is not None for flag in ("-a", "-s", "--add-dir")):
             raise SupervisorError("interactive Codex task command has unexpected approval overrides")
-        elif option_values(argv, "-c") != [codex_effort_config(effort)]:
+        elif option_values(argv, "-c") != [
+            codex_automation_service_tier_config(), codex_effort_config(effort)
+        ]:
             raise SupervisorError("interactive Codex task command has unexpected config overrides")
         return
     require_option(argv, "--permission-mode", "auto")
@@ -785,6 +794,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
             append_task_codex_network_policy(argv, cmux_socket, effort)
             env["CMUX_SOCKET_PATH"] = str(cmux_socket)
         else:
+            argv.extend(["-c", codex_automation_service_tier_config()])
             argv.extend(["-c", codex_effort_config(effort)])
         codex_home = str(meta.get("codex_home") or "").strip()
         if codex_home:

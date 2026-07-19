@@ -118,6 +118,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fetch_proxy = fetch_parsed["features"]["network_proxy"]
     fetch_network = fetch_parsed["permissions"]["research-fetch"]["network"]
     check("fetch web enabled", 'web_search = "live"' in config_text)
+    check("fetch keeps automated Codex off Fast service", fetch_parsed["service_tier"] == "default")
     check("fetch network proxy enabled", fetch_proxy["enabled"] is True)
     check("fetch command network policy enabled", fetch_network["enabled"] is True)
     check("fetch network is limited", fetch_network["mode"] == "limited")
@@ -205,6 +206,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     synth_network = synth_parsed["permissions"]["research-synthesize"]["network"]
     synth_prompt = (Path(received["synth_dir"]) / "synth-prompt.md").read_text(encoding="utf-8")
     check("synth web disabled", 'web_search = "disabled"' in synth_config)
+    check("synth keeps automated Codex off Fast service", synth_parsed["service_tier"] == "default")
     check(
         "synth pins Codex model defaults",
         synth_parsed["model"] == "gpt-5.6-sol"

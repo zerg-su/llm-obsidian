@@ -471,16 +471,17 @@ def wait_for_outbox(
 
 
 def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
-    try:
-        if runtime == "codex":
-            for _ in range(40):
-                subprocess.run(["cmux", "send-key", "--surface", surface, "backspace"], capture_output=True, check=False)
-            send_surface(surface, "/exit", submit_key="tab")
-            subprocess.run(["cmux", "send-key", "--surface", surface, "Enter"], capture_output=True, check=False)
-        else:
-            send_surface(surface, "/exit")
-    except AcceptanceRunnerError:
-        return "exit-request-failed; surface left visible"
+    if not exit_marker.is_file():
+        try:
+            if runtime == "codex":
+                for _ in range(40):
+                    subprocess.run(["cmux", "send-key", "--surface", surface, "backspace"], capture_output=True, check=False)
+                send_surface(surface, "/exit", submit_key="tab")
+                subprocess.run(["cmux", "send-key", "--surface", surface, "Enter"], capture_output=True, check=False)
+            else:
+                send_surface(surface, "/exit")
+        except AcceptanceRunnerError:
+            return "exit-request-failed; surface left visible"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline and not exit_marker.is_file():
         time.sleep(0.5)
@@ -563,6 +564,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         prompt_path.write_text(prompt, encoding="utf-8")
         spec = {
             "schema_version": 1,
+            "row": {key: row[key] for key in ("phase", "skill", "runtime", "scenario", "expected")},
             "runtime": row["runtime"],
             "model": route["model"],
             "effort": route["effort"],
@@ -612,11 +614,22 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             result["cleanup"] = f"{result['cleanup']}; diagnostic clone retained; exact surface closed"[:600]
         spec["status"] = "complete" if result["verdict"] in {"pass", "n-a"} else "blocked"
         spec["verdict"] = result["verdict"]
+        atomic_json(run_dir / "result.json", result)
         atomic_json(spec_path, spec)
         return result
     except BaseException:
+        close = "surface was not created"
         if surface:
-            close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
+            close = close_surface(surface, row["runtime"], run_dir / "agent-exit.json")
+        spec_path = run_dir / "operation.json"
+        if spec_path.is_file():
+            try:
+                interrupted = read_json(spec_path)
+                interrupted["status"] = "interrupted"
+                interrupted["cleanup"] = close
+                atomic_json(spec_path, interrupted)
+            except (AcceptanceRunnerError, OSError):
+                pass
         raise
 
 

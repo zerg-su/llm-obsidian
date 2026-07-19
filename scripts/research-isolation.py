@@ -175,6 +175,7 @@ def runtime_config(
         f"default_permissions = {toml_string(profile)}",
         f"web_search = {toml_string(web_search)}",
         'approval_policy = "never"',
+        'service_tier = "default"',
         f"model = {toml_string(model)}",
         f"model_reasoning_effort = {toml_string(effort)}",
         f'history.persistence = {toml_string("save-all" if persistent else "none")}',

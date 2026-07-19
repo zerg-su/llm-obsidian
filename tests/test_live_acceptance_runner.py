@@ -144,6 +144,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
+    check("Codex acceptance keeps Fast user-only", 'service_tier="default"' in codex_argv)
 
     settling = tmp / "settling-outbox.json"
     state: dict[str, object] = {}
@@ -181,6 +182,28 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         check("oversized outbox is rejected", "size limit" in str(exc))
     else:
         check("oversized outbox is rejected", False, "no error")
+
+    exited = tmp / "agent-exit.json"
+    exited.write_text('{"schema_version": 1}\n', encoding="utf-8")
+    close_calls: list[list[str]] = []
+    original_run = module.subprocess.run
+    original_send_surface = module.send_surface
+    module.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("already-exited agent must not receive /exit")
+    )
+    module.subprocess.run = lambda argv, **_kwargs: (
+        close_calls.append(list(argv))
+        or subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
+    )
+    try:
+        close_result = module.close_surface("00000000-0000-0000-0000-000000000001", "codex", exited)
+    finally:
+        module.subprocess.run = original_run
+        module.send_surface = original_send_surface
+    check("interrupted exited agent closes without a second command", close_result == "exact surface closed")
+    check("interrupted cleanup targets exact surface once", close_calls == [[
+        "cmux", "close-surface", "--surface", "00000000-0000-0000-0000-000000000001"
+    ]])
 
     prompt = module.prompt_text(
         row(), module.load_scenarios()["conversation-readonly"], repo,

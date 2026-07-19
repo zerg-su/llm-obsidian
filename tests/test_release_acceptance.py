@@ -81,13 +81,30 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     report = tmp / "report.json"
     result = run(
-        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("green report", result.returncode == 0 and payload["summary"]["failed"] == 0, result.stderr)
     check("expected retained", all(row["expected"] for row in payload["rows"]))
     check("duration measured", all(row["duration_seconds"] is not None for row in payload["rows"]))
+    check("completed report is checkpoint-compatible", payload["summary"]["complete"] is True and payload["summary"]["pending"] == 0)
+
+    runner.write_text("raise SystemExit(99)\n", encoding="utf-8")
+    result = run(
+        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "--timeout", "5", "--report", str(report),
+    )
+    check("matching completed report resumes without rerunning cells", result.returncode == 0, result.stderr)
+
+    stale_report = json.loads(report.read_text(encoding="utf-8"))
+    stale_report["source_commit"] = "0" * 40
+    report.write_text(json.dumps(stale_report), encoding="utf-8")
+    result = run(
+        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "--timeout", "5", "--report", str(report),
+    )
+    check("resume rejects a different source commit", result.returncode == 3 and "use --restart" in result.stderr)
 
     runner.write_text(
         "import json,sys\n"
@@ -96,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         encoding="utf-8",
     )
     result = run(
-        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
@@ -109,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         encoding="utf-8",
     )
     result = run(
-        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
@@ -122,14 +139,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         encoding="utf-8",
     )
     result = run(
-        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("approved n-a is neutral", result.returncode == 0 and payload["summary"]["accepted"] == len(payload["rows"]))
 
     result = run(
-        "run", "--phase", "final", "--runner", str(tmp / "missing-runner"),
+        "run", "--restart", "--phase", "final", "--runner", str(tmp / "missing-runner"),
         "--timeout", "1", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
@@ -143,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         encoding="utf-8",
     )
     result = run(
-        "run", "--phase", "final", "--runner", f"{sys.executable} {runner}",
+        "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
         "--timeout", "5", "--report", str(report),
     )
     payload = json.loads(report.read_text(encoding="utf-8"))

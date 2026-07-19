@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -140,9 +142,78 @@ def validate_result(row: dict[str, Any], result: Any) -> dict[str, Any]:
     return bounded
 
 
-def run_matrix(rows: list[dict[str, Any]], command: list[str], timeout: float) -> list[dict[str, Any]]:
+def row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return tuple(str(row[key]) for key in ("phase", "skill", "runtime", "scenario", "expected"))
+
+
+def source_commit(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=False
+    )
+    commit = result.stdout.strip()
+    if result.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise AcceptanceError("cannot resolve the acceptance source commit")
+    return commit
+
+
+def matrix_fingerprint(rows: list[dict[str, Any]]) -> str:
+    payload = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def load_resume_results(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    phase: str,
+    commit: str,
+    fingerprint: str,
+) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    report = read_object(path)
+    if (
+        report.get("schema_version") != 1
+        or report.get("phase") != phase
+        or report.get("source_commit") != commit
+        or report.get("matrix_fingerprint") != fingerprint
+        or not isinstance(report.get("rows"), list)
+    ):
+        raise AcceptanceError(
+            "existing acceptance report does not match this commit/matrix; use --restart"
+        )
+    expected = {row_key(row): row for row in rows}
+    resumed: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for raw in report["rows"]:
+        if not isinstance(raw, dict):
+            raise AcceptanceError("existing acceptance report contains a malformed row")
+        try:
+            key = row_key(raw)
+        except KeyError as exc:
+            raise AcceptanceError("existing acceptance report contains a malformed row") from exc
+        if key in seen or key not in expected:
+            raise AcceptanceError("existing acceptance report contains duplicate or stale rows")
+        resumed.append(validate_result(expected[key], raw))
+        seen.add(key)
+    return resumed
+
+
+def run_matrix(
+    rows: list[dict[str, Any]],
+    command: list[str],
+    timeout: float,
+    *,
+    prior: list[dict[str, Any]] | None = None,
+    checkpoint: Any = None,
+) -> list[dict[str, Any]]:
+    prior_by_key = {row_key(item): item for item in (prior or [])}
     results: list[dict[str, Any]] = []
     for row in rows:
+        previous = prior_by_key.get(row_key(row))
+        if previous is not None:
+            results.append(previous)
+            continue
         started = datetime.now(timezone.utc)
         try:
             proc = subprocess.run(
@@ -172,10 +243,20 @@ def run_matrix(rows: list[dict[str, Any]], command: list[str], timeout: float) -
         if result.get("duration_seconds") is None:
             result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
         results.append(result)
+        if checkpoint is not None:
+            checkpoint(results)
     return results
 
 
-def report_payload(phase: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def report_payload(
+    phase: str,
+    rows: list[dict[str, Any]],
+    *,
+    planned_total: int | None = None,
+    commit: str = "",
+    fingerprint: str = "",
+) -> dict[str, Any]:
+    planned = len(rows) if planned_total is None else planned_total
     counts = {verdict: 0 for verdict in sorted(VERDICTS)}
     for row in rows:
         counts[str(row.get("verdict") or "blocked")] += 1
@@ -184,23 +265,33 @@ def report_payload(phase: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "phase": phase,
+        "source_commit": commit,
+        "matrix_fingerprint": fingerprint,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
-            "total": len(rows), "passed": passed, "accepted": accepted,
+            "total": planned, "completed": len(rows), "pending": planned - len(rows),
+            "complete": len(rows) == planned,
+            "passed": passed, "accepted": accepted,
             "failed": len(rows) - accepted, "verdicts": counts,
         },
         "rows": rows,
     }
 
 
-def write_json(value: Any, path: Path | None) -> None:
+def write_json(value: Any, path: Path | None, *, announce: bool = True) -> None:
     text = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
     if path is None:
         sys.stdout.write(text)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        print(path)
+        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        if announce:
+            print(path)
 
 
 def main() -> int:
@@ -218,6 +309,7 @@ def main() -> int:
     run.add_argument("--runner", required=True)
     run.add_argument("--timeout", type=float, default=900.0)
     run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--restart", action="store_true", help="ignore a matching partial/completed report")
     args = parser.parse_args()
     try:
         skills = load_spec(args.spec, args.root.resolve())
@@ -229,8 +321,30 @@ def main() -> int:
         if args.command == "matrix":
             write_json({"schema_version": 1, "phase": args.phase, "rows": rows}, args.output)
             return 0
-        results = run_matrix(rows, shlex.split(args.runner), args.timeout)
-        report = report_payload(args.phase, results)
+        commit = source_commit(args.root.resolve())
+        fingerprint = matrix_fingerprint(rows)
+        prior = [] if args.restart else load_resume_results(
+            args.report, rows, phase=args.phase, commit=commit, fingerprint=fingerprint
+        )
+
+        def checkpoint(completed: list[dict[str, Any]]) -> None:
+            write_json(
+                report_payload(
+                    args.phase, completed, planned_total=len(rows),
+                    commit=commit, fingerprint=fingerprint,
+                ),
+                args.report,
+                announce=False,
+            )
+
+        checkpoint(prior)
+        results = run_matrix(
+            rows, shlex.split(args.runner), args.timeout,
+            prior=prior, checkpoint=checkpoint,
+        )
+        report = report_payload(
+            args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint
+        )
         write_json(report, args.report)
         return 0 if report["summary"]["failed"] == 0 else 1
     except AcceptanceError as exc:

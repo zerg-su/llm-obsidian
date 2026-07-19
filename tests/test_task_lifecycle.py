@@ -439,6 +439,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and 'model_reasoning_effort="high"'
         in supervisor_module.option_values(agent_spec["argv"], "-c"),
     )
+    check(
+        "supervisor keeps automated Codex off Fast service",
+        'service_tier="default"'
+        in supervisor_module.option_values(agent_spec["argv"], "-c"),
+    )
     add_dir_index = agent_spec["argv"].index("--add-dir")
     check(
         "supervisor grants only the task Git metadata root",

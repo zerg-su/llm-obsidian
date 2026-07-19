@@ -50,6 +50,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   callback transition.
 - Live acceptance waits for a stable bounded regular-file outbox, tolerating a
   short non-atomic agent write without accepting symlinks or oversized output.
+- Repo-spawned Codex task, review, research, and acceptance sessions explicitly
+  use default service; Fast/priority service remains a user-only session choice.
+- Live acceptance reports checkpoint atomically after every cell and resume
+  only against the same source commit and matrix fingerprint.
 
 ## [2.0.9] - 2026-07-18
 
