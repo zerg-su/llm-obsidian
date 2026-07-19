@@ -298,6 +298,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "fixture_text": "dispatch acceptance deadbeef\n",
         "result_title": "Acceptance dispatch deadbeef result",
         "nested_worktree": str(repo / ".vault-meta/acceptance-worktrees/sandbox-acceptance-dispatch-deadbeef"),
+        "dispatch_spec": str(repo / ".vault-meta/acceptance/dispatch-request.json"),
+        "request_id": "11111111-1111-4111-8111-111111111111",
+        "coordinator_runtime": "codex",
     }
     exact_dispatch = module.dispatch_fixture_prompt(prepared)
     dispatch_prompt = module.prompt_text(
@@ -311,9 +314,33 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "dispatch prompt pins one exact runner-prepared operation",
         all(value in dispatch_prompt for value in (
             prepared["task_name"], prepared["branch"], prepared["plan_path"],
-            prepared["nested_worktree"], prepared["result_title"],
+            prepared["nested_worktree"], prepared["result_title"], prepared["dispatch_spec"],
         )),
     )
+    check(
+        "dispatch prompt uses mechanical runner once",
+        "dispatch-runner.py start --spec" in dispatch_prompt
+        and "do not reproduce its setup commands manually" in dispatch_prompt,
+    )
+    module.write_dispatch_acceptance_request(
+        repo,
+        prepared,
+        source_commit=commit,
+        coordinator_surface="22222222-2222-4222-8222-222222222222",
+        coordinator_model="gpt-5.6-sol",
+        coordinator_effort="high",
+    )
+    prepared_request = json.loads(Path(prepared["dispatch_spec"]).read_text(encoding="utf-8"))
+    check(
+        "acceptance request delegates current session route to runner",
+        "origin_session" not in prepared_request
+        and prepared_request["session_route"]["source"] == "acceptance-runner",
+    )
+    check(
+        "acceptance request binds exact coordinator surface",
+        prepared_request["origin_surface"] == "22222222-2222-4222-8222-222222222222",
+    )
+    Path(prepared["dispatch_spec"]).unlink()
     check(
         "dispatch prompt preserves durable proof artifacts",
         "Leave them in place" in dispatch_prompt and "independently proves the exact commit" in dispatch_prompt,

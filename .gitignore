@@ -152,6 +152,8 @@ _attachments/
 .vault-meta/research-runs/
 .vault-meta/session-routing/
 .vault-meta/daily-runs/
+.vault-meta/dispatch-requests/
+.vault-meta/dispatch-runs/
 .vault-meta/review-runtimes/
 .vault-meta/task-sessions/
 .vault-meta/document-cache/

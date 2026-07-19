@@ -639,38 +639,49 @@ def query_main(argv: list[str]) -> int:
     parser.add_argument("--top", type=int, default=5)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--dense", choices=("auto", "off", "on"), default="auto")
+    parser.add_argument(
+        "--read-only", action="store_true",
+        help="build stale sparse state in memory and emit no telemetry/index writes",
+    )
     args = parser.parse_args(argv)
     if args.top < 1:
         parser.error("--top must be positive")
     query = " ".join(args.query)
     try:
-        index, _ = ensure_sparse()
+        if args.read_only:
+            index = load_sparse()
+            if index is None or index.get("source_fingerprint") != source_fingerprint():
+                index = build_sparse()
+        else:
+            index, _ = ensure_sparse()
         results, meta = retrieve(index, query, top=args.top, dense_mode=args.dense)
     except (FileNotFoundError, RuntimeError, TimeoutError) as exc:
+        if not args.read_only:
+            emit_event(
+                "retrieve",
+                actor="retrieve",
+                counts={"requested": args.top, "results": 0},
+                status="error",
+                root=ROOT,
+            )
+        print(f"retrieve: {exc}", file=sys.stderr)
+        return 3
+    if not args.read_only:
         emit_event(
             "retrieve",
             actor="retrieve",
-            counts={"requested": args.top, "results": 0},
-            status="error",
+            paths=[item.path for item in results],
+            counts={
+                "requested": args.top,
+                "results": len(results),
+                "pages": meta["pages"],
+                "chunks": meta["chunks"],
+                "dense_used": int(meta["mode"] == "hybrid"),
+                "degraded": int(bool(meta["degraded"])),
+            },
+            status="degraded" if meta["degraded"] else "ok",
             root=ROOT,
         )
-        print(f"retrieve: {exc}", file=sys.stderr)
-        return 3
-    emit_event(
-        "retrieve",
-        actor="retrieve",
-        paths=[item.path for item in results],
-        counts={
-            "requested": args.top,
-            "results": len(results),
-            "pages": meta["pages"],
-            "chunks": meta["chunks"],
-            "dense_used": int(meta["mode"] == "hybrid"),
-            "degraded": int(bool(meta["degraded"])),
-        },
-        status="degraded" if meta["degraded"] else "ok",
-        root=ROOT,
-    )
     if args.json:
         print(
             json.dumps(

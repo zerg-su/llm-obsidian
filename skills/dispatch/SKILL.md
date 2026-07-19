@@ -1,7 +1,7 @@
 ---
 name: dispatch
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
@@ -10,6 +10,67 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 Keeps the "wiki as backbone" paradigm but moves execution into a separate cmux task split. The wiki agent (this session, Claude or Codex) does **not** execute the task — it spawns a task split and keeps dispatching other tasks in parallel. When the task is done — `/reap` it into the wiki.
 The prompt may select either runtime; otherwise dispatch inherits the current
 session route. Claude and Codex can dispatch each other.
+
+## Canonical approved-plan runner
+
+For an approved unattended plan, deterministic setup is code-owned. Do not
+manually reproduce Phase 2 worktree, routing, prompt, metadata, surface, launch,
+or log commands. After Phase 1 resolves the values, write one unique ignored
+request under `.vault-meta/dispatch-requests/<request-id>.json`:
+
+```json
+{
+  "schema_version": 1,
+  "request_id": "<canonical UUID>",
+  "task_name": "<kebab-case>",
+  "description": "<approved bounded mandate>",
+  "vault_root": "<absolute coordinator vault>",
+  "target_repo": "<absolute Git repository>",
+  "worktree": "<absolute new worktree>",
+  "branch": "task/<task_name>",
+  "base_branch": "<approved branch or commit>",
+  "plan_file": "<absolute pending plan>",
+  "executor": {"runtime": "", "model": "", "effort": ""},
+  "wiki_context": [{"title": "Existing Page", "summary": "why it matters"}],
+  "suggested_agents": [],
+  "reap": {"type": "session", "title": "<exact approved title>"},
+  "review_mode": "light"
+}
+```
+
+The runner binds `origin_surface`, `origin_session`, and `session_route` to the
+current process when those fields are omitted. This is safe because it uses the
+surface-local `CMUX_SURFACE_ID`, the exact host session ID, and host-confirmed
+routing; it never inspects the globally focused surface or falls back to a
+tracked model default. Explicit fields remain available for acceptance fixtures
+and diagnostics.
+
+Before echo-confirm, validate and show its typed route/hash result:
+
+```bash
+python3 <vault-root>/scripts/dispatch-runner.py validate --spec <request.json>
+```
+
+After the user approves that exact block, start it exactly once:
+
+```bash
+python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json>
+```
+
+`start` claims the UUID before mutation and is idempotent after launch. It
+creates one branch/worktree/task identity, renders only the approved-plan prompt
+branch, writes and validates v3 metadata, opens one split anchored right of the
+caller, launches the supervisor, verifies the surface, and logs through
+`vault-write.py`. Repeating a `preparing` or `failed` request fails closed rather
+than opening a second surface. A launched request returns its original typed
+result. If a blank child surface was created but launch did not begin, the
+runner closes only that exact surface.
+
+The remainder of Phase 2 documents the compatibility mechanics enforced by the
+runner. For approved v3 tasks it is a contract/reference, not an instruction to
+execute those commands individually. Classic interactive mode still follows
+the compatibility path.
+
 ## Phase 0: cmux availability check
 `/dispatch` depends on cmux (a terminal multiplexer CLI). First thing, before any parsing:
 
@@ -50,6 +111,12 @@ If something cannot be extracted from the text — ask with a single question, d
 ---
 
 ## Phase 1: Parse + Resolve (no writes, no spawn)
+
+Use `scripts/dispatch-resolver.py --request <phase1.json>` for repo, approved
+plan, and ranked context candidates. It returns `resolved` only for one exact
+repo and plan; missing/ambiguous candidates are explicit blockers and must be
+shown for selection, never guessed. The coordinator still interprets the user
+description and decides which returned context pages are actually relevant.
 
 ### 1.1 Parse
 Extract `task_name`, `target_repo`, `branch_intent`, `description` from the input.
@@ -228,227 +295,54 @@ Wait for "yes / no / edit". Do not proceed to Phase 2 without explicit consent.
 
 ---
 
-## Phase 2: Spawn (batched Bash)
-### 2.1 Worktree
-```bash
-WORKTREES_DIR="${LLM_OBSIDIAN_WORKTREES:-$HOME/Projects/worktrees}"
-mkdir -p "$WORKTREES_DIR"
-```
+## Phase 2: Spawn compatibility reference
 
-For a new branch:
-```bash
-git -C <repo-path> worktree add -b task/<task_name> \
-    "$WORKTREES_DIR/<repo>-<task_name>" <base-branch>
-```
+Approved unattended v3 dispatches use `scripts/dispatch-runner.py start` from
+the canonical runner section above. The detailed mechanics below define what
+that code must enforce and remain only for classic interactive compatibility or
+read-only diagnosis. Do not execute them one by one for v3.
 
-For an existing branch:
-```bash
-git -C <repo-path> worktree add \
-    "$WORKTREES_DIR/<repo>-<task_name>" <existing-branch>
-```
+### 2.1 Runner-enforced mechanics
 
-If the worktree already exists (`already used by worktree at`) — tell the user, do not force it.
+For approved unattended v3, `dispatch-runner.py start` performs this exact
+sequence as one typed operation:
 
-### 2.2 Generate `.task-prompt.md` in the worktree
+- Verify the pending approved plan, Git base, new branch/worktree path,
+  exact existing wiki links, current session route, and caller surface.
+- Claim the request UUID before mutation and create the branch/worktree.
+- Initialize the opaque project/task binding and render `.task-prompt.md`
+  with only Branch A from `references/task-prompt-template.md`.
+- Resolve the Codex dispatch environment, sync only its approved profile,
+  and write validated v3 `.task-meta.json` plus exact handoff files.
+- Call the existing anchored `task_sessions.spawn_right`, prepare the
+  shell-free supervisor spec, send one bounded launch command, and verify
+  that exact surface by UUID.
+- Append the dispatch entry through `vault-write.py` and return typed JSON.
 
-**Read** `references/task-prompt-template.md` — the full template (task description, pre-loaded wiki context, suggested sub-agents, wiki access rules, plan section, finalization via /reap-send). Substitute the placeholders from Phase 1 and write via the Write tool (not echo/heredoc through Bash — the template is long).
+The task prompt keeps the same safety contract: the coordinator vault is
+read-only to the task, the approved plan hash is immutable, review/reap
+policies are explicit, and push/deploy/publish/worktree deletion/scope
+expansion remain forbidden. `cmux_agent_supervisor.py` continues to own
+runtime argv, permissions, DCG, trust-dialog handling, watchdog, and
+close-after-exit behavior.
 
-The plan section is **conditional** — render exactly one branch:
-- **plan-mode** (Phase 1.4b produced a file) → branch A "Approved plan": absolute path to the plan, echo + immediate execution;
-- **classic-mode** → branch B "plan-first workflow" (as before).
+The validated metadata retains `approved_plan_sha256`, `forbidden_actions`,
+and the complete bounded `watchdog_policy`. Unattended Codex launch remains
+`-a never` plus `workspace-write`, exact Git/session write roots, a loopback
+proxy restricted to `localhost`/the owned cmux socket, pinned `DCG_CONFIG`, and
+the supervisor's trusted `PATH`; the runner does not weaken those controls.
 
-Key template invariants (preserve them if you edit the reference):
-- **plan-first** is mandatory ONLY in classic-mode; in plan-mode the Approved plan replaces it (plan echo, start without approval, stop conditions at forks remain);
-- the **vault is read-only** for the task agent — vault edits happen only via /reap (otherwise a race with the vault's Stop-hook autocommit);
-- **Suggested sub-agents** — a hint, not a command;
-- finalization — `/reap-send`, fallback = print the `## Wiki Summary` block into the chat.
-
-### 2.3 Spawn a split surface in the current workspace
-
-For Codex, run `codex-sync --apply --only-profile <dispatch-profile>` after the
-upfront approval and before `new-split`, preceded by
-`mcp-gateway.sh sync-config --apply` so a fresh clone has its ignored local MCP
-JSON. The scoped sync unions only already
-trusted global hook hashes into that profile, never changes other Codex
-profiles, and never accepts a new/conflicting hash.
-For an approved v2/v3 unattended task, the supervisor recognizes only the
-runtime's complete native first-run workspace-trust dialog on the exact bound
-task/reviewer surface and presses Enter once. Codex or Claude persists its own
-native trust decision; the pipeline never edits global trust files directly.
-Partial/unknown prompts, interactive tasks, other surfaces, and later dialogs
-remain untouched and visible to the user.
-
-Paradigm: the task agent lives as a **split surface to the right** of the wiki agent in the very same cmux workspace, **not** in a separate workspace or window. The user sees both sessions at once, switches between them as panes, and parallel tasks accumulate as extra surfaces in the same split stack.
-
-**First** — capture the calling wiki surface UUID **before** the new-split (in
-case focus shifts). Anchor it to this process's `CMUX_SURFACE_ID`; the globally
-selected `*` surface may belong to another task when background work is running.
-Do not persist short `surface:N` refs in handoff files: refs are convenient for
-humans, but UUIDs are safer when tabs/surfaces are moved or closed.
-
-```bash
-CMUX_UUID_RE='[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-test -n "${CMUX_SURFACE_ID:-}" || { echo "CMUX_SURFACE_ID is missing" >&2; exit 1; }
-SUPERVISOR="<vault-root>/scripts/cmux_agent_supervisor.py"
-IDENTITY=$(python3 "$SUPERVISOR" identify-caller --surface "$CMUX_SURFACE_ID")
-WIKI_SURFACE=$(printf '%s\n' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["surface_id"])')
-WIKI_SURFACE_REF=$(printf '%s\n' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["surface_ref"])')
-test "$WIKI_SURFACE" = "$CMUX_SURFACE_ID" || { echo "caller surface identity mismatch" >&2; exit 1; }
-```
-
-If the explicit caller UUID cannot be determined or differs from
-`CMUX_SURFACE_ID` — report and stop; never substitute the selected surface or
-guess by recency. `WIKI_SURFACE_REF` is only for human-readable echo/log.
-
-```bash
-SURFACE_LINE=$(cmux --id-format both new-split right --surface "$WIKI_SURFACE" --focus false 2>&1)
-# Output can be "OK surface:N <UUID> ..." or "OK surface:N (<UUID>) ...".
-# Persist UUID, ref only for echo/log.
-SURFACE_ID=$(printf '%s\n' "$SURFACE_LINE" | grep -oE "$CMUX_UUID_RE" | head -1)
-SURFACE_REF=$(echo "$SURFACE_LINE" | grep -oE 'surface:[0-9]+' | head -1)
-```
-
-If `cmux new-split` fails (no active workspace / pane cannot split) — report and stop. Do not fall back to `new-workspace`.
-
-Save **both** surface UUIDs into the worktree (backwards-compat with reap / reap-send; `cmux --surface` accepts UUIDs):
-
-```bash
-WIKI_RUNTIME=claude
-[ -n "${CODEX_THREAD_ID:-}" ] && WIKI_RUNTIME=codex
-echo "$SURFACE_ID" > <worktree-path>/.task-cmux-surface    # task agent (right split)
-echo "$WIKI_SURFACE" > <worktree-path>/.wiki-cmux-surface   # wiki agent (left split, for /reap-send RPC)
-echo "$WIKI_RUNTIME" > <worktree-path>/.wiki-agent-runtime  # claude|codex, for the right RPC command
-echo "<reap_skill without task argument>" > <worktree-path>/.wiki-reap-command
-echo "<reap_send_skill>" > <worktree-path>/.task-reap-send-skill
-echo "<review_skill>" > <worktree-path>/.task-review-skill
-echo "<review_send_skill>" > <worktree-path>/.task-review-send-skill
-```
-
-`.task-cmux-surface` is needed by `/reap` (wiki-side fetch via read-screen, fallback when `.task-summary.md` is missing).
-`.wiki-cmux-surface` and `.wiki-agent-runtime` are needed by `/reap-send` (task-side RPC trigger: Claude receives `/reap`; Codex receives the command stored in `.wiki-reap-command`).
-`.wiki-reap-command` is the environment-specific Codex skill command to send
-back to the wiki split, for example `$llm-obsidian:reap`. This avoids
-guessing from `WIKI_RUNTIME=codex`, which is not enough to distinguish plugin
-namespaces.
-`.task-review-skill` stores the environment-specific review command, for
-example `$llm-obsidian:review-dispatch`, so the task agent can run
-cross-model review before `/reap-send`.
-`.task-review-send-skill` stores the reviewer-side callback command, for
-example `$llm-obsidian:review-send`, so the review split can return
-findings to the executor split.
-`.task-agent-command.json` is the shell-free argv/env handoff consumed by the
-cmux supervisor; it is runtime state, never a commit target.
-
-**Additionally** — approved-plan mode initializes the persistent task identity,
-then writes v3 `.task-meta.json` with the origin binding and unattended mandate.
-Classic interactive mode keeps v1 and is not resumable.
-
-```bash
-TASK_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
-IDENTITY=$(python3 <vault-root>/scripts/task_sessions.py --vault-root <vault-root> \
-  init-task --worktree <worktree-path> --task-id "$TASK_ID" \
-  --runtime "$WIKI_RUNTIME" --session-id "$(./scripts/current-session-id.sh)")
-PROJECT_ID=$(printf '%s' "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["project_id"])')
-```
-
-Never derive either ID from a task name, branch, path, or existing candidate.
-Attaching another coordinator requires the exact opaque `task_id` and an
-explicit `init-task --task-id ...` binding.
-The same coordinator session may explicitly bind several concurrent task IDs;
-each binding is preserved independently. A command that omits `task_id` may
-reuse a session only when exactly one active task remains, otherwise it fails
-closed instead of guessing.
-
-```bash
-cat > <worktree-path>/.task-meta.json <<EOF
-{
-  "version": 3,
-  "project_id": "$PROJECT_ID",
-  "task_id": "$TASK_ID",
-  "task_name": "<task_name>",
-  "wiki_runtime": "$WIKI_RUNTIME",
-  "executor_runtime": "<claude|codex>",
-  "runtime": "<claude|codex>",
-  "origin_session": "$(./scripts/current-session-id.sh)",
-  "spawned_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "wiki_surface": "$WIKI_SURFACE",
-  "wiki_surface_ref": "$WIKI_SURFACE_REF",
-  "task_surface": "$SURFACE_ID",
-  "task_surface_ref": "$SURFACE_REF",
-  "target_repo": "<repo-path>",
-  "vault_root": "<absolute coordinator vault path>",
-  "branch": "task/<task_name>",
-  "base_branch": "<base-branch>",
-  "codex_home": "<absolute CODEX_HOME path or null>",
-  "codex_profile": "<profile name or null>",
-  "wiki_reap_command": "<reap_skill without task argument>",
-  "reap_send_skill": "<reap_send_skill>",
-  "review_skill": "<review_skill>",
-  "review_send_skill": "<review_send_skill>",
-  "routing": {
-    "schema_version": 1,
-    "session": {"runtime": "<current>", "model": "<current>", "effort": "<current>", "source": "<runtime-environment|codex-session-log|host-field>"},
-    "effective": {"runtime": "<resolved>", "model": "<resolved>", "effort": "<resolved>", "source": ["session"], "config_sha256": "<sha256>"}
-  },
-  "model": "<explicit override only, otherwise omit>",
-  "effort": "<explicit override only, otherwise omit>",
-  "plan_file": "/abs/path/to/wiki/plans/<file>.md",
-  "approved_plan_sha256": "<sha256 captured before echo-confirm>",
-  "interaction_policy": "unattended",
-  "review_policy": {"mode": "light|full|skip", "max_verify_iterations": 2, "auto_resolve_severities": ["warning", "nit"], "escalate_severities": ["blocking"]},
-  "reap_policy": {"mode": "final", "auto_file": true, "allowed_types": ["session"], "title": "<exact approved wiki title>"},
-  "surface_policy": {"auto_close": true},
-  "watchdog_policy": {"enabled": true, "poll_seconds": 30, "warn_after_seconds": 900, "alert_after_seconds": 1200},
-  "forbidden_actions": ["push", "deploy", "publish", "delete-worktree", "delete-branch", "expand-scope"],
-  "suggested_agents": [<from Phase 1.6, JSON array of {"name", "hint"}>]
-}
-EOF
-```
-
-Why `.task-meta.json`:
-- `origin_session` — `/reap` compares it with current `./scripts/current-session-id.sh`; on mismatch (the wiki agent restarted between dispatch and reap, or another session runs reap) — WARNING and an explicit confirm before filing. Does not block, but stays visible. See Edge case 6.
-- `vault_root` — binds review archives, callbacks, lifecycle telemetry, and reap to the canonical coordinator vault even for a linked worktree. Older v2 metadata derives it from `plan_file`; script-location inference is only a legacy fallback.
-- `wiki_runtime` and `wiki_reap_command` — `/reap-send` selects the correct RPC command: `/reap` for Claude, or the plugin-qualified command stored in `.wiki-reap-command` for Codex.
-- `executor_runtime` / `runtime` / `model` — `/reap` preserves executor provenance in result-page frontmatter and echo output (`runtime` stays as a legacy alias for old consumers).
-- `suggested_agents` — `/reap` can add them to the saved page's frontmatter or use them for cross-refs.
-- `approved_plan_sha256` prevents post-approval drift; validate it with `scripts/task_contract.py validate` before task work.
-- `reap_policy` binds unattended filing to one exact type/title; drift, collision, or session mismatch escalates instead of filing.
-- `watchdog_policy` only observes/alerts; it never sends input, kills, or closes.
-
-Prepare the shell-free task argv, then send only the short supervisor command.
-`prepare-task` pins Codex to `-a never -s workspace-write` and adds only the validated Git common directory, enough for linked-worktree commits. Its proxy allows clients only to `localhost`, `127.0.0.1`, `::1`, and the exact user-owned cmux socket from `CMUX_SOCKET_PATH`; external domains, non-loopback/upstream proxying, arbitrary Unix sockets, and SOCKS remain disabled.
-The supervisor pins a trusted `PATH` with Python, Homebrew, Docling, Git, cmux, Claude, and Codex, plus the task profile through `DCG_CONFIG`. That profile permits local rebase/amend/cherry-pick/staging but blocks push, hard reset, file discard, worktree/branch deletion, repository-wide history rewriting, deployment, publication, and the other destructive packs.
-Claude keeps `auto` while using the same trusted `PATH` and task DCG profile.
-The supervisor validates the command/environment contract, refuses drift,
-appends one prompt argv, runs the watchdog, and calls lifecycle after exit.
-
-```bash
-WORKTREE="<worktree-path>"
-WORKTREE_Q=$(printf '%q' "$WORKTREE")
-SUPERVISOR_Q=$(printf '%q' "$SUPERVISOR")
-python3 "$SUPERVISOR" prepare-task --worktree "$WORKTREE" --surface "$SURFACE_ID"
-cmux send --surface "$SURFACE_ID" "python3 $SUPERVISOR_Q run --worktree $WORKTREE_Q --kind task --surface $SURFACE_ID"
-sleep 0.2
-cmux send-key --surface "$SURFACE_ID" Enter
-```
-
-### 2.4 Verify
-
-```bash
-cmux read-screen --surface "$SURFACE_ID" --lines 1 >/dev/null
-```
-
-The surface must be addressable by its persisted UUID. Optionally, after 1-2 seconds:
-
-```bash
-cmux read-screen --surface "$SURFACE_ID" --lines 20
-```
-
-If the output shows a running `claude` or `codex` process — success.
-
----
+Classic interactive compatibility may still construct these artifacts
+manually, but it is not resumable and must never be used as an unattended
+fallback. Operational details and recovery semantics live in
+`docs/task-sessions.md`; the executable contract is covered by
+`tests/test_dispatch_runner.py` and `tests/test_task_lifecycle.py`.
 
 ## Phase 3: Log (vault-write, log-only)
+
+For approved v3, the runner performs this transaction and returns
+`log_status: ok|degraded`; do not write a duplicate log entry. The command below
+is the classic compatibility path.
 Payload goes through the dispatcher script (NOT a direct Edit):
 
 ```bash

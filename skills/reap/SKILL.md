@@ -1,7 +1,7 @@
 ---
 name: reap
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 description: |
   Finalize a Claude/Codex cmux task: collect its typed summary, file it through the vault transaction, preserve provenance, and close safely.
   Triggers: reap, finalize task, collect task summary, зафиксируй task, финализируй task.
@@ -13,6 +13,28 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 After the task agent produces a typed summary, `/reap` files it through the
 single writer. Approved v2 unattended tasks use contract-bound final filing,
 validation, and armed exact-surface close; legacy tasks remain interactive.
+
+## Canonical v3 final runner
+
+When `.task-meta.json` is v3, `interaction_policy=unattended`, and the command
+is final, do not reproduce Phases 1–3 manually. Run once:
+
+```bash
+python3 <vault-root>/scripts/reap-runner.py \
+  --vault-root <vault-root> --worktree <exact-worktree>
+```
+
+The runner validates the typed summary and exact session/plan/reap policy,
+archives every completed broker review, appends only validated review links,
+selects the collision-safe result route, allocates provenance/frontmatter,
+prepares the plan close, performs one `vault-write.py` transaction, reindexes,
+validates, completes the broker task, and arms exit for only the exact task
+surface. It emits content-free duration telemetry. Any ambiguity,
+executed-plan recovery, interactive/legacy task, unfinished review, update
+conflict, or contract drift fails closed into the compatibility diagnostics
+below; never retry a partially completed final reap blindly.
+
+The remaining phases are the compatibility contract and recovery reference.
 
 ## Input
 

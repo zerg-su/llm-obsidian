@@ -28,6 +28,42 @@ Task-meta v3 carries `project_id` and `task_id`. v1/v2 remain readable and keep
 their exact legacy origin-session and worktree-local artifact rules. Running
 legacy sessions are never adopted during an overlay.
 
+## Deterministic dispatch start
+
+`scripts/dispatch-resolver.py` performs the read-only Phase 1 inventory. It
+deduplicates repo candidates from `wiki/repos` and the configured projects
+root, finds pending current-session/explicit plans, and ranks up to five
+existing wiki pages through the canonical hybrid retriever in read-only mode.
+When the dense index or local embedding service is unavailable, retrieval
+reports the degradation and falls back to sparse search without blocking. Zero or multiple repo/plan matches
+return `needs-selection`; the script never chooses by recency across unrelated
+sessions or turns a fuzzy context score into authorization.
+
+`scripts/dispatch-runner.py` owns the approved-plan setup boundary. The
+coordinator still resolves the repository, context, exact result title, and
+user approval; after approval it passes one ignored typed request to `start`.
+The runner captures the exact current session route, claims the request UUID,
+creates one branch/worktree/task binding, renders and validates task-meta v3,
+opens one split anchored to the caller, launches the supervisor, verifies the
+surface, and writes the dispatch log transaction.
+
+The run claim is persistent under `.vault-meta/dispatch-runs/<request-id>.json`.
+A completed request replays its original typed result. A preparing or failed
+request cannot be started again implicitly, so coordinator retries cannot open
+duplicate surfaces. If launch fails after a blank child split was created, only
+that exact not-yet-running split is closed; an already launched task is never
+rolled back or duplicated. `validate --spec ...` performs the same fail-closed
+request, plan, context, route, and prompt checks without creating a worktree or
+surface.
+
+`scripts/reap-runner.py` owns the symmetric first finalization of a v3
+unattended task. Given the exact worktree, it validates the summary/handoff,
+archives all review operations, renders the provenance page, prepares and
+commits the collision-safe result plus plan close in one transaction, validates
+the vault, archives the broker task, and arms exact-surface exit. Legacy,
+interactive, ambiguous, conflicted, and already-executed recovery cases stay
+visible and use the diagnostic contract rather than an implicit retry.
+
 ## Layout and concurrency
 
 Canonical state is:

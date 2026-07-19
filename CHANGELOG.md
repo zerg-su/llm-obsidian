@@ -8,6 +8,16 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Approved-plan dispatch now uses a typed, idempotent post-approval runner for
+  route capture, worktree/task identity, prompt/meta rendering, anchored spawn,
+  supervisor launch, and log filing. Coordinators no longer reproduce the
+  lifecycle as dozens of shell/tool steps, and a repeated preparing/failed
+  request cannot open a duplicate surface.
+- Dispatch Phase 1 now has a read-only candidate resolver, first final v3 reap
+  has one contract-bound runner, and both paths emit content-free stage timing
+  so repeated model turns are reserved for semantic choices rather than
+  mechanical orchestration.
+
 - Codex task sessions now receive write access only to their exact v3 task
   registry subtree, allowing operation-scoped review callbacks without exposing
   the broader coordinator registry.

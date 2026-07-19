@@ -216,6 +216,24 @@ def run():
         assert_eq("CLI telemetry result path", ["wiki/Target.md"], retrieve_event["paths"])
         assert_true("CLI telemetry omits query", "buildkit" not in event_log.read_text(encoding="utf-8"))
 
+        readonly = root / "cli-read-only"
+        (readonly / "scripts").mkdir(parents=True)
+        (readonly / "wiki").mkdir()
+        for filename in ("retrieve.py", "vault_schema.py", "pipeline_events.py"):
+            shutil.copy2(ROOT / "scripts" / filename, readonly / "scripts" / filename)
+        (readonly / "wiki/Target.md").write_text(
+            page("Target", "c-000001", "buildkit", "## Read only\n\nBuildkit lookup."),
+            encoding="utf-8",
+        )
+        read_only_result = subprocess.run(
+            [sys.executable, str(readonly / "scripts/retrieve.py"), "buildkit", "--json", "--read-only"],
+            text=True,
+            capture_output=True,
+        )
+        assert_eq("read-only CLI exit 0", 0, read_only_result.returncode)
+        assert_true("read-only CLI returns results", bool(json.loads(read_only_result.stdout)["results"]))
+        assert_true("read-only CLI writes no derived state", not (readonly / ".vault-meta").exists())
+
         wrapper = subprocess.run(
             [sys.executable, str(sandbox / "scripts/semantic-search.py"), "buildkit", "--hybrid"],
             text=True,

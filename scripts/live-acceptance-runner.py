@@ -321,23 +321,6 @@ Do not merge, push, publish, deploy, delete the task worktree, or expand scope.
         cwd=sandbox,
         input_text=json.dumps(payload, ensure_ascii=False),
     )
-    if runtime == "codex":
-        runtime_env = sandbox / "scripts" / "mcp-gateway" / "runtime.env"
-        if not runtime_env.exists():
-            shutil.copy2(runtime_env.with_name("runtime.env.example"), runtime_env)
-        gateway = sandbox / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
-        run_checked([str(gateway), "sync-config", "--apply"], cwd=sandbox)
-        profile = "llm-obsidian-mcp"
-        dispatch_env = sandbox / ".codex" / "dispatch-env.toml"
-        if dispatch_env.is_file() and sys.version_info >= (3, 11):
-            import tomllib
-
-            raw = tomllib.loads(dispatch_env.read_text(encoding="utf-8")).get("codex_dispatch", {})
-            if isinstance(raw, dict) and str(raw.get("profile") or "").strip():
-                profile = str(raw["profile"]).strip()
-        run_checked(
-            [str(gateway), "codex-sync", "--apply", "--only-profile", profile], cwd=sandbox,
-        )
     fixture = {
         "task_name": task_name,
         "branch": f"task/{task_name}",
@@ -348,6 +331,9 @@ Do not merge, push, publish, deploy, delete the task worktree, or expand scope.
         "fixture_sha256": hashlib.sha256(fixture_text.encode("utf-8")).hexdigest(),
         "result_title": result_title,
         "nested_worktree": str(nested_worktree.resolve()),
+        "dispatch_spec": str((sandbox / ".vault-meta" / "acceptance" / "dispatch-request.json").resolve()),
+        "request_id": run_id,
+        "coordinator_runtime": runtime,
     }
     atomic_json(sandbox / ".vault-meta" / "acceptance" / "dispatch-fixture.json", fixture)
     return fixture
@@ -356,6 +342,9 @@ Do not merge, push, publish, deploy, delete the task worktree, or expand scope.
 def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
     return (
         f"Execute the already-approved plan `{fixture['plan_path']}` exactly once. "
+        f"The deterministic dispatch request is `{fixture['dispatch_spec']}`. Start it exactly once with "
+        f"`python3 {Path(fixture['plan_path']).parents[2]}/scripts/dispatch-runner.py start --spec "
+        f"{fixture['dispatch_spec']}`; do not reproduce its setup commands manually. "
         f"Use task name `{fixture['task_name']}`, branch `{fixture['branch']}`, and exact worktree "
         f"`{fixture['nested_worktree']}`. Create only `{fixture['fixture_rel']}` with exact bytes "
         f"`{fixture['fixture_text'].rstrip()}` plus one newline and commit it in exactly one commit. "
@@ -364,6 +353,39 @@ def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
         "configuration and owns setup, artifact proof, and disposable-clone cleanup. Do not make a second "
         "plan, repeat configuration setup, remove result/review/plan artifacts, or ask for approval again."
     )
+
+
+def write_dispatch_acceptance_request(
+    sandbox: Path, fixture: dict[str, str], *, source_commit: str, coordinator_surface: str,
+    coordinator_model: str, coordinator_effort: str,
+) -> None:
+    atomic_json(Path(fixture["dispatch_spec"]), {
+        "schema_version": 1,
+        "request_id": fixture["request_id"],
+        "task_name": fixture["task_name"],
+        "description": (
+            f"Execute {fixture['plan_path']} exactly once, create only {fixture['fixture_rel']} "
+            "with its specified bytes, run one light opposite-model review, and finalize through reap."
+        ),
+        "vault_root": str(sandbox),
+        "target_repo": str(sandbox),
+        "worktree": fixture["nested_worktree"],
+        "branch": fixture["branch"],
+        "base_branch": source_commit,
+        "plan_file": fixture["plan_path"],
+        "origin_surface": coordinator_surface,
+        "session_route": {
+            "runtime": fixture["coordinator_runtime"],
+            "model": coordinator_model,
+            "effort": coordinator_effort,
+            "source": "acceptance-runner",
+        },
+        "executor": {},
+        "wiki_context": [],
+        "suggested_agents": [],
+        "reap": {"type": "session", "title": fixture["result_title"]},
+        "review_mode": "light",
+    })
 
 
 def git_output(repo: Path, *args: str) -> tuple[bool, str]:
@@ -993,6 +1015,15 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             }
         )
         atomic_json(spec_path, spec)
+        if prepared_dispatch is not None:
+            write_dispatch_acceptance_request(
+                sandbox,
+                prepared_dispatch,
+                source_commit=commit,
+                coordinator_surface=surface,
+                coordinator_model=route["model"],
+                coordinator_effort=route["effort"],
+            )
         command = shlex.join([sys.executable, str(Path(__file__).resolve()), "agent", "--spec", str(spec_path)])
         send_surface(surface, command)
         raw = wait_for_outbox(
