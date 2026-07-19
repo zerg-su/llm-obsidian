@@ -30,6 +30,16 @@ SURFACE_RE = re.compile(
 OUTBOX_MAX_BYTES = 64 * 1024
 OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
+DISPOSABLE_VAULT_BOOKKEEPING = {
+    ".vault-meta/address-counter.txt",
+    ".vault-meta/address-map.tsv",
+    ".vault-meta/index.jsonl",
+    ".vault-meta/recent.jsonl",
+    ".vault-meta/session-to-pages.jsonl",
+    ".vault-meta/tag-index.json",
+    "wiki/hot.md",
+    "wiki/log.md",
+}
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
@@ -289,6 +299,10 @@ Hard boundaries:
 - Install nothing unless it is already covered by an explicit local noninteractive fixture. Missing optional dependencies must produce a visible blocked/degraded result.
 - Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
+- The runner owns the disposable clone, its ignored task-session registry, the operation outbox,
+  and its run-scoped temporary directory. Do not run `git restore`, `git checkout`, `git stash`,
+  or manually delete those runner-owned paths. Remove the fixture's product output and close
+  external processes/surfaces; the runner validates allowed vault bookkeeping and deletes the clone.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 
 Finally write exactly one JSON object to `{outbox}` using this shape:
@@ -315,11 +329,22 @@ Do not merely describe a hypothetical test. The outbox is the final action after
 """
 
 
-def agent_argv(runtime: str, sandbox: Path, model: str, effort: str, prompt: str) -> tuple[list[str], dict[str, str]]:
+def agent_argv(
+    runtime: str,
+    sandbox: Path,
+    model: str,
+    effort: str,
+    prompt: str,
+    *,
+    scratch_root: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env["LLM_OBSIDIAN_ACCEPTANCE"] = "1"
     env["LLM_OBSIDIAN_WORKTREES"] = str(sandbox / ".vault-meta" / "acceptance-worktrees")
     env["DCG_CONFIG"] = str(sandbox / "config" / "dcg" / "task.toml")
+    if scratch_root is not None:
+        for name in ("TMPDIR", "TMP", "TEMP"):
+            env[name] = str(scratch_root)
     if runtime == "claude":
         return [
             "claude", "--permission-mode", "auto", "--add-dir", str(sandbox),
@@ -354,16 +379,26 @@ def run_agent_process(spec_path: Path) -> int:
     run_dir = spec_path.parent.resolve()
     sandbox = Path(str(spec.get("sandbox") or "")).resolve()
     prompt_path = Path(str(spec.get("prompt_file") or "")).resolve()
+    scratch_root = Path(str(spec.get("scratch_root") or "")).resolve()
     if sandbox.parent != run_dir or not (sandbox / ".acceptance-sandbox.json").is_file():
         raise AcceptanceRunnerError("acceptance sandbox is not bound to its run directory")
     if prompt_path != run_dir / "prompt.md" or not prompt_path.is_file():
         raise AcceptanceRunnerError("acceptance prompt is not operation-scoped")
+    if scratch_root != run_dir / "scratch" or not (scratch_root / ".acceptance-scratch.json").is_file():
+        raise AcceptanceRunnerError("acceptance scratch directory is not operation-scoped")
     runtime = str(spec.get("runtime") or "")
     config = load_config(sandbox)
     route = config.runtime_default(runtime)
     if route["model"] != spec.get("model") or route["effort"] != spec.get("effort"):
         raise AcceptanceRunnerError("acceptance route drifted after preparation")
-    argv, env = agent_argv(runtime, sandbox, route["model"], route["effort"], prompt_path.read_text(encoding="utf-8"))
+    argv, env = agent_argv(
+        runtime,
+        sandbox,
+        route["model"],
+        route["effort"],
+        prompt_path.read_text(encoding="utf-8"),
+        scratch_root=scratch_root,
+    )
     try:
         launch_cwd = run_dir if runtime == "claude" else sandbox
         return subprocess.run(argv, cwd=launch_cwd, env=env, check=False).returncode
@@ -501,6 +536,10 @@ def safe_cleanup(run_dir: Path) -> None:
     marker = sandbox / ".acceptance-sandbox.json"
     if sandbox.is_dir() and marker.is_file() and sandbox.parent == run_dir:
         shutil.rmtree(sandbox)
+    scratch = run_dir / "scratch"
+    scratch_marker = scratch / ".acceptance-scratch.json"
+    if scratch.is_dir() and scratch_marker.is_file() and scratch.parent == run_dir:
+        shutil.rmtree(scratch)
 
 
 def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
@@ -516,15 +555,23 @@ def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
     )
     if status.returncode != 0:
         return False, "disposable clone status is unreadable"
-    dirty = [
-        line for line in status.stdout.splitlines()
-        if line[3:] != ".acceptance-sandbox.json"
-    ]
+    dirty = []
+    bookkeeping = []
+    for line in status.stdout.splitlines():
+        path = line[3:]
+        if path == ".acceptance-sandbox.json":
+            continue
+        if path in DISPOSABLE_VAULT_BOOKKEEPING and not line.startswith("??"):
+            bookkeeping.append(path)
+            continue
+        dirty.append(line)
     if dirty:
         return False, "disposable clone retained product or vault changes"
     nested = sandbox / ".vault-meta" / "acceptance-worktrees"
     if nested.is_dir() and any(nested.iterdir()):
         return False, "nested acceptance worktrees remain"
+    if bookkeeping:
+        return True, "product outputs removed; only disposable vault bookkeeping remains"
     return True, "committed HEAD and worktree restored"
 
 
@@ -556,6 +603,12 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     cleanup = "sandbox retained for diagnosis"
     try:
         sandbox, commit = create_sandbox(run_dir)
+        scratch_root = run_dir / "scratch"
+        scratch_root.mkdir(mode=0o700)
+        atomic_json(
+            scratch_root / ".acceptance-scratch.json",
+            {"schema_version": 1, "run_dir": str(run_dir)},
+        )
         outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
         prompt = prompt_text(
             row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture
@@ -569,6 +622,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             "model": route["model"],
             "effort": route["effort"],
             "sandbox": str(sandbox),
+            "scratch_root": str(scratch_root),
             "prompt_file": str(prompt_path),
         }
         spec_path = run_dir / "operation.json"

@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -216,14 +217,32 @@ def run_matrix(
             continue
         started = datetime.now(timezone.utc)
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 command,
-                input=json.dumps(row, ensure_ascii=False) + "\n",
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                capture_output=True,
-                timeout=timeout,
-                check=False,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = proc.communicate(
+                    json.dumps(row, ensure_ascii=False) + "\n", timeout=timeout
+                )
+            except (KeyboardInterrupt, subprocess.TimeoutExpired):
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGINT)
+                    try:
+                        proc.communicate(timeout=45)
+                    except subprocess.TimeoutExpired:
+                        proc.terminate()
+                        try:
+                            proc.communicate(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.communicate()
+                raise
+            proc = subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
             if proc.returncode != 0:
                 raise AcceptanceError(f"runner exit {proc.returncode}")
             result = validate_result(row, json.loads(proc.stdout))

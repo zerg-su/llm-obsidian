@@ -54,6 +54,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   use default service; Fast/priority service remains a user-only session choice.
 - Live acceptance reports checkpoint atomically after every cell and resume
   only against the same source commit and matrix fingerprint.
+- Live acceptance now scopes nested temporary files to the exact operation,
+  leaves disposable clone/bookkeeping cleanup to the runner, rejects residual
+  product outputs, and gives an interrupted cell time to close its exact
+  surface before the matrix process exits.
 
 ## [2.0.9] - 2026-07-18
 

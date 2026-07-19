@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -165,5 +168,36 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("credential text sanitized", result.returncode == 0 and all("abcdefghijk" not in row["actual"] for row in payload["rows"]))
+
+    interrupt_marker = tmp / "runner-interrupted"
+    interrupt_runner = tmp / "interrupt-runner.py"
+    interrupt_runner.write_text(
+        "import signal,sys,time\n"
+        "from pathlib import Path\n"
+        "marker=Path(sys.argv[1])\n"
+        "def stop(_signum,_frame): marker.write_text('cleanup-complete\\n'); raise SystemExit(130)\n"
+        "signal.signal(signal.SIGINT, stop)\n"
+        "marker.with_suffix('.started').write_text('started\\n')\n"
+        "while True: time.sleep(0.1)\n",
+        encoding="utf-8",
+    )
+    interrupted = subprocess.Popen(
+        [
+            sys.executable, str(SCRIPT), "run", "--restart", "--phase", "final",
+            "--runner", f"{sys.executable} {interrupt_runner} {interrupt_marker}",
+            "--timeout", "60", "--report", str(report),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not interrupt_marker.with_suffix('.started').is_file():
+        time.sleep(0.05)
+    check("interrupt fixture starts", interrupt_marker.with_suffix('.started').is_file())
+    os.kill(interrupted.pid, signal.SIGINT)
+    interrupted.communicate(timeout=15)
+    check("matrix interrupt reaches active runner cleanup", interrupt_marker.is_file())
 
 print("\nAll release acceptance tests passed.")

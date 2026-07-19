@@ -138,6 +138,21 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
     clean, reason = module.sandbox_cleanup_proof(repo, commit)
     check("independent cleanup proof catches product drift", not clean and "changes" in reason)
+    (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
+    (repo / ".vault-meta").mkdir()
+    (repo / ".vault-meta" / "address-counter.txt").write_text("1\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".vault-meta/address-counter.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "bookkeeping fixture"], cwd=repo, check=True)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
+    ).stdout.strip()
+    (repo / ".vault-meta" / "address-counter.txt").write_text("2\n", encoding="utf-8")
+    clean, reason = module.sandbox_cleanup_proof(repo, commit)
+    check("runner accepts disposable vault bookkeeping", clean and "bookkeeping" in reason, reason)
+    (repo / "unexpected.md").write_text("product residue\n", encoding="utf-8")
+    clean, reason = module.sandbox_cleanup_proof(repo, commit)
+    check("runner rejects untracked product output", not clean and "changes" in reason, reason)
+    (repo / "unexpected.md").unlink()
 
     claude_argv, _ = module.agent_argv("claude", repo, "fixture-model", "high", "prompt")
     check("Claude acceptance runs outside project hooks", "--add-dir" in claude_argv and str(repo) in claude_argv)
@@ -145,6 +160,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
     check("Codex acceptance keeps Fast user-only", 'service_tier="default"' in codex_argv)
+    scratch = tmp / "scratch"
+    scratch.mkdir()
+    _argv, scratch_env = module.agent_argv(
+        "claude", repo, "fixture-model", "high", "prompt", scratch_root=scratch
+    )
+    check("acceptance temp files are operation-scoped", all(scratch_env[name] == str(scratch) for name in ("TMPDIR", "TMP", "TEMP")))
 
     settling = tmp / "settling-outbox.json"
     state: dict[str, object] = {}
@@ -212,6 +233,19 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     )
     check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
     check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
+    check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
+
+    cleanup_run = tmp / "cleanup-run"
+    cleanup_sandbox = cleanup_run / "sandbox"
+    cleanup_scratch = cleanup_run / "scratch"
+    cleanup_sandbox.mkdir(parents=True)
+    cleanup_scratch.mkdir()
+    (cleanup_sandbox / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
+    (cleanup_scratch / ".acceptance-scratch.json").write_text("{}\n", encoding="utf-8")
+    (cleanup_scratch / "nested").mkdir()
+    (cleanup_scratch / "nested" / "artifact.json").write_text("{}\n", encoding="utf-8")
+    module.safe_cleanup(cleanup_run)
+    check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
