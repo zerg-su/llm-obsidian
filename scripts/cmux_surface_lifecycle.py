@@ -296,10 +296,6 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
                 f"the next round will start fresh: {degradation.removeprefix('resume checkpoint unavailable: ')}",
                 file=sys.stderr,
             )
-    try:
-        close_surface_exact(surface)
-    except (TaskSessionError, OSError) as exc:
-        die(str(exc) or "cmux close-surface failed")
     broker_transitioned = True
     if kind == "reviewer" and _STATE_DIR is not None:
         broker_transitioned = transition_broker_review(
@@ -307,8 +303,36 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
         )
         if broker_transitioned:
             start_next_broker_review(worktree)
-    if kind != "reviewer" or _STATE_DIR is None or broker_transitioned:
-        sentinel.unlink(missing_ok=True)
+    if not broker_transitioned:
+        emit_lifecycle_event(
+            worktree,
+            "surface-lifecycle",
+            actor=f"{kind}:{runtime}",
+            counts={
+                "closed": 0,
+                "auto_close_expected": 1,
+                "broker_transition_pending": 1,
+            },
+            status="degraded",
+        )
+        print(
+            "reviewer surface remains open because its exact broker transition is pending; "
+            "the close sentinel was preserved, so rerun this after-exit command or use "
+            "the printed fail-operation recovery command",
+            file=sys.stderr,
+        )
+        return 3
+
+    # The supervisor runs inside the surface being closed. Current cmux may
+    # terminate that process as soon as close-surface succeeds, so persist the
+    # broker transition and remove the armed marker before self-close. Restore
+    # the marker only when close returns a real error and this process survives.
+    sentinel.unlink(missing_ok=True)
+    try:
+        close_surface_exact(surface)
+    except (TaskSessionError, OSError) as exc:
+        write_marker(sentinel, payload)
+        die(str(exc) or "cmux close-surface failed")
     runtime, expected = telemetry_surface_context(worktree, kind)
     emit_lifecycle_event(
         worktree,
@@ -321,14 +345,6 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
         },
         status="ok" if broker_transitioned else "degraded",
     )
-    if not broker_transitioned:
-        print(
-            "reviewer surface is closed but its exact broker transition is pending; "
-            "the close sentinel was preserved, so rerun this after-exit command or use "
-            "the printed fail-operation recovery command",
-            file=sys.stderr,
-        )
-        return 3
     print(f"closed {kind} surface {surface}")
     return 0
 

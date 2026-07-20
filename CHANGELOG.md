@@ -32,6 +32,11 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Reviewer completion is now persisted in the exact broker lane before cmux
+  closes the supervisor's own surface, preventing an approved review from
+  remaining `callback-ready` after its tab disappears. Successful unattended
+  reap-send output also omits the already-delivered coordinator command, so a
+  task model cannot execute the coordinator-only reap a second time.
 - Exact cmux cleanup now resolves and supplies the surface's window/workspace
   anchors, verifies disappearance in the cmux tree, and retries once instead of
   treating a misleading `not_found` response as success. The `/close` live

@@ -996,15 +996,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     ) / "lane.json"
     retry_lane_original = retry_lane_path.read_text(encoding="utf-8")
     retry_lane_path.write_text("{not-json", encoding="utf-8")
+    close_log_before = cmux_log.read_text(encoding="utf-8") if cmux_log.exists() else ""
     failed_transition = run(
         LIFECYCLE, "after-exit", "--worktree", str(broker_worktree),
         "--state-dir", str(retry_state_dir), "--kind", "reviewer",
         "--surface", retry_surface, cwd=broker_worktree, env=env,
     )
     check(
-        "post-close broker failure preserves retry sentinel",
+        "pre-close broker failure preserves retry sentinel",
         failed_transition.returncode == 3
         and retry_sentinel.is_file()
+        and cmux_log.read_text(encoding="utf-8") == close_log_before
         and "fail-operation" in failed_transition.stderr,
         failed_transition.stderr,
     )
@@ -1023,6 +1025,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and not retry_sentinel.exists()
         and retry_lane_after["active_operation_id"] is None,
         repaired_transition.stderr,
+    )
+    check(
+        "broker completion is durable before reviewer self-close",
+        json.loads(
+            (
+                broker_store.lane_dir(
+                    broker_project, broker_task, retry_review["lane_id"]
+                )
+                / "operations" / retry_review["operation_id"] / "operation.json"
+            ).read_text(encoding="utf-8")
+        )["status"] == "complete",
     )
     surface_events = telemetry(worktree, "surface-lifecycle")
     check(

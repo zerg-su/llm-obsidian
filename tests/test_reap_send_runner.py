@@ -67,6 +67,24 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
     check("callback targets exact coordinator surface", value["surface"] == surface)
     check("callback contains one exact reap runner command", value["message"].count("reap-runner.py") == 1)
     check("callback shell-quotes paths with spaces", "'" in value["command"] and str(worktree) in value["command"])
+    sent_result = sender.public_result(value, dry_run=False)
+    dry_result = sender.public_result(value, dry_run=True)
+    check(
+        "sent result does not echo coordinator executable instructions",
+        sent_result == {
+            "schema_version": 1,
+            "status": "sent",
+            "mode": "runner",
+            "neutralized_wikilinks": 0,
+        },
+    )
+    check(
+        "dry-run retains inspectable coordinator instructions",
+        dry_result["status"] == "validated"
+        and dry_result["surface"] == surface
+        and dry_result["message"] == value["message"]
+        and dry_result["command"] == value["command"],
+    )
     check(
         "callback always renders the canonical Markdown view",
         (worktree / ".task-summary.md").read_text(encoding="utf-8").endswith("Done.\n"),

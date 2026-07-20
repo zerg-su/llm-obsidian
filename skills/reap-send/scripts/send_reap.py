@@ -133,6 +133,24 @@ def send(value: dict[str, Any]) -> None:
             time.sleep(CMUX_PASTE_SETTLE_SECONDS)
 
 
+def public_result(value: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    """Keep executable coordinator instructions out of task tool output."""
+
+    result = {
+        "schema_version": 1,
+        "status": "validated" if dry_run else "sent",
+        "mode": value["mode"],
+        "neutralized_wikilinks": value["neutralized_wikilinks"],
+    }
+    if dry_run:
+        result.update({
+            "surface": value["surface"],
+            "message": value["message"],
+            "command": value["command"],
+        })
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worktree", type=Path, default=Path.cwd())
@@ -144,7 +162,7 @@ def main() -> int:
         )
         if not args.dry_run:
             send(value)
-        print(json.dumps({"schema_version": 1, "status": "validated" if args.dry_run else "sent", **value}, sort_keys=True))
+        print(json.dumps(public_result(value, dry_run=args.dry_run), sort_keys=True))
         return 0
     except (SendError, OSError, ValueError) as exc:
         die(str(exc))
