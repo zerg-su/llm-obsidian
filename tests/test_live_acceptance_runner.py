@@ -374,7 +374,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check(
         "autoresearch prompt delegates exact output cleanup to runner",
         "Leave the exact filed output pages" in autoresearch_prompt
-        and "runner-owned cleanup begins afterward" in autoresearch_prompt,
+        and "runner-owned cleanup begins afterward" in autoresearch_prompt
+        and "Do not poll marker/state files" in autoresearch_prompt,
     )
 
     autoresearch_repo = tmp / "autoresearch-cleanup-repo"

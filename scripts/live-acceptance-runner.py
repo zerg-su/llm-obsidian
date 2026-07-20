@@ -857,6 +857,9 @@ def prompt_text(
   one optimistic vault-write transaction, restores tracked indexes, and cleans the disposable clone.
 - Close external processes through the documented autoresearch lifecycle, but do not manually delete
   product pages, indexes, task-session state, `.acceptance-sandbox.json`, the operation outbox, or scratch.
+- After `research-isolation.py start` or `receive` returns, finish the coordinator turn immediately and
+  wait for the exact typed callback. Do not poll marker/state files, inspect child screens, sleep, or loop;
+  the callback starts the next turn and preserves the observable unattended lifecycle.
 - Do not run `git restore`, `git checkout`, `git stash`, pass `--tmp-root`/`--state-root`, or override
   `TMPDIR`/`TMP`/`TEMP`."""
     elif runner_fixture is None:

@@ -661,6 +661,61 @@ check(
 check("exact close proves disappearance", close_surface_exact(exact_surface, exact_close_runner) == "closed")
 check("not-found without tree disappearance receives one bounded retry", exact_close_attempts == 2)
 check("exact close is idempotent only after tree proof", close_surface_exact(exact_surface, exact_close_runner) == "already-gone")
+
+replacement_original = "aaaaaaaa-1111-4111-8111-111111111111"
+replacement_surface = "bbbbbbbb-2222-4222-8222-222222222222"
+replacement_original_open = True
+replacement_shell_open = False
+replacement_calls: list[list[str]] = []
+def replacement_close_runner(args, **_kwargs):
+    global replacement_original_open, replacement_shell_open
+    replacement_calls.append(list(args))
+    if args[:3] == ["cmux", "rpc", "system.tree"]:
+        panes = [{
+            "id": "origin-pane", "ref": "pane:40",
+            "surfaces": [{"id": "origin-surface", "ref": "surface:40"}],
+        }]
+        if replacement_original_open:
+            panes.append({
+                "id": "task-pane", "ref": "pane:41",
+                "surfaces": [{"id": replacement_original, "ref": "surface:41"}],
+            })
+        elif replacement_shell_open:
+            panes.append({
+                "id": "replacement-pane", "ref": "pane:42",
+                "surfaces": [{"id": replacement_surface, "ref": "surface:42"}],
+            })
+        return Result(stdout=json.dumps({
+            "windows": [{
+                "id": "window-replacement", "ref": "window:9",
+                "workspaces": [{
+                    "id": "workspace-replacement", "ref": "workspace:9", "panes": panes,
+                }],
+            }],
+        }))
+    if args[:2] == ["cmux", "close-surface"]:
+        replacement_original_open = False
+        replacement_shell_open = True
+        return Result(stdout="OK")
+    if args[:2] == ["cmux", "send-key"]:
+        replacement_shell_open = False
+        return Result(stdout="OK")
+    if args[:2] == ["cmux", "send"]:
+        return Result(stdout="OK")
+    return Result(returncode=1)
+
+check(
+    "last-surface close collapses deterministic replacement shell",
+    close_surface_exact(replacement_original, replacement_close_runner) == "closed"
+    and not replacement_shell_open,
+)
+check(
+    "replacement cleanup targets only the newly created auxiliary surface",
+    [
+        "cmux", "send", "--surface", "surface:42", "--workspace", "workspace:9",
+        "--window", "window:9", "exit",
+    ] in replacement_calls,
+)
 checkpoint = capture_resume("surface-1", "codex", fake_cmux)
 check(
     "checkpoint ignores stored command",

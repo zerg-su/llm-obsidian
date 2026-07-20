@@ -199,37 +199,41 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check=False,
     )
     check("fetch launcher parses in target shell", launcher_syntax.returncode == 0, launcher_syntax.stderr)
-    check(
-        "fetch prompt uses exact notifier binding",
-        f'{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"' in fetch_prompt
-        and f"LLM_OBSIDIAN_RESEARCH_NOTIFY={fetch_dir / 'notify.py'}" in fetch_launcher,
-    )
+    check("fetch prompt uses local executable notifier", "run exactly `./notify.py`" in fetch_prompt)
+    check("fetch launcher has no tool-shell env dependency", "LLM_OBSIDIAN_RESEARCH_NOTIFY" not in fetch_launcher)
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
+    check("fetch notifier is owner-executable", (fetch_dir / "notify.py").stat().st_mode & 0o777 == 0o700)
     check(
         "standalone callback carries its explicit state root",
         f"--state-root {state_root.resolve()}" in notifier,
     )
     cmux_log.write_text("", encoding="utf-8")
     notify_env = dict(fake_env)
-    notify_env["CMUX_SURFACE_ID"] = "22222222-2222-2222-2222-222222222222"
     notify_env["CODEX_THREAD_ID"] = "019f0000-0000-7000-8000-000000000001"
     notified = subprocess.run(
-        [python_executable, str(fetch_dir / "notify.py")],
+        [str(fetch_dir / "notify.py")],
         text=True,
         capture_output=True,
         env=notify_env,
+        cwd=fetch_dir,
     )
     check("callback failure is nonfatal", notified.returncode == 0, notified.stderr)
     notify_calls = cmux_log.read_text(encoding="utf-8").splitlines()
+    checkpoint_sidecar = json.loads(
+        (fetch_dir / "resume-checkpoint.json").read_text(encoding="utf-8")
+    )
     check(
-        "notifier binds exact Codex checkpoint before callback",
-        notify_calls
-        and notify_calls[0].startswith(
-            "surface resume set --surface 22222222-2222-2222-2222-222222222222 "
-        )
-        and "--checkpoint-id 019f0000-0000-7000-8000-000000000001" in notify_calls[0]
-        and any(call.startswith("send --surface surface:test") for call in notify_calls[1:]),
+        "notifier writes exact Codex checkpoint before callback",
+        checkpoint_sidecar["run_id"] == run_id
+        and checkpoint_sidecar["stage"] == "fetch"
+        and checkpoint_sidecar["checkpoint"] == {
+            "kind": "codex",
+            "checkpoint_id": "019f0000-0000-7000-8000-000000000001",
+            "cwd": str(fetch_dir),
+        }
+        and not any("surface resume set" in call for call in notify_calls)
+        and any(call.startswith("send --surface surface:test") for call in notify_calls),
     )
     check("fetch completion marker written", Path(state["fetch_completion_marker"]).is_file())
     marked = run("status", "--run-id", run_id, "--state-root", str(state_root))
@@ -314,11 +318,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check("synth has Homebrew runtime root", '"/opt/homebrew" = true' in synth_config)
     check("untrusted boundary explicit", "UNTRUSTED DATA" in synth_prompt)
     check("writer required", "vault-write.py" in synth_prompt)
+    check("synth prompt uses local executable notifier", "run exactly `./notify.py`" in synth_prompt)
+    check("synth launcher has no tool-shell env dependency", "LLM_OBSIDIAN_RESEARCH_NOTIFY" not in synth_launcher)
     check(
-        "synth prompt uses exact notifier binding",
-        f'{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"' in synth_prompt
-        and f"LLM_OBSIDIAN_RESEARCH_NOTIFY={Path(received['synth_dir']) / 'notify.py'}"
-        in synth_launcher,
+        "synth notifier is owner-executable",
+        (Path(received["synth_dir"]) / "notify.py").stat().st_mode & 0o777 == 0o700,
     )
     writer_at = synth_prompt.index("single vault-write transaction succeeds")
     reindex_at = synth_prompt.index(str(ROOT / "scripts/reindex.py"), writer_at)

@@ -19,6 +19,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -732,11 +733,7 @@ def parse_surface(output: str) -> tuple[str, str]:
     return uuid_match.group(0), ref_match.group(0) if ref_match else ""
 
 
-def surface_context(
-    surface: str, runner: Any = subprocess.run, *, missing_ok: bool = False
-) -> dict[str, str] | None:
-    """Resolve an exact surface to its window/workspace without consulting focus."""
-
+def cmux_tree(runner: Any = subprocess.run) -> dict[str, Any]:
     result = runner(
         ["cmux", "rpc", "system.tree", '{"all":true}'],
         text=True,
@@ -749,7 +746,56 @@ def surface_context(
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise TaskSessionError("cmux surface workspace lookup returned invalid JSON") from exc
-    matches: list[dict[str, str]] = []
+    if not isinstance(payload, dict):
+        raise TaskSessionError("cmux surface workspace lookup returned invalid data")
+    return payload
+
+
+def pane_layout(workspace: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    layout: dict[str, list[dict[str, str]]] = {}
+    for pane in workspace.get("panes", []) if isinstance(workspace, dict) else []:
+        if not isinstance(pane, dict):
+            continue
+        pane_key = str(pane.get("ref") or pane.get("id") or "")
+        if not pane_key:
+            continue
+        surfaces: list[dict[str, str]] = []
+        for candidate in pane.get("surfaces", []):
+            if isinstance(candidate, dict):
+                surfaces.append({
+                    "surface": str(candidate.get("id") or ""),
+                    "surface_ref": str(candidate.get("ref") or ""),
+                })
+        layout[pane_key] = surfaces
+    return layout
+
+
+def workspace_layout(
+    payload: dict[str, Any], window_id: str, workspace_id: str
+) -> dict[str, list[dict[str, str]]]:
+    matches: list[dict[str, list[dict[str, str]]]] = []
+    for window in payload.get("windows", []):
+        if not isinstance(window, dict) or window_id not in {
+            str(window.get("id") or ""), str(window.get("ref") or "")
+        }:
+            continue
+        for workspace in window.get("workspaces", []):
+            if isinstance(workspace, dict) and workspace_id in {
+                str(workspace.get("id") or ""), str(workspace.get("ref") or "")
+            }:
+                matches.append(pane_layout(workspace))
+    if len(matches) != 1:
+        raise TaskSessionError("cmux workspace does not resolve to one exact layout")
+    return matches[0]
+
+
+def surface_context(
+    surface: str, runner: Any = subprocess.run, *, missing_ok: bool = False
+) -> dict[str, Any] | None:
+    """Resolve an exact surface to its window/workspace without consulting focus."""
+
+    payload = cmux_tree(runner)
+    matches: list[dict[str, Any]] = []
     for window in payload.get("windows", []) if isinstance(payload, dict) else []:
         if not isinstance(window, dict):
             continue
@@ -767,10 +813,13 @@ def surface_context(
                     context = {
                         "surface": str(candidate.get("id") or ""),
                         "surface_ref": str(candidate.get("ref") or ""),
+                        "pane": str(pane.get("id") or ""),
+                        "pane_ref": str(pane.get("ref") or ""),
                         "workspace": str(workspace.get("id") or ""),
                         "workspace_ref": str(workspace.get("ref") or ""),
                         "window": str(window.get("id") or ""),
                         "window_ref": str(window.get("ref") or ""),
+                        "workspace_layout": pane_layout(workspace),
                     }
                     if context not in matches:
                         matches.append(context)
@@ -787,6 +836,72 @@ def surface_workspace(surface: str, runner: Any = subprocess.run) -> str:
     context = surface_context(surface, runner)
     assert context is not None
     return context["workspace"] or context["workspace_ref"]
+
+
+def close_replacement_shell(
+    context: dict[str, Any], runner: Any = subprocess.run
+) -> None:
+    """Collapse only the shell replacement created for a last-surface split."""
+
+    before = context.get("workspace_layout")
+    if not isinstance(before, dict):
+        raise TaskSessionError("cmux surface close layout is incomplete")
+    target_pane = str(context.get("pane_ref") or context.get("pane") or "")
+    target_surfaces = before.get(target_pane)
+    if (
+        len(before) <= 1
+        or not target_pane
+        or not isinstance(target_surfaces, list)
+        or len(target_surfaces) != 1
+    ):
+        return
+    window = str(context.get("window_ref") or context.get("window") or "")
+    workspace = str(context.get("workspace_ref") or context.get("workspace") or "")
+    after = workspace_layout(cmux_tree(runner), window, workspace)
+    replacement: dict[str, str] | None = None
+    if target_pane in after:
+        current = after[target_pane]
+        stable = all(
+            after.get(pane) == surfaces
+            for pane, surfaces in before.items()
+            if pane != target_pane
+        )
+        if set(after) == set(before) and stable and len(current) == 1 and current != target_surfaces:
+            replacement = current[0]
+    else:
+        added_panes = [pane for pane in after if pane not in before]
+        removed_panes = [pane for pane in before if pane not in after]
+        stable = all(
+            after.get(pane) == surfaces
+            for pane, surfaces in before.items()
+            if pane != target_pane
+        )
+        if (
+            removed_panes == [target_pane]
+            and len(added_panes) == 1
+            and stable
+            and len(after[added_panes[0]]) == 1
+        ):
+            replacement = after[added_panes[0]][0]
+        elif not added_panes:
+            return
+    if replacement is None:
+        raise TaskSessionError("cmux last-surface replacement is ambiguous")
+    replacement_target = replacement.get("surface_ref") or replacement.get("surface") or ""
+    if not replacement_target:
+        raise TaskSessionError("cmux replacement surface identity is incomplete")
+    for args in (
+        ["cmux", "send", "--surface", replacement_target, "--workspace", workspace, "--window", window, "exit"],
+        ["cmux", "send-key", "--surface", replacement_target, "--workspace", workspace, "--window", window, "Enter"],
+    ):
+        result = runner(args, text=True, capture_output=True, check=False)
+        if result.returncode != 0:
+            raise TaskSessionError("cmux replacement shell could not be exited")
+    for _attempt in range(8):
+        if surface_context(replacement_target, runner, missing_ok=True) is None:
+            return
+        time.sleep(0.25)
+    raise TaskSessionError("cmux replacement shell remained open")
 
 
 def close_surface_exact(surface: str, runner: Any = subprocess.run) -> str:
@@ -812,6 +927,7 @@ def close_surface_exact(surface: str, runner: Any = subprocess.run) -> str:
             check=False,
         )
         if surface_context(surface, runner, missing_ok=True) is None:
+            close_replacement_shell(context, runner)
             return "closed"
     raise TaskSessionError("cmux close-surface returned but the exact surface remained open")
 

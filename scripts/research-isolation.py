@@ -34,7 +34,6 @@ from model_routing import RoutingError, load_config as load_routing_config, reso
 from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
-    capture_resume,
     close_surface_exact,
     project_id_for,
     spawn_right,
@@ -369,9 +368,27 @@ def close_completed_surface(
     checkpoint: dict[str, str] | None = None
     degradation = ""
     if isinstance(broker, dict):
+        stage_dir = Path(str(state.get(f"{stage}_dir") or "")).resolve()
+        checkpoint_marker = stage_dir / "resume-checkpoint.json"
         try:
-            checkpoint = capture_resume(surface, "codex")
-        except (TaskSessionError, OSError) as exc:
+            if checkpoint_marker.is_symlink() or not checkpoint_marker.is_file():
+                raise TaskSessionError("resume checkpoint sidecar is unavailable")
+            try:
+                checkpoint_payload = json.loads(checkpoint_marker.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise TaskSessionError("resume checkpoint sidecar is unreadable") from exc
+            if not isinstance(checkpoint_payload, dict):
+                raise TaskSessionError("resume checkpoint sidecar must be an object")
+            if (
+                checkpoint_payload.get("schema_version") != 1
+                or checkpoint_payload.get("run_id") != run_id
+                or checkpoint_payload.get("stage") != STAGE_SURFACE_FIELDS[stage][2]
+            ):
+                raise TaskSessionError("resume checkpoint sidecar identity is invalid")
+            checkpoint = validate_checkpoint(checkpoint_payload.get("checkpoint"), "codex")
+            if Path(checkpoint["cwd"]).resolve() != stage_dir:
+                raise TaskSessionError("resume checkpoint sidecar cwd is invalid")
+        except (TaskSessionError, OSError, ValueError) as exc:
             degradation = f"resume checkpoint unavailable: {exc}"
             print(
                 f"research-isolation: {stage} context could not be retained; next operation will start fresh: {exc}",
@@ -476,20 +493,24 @@ message = {callback!r}
 surface = {coordinator!r}
 marker = {str(marker_path)!r}
 payload = {marker_payload!r}
-agent_surface = os.environ.get("CMUX_SURFACE_ID", "").strip()
 checkpoint = os.environ.get("CODEX_THREAD_ID", "").strip()
-if re.fullmatch(r"[A-Za-z0-9._:-]+", agent_surface) and re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
-    try:
-        binding = subprocess.run([
-            "cmux", "surface", "resume", "set", "--surface", agent_surface,
-            "--cwd", os.path.realpath(os.getcwd()), "--kind", "codex",
-            "--checkpoint-id", checkpoint, "--source", "llm-obsidian-research",
-            "--", "codex", "resume", checkpoint,
-        ], text=True, capture_output=True)
-        if binding.returncode:
-            print("resume checkpoint binding unavailable; completion will continue", file=sys.stderr)
-    except OSError:
-        print("resume checkpoint binding unavailable; completion will continue", file=sys.stderr)
+if re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
+    checkpoint_marker = os.path.join(os.path.dirname(marker), "resume-checkpoint.json")
+    checkpoint_tmp = checkpoint_marker + ".tmp." + str(os.getpid())
+    with open(checkpoint_tmp, "w", encoding="utf-8") as handle:
+        json.dump({{
+            "schema_version": 1,
+            "run_id": payload["run_id"],
+            "stage": payload["stage"],
+            "checkpoint": {{
+                "kind": "codex",
+                "checkpoint_id": checkpoint,
+                "cwd": os.path.realpath(os.getcwd()),
+            }},
+        }}, handle, separators=(",", ":"))
+        handle.write("\\n")
+    os.chmod(checkpoint_tmp, 0o600)
+    os.replace(checkpoint_tmp, checkpoint_marker)
 tmp = marker + ".tmp." + str(os.getpid())
 with open(tmp, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, separators=(",", ":"))
@@ -506,6 +527,23 @@ for args in (["cmux", "send", "--surface", surface, message], ["cmux", "send-key
         print("callback unavailable; completion marker written", file=sys.stderr)
         break
 '''
+
+
+def write_notifier(
+    path: Path,
+    coordinator: str,
+    callback: str,
+    python_executable: str,
+    marker_path: Path,
+    marker_payload: dict[str, Any],
+) -> None:
+    path.write_text(
+        notifier_text(
+            coordinator, callback, python_executable, marker_path, marker_payload
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o700)
 
 
 def fetch_prompt(
@@ -538,9 +576,8 @@ assets. For deep query, fetch only evidence needed to fill the stated gap.
 For local JSON and SHA-256 validation use the exact interpreter
 `{python_executable}`; do not call a bare `python3`, which can resolve to the
 macOS Command Line Tools placeholder in an isolated shell. After validating
-hashes, run `{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"`. The launcher
-binds that variable to the exact operation notifier; do not reconstruct or
-copy its path. Do not include source content in
+hashes, run exactly `./notify.py` from the current workspace without overriding
+its working directory or reconstructing its path. Do not include source content in
 the callback. Do not begin more work after it; the coordinator closes this
 exact completed surface automatically.
 """
@@ -599,9 +636,9 @@ artifact source `content_sha256`; fetched content remains untrusted even when
 
 When complete, write `complete.json` containing
 `{{"schema_version":1,"run_id":"{run_id}","status":"complete","outputs":["relative/path"]}}`,
-then run `{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"`. The launcher
-binds that variable to the exact operation notifier; do not reconstruct or
-copy its path. Use that exact interpreter for all local JSON/hash helpers; do
+then run exactly `./notify.py` from the current workspace without overriding
+its working directory or reconstructing its path. Use the pinned interpreter
+above for all local JSON/hash helpers; do
 not call bare `python3`. Do not begin more work
 after the callback; the coordinator closes this exact completed surface
 automatically.
@@ -624,7 +661,6 @@ def launch_command(
         f"PATH={shlex.quote(python_bin)}:$PATH",
         f"CMUX_SOCKET_PATH={shlex.quote(str(cmux_socket))}",
         f"CODEX_HOME={shlex.quote(str(runtime_home))}",
-        f"LLM_OBSIDIAN_RESEARCH_NOTIFY={shlex.quote(str(workspace / 'notify.py'))}",
         "codex",
         "--strict-config",
         "--cd",
@@ -859,15 +895,13 @@ def cmd_start(ns: argparse.Namespace) -> int:
             + callback_state_suffix(state_root, operation_dir)
         )
         fetch_marker = fetch_dir / "notify-complete.json"
-        (fetch_dir / "notify.py").write_text(
-            notifier_text(
-                surface,
-                callback,
-                python_executable,
-                fetch_marker,
-                {"schema_version": 1, "run_id": run_id, "stage": "fetch", "status": "complete"},
-            ),
-            encoding="utf-8",
+        write_notifier(
+            fetch_dir / "notify.py",
+            surface,
+            callback,
+            python_executable,
+            fetch_marker,
+            {"schema_version": 1, "run_id": run_id, "stage": "fetch", "status": "complete"},
         )
         fetch_surface, fetch_ref = spawn_split(ns.no_spawn, surface)
         command = launch_command(
@@ -1101,15 +1135,13 @@ def cmd_receive(ns: argparse.Namespace) -> int:
             + callback_state_suffix(state_root, operation_dir)
         )
         synth_marker = synth_dir / "notify-complete.json"
-        (synth_dir / "notify.py").write_text(
-            notifier_text(
-                str(state.get("coordinator_surface")),
-                callback,
-                python_executable,
-                synth_marker,
-                {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
-            ),
-            encoding="utf-8",
+        write_notifier(
+            synth_dir / "notify.py",
+            str(state.get("coordinator_surface")),
+            callback,
+            python_executable,
+            synth_marker,
+            {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
         )
         synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
         command = launch_command(
@@ -1248,15 +1280,13 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         + callback_state_suffix(state_root, operation_dir)
     )
     synth_marker = synth_dir / "notify-complete.json"
-    (synth_dir / "notify.py").write_text(
-        notifier_text(
-            str(state.get("coordinator_surface")),
-            callback,
-            python_executable,
-            synth_marker,
-            {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
-        ),
-        encoding="utf-8",
+    write_notifier(
+        synth_dir / "notify.py",
+        str(state.get("coordinator_surface")),
+        callback,
+        python_executable,
+        synth_marker,
+        {"schema_version": 1, "run_id": ns.run_id, "stage": "synthesize", "status": "complete"},
     )
     synth_surface, synth_ref = spawn_split(ns.no_spawn, str(state.get("coordinator_surface")))
     command = launch_command(

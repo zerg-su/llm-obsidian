@@ -36,7 +36,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   anchors, verifies disappearance in the cmux tree, and retries once instead of
   treating a misleading `not_found` response as success. The `/close` live
   fixture reuses its runner-created surface and delegates proof/page cleanup to
-  code, eliminating nested-agent quoting failures and orphan tabs.
+  code. When cmux replaces the last surface in an auxiliary split with an empty
+  shell, cleanup identifies that one layout delta and exits it so the pane
+  collapses instead of leaving an orphan tab.
 - Task and reviewer hooks now write only content-free turn telemetry to the
   origin vault; coordinator context injection, command capture, plan capture,
   and the full Stop pipeline remain disabled across the read-only boundary.
@@ -55,9 +57,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   locator inside the current vault, keeping callbacks short and eliminating
   model-reconstructed task-session paths while rejecting locator escapes
   fail-closed.
-- Protected-research launchers bind their exact notifier and Codex resume
-  checkpoint mechanically, and synthesis reindexes before validation, so
-  callbacks and retained context no longer depend on a model copying paths.
+- Protected-research workspaces ship one exact executable notifier that writes
+  a typed Codex checkpoint sidecar before callback, while synthesis reindexes
+  before validation; neither path depends on model-copied paths or cmux resume
+  API calls.
 - Autoresearch acceptance now leaves validated product outputs to the runner,
   which resolves the one bound operation, deletes new pages and restores
   deduplicated pages/indexes through one optimistic vault transaction, then
