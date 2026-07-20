@@ -21,6 +21,7 @@ from acceptance_fingerprints import (
     FingerprintError,
     cell_metadata,
     changed_paths,
+    dirty_paths,
     environment_contract,
     generation_snapshot,
     non_behavioral_paths,
@@ -225,10 +226,10 @@ def load_resume_results(
     *,
     phase: str,
     commit: str,
-    fingerprint: str,
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
     root: Path,
     non_behavioral: set[str] | None = None,
+    include_dirty: bool = True,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -239,11 +240,9 @@ def load_resume_results(
             "existing acceptance report does not match this phase/matrix; use --restart"
         )
     prior_commit = str(report.get("source_commit") or "")
-    if schema == 1 and (
-        prior_commit != commit or report.get("matrix_fingerprint") != fingerprint
-    ):
-        raise AcceptanceError("schema-1 acceptance evidence cannot cross commits; use --restart")
-    changed = set() if prior_commit == commit else changed_paths(root, prior_commit)
+    if schema == 1:
+        raise AcceptanceError("schema-1 acceptance evidence requires --restart")
+    changed = changed_paths(root, prior_commit, include_dirty=include_dirty)
     declared = {path for item in metadata.values() for path in item["dependencies"]}
     declared.update(non_behavioral or set())
     unknown_changed = changed is None or bool(changed - declared)
@@ -264,9 +263,6 @@ def load_resume_results(
         if result.get("verdict") not in {"pass", "n-a"}:
             continue
         current = metadata[key]
-        if schema == 1:
-            resumed.append(decorate_result(result, current, commit=commit, reason="legacy-same-commit"))
-            continue
         provenance = raw.get("provenance")
         if (
             unknown_changed
@@ -456,6 +452,25 @@ def main() -> int:
             )
             return 0
         commit = source_commit(args.root.resolve())
+        allowed_dirty = non_behavioral_paths(manifest)
+        canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
+        try:
+            args.report.resolve().relative_to(canonical_acceptance_root)
+            canonical_report = True
+        except ValueError:
+            canonical_report = False
+        if canonical_report:
+            dirty = dirty_paths(args.root.resolve())
+            if dirty is None:
+                raise AcceptanceError("cannot inspect acceptance worktree state")
+            behavioral_dirty = sorted(dirty - allowed_dirty)
+            if behavioral_dirty:
+                preview = ", ".join(behavioral_dirty[:8])
+                suffix = " …" if len(behavioral_dirty) > 8 else ""
+                raise AcceptanceError(
+                    "acceptance requires committed behavioral state; dirty paths: "
+                    + preview + suffix
+                )
         selected_skills = set(args.skill)
         unknown_skills = selected_skills - set(skills)
         if unknown_skills:
@@ -466,9 +481,12 @@ def main() -> int:
             [{**row, "cell_fingerprint": metadata[row_key(row)]["cell_fingerprint"]} for row in rows]
         )
         prior = [] if args.restart else load_resume_results(
-            args.report, rows, phase=args.phase, commit=commit, fingerprint=fingerprint,
+            args.report, rows, phase=args.phase, commit=commit,
             metadata=metadata, root=args.root.resolve(),
-            non_behavioral=non_behavioral_paths(manifest),
+            non_behavioral=allowed_dirty,
+            # Only canonical worktree-local reports are release evidence.
+            # Explicit external reports remain useful for hermetic diagnostics.
+            include_dirty=canonical_report,
         )
 
         def checkpoint(completed: list[dict[str, Any]]) -> None:
@@ -491,12 +509,6 @@ def main() -> int:
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint
         )
         write_json(report, args.report)
-        canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
-        try:
-            args.report.resolve().relative_to(canonical_acceptance_root)
-            canonical_report = True
-        except ValueError:
-            canonical_report = False
         if canonical_report and report["summary"]["failed"] == 0 and report["summary"]["complete"]:
             write_json(
                 generation_snapshot(args.root.resolve(), manifest),

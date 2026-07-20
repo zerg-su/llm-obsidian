@@ -68,7 +68,7 @@ def metrics(path: Path) -> dict[str, int]:
 def baseline_payload(rows: list[tuple[str, int, dict[str, int]]]) -> dict:
     return {
         "schema_version": 1,
-        "basis": "v2.1.0 skill bodies and directly referenced Markdown",
+        "basis": "optimized skill bodies and normal-path referenced Markdown",
         "skills": {name: values for name, _description_size, values in rows},
     }
 

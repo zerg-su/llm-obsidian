@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,9 @@ with tempfile.TemporaryDirectory(prefix="skill-budget-test.") as raw:
     baseline = root / "baseline.json"
     result = run("--skills", str(root), "--baseline", str(baseline), "--update-baseline")
     assert result.returncode == 0 and baseline.is_file()
+    assert json.loads(baseline.read_text(encoding="utf-8"))["basis"] == (
+        "optimized skill bodies and normal-path referenced Markdown"
+    )
     result = run("--skills", str(root), "--baseline", str(baseline), "--limit", "100")
     assert result.returncode == 1
     assert "SKILL_BUDGET_EXCEEDED" in result.stderr

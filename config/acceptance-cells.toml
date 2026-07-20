@@ -49,7 +49,12 @@ dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
 dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
 
 [scenarios.conversation-readonly]
-dependencies = ["hooks/run-hook.py", ".claude/hooks/skill-router.py"]
+dependencies = [
+  "hooks/run-hook.py",
+  ".claude/hooks/skill-router.py",
+  "scripts/lifecycle_telemetry.py",
+  "scripts/turn_telemetry.py",
+]
 
 [scenarios.cmux-lifecycle]
 dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/queue-session-exit.py"]

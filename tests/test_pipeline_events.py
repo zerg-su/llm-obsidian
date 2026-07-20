@@ -110,6 +110,9 @@ def run() -> None:
         check("lifecycle invalid counter is safe", lifecycle.nonnegative_int("broken") == 0)
 
         lifecycle_samples = [
+            ("model-turn", "task", {"duration_ms": 300}),
+            ("model-turn", "coordinator", {"duration_ms": 100}),
+            ("model-turn-incomplete", "reviewer", {}),
             ("agent-run", "task:codex", {"duration_ms": 1000, "watchdog_warnings": 1}),
             ("agent-run", "reviewer:claude", {"duration_ms": 2500, "watchdog_recoveries": 1}),
             ("review-round-start", "review:claude:fable:full", {"rounds_started": 1, "iteration": 1}),
@@ -136,10 +139,20 @@ def run() -> None:
                 f"synthetic {op} emitted",
                 events.emit_event(op, actor=actor, counts=counts, root=root, environ=codex_env),
             )
+        check(
+            "synthetic Claude coordinator turn emitted",
+            events.emit_event(
+                "model-turn",
+                actor="coordinator",
+                counts={"duration_ms": 500},
+                root=root,
+                environ=claude_env,
+            ),
+        )
 
         log = root / ".vault-meta/pipeline-events.jsonl"
         records = read_jsonl(log)
-        check("all records", len(records) == 3 + len(lifecycle_samples))
+        check("all records", len(records) == 4 + len(lifecycle_samples))
         check("runtime classification", [item["runtime"] for item in records[:3]] == ["claude", "codex", "unknown"])
         check("unsafe session hashed", records[0]["session"].startswith("sha256:"))
         check("unsafe paths omitted", records[0]["paths"] == ["wiki/concepts/Secret Page.md"])
@@ -188,6 +201,13 @@ def run() -> None:
         check("codex operation reported", "| codex | vault-write | ok | 1 |" in result.stdout)
         check("claude operation reported", "| claude | retrieve | ok | 1 |" in result.stdout)
         check("numeric latency percentiles reported", "| claude | retrieve | ok | 1 | 12.5 | 12.5 |" in result.stdout)
+        check("model turn role section", "## Model turn timing by session role" in result.stdout)
+        check(
+            "model turn role counters and latency",
+            "| codex | task | 1 | 0 | 300.0 | 300.0 |" in result.stdout
+            and "| codex | reviewer | 0 | 1 | - | - |" in result.stdout
+            and "| claude | coordinator | 1 | 0 | 500.0 | 500.0 |" in result.stdout,
+        )
         check("lifecycle dogfood section", "## Unattended lifecycle dogfood" in result.stdout)
         check("callback validation rate", "| Callback schema-valid rate | 100.0% |" in result.stdout)
         check("lifecycle completion counted", "| Validated task completions | 1 |" in result.stdout)

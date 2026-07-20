@@ -103,9 +103,10 @@ open(path, "w", encoding="utf-8").write(json.dumps(data) + "\n")
 PY
 printf '# stale resolution\n' > "$LIGHT/.task-review-resolution.md"
 printf '# stale verify\n' > "$LIGHT/.task-review-verify.md"
+printf '{"schema_version":2}\n' > "$LIGHT/.review-outbox.json"
 "$SCRIPT" start --light --no-spawn --worktree "$LIGHT" --vault-root "$LIGHT_VAULT" >"$SANDBOX/light.out" 2>"$SANDBOX/light.err"
 expect_eq "start-light-exit" "$?" 0
-[[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify survived"
+[[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" && ! -e "$LIGHT/.review-outbox.json" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify/outbox survived"
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
 expect_eq "start-supervised-receive" "$(json_get "$LIGHT/.review-meta.json" callback_transport)" "supervised-receive-v1"
 expect_eq "start-review-id-stable" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$(json_get "$LIGHT/.review-meta.json" run_id)"

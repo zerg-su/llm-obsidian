@@ -301,6 +301,8 @@ def main() -> int:
     operation_count: dict[tuple[str, str, str], int] = defaultdict(int)
     operation_last: dict[tuple[str, str, str], dt.datetime] = {}
     operation_durations: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    turn_count: dict[tuple[str, str, str], int] = defaultdict(int)
+    turn_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
     lifecycle_events: list[dict] = []
     for log in EVENT_LOGS:
         for rec in iter_jsonl(log):
@@ -312,9 +314,14 @@ def main() -> int:
                 runtime = "unknown"
             op = base_name(str(rec.get("op") or "unknown"))
             status = str(rec.get("status") or "unknown")
+            actor = str(rec.get("actor") or "unknown").split(":", 1)[0]
+            role = actor if actor in {"coordinator", "task", "reviewer"} else "unknown"
             key = (runtime, op, status)
             operation_count[key] += 1
             operation_last[key] = max(operation_last.get(key, ts), ts)
+            if op in {"model-turn", "model-turn-incomplete"}:
+                outcome = "completed" if op == "model-turn" else "incomplete"
+                turn_count[(runtime, role, outcome)] += 1
             if op in {
                 "agent-run",
                 "review-round-start",
@@ -333,6 +340,8 @@ def main() -> int:
                 and math.isfinite(duration)
             ):
                 operation_durations[key].append(float(duration))
+                if op == "model-turn":
+                    turn_durations[(runtime, role)].append(float(duration))
 
     totals = {n: typed_count.get(n, 0) + auto_count.get(n, 0)
               for n in set(typed_count) | set(auto_count)}
@@ -361,6 +370,28 @@ def main() -> int:
             )
     else:
         lines.append("no runtime-neutral operations captured")
+    lines.append("")
+    lines.append("## Model turn timing by session role")
+    lines.append("")
+    lines.append(
+        "Completed and incomplete turns are content-free counters. Duration percentiles use "
+        "completed turns only."
+    )
+    lines.append("")
+    turn_groups = sorted({(runtime, role) for runtime, role, _outcome in turn_count})
+    if turn_groups:
+        lines.append("| Runtime | Session role | Completed | Incomplete | P50 ms | P95 ms |")
+        lines.append("|---|---|---:|---:|---:|---:|")
+        for runtime, role in turn_groups:
+            durations = sorted(turn_durations.get((runtime, role), []))
+            p50 = f"{statistics.median(durations):.1f}" if durations else "-"
+            p95 = f"{durations[max(0, math.ceil(len(durations) * 0.95) - 1)]:.1f}" if durations else "-"
+            lines.append(
+                f"| {runtime} | {role} | {turn_count[(runtime, role, 'completed')]} | "
+                f"{turn_count[(runtime, role, 'incomplete')]} | {p50} | {p95} |"
+            )
+    else:
+        lines.append("no model turn timing captured")
     lines.append("")
     lines.append("## Unattended lifecycle dogfood")
     lines.append("")

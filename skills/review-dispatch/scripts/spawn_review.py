@@ -104,6 +104,7 @@ REVIEW_ROUND_ARTIFACTS = (
     ".task-review-verify.md",
     ".task-review-verify.json",
     ".task-review-resolution.md",
+    ".review-outbox.json",
     REVIEW_CALLBACK_FILE,
 )
 _REVIEW_STATE_DIR: Path | None = None

@@ -1,5 +1,5 @@
 {
-  "basis": "v2.1.1 optimized skill bodies and normal-path referenced Markdown",
+  "basis": "optimized skill bodies and normal-path referenced Markdown",
   "schema_version": 1,
   "skills": {
     "agenda": {"body_bytes": 2079, "body_lines": 57, "closure_bytes": 2079, "closure_token_estimate": 520, "token_estimate": 520},

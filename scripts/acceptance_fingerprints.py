@@ -222,7 +222,7 @@ def generation_snapshot(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def changed_paths(root: Path, prior_commit: str) -> set[str] | None:
+def changed_paths(root: Path, prior_commit: str, *, include_dirty: bool = True) -> set[str] | None:
     if not re.fullmatch(r"[0-9a-f]{40}", prior_commit):
         return None
     ancestry = subprocess.run(
@@ -235,16 +235,27 @@ def changed_paths(root: Path, prior_commit: str) -> set[str] | None:
         ["git", "diff", "--name-only", prior_commit, "HEAD"],
         cwd=root, text=True, capture_output=True, check=False,
     )
+    dirty = dirty_paths(root) if include_dirty else set()
+    if diff.returncode != 0 or dirty is None:
+        return None
+    values = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
+    values.update(dirty)
+    return values
+
+
+def dirty_paths(root: Path) -> set[str] | None:
+    """Return staged, unstaged, and non-ignored untracked repo-relative paths."""
+
     status = subprocess.run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=root, text=True, capture_output=True, check=False,
     )
-    if diff.returncode != 0 or status.returncode != 0:
+    if status.returncode != 0:
         return None
-    values = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
+    values: set[str] = set()
     for line in status.stdout.splitlines():
         if len(line) >= 4:
-            values.add(line[3:].split(" -> ")[-1])
+            values.add(line[3:].split(" -> ")[-1].strip('"'))
     return values
 
 
@@ -252,6 +263,7 @@ __all__ = [
     "FingerprintError",
     "cell_metadata",
     "changed_paths",
+    "dirty_paths",
     "environment_contract",
     "expanded_dependencies",
     "generation_snapshot",

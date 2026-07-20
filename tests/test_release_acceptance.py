@@ -387,6 +387,45 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.stderr,
     )
     invocation_log.write_text("", encoding="utf-8")
+    (incremental / "CHANGELOG.md").write_text("# Changelog\n\nUncommitted metadata only.\n", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "dirty exact non-behavioral path still reuses valid cells",
+        result.returncode == 0 and calls == [],
+        result.stderr,
+    )
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "uncommitted metadata becomes committed"], cwd=incremental, check=True)
+    invocation_log.write_text("", encoding="utf-8")
+    dirty_unknown = incremental / "dirty-unknown.txt"
+    dirty_unknown.write_text("not committed\n", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "same-commit dirty unknown path blocks without recording evidence",
+        result.returncode == 3 and calls == [] and "committed behavioral state" in result.stderr,
+        result.stderr,
+    )
+    dirty_unknown.unlink()
+    (incremental / "skills/demo-b/SKILL.md").write_text("# Demo B\n\nchanged after evidence\n", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "dirty declared dependency blocks before testing committed HEAD",
+        result.returncode == 3 and calls == [],
+        result.stderr,
+    )
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "commit previously dirty dependency"], cwd=incremental, check=True)
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "committed formerly dirty dependency reruns its exact cells",
+        result.returncode == 0 and {item[0] for item in calls} == {"demo-b"} and len(calls) == 2,
+        result.stderr,
+    )
+    invocation_log.write_text("", encoding="utf-8")
     (incremental / "unknown.txt").write_text("unknown dependency\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=incremental, check=True)
     subprocess.run(["git", "commit", "-qm", "unknown dependency"], cwd=incremental, check=True)

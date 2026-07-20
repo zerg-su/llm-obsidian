@@ -24,6 +24,14 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def invoke(route: str, payload: dict, vault: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    for key in (
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_PROJECT_DIR",
+        "CODEX_THREAD_ID",
+        "LLM_OBSIDIAN_PROJECT_ROOT",
+        "LLM_OBSIDIAN_SESSION_ROLE",
+    ):
+        env.pop(key, None)
     env["LLM_OBSIDIAN_PROJECT_ROOT"] = str(vault)
     adapter = vault / "hooks" / "run-hook.py"
     if not adapter.is_file():
@@ -150,7 +158,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
         "stale turn is incomplete",
         events[-1]["op"] == "model-turn-incomplete"
         and events[-1]["runtime"] == "claude"
-        and events[-1]["status"] == "degraded",
+        and events[-1]["status"] == "degraded"
+        and "duration_ms" not in events[-1]["counts"],
     )
     invoke("session-start", {**claude, "hook_event_name": "SessionStart", "source": "resume"}, vault)
     check("SessionStart clears stale marker", not list(marker_dir.glob("*.json")))
@@ -177,13 +186,90 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
         "prompt": "private task content",
     }
     task_env = dict(os.environ)
+    for key in (
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_PROJECT_DIR",
+        "CODEX_THREAD_ID",
+        "LLM_OBSIDIAN_PROJECT_ROOT",
+        "LLM_OBSIDIAN_SESSION_ROLE",
+    ):
+        task_env.pop(key, None)
     task_result = subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "router"],
         input=json.dumps(task_payload), text=True, capture_output=True, env=task_env,
     )
     task_marker = json.loads(next(marker_dir.glob("*.json")).read_text())
-    check("task origin routes to coordinator vault", task_result.returncode == 0 and task_marker["actor"] == "task")
+    check(
+        "task origin routes only telemetry to coordinator vault",
+        task_result.returncode == 0 and task_marker["actor"] == "task" and not task_result.stdout,
+    )
     check("turn marker is content-free", "private task content" not in json.dumps(task_marker))
+    task_start = subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "session-start"],
+        input=json.dumps({**task_payload, "source": "resume"}),
+        text=True, capture_output=True, env=task_env,
+    )
+    check(
+        "task SessionStart does not inject coordinator context",
+        task_start.returncode == 0 and "parity marker" not in task_start.stdout,
+        task_start.stderr,
+    )
+    task_compact = subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "post-compact"],
+        input=json.dumps(task_payload), text=True, capture_output=True, env=task_env,
+    )
+    check(
+        "task PostCompact does not claim coordinator context reload",
+        task_compact.returncode == 0 and not task_compact.stdout,
+        task_compact.stderr,
+    )
+    command_log = vault / ".vault-meta" / "command-log.jsonl"
+    command_log_before = command_log.read_text(encoding="utf-8")
+    task_capture = subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "command-capture"],
+        input=json.dumps({**task_payload, "tool_name": "Bash"}),
+        text=True, capture_output=True, env=task_env,
+    )
+    check(
+        "task command capture stays disabled",
+        task_capture.returncode == 0
+        and command_log.read_text(encoding="utf-8") == command_log_before,
+        task_capture.stderr,
+    )
+    subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "router"],
+        input=json.dumps(task_payload), text=True, capture_output=True, env=task_env,
+    )
+    stop_probe = vault / ".vault-meta" / "task-stop-probe"
+    (vault / ".claude" / "hooks" / "stop.sh").write_text(
+        "#!/usr/bin/env python3\n"
+        "from pathlib import Path\n"
+        f"Path({str(stop_probe)!r}).write_text('blocked', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    (vault / ".claude" / "hooks" / "stop.sh").chmod(0o755)
+    task_stop = subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "stop"],
+        input=json.dumps(task_payload), text=True, capture_output=True, env=task_env,
+    )
+    check(
+        "task Stop records telemetry without coordinator pipeline",
+        task_stop.returncode == 0 and not stop_probe.exists() and not list(marker_dir.glob("*.json")),
+        task_stop.stderr,
+    )
+    broken_task = vault / "broken-task-worktree"
+    broken_task.mkdir()
+    (broken_task / ".task-meta.json").write_text("{}\n", encoding="utf-8")
+    broken_stop = subprocess.run(
+        [sys.executable, str(vault / "hooks" / "run-hook.py"), "stop"],
+        input=json.dumps({**task_payload, "cwd": str(broken_task)}),
+        text=True, capture_output=True, env={**task_env, "LLM_OBSIDIAN_PROJECT_ROOT": str(vault)},
+    )
+    check(
+        "invalid task origin fails closed before coordinator pipeline",
+        broken_stop.returncode == 0 and not stop_probe.exists(),
+        broken_stop.stderr,
+    )
 
     command_payload = {
         **common,

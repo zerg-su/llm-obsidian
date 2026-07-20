@@ -68,15 +68,11 @@ def role_for(data: Mapping[str, Any], *, context_root: Path | None = None) -> st
 
 
 def emit_incomplete(root: Path, session: str, marker: Mapping[str, Any], data: Mapping[str, Any]) -> None:
-    counts: dict[str, int] = {}
-    started_ms = marker.get("started_ms")
-    if isinstance(started_ms, int) and not isinstance(started_ms, bool):
-        counts["duration_ms"] = max(0, round(time.time() * 1000) - started_ms)
     emit_event(
         "model-turn-incomplete",
         actor=marker.get("actor") or "coordinator",
         session=session,
-        counts=counts,
+        counts={},
         status="degraded",
         root=root,
         environ=runtime_environ(data),

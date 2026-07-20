@@ -27,6 +27,8 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Exact reviewed release-packaging paths are classified as non-behavioral, so
   metadata-only changes reuse valid acceptance evidence while every unknown
   changed path continues to invalidate the matrix fail-closed.
+- Pipeline timing reports completed and incomplete model turns by runtime and
+  coordinator/task/reviewer role; incomplete turns carry no fabricated latency.
 
 ### Fixed
 
@@ -35,6 +37,13 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   treating a misleading `not_found` response as success. The `/close` live
   fixture reuses its runner-created surface and delegates proof/page cleanup to
   code, eliminating nested-agent quoting failures and orphan tabs.
+- Task and reviewer hooks now write only content-free turn telemetry to the
+  origin vault; coordinator context injection, command capture, plan capture,
+  and the full Stop pipeline remain disabled across the read-only boundary.
+- Canonical acceptance evidence refuses dirty behavioral worktrees before
+  execution, including same-commit staged, unstaged, and untracked paths, while
+  retaining the exact release-metadata exception. Review startup also removes
+  stale outboxes before granting the reviewer its single-file write surface.
 
 - Approved-plan dispatch now uses a typed, idempotent post-approval runner for
   route capture, worktree/task identity, prompt/meta rendering, anchored spawn,

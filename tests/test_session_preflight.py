@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 
@@ -63,6 +64,13 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
     (guessed_root / "config/acceptance-cells.toml").write_text(
         (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
+    manifest = tomllib.loads(
+        (guessed_root / "config/acceptance-cells.toml").read_text(encoding="utf-8")
+    )
+    for relative in manifest["non_behavioral_paths"]:
+        target = guessed_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
     generation_file = guessed_root / ".vault-meta/acceptance/model-generations.json"
     generation_file.parent.mkdir(parents=True, exist_ok=True)
     generation_file.write_text(
