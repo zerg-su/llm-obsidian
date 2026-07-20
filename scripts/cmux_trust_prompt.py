@@ -28,3 +28,18 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
         return False
     compact_screen = re.sub(r"\s+", "", screen)
     return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
+
+
+def claude_background_exit_prompt_visible(screen: str) -> bool:
+    """Recognize Claude's complete background-work exit dialog across wrapping."""
+
+    markers = (
+        "Background work is running",
+        "The following will stop when you exit:",
+        "1. Exit anyway",
+        "2. Move to background and exit",
+        "3. Stay",
+        "Enter to confirm",
+    )
+    compact_screen = re.sub(r"\s+", "", screen)
+    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)

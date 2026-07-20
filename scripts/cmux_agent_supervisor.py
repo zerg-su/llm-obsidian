@@ -36,7 +36,10 @@ from cmux_agent_support import (
     task_codex_config_values,
     validated_cmux_socket_path,
 )
-from cmux_trust_prompt import workspace_trust_prompt_visible
+from cmux_trust_prompt import (
+    claude_background_exit_prompt_visible,
+    workspace_trust_prompt_visible,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -969,20 +972,6 @@ def claude_mcp_trust_prompt_visible(screen: str) -> bool:
         "Use this MCP server",
         "Use this and all future MCP servers in this project",
         "Continue without using this MCP server",
-        "Enter to confirm",
-    )
-    compact_screen = re.sub(r"\s+", "", screen)
-    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)
-
-
-def claude_background_exit_prompt_visible(screen: str) -> bool:
-    """Recognize Claude's complete native background-work exit dialog."""
-    markers = (
-        "Background work is running",
-        "The following will stop when you exit:",
-        "1. Exit anyway",
-        "2. Move to background and exit",
-        "3. Stay",
         "Enter to confirm",
     )
     compact_screen = re.sub(r"\s+", "", screen)

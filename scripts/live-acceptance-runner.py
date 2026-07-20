@@ -59,7 +59,10 @@ from cmux_agent_support import (  # noqa: E402
     task_codex_config_values,
     validated_cmux_socket_path,
 )
-from cmux_trust_prompt import workspace_trust_prompt_visible  # noqa: E402
+from cmux_trust_prompt import (  # noqa: E402
+    claude_background_exit_prompt_visible,
+    workspace_trust_prompt_visible,
+)
 
 
 class AcceptanceRunnerError(ValueError):
@@ -1003,6 +1006,8 @@ Hard boundaries:
 {cleanup_contract}
 - Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
+- An acceptance cell must not repair or edit product scripts, skills, tests, hooks, or configuration. If a
+  repo-owned mechanism fails, preserve the evidence and report it; the outer coordinator owns any fix and rerun.
 
 Finally write exactly one JSON object to `{outbox}` using this shape:
 
@@ -1245,9 +1250,7 @@ def close_surface(
             )
             if (
                 screen.returncode == 0
-                and "1. Exit anyway" in screen.stdout
-                and "2. Move to background and exit" in screen.stdout
-                and "3. Stay" in screen.stdout
+                and claude_background_exit_prompt_visible(screen.stdout)
             ):
                 confirmed = subprocess.run(
                     ["cmux", "send-key", "--surface", surface, "Enter"],

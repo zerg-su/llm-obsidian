@@ -782,6 +782,12 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     check(
         "supervisor recognizes only the complete Claude background-work exit prompt",
         supervisor_module.claude_background_exit_prompt_visible(claude_exit_screen)
+        and supervisor_module.claude_background_exit_prompt_visible(
+            "Background work is run\nning\n"
+            "The following will stop when you ex\nit:\n"
+            "1. Exit any\nway\n2. Move to background and ex\nit\n"
+            "3. St\nay\nEnter to con\nfirm\n"
+        )
         and not supervisor_module.claude_background_exit_prompt_visible(
             "Background work is running\n1. Exit anyway\nEnter to confirm\n"
         ),

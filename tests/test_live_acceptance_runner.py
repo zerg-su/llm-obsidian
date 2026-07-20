@@ -372,7 +372,17 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     def confirm_run(argv, **_kwargs):
         confirm_calls.append(list(argv))
         if argv[1] == "read-screen":
-            return subprocess.CompletedProcess(argv, 0, stdout="1. Exit anyway\n2. Move to background and exit\n3. Stay\n", stderr="")
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=(
+                    "Background work is run\nning\n"
+                    "The following will stop when you ex\nit:\n"
+                    "1. Exit any\nway\n2. Move to background and ex\nit\n"
+                    "3. St\nay\nEnter to con\nfirm\n"
+                ),
+                stderr="",
+            )
         if argv[1] == "send-key":
             confirming_exit.write_text('{"schema_version": 1}\n', encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
@@ -404,6 +414,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
     check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
     check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
+    check(
+        "acceptance prompt delegates product repair to the outer coordinator",
+        "must not repair or edit product scripts" in prompt
+        and "outer coordinator owns any fix and rerun" in prompt,
+    )
     check("prompt pins runner-owned nested worktrees", "Use `LLM_OBSIDIAN_WORKTREES`" in prompt)
     check("prompt validates before disposable cleanup", "Validate product output before removing" in prompt)
     check(
