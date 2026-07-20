@@ -15,8 +15,9 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_7 pages, updated 2026-07-20_
+_8 pages, updated 2026-07-20_
 
+- [[Cross-model review — v2.1.1 final implementation review — 43a447bc1b02]] — resolved, 2026-07-20 `c-000015`
 - [[Cross-model review — v2.1.1 final implementation review — ab4803b6000c]] — resolved, 2026-07-20 `c-000014`
 - [[Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030]] — resolved, 2026-07-19 `c-000012`
 - [[Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465]] — resolved, 2026-07-19 `c-000013`

@@ -29,6 +29,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ## [2026-07-20] review | v2.1.1 final implementation review
 
+`c-000015` [[Cross-model review — v2.1.1 final implementation review — 43a447bc1b02]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-20] review | v2.1.1 final implementation review
+
 `c-000014` [[Cross-model review — v2.1.1 final implementation review — ab4803b6000c]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-19] review | v2.1.1 code-owned optimization plan review
