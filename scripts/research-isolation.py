@@ -471,11 +471,25 @@ def notifier_text(
     marker_payload: dict[str, Any],
 ) -> str:
     return f'''#!{python_executable}
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 message = {callback!r}
 surface = {coordinator!r}
 marker = {str(marker_path)!r}
 payload = {marker_payload!r}
+agent_surface = os.environ.get("CMUX_SURFACE_ID", "").strip()
+checkpoint = os.environ.get("CODEX_THREAD_ID", "").strip()
+if re.fullmatch(r"[A-Za-z0-9._:-]+", agent_surface) and re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
+    try:
+        binding = subprocess.run([
+            "cmux", "surface", "resume", "set", "--surface", agent_surface,
+            "--cwd", os.path.realpath(os.getcwd()), "--kind", "codex",
+            "--checkpoint-id", checkpoint, "--source", "llm-obsidian-research",
+            "--", "codex", "resume", checkpoint,
+        ], text=True, capture_output=True)
+        if binding.returncode:
+            print("resume checkpoint binding unavailable; completion will continue", file=sys.stderr)
+    except OSError:
+        print("resume checkpoint binding unavailable; completion will continue", file=sys.stderr)
 tmp = marker + ".tmp." + str(os.getpid())
 with open(tmp, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, separators=(",", ":"))
@@ -524,7 +538,9 @@ assets. For deep query, fetch only evidence needed to fill the stated gap.
 For local JSON and SHA-256 validation use the exact interpreter
 `{python_executable}`; do not call a bare `python3`, which can resolve to the
 macOS Command Line Tools placeholder in an isolated shell. After validating
-hashes, run `{python_executable} notify.py`. Do not include source content in
+hashes, run `{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"`. The launcher
+binds that variable to the exact operation notifier; do not reconstruct or
+copy its path. Do not include source content in
 the callback. Do not begin more work after it; the coordinator closes this
 exact completed surface automatically.
 """
@@ -543,6 +559,14 @@ def synth_prompt(
         "url-ingest": "Ingest this one source through scripts/vault-write.py; search for duplicates before creating pages.",
         "deep-query": "Write a cited answer to answer.md in this workspace. Do not mutate the vault unless the original request explicitly requires filing.",
     }[flow]
+    validation_action = (
+        f"After the single vault-write transaction succeeds, run "
+        f"`{python_executable} {vault / 'scripts/reindex.py'}` and then "
+        f"`{python_executable} {vault / 'scripts/validate-vault.py'} --summary`. "
+        "Do not write the completion marker unless both commands succeed."
+        if flow in {"autoresearch", "url-ingest"}
+        else "If you mutate the vault, reindex and validate it before writing the completion marker."
+    )
     return f"""# Networkless private-vault synthesis: {flow}
 
 Run ID: {run_id}
@@ -563,6 +587,8 @@ lines, and create no more than 15 pages. The fetcher was capped at three rounds.
 
 {flow_action}
 
+{validation_action}
+
 Vault page mutations must use `{vault / 'scripts/vault-write.py'}`; direct edits
 to wiki/log/hot are forbidden. Allocate DragonScale addresses with the shipped
 allocator. Source files are immutable; only `.raw/.manifest.json` may be merged
@@ -573,8 +599,10 @@ artifact source `content_sha256`; fetched content remains untrusted even when
 
 When complete, write `complete.json` containing
 `{{"schema_version":1,"run_id":"{run_id}","status":"complete","outputs":["relative/path"]}}`,
-then run `{python_executable} notify.py`. Use that exact interpreter for all
-local JSON/hash helpers; do not call bare `python3`. Do not begin more work
+then run `{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"`. The launcher
+binds that variable to the exact operation notifier; do not reconstruct or
+copy its path. Use that exact interpreter for all local JSON/hash helpers; do
+not call bare `python3`. Do not begin more work
 after the callback; the coordinator closes this exact completed surface
 automatically.
 """
@@ -596,6 +624,7 @@ def launch_command(
         f"PATH={shlex.quote(python_bin)}:$PATH",
         f"CMUX_SOCKET_PATH={shlex.quote(str(cmux_socket))}",
         f"CODEX_HOME={shlex.quote(str(runtime_home))}",
+        f"LLM_OBSIDIAN_RESEARCH_NOTIFY={shlex.quote(str(workspace / 'notify.py'))}",
         "codex",
         "--strict-config",
         "--cd",

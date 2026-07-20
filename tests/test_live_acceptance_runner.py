@@ -357,6 +357,128 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "already authenticated" in prompt and "Never read, copy, print, export" in prompt,
     )
 
+    autoresearch_prompt = module.prompt_text(
+        row(
+            skill="autoresearch",
+            scenario="protected-web",
+            expected="Complete one bounded read-only protected web research flow and file validated output.",
+        ),
+        module.load_scenarios()["protected-web"],
+        repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model",
+        "high",
+        commit,
+        "Research one bounded public URL.",
+    )
+    check(
+        "autoresearch prompt delegates exact output cleanup to runner",
+        "Leave the exact filed output pages" in autoresearch_prompt
+        and "runner-owned cleanup begins afterward" in autoresearch_prompt,
+    )
+
+    autoresearch_repo = tmp / "autoresearch-cleanup-repo"
+    (autoresearch_repo / "wiki" / "sources").mkdir(parents=True)
+    (autoresearch_repo / "wiki" / "questions").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=autoresearch_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=autoresearch_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=autoresearch_repo, check=True)
+    index_page = autoresearch_repo / "wiki" / "sources" / "_index.md"
+    index_page.write_text("# Sources\n", encoding="utf-8")
+    merged_page = autoresearch_repo / "wiki" / "questions" / "Existing Research.md"
+    merged_page.write_text("---\ntype: question\n---\n\nOriginal.\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "wiki/sources/_index.md", "wiki/questions/Existing Research.md"],
+        cwd=autoresearch_repo,
+        check=True,
+    )
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=autoresearch_repo, check=True)
+    autoresearch_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=autoresearch_repo,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    output_page = autoresearch_repo / "wiki" / "sources" / "Acceptance Result.md"
+    output_page.write_text("---\ntype: source\n---\n\nValidated output.\n", encoding="utf-8")
+    merged_page.write_text("---\ntype: question\n---\n\nOriginal plus accepted research.\n", encoding="utf-8")
+    index_page.write_text("# Sources\n- [[Acceptance Result]]\n", encoding="utf-8")
+    research_run_id = "11111111-2222-4333-8444-555555555555"
+    coordinator_surface = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    operation_dir = (
+        autoresearch_repo / ".vault-meta" / "task-sessions" / "projects" / "project"
+        / "tasks" / "task" / "lanes" / "lane" / "operations" / research_run_id
+    )
+    operation_dir.mkdir(parents=True)
+    locator_dir = autoresearch_repo / ".vault-meta" / "research-runs" / research_run_id
+    locator_dir.mkdir(parents=True)
+    (locator_dir / "locator.json").write_text(json.dumps({
+        "schema_version": 1,
+        "run_id": research_run_id,
+        "vault": str(autoresearch_repo),
+        "operation_dir": str(operation_dir),
+    }), encoding="utf-8")
+    (operation_dir / "state.json").write_text(json.dumps({
+        "schema_version": 1,
+        "run_id": research_run_id,
+        "vault": str(autoresearch_repo),
+        "operation_dir": str(operation_dir),
+        "status": "complete",
+        "fetch_artifact_status": "accepted",
+        "coordinator_surface": coordinator_surface,
+        "outputs": [
+            "wiki/sources/Acceptance Result.md",
+            "wiki/questions/Existing Research.md",
+        ],
+    }), encoding="utf-8")
+    cleanup_calls: list[list[str]] = []
+    cleanup_payloads: list[dict[str, object]] = []
+    original_run_checked = module.run_checked
+    def fake_run_checked(argv, *, cwd, input_text=None, **_kwargs):
+        cleanup_calls.append(list(argv))
+        if input_text is not None:
+            payload = json.loads(input_text)
+            cleanup_payloads.append(payload)
+            for page in payload["pages"]:
+                target = Path(cwd) / page["path"]
+                if page["op"] == "delete":
+                    target.unlink()
+                else:
+                    target.write_text(page["content"], encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+    module.run_checked = fake_run_checked
+    try:
+        clean, reason = module.autoresearch_acceptance_cleanup(
+            autoresearch_repo, autoresearch_commit, coordinator_surface
+        )
+        check(
+            "runner transactionally deletes bound autoresearch output",
+            clean and not output_page.exists() and "transactionally restored" in reason,
+            reason,
+        )
+        check(
+            "runner restores tracked product index in the same transaction",
+            index_page.read_text(encoding="utf-8") == "# Sources\n"
+            and len(cleanup_payloads) == 1
+            and {page["op"] for page in cleanup_payloads[0]["pages"]} == {"delete", "update"},
+        )
+        check(
+            "runner restores a tracked deduplicated autoresearch page",
+            merged_page.read_text(encoding="utf-8")
+            == "---\ntype: question\n---\n\nOriginal.\n",
+        )
+        locator = json.loads((locator_dir / "locator.json").read_text(encoding="utf-8"))
+        locator["operation_dir"] = str(tmp / "escaped-operation")
+        (locator_dir / "locator.json").write_text(json.dumps(locator), encoding="utf-8")
+        escaped, escaped_reason = module.autoresearch_acceptance_cleanup(
+            autoresearch_repo, autoresearch_commit, coordinator_surface
+        )
+        check(
+            "runner rejects autoresearch locator escape",
+            not escaped and "escapes task sessions" in escaped_reason,
+            escaped_reason,
+        )
+    finally:
+        module.run_checked = original_run_checked
+
     close_fixture = module.close_acceptance_fixture("abcdef12-0000-0000-0000-000000000000")
     close_prompt = module.prompt_text(
         row(

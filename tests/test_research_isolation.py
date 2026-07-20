@@ -199,15 +199,21 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check=False,
     )
     check("fetch launcher parses in target shell", launcher_syntax.returncode == 0, launcher_syntax.stderr)
-    check("fetch prompt uses pinned Python", f"{python_executable} notify.py" in fetch_prompt)
+    check(
+        "fetch prompt uses exact notifier binding",
+        f'{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"' in fetch_prompt
+        and f"LLM_OBSIDIAN_RESEARCH_NOTIFY={fetch_dir / 'notify.py'}" in fetch_launcher,
+    )
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
     check(
         "standalone callback carries its explicit state root",
         f"--state-root {state_root.resolve()}" in notifier,
     )
-    notify_env = dict(os.environ)
-    notify_env["PATH"] = str(tmp / "no-cmux-on-path")
+    cmux_log.write_text("", encoding="utf-8")
+    notify_env = dict(fake_env)
+    notify_env["CMUX_SURFACE_ID"] = "22222222-2222-2222-2222-222222222222"
+    notify_env["CODEX_THREAD_ID"] = "019f0000-0000-7000-8000-000000000001"
     notified = subprocess.run(
         [python_executable, str(fetch_dir / "notify.py")],
         text=True,
@@ -215,6 +221,16 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         env=notify_env,
     )
     check("callback failure is nonfatal", notified.returncode == 0, notified.stderr)
+    notify_calls = cmux_log.read_text(encoding="utf-8").splitlines()
+    check(
+        "notifier binds exact Codex checkpoint before callback",
+        notify_calls
+        and notify_calls[0].startswith(
+            "surface resume set --surface 22222222-2222-2222-2222-222222222222 "
+        )
+        and "--checkpoint-id 019f0000-0000-7000-8000-000000000001" in notify_calls[0]
+        and any(call.startswith("send --surface surface:test") for call in notify_calls[1:]),
+    )
     check("fetch completion marker written", Path(state["fetch_completion_marker"]).is_file())
     marked = run("status", "--run-id", run_id, "--state-root", str(state_root))
     check("status detects fetch marker", json.loads(marked.stdout)["status"] == "fetch_ready")
@@ -298,7 +314,20 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check("synth has Homebrew runtime root", '"/opt/homebrew" = true' in synth_config)
     check("untrusted boundary explicit", "UNTRUSTED DATA" in synth_prompt)
     check("writer required", "vault-write.py" in synth_prompt)
-    check("synth prompt uses pinned Python", f"{python_executable} notify.py" in synth_prompt)
+    check(
+        "synth prompt uses exact notifier binding",
+        f'{python_executable} "$LLM_OBSIDIAN_RESEARCH_NOTIFY"' in synth_prompt
+        and f"LLM_OBSIDIAN_RESEARCH_NOTIFY={Path(received['synth_dir']) / 'notify.py'}"
+        in synth_launcher,
+    )
+    writer_at = synth_prompt.index("single vault-write transaction succeeds")
+    reindex_at = synth_prompt.index(str(ROOT / "scripts/reindex.py"), writer_at)
+    validate_at = synth_prompt.index(str(ROOT / "scripts/validate-vault.py"), reindex_at)
+    complete_at = synth_prompt.index("When complete, write `complete.json`", validate_at)
+    check(
+        "synth reindexes and validates before completion",
+        writer_at < reindex_at < validate_at < complete_at,
+    )
     check(
         "synth prepends Python bin to PATH",
         f"PATH={Path(python_executable).parent}:$PATH" in synth_launcher,

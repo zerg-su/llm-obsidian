@@ -34,6 +34,7 @@ OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
 AGENT_EXIT_GRACE_SECONDS = 300.0
 CHILD_SURFACE_SETTLE_SECONDS = 45.0
+AUTORESEARCH_OUTPUT_LIMIT = 15
 DISPOSABLE_VAULT_BOOKKEEPING = {
     ".vault-meta/address-counter.txt",
     ".vault-meta/address-map.tsv",
@@ -478,6 +479,198 @@ def close_acceptance_proof(sandbox: Path, fixture: dict[str, str]) -> tuple[bool
     return True, "saved page validated and transactionally removed after exact agent exit"
 
 
+def commit_file(sandbox: Path, commit: str, rel: str) -> tuple[bool, str | None]:
+    """Return one exact tracked file, distinguishing absence from Git failure."""
+
+    listing = subprocess.run(
+        ["git", "ls-tree", "-z", "--name-only", commit, "--", rel], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if listing.returncode != 0:
+        return False, None
+    names = [name for name in listing.stdout.split("\0") if name]
+    if not names:
+        return True, None
+    if names != [rel]:
+        return False, None
+    content = subprocess.run(
+        ["git", "show", f"{commit}:{rel}"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if content.returncode != 0:
+        return False, None
+    return True, content.stdout
+
+
+def autoresearch_acceptance_cleanup(
+    sandbox: Path, commit: str, coordinator_surface: str
+) -> tuple[bool, str]:
+    """Validate and transactionally remove outputs from one bound research run."""
+
+    locator_root = sandbox / ".vault-meta" / "research-runs"
+    if locator_root.is_symlink() or not locator_root.is_dir():
+        return False, "autoresearch run locator root is invalid"
+    try:
+        locators = sorted(locator_root.glob("*/locator.json"))
+    except OSError:
+        return False, "autoresearch run locator is unreadable"
+    if len(locators) != 1:
+        return False, "autoresearch must leave exactly one run locator"
+    locator_path = locators[0]
+    if locator_path.parent.is_symlink() or locator_path.is_symlink() or not locator_path.is_file():
+        return False, "autoresearch run locator is not a regular file"
+    try:
+        locator = read_json(locator_path)
+    except AcceptanceRunnerError:
+        return False, "autoresearch run locator is invalid"
+    run_id = str(locator.get("run_id") or "")
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", run_id) or locator_path.parent.name != run_id:
+        return False, "autoresearch run locator identity is invalid"
+    locator_vault = str(locator.get("vault") or "").strip()
+    if not locator_vault or not Path(locator_vault).is_absolute():
+        return False, "autoresearch run locator has the wrong vault"
+    if Path(locator_vault).resolve() != sandbox.resolve():
+        return False, "autoresearch run locator has the wrong vault"
+    operation_dir = Path(str(locator.get("operation_dir") or "")).resolve()
+    task_root = (sandbox / ".vault-meta" / "task-sessions").resolve()
+    try:
+        operation_dir.relative_to(task_root)
+    except ValueError:
+        return False, "autoresearch run locator escapes task sessions"
+    if (
+        operation_dir.is_symlink()
+        or operation_dir.name != run_id
+        or operation_dir.parent.name != "operations"
+    ):
+        return False, "autoresearch operation binding is invalid"
+    state_path = operation_dir / "state.json"
+    if state_path.is_symlink() or not state_path.is_file():
+        return False, "autoresearch state is missing"
+    try:
+        state = read_json(state_path)
+    except AcceptanceRunnerError:
+        return False, "autoresearch state is invalid"
+    outputs = state.get("outputs")
+    if (
+        state.get("run_id") != run_id
+        or Path(str(state.get("operation_dir") or "")).resolve() != operation_dir
+        or Path(str(state.get("vault") or "")).resolve() != sandbox.resolve()
+        or state.get("status") != "complete"
+        or state.get("fetch_artifact_status") != "accepted"
+        or state.get("coordinator_surface") != coordinator_surface
+        or not isinstance(outputs, list)
+        or not 1 <= len(outputs) <= AUTORESEARCH_OUTPUT_LIMIT
+        or any(not isinstance(item, str) for item in outputs)
+        or len(set(outputs)) != len(outputs)
+    ):
+        return False, "autoresearch state is not one complete bound run"
+
+    pages: list[dict[str, str]] = []
+    output_paths: set[str] = set()
+    restored_outputs: dict[str, str] = {}
+    wiki_root = sandbox / "wiki"
+    if wiki_root.is_symlink() or not wiki_root.is_dir():
+        return False, "autoresearch wiki root is invalid"
+    for raw in outputs:
+        rel_path = Path(raw)
+        if (
+            rel_path.is_absolute()
+            or not rel_path.parts
+            or rel_path.parts[0] != "wiki"
+            or rel_path.suffix != ".md"
+            or any(part in {"", ".", ".."} for part in rel_path.parts)
+        ):
+            return False, "autoresearch output path is outside the wiki"
+        page = (sandbox / rel_path).resolve()
+        try:
+            page.relative_to(wiki_root.resolve())
+        except ValueError:
+            return False, "autoresearch output path escapes the wiki"
+        if page.is_symlink() or not page.is_file():
+            return False, "autoresearch output page is missing"
+        output_paths.add(raw)
+        current_sha256 = hashlib.sha256(page.read_bytes()).hexdigest()
+        baseline_ok, baseline = commit_file(sandbox, commit, raw)
+        if not baseline_ok:
+            return False, "autoresearch source commit is unreadable"
+        if baseline is not None:
+            restored_outputs[raw] = baseline
+            pages.append({
+                "op": "update",
+                "path": raw,
+                "content": baseline,
+                "expected_sha256": current_sha256,
+            })
+        else:
+            pages.append({
+                "op": "delete",
+                "path": raw,
+                "expected_sha256": current_sha256,
+            })
+
+    try:
+        run_checked(
+            [sys.executable, str(sandbox / "scripts" / "validate-vault.py"), "--summary"],
+            cwd=sandbox,
+        )
+    except AcceptanceRunnerError:
+        return False, "autoresearch output failed independent vault validation"
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if status.returncode != 0:
+        return False, "autoresearch index cleanup status is unreadable"
+    for line in status.stdout.splitlines():
+        rel = line[3:]
+        if rel in output_paths or not re.fullmatch(r"wiki(?:/[^/]+)*/_index\.md", rel):
+            continue
+        if line[:2] == "??":
+            return False, "autoresearch left an unbound product index"
+        current = sandbox / rel
+        baseline_ok, baseline = commit_file(sandbox, commit, rel)
+        if (
+            not baseline_ok
+            or baseline is None
+            or current.is_symlink()
+            or not current.is_file()
+        ):
+            return False, "autoresearch product index cannot be restored safely"
+        pages.append({
+            "op": "update",
+            "path": rel,
+            "content": baseline,
+            "expected_sha256": hashlib.sha256(current.read_bytes()).hexdigest(),
+        })
+
+    payload = {
+        "schema_version": 1,
+        "request_id": f"acceptance-autoresearch-cleanup-{run_id}",
+        "actor": "acceptance",
+        "session": run_id,
+        "pages": pages,
+    }
+    try:
+        run_checked(
+            [sys.executable, str(sandbox / "scripts" / "vault-write.py"), "--output", "json"],
+            cwd=sandbox,
+            input_text=json.dumps(payload, ensure_ascii=False),
+        )
+    except AcceptanceRunnerError:
+        return False, "autoresearch transactional cleanup failed"
+    for path in output_paths:
+        output = sandbox / path
+        if path in restored_outputs:
+            if output.is_symlink() or not output.is_file():
+                return False, "autoresearch tracked output was not restored"
+            if output.read_text(encoding="utf-8") != restored_outputs[path]:
+                return False, "autoresearch tracked output differs from source commit"
+        elif output.exists():
+            return False, "autoresearch new output remained after cleanup"
+    return True, "autoresearch output independently validated and transactionally restored"
+
+
 def write_dispatch_acceptance_request(
     sandbox: Path, fixture: dict[str, str], *, source_commit: str, coordinator_surface: str,
     coordinator_model: str, coordinator_effort: str,
@@ -657,6 +850,15 @@ def prompt_text(
 - Leave the exact saved page in place for runner proof. The runner owns its transactional deletion,
   disposable bookkeeping, operation outbox, clone, scratch directory, and exact surface cleanup.
 - Do not remove `.acceptance-sandbox.json`, pass `--tmp-root`/`--state-root`, or override `TMPDIR`/`TMP`/`TEMP`."""
+    elif row["skill"] == "autoresearch":
+        cleanup_contract = f"""- Complete one protected research run and independently validate its filed pages and provenance.
+- Leave the exact filed output pages and any generated index links in place for runner proof. The runner
+  resolves the one operation-bound run state, validates the vault, removes those exact outputs through
+  one optimistic vault-write transaction, restores tracked indexes, and cleans the disposable clone.
+- Close external processes through the documented autoresearch lifecycle, but do not manually delete
+  product pages, indexes, task-session state, `.acceptance-sandbox.json`, the operation outbox, or scratch.
+- Do not run `git restore`, `git checkout`, `git stash`, pass `--tmp-root`/`--state-root`, or override
+  `TMPDIR`/`TMP`/`TEMP`."""
     elif runner_fixture is None:
         cleanup_contract = f"""- Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
@@ -699,6 +901,11 @@ def prompt_text(
 then make your final tool call exactly `python3 scripts/queue-session-exit.py`. Perform no tool calls
 after that command and end the turn immediately. The outer runner independently proves process exit,
 surface retention, exact-surface cleanup, and removal of the saved fixture page."""
+    elif row["skill"] == "autoresearch":
+        final_contract = (
+            "Do not merely describe a hypothetical test. After validating the protected run and its "
+            "filed pages, write the outbox as the final action; runner-owned cleanup begins afterward."
+        )
     else:
         final_contract = "Do not merely describe a hypothetical test. The outbox is the final action after cleanup."
     return f"""# Live release acceptance operation
@@ -1291,6 +1498,11 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 clean, proof = dispatch_acceptance_proof(sandbox, commit, prepared_dispatch)
             elif prepared_close is not None:
                 clean, proof = close_acceptance_proof(sandbox, prepared_close)
+                if clean:
+                    clean, cleanup_proof = sandbox_cleanup_proof(sandbox, commit)
+                    proof = f"{proof}; {cleanup_proof}"
+            elif row["skill"] == "autoresearch":
+                clean, proof = autoresearch_acceptance_cleanup(sandbox, commit, surface)
                 if clean:
                     clean, cleanup_proof = sandbox_cleanup_proof(sandbox, commit)
                     proof = f"{proof}; {cleanup_proof}"

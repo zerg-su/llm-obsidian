@@ -55,6 +55,13 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   locator inside the current vault, keeping callbacks short and eliminating
   model-reconstructed task-session paths while rejecting locator escapes
   fail-closed.
+- Protected-research launchers bind their exact notifier and Codex resume
+  checkpoint mechanically, and synthesis reindexes before validation, so
+  callbacks and retained context no longer depend on a model copying paths.
+- Autoresearch acceptance now leaves validated product outputs to the runner,
+  which resolves the one bound operation, deletes new pages and restores
+  deduplicated pages/indexes through one optimistic vault transaction, then
+  proves the clone clean without model-written cleanup shell.
 
 - Approved-plan dispatch now uses a typed, idempotent post-approval runner for
   route capture, worktree/task identity, prompt/meta rendering, anchored spawn,
