@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import importlib.util
 import os
@@ -84,6 +85,21 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.returncode == 3 and "only tests/" in result.stderr,
         result.stderr,
     )
+    dead_generation_route_manifest = tmp / "dead-generation-route-acceptance-cells.toml"
+    dead_generation_route_manifest.write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8").replace(
+            'include = ["runtimes.codex", "runtimes.claude"]',
+            'include = ["runtimes.codex", "runtimes.claude"]\nexclude = ["roles.review.codex"]',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    result = run("--manifest", str(dead_generation_route_manifest), "check")
+    check(
+        "generation routes reject dead or unknown configuration",
+        result.returncode == 3 and "only the two production runtime defaults" in result.stderr,
+        result.stderr,
+    )
     matrix = tmp / "matrix.json"
     result = run("matrix", "--phase", "baseline", "--output", str(matrix))
     data = json.loads(matrix.read_text(encoding="utf-8"))
@@ -96,6 +112,9 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         all(
             ".gitignore" in row["dependencies"]
             and "scripts/cmux_agent_support.py" in row["dependencies"]
+            and "scripts/lifecycle_telemetry.py" in row["dependencies"]
+            and "scripts/task_contract.py" in row["dependencies"]
+            and "scripts/turn_telemetry.py" in row["dependencies"]
             for row in data["rows"]
         ),
     )
@@ -118,6 +137,64 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
             == (row["scenario"] in lifecycle_scenarios)
             for row in data["rows"]
         ),
+    )
+
+    # A path declared by any cell is no longer protected by unknown-path
+    # invalidation. Therefore every cell must include the complete local import
+    # closure of each Python dependency it declares. Modules declared nowhere
+    # intentionally remain fail-closed as unknown product paths.
+    declared_by_any_cell = {
+        rel for row in data["rows"] for rel in row["dependencies"]
+    }
+
+    def declared_local_imports(rel: str) -> set[str]:
+        source = ROOT / rel
+        if source.suffix != ".py" or not source.is_file():
+            return set()
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=rel)
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names.add(node.module.split(".", 1)[0])
+        imported: set[str] = set()
+        for name in names:
+            candidates = {
+                candidate
+                for candidate in declared_by_any_cell
+                if Path(candidate).suffix == ".py" and Path(candidate).stem == name
+            }
+            sibling = (source.parent / f"{name}.py")
+            if sibling.is_file():
+                candidates.add(sibling.relative_to(ROOT).as_posix())
+            scripts_module = ROOT / "scripts" / f"{name}.py"
+            if scripts_module.is_file():
+                candidates.add(scripts_module.relative_to(ROOT).as_posix())
+            imported.update(candidates & declared_by_any_cell)
+        return imported
+
+    incomplete_closures: list[str] = []
+    for row in data["rows"]:
+        dependencies = set(row["dependencies"])
+        pending = list(dependencies)
+        visited: set[str] = set()
+        while pending:
+            importer = pending.pop()
+            if importer in visited:
+                continue
+            visited.add(importer)
+            for imported in declared_local_imports(importer):
+                if imported not in dependencies:
+                    incomplete_closures.append(
+                        f"{row['skill']}/{row['runtime']}: {importer} -> {imported}"
+                    )
+                elif imported not in visited:
+                    pending.append(imported)
+    check(
+        "declared Python dependencies contain their transitive local import closure",
+        not incomplete_closures,
+        "\n".join(sorted(incomplete_closures)),
     )
 
     fragment_root = tmp / "fragment-root"
@@ -420,7 +497,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "global_dependencies = [\".gitignore\", \"config/model-routing.toml\"]\n"
         "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
         "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"
-        "[generation_routes]\ninclude = [\"runtimes.codex\", \"runtimes.claude\"]\nexclude = []\n"
+        "[generation_routes]\ninclude = [\"runtimes.codex\", \"runtimes.claude\"]\n"
         "[scenarios.demo]\ndependencies = []\n",
         encoding="utf-8",
     )

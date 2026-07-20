@@ -450,12 +450,12 @@ def main() -> int:
         validate_scenario_coverage(args.scenarios, skills)
         manifest = read_manifest(args.root.resolve(), args.manifest)
         orchestration_version = int(manifest["orchestration_contract_version"])
+        generations = production_generations(args.root.resolve(), manifest)
         if args.command == "check":
             print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
             return 0
         rows = matrix_rows(skills, args.phase)
         environment = environment_contract()
-        generations = production_generations(args.root.resolve(), manifest)
         metadata = {
             row_key(row): cell_metadata(
                 args.root.resolve(), manifest, row,

@@ -29,10 +29,13 @@ global_dependencies = [
   "evals/acceptance/scenarios.json",
   "evals/acceptance/skills.json",
   "scripts/cmux_agent_support.py",
+  "scripts/lifecycle_telemetry.py",
   "scripts/live-acceptance-runner.py",
   "scripts/model_routing.py",
-  "scripts/task_sessions.py",
   "scripts/pipeline_events.py",
+  "scripts/task_contract.py",
+  "scripts/task_sessions.py",
+  "scripts/turn_telemetry.py",
 ]
 
 [model_generations]
@@ -44,7 +47,6 @@ sonnet = "claude:sonnet"
 
 [generation_routes]
 include = ["runtimes.codex", "runtimes.claude"]
-exclude = ["roles.review.codex", "roles.review.claude"]
 
 [scenarios.agenda-carry]
 dependencies = ["scripts/agenda.py", "scripts/vault-write.py"]

@@ -223,12 +223,11 @@ def canonical_generation(model: str, manifest: dict[str, Any]) -> str:
 
 def production_generations(root: Path, manifest: dict[str, Any]) -> dict[str, dict[str, str]]:
     routes = manifest.get("generation_routes")
-    if not isinstance(routes, dict):
-        raise FingerprintError("acceptance manifest generation_routes must be a table")
-    include = routes.get("include")
-    exclude = routes.get("exclude")
-    if include != ["runtimes.codex", "runtimes.claude"] or not isinstance(exclude, list):
-        raise FingerprintError("generation routes must explicitly include both production runtimes")
+    expected_routes = {"include": ["runtimes.codex", "runtimes.claude"]}
+    if routes != expected_routes:
+        raise FingerprintError(
+            "generation routes must contain only the two production runtime defaults"
+        )
     config = load_config(root)
     result: dict[str, dict[str, str]] = {}
     for runtime in ("claude", "codex"):
