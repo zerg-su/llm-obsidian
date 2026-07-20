@@ -191,6 +191,7 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     assert first_meta["operation_id"] in action_file.name
     assert "--operation-dir" not in callback_argv
     assert str(first_dir) not in callback_argv
+    assert callback_argv[0] == "python3"
     assert callback_argv[1] == "skills/review-dispatch/scripts/spawn_review.py"
     assert callback_argv[callback_argv.index("--worktree") + 1] == "."
     drive = run(

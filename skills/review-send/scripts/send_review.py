@@ -137,7 +137,7 @@ def drive_argv_for_callback(worktree: Path, state_dir: Path) -> list[str]:
     if state_dir != worktree:
         action_file = write_drive_request(worktree, state_dir)
         argv = [
-            sys.executable,
+            "python3",
             "skills/review-dispatch/scripts/spawn_review.py",
             "drive",
             "--worktree",
@@ -363,10 +363,9 @@ def cmd_submit(ns: argparse.Namespace) -> int:
             "Cross-model review callback was validated and received automatically by the trusted "
             f"supervisor. Review: {output}. Recommended action: {action}. "
             "Continue the Review Gate without running receive again. After the required executor "
-            "self-review or resolution, run the following exact command as its own standalone tool "
-            "call: do not add a prefix, suffix, wrapper, &&, pipe, redirection, or substitution. "
-            "Proceed only if it exits zero and reports applied=true; otherwise treat the review "
-            f"transition as incomplete. Exact command: {shlex.join(drive_argv)}"
+            "self-review or resolution, run this code-owned command in one standalone tool call. "
+            "Its exit status and JSON result are authoritative; continue only on exit 0 with "
+            f"applied=true. Exact command: {shlex.join(drive_argv)}"
         )
     try:
         send_to_surface(surface, message)

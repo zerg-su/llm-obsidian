@@ -41,6 +41,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Block final reap while an operation-bound review transition is still pending,
   require its drive command to run standalone, and clear Claude's composer
   before lifecycle `/exit` so suggested text cannot swallow the command.
+- Use the standard `python3` entrypoint and a neutral authoritative-result
+  contract for task-local review drive callbacks, avoiding Claude auto-mode
+  classifier denials on Homebrew interpreter paths.
 - Reviewer completion is now persisted in the exact broker lane before cmux
   closes the supervisor's own surface, preventing an approved review from
   remaining `callback-ready` after its tab disappears. Successful unattended
