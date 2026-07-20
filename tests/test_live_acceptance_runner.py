@@ -449,6 +449,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt pins runner-owned nested worktrees", "Use `LLM_OBSIDIAN_WORKTREES`" in prompt)
     check("prompt validates before disposable cleanup", "Validate product output before removing" in prompt)
     check(
+        "prompt keeps append-only cleanup bookkeeping writer-owned",
+        "Never put\n  `wiki/log.md` or `wiki/hot.md` in cleanup `pages` operations" in prompt
+        and "instead of requiring a second whole-vault validation" in prompt,
+    )
+    check(
         "prompt permits native subscription without exposing credentials",
         "already authenticated" in prompt and "Never read, copy, print, export" in prompt,
     )

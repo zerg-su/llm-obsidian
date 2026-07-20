@@ -931,7 +931,9 @@ def prompt_text(
   the runner validates allowed vault bookkeeping and deletes the clone.
 - Validate product output before removing disposable pages. After removal, append-only log/hot/index
   bookkeeping may still name those discarded pages; report it as runner-owned disposable bookkeeping
-  instead of requiring a second whole-vault validation or treating it as a product failure."""
+  instead of requiring a second whole-vault validation or treating it as a product failure. Never put
+  `wiki/log.md` or `wiki/hot.md` in cleanup `pages` operations: they are writer-owned and intentionally
+  retain this disposable history until the outer runner deletes the clone."""
     else:
         cleanup_contract = f"""- This cell's plan, result page, review archive, task branch, exact nested worktree,
   task-session registry, and lifecycle markers are runner-owned proof artifacts. Leave them in place.
