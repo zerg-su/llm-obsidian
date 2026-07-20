@@ -42,7 +42,6 @@ from task_sessions import (
 )
 
 
-DEFAULT_STATE_ROOT = ROOT / ".vault-meta" / "research-runs"
 FLOWS = {"autoresearch", "url-ingest", "deep-query"}
 SURFACE_ID_RX = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 DRY_RUN_SURFACE = "00000000-0000-0000-0000-000000000000"
@@ -627,8 +626,70 @@ def state_paths(
 ) -> tuple[Path, Path]:
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", run_id):
         die("invalid run id", 3)
-    directory = operation_dir.resolve() if operation_dir is not None else state_root / run_id
+    if operation_dir is not None:
+        directory = operation_dir.resolve()
+    else:
+        directory = state_root.resolve() / run_id
+        locator_path = directory / "locator.json"
+        if not (directory / "state.json").is_file() and locator_path.exists():
+            if locator_path.is_symlink() or not locator_path.is_file():
+                die("research state locator must be a regular non-symlink file", 3)
+            locator = read_json(locator_path)
+            if locator.get("schema_version") != 1 or locator.get("run_id") != run_id:
+                die("research state locator identity is invalid", 3)
+            vault = Path(str(locator.get("vault") or "")).expanduser().resolve()
+            target = Path(str(locator.get("operation_dir") or "")).expanduser().resolve()
+            task_root = vault / ".vault-meta" / "task-sessions"
+            try:
+                target.relative_to(task_root)
+            except ValueError:
+                die("research state locator escapes the exact task-session root", 3)
+            if (
+                target.name != run_id
+                or target.parent.name != "operations"
+                or target.is_symlink()
+            ):
+                die("research state locator target is invalid", 3)
+            directory = target
     return directory, directory / "state.json"
+
+
+def state_root_for(ns: argparse.Namespace, *, vault_root: Path | None = None) -> Path:
+    configured = getattr(ns, "state_root", None)
+    if configured is not None:
+        return Path(configured).expanduser().resolve()
+    base = vault_root.resolve() if vault_root is not None else Path.cwd().resolve()
+    return base / ".vault-meta" / "research-runs"
+
+
+def write_state_locator(state_root: Path, run_id: str, operation_dir: Path, vault: Path) -> None:
+    locator_dir = state_root.resolve() / run_id
+    locator_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        locator_dir / "locator.json",
+        {
+            "schema_version": 1,
+            "run_id": run_id,
+            "vault": str(vault.resolve()),
+            "operation_dir": str(operation_dir.resolve()),
+        },
+    )
+
+
+def read_bound_state(state_dir: Path, state_path: Path, run_id: str) -> dict[str, Any]:
+    state = read_json(state_path)
+    if state.get("run_id") != run_id:
+        die("research state identity does not match the requested run id", 3)
+    stored_operation = str(state.get("operation_dir") or "").strip()
+    if stored_operation and Path(stored_operation).expanduser().resolve() != state_dir.resolve():
+        die("research state is not bound to its exact operation directory", 3)
+    return state
+
+
+def callback_state_suffix(state_root: Path, operation_dir: Path | None) -> str:
+    if operation_dir is not None:
+        return ""
+    return f" --state-root {shlex.quote(str(state_root.resolve()))}"
 
 
 def stored_route(state: dict[str, Any]) -> dict[str, str]:
@@ -744,7 +805,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
         except (TaskSessionError, OSError) as exc:
             die(f"persistent fetch lane failed: {exc}", 3)
     try:
-        state_dir, state_path = state_paths(ns.state_root.resolve(), run_id, operation_dir)
+        state_root = state_root_for(ns, vault_root=ns.vault_root)
+        state_dir, state_path = state_paths(state_root, run_id, operation_dir)
         state_dir.mkdir(parents=True, exist_ok=operation_dir is not None)
         tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
         fetch_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-fetch-{run_id[:8]}-", dir=tmp_root))
@@ -765,7 +827,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
         callback = (
             f"Protected fetch complete. Run: {python_executable} "
             f"{ROOT / 'scripts/research-isolation.py'} receive --run-id {run_id}"
-            + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+            + callback_state_suffix(state_root, operation_dir)
         )
         fetch_marker = fetch_dir / "notify-complete.json"
         (fetch_dir / "notify.py").write_text(
@@ -808,6 +870,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
         "resume_checkpoint": checkpoint,
         }
         write_json(state_path, state)
+        if operation_dir is not None:
+            write_state_locator(state_root, run_id, operation_dir, ns.vault_root)
         if ns.no_spawn:
             print(json.dumps(state, indent=2, ensure_ascii=False))
         else:
@@ -830,9 +894,13 @@ def cmd_start(ns: argparse.Namespace) -> int:
 
 
 def cmd_receive(ns: argparse.Namespace) -> int:
-    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
-    state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
-    state = read_json(state_path)
+    requested_operation_dir = (
+        Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    )
+    state_root = state_root_for(ns)
+    state_dir, state_path = state_paths(state_root, ns.run_id, requested_operation_dir)
+    state = read_bound_state(state_dir, state_path, ns.run_id)
+    operation_dir = state_dir if str(state.get("operation_dir") or "").strip() else None
     if state.get("status") not in {
         "fetching", "fetch_prepared", "fetch_ready", "fetch_received", "synthesis_queued"
     }:
@@ -1001,7 +1069,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         callback = (
             f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
             f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
-            + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+            + callback_state_suffix(state_root, operation_dir)
         )
         synth_marker = synth_dir / "notify-complete.json"
         (synth_dir / "notify.py").write_text(
@@ -1061,9 +1129,13 @@ def cmd_receive(ns: argparse.Namespace) -> int:
 
 
 def cmd_status(ns: argparse.Namespace) -> int:
-    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
-    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
-    state = read_json(state_path)
+    requested_operation_dir = (
+        Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    )
+    state_root = state_root_for(ns)
+    state_dir, state_path = state_paths(state_root, ns.run_id, requested_operation_dir)
+    state = read_bound_state(state_dir, state_path, ns.run_id)
+    operation_dir = state_dir if str(state.get("operation_dir") or "").strip() else None
     fetch_marker = Path(str(state.get("fetch_completion_marker") or ""))
     if state.get("status") in {"fetching", "fetch_prepared"} and str(fetch_marker) not in {"", "."} and fetch_marker.is_file():
         marker = read_json(fetch_marker)
@@ -1078,7 +1150,7 @@ def cmd_status(ns: argparse.Namespace) -> int:
             state["next_command"] = (
                 f"{state.get('python_executable')} {ROOT / 'scripts/research-isolation.py'} "
                 f"receive --run-id {ns.run_id}"
-                + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+                + callback_state_suffix(state_root, operation_dir)
             )
             write_json(state_path, state)
     synth_dir = Path(str(state.get("synth_dir") or ""))
@@ -1098,9 +1170,13 @@ def cmd_status(ns: argparse.Namespace) -> int:
 
 def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
     """Restart only the networkless stage from an already accepted artifact."""
-    operation_dir = Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
-    _state_dir, state_path = state_paths(ns.state_root.resolve(), ns.run_id, operation_dir)
-    state = read_json(state_path)
+    requested_operation_dir = (
+        Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
+    )
+    state_root = state_root_for(ns)
+    state_dir, state_path = state_paths(state_root, ns.run_id, requested_operation_dir)
+    state = read_bound_state(state_dir, state_path, ns.run_id)
+    operation_dir = state_dir if str(state.get("operation_dir") or "").strip() else None
     if state.get("status") not in {"synthesizing", "synthesis_prepared"}:
         die(f"synthesis cannot restart from status {state.get('status')!r}", 3)
 
@@ -1140,7 +1216,7 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
     callback = (
         f"Protected synthesis finished for {ns.run_id}. Inspect its cmux split; status: "
         f"{python_executable} {ROOT / 'scripts/research-isolation.py'} status --run-id {ns.run_id}"
-        + (f" --operation-dir {operation_dir}" if operation_dir is not None else "")
+        + callback_state_suffix(state_root, operation_dir)
     )
     synth_marker = synth_dir / "notify-complete.json"
     (synth_dir / "notify.py").write_text(
@@ -1191,7 +1267,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--project-id", default="", help="exact project UUID; otherwise derive from --worktree")
     start.add_argument("--worktree", type=Path, default=ROOT)
     start.add_argument("--vault-root", type=Path, default=ROOT)
-    start.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    start.add_argument("--state-root", type=Path)
     start.add_argument("--tmp-root", type=Path)
     start.add_argument("--no-spawn", action="store_true")
     start.add_argument(
@@ -1204,21 +1280,21 @@ def parser() -> argparse.ArgumentParser:
     receive.add_argument("--run-id", required=True)
     receive.add_argument("--operation-dir", default="")
     receive.add_argument("--synth-operation-id", default="")
-    receive.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    receive.add_argument("--state-root", type=Path)
     receive.add_argument("--tmp-root", type=Path)
     receive.add_argument("--no-spawn", action="store_true")
     receive.set_defaults(func=cmd_receive)
     restart = sub.add_parser("restart-synthesis")
     restart.add_argument("--run-id", required=True)
     restart.add_argument("--operation-dir", default="")
-    restart.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    restart.add_argument("--state-root", type=Path)
     restart.add_argument("--tmp-root", type=Path)
     restart.add_argument("--no-spawn", action="store_true")
     restart.set_defaults(func=cmd_restart_synthesis)
     status = sub.add_parser("status")
     status.add_argument("--run-id", required=True)
     status.add_argument("--operation-dir", default="")
-    status.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
+    status.add_argument("--state-root", type=Path)
     status.set_defaults(func=cmd_status)
     return out
 

@@ -22,8 +22,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from task_sessions import TaskSessionStore, project_id_for
 
 
-def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(SCRIPT), *args], text=True, capture_output=True, env=env)
+def run(
+    *args: str,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        text=True,
+        capture_output=True,
+        env=env,
+        cwd=cwd,
+    )
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -192,6 +202,10 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("fetch prompt uses pinned Python", f"{python_executable} notify.py" in fetch_prompt)
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
+    check(
+        "standalone callback carries its explicit state root",
+        f"--state-root {state_root.resolve()}" in notifier,
+    )
     notify_env = dict(os.environ)
     notify_env["PATH"] = str(tmp / "no-cmux-on-path")
     notified = subprocess.run(
@@ -623,7 +637,39 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("persistent fetch starts", persistent.returncode == 0, persistent.stderr)
     persistent_state = json.loads(persistent.stdout)
     persistent_operation = Path(persistent_state["operation_dir"])
+    persistent_locator = (
+        persistent_vault / ".vault-meta" / "research-runs"
+        / persistent_state["run_id"] / "locator.json"
+    )
     check("persistent fetch uses broker operation", persistent_operation.name == persistent_state["run_id"])
+    check("persistent fetch writes an exact state locator", persistent_locator.is_file())
+    locator_value = json.loads(persistent_locator.read_text(encoding="utf-8"))
+    check(
+        "persistent locator binds one run to one operation",
+        locator_value == {
+            "schema_version": 1,
+            "run_id": persistent_state["run_id"],
+            "vault": str(persistent_vault.resolve()),
+            "operation_dir": str(persistent_operation.resolve()),
+        },
+    )
+    persistent_notifier = Path(
+        persistent_state["fetch_dir"], "notify.py"
+    ).read_text(encoding="utf-8")
+    check(
+        "persistent callback needs only the stable run id",
+        f"receive --run-id {persistent_state['run_id']}" in persistent_notifier
+        and "--operation-dir" not in persistent_notifier,
+    )
+    located_status = run(
+        "status", "--run-id", persistent_state["run_id"], cwd=persistent_vault
+    )
+    check(
+        "status resolves persistent state from the exact locator",
+        located_status.returncode == 0
+        and json.loads(located_status.stdout)["operation_dir"] == str(persistent_operation),
+        located_status.stderr,
+    )
     persistent_config = Path(persistent_state["fetch_runtime_home"], "config.toml").read_text(encoding="utf-8")
     check("persistent fetch retains provider history", 'history.persistence = "save-all"' in persistent_config)
     check("persistent fetch domain is isolated", persistent_state["fetch_broker"]["task_id"] == persistent_task)
@@ -690,10 +736,16 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     write_persistent_artifact(persistent_state, "persistent context")
     first_synth_result = run(
         "receive", "--run-id", persistent_state["run_id"],
-        "--operation-dir", str(persistent_operation), "--tmp-root", str(tmp), "--no-spawn",
+        "--tmp-root", str(tmp), "--no-spawn", cwd=persistent_vault,
     )
-    check("persistent synthesis starts", first_synth_result.returncode == 0, first_synth_result.stderr)
+    check("persistent synthesis starts from locator", first_synth_result.returncode == 0, first_synth_result.stderr)
     first_synth = json.loads(first_synth_result.stdout)
+    synth_notifier = Path(first_synth["synth_dir"], "notify.py").read_text(encoding="utf-8")
+    check(
+        "persistent synthesis callback stays short and deterministic",
+        f"status --run-id {persistent_state['run_id']}" in synth_notifier
+        and "--operation-dir" not in synth_notifier,
+    )
     first_synth_broker = first_synth["synth_broker"]
     check("fetch and synth permission lanes differ", first_synth_broker["lane_id"] != first_fetch["lane_id"])
     first_synth_config = Path(first_synth["synth_runtime_home"], "config.toml").read_text(encoding="utf-8")
@@ -767,6 +819,27 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "invalid secure synthesis checkpoint falls back visibly",
         "secure synthesis checkpoint is invalid" in invalid_synth_result.stderr,
         invalid_synth_result.stderr,
+    )
+
+    escaped_run_id = str(uuid.uuid4())
+    escaped_locator_dir = (
+        persistent_vault / ".vault-meta" / "research-runs" / escaped_run_id
+    )
+    escaped_locator_dir.mkdir(parents=True)
+    escaped_locator_dir.joinpath("locator.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": escaped_run_id,
+            "vault": str(persistent_vault),
+            "operation_dir": str(tmp / "outside" / "operations" / escaped_run_id),
+        }),
+        encoding="utf-8",
+    )
+    escaped = run("status", "--run-id", escaped_run_id, cwd=persistent_vault)
+    check(
+        "state locator fails closed outside the exact task-session root",
+        escaped.returncode == 3 and "escapes the exact task-session root" in escaped.stderr,
+        escaped.stderr,
     )
 
 print("\nAll research isolation tests passed.")

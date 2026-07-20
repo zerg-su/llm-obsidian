@@ -291,6 +291,27 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "00000000-0000-0000-0000-000000000001"
     ]])
 
+    forced_exit = tmp / "forced-agent-exit.json"
+    force_calls: list[list[str]] = []
+    module.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("forced interrupt cleanup must not wait for agent commands")
+    )
+    module.close_surface_exact = lambda surface, _runner: force_calls.append([surface]) or "closed"
+    try:
+        forced_result = module.close_surface(
+            "00000000-0000-0000-0000-000000000007",
+            "codex",
+            forced_exit,
+            force=True,
+        )
+    finally:
+        module.send_surface = original_send_surface
+        module.close_surface_exact = original_close_exact
+    check("forced interrupt closes without an exit-marker wait", forced_result == "exact surface closed")
+    check("forced interrupt targets the exact surface once", force_calls == [[
+        "00000000-0000-0000-0000-000000000007"
+    ]])
+
     confirming_exit = tmp / "confirming-agent-exit.json"
     confirm_calls: list[list[str]] = []
     module.send_surface = lambda *_args, **_kwargs: None
@@ -685,6 +706,29 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         surface_order == ["coordinator", "wait", "children"]
         and settled == ("exact surface closed", 2, [])
         and module.CHILD_SURFACE_SETTLE_SECONDS >= 30,
+    )
+    surface_order = []
+    module.close_surface = lambda *_args, **kwargs: surface_order.append(
+        f"coordinator-force={kwargs.get('force')}"
+    ) or "exact surface closed"
+    module.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
+    module.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
+    try:
+        forced_settled = module.settle_operation_surfaces(
+            child_root,
+            "00000000-0000-0000-0000-000000000003",
+            "codex",
+            child_root / "agent-exit.json",
+            force=True,
+        )
+    finally:
+        module.close_surface = original_close_surface
+        module.wait_for_operation_children = original_wait_children
+        module.close_operation_children = original_close_children
+    check(
+        "forced interrupt skips grace and closes exact children immediately",
+        surface_order == ["coordinator-force=True", "children"]
+        and forced_settled == ("exact surface closed", 2, []),
     )
 
 registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))

@@ -949,7 +949,15 @@ def wait_for_outbox(
     raise AcceptanceRunnerError("acceptance agent timed out")
 
 
-def close_surface(surface: str, runtime: str, exit_marker: Path) -> str:
+def close_surface(
+    surface: str, runtime: str, exit_marker: Path, *, force: bool = False
+) -> str:
+    if force:
+        try:
+            close_surface_exact(surface, subprocess.run)
+        except (TaskSessionError, OSError):
+            return "exact surface close failed; surface left visible"
+        return "exact surface closed"
     if not exit_marker.is_file():
         try:
             if runtime == "codex":
@@ -1100,10 +1108,15 @@ def settle_operation_surfaces(
     coordinator_surface: str,
     runtime: str,
     exit_marker: Path,
+    *,
+    force: bool = False,
 ) -> tuple[str, int, list[str]]:
     """Stop child creation before enumerating exact operation descendants."""
-    coordinator_close = close_surface(coordinator_surface, runtime, exit_marker)
-    wait_for_operation_children(sandbox, coordinator_surface)
+    coordinator_close = close_surface(
+        coordinator_surface, runtime, exit_marker, force=force
+    )
+    if not force:
+        wait_for_operation_children(sandbox, coordinator_surface)
     children_closed, child_failures = close_operation_children(sandbox, coordinator_surface)
     return coordinator_close, children_closed, child_failures
 
@@ -1309,7 +1322,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             status="ok" if result["verdict"] in {"pass", "n-a"} else "degraded", root=ROOT,
         )
         return result
-    except BaseException:
+    except BaseException as exc:
         emit_event(
             "acceptance-cell-stage", actor=stage, session=run_id,
             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
@@ -1322,6 +1335,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 surface,
                 row["runtime"],
                 run_dir / "agent-exit.json",
+                force=isinstance(exc, KeyboardInterrupt),
             )
         spec_path = run_dir / "operation.json"
         if spec_path.is_file():

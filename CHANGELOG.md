@@ -48,6 +48,13 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   interactive question UI in unattended cells, carries explicit promotion
   choices in fixtures, and refreshes derived address indexes before validating
   the close fixture.
+- Interrupted live acceptance now force-closes only its exact coordinator and
+  registered child surfaces instead of waiting through the normal interactive
+  shutdown grace and leaving orphan tabs when the outer matrix exits.
+- Persistent protected-research callbacks resolve an exact run-to-operation
+  locator inside the current vault, keeping callbacks short and eliminating
+  model-reconstructed task-session paths while rejecting locator escapes
+  fail-closed.
 
 - Approved-plan dispatch now uses a typed, idempotent post-approval runner for
   route capture, worktree/task identity, prompt/meta rendering, anchored spawn,
