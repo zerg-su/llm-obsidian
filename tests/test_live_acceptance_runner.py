@@ -124,6 +124,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     spec = importlib.util.spec_from_file_location("live_acceptance_runner_test", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    check(
+        "live runner uses the canonical trust prompt matcher",
+        module.workspace_trust_prompt_visible.__module__ == "cmux_trust_prompt",
+    )
     override_repo = tmp / "override-repo"
     (override_repo / "config").mkdir(parents=True)
     module.install_acceptance_model_overrides(override_repo, {"claude": "sonnet"})
@@ -715,7 +719,6 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module.atomic_json(lifecycle_worktree / ".task-meta.json", {
         "version": 3,
         "vault_root": str(lifecycle_repo),
-        "target_repo": str(lifecycle_repo),
         "plan_file": str(plan),
         "project_id": project_id,
         "task_id": task_id,
@@ -738,6 +741,19 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         lifecycle_clean and "2 bound page(s)" in lifecycle_proof,
         lifecycle_proof,
     )
+    lifecycle_meta = module.read_json(lifecycle_worktree / ".task-meta.json")
+    lifecycle_meta["target_repo"] = str(tmp / "other-repo")
+    module.atomic_json(lifecycle_worktree / ".task-meta.json", lifecycle_meta)
+    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
+        lifecycle_repo, lifecycle_commit
+    )
+    check(
+        "lifecycle cleanup rejects an explicitly foreign target repo",
+        not lifecycle_clean and "not bound to this clone" in lifecycle_proof,
+        lifecycle_proof,
+    )
+    lifecycle_meta.pop("target_repo")
+    module.atomic_json(lifecycle_worktree / ".task-meta.json", lifecycle_meta)
     (lifecycle_repo / "unexpected.md").write_text("residue\n", encoding="utf-8")
     lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
         lifecycle_repo, lifecycle_commit
@@ -903,6 +919,17 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and provisioned_meta["task_surface"]
         == "11111111-1111-4111-8111-111111111111",
         cloned.stderr,
+    )
+    check(
+        "review fixture finding is behavior-preserving and non-blocking",
+        provisioned["fixture_text"]
+        == (
+            "def render(ready: bool) -> str:\n"
+            "    status = \"ready\" if ready else \"not ready\"\n"
+            "    return f\"{status}\"\n"
+        )
+        and "redundant-f-string warning"
+        in module.review_fixture_prompt(provisioned, "review-dispatch"),
     )
     check(
         "review-dispatch fixture exercises a resolvable warning",

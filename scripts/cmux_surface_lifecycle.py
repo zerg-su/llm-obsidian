@@ -76,6 +76,12 @@ def utc_now() -> str:
 
 
 def current_session_id() -> str:
+    acceptance = str(os.environ.get("LLM_OBSIDIAN_ACCEPTANCE") or "") == "1"
+    acceptance_session = str(
+        os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID") or ""
+    ).strip()
+    if acceptance and re.fullmatch(r"[A-Za-z0-9._:-]+", acceptance_session):
+        return acceptance_session
     return os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unknown"
 
 

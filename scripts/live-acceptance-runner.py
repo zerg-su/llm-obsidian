@@ -465,9 +465,8 @@ def review_acceptance_fixture(
     fixture_rel = f"acceptance-review-{token}.py"
     fixture_text = (
         "def render(ready: bool) -> str:\n"
-        "    if ready:\n"
-        "        return \"ready\"\n"
-        "    return \"ready\"\n"
+        "    status = \"ready\" if ready else \"not ready\"\n"
+        "    return f\"{status}\"\n"
     )
     plan_rel = f"wiki/plans/{date.today().isoformat()}-{task_name}.md"
     plan_path = sandbox / plan_rel
@@ -489,8 +488,8 @@ sessions: []
 ## Approved scope
 
 Create only `{fixture_rel}` as the disposable review target and commit it once.
-Resolve its known non-blocking duplicate-branch warning if the required review
-finds it. The review lifecycle is verification of this scope, not another
+Resolve its known non-blocking redundant-f-string warning if the required
+review finds it. The review lifecycle is verification of this scope, not another
 product action. Do not merge, push, publish, deploy, or expand scope.
 """
     run_checked(
@@ -684,8 +683,9 @@ def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
         f"`python3 {fixture['review_script']} start --light --worktree {fixture['nested_worktree']}`; "
         "do not pass same-model, reviewer-runtime, model, or effort "
         "overrides. Return idle after each launch and let typed callbacks start later turns; never poll. "
-        "Resolve only the known duplicate-branch warning by simplifying the prepared script, commit that "
-        "one fix, verify in the same reviewer lane, drive approval, and finish it. Then publish the "
+        "Resolve only the known redundant-f-string warning by returning the prepared `status` value "
+        "directly, commit that one behavior-preserving fix, verify in the same reviewer lane, drive "
+        "approval, and finish it. Then publish the "
         "acceptance outbox. Leave the task worktree, branch, plan, registry, and review artifacts for "
         "runner proof and cleanup."
     )
@@ -1737,10 +1737,11 @@ def lifecycle_acceptance_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool
             meta = read_json(task_worktree / ".task-meta.json")
         except AcceptanceRunnerError as exc:
             return False, str(exc)
+        target_repo = str(meta.get("target_repo") or "").strip()
         if (
             meta.get("version") != 3
             or Path(str(meta.get("vault_root") or "")).resolve() != sandbox.resolve()
-            or Path(str(meta.get("target_repo") or "")).resolve() != sandbox.resolve()
+            or (target_repo and Path(target_repo).resolve() != sandbox.resolve())
             or not add_page(meta.get("plan_file"))
         ):
             return False, "disposable lifecycle task metadata is not bound to this clone"

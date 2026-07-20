@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import uuid
@@ -129,6 +130,26 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     )
     check("dry start", result.returncode == 0, result.stderr)
     state = json.loads(result.stdout)
+    delayed_marker = tmp / "delayed-completion.json"
+    delayed_state = {"fetch_completion_marker": str(delayed_marker)}
+    delayed_payload = {
+        "schema_version": 1,
+        "run_id": state["run_id"],
+        "stage": "fetch",
+        "status": "complete",
+    }
+    delayed_writer = threading.Thread(
+        target=lambda: (
+            time.sleep(0.1),
+            delayed_marker.write_text(json.dumps(delayed_payload), encoding="utf-8"),
+        )
+    )
+    delayed_writer.start()
+    waited = runpy.run_path(str(SCRIPT))["wait_for_completion_marker"](
+        delayed_state, state["run_id"], "fetch", timeout=1.0
+    )
+    delayed_writer.join()
+    check("receive boundary tolerates notifier marker race", waited)
     check("surface auto-close default", state["surface_policy"] == "auto_close")
     keep = run(
         "start", "--topic", "debug surfaces", "--flow", "autoresearch",
@@ -314,12 +335,22 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     cmux_log.write_text("", encoding="utf-8")
     watcher_env = dict(fake_env)
     watcher_env["CODEX_THREAD_ID"] = "wrong-parent-checkpoint"
+    tamper_probe = tmp / "tampered-notifier-ran"
+    (fetch_dir / "notify.py").write_text(
+        f"#!{python_executable}\nfrom pathlib import Path\nPath({str(tamper_probe)!r}).write_text('unsafe')\n",
+        encoding="utf-8",
+    )
+    (fetch_dir / "notify.py").chmod(0o700)
     watched = run(
         "_watch-callback",
         "--state-file", str(state_root / run_id / "state.json"),
         "--stage", "fetch",
         "--workspace", str(fetch_dir),
         "--runtime-home", state["fetch_runtime_home"],
+        "--coordinator-surface", "surface:test",
+        "--callback", "trusted watcher callback",
+        "--marker-path", state["fetch_completion_marker"],
+        "--run-id", run_id,
         "--grace", "0",
         "--timeout", "2",
         env=watcher_env,
@@ -336,6 +367,10 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
             for call in cmux_log.read_text(encoding="utf-8").splitlines()
         ),
         watched.stderr,
+    )
+    check(
+        "code-owned watcher never executes agent-writable notifier",
+        not tamper_probe.exists(),
     )
     check(
         "watcher preserves exact child checkpoint",
@@ -757,6 +792,15 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
                 "clean_markdown": failed_synth_body,
             }],
             "fetch_errors": [],
+        }),
+        encoding="utf-8",
+    )
+    Path(failed_synth_state["fetch_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": failed_synth_state["run_id"],
+            "stage": "fetch",
+            "status": "complete",
         }),
         encoding="utf-8",
     )

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -89,26 +88,3 @@ def resolved_git_common_dir(worktree: Path) -> Path:
     if not common.is_dir() or common.stat().st_uid != os.getuid():
         raise SupervisorError("task Git metadata root is missing or not owned by the current user")
     return common
-
-
-def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
-    """Recognize only the native first-run trust dialog for one runtime."""
-    markers = {
-        "claude": (
-            "Accessing workspace:",
-            "Quick safety check: Is this a project you created or one you trust?",
-            "Yes, I trust this folder",
-            "Enter to confirm",
-        ),
-        "codex": (
-            "Do you trust the contents of this directory?",
-            "Yes, continue",
-            "Press enter to continue",
-        ),
-    }
-    expected = markers.get(runtime)
-    if expected is None:
-        return False
-    compact_screen = re.sub(r"\s+", "", screen)
-    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
-

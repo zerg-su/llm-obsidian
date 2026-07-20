@@ -213,6 +213,7 @@ def decorate_result(
         "source_commit": commit,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "actual_model": str(result.get("model") or "unknown"),
+        "environment_sha256": metadata["environment_sha256"],
     }
     value = {
         **result,
@@ -303,6 +304,8 @@ def load_resume_results(
         current_dependency_set = set(current["dependencies"])
         compatible_orchestration_migration = (
             not exact
+            and provenance.get("environment_sha256")
+            == current["environment_sha256"]
             and changed is not None
             and not (current_dependency_set - prior_dependency_set)
             and bool(prior_dependency_set - current_dependency_set)

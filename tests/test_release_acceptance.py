@@ -111,6 +111,42 @@ check(
     shard_env["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] == "a" * 40,
 )
 
+with tempfile.TemporaryDirectory(prefix="acceptance-generation-snapshot.") as raw:
+    snapshot_root = Path(raw)
+    snapshot_report = snapshot_root / ".vault-meta/acceptance/latest-live.json"
+    snapshot_report.parent.mkdir(parents=True)
+    snapshot_report.write_text(
+        json.dumps({"summary": {"complete": True, "failed": 0}}),
+        encoding="utf-8",
+    )
+    snapshot = {
+        "schema_version": 1,
+        "generations": {"claude": "claude:opus-4.8", "codex": "codex:5.6"},
+    }
+    refreshed = acceptance_workspaces.refresh_generation_snapshot(
+        snapshot_root, snapshot_report, snapshot
+    )
+    check(
+        "green sharded report refreshes model generations",
+        refreshed
+        and json.loads(
+            (snapshot_report.parent / "model-generations.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        == snapshot,
+    )
+    snapshot_report.write_text(
+        json.dumps({"summary": {"complete": True, "failed": 1}}),
+        encoding="utf-8",
+    )
+    check(
+        "failed sharded report cannot refresh model generations",
+        not acceptance_workspaces.refresh_generation_snapshot(
+            snapshot_root, snapshot_report, snapshot
+        ),
+    )
+
 with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
     tmp = Path(raw)
     merge_row = {
@@ -125,6 +161,7 @@ with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
         "cell_fingerprint": "f" * 64,
         "dependencies": ["skills/fixture/SKILL.md"],
         "generation": "codex:5.6",
+        "environment_sha256": "e" * 64,
     }
     merge_result = {
         **merge_row,
@@ -844,6 +881,25 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         ["git", "commit", "-qm", "move runner out of cell behavior"],
         cwd=incremental, check=True,
     )
+    mismatched_environment_report = json.loads(json.dumps(legacy_report))
+    for row in mismatched_environment_report["rows"]:
+        row["provenance"]["environment_sha256"] = "0" * 64
+        row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
+            row, row["cell_fingerprint"], row["provenance"]
+        )
+    incremental_report.write_text(
+        json.dumps(mismatched_environment_report), encoding="utf-8"
+    )
+    invocation_log.write_text("", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "orchestration migration rejects environment drift",
+        result.returncode == 0 and len(calls) == 4,
+        result.stderr,
+    )
+    incremental_report.write_text(json.dumps(legacy_report), encoding="utf-8")
+    invocation_log.write_text("", encoding="utf-8")
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
     migrated = json.loads(incremental_report.read_text(encoding="utf-8"))

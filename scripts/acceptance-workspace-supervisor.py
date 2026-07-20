@@ -21,6 +21,7 @@ from acceptance_fingerprints import (
     cell_metadata,
     dirty_paths,
     environment_contract,
+    generation_snapshot,
     is_non_behavioral_path,
     non_behavioral_paths,
     non_behavioral_prefixes,
@@ -266,6 +267,28 @@ def checkpoint(report: Path, rows: list[dict[str, Any]], context: dict[str, Any]
     )
 
 
+def refresh_generation_snapshot(
+    root: Path, report: Path, snapshot: dict[str, Any]
+) -> bool:
+    """Refresh the canonical model-generation baseline after one green merge."""
+
+    acceptance_root = root.resolve() / ".vault-meta" / "acceptance"
+    try:
+        report.resolve().relative_to(acceptance_root)
+    except ValueError:
+        return False
+    payload = read_object(report)
+    summary = payload.get("summary")
+    if (
+        not isinstance(summary, dict)
+        or summary.get("complete") is not True
+        or summary.get("failed") != 0
+    ):
+        return False
+    atomic_json(acceptance_root / "model-generations.json", snapshot)
+    return True
+
+
 def worker(config_path: Path) -> int:
     config = read_object(config_path)
     if config.get("schema_version") != 1:
@@ -343,6 +366,9 @@ def supervise(args: argparse.Namespace) -> int:
     assignments = partition_skills(pending, args.workspaces)
     if not assignments:
         checkpoint(report, context["prior"], context, args.phase)
+        refresh_generation_snapshot(
+            root, report, generation_snapshot(root, read_manifest(root))
+        )
         print("acceptance workspaces: matrix already complete")
         return 0
 
@@ -420,6 +446,10 @@ def supervise(args: argparse.Namespace) -> int:
         checkpoint(report, merged, context, args.phase)
         payload = read_object(report)
         summary = payload["summary"]
+        if summary["complete"] and summary["failed"] == 0:
+            refresh_generation_snapshot(
+                root, report, generation_snapshot(root, read_manifest(root))
+            )
         print(
             "acceptance workspaces: "
             f"completed={summary['completed']}/{summary['total']} failed={summary['failed']}"

@@ -136,6 +136,22 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def atomic_json(path: Path, value: Any) -> None:
+    """Publish one coordinator-owned marker without exposing partial JSON."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_text(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        tmp.chmod(0o600)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def prepare_stage_workspace(
     tmp_root: Path,
     run_id: str,
@@ -379,6 +395,19 @@ def completion_marker_matches(state: dict[str, Any], run_id: str, stage: str) ->
         "stage": marker_stage,
         "status": "complete",
     }
+
+
+def wait_for_completion_marker(
+    state: dict[str, Any], run_id: str, stage: str, *, timeout: float = 2.0
+) -> bool:
+    """Bound the notifier/callback race without accepting an unmarked handoff."""
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    while time.monotonic() <= deadline:
+        if completion_marker_matches(state, run_id, stage):
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def surface_is_missing(result: subprocess.CompletedProcess[str]) -> bool:
@@ -875,18 +904,77 @@ def callback_input_ready(state: dict[str, Any], stage: str, workspace: Path) -> 
     )
 
 
+def deliver_watched_callback(
+    *,
+    coordinator: str,
+    callback: str,
+    marker_path: Path,
+    marker_payload: dict[str, Any],
+) -> bool:
+    """Deliver only the immutable watcher callback; never execute stage files."""
+
+    if (
+        not coordinator
+        or "\n" in coordinator
+        or "\0" in coordinator
+        or not callback
+        or "\0" in callback
+        or len(callback) > 4096
+    ):
+        return False
+    if marker_path.is_symlink():
+        return False
+    if marker_path.is_file():
+        try:
+            return json.loads(marker_path.read_text(encoding="utf-8")) == marker_payload
+        except (OSError, json.JSONDecodeError):
+            return False
+    claim = marker_path.with_name(marker_path.name + ".claim")
+    try:
+        claim_fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            if time.time() - claim.stat().st_mtime <= 30:
+                return False
+            claim.unlink()
+            claim_fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except (FileNotFoundError, FileExistsError, OSError):
+            return False
+    try:
+        os.close(claim_fd)
+        for index, args in enumerate((
+            ["cmux", "send", "--surface", coordinator, callback],
+            ["cmux", "send-key", "--surface", coordinator, "Enter"],
+        )):
+            result = subprocess.run(args, text=True, capture_output=True, check=False)
+            if result.returncode != 0:
+                return False
+            if index == 0:
+                time.sleep(CMUX_PASTE_SETTLE_SECONDS)
+        atomic_json(marker_path, marker_payload)
+        return True
+    except OSError:
+        return False
+    finally:
+        claim.unlink(missing_ok=True)
+
+
 def cmd_watch_callback(ns: argparse.Namespace) -> int:
     """Retry a missed model-side callback after its validated output appears."""
 
     state_path = Path(ns.state_file).expanduser().resolve()
     workspace = Path(ns.workspace).expanduser().resolve()
     runtime_home = Path(ns.runtime_home).expanduser().resolve()
-    notifier = workspace / "notify.py"
-    if notifier.is_symlink() or not notifier.is_file():
-        return 0
+    marker_path = Path(ns.marker_path).expanduser().resolve()
     valid_since: float | None = None
     deadline = time.monotonic() + max(0.0, ns.timeout)
     expected_stage = "fetch" if ns.stage == "fetch" else "synthesize"
+    marker_payload = {
+        "schema_version": 1,
+        "run_id": ns.run_id,
+        "stage": expected_stage,
+        "status": "complete",
+    }
     while time.monotonic() <= deadline:
         try:
             with state_path.open(encoding="utf-8") as handle:
@@ -895,21 +983,13 @@ def cmd_watch_callback(ns: argparse.Namespace) -> int:
             return 0
         if not isinstance(state, dict):
             return 0
-        marker_path = Path(
-            str(state.get(f"{ns.stage}_completion_marker") or workspace / "notify-complete.json")
-        ).expanduser().resolve()
         if marker_path.is_file():
             try:
                 with marker_path.open(encoding="utf-8") as handle:
                     marker = json.load(handle)
             except (OSError, json.JSONDecodeError):
                 marker = None
-            if marker == {
-                "schema_version": 1,
-                "run_id": state.get("run_id"),
-                "stage": expected_stage,
-                "status": "complete",
-            }:
+            if marker == marker_payload:
                 return 0
         active_statuses = (
             {"fetching", "fetch_prepared", "fetch_ready"}
@@ -928,19 +1008,26 @@ def cmd_watch_callback(ns: argparse.Namespace) -> int:
         if now - valid_since < max(0.0, ns.grace):
             time.sleep(0.5)
             continue
-        callback_env = dict(os.environ)
-        callback_env.pop("CODEX_THREAD_ID", None)
         checkpoint = callback_checkpoint(runtime_home, workspace)
         if checkpoint:
-            callback_env["CODEX_THREAD_ID"] = checkpoint
-        subprocess.run(
-            [str(notifier)],
-            cwd=workspace,
-            env=callback_env,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+            atomic_json(
+                workspace / "resume-checkpoint.json",
+                {
+                    "schema_version": 1,
+                    "run_id": ns.run_id,
+                    "stage": expected_stage,
+                    "checkpoint": {
+                        "kind": "codex",
+                        "checkpoint_id": checkpoint,
+                        "cwd": str(workspace),
+                    },
+                },
+            )
+        deliver_watched_callback(
+            coordinator=ns.coordinator_surface,
+            callback=ns.callback,
+            marker_path=marker_path,
+            marker_payload=marker_payload,
         )
         time.sleep(0.5)
     return 0
@@ -951,6 +1038,11 @@ def start_callback_watch(
     stage: str,
     workspace: Path,
     runtime_home: Path,
+    *,
+    coordinator_surface: str,
+    callback: str,
+    marker_path: Path,
+    run_id: str,
 ) -> int:
     process = subprocess.Popen(
         [
@@ -965,6 +1057,14 @@ def start_callback_watch(
             str(workspace),
             "--runtime-home",
             str(runtime_home),
+            "--coordinator-surface",
+            coordinator_surface,
+            "--callback",
+            callback,
+            "--marker-path",
+            str(marker_path),
+            "--run-id",
+            run_id,
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -1236,7 +1336,16 @@ def cmd_start(ns: argparse.Namespace) -> int:
                     "running", surface=fetch_surface,
                 )
             send_surface(fetch_surface, command)
-            start_callback_watch(state_path, "fetch", fetch_dir, runtime_home)
+            start_callback_watch(
+                state_path,
+                "fetch",
+                fetch_dir,
+                runtime_home,
+                coordinator_surface=surface,
+                callback=callback,
+                marker_path=fetch_marker,
+                run_id=run_id,
+            )
             print(f"protected fetch surface: {fetch_ref or fetch_surface}")
             print(f"run id: {run_id}")
     except BaseException:
@@ -1256,6 +1365,8 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     state_dir, state_path = state_paths(state_root, ns.run_id, requested_operation_dir)
     state = read_bound_state(state_dir, state_path, ns.run_id)
     operation_dir = state_dir if str(state.get("operation_dir") or "").strip() else None
+    if not ns.no_spawn and not wait_for_completion_marker(state, ns.run_id, "fetch"):
+        die("trusted fetch completion marker is unavailable; retry the exact callback", 3)
     if state.get("status") not in {
         "fetching", "fetch_prepared", "fetch_ready", "fetch_received", "synthesis_queued"
     }:
@@ -1469,7 +1580,16 @@ def cmd_receive(ns: argparse.Namespace) -> int:
                     "running", surface=synth_surface,
                 )
             send_surface(synth_surface, command)
-            start_callback_watch(state_path, "synth", synth_dir, runtime_home)
+            start_callback_watch(
+                state_path,
+                "synth",
+                synth_dir,
+                runtime_home,
+                coordinator_surface=str(state.get("coordinator_surface")),
+                callback=callback,
+                marker_path=synth_marker,
+                run_id=ns.run_id,
+            )
             close_completed_surface(state, state_path, ns.run_id, "fetch")
             print(f"networkless synthesis surface: {synth_ref or synth_surface}")
     except BaseException:
@@ -1640,7 +1760,16 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         print(json.dumps(state, indent=2, ensure_ascii=False))
     else:
         send_surface(synth_surface, command)
-        start_callback_watch(state_path, "synth", synth_dir, runtime_home)
+        start_callback_watch(
+            state_path,
+            "synth",
+            synth_dir,
+            runtime_home,
+            coordinator_surface=str(state.get("coordinator_surface")),
+            callback=callback,
+            marker_path=synth_marker,
+            run_id=ns.run_id,
+        )
         print(f"networkless synthesis restarted: {synth_ref or synth_surface}")
     return 0
 
@@ -1691,6 +1820,10 @@ def parser() -> argparse.ArgumentParser:
     watch.add_argument("--stage", choices=("fetch", "synth"), required=True)
     watch.add_argument("--workspace", required=True)
     watch.add_argument("--runtime-home", required=True)
+    watch.add_argument("--coordinator-surface", required=True)
+    watch.add_argument("--callback", required=True)
+    watch.add_argument("--marker-path", required=True)
+    watch.add_argument("--run-id", required=True)
     watch.add_argument("--grace", type=float, default=CALLBACK_WATCH_GRACE_SECONDS)
     watch.add_argument("--timeout", type=float, default=CALLBACK_WATCH_TIMEOUT_SECONDS)
     watch.set_defaults(func=cmd_watch_callback)

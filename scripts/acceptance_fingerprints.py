@@ -249,6 +249,7 @@ def cell_metadata(
     dependencies = expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
     generation_map = generations or production_generations(root, manifest)
     generation = generation_map[str(row["runtime"])]["generation"]
+    environment_value = environment or environment_contract()
     payload = {
         "runner_contract_version": manifest["runner_contract_version"],
         "phase": row["phase"],
@@ -262,14 +263,20 @@ def cell_metadata(
             skill=str(row["skill"]),
             scenario=str(row["scenario"]),
         ),
-        "environment": environment or environment_contract(),
+        "environment": environment_value,
         "generation": generation,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    environment_encoded = json.dumps(
+        environment_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     return {
         "cell_fingerprint": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
         "dependencies": dependencies,
         "generation": generation,
+        "environment_sha256": hashlib.sha256(
+            environment_encoded.encode("utf-8")
+        ).hexdigest(),
     }
 
 

@@ -463,6 +463,23 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     clean_env = {k: v for k, v in env.items() if k not in {"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"}}
     wrong_env = dict(clean_env, CODEX_THREAD_ID="other")
     origin_env = dict(clean_env, CODEX_THREAD_ID="origin-1")
+    saved_acceptance = {
+        key: os.environ.get(key)
+        for key in ("LLM_OBSIDIAN_ACCEPTANCE", "LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID")
+    }
+    os.environ["LLM_OBSIDIAN_ACCEPTANCE"] = "1"
+    os.environ["LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID"] = "acceptance-fixture-session"
+    try:
+        check(
+            "lifecycle honors explicit acceptance session identity",
+            lifecycle_module.current_session_id() == "acceptance-fixture-session",
+        )
+    finally:
+        for key, value in saved_acceptance.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     result_page = worktree / "wiki" / "Demo Result.md"
     result_page.parent.mkdir(exist_ok=True)
     result_page.write_text("# Demo Result\n", encoding="utf-8")

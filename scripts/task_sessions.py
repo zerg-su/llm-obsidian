@@ -771,8 +771,8 @@ def pane_layout(workspace: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
 
 
 def workspace_layout(
-    payload: dict[str, Any], window_id: str, workspace_id: str
-) -> dict[str, list[dict[str, str]]]:
+    payload: dict[str, Any], window_id: str, workspace_id: str, *, missing_ok: bool = False
+) -> dict[str, list[dict[str, str]]] | None:
     matches: list[dict[str, list[dict[str, str]]]] = []
     for window in payload.get("windows", []):
         if not isinstance(window, dict) or window_id not in {
@@ -784,6 +784,8 @@ def workspace_layout(
                 str(workspace.get("id") or ""), str(workspace.get("ref") or "")
             }:
                 matches.append(pane_layout(workspace))
+    if not matches and missing_ok:
+        return None
     if len(matches) != 1:
         raise TaskSessionError("cmux workspace does not resolve to one exact layout")
     return matches[0]
@@ -857,7 +859,11 @@ def close_replacement_shell(
         return
     window = str(context.get("window_ref") or context.get("window") or "")
     workspace = str(context.get("workspace_ref") or context.get("workspace") or "")
-    after = workspace_layout(cmux_tree(runner), window, workspace)
+    after = workspace_layout(
+        cmux_tree(runner), window, workspace, missing_ok=True
+    )
+    if after is None:
+        return
     replacement: dict[str, str] | None = None
     if target_pane in after:
         current = after[target_pane]

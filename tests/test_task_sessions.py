@@ -662,6 +662,33 @@ check("exact close proves disappearance", close_surface_exact(exact_surface, exa
 check("not-found without tree disappearance receives one bounded retry", exact_close_attempts == 2)
 check("exact close is idempotent only after tree proof", close_surface_exact(exact_surface, exact_close_runner) == "already-gone")
 
+vanished_surface = "cccccccc-3333-4333-8333-333333333333"
+vanished_open = True
+def vanished_workspace_runner(args, **_kwargs):
+    global vanished_open
+    if args[:3] == ["cmux", "rpc", "system.tree"]:
+        workspaces = []
+        if vanished_open:
+            workspaces = [{
+                "id": "workspace-vanished", "ref": "workspace:30",
+                "panes": [
+                    {"id": "origin-pane", "ref": "pane:30", "surfaces": [{"id": "origin", "ref": "surface:30"}]},
+                    {"id": "target-pane", "ref": "pane:31", "surfaces": [{"id": vanished_surface, "ref": "surface:31"}]},
+                ],
+            }]
+        return Result(stdout=json.dumps({
+            "windows": [{"id": "window-vanished", "ref": "window:30", "workspaces": workspaces}],
+        }))
+    if args[:2] == ["cmux", "close-surface"]:
+        vanished_open = False
+        return Result(returncode=1, stderr="not_found: Workspace not found")
+    return Result(returncode=1)
+
+check(
+    "exact close accepts disappearance of the anchored workspace",
+    close_surface_exact(vanished_surface, vanished_workspace_runner) == "closed",
+)
+
 replacement_original = "aaaaaaaa-1111-4111-8111-111111111111"
 replacement_surface = "bbbbbbbb-2222-4222-8222-222222222222"
 replacement_original_open = True
