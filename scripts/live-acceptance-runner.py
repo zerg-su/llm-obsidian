@@ -685,8 +685,10 @@ def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
         "overrides. Return idle after each launch and let typed callbacks start later turns; never poll. "
         "Resolve only the known redundant-f-string warning by returning the prepared `status` value "
         "directly, commit that one behavior-preserving fix, verify in the same reviewer lane, drive "
-        "approval, and finish it. Then publish the "
-        "acceptance outbox. Leave the task worktree, branch, plan, registry, and review artifacts for "
+        "approval, and finish it. Once the code-owned drive command reports exit 0 with `applied=true`, "
+        "treat that durable operation result as authoritative and publish the acceptance outbox "
+        "immediately; do not wait for, inspect, or poll the already-finished reviewer surface. Leave the "
+        "task worktree, branch, plan, registry, and review artifacts for "
         "runner proof and cleanup."
     )
 
@@ -1263,6 +1265,9 @@ Hard boundaries:
 - A public web read is allowed only when the declared network class permits it.
 - If authentication is required, return `blocked` and name only the credential class; never print a value.
 - Install nothing unless it is already covered by an explicit local noninteractive fixture. Missing optional dependencies must produce a visible blocked/degraded result.
+- When a fixture validates product pages after a `vault-write.py` mutation, run `python3 scripts/reindex.py`
+  before the whole-vault validation. Refreshing this derived index is normal fixture procedure, not a
+  product repair. Do not add an extra whole-vault validation after the fixture's final page cleanup.
 {cleanup_contract}
 - Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.

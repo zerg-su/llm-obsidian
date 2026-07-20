@@ -624,6 +624,20 @@ state.rmdir()
 PY
 [[ $? -eq 0 ]] && ok "v3-resolution-operation-scope" || bad "v3-resolution-operation-scope" "resolution was not bound to the exact action"
 
+python3 - "$SEND_SCRIPT" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("review_send_handoff_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+operation_id = "11111111-1111-4111-8111-111111111111"
+assert module.is_handoff(f".task-review-drive-{operation_id}.json")
+assert module.is_handoff(f".task-review-resolution-{operation_id}.md")
+assert not module.is_handoff("scripts/product-change.py")
+PY
+[[ $? -eq 0 ]] && ok "operation-scoped-review-handoffs" || bad "operation-scoped-review-handoffs" "operation handoffs were treated as product drift"
+
 LEGACY="$SANDBOX/legacy-payload"
 write_fixture "$LEGACY"
 "$SCRIPT" start --light --no-spawn --worktree "$LEGACY" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/legacy-start.err"

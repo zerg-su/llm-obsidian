@@ -419,7 +419,7 @@ def complete_broker_operation(
     state: dict[str, Any], state_path: Path, stage: str, broker: dict[str, Any],
     *, checkpoint: dict[str, str] | None = None, degradation: str = "",
 ) -> bool:
-    """Complete or repair one exact broker transition after surface close."""
+    """Complete or repair one exact broker transition independently of UI cleanup."""
     vault = Path(str(state["vault"]))
     try:
         store = TaskSessionStore(vault)
@@ -450,6 +450,61 @@ def complete_broker_operation(
     return True
 
 
+def broker_completion_context(
+    state: dict[str, Any], run_id: str, stage: str,
+) -> tuple[dict[str, str] | None, str]:
+    """Load an optional provider checkpoint without making lane release depend on it."""
+
+    stage_dir = Path(str(state.get(f"{stage}_dir") or "")).resolve()
+    checkpoint_marker = stage_dir / "resume-checkpoint.json"
+    try:
+        if checkpoint_marker.is_symlink() or not checkpoint_marker.is_file():
+            raise TaskSessionError("resume checkpoint sidecar is unavailable")
+        try:
+            checkpoint_payload = json.loads(checkpoint_marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise TaskSessionError("resume checkpoint sidecar is unreadable") from exc
+        if not isinstance(checkpoint_payload, dict):
+            raise TaskSessionError("resume checkpoint sidecar must be an object")
+        if (
+            checkpoint_payload.get("schema_version") != 1
+            or checkpoint_payload.get("run_id") != run_id
+            or checkpoint_payload.get("stage") != STAGE_SURFACE_FIELDS[stage][2]
+        ):
+            raise TaskSessionError("resume checkpoint sidecar identity is invalid")
+        checkpoint = validate_checkpoint(checkpoint_payload.get("checkpoint"), "codex")
+        if Path(checkpoint["cwd"]).resolve() != stage_dir:
+            raise TaskSessionError("resume checkpoint sidecar cwd is invalid")
+        return checkpoint, ""
+    except (TaskSessionError, OSError, ValueError) as exc:
+        degradation = f"resume checkpoint unavailable: {exc}"
+        print(
+            f"research-isolation: {stage} context could not be retained; "
+            f"next operation will start fresh: {exc}",
+            file=sys.stderr,
+        )
+        return None, degradation
+
+
+def finalize_stage_broker(
+    state: dict[str, Any], state_path: Path, run_id: str, stage: str,
+) -> bool:
+    """Release one persistent lane once product completion is proven."""
+
+    broker = state.get(f"{stage}_broker")
+    if not isinstance(broker, dict) or state.get(f"{stage}_broker_completion") == "complete":
+        return True
+    checkpoint, degradation = broker_completion_context(state, run_id, stage)
+    return complete_broker_operation(
+        state,
+        state_path,
+        stage,
+        broker,
+        checkpoint=checkpoint,
+        degradation=degradation,
+    )
+
+
 def close_completed_surface(
     state: dict[str, Any], state_path: Path, run_id: str, stage: str, *, no_spawn: bool = False
 ) -> bool:
@@ -462,8 +517,8 @@ def close_completed_surface(
     closed_key = f"{stage}_surface_closed_at"
     broker = state.get(f"{stage}_broker")
     if state.get(closed_key):
-        if isinstance(broker, dict) and state.get(f"{stage}_broker_completion") != "complete":
-            complete_broker_operation(state, state_path, stage, broker)
+        if isinstance(broker, dict):
+            finalize_stage_broker(state, state_path, run_id, stage)
         return True
     if not completion_marker_matches(state, run_id, stage):
         return False
@@ -479,35 +534,6 @@ def close_completed_surface(
             file=sys.stderr,
         )
         return False
-    checkpoint: dict[str, str] | None = None
-    degradation = ""
-    if isinstance(broker, dict):
-        stage_dir = Path(str(state.get(f"{stage}_dir") or "")).resolve()
-        checkpoint_marker = stage_dir / "resume-checkpoint.json"
-        try:
-            if checkpoint_marker.is_symlink() or not checkpoint_marker.is_file():
-                raise TaskSessionError("resume checkpoint sidecar is unavailable")
-            try:
-                checkpoint_payload = json.loads(checkpoint_marker.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise TaskSessionError("resume checkpoint sidecar is unreadable") from exc
-            if not isinstance(checkpoint_payload, dict):
-                raise TaskSessionError("resume checkpoint sidecar must be an object")
-            if (
-                checkpoint_payload.get("schema_version") != 1
-                or checkpoint_payload.get("run_id") != run_id
-                or checkpoint_payload.get("stage") != STAGE_SURFACE_FIELDS[stage][2]
-            ):
-                raise TaskSessionError("resume checkpoint sidecar identity is invalid")
-            checkpoint = validate_checkpoint(checkpoint_payload.get("checkpoint"), "codex")
-            if Path(checkpoint["cwd"]).resolve() != stage_dir:
-                raise TaskSessionError("resume checkpoint sidecar cwd is invalid")
-        except (TaskSessionError, OSError, ValueError) as exc:
-            degradation = f"resume checkpoint unavailable: {exc}"
-            print(
-                f"research-isolation: {stage} context could not be retained; next operation will start fresh: {exc}",
-                file=sys.stderr,
-            )
     state[f"{stage}_surface_cleanup_attempted_at"] = utc_now()
     try:
         close_status = close_surface_exact(surface)
@@ -523,10 +549,7 @@ def close_completed_surface(
     state[closed_key] = utc_now()
     write_json(state_path, state)
     if isinstance(broker, dict):
-        complete_broker_operation(
-            state, state_path, stage, broker,
-            checkpoint=checkpoint, degradation=degradation,
-        )
+        finalize_stage_broker(state, state_path, run_id, stage)
     return True
 
 
@@ -1669,10 +1692,14 @@ def cmd_status(ns: argparse.Namespace) -> int:
             outputs = validated_completion_outputs(state.get("flow"), complete.get("outputs"))
             if outputs is None:
                 die("completion outputs do not match the exact flow-owned path contract", 3)
-            state["status"] = "complete"
+            state["status"] = "synthesis_ready"
             state["updated_at"] = utc_now()
             state["outputs"] = outputs
             write_json(state_path, state)
+            if finalize_stage_broker(state, state_path, ns.run_id, "synth"):
+                state["status"] = "complete"
+                state["updated_at"] = utc_now()
+                write_json(state_path, state)
     close_completed_surface(state, state_path, ns.run_id, "fetch")
     close_completed_surface(state, state_path, ns.run_id, "synth")
     print(json.dumps(state, indent=2, ensure_ascii=False))

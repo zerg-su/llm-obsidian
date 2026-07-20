@@ -966,13 +966,55 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("fetch and synth permission lanes differ", first_synth_broker["lane_id"] != first_fetch["lane_id"])
     first_synth_config = Path(first_synth["synth_runtime_home"], "config.toml").read_text(encoding="utf-8")
     check("persistent synth retains provider history", 'history.persistence = "save-all"' in first_synth_config)
-    persistent_store.transition_operation(
+    Path(first_synth["synth_dir"], "complete.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": first_synth["run_id"],
+            "status": "complete",
+            "outputs": ["wiki/sources/Persistent acceptance.md"],
+        }),
+        encoding="utf-8",
+    )
+    Path(first_synth["synth_completion_marker"]).write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": first_synth["run_id"],
+            "stage": "synthesize",
+            "status": "complete",
+        }),
+        encoding="utf-8",
+    )
+    Path(first_synth["synth_dir"], "resume-checkpoint.json").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "run_id": first_synth["run_id"],
+            "stage": "synthesize",
+            "checkpoint": {
+                "kind": "codex",
+                "checkpoint_id": "checkpoint-synth-1",
+                "cwd": first_synth["synth_dir"],
+            },
+        }),
+        encoding="utf-8",
+    )
+    completed_synth = run(
+        "status", "--run-id", first_synth["run_id"], cwd=persistent_vault,
+    )
+    completed_synth_state = json.loads(completed_synth.stdout)
+    completed_synth_lane = persistent_store.lane_state(
         first_synth_broker["project_id"], first_synth_broker["task_id"],
-        first_synth_broker["lane_id"], first_synth_broker["operation_id"], "complete",
-        checkpoint={
-            "kind": "codex", "checkpoint_id": "checkpoint-synth-1",
-            "cwd": first_synth["synth_dir"],
-        },
+        first_synth_broker["lane_id"],
+    )
+    check(
+        "persistent synth completion releases its lane before dry-run surface cleanup",
+        completed_synth.returncode == 0
+        and completed_synth_state["status"] == "complete"
+        and completed_synth_state["synth_broker_completion"] == "complete"
+        and completed_synth_lane.get("active_operation_id") is None
+        and completed_synth_lane.get("checkpoint", {}).get("checkpoint_id")
+        == "checkpoint-synth-1"
+        and "synth_surface_closed_at" not in completed_synth_state,
+        completed_synth.stderr,
     )
 
     second_fetch = resumed_fetch_state["fetch_broker"]

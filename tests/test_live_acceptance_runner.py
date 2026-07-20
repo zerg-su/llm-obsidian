@@ -108,6 +108,33 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("substituted fixture contract is rejected", result.returncode == 3 and not result.stdout, result.stderr)
 
     fixture_registry = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
+    check(
+        "daily fixture preserves one independently provable evidence commit",
+        "exactly one local commit" in fixture_registry["skills"]["daily"]["fixture"]
+        and "without committing that deletion" in fixture_registry["skills"]["daily"]["fixture"]
+        and "Do not create a cleanup commit" in fixture_registry["skills"]["daily"]["fixture"],
+    )
+    check(
+        "wiki-lint fixture stays inside canonical writer schema",
+        "complete required frontmatter" in fixture_registry["skills"]["wiki-lint"]["fixture"]
+        and "Do not create an invalid-frontmatter page" in fixture_registry["skills"]["wiki-lint"]["fixture"]
+        and "dead wikilink" in fixture_registry["skills"]["wiki-lint"]["fixture"],
+    )
+    check(
+        "wiki-query fixture has deterministic sparse evidence",
+        "ACCEPTANCEQUARTZ731" in fixture_registry["skills"]["wiki-query"]["fixture"]
+        and "neither distractor may contain" in fixture_registry["skills"]["wiki-query"]["fixture"]
+        and "answer note ranks first" in fixture_registry["skills"]["wiki-query"]["fixture"],
+    )
+    check(
+        "reap fixtures require real registered task surfaces",
+        all(
+            "real disposable cmux task surface" in fixture_registry["skills"][skill]["fixture"]
+            and "task_sessions.py init-task" in fixture_registry["skills"][skill]["fixture"]
+            and "never fabricate a surface handle" in fixture_registry["skills"][skill]["fixture"]
+            for skill in ("reap", "reap-send")
+        ),
+    )
     missing_fixture = tmp / "missing-fixture.json"
     missing_fixture_data = json.loads(json.dumps(fixture_registry))
     missing_fixture_data["skills"]["clarify"].pop("fixture")
@@ -613,6 +640,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "run scripts/reindex.py before full-vault validation" in close_prompt,
     )
     check(
+        "all vault-writing fixtures refresh derived indexes before validation",
+        "run `python3 scripts/reindex.py`" in close_prompt
+        and "normal fixture procedure, not a\n  product repair" in close_prompt,
+    )
+    check(
         "backlog fixture carries its explicit promotion target",
         "already selected Wiki decision" in module.load_skill_fixtures()["backlog"]["fixture"]
         and "do not invoke AskUserQuestion" in module.load_skill_fixtures()["backlog"]["fixture"],
@@ -862,6 +894,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "do not enter Plan Mode" in review_fixture_text
         and "do not pass same-model" in review_fixture_text
         and "Return idle after each launch" in review_fixture_text,
+    )
+    check(
+        "review acceptance publishes immediately after durable finish",
+        "reports exit 0 with `applied=true`" in review_fixture_text
+        and "publish the acceptance outbox immediately" in review_fixture_text
+        and "do not wait for, inspect, or poll" in review_fixture_text,
     )
     review_cleanup_prompt = module.prompt_text(
         row(skill="review-send", scenario="dispatch-review-reap",

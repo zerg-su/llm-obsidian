@@ -37,6 +37,8 @@ HANDOFF_EXCLUDES = [
     ".task-review-verify.md",
     ".task-review-verify.json",
     ".task-review-resolution.md",
+    ".task-review-resolution-*.md",
+    ".task-review-drive-*.json",
     ".task-review-skill",
     ".task-review-send-skill",
     ".review-history.json",
