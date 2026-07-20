@@ -129,33 +129,42 @@ def review_file(worktree: Path, name: str) -> Path:
 def configure_existing_review_state(ns: argparse.Namespace, worktree: Path, meta: dict[str, Any]) -> Path:
     raw = str(getattr(ns, "operation_dir", "") or "").strip()
     action_raw = str(getattr(ns, "action_file", "") or "").strip()
-    if raw and action_raw:
-        die("use either --operation-dir or --action-file, not both")
+    operation_raw = str(getattr(ns, "operation_file", "") or "").strip()
+    if sum(bool(value) for value in (raw, action_raw, operation_raw)) > 1:
+        die("use exactly one of --operation-dir, --operation-file, or --action-file")
     action_path: Path | None = None
-    if action_raw:
-        unresolved_action = Path(action_raw).expanduser()
-        if not unresolved_action.is_absolute():
-            unresolved_action = worktree / unresolved_action
-        if unresolved_action.is_symlink():
-            die("review action file must be an exact task-local operation handoff")
-        action_path = unresolved_action.resolve()
-        name_match = re.fullmatch(r"\.task-review-drive-([0-9a-f-]{36})\.json", action_path.name)
+    handoff_raw = action_raw or operation_raw
+    if handoff_raw:
+        unresolved_handoff = Path(handoff_raw).expanduser()
+        if not unresolved_handoff.is_absolute():
+            unresolved_handoff = worktree / unresolved_handoff
+        handoff_kind = "action" if action_raw else "operation"
+        if unresolved_handoff.is_symlink():
+            die(f"review {handoff_kind} file must be an exact task-local operation handoff")
+        handoff_path = unresolved_handoff.resolve()
+        handoff_prefix = "drive" if action_raw else "operation"
+        name_match = re.fullmatch(
+            rf"\.task-review-{handoff_prefix}-([0-9a-f-]{{36}})\.json",
+            handoff_path.name,
+        )
         if (
-            action_path.parent != worktree
+            handoff_path.parent != worktree
             or name_match is None
         ):
-            die("review action file must be an exact task-local operation handoff")
-        action = read_json(action_path)
+            die(f"review {handoff_kind} file must be an exact task-local operation handoff")
+        handoff = read_json(handoff_path)
         operation_id = str(uuid.UUID(name_match.group(1)))
         if (
-            action.get("schema_version") != 1
-            or action.get("project_id") != meta.get("project_id")
-            or action.get("task_id") != meta.get("task_id")
-            or action.get("operation_id") != operation_id
+            handoff.get("schema_version") != 1
+            or handoff.get("project_id") != meta.get("project_id")
+            or handoff.get("task_id") != meta.get("task_id")
+            or handoff.get("operation_id") != operation_id
         ):
-            die("review action file identity does not match task metadata")
-        raw = str(action.get("operation_dir") or "").strip()
-        setattr(ns, "_action_file_path", action_path)
+            die(f"review {handoff_kind} file identity does not match task metadata")
+        raw = str(handoff.get("operation_dir") or "").strip()
+        if action_raw:
+            action_path = handoff_path
+            setattr(ns, "_action_file_path", action_path)
     if meta.get("version", 1) != 3:
         if raw or action_raw:
             die("operation handoffs are supported only by task metadata v3")
@@ -185,6 +194,28 @@ def configure_existing_review_state(ns: argparse.Namespace, worktree: Path, meta
         die("review operation directory identity does not match task metadata")
     set_review_state_dir(candidate)
     return candidate
+
+
+def operation_handoff_path(worktree: Path, operation_id: str) -> Path:
+    return worktree / f".task-review-operation-{str(uuid.UUID(operation_id))}.json"
+
+
+def write_operation_handoff(
+    worktree: Path,
+    meta: dict[str, Any],
+    state_dir: Path,
+    operation_id: str,
+) -> Path:
+    """Persist a short, concurrency-safe pointer to one exact v3 operation."""
+    path = operation_handoff_path(worktree, operation_id)
+    write_json(path, {
+        "schema_version": 1,
+        "project_id": meta.get("project_id"),
+        "task_id": meta.get("task_id"),
+        "operation_id": str(uuid.UUID(operation_id)),
+        "operation_dir": str(state_dir),
+    })
+    return path
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -1312,6 +1343,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
     store: TaskSessionStore | None = None
     claimed_identity: tuple[str, str, str, str] | None = None
     checkpoint: dict[str, str] | None = None
+    operation_handoff: Path | None = None
     if meta.get("version", 1) == 3:
         try:
             store = TaskSessionStore(vault)
@@ -1352,8 +1384,10 @@ def cmd_start(ns: argparse.Namespace) -> int:
             queue = lane.get("queue")
             if not isinstance(queue, list) or review_id not in queue:
                 die("review operation is neither active nor queued; exact registry recovery is required")
+            handoff = write_operation_handoff(worktree, meta, state_dir, review_id)
             print(f"review queued on busy lane: {review_id}")
             print(f"review operation: {state_dir}")
+            print(f"review operation handoff: {handoff.name}")
             return 0
         claimed_identity = (
             str(meta["project_id"]), str(meta["task_id"]), lane_id, review_id
@@ -1381,6 +1415,10 @@ def cmd_start(ns: argparse.Namespace) -> int:
             fail_claimed_review_operation(store, vault, *claimed_identity)
             raise
     try:
+        if meta.get("version", 1) == 3:
+            operation_handoff = write_operation_handoff(
+                worktree, meta, state_dir, review_id
+            )
         ensure_review_cycle_can_start(worktree)
         review_runtime_dir = (
             prepare_review_runtime(
@@ -1497,6 +1535,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
             print(command)
             if state_dir != worktree:
                 print(f"review operation: {state_dir}")
+                assert operation_handoff is not None
+                print(f"review operation handoff: {operation_handoff.name}")
             return 0
 
         if store is not None:
@@ -1506,6 +1546,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
             )
         send_to_surface(review_surface, command)
     except BaseException:
+        if operation_handoff is not None:
+            operation_handoff.unlink(missing_ok=True)
         if store is not None and claimed_identity is not None:
             fail_claimed_review_operation(store, vault, *claimed_identity)
         raise
@@ -1521,6 +1563,8 @@ def cmd_start(ns: argparse.Namespace) -> int:
 
     print(f"review surface: {review_ref or review_surface}")
     print(f"review operation: {state_dir}")
+    if operation_handoff is not None:
+        print(f"review operation handoff: {operation_handoff.name}")
     print(f"review output: {review_file(worktree, output_file)}")
     print("reviewer stays open; close it later with review-dispatch finish")
     return 0
@@ -1891,6 +1935,10 @@ def cmd_finish(ns: argparse.Namespace) -> int:
         review_meta["status"] = "finish_sent_close_armed"
         review_meta["updated_at"] = utc_now()
         write_json(review_file(worktree, ".review-meta.json"), review_meta)
+        if task_meta.get("version", 1) == 3:
+            operation_handoff_path(
+                worktree, str(review_meta.get("operation_id") or "")
+            ).unlink(missing_ok=True)
         print(result.stdout.strip())
         return 0
 
@@ -1916,6 +1964,10 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     review_meta["status"] = "finish_sent"
     review_meta["updated_at"] = utc_now()
     write_json(review_file(worktree, ".review-meta.json"), review_meta)
+    if task_meta.get("version", 1) == 3:
+        operation_handoff_path(
+            worktree, str(review_meta.get("operation_id") or "")
+        ).unlink(missing_ok=True)
     print(f"sent /exit to reviewer surface: {review_meta.get('review_surface_ref') or surface}")
     if fallback:
         print(fallback)
@@ -1960,6 +2012,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify", help="send fixes back to the same reviewer split")
     verify.add_argument("--worktree", default=".", help="task worktree path")
     verify.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    verify.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     verify.add_argument("--vault-root", default="", help="explicit coordinator llm-obsidian vault root")
     verify.add_argument("--task-name", default="", help="override task name")
     verify.add_argument("--review-send-skill", default="", help="reviewer handoff skill command")
@@ -1969,6 +2022,7 @@ def build_parser() -> argparse.ArgumentParser:
     receive = sub.add_parser("receive", help="validate a typed reviewer callback and render handoff files")
     receive.add_argument("--worktree", default=".", help="task worktree path")
     receive.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    receive.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     receive_source = receive.add_mutually_exclusive_group(required=True)
     receive_source.add_argument("--relay-file", default="", help="validated callback file from review-send")
     receive_source.add_argument("--payload-b64", default="", help="legacy compressed review payload token")
@@ -1977,11 +2031,13 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="print .review-meta.json")
     status.add_argument("--worktree", default=".", help="task worktree path")
     status.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    status.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     status.set_defaults(func=cmd_status)
 
     drive = sub.add_parser("drive", help="apply the deterministic next review-gate transition")
     drive.add_argument("--worktree", default=".", help="task worktree path")
     drive.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    drive.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     drive.add_argument(
         "--action-file",
         default="",
@@ -1997,6 +2053,7 @@ def build_parser() -> argparse.ArgumentParser:
     archive = sub.add_parser("archive", help="archive validated review history into the coordinator wiki")
     archive.add_argument("--worktree", default=".", help="reviewed task worktree path")
     archive.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    archive.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     archive.add_argument("--vault-root", default="", help="override coordinator vault root")
     archive.add_argument("--dry-run", action="store_true", help="validate without writing or deferring")
     archive.set_defaults(func=cmd_archive)
@@ -2004,6 +2061,7 @@ def build_parser() -> argparse.ArgumentParser:
     finish = sub.add_parser("finish", help="exit reviewer; unattended tasks arm exact-surface close")
     finish.add_argument("--worktree", default=".", help="task worktree path")
     finish.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    finish.add_argument("--operation-file", default="", help="exact task-local v3 operation handoff")
     finish.add_argument("--no-send", action="store_true", help="print exit action without sending it")
     finish.set_defaults(func=cmd_finish)
     return parser

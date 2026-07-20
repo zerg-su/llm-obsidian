@@ -38,8 +38,10 @@ For the canonical primary checkout only, explicit coordinator review may add
 `--coordinator-review --vault-root <vault-root>`; linked worktrees are rejected.
 `spawn` is a legacy alias.
 
-For v3, keep the exact printed `--operation-dir` for every receive/verify/status/
-archive/finish command. Project/task/lane/operation IDs prevent parallel
+For v3, use the unique printed task-local `--operation-file` for manual
+receive/verify/status/archive/finish commands. The handoff validates the exact
+project/task/lane/operation directory without copying a long path; supervised
+callbacks use their own one-shot handoff. Project/task/lane/operation IDs prevent parallel
 coordinators or model lanes from overwriting each other. Start opens one split
 anchored right of the caller and hands cmux only a short supervised command.
 Preparation/spawn/send failures mark the exact operation failed; never guess or
@@ -81,7 +83,7 @@ commit (never runtime handoffs; never push), apply the mechanical decision:
 
 ```bash
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py drive \
-  --worktree <worktree> --operation-dir <exact-operation> --apply-action
+  --worktree <worktree> --action-file <exact-task-local-handoff> --apply-action
 ```
 
 `approve` finishes the reviewer, `resolve` requires a non-empty resolution and
@@ -94,7 +96,7 @@ When fixes/rejections require another round:
 
 ```bash
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py verify \
-  --worktree <worktree> --operation-dir <exact-operation>
+  --worktree <worktree> --operation-file <exact-task-local-handoff>
 ```
 
 This must reuse the exact reviewer lane/surface and original mode, snapshot the
@@ -107,7 +109,7 @@ same-model session. Repeat receive/decision, then do final executor self-review.
 
 ```bash
 python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py finish \
-  --worktree <worktree> --operation-dir <exact-operation>
+  --worktree <worktree> --operation-file <exact-task-local-handoff>
 ```
 
 Finish records the resumable lane checkpoint, gracefully exits the agent, and

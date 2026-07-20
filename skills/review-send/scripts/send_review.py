@@ -359,9 +359,11 @@ def cmd_submit(ns: argparse.Namespace) -> int:
     if meta.get("callback_transport") == SUPERVISED_RECEIVE_TRANSPORT:
         action, output = receive_callback(worktree, state_dir, relay_path)
         drive_argv = drive_argv_for_callback(worktree, state_dir)
+        review_json = output.with_suffix(".json")
         message = (
             "Cross-model review callback was validated and received automatically by the trusted "
-            f"supervisor. Review: {output}. Recommended action: {action}. "
+            f"supervisor. Review JSON (for task_contract): {review_json}. "
+            f"Rendered review: {output}. Recommended action: {action}. "
             "Continue the Review Gate without running receive again. After the required executor "
             "self-review or resolution, run this code-owned command in one standalone tool call. "
             "Its exit status and JSON result are authoritative; continue only on exit 0 with "

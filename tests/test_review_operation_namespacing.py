@@ -33,6 +33,13 @@ def operation_dir(output: str) -> Path:
     raise AssertionError(f"operation directory missing from output: {output}")
 
 
+def operation_handoff(worktree: Path, output: str) -> Path:
+    for line in output.splitlines():
+        if line.startswith("review operation handoff: "):
+            return worktree / line.removeprefix("review operation handoff: ")
+    raise AssertionError(f"operation handoff missing from output: {output}")
+
+
 with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     tmp = Path(raw)
     worktree = tmp / "project"
@@ -99,13 +106,34 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     )
     assert first.returncode == 0, first.stderr
     first_dir = operation_dir(first.stdout)
+    first_handoff = operation_handoff(worktree, first.stdout)
+    assert first_handoff.is_file()
+    first_status = run(
+        "status", "--worktree", str(worktree),
+        "--operation-file", first_handoff.name,
+    )
+    assert first_status.returncode == 0, first_status.stderr
+    assert json.loads(first_status.stdout)["operation_id"] == first_dir.name
+    handoff_payload = json.loads(first_handoff.read_text(encoding="utf-8"))
+    handoff_payload["operation_dir"] = str(tmp / "not-the-task-registry")
+    first_handoff.write_text(json.dumps(handoff_payload) + "\n", encoding="utf-8")
+    wrong_registry = run(
+        "status", "--worktree", str(worktree),
+        "--operation-file", first_handoff.name,
+    )
+    assert wrong_registry.returncode != 0
+    assert "outside the exact task registry" in wrong_registry.stderr
+    handoff_payload["operation_dir"] = str(first_dir)
+    first_handoff.write_text(json.dumps(handoff_payload) + "\n", encoding="utf-8")
     second = run(
         "start", "--no-spawn", "--worktree", str(worktree), "--vault-root", str(vault),
         "--reviewer-runtime", "claude", "--model", "opus",
     )
     assert second.returncode == 0, second.stderr
     second_dir = operation_dir(second.stdout)
+    second_handoff = operation_handoff(worktree, second.stdout)
     assert first_dir != second_dir
+    assert first_handoff != second_handoff
     assert (first_dir / ".review-meta.json").is_file()
     assert (second_dir / ".review-meta.json").is_file()
     assert not (worktree / ".review-meta.json").exists()
@@ -178,6 +206,7 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     assert received.returncode == 0, received.stderr
     assert (first_dir / ".task-review.json").is_file()
     assert not (second_dir / ".task-review.json").exists()
+    assert first_handoff.is_file(), "operation handoff must survive through verify/finish"
 
     send_script = ROOT / "skills" / "review-send" / "scripts" / "send_review.py"
     send_spec = importlib.util.spec_from_file_location("review_send_namespacing_test", send_script)
