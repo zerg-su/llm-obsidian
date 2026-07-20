@@ -51,6 +51,8 @@ STAGE_SURFACE_FIELDS = {
     "synth": ("synth_surface", "synth_completion_marker", "synthesize"),
 }
 CMUX_PASTE_SETTLE_SECONDS = 0.2
+CALLBACK_WATCH_GRACE_SECONDS = 30.0
+CALLBACK_WATCH_TIMEOUT_SECONDS = 7200.0
 STAGE_SCRATCH_PREFIXES = {
     "fetch": "llm-obsidian-fetch-",
     "synth": "llm-obsidian-synth-",
@@ -600,23 +602,47 @@ if re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
         handle.write("\\n")
     os.chmod(checkpoint_tmp, 0o600)
     os.replace(checkpoint_tmp, checkpoint_marker)
-tmp = marker + ".tmp." + str(os.getpid())
-with open(tmp, "w", encoding="utf-8") as handle:
-    json.dump(payload, handle, separators=(",", ":"))
-    handle.write("\\n")
-os.replace(tmp, marker)
-for index, args in enumerate((["cmux", "send", "--surface", surface, message], ["cmux", "send-key", "--surface", surface, "Enter"])):
+claim = marker + ".claim"
+if os.path.exists(marker):
+    with open(marker, encoding="utf-8") as handle:
+        if json.load(handle) == payload:
+            raise SystemExit(0)
+    print("callback marker identity mismatch", file=sys.stderr)
+    raise SystemExit(2)
+try:
+    claim_fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
     try:
-        result = subprocess.run(args, text=True, capture_output=True)
-    except OSError as exc:
-        print(f"callback unavailable; completion marker written: {{exc}}", file=sys.stderr)
-        break
-    if result.returncode:
-        print(result.stderr or result.stdout, file=sys.stderr)
-        print("callback unavailable; completion marker written", file=sys.stderr)
-        break
-    if index == 0:
-        time.sleep({CMUX_PASTE_SETTLE_SECONDS!r})
+        if time.time() - os.path.getmtime(claim) <= 30:
+            raise SystemExit(0)
+        os.unlink(claim)
+        claim_fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except (FileNotFoundError, FileExistsError):
+        raise SystemExit(0)
+try:
+    os.close(claim_fd)
+    for index, args in enumerate((["cmux", "send", "--surface", surface, message], ["cmux", "send-key", "--surface", surface, "Enter"])):
+        try:
+            result = subprocess.run(args, text=True, capture_output=True)
+        except OSError as exc:
+            print(f"callback unavailable; retry remains possible: {{exc}}", file=sys.stderr)
+            raise SystemExit(1)
+        if result.returncode:
+            print(result.stderr or result.stdout, file=sys.stderr)
+            print("callback unavailable; retry remains possible", file=sys.stderr)
+            raise SystemExit(1)
+        if index == 0:
+            time.sleep({CMUX_PASTE_SETTLE_SECONDS!r})
+    tmp = marker + ".tmp." + str(os.getpid())
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, separators=(",", ":"))
+        handle.write("\\n")
+    os.replace(tmp, marker)
+finally:
+    try:
+        os.unlink(claim)
+    except FileNotFoundError:
+        pass
 '''
 
 
@@ -783,6 +809,164 @@ def launch_command(
     )
     launcher.chmod(0o700)
     return f"exec /bin/zsh {shlex.quote(str(launcher))}"
+
+
+def callback_checkpoint(runtime_home: Path, workspace: Path) -> str:
+    """Return the newest exact Codex checkpoint for one isolated workspace."""
+
+    expected_cwd = workspace.resolve()
+    candidates: list[tuple[int, str]] = []
+    sessions = runtime_home.resolve() / "sessions"
+    if not sessions.is_dir():
+        return ""
+    for rollout in sessions.rglob("rollout-*.jsonl"):
+        try:
+            if rollout.is_symlink() or not rollout.is_file():
+                continue
+            with rollout.open(encoding="utf-8") as handle:
+                first = json.loads(handle.readline())
+            payload = first.get("payload") if first.get("type") == "session_meta" else None
+            if not isinstance(payload, dict):
+                continue
+            cwd = Path(str(payload.get("cwd") or "")).expanduser().resolve()
+            checkpoint = str(payload.get("id") or payload.get("session_id") or "").strip()
+            if cwd != expected_cwd or not re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
+                continue
+            candidates.append((rollout.stat().st_mtime_ns, checkpoint))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return max(candidates)[1] if candidates else ""
+
+
+def callback_input_ready(state: dict[str, Any], stage: str, workspace: Path) -> bool:
+    """Validate the exact stage output before a code-owned callback retry."""
+
+    run_id = str(state.get("run_id") or "")
+    if stage == "fetch":
+        try:
+            load_artifact(
+                str(workspace / "artifact.json"),
+                expected_run_id=run_id,
+                expected_topic=str(state.get("topic") or ""),
+            )
+        except ResearchContractError:
+            return False
+        return True
+    if stage != "synth":
+        return False
+    try:
+        with (workspace / "complete.json").open(encoding="utf-8") as handle:
+            complete = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(complete, dict)
+        and complete.get("schema_version") == 1
+        and complete.get("run_id") == run_id
+        and complete.get("status") == "complete"
+        and validated_completion_outputs(state.get("flow"), complete.get("outputs"))
+        is not None
+    )
+
+
+def cmd_watch_callback(ns: argparse.Namespace) -> int:
+    """Retry a missed model-side callback after its validated output appears."""
+
+    state_path = Path(ns.state_file).expanduser().resolve()
+    workspace = Path(ns.workspace).expanduser().resolve()
+    runtime_home = Path(ns.runtime_home).expanduser().resolve()
+    notifier = workspace / "notify.py"
+    if notifier.is_symlink() or not notifier.is_file():
+        return 0
+    valid_since: float | None = None
+    deadline = time.monotonic() + max(0.0, ns.timeout)
+    expected_stage = "fetch" if ns.stage == "fetch" else "synthesize"
+    while time.monotonic() <= deadline:
+        try:
+            with state_path.open(encoding="utf-8") as handle:
+                state = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return 0
+        if not isinstance(state, dict):
+            return 0
+        marker_path = Path(
+            str(state.get(f"{ns.stage}_completion_marker") or workspace / "notify-complete.json")
+        ).expanduser().resolve()
+        if marker_path.is_file():
+            try:
+                with marker_path.open(encoding="utf-8") as handle:
+                    marker = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                marker = None
+            if marker == {
+                "schema_version": 1,
+                "run_id": state.get("run_id"),
+                "stage": expected_stage,
+                "status": "complete",
+            }:
+                return 0
+        active_statuses = (
+            {"fetching", "fetch_prepared", "fetch_ready"}
+            if ns.stage == "fetch"
+            else {"synthesizing", "synthesis_prepared"}
+        )
+        if state.get("status") not in active_statuses:
+            return 0
+        if not callback_input_ready(state, ns.stage, workspace):
+            valid_since = None
+            time.sleep(0.5)
+            continue
+        now = time.monotonic()
+        if valid_since is None:
+            valid_since = now
+        if now - valid_since < max(0.0, ns.grace):
+            time.sleep(0.5)
+            continue
+        callback_env = dict(os.environ)
+        callback_env.pop("CODEX_THREAD_ID", None)
+        checkpoint = callback_checkpoint(runtime_home, workspace)
+        if checkpoint:
+            callback_env["CODEX_THREAD_ID"] = checkpoint
+        subprocess.run(
+            [str(notifier)],
+            cwd=workspace,
+            env=callback_env,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        time.sleep(0.5)
+    return 0
+
+
+def start_callback_watch(
+    state_path: Path,
+    stage: str,
+    workspace: Path,
+    runtime_home: Path,
+) -> int:
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "_watch-callback",
+            "--state-file",
+            str(state_path),
+            "--stage",
+            stage,
+            "--workspace",
+            str(workspace),
+            "--runtime-home",
+            str(runtime_home),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+    return process.pid
 
 
 def state_paths(
@@ -1046,6 +1230,7 @@ def cmd_start(ns: argparse.Namespace) -> int:
                     "running", surface=fetch_surface,
                 )
             send_surface(fetch_surface, command)
+            start_callback_watch(state_path, "fetch", fetch_dir, runtime_home)
             print(f"protected fetch surface: {fetch_ref or fetch_surface}")
             print(f"run id: {run_id}")
     except BaseException:
@@ -1278,6 +1463,7 @@ def cmd_receive(ns: argparse.Namespace) -> int:
                     "running", surface=synth_surface,
                 )
             send_surface(synth_surface, command)
+            start_callback_watch(state_path, "synth", synth_dir, runtime_home)
             close_completed_surface(state, state_path, ns.run_id, "fetch")
             print(f"networkless synthesis surface: {synth_ref or synth_surface}")
     except BaseException:
@@ -1448,6 +1634,7 @@ def cmd_restart_synthesis(ns: argparse.Namespace) -> int:
         print(json.dumps(state, indent=2, ensure_ascii=False))
     else:
         send_surface(synth_surface, command)
+        start_callback_watch(state_path, "synth", synth_dir, runtime_home)
         print(f"networkless synthesis restarted: {synth_ref or synth_surface}")
     return 0
 
@@ -1493,6 +1680,14 @@ def parser() -> argparse.ArgumentParser:
     status.add_argument("--operation-dir", default="")
     status.add_argument("--state-root", type=Path)
     status.set_defaults(func=cmd_status)
+    watch = sub.add_parser("_watch-callback", help=argparse.SUPPRESS)
+    watch.add_argument("--state-file", required=True)
+    watch.add_argument("--stage", choices=("fetch", "synth"), required=True)
+    watch.add_argument("--workspace", required=True)
+    watch.add_argument("--runtime-home", required=True)
+    watch.add_argument("--grace", type=float, default=CALLBACK_WATCH_GRACE_SECONDS)
+    watch.add_argument("--timeout", type=float, default=CALLBACK_WATCH_TIMEOUT_SECONDS)
+    watch.set_defaults(func=cmd_watch_callback)
     return out
 
 

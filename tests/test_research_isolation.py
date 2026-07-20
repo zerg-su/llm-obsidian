@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import uuid
 from pathlib import Path
@@ -52,6 +53,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     fake_cmux.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$CMUX_LOG\"\n"
+        "if [ \"${CMUX_FAIL_SEND:-0}\" = \"1\" ] && [ \"$1\" = \"send\" ]; then exit 1; fi\n"
         "if [ \"$1 $2\" = \"rpc system.tree\" ]; then\n"
         "  python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ[\"CMUX_CLOSED_FILE\"]); "
         "closed=set(p.read_text().splitlines()) if p.exists() else set(); "
@@ -215,6 +217,25 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     cmux_log.write_text("", encoding="utf-8")
     notify_env = dict(fake_env)
     notify_env["CODEX_THREAD_ID"] = "019f0000-0000-7000-8000-000000000001"
+    failed_notify_env = dict(notify_env)
+    failed_notify_env["CMUX_FAIL_SEND"] = "1"
+    stale_claim = Path(str(state["fetch_completion_marker"]) + ".claim")
+    stale_claim.write_text("stale", encoding="utf-8")
+    os.utime(stale_claim, (time.time() - 31, time.time() - 31))
+    failed_notify = subprocess.run(
+        [str(fetch_dir / "notify.py")],
+        text=True,
+        capture_output=True,
+        env=failed_notify_env,
+        cwd=tmp,
+    )
+    check(
+        "callback failure stays retryable",
+        failed_notify.returncode == 1
+        and not Path(state["fetch_completion_marker"]).exists()
+        and not Path(str(state["fetch_completion_marker"]) + ".claim").exists(),
+        failed_notify.stderr,
+    )
     notified = subprocess.run(
         [str(fetch_dir / "notify.py")],
         text=True,
@@ -222,7 +243,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         env=notify_env,
         cwd=tmp,
     )
-    check("callback failure is nonfatal", notified.returncode == 0, notified.stderr)
+    check("callback retry succeeds", notified.returncode == 0, notified.stderr)
     notify_calls = cmux_log.read_text(encoding="utf-8").splitlines()
     checkpoint_sidecar = json.loads(
         (fetch_dir / "resume-checkpoint.json").read_text(encoding="utf-8")
@@ -240,6 +261,20 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         and any(call.startswith("send --surface surface:test") for call in notify_calls),
     )
     check("fetch completion marker written", Path(state["fetch_completion_marker"]).is_file())
+    notify_call_count = len(notify_calls)
+    duplicate_notify = subprocess.run(
+        [str(fetch_dir / "notify.py")],
+        text=True,
+        capture_output=True,
+        env=notify_env,
+        cwd=tmp,
+    )
+    check(
+        "completed callback is idempotent",
+        duplicate_notify.returncode == 0
+        and len(cmux_log.read_text(encoding="utf-8").splitlines()) == notify_call_count,
+        duplicate_notify.stderr,
+    )
     marked = run("status", "--run-id", run_id, "--state-root", str(state_root))
     check("status detects fetch marker", json.loads(marked.stdout)["status"] == "fetch_ready")
 
@@ -259,6 +294,53 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "fetch_errors": [],
     }
     (fetch_dir / "artifact.json").write_text(json.dumps(artifact), encoding="utf-8")
+    Path(state["fetch_completion_marker"]).unlink()
+    (fetch_dir / "resume-checkpoint.json").unlink()
+    rollout_dir = Path(state["fetch_runtime_home"]) / "sessions" / "2026" / "07" / "20"
+    rollout_dir.mkdir(parents=True)
+    watcher_checkpoint = "019f0000-0000-7000-8000-000000000002"
+    rollout_dir.joinpath(f"rollout-{watcher_checkpoint}.jsonl").write_text(
+        json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "id": watcher_checkpoint,
+                "session_id": watcher_checkpoint,
+                "cwd": str(fetch_dir),
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    cmux_log.write_text("", encoding="utf-8")
+    watcher_env = dict(fake_env)
+    watcher_env["CODEX_THREAD_ID"] = "wrong-parent-checkpoint"
+    watched = run(
+        "_watch-callback",
+        "--state-file", str(state_root / run_id / "state.json"),
+        "--stage", "fetch",
+        "--workspace", str(fetch_dir),
+        "--runtime-home", state["fetch_runtime_home"],
+        "--grace", "0",
+        "--timeout", "2",
+        env=watcher_env,
+    )
+    watched_checkpoint = json.loads(
+        (fetch_dir / "resume-checkpoint.json").read_text(encoding="utf-8")
+    )
+    check(
+        "code-owned watcher retries validated callback",
+        watched.returncode == 0
+        and Path(state["fetch_completion_marker"]).is_file()
+        and any(
+            call.startswith("send --surface surface:test")
+            for call in cmux_log.read_text(encoding="utf-8").splitlines()
+        ),
+        watched.stderr,
+    )
+    check(
+        "watcher preserves exact child checkpoint",
+        watched_checkpoint["checkpoint"]["checkpoint_id"] == watcher_checkpoint,
+        json.dumps(watched_checkpoint),
+    )
     result = run(
         "receive", "--run-id", run_id, "--state-root", str(state_root),
         "--tmp-root", str(tmp), "--no-spawn",
