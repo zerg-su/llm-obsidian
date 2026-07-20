@@ -788,6 +788,8 @@ def agent_argv(
     if runtime == "claude":
         return [
             "claude", "--permission-mode", "auto", "--add-dir", str(sandbox),
+            "--plugin-dir", str(sandbox),
+            "--disallowedTools", "AskUserQuestion",
             "--model", model, "--effort", effort, prompt,
         ], env
     socket = validated_cmux_socket_path()

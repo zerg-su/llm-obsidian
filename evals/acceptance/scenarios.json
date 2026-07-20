@@ -24,12 +24,12 @@
     "conversation-readonly": {
       "timeout_seconds": 600,
       "network": "none",
-      "instructions": "Run one small realistic interaction for the named skill. Confirm the response contract and prove that the repository and vault remain unchanged."
+      "instructions": "Run one small realistic interaction for the named skill. Do not invoke an interactive question tool: render any question and recommended answer as ordinary output, then continue without a human reply. Confirm the response contract and prove that the repository and vault remain unchanged."
     },
     "cmux-lifecycle": {
       "timeout_seconds": 900,
       "network": "none",
-      "instructions": "Use a nested disposable cmux surface. Verify exact-surface save/exit behavior without closing or repurposing the acceptance-agent surface."
+      "instructions": "Use a nested disposable cmux surface. After saving the fixture page, run scripts/reindex.py before full-vault validation so derived address indexes match the written page. Verify exact-surface save/exit behavior without closing or repurposing the acceptance-agent surface."
     },
     "daily-summary": {
       "timeout_seconds": 900,

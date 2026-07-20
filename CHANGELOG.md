@@ -44,6 +44,10 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   execution, including same-commit staged, unstaged, and untracked paths, while
   retaining the exact release-metadata exception. Review startup also removes
   stale outboxes before granting the reviewer its single-file write surface.
+- Claude live acceptance now loads the exact repo-local plugin, disables
+  interactive question UI in unattended cells, carries explicit promotion
+  choices in fixtures, and refreshes derived address indexes before validating
+  the close fixture.
 
 - Approved-plan dispatch now uses a typed, idempotent post-approval runner for
   route capture, worktree/task identity, prompt/meta rendering, anchored spawn,

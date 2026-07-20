@@ -205,6 +205,14 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
     claude_argv, _ = module.agent_argv("claude", repo, "fixture-model", "high", "prompt")
     check("Claude acceptance runs outside project hooks", "--add-dir" in claude_argv and str(repo) in claude_argv)
+    check(
+        "Claude acceptance loads the repo-local plugin",
+        claude_argv[claude_argv.index("--plugin-dir") + 1] == str(repo),
+    )
+    check(
+        "Claude acceptance cannot block on interactive questions",
+        claude_argv[claude_argv.index("--disallowedTools") + 1] == "AskUserQuestion",
+    )
     module.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
@@ -314,6 +322,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     )
     check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
     check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
+    check(
+        "conversation scenario requires plain output instead of interactive UI",
+        "Do not invoke an interactive question tool" in prompt,
+    )
     check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
     check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
     check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
@@ -344,6 +356,15 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "do not create another cmux surface" in close_prompt
         and "do not create another surface"
         in module.load_skill_fixtures()["close"]["fixture"].lower(),
+    )
+    check(
+        "close fixture refreshes derived indexes before validation",
+        "run scripts/reindex.py before full-vault validation" in close_prompt,
+    )
+    check(
+        "backlog fixture carries its explicit promotion target",
+        "already selected Wiki decision" in module.load_skill_fixtures()["backlog"]["fixture"]
+        and "do not invoke AskUserQuestion" in module.load_skill_fixtures()["backlog"]["fixture"],
     )
     check(
         "close outbox precedes one final graceful exit",
