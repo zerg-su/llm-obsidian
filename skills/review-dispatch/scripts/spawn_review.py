@@ -166,6 +166,13 @@ def configure_existing_review_state(ns: argparse.Namespace, worktree: Path, meta
         if action_raw:
             action_path = handoff_path
             setattr(ns, "_action_file_path", action_path)
+            resolution_raw = str(handoff.get("resolution_file") or "").strip()
+            if resolution_raw:
+                resolution_path = (worktree / resolution_raw).resolve()
+                expected_resolution = worktree / f".task-review-resolution-{operation_id}.md"
+                if resolution_path != expected_resolution:
+                    die("review action resolution file does not match its operation identity")
+                setattr(ns, "_resolution_file_path", resolution_path)
     if meta.get("version", 1) != 3:
         # `drive` forwards its resolved non-v3 state_dir (the worktree itself)
         # into cmd_finish/cmd_verify. That self-reference is not a v3 handoff.
@@ -1812,6 +1819,44 @@ def cmd_status(ns: argparse.Namespace) -> int:
     return 0
 
 
+def prepare_drive_resolution(ns: argparse.Namespace, worktree: Path) -> list[Path]:
+    """Bind one task-local resolution to the exact operation before verify."""
+
+    target = review_file(worktree, ".task-review-resolution.md")
+    exact = getattr(ns, "_resolution_file_path", None)
+    generic = worktree / ".task-review-resolution.md"
+    candidates: list[Path] = []
+    if isinstance(exact, Path) and exact.is_file():
+        candidates.append(exact)
+    if generic != target and generic.is_file():
+        action = getattr(ns, "_action_file_path", None)
+        active = sorted(worktree.glob(".task-review-drive-*.json"))
+        if not isinstance(action, Path) or active != [action]:
+            die(
+                "unscoped .task-review-resolution.md is ambiguous; write the exact "
+                "resolution_file named by this action handoff"
+            )
+        candidates.append(generic)
+    existing = read_text_file(target)
+    values = [(path, read_text_file(path)) for path in candidates]
+    nonempty = [(path, value) for path, value in values if value]
+    distinct = {value for _path, value in nonempty}
+    if existing:
+        distinct.add(existing)
+    if len(distinct) > 1:
+        die("operation resolution files disagree; resolve the exact handoff without guessing")
+    resolution = existing or (nonempty[0][1] if nonempty else "")
+    if not resolution:
+        expected = exact if isinstance(exact, Path) else target
+        die(f"resolve action requires a non-empty review resolution at {expected}")
+    if len(resolution) > 20_000:
+        die(".task-review-resolution.md exceeds 20000 characters")
+    if not existing:
+        target.write_text(resolution, encoding="utf-8")
+        target.chmod(0o600)
+    return [path for path, _value in nonempty if path != target]
+
+
 def cmd_drive(ns: argparse.Namespace) -> int:
     """Apply only the deterministic next transition after a received review."""
     worktree = Path(ns.worktree).expanduser().resolve()
@@ -1838,9 +1883,7 @@ def cmd_drive(ns: argparse.Namespace) -> int:
         payload["applied"] = True
         payload["transition"] = "finish"
     elif action == "resolve":
-        resolution = review_file(worktree, ".task-review-resolution.md")
-        if not resolution.is_file() or not resolution.read_text(encoding="utf-8").strip():
-            die("resolve action requires a non-empty .task-review-resolution.md")
+        resolution_sources = prepare_drive_resolution(ns, worktree)
         verify_ns = argparse.Namespace(
             worktree=str(worktree),
             operation_dir=str(state_dir),
@@ -1850,6 +1893,8 @@ def cmd_drive(ns: argparse.Namespace) -> int:
             no_send=False,
         )
         cmd_verify(verify_ns)
+        for resolution_source in resolution_sources:
+            resolution_source.unlink(missing_ok=True)
         payload["applied"] = True
         payload["transition"] = "verify"
     elif action == "escalate":

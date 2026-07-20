@@ -121,12 +121,14 @@ def write_drive_request(worktree: Path, state_dir: Path) -> Path:
     ):
         die("review drive request identity does not match the task operation", 3)
     path = worktree / f".task-review-drive-{operation_id}.json"
+    resolution = worktree / f".task-review-resolution-{operation_id}.md"
     payload = {
         "schema_version": 1,
         "project_id": operation["project_id"],
         "task_id": operation["task_id"],
         "operation_id": operation_id,
         "operation_dir": str(state_dir),
+        "resolution_file": resolution.name,
     }
     write_callback(path, payload)
     return path

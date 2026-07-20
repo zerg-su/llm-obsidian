@@ -69,11 +69,11 @@ python3 <vault-root>/skills/review-dispatch/scripts/spawn_review.py receive \
   --relay-file <exact-.review-callback.json>
 ```
 
-Classify every finding in `.task-review-resolution.md` as `applied`, `rejected`,
-or `out-of-scope`, with evidence. Unattended warning/nit findings may be
-resolved within approved scope. Blocking, security, scope, migration,
-public-interface, permission, dependency, or external-effect changes escalate;
-never auto-resolve them.
+For v3 `resolve`, read the exact action handoff and write its operation-unique
+`resolution_file`; legacy uses `.task-review-resolution.md`. Classify every
+finding as `applied`, `rejected`, or `out-of-scope`, with evidence. Unattended
+warnings/nits may be resolved in scope. Blocking, security, scope, migration,
+public-interface, permission, dependency, or external-effect changes escalate.
 
 After the required executor self-review, resolution, tests, and explicit-file
 commit (never runtime handoffs; never push), apply the mechanical decision:

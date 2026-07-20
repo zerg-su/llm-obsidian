@@ -216,8 +216,12 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     callback_argv = send_module.drive_argv_for_callback(worktree, first_dir)
     action_name = callback_argv[callback_argv.index("--action-file") + 1]
     action_file = worktree / action_name
+    action_payload = json.loads(action_file.read_text(encoding="utf-8"))
     assert action_file.parent == worktree
     assert first_meta["operation_id"] in action_file.name
+    assert action_payload["resolution_file"] == (
+        f".task-review-resolution-{first_meta['operation_id']}.md"
+    )
     assert "--operation-dir" not in callback_argv
     assert str(first_dir) not in callback_argv
     assert callback_argv[0] == "python3"

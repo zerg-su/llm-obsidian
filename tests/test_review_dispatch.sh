@@ -587,6 +587,43 @@ finally:
 PY
 [[ $? -eq 0 ]] && ok "review-drive-safe-actions" || bad "review-drive-safe-actions" "drive did not preserve approve/resolve/escalate boundaries"
 
+python3 - "$SCRIPT" "$LIGHT" <<'PY'
+import importlib.util, pathlib, sys
+from types import SimpleNamespace
+
+spec = importlib.util.spec_from_file_location("review_resolution_scope_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2]).resolve()
+state = worktree / ".resolution-operation-fixture"
+state.mkdir()
+operation_id = "11111111-1111-4111-8111-111111111111"
+action = worktree / f".task-review-drive-{operation_id}.json"
+action.write_text("{}\n", encoding="utf-8")
+exact = worktree / f".task-review-resolution-{operation_id}.md"
+generic = worktree / ".task-review-resolution.md"
+generic.write_text("# Applied\n\nBounded evidence.\n", encoding="utf-8")
+module.set_review_state_dir(state)
+ns = SimpleNamespace(_action_file_path=action, _resolution_file_path=exact)
+cleanup = module.prepare_drive_resolution(ns, worktree)
+target = state / ".task-review-resolution.md"
+assert target.read_text(encoding="utf-8").strip() == generic.read_text(encoding="utf-8").strip()
+assert cleanup == [generic]
+target.unlink()
+second = worktree / ".task-review-drive-22222222-2222-4222-8222-222222222222.json"
+second.write_text("{}\n", encoding="utf-8")
+try:
+    module.prepare_drive_resolution(ns, worktree)
+except SystemExit:
+    pass
+else:
+    raise AssertionError("ambiguous generic resolution was accepted")
+for path in (action, second, generic, exact):
+    path.unlink(missing_ok=True)
+state.rmdir()
+PY
+[[ $? -eq 0 ]] && ok "v3-resolution-operation-scope" || bad "v3-resolution-operation-scope" "resolution was not bound to the exact action"
+
 LEGACY="$SANDBOX/legacy-payload"
 write_fixture "$LEGACY"
 "$SCRIPT" start --light --no-spawn --worktree "$LEGACY" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/legacy-start.err"
