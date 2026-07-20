@@ -46,7 +46,8 @@
   "cross-model": [
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
-    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md"
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — ab4803b6000c.md"
   ],
   "dashboard": [
     "wiki/meta/dashboard.md"
@@ -167,7 +168,8 @@
     "wiki/concepts/Unattended Pipeline.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
-    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md"
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — ab4803b6000c.md"
   ],
   "skills": [
     "wiki/meta/daily-pipeline-guide.md"
