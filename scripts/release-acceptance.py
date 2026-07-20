@@ -312,8 +312,8 @@ def run_matrix(
     selected_skills: set[str] | None = None,
     jobs: int = 1,
 ) -> list[dict[str, Any]]:
-    if not 1 <= jobs <= 15:
-        raise AcceptanceError("acceptance jobs must be between 1 and 15")
+    if not 1 <= jobs <= 5:
+        raise AcceptanceError("acceptance jobs must be between 1 and 5 per cmux workspace")
     completed = {row_key(item): item for item in (prior or [])}
     row_order = {row_key(row): index for index, row in enumerate(rows)}
     active: set[subprocess.Popen[str]] = set()
@@ -502,7 +502,7 @@ def main() -> int:
     run.add_argument("--timeout", type=float, default=900.0)
     run.add_argument(
         "--jobs", type=int, default=1,
-        help="maximum concurrent acceptance cells (1..15; default: 1)",
+        help="maximum concurrent acceptance cells in one cmux workspace (1..5; default: 1)",
     )
     run.add_argument("--report", type=Path, required=True)
     run.add_argument("--restart", action="store_true", help="ignore a matching partial/completed report")

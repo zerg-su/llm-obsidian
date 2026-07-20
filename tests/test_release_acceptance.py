@@ -345,11 +345,11 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         == [item["skill"] for item in parallel_rows],
     )
     try:
-        release_acceptance.run_matrix([], [sys.executable, str(runner)], 5, jobs=16)
+        release_acceptance.run_matrix([], [sys.executable, str(runner)], 5, jobs=6)
     except release_acceptance.AcceptanceError as exc:
-        check("parallel worker limit is bounded at fifteen", "between 1 and 15" in str(exc))
+        check("parallel worker limit is bounded at five per workspace", "between 1 and 5" in str(exc))
     else:
-        check("parallel worker limit is bounded at fifteen", False)
+        check("parallel worker limit is bounded at five per workspace", False)
     report = tmp / "report.json"
     result = run(
         "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
