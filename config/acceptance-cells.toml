@@ -21,6 +21,7 @@ orchestration_dependencies = [
   "config/acceptance-cells.toml",
   "scripts/acceptance_fingerprints.py",
   "scripts/acceptance-workspace-supervisor.py",
+  "scripts/live-acceptance-runner.py",
   "scripts/release-acceptance.py",
 ]
 
@@ -31,7 +32,6 @@ global_dependencies = [
   "evals/acceptance/skills.json",
   "scripts/cmux_agent_support.py",
   "scripts/lifecycle_telemetry.py",
-  "scripts/live-acceptance-runner.py",
   "scripts/model_routing.py",
   "scripts/pipeline_events.py",
   "scripts/task_contract.py",

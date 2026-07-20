@@ -29,6 +29,7 @@ ALLOWED_ORCHESTRATION_DEPENDENCIES = {
     "config/acceptance-cells.toml",
     "scripts/acceptance_fingerprints.py",
     "scripts/acceptance-workspace-supervisor.py",
+    "scripts/live-acceptance-runner.py",
     "scripts/release-acceptance.py",
 }
 

@@ -758,7 +758,9 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     )
     fetch_lane_state = json.loads(fetch_lane_path.read_text(encoding="utf-8"))
     fetch_lane_state["checkpoint"] = {
-        "kind": "claude", "checkpoint_id": "wrong-runtime", "cwd": str(tmp),
+        "kind": "codex",
+        "checkpoint_id": "checkpoint-fetch-1",
+        "cwd": persistent_state["fetch_dir"],
     }
     fetch_lane_path.write_text(json.dumps(fetch_lane_state), encoding="utf-8")
     resumed_fetch = run(
@@ -768,12 +770,16 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "--operation-id", queued_value["run_id"], "--tmp-root", str(tmp), "--no-spawn",
     )
     check("queued persistent fetch becomes runnable", resumed_fetch.returncode == 0, resumed_fetch.stderr)
-    check(
-        "invalid secure fetch checkpoint falls back visibly",
-        "secure fetch checkpoint is invalid" in resumed_fetch.stderr,
-        resumed_fetch.stderr,
-    )
     resumed_fetch_state = json.loads(resumed_fetch.stdout)
+    resumed_fetch_launcher = Path(
+        resumed_fetch_state["fetch_dir"], "launch-agent.sh"
+    ).read_text(encoding="utf-8")
+    check(
+        "secure fetch resumes in the exact checkpoint workspace",
+        resumed_fetch_state["fetch_dir"] == persistent_state["fetch_dir"]
+        and "checkpoint-fetch-1" in resumed_fetch_launcher,
+        resumed_fetch_launcher,
+    )
 
     def write_persistent_artifact(value: dict[str, object], topic: str) -> None:
         body = f"# {topic}\n\nBounded untrusted fixture."
@@ -817,7 +823,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         first_synth_broker["lane_id"], first_synth_broker["operation_id"], "complete",
         checkpoint={
             "kind": "codex", "checkpoint_id": "checkpoint-synth-1",
-            "cwd": first_synth["synth_runtime_home"],
+            "cwd": first_synth["synth_dir"],
         },
     )
 
@@ -846,6 +852,12 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         second_synth_broker["lane_id"], second_synth_broker["operation_id"], "complete",
     )
 
+    fetch_lane_state = json.loads(fetch_lane_path.read_text(encoding="utf-8"))
+    fetch_lane_state["checkpoint"] = {
+        "kind": "claude", "checkpoint_id": "wrong-runtime", "cwd": str(tmp),
+    }
+    fetch_lane_path.write_text(json.dumps(fetch_lane_state), encoding="utf-8")
+
     third_fetch_result = run(
         "start", "--topic", "invalid synth checkpoint", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
@@ -853,6 +865,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "--tmp-root", str(tmp), "--no-spawn",
     )
     check("third persistent fetch starts", third_fetch_result.returncode == 0, third_fetch_result.stderr)
+    check(
+        "invalid secure fetch checkpoint falls back visibly",
+        "secure fetch checkpoint is invalid" in third_fetch_result.stderr,
+        third_fetch_result.stderr,
+    )
     third_fetch = json.loads(third_fetch_result.stdout)
     third_fetch_broker = third_fetch["fetch_broker"]
     persistent_store.transition_operation(

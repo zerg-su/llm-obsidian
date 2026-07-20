@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
     (vault / "scripts").mkdir(parents=True)
     (vault / "wiki/plans").mkdir(parents=True)
     worktree.mkdir()
+    subprocess_run = sender.subprocess.run
+    subprocess_run(["git", "init", "-q"], cwd=worktree, check=True)
     for name in ("task_contract.py", "vault_schema.py", "wiki_summary_contract.py"):
         shutil.copy2(ROOT / "scripts" / name, vault / "scripts" / name)
     (vault / "scripts/reap-runner.py").write_text("# fixture\n", encoding="utf-8")
@@ -133,6 +135,25 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
         [call[1] for call in send_calls] == ["send", "send-key"]
         and sleeps == [sender.CMUX_PASTE_SETTLE_SECONDS],
     )
+    sender.ensure_delivery_marker_ignored(worktree.resolve())
+    ignored = subprocess_run(
+        ["git", "check-ignore", "-q", sender.DELIVERY_MARKER], cwd=worktree,
+        check=False,
+    )
+    check("callback delivery claim is task-local Git metadata", ignored.returncode == 0)
+    check(
+        "matching callback delivery claims are idempotent",
+        sender.claim_delivery(worktree.resolve(), value) is True
+        and sender.claim_delivery(worktree.resolve(), value) is False,
+    )
+    changed_callback = dict(value, command=value["command"] + " --changed")
+    try:
+        sender.claim_delivery(worktree.resolve(), changed_callback)
+    except sender.SendError:
+        check("different callback delivery claims fail closed", True)
+    else:
+        check("different callback delivery claims fail closed", False)
+    (worktree / sender.DELIVERY_MARKER).unlink()
     pending_action = worktree / f".task-review-drive-{uuid.uuid4()}.json"
     pending_action.write_text("{}\n", encoding="utf-8")
     try:

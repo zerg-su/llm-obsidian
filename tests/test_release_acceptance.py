@@ -694,12 +694,13 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     manifest = incremental / "config/acceptance-cells.toml"
     (incremental / "scripts/acceptance_fingerprints.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/acceptance-workspace-supervisor.py").write_text("# orchestration\n", encoding="utf-8")
+    (incremental / "scripts/live-acceptance-runner.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/release-acceptance.py").write_text("# orchestration\n", encoding="utf-8")
     manifest.write_text(
         "schema_version = 1\nrunner_contract_version = 2\norchestration_contract_version = 1\n"
         "non_behavioral_paths = [\"CHANGELOG.md\"]\n"
         "non_behavioral_prefixes = [\"tests/\"]\n"
-        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/acceptance-workspace-supervisor.py\", \"scripts/release-acceptance.py\"]\n"
+        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/acceptance-workspace-supervisor.py\", \"scripts/live-acceptance-runner.py\", \"scripts/release-acceptance.py\"]\n"
         "global_dependencies = [\".gitignore\", \"config/model-routing.toml\"]\n"
         "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
         "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"

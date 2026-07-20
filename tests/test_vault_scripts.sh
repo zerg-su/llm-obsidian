@@ -299,6 +299,21 @@ python3 -c 'import json,sys; print(json.dumps({"pages":[{"op":"create","path":"w
 expect_exit "vw-source-provenance-valid" "$?" 0
 
 mkdir -p "$SANDBOX/.raw"
+initial_manifest_hash=$(printf '{"address_map":{},"sources":{}}\n' | shasum -a 256 | awk '{print $1}')
+python3 - "$initial_manifest_hash" <<'PY' | "$VW" >/dev/null 2>&1
+import json
+import sys
+
+print(json.dumps({
+    "manifest_update": {
+        "path": ".raw/.manifest.json",
+        "expected_sha256": sys.argv[1],
+        "merge": {"sources": {".raw/first.md": {"hash": "a"}}},
+    }
+}))
+PY
+expect_exit "vw-manifest-create" "$?" 0
+expect_grep "vw-manifest-created" "$SANDBOX/.raw/.manifest.json" 'first.md'
 printf '{"address_map":{},"sources":{}}\n' > "$SANDBOX/.raw/.manifest.json"
 manifest_hash=$(shasum -a 256 "$SANDBOX/.raw/.manifest.json" | awk '{print $1}')
 python3 -c 'import json,sys; print(json.dumps({"manifest_update":{"path":".raw/.manifest.json","expected_sha256":sys.argv[1],"merge":{"address_map":{"wiki/concepts/Transaction Page.md":"c-000001"}}}}))' "$manifest_hash" \

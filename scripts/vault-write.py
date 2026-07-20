@@ -581,17 +581,23 @@ def manifest_write(spec: object) -> tuple[Path, str] | None:
         raise PayloadError("manifest_update.path must be .raw/.manifest.json")
     path = safe_repo_path(rel)
     expected = str(spec.get("expected_sha256") or "")
-    if not path.is_file():
-        raise ConflictError(f"manifest target missing: {rel}")
     if not re.fullmatch(r"[0-9a-f]{64}", expected):
         raise PayloadError("manifest_update requires lowercase expected_sha256")
-    current_text = path.read_text(encoding="utf-8")
-    actual = sha256_text(current_text)
-    if actual != expected:
-        raise ConflictError(f"manifest conflict: {actual}, expected {expected}")
     merge = spec.get("merge")
     if not isinstance(merge, dict):
         raise PayloadError("manifest_update.merge must be an object")
+    # A first ingest has no manifest yet. Permit only the deterministic empty
+    # baseline so callers still prove the state they expected to merge against.
+    initial_text = '{"address_map":{},"sources":{}}\n'
+    if not path.is_file():
+        if expected != sha256_text(initial_text):
+            raise ConflictError(f"manifest target missing: {rel}")
+        current_text = initial_text
+    else:
+        current_text = path.read_text(encoding="utf-8")
+        actual = sha256_text(current_text)
+        if actual != expected:
+            raise ConflictError(f"manifest conflict: {actual}, expected {expected}")
     try:
         current = json.loads(current_text)
     except json.JSONDecodeError as exc:

@@ -18,6 +18,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,29 @@ STAGE_SURFACE_FIELDS = {
     "synth": ("synth_surface", "synth_completion_marker", "synthesize"),
 }
 CMUX_PASTE_SETTLE_SECONDS = 0.2
+STAGE_SCRATCH_PREFIXES = {
+    "fetch": "llm-obsidian-fetch-",
+    "synth": "llm-obsidian-synth-",
+}
+STAGE_TRANSIENT_FILES = {
+    "fetch": (
+        "artifact.json",
+        "fetch-prompt.md",
+        "launch-agent.sh",
+        "notify-complete.json",
+        "notify.py",
+        "resume-checkpoint.json",
+    ),
+    "synth": (
+        "artifact.json",
+        "complete.json",
+        "launch-agent.sh",
+        "notify-complete.json",
+        "notify.py",
+        "resume-checkpoint.json",
+        "synth-prompt.md",
+    ),
+}
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -108,6 +132,63 @@ def utc_now() -> str:
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def prepare_stage_workspace(
+    tmp_root: Path,
+    run_id: str,
+    stage: str,
+    checkpoint: dict[str, str] | None,
+) -> tuple[Path, dict[str, str] | None]:
+    """Create fresh scratch or safely reuse the cwd bound to a Codex thread.
+
+    Codex resume retains the original thread cwd even when a new ``--cd`` is
+    supplied. Reusing that exact owner-only scratch directory keeps tool calls
+    valid while the operation registry remains the durable, per-run record.
+    """
+    prefix = STAGE_SCRATCH_PREFIXES[stage]
+    if checkpoint is None:
+        return (
+            Path(tempfile.mkdtemp(prefix=f"{prefix}{run_id[:8]}-", dir=tmp_root)),
+            None,
+        )
+
+    workspace = Path(checkpoint["cwd"]).expanduser()
+    try:
+        if workspace.is_symlink():
+            raise TaskSessionError("checkpoint workspace must not be a symlink")
+        workspace = workspace.resolve(strict=True)
+        metadata = workspace.stat()
+        if (
+            not workspace.is_dir()
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o077
+            or not workspace.name.startswith(prefix)
+        ):
+            raise TaskSessionError("checkpoint workspace is not protected stage scratch")
+        for name in STAGE_TRANSIENT_FILES[stage]:
+            candidate = workspace / name
+            if candidate.is_symlink():
+                raise TaskSessionError(
+                    f"checkpoint workspace contains unsafe transient path {name}"
+                )
+            if candidate.exists():
+                if not candidate.is_file():
+                    raise TaskSessionError(
+                        f"checkpoint workspace transient path is not a file: {name}"
+                    )
+                candidate.unlink()
+    except (OSError, TaskSessionError) as exc:
+        print(
+            f"secure {stage} checkpoint workspace is unavailable; "
+            f"continuing visibly with a fresh session: {exc}",
+            file=sys.stderr,
+        )
+        return (
+            Path(tempfile.mkdtemp(prefix=f"{prefix}{run_id[:8]}-", dir=tmp_root)),
+            None,
+        )
+    return workspace, checkpoint
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -890,7 +971,9 @@ def cmd_start(ns: argparse.Namespace) -> int:
         state_dir, state_path = state_paths(state_root, run_id, operation_dir)
         state_dir.mkdir(parents=True, exist_ok=operation_dir is not None)
         tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
-        fetch_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-fetch-{run_id[:8]}-", dir=tmp_root))
+        fetch_dir, checkpoint = prepare_stage_workspace(
+            tmp_root, run_id, "fetch", checkpoint
+        )
         runtime_base = (
             operation_dir.parents[1] / "runtime" if operation_dir is not None
             else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-{run_id[:8]}-", dir=tmp_root))
@@ -1012,7 +1095,6 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     state["fetch_artifact_status"] = "accepted"
 
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
-    synth_dir = Path(tempfile.mkdtemp(prefix=f"llm-obsidian-synth-{ns.run_id[:8]}-", dir=tmp_root))
     synth_broker: dict[str, Any] | None = None
     synth_checkpoint: dict[str, str] | None = None
     synth_operation_dir: Path | None = None
@@ -1117,6 +1199,9 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         except (TaskSessionError, OSError) as exc:
             die(f"persistent synthesis lane failed: {exc}", 3)
     try:
+        synth_dir, synth_checkpoint = prepare_stage_workspace(
+            tmp_root, ns.run_id, "synth", synth_checkpoint
+        )
         runtime_base = (
             synth_operation_dir.parents[1] / "runtime" if synth_operation_dir is not None
             else Path(tempfile.mkdtemp(prefix=f"llm-obsidian-runtime-synth-{ns.run_id[:8]}-", dir=tmp_root))

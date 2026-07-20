@@ -317,6 +317,14 @@ def install_acceptance_model_overrides(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def install_acceptance_runtime_fixture(sandbox: Path) -> None:
+    """Provision only the ignored local gateway fixture required by lifecycle tests."""
+
+    runtime_env = sandbox / "scripts" / "mcp-gateway" / "runtime.env"
+    if not runtime_env.exists():
+        shutil.copy2(runtime_env.with_name("runtime.env.example"), runtime_env)
+
+
 def run_checked(argv: list[str], *, cwd: Path, input_text: str | None = None) -> str:
     result = subprocess.run(
         argv, cwd=cwd, input=input_text, text=True, capture_output=True, check=False,
@@ -1381,6 +1389,67 @@ def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
     return True, "committed HEAD and worktree restored"
 
 
+def daily_acceptance_cleanup(sandbox: Path, commit: str) -> tuple[bool, str]:
+    """Accept one exact disposable session-evidence commit deleted after proof."""
+
+    count = subprocess.run(
+        ["git", "rev-list", "--count", f"{commit}..HEAD"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if count.returncode != 0 or count.stdout.strip() != "1":
+        return False, "daily fixture must create exactly one local evidence commit"
+    changed = subprocess.run(
+        ["git", "diff", "--name-status", "-z", commit, "HEAD"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    parts = changed.stdout.rstrip("\0").split("\0") if changed.returncode == 0 else []
+    if len(parts) != 2 or parts[0] != "A":
+        return False, "daily evidence commit changed unexpected paths"
+    path = parts[1]
+    if re.fullmatch(r"wiki/meta/sessions/Acceptance[^/]*\.md", path) is None:
+        return False, "daily evidence commit used an unexpected fixture path"
+    if (sandbox / path).exists():
+        return False, "daily fixture session was not removed after verification"
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if head.returncode != 0:
+        return False, "daily fixture HEAD is unreadable"
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, head.stdout.strip()],
+        cwd=sandbox, text=True, capture_output=True, check=False,
+    )
+    if ancestry.returncode != 0:
+        return False, "daily fixture commit is not based on the release candidate"
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--", path],
+        cwd=sandbox, text=True, capture_output=True, check=False,
+    )
+    deletion = status.stdout.strip("\n")
+    if status.returncode != 0 or not deletion.startswith(" D "):
+        return False, "daily fixture deletion is not independently proven"
+    restored = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    if restored.returncode != 0:
+        return False, "disposable clone status is unreadable"
+    dirty = []
+    for line in restored.stdout.splitlines():
+        candidate = line[3:]
+        if line == deletion or candidate == ".acceptance-sandbox.json":
+            continue
+        if candidate.startswith(".vault-meta/acceptance-worktrees/"):
+            continue
+        if is_disposable_bookkeeping(candidate, line[:2]):
+            continue
+        dirty.append(line)
+    if dirty:
+        return False, "disposable clone retained product or vault changes"
+    return True, "one bounded daily evidence commit verified and product outputs removed"
+
+
 def run_with_backend(row: dict[str, Any], command: list[str]) -> dict[str, Any]:
     proc = subprocess.run(
         command, input=json.dumps(row, ensure_ascii=False) + "\n", text=True,
@@ -1412,6 +1481,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     try:
         sandbox, commit = create_sandbox(run_dir)
         install_acceptance_model_overrides(sandbox)
+        if row["scenario"] == "dispatch-review-reap":
+            install_acceptance_runtime_fixture(sandbox)
         route = load_config(sandbox).runtime_default(row["runtime"])
         if row["skill"] == "dispatch":
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
@@ -1519,6 +1590,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 if clean:
                     clean, cleanup_proof = sandbox_cleanup_proof(sandbox, commit)
                     proof = f"{proof}; {cleanup_proof}"
+            elif row["skill"] == "daily":
+                clean, proof = daily_acceptance_cleanup(sandbox, commit)
             else:
                 clean, proof = sandbox_cleanup_proof(sandbox, commit)
             if not clean:

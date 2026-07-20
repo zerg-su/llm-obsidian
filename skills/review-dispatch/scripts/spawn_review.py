@@ -87,6 +87,7 @@ HANDOFF_EXCLUDES = [
     ".task-close-armed.json",
     ".task-reap-prepared.json",
     ".task-reap-complete.json",
+    ".task-reap-callback.json",
     ".task-needs-attention.json",
     ".task-watchdog.json",
     ".task-watchdog.lock",
@@ -166,7 +167,9 @@ def configure_existing_review_state(ns: argparse.Namespace, worktree: Path, meta
             action_path = handoff_path
             setattr(ns, "_action_file_path", action_path)
     if meta.get("version", 1) != 3:
-        if raw or action_raw:
+        # `drive` forwards its resolved non-v3 state_dir (the worktree itself)
+        # into cmd_finish/cmd_verify. That self-reference is not a v3 handoff.
+        if action_raw or (raw and Path(raw).expanduser().resolve() != worktree.resolve()):
             die("operation handoffs are supported only by task metadata v3")
         set_review_state_dir(None)
         return worktree

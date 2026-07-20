@@ -582,6 +582,52 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "runtime.env.example" in inspect.getsource(module.dispatch_acceptance_fixture)
         and "codex-sync" not in inspect.getsource(module.dispatch_acceptance_fixture),
     )
+    runtime_fixture = tmp / "runtime-fixture"
+    (runtime_fixture / "scripts/mcp-gateway").mkdir(parents=True)
+    (runtime_fixture / "scripts/mcp-gateway/runtime.env.example").write_text(
+        "LLM_OBSIDIAN_TEST=1\n", encoding="utf-8"
+    )
+    module.install_acceptance_runtime_fixture(runtime_fixture)
+    module.install_acceptance_runtime_fixture(runtime_fixture)
+    check(
+        "lifecycle acceptance provisions one idempotent local runtime fixture",
+        (runtime_fixture / "scripts/mcp-gateway/runtime.env").read_text(encoding="utf-8")
+        == "LLM_OBSIDIAN_TEST=1\n"
+        and "dispatch-review-reap" in inspect.getsource(module.run_live),
+    )
+
+    daily_repo = tmp / "daily-cleanup-proof"
+    daily_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=daily_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=daily_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=daily_repo, check=True)
+    (daily_repo / "tracked.txt").write_text("release\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=daily_repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "release"], cwd=daily_repo, check=True)
+    daily_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=daily_repo,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    daily_page = daily_repo / "wiki/meta/sessions/Acceptance daily fixture.md"
+    daily_page.parent.mkdir(parents=True)
+    daily_page.write_text("---\ntype: session\n---\n", encoding="utf-8")
+    subprocess.run(["git", "add", str(daily_page.relative_to(daily_repo))], cwd=daily_repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "daily evidence"], cwd=daily_repo, check=True)
+    daily_page.unlink()
+    (daily_repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
+    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
+    check(
+        "daily cleanup accepts one exact removed evidence commit",
+        daily_clean and "bounded daily evidence" in daily_proof,
+        daily_proof,
+    )
+    (daily_repo / "unexpected.md").write_text("residue\n", encoding="utf-8")
+    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
+    check(
+        "daily cleanup still rejects unrelated residue",
+        not daily_clean and "retained" in daily_proof,
+        daily_proof,
+    )
 
     prepared = {
         "task_name": "acceptance-dispatch-deadbeef",

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -14,6 +16,7 @@ from typing import Any, NoReturn
 
 
 CMUX_PASTE_SETTLE_SECONDS = 0.2
+DELIVERY_MARKER = ".task-reap-callback.json"
 
 
 class SendError(ValueError):
@@ -54,6 +57,59 @@ def write_summary_views(worktree: Path, summary: dict[str, Any], render_markdown
     markdown_tmp.write_text(render_markdown(summary), encoding="utf-8")
     json_tmp.replace(json_path)
     markdown_tmp.replace(markdown_path)
+
+
+def ensure_delivery_marker_ignored(worktree: Path) -> None:
+    """Keep the task-local idempotency claim out of product status."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=worktree,
+        text=True, capture_output=True, check=False,
+    )
+    raw = result.stdout.strip()
+    if result.returncode != 0 or not raw or "\n" in raw:
+        raise SendError("cannot resolve task Git metadata for reap callback claim")
+    common = Path(raw).expanduser()
+    if not common.is_absolute():
+        common = (worktree / common).resolve()
+    if not common.is_dir() or common.stat().st_uid != os.getuid():
+        raise SendError("task Git metadata for reap callback claim is unavailable")
+    exclude = common / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    existing = (
+        {line.strip() for line in exclude.read_text(encoding="utf-8").splitlines()}
+        if exclude.exists() else set()
+    )
+    if DELIVERY_MARKER not in existing:
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(DELIVERY_MARKER + "\n")
+
+
+def claim_delivery(worktree: Path, value: dict[str, Any]) -> bool:
+    """Persist one exact callback claim; matching retries are idempotent."""
+    path = worktree / DELIVERY_MARKER
+    payload = {
+        "schema_version": 1,
+        "task_id": read_json(worktree / ".task-meta.json").get("task_id"),
+        "surface": value["surface"],
+        "command_sha256": hashlib.sha256(value["command"].encode("utf-8")).hexdigest(),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n"
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        existing = read_json(path)
+        if existing == payload:
+            return False
+        raise SendError("a different reap callback was already delivered for this task")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return True
 
 
 def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
@@ -167,7 +223,21 @@ def main() -> int:
             args.worktree.expanduser().resolve(), persist_repairs=not args.dry_run
         )
         if not args.dry_run:
-            send(value)
+            worktree = args.worktree.expanduser().resolve()
+            ensure_delivery_marker_ignored(worktree)
+            if not claim_delivery(worktree, value):
+                print(json.dumps({
+                    "schema_version": 1,
+                    "status": "already-delivered",
+                    "mode": value["mode"],
+                    "neutralized_wikilinks": value["neutralized_wikilinks"],
+                }, sort_keys=True))
+                return 0
+            try:
+                send(value)
+            except BaseException:
+                (worktree / DELIVERY_MARKER).unlink(missing_ok=True)
+                raise
         print(json.dumps(public_result(value, dry_run=args.dry_run), sort_keys=True))
         return 0
     except (SendError, OSError, ValueError) as exc:

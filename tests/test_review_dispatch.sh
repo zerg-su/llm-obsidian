@@ -338,13 +338,16 @@ printf '00000000-0000-0000-0000-000000000001\n' > "$LINK_WORKTREE/.task-cmux-sur
 printf '{}\n' > "$LINK_WORKTREE/.review-relay.json"
 printf '{}\n' > "$LINK_WORKTREE/.review-callback.json"
 printf '{}\n' > "$LINK_WORKTREE/.task-reap-prepared.json"
+printf '{}\n' > "$LINK_WORKTREE/.task-reap-callback.json"
 git -C "$LINK_WORKTREE" check-ignore -q .review-relay.json
 relay_ignored=$?
 git -C "$LINK_WORKTREE" check-ignore -q .review-callback.json
 callback_ignored=$?
 git -C "$LINK_WORKTREE" check-ignore -q .task-reap-prepared.json
 prepared_ignored=$?
-[[ $relay_ignored -eq 0 && $callback_ignored -eq 0 && $prepared_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
+git -C "$LINK_WORKTREE" check-ignore -q .task-reap-callback.json
+reap_callback_ignored=$?
+[[ $relay_ignored -eq 0 && $callback_ignored -eq 0 && $prepared_ignored -eq 0 && $reap_callback_ignored -eq 0 ]] && ok "linked-worktree-relay-ignored" || bad "linked-worktree-relay-ignored" "common exclude not updated"
 for artifact in .review-history.json .review-archive.json .review-archive-request.json; do
   printf '{}\n' > "$LINK_WORKTREE/$artifact"
   git -C "$LINK_WORKTREE" check-ignore -q "$artifact" || bad "linked-worktree-$artifact-ignored" "common exclude not updated"
