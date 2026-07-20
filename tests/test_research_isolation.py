@@ -203,6 +203,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("fetch launcher has no tool-shell env dependency", "LLM_OBSIDIAN_RESEARCH_NOTIFY" not in fetch_launcher)
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
+    check("fetch callback settles paste before Enter", "time.sleep(0.2)" in notifier)
     check("fetch notifier is owner-executable", (fetch_dir / "notify.py").stat().st_mode & 0o777 == 0o700)
     check(
         "standalone callback carries its explicit state root",
@@ -319,10 +320,21 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     check("untrusted boundary explicit", "UNTRUSTED DATA" in synth_prompt)
     check("writer required", "vault-write.py" in synth_prompt)
     check("synth prompt uses local executable notifier", "run exactly `./notify.py`" in synth_prompt)
+    check(
+        "synth completion pins exact product output paths",
+        '"wiki/path/to/page.md"' in synth_prompt
+        and "pages[*].path" in synth_prompt
+        and "never include `complete.json`" in synth_prompt
+        and '`outputs` must be exactly `["answer.md"]`' in synth_prompt,
+    )
     check("synth launcher has no tool-shell env dependency", "LLM_OBSIDIAN_RESEARCH_NOTIFY" not in synth_launcher)
     check(
         "synth notifier is owner-executable",
         (Path(received["synth_dir"]) / "notify.py").stat().st_mode & 0o777 == 0o700,
+    )
+    check(
+        "synth callback settles paste before Enter",
+        "time.sleep(0.2)" in (Path(received["synth_dir"]) / "notify.py").read_text(encoding="utf-8"),
     )
     writer_at = synth_prompt.index("single vault-write transaction succeeds")
     reindex_at = synth_prompt.index(str(ROOT / "scripts/reindex.py"), writer_at)
@@ -353,11 +365,28 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         '"/opt/homebrew" = "read"' in restarted_config,
     )
 
+    invalid_complete = {
+        "schema_version": 1, "run_id": run_id, "status": "complete",
+        "outputs": ["complete.json"],
+    }
+    completion_path = Path(received["synth_dir"]) / "complete.json"
+    completion_path.write_text(json.dumps(invalid_complete), encoding="utf-8")
+    result = run("status", "--run-id", run_id, "--state-root", str(state_root))
+    check(
+        "status rejects synthesis marker as a product output",
+        result.returncode == 3 and "exact flow-owned path contract" in result.stderr,
+        result.stderr,
+    )
+    check(
+        "invalid completion does not advance durable state",
+        json.loads((state_root / run_id / "state.json").read_text(encoding="utf-8"))["status"]
+        != "complete",
+    )
     complete = {
         "schema_version": 1, "run_id": run_id, "status": "complete",
         "outputs": ["wiki/questions/Research Result.md"],
     }
-    (Path(received["synth_dir"]) / "complete.json").write_text(json.dumps(complete), encoding="utf-8")
+    completion_path.write_text(json.dumps(complete), encoding="utf-8")
     result = run("status", "--run-id", run_id, "--state-root", str(state_root))
     check("status complete", json.loads(result.stdout)["status"] == "complete")
 

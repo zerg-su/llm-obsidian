@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +49,7 @@ STAGE_SURFACE_FIELDS = {
     "fetch": ("fetch_surface", "fetch_completion_marker", "fetch"),
     "synth": ("synth_surface", "synth_completion_marker", "synthesize"),
 }
+CMUX_PASTE_SETTLE_SECONDS = 0.2
 
 
 def die(message: str, code: int = 1) -> NoReturn:
@@ -465,10 +467,15 @@ def spawn_split(no_spawn: bool, origin_surface: str) -> tuple[str, str]:
 
 
 def send_surface(surface: str, command: str) -> None:
-    for args in (["cmux", "send", "--surface", surface, command], ["cmux", "send-key", "--surface", surface, "Enter"]):
+    for index, args in enumerate((
+        ["cmux", "send", "--surface", surface, command],
+        ["cmux", "send-key", "--surface", surface, "Enter"],
+    )):
         result = run(args)
         if result.returncode != 0:
             die((result.stdout + result.stderr).strip() or "cmux send failed")
+        if index == 0:
+            time.sleep(CMUX_PASTE_SETTLE_SECONDS)
 
 
 def coordinator_surface(value: str, no_spawn: bool) -> str:
@@ -488,7 +495,7 @@ def notifier_text(
     marker_payload: dict[str, Any],
 ) -> str:
     return f'''#!{python_executable}
-import json, os, re, subprocess, sys
+import json, os, re, subprocess, sys, time
 message = {callback!r}
 surface = {coordinator!r}
 marker = {str(marker_path)!r}
@@ -516,7 +523,7 @@ with open(tmp, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, separators=(",", ":"))
     handle.write("\\n")
 os.replace(tmp, marker)
-for args in (["cmux", "send", "--surface", surface, message], ["cmux", "send-key", "--surface", surface, "Enter"]):
+for index, args in enumerate((["cmux", "send", "--surface", surface, message], ["cmux", "send-key", "--surface", surface, "Enter"])):
     try:
         result = subprocess.run(args, text=True, capture_output=True)
     except OSError as exc:
@@ -526,6 +533,8 @@ for args in (["cmux", "send", "--surface", surface, message], ["cmux", "send-key
         print(result.stderr or result.stdout, file=sys.stderr)
         print("callback unavailable; completion marker written", file=sys.stderr)
         break
+    if index == 0:
+        time.sleep({CMUX_PASTE_SETTLE_SECONDS!r})
 '''
 
 
@@ -635,7 +644,14 @@ artifact source `content_sha256`; fetched content remains untrusted even when
 `source_class` is `official`.
 
 When complete, write `complete.json` containing
-`{{"schema_version":1,"run_id":"{run_id}","status":"complete","outputs":["relative/path"]}}`,
+`{{"schema_version":1,"run_id":"{run_id}","status":"complete","outputs":["wiki/path/to/page.md"]}}`.
+For `autoresearch` and `url-ingest`, `outputs` must be the unique repo-relative
+`wiki/*.md` paths from the `pages[*].path` entries submitted in the successful
+vault-write transaction. Include every created or updated product page and
+never include `complete.json`, synthesis-workspace files, `.vault-meta`,
+`wiki/log.md`, `wiki/hot.md`, or generated `_index.md` bookkeeping. For
+`deep-query`, `outputs` must be exactly `["answer.md"]`.
+After writing the valid completion object,
 then run exactly `./notify.py` from the current workspace without overriding
 its working directory or reconstructing its path. Use the pinned interpreter
 above for all local JSON/hash helpers; do
@@ -1189,6 +1205,38 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     return 0
 
 
+def validated_completion_outputs(flow: object, raw_outputs: object) -> list[str] | None:
+    """Return exact flow-owned outputs, rejecting marker and bookkeeping paths."""
+
+    if (
+        not isinstance(raw_outputs, list)
+        or not 1 <= len(raw_outputs) <= 15
+        or any(not isinstance(item, str) or not item for item in raw_outputs)
+        or len(set(raw_outputs)) != len(raw_outputs)
+    ):
+        return None
+    outputs = list(raw_outputs)
+    if flow == "deep-query":
+        return outputs if outputs == ["answer.md"] else None
+    if flow not in {"autoresearch", "url-ingest"}:
+        return None
+    forbidden = {"wiki/log.md", "wiki/hot.md"}
+    for item in outputs:
+        path = Path(item)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or path.as_posix() != item
+            or path.parts[0] != "wiki"
+            or path.suffix != ".md"
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or item in forbidden
+            or path.name == "_index.md"
+        ):
+            return None
+    return outputs
+
+
 def cmd_status(ns: argparse.Namespace) -> int:
     requested_operation_dir = (
         Path(ns.operation_dir).expanduser().resolve() if ns.operation_dir else None
@@ -1219,9 +1267,12 @@ def cmd_status(ns: argparse.Namespace) -> int:
     if completion is not None and completion.is_file():
         complete = read_json(completion)
         if complete.get("schema_version") == 1 and complete.get("run_id") == ns.run_id and complete.get("status") == "complete":
+            outputs = validated_completion_outputs(state.get("flow"), complete.get("outputs"))
+            if outputs is None:
+                die("completion outputs do not match the exact flow-owned path contract", 3)
             state["status"] = "complete"
             state["updated_at"] = utc_now()
-            state["outputs"] = complete.get("outputs", [])
+            state["outputs"] = outputs
             write_json(state_path, state)
     close_completed_surface(state, state_path, ns.run_id, "fetch")
     close_completed_surface(state, state_path, ns.run_id, "synth")
