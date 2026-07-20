@@ -109,6 +109,10 @@ expect_eq "start-light-exit" "$?" 0
 [[ ! -e "$LIGHT/.task-review-resolution.md" && ! -e "$LIGHT/.task-review-verify.md" && ! -e "$LIGHT/.review-outbox.json" ]] && ok "start-clears-stale-round-artifacts" || bad "start-clears-stale-round-artifacts" "old resolution/verify/outbox survived"
 expect_eq "start-light-meta" "$(json_get "$LIGHT/.review-meta.json" review_mode)" "light"
 expect_eq "start-supervised-receive" "$(json_get "$LIGHT/.review-meta.json" callback_transport)" "supervised-receive-v1"
+case "$(json_get "$LIGHT/.review-meta.json" executor_callback_command)" in
+  *"$REPO_ROOT/skills/review-dispatch/scripts/spawn_review.py receive"*) ok "review-callback-version-aligned" ;;
+  *) bad "review-callback-version-aligned" "callback used the coordinator vault's potentially incompatible review script" ;;
+esac
 expect_eq "start-review-id-stable" "$(json_get "$LIGHT/.review-meta.json" review_id)" "$(json_get "$LIGHT/.review-meta.json" run_id)"
 [[ -f "$LIGHT/.review-history.json" ]] && ok "start-review-history" || bad "start-review-history" "history file missing"
 python3 - "$LIGHT/.review-history.json" <<'PY'
@@ -157,6 +161,8 @@ grep -qF -- 'Do not exit on your own, call wait/poll tools, start a polling loop
 grep -qF -- 'Do not prefix them with `git -C`' "$LIGHT/.review-prompt.md" && ok "claude-cwd-git-prompt" || bad "claude-cwd-git-prompt" "cwd-relative git guidance missing"
 if grep -qF -- "git -C $LIGHT ..." "$LIGHT/.review-prompt.md"; then bad "claude-no-git-c-escape" "Claude prompt requests a denied git -C command"; else ok "claude-no-git-c-escape"; fi
 grep -q -- 'cmux_agent_supervisor.py run' "$SANDBOX/light.out" && ok "review-supervisor-wrapper" || bad "review-supervisor-wrapper" "short supervisor command missing"
+grep -qF -- "$REPO_ROOT/scripts/cmux_agent_supervisor.py run" "$SANDBOX/light.out" && ok "review-supervisor-version-aligned" || bad "review-supervisor-version-aligned" "review used the coordinator vault's potentially incompatible supervisor"
+if grep -qF -- "$LIGHT_VAULT/scripts/cmux_agent_supervisor.py run" "$SANDBOX/light.out"; then bad "review-supervisor-not-coordinator-copy" "review used an independently versioned coordinator supervisor"; else ok "review-supervisor-not-coordinator-copy"; fi
 grep -q -- '--kind reviewer' "$SANDBOX/light.out" && ok "review-watchdog-kind" || bad "review-watchdog-kind" "reviewer routing missing"
 "$SUPERVISOR" validate --worktree "$LIGHT" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/supervisor.err"
 expect_eq "review-supervisor-valid" "$?" 0
@@ -634,6 +640,10 @@ spec.loader.exec_module(module)
 operation_id = "11111111-1111-4111-8111-111111111111"
 assert module.is_handoff(f".task-review-drive-{operation_id}.json")
 assert module.is_handoff(f".task-review-resolution-{operation_id}.md")
+assert not module.is_handoff(".task-review-drive-x/evil.json")
+assert not module.is_handoff(".task-review-resolution-x/evil.md")
+assert not module.is_handoff(".task-review-drive-not-a-uuid.json")
+assert not module.is_handoff(".task-review-resolution-not-a-uuid.md")
 assert not module.is_handoff("scripts/product-change.py")
 PY
 [[ $? -eq 0 ]] && ok "operation-scoped-review-handoffs" || bad "operation-scoped-review-handoffs" "operation handoffs were treated as product drift"

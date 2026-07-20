@@ -124,6 +124,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "wiki-query fixture has deterministic sparse evidence",
         "ACCEPTANCEQUARTZ731" in fixture_registry["skills"]["wiki-query"]["fixture"]
         and "neither distractor may contain" in fixture_registry["skills"]["wiki-query"]["fixture"]
+        and "OLLAMA_URL=http://127.0.0.1:1" in fixture_registry["skills"]["wiki-query"]["fixture"]
+        and "unconditional visible degraded=true" in fixture_registry["skills"]["wiki-query"]["fixture"]
         and "answer note ranks first" in fixture_registry["skills"]["wiki-query"]["fixture"],
     )
     check(

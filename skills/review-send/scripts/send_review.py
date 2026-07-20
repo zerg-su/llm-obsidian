@@ -8,6 +8,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -37,8 +38,6 @@ HANDOFF_EXCLUDES = [
     ".task-review-verify.md",
     ".task-review-verify.json",
     ".task-review-resolution.md",
-    ".task-review-resolution-*.md",
-    ".task-review-drive-*.json",
     ".task-review-skill",
     ".task-review-send-skill",
     ".review-history.json",
@@ -68,6 +67,10 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace.json",
     ".obsidian/workspace-mobile.json",
 ]
+OPERATION_HANDOFF_RX = re.compile(
+    r"^\.task-review-(?:drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"resolution-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.md)$"
+)
 CMUX_PASTE_SETTLE_SECONDS = 0.2
 REVIEW_CALLBACK_FILE = ".review-callback.json"
 SUPERVISED_RECEIVE_TRANSPORT = "supervised-receive-v1"
@@ -174,7 +177,9 @@ def resolve_state_dir(worktree: Path, raw: str) -> Path:
 
 
 def is_handoff(path: str) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in HANDOFF_EXCLUDES)
+    return OPERATION_HANDOFF_RX.fullmatch(path) is not None or any(
+        fnmatch.fnmatch(path, pattern) for pattern in HANDOFF_EXCLUDES
+    )
 
 
 def git_paths(worktree: Path, *args: str) -> list[str]:

@@ -997,6 +997,26 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         }),
         encoding="utf-8",
     )
+    first_synth_lane_path = (
+        persistent_store.lane_dir(
+            first_synth_broker["project_id"], first_synth_broker["task_id"],
+            first_synth_broker["lane_id"],
+        ) / "lane.json"
+    )
+    first_synth_lane_bytes = first_synth_lane_path.read_bytes()
+    first_synth_lane_path.write_text("{invalid\n", encoding="utf-8")
+    pending_synth = run(
+        "status", "--run-id", first_synth["run_id"], cwd=persistent_vault,
+    )
+    pending_synth_state = json.loads(pending_synth.stdout)
+    check(
+        "persistent synth broker failure stays visibly nonterminal",
+        pending_synth.returncode == 0
+        and pending_synth_state["status"] == "synthesis_ready"
+        and pending_synth_state["synth_broker_completion"] == "pending-recovery",
+        pending_synth.stderr,
+    )
+    first_synth_lane_path.write_bytes(first_synth_lane_bytes)
     completed_synth = run(
         "status", "--run-id", first_synth["run_id"], cwd=persistent_vault,
     )
@@ -1015,6 +1035,17 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         == "checkpoint-synth-1"
         and "synth_surface_closed_at" not in completed_synth_state,
         completed_synth.stderr,
+    )
+    completed_state_path = Path(first_synth["operation_dir"], "state.json")
+    completed_state_bytes = completed_state_path.read_bytes()
+    repeated_completed_synth = run(
+        "status", "--run-id", first_synth["run_id"], cwd=persistent_vault,
+    )
+    check(
+        "terminal synth status is a byte-stable read",
+        repeated_completed_synth.returncode == 0
+        and completed_state_path.read_bytes() == completed_state_bytes,
+        repeated_completed_synth.stderr,
     )
 
     second_fetch = resumed_fetch_state["fetch_broker"]
@@ -1052,7 +1083,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "start", "--topic", "invalid synth checkpoint", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--vault-root", str(persistent_vault),
         "--worktree", str(persistent_repo), "--task-id", persistent_task,
-        "--tmp-root", str(tmp), "--no-spawn",
+        "--tmp-root", str(tmp), "--no-spawn", "--keep-surfaces",
     )
     check("third persistent fetch starts", third_fetch_result.returncode == 0, third_fetch_result.stderr)
     check(
@@ -1062,10 +1093,6 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     )
     third_fetch = json.loads(third_fetch_result.stdout)
     third_fetch_broker = third_fetch["fetch_broker"]
-    persistent_store.transition_operation(
-        third_fetch_broker["project_id"], third_fetch_broker["task_id"],
-        third_fetch_broker["lane_id"], third_fetch_broker["operation_id"], "complete",
-    )
     write_persistent_artifact(third_fetch, "invalid synth checkpoint")
     synth_lane_path = (
         persistent_store.lane_dir(
@@ -1084,6 +1111,18 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         "--tmp-root", str(tmp), "--no-spawn",
     )
     check("invalid checkpoint synthesis starts", invalid_synth_result.returncode == 0, invalid_synth_result.stderr)
+    invalid_synth_state = json.loads(invalid_synth_result.stdout)
+    third_fetch_lane = persistent_store.lane_state(
+        third_fetch_broker["project_id"], third_fetch_broker["task_id"],
+        third_fetch_broker["lane_id"],
+    )
+    check(
+        "accepted fetch releases its lane independently of keep-surfaces cleanup",
+        invalid_synth_state["fetch_broker_completion"] == "complete"
+        and invalid_synth_state["surface_policy"] == "keep"
+        and third_fetch_lane.get("active_operation_id") is None
+        and "fetch_surface_closed_at" not in invalid_synth_state,
+    )
     check(
         "invalid secure synthesis checkpoint falls back visibly",
         "secure synthesis checkpoint is invalid" in invalid_synth_result.stderr,

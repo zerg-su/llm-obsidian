@@ -967,7 +967,7 @@ def prepare_review_runtime(
 
 def callback_command(vault: Path, worktree: Path, state_dir: Path | None = None) -> str:
     """Build a runtime-neutral callback prompt instead of a fragile slash command."""
-    script = vault / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
+    script = DEFAULT_VAULT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
     argv = ["python3", str(script), "receive", "--worktree", str(worktree)]
     state_dir = state_dir or worktree
     if state_dir != worktree:
@@ -1050,7 +1050,10 @@ def launch_command(
         env["TMPDIR"] = str(review_runtime_dir)
 
     write_agent_spec(state_dir, "reviewer", reviewer_runtime, argv, prompt_file, env)
-    supervisor = vault / "scripts" / "cmux_agent_supervisor.py"
+    # The supervisor and the generated state contract must come from the same
+    # checkout.  A task may intentionally point at an older coordinator vault
+    # while reviewing a newer self-dogfood branch.
+    supervisor = DEFAULT_VAULT / "scripts" / "cmux_agent_supervisor.py"
     return shlex.join(
         [
             "python3", str(supervisor), "run", "--worktree", str(worktree),

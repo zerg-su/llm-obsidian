@@ -1420,6 +1420,15 @@ def cmd_receive(ns: argparse.Namespace) -> int:
         die(f"artifact rejected: {exc}", 3)
     write_json(state_dir / "artifact.json", artifact)
     state["fetch_artifact_status"] = "accepted"
+    state["status"] = "fetch_received"
+    state["updated_at"] = utc_now()
+    write_json(state_path, state)
+    if not finalize_stage_broker(state, state_path, ns.run_id, "fetch"):
+        die(
+            "fetch artifact is accepted but exact broker completion is pending recovery; "
+            "retry this receive command",
+            3,
+        )
 
     tmp_root = ns.tmp_root.resolve() if ns.tmp_root else Path(tempfile.gettempdir())
     synth_broker: dict[str, Any] | None = None
@@ -1692,14 +1701,23 @@ def cmd_status(ns: argparse.Namespace) -> int:
             outputs = validated_completion_outputs(state.get("flow"), complete.get("outputs"))
             if outputs is None:
                 die("completion outputs do not match the exact flow-owned path contract", 3)
-            state["status"] = "synthesis_ready"
-            state["updated_at"] = utc_now()
-            state["outputs"] = outputs
-            write_json(state_path, state)
-            if finalize_stage_broker(state, state_path, ns.run_id, "synth"):
-                state["status"] = "complete"
+            synth_broker = state.get("synth_broker")
+            terminal = state.get("status") == "complete" and (
+                not isinstance(synth_broker, dict)
+                or state.get("synth_broker_completion") == "complete"
+            )
+            if terminal:
+                if state.get("outputs") != outputs:
+                    die("terminal completion outputs changed after publication", 3)
+            else:
+                state["status"] = "synthesis_ready"
                 state["updated_at"] = utc_now()
+                state["outputs"] = outputs
                 write_json(state_path, state)
+                if finalize_stage_broker(state, state_path, ns.run_id, "synth"):
+                    state["status"] = "complete"
+                    state["updated_at"] = utc_now()
+                    write_json(state_path, state)
     close_completed_surface(state, state_path, ns.run_id, "fetch")
     close_completed_surface(state, state_path, ns.run_id, "synth")
     print(json.dumps(state, indent=2, ensure_ascii=False))
