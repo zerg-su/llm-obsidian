@@ -66,6 +66,39 @@ with tempfile.TemporaryDirectory(prefix="journal-write-test.") as raw:
     check("reminder append uses checkbox", result.returncode == 0 and "- [ ] Call the workshop" in page.read_text(encoding="utf-8"), result.stderr)
     result = run(root, "check", "--date", "2026-07-10", "--section", "reminders", "--match", "workshop")
     check("reminder check", result.returncode == 0 and "- [x] Call the workshop" in page.read_text(encoding="utf-8"), result.stderr)
+    batch_operations = json.dumps([
+        {"op": "append", "section": "reminders", "text": "Atomic reminder"},
+        {"op": "append", "section": "plans", "text": "Atomic completed task"},
+        {"op": "check", "section": "plans", "match": "Atomic completed task"},
+    ])
+    events_path = root / ".vault-meta/pipeline-events.jsonl"
+    events_before_batch = len(events_path.read_text(encoding="utf-8").splitlines())
+    result = run(
+        root, "batch", "--date", "2026-07-10", "--operations-json", batch_operations
+    )
+    batch_text = page.read_text(encoding="utf-8")
+    check(
+        "batch applies reminder and completed task atomically",
+        result.returncode == 0
+        and "- [ ] Atomic reminder" in batch_text
+        and "- [x] Atomic completed task" in batch_text
+        and len(events_path.read_text(encoding="utf-8").splitlines())
+        == events_before_batch + 1,
+        result.stderr,
+    )
+    before_invalid_batch = page.read_text(encoding="utf-8")
+    invalid_batch = json.dumps([
+        {"op": "append", "section": "plans", "text": "Must roll back"},
+        {"op": "check", "section": "plans", "match": "missing task"},
+    ])
+    result = run(
+        root, "batch", "--date", "2026-07-10", "--operations-json", invalid_batch
+    )
+    check(
+        "invalid batch leaves the page unchanged",
+        result.returncode == 3 and page.read_text(encoding="utf-8") == before_invalid_batch,
+        result.stderr,
+    )
     result = run(
         root,
         "append",
@@ -128,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix="journal-write-test.") as raw:
     check(
         "today performs a read-only unfinished scan",
         result.returncode == 0
-        and today_payload["unfinished_count"] == 1
+        and today_payload["unfinished_count"] == 2
         and today_payload["next"].endswith("collect --date 2026-07-12"),
         result.stderr,
     )

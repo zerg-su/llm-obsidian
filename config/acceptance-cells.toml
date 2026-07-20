@@ -103,3 +103,6 @@ dependencies = ["scripts/validate-vault.py", "scripts/vault-write.py"]
 
 [scenarios.ingest]
 dependencies = ["scripts/document-normalize.py", "scripts/research-isolation.py", "scripts/research_contract.py", "scripts/vault-write.py"]
+
+[skills.journal]
+dependencies = ["scripts/journal-write.py"]

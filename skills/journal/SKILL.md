@@ -33,6 +33,9 @@ python3 scripts/journal-write.py append --date YYYY-MM-DD --section notes --text
 python3 scripts/journal-write.py check --date YYYY-MM-DD --match "substring"
 python3 scripts/journal-write.py check --date YYYY-MM-DD --section reminders --match "substring"
 
+# Apply ordered appends/checks to one date page in one optimistic transaction
+python3 scripts/journal-write.py batch --date YYYY-MM-DD --operations-json '[{"op":"append","section":"reminders","text":"FYI"},{"op":"append","section":"plans","text":"task"},{"op":"check","section":"plans","match":"task"}]'
+
 # Compatibility command: atomically migrate source plans via agenda
 python3 scripts/journal-write.py carryover --source YYYY-MM-DD --target YYYY-MM-DD
 
@@ -42,6 +45,8 @@ python3 scripts/journal-write.py sessions --date YYYY-MM-DD
 
 Plans and reminders are Tasks-compatible checkboxes with stable `^agenda-...` block
 IDs; exact text deduplicates within a section across every status. Notes are free-form and append.
+Use `batch` when one user request contains several mutations that must commit atomically;
+it accepts 1–20 ordered `append`/`check` operations and still invokes `vault-write.py` once.
 `check` refuses zero or multiple matches; ask the user to disambiguate and retry with a
 narrower match. Carry-over delegates to `scripts/agenda.py collect`, closes the source
 as `[>]`, and creates one open target occurrence in the same optimistic transaction.

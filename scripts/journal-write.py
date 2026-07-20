@@ -117,6 +117,14 @@ def ensure(date: str, *, dry_run: bool) -> dict:
 
 
 def append(date: str, section_name: str, text: str, *, dry_run: bool) -> dict:
+    return mutate(
+        date,
+        lambda page: append_to_page(date, page, section_name, text),
+        dry_run=dry_run,
+    )
+
+
+def append_to_page(date: str, page: str, section_name: str, text: str) -> str:
     heading = SECTIONS[section_name]
     if section_name != "notes" and ("\n" in text or not text.strip()):
         raise DailyContractError("plans/reminders require one non-empty line")
@@ -125,60 +133,101 @@ def append(date: str, section_name: str, text: str, *, dry_run: bool) -> dict:
     if section_name == "notes" and any(line.startswith(("## ", "---")) for line in text.splitlines()):
         raise DailyContractError("notes must not introduce headings or frontmatter delimiters")
 
-    def transform(page: str) -> str:
-        current = section_lines(page, heading)
-        if section_name in DAILY_TASK_SECTIONS:
-            candidate = task_input_open_line(date, section_name, text)
-            candidate_task = parse_daily_task(
-                candidate,
-                date=date,
-                section=section_name,
-                line_no=1,
-            )
-            if candidate_task is None:
-                raise DailyContractError("cannot normalize task input")
-            identity = candidate_task.normalized_text
-            parsed = [
-                parse_daily_task(line, date=date, section=section_name, line_no=index + 1)
-                for index, line in enumerate(current)
-            ]
-            if any(
-                item is not None
-                and item.normalized_text == identity
-                for item in parsed
-            ):
-                return page
-            current.append(candidate)
-        else:
-            current.extend(text.strip().splitlines())
-        return replace_h2(page, heading, current)
-
-    return mutate(date, transform, dry_run=dry_run)
+    current = section_lines(page, heading)
+    if section_name in DAILY_TASK_SECTIONS:
+        candidate = task_input_open_line(date, section_name, text)
+        candidate_task = parse_daily_task(
+            candidate,
+            date=date,
+            section=section_name,
+            line_no=1,
+        )
+        if candidate_task is None:
+            raise DailyContractError("cannot normalize task input")
+        identity = candidate_task.normalized_text
+        parsed = [
+            parse_daily_task(line, date=date, section=section_name, line_no=index + 1)
+            for index, line in enumerate(current)
+        ]
+        if any(
+            item is not None
+            and item.normalized_text == identity
+            for item in parsed
+        ):
+            return page
+        current.append(candidate)
+    else:
+        current.extend(text.strip().splitlines())
+    return replace_h2(page, heading, current)
 
 
 def check(date: str, match: str, *, section_name: str = "plans", dry_run: bool) -> dict:
+    return mutate(
+        date,
+        lambda page: check_in_page(date, page, match, section_name=section_name),
+        dry_run=dry_run,
+    )
+
+
+def check_in_page(
+    date: str, page: str, match: str, *, section_name: str = "plans"
+) -> str:
     needle = match.strip().casefold()
     if not needle:
         raise DailyContractError("check match must not be empty")
     if section_name not in DAILY_TASK_SECTIONS:
         raise DailyContractError("check section must be plans or reminders")
 
+    lines = page.splitlines()
+    start, end = h2_section_span(page, DAILY_TASK_SECTIONS[section_name])
+    matches = []
+    for index in range(start, end):
+        task = parse_daily_task(lines[index], date=date, section=section_name, line_no=index + 1)
+        if task is not None and task.status in {"open", "in_progress"} and needle in task.raw.casefold():
+            matches.append((index, task))
+    if not matches:
+        raise DailyContractError(f"no unfinished {section_name} item matches")
+    if len(matches) > 1:
+        choices = "; ".join(task.raw for _, task in matches[:5])
+        raise DailyContractError(f"multiple unfinished {section_name} items match: {choices}")
+    index, task = matches[0]
+    lines[index] = task_done_line(task, datetime.now().astimezone().strftime("%Y-%m-%d"))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def batch(date: str, operations_json: str, *, dry_run: bool) -> dict:
+    """Apply a bounded ordered operation list in one optimistic writer transaction."""
+    try:
+        operations = json.loads(operations_json)
+    except json.JSONDecodeError as exc:
+        raise DailyContractError("batch operations must be valid JSON") from exc
+    if not isinstance(operations, list) or not 1 <= len(operations) <= 20:
+        raise DailyContractError("batch operations must contain between 1 and 20 items")
+
     def transform(page: str) -> str:
-        lines = page.splitlines()
-        start, end = h2_section_span(page, DAILY_TASK_SECTIONS[section_name])
-        matches = []
-        for index in range(start, end):
-            task = parse_daily_task(lines[index], date=date, section=section_name, line_no=index + 1)
-            if task is not None and task.status in {"open", "in_progress"} and needle in task.raw.casefold():
-                matches.append((index, task))
-        if not matches:
-            raise DailyContractError(f"no unfinished {section_name} item matches")
-        if len(matches) > 1:
-            choices = "; ".join(task.raw for _, task in matches[:5])
-            raise DailyContractError(f"multiple unfinished {section_name} items match: {choices}")
-        index, task = matches[0]
-        lines[index] = task_done_line(task, datetime.now().astimezone().strftime("%Y-%m-%d"))
-        return "\n".join(lines).rstrip() + "\n"
+        current = page
+        for index, operation in enumerate(operations, start=1):
+            if not isinstance(operation, dict):
+                raise DailyContractError(f"batch operation {index} must be an object")
+            kind = operation.get("op")
+            section = operation.get("section")
+            if kind == "append" and section in SECTIONS and set(operation) == {"op", "section", "text"}:
+                text = operation.get("text")
+                if not isinstance(text, str):
+                    raise DailyContractError(f"batch operation {index} text must be a string")
+                current = append_to_page(date, current, str(section), text)
+            elif (
+                kind == "check"
+                and section in DAILY_TASK_SECTIONS
+                and set(operation) == {"op", "section", "match"}
+            ):
+                match = operation.get("match")
+                if not isinstance(match, str):
+                    raise DailyContractError(f"batch operation {index} match must be a string")
+                current = check_in_page(date, current, match, section_name=str(section))
+            else:
+                raise DailyContractError(f"batch operation {index} has an invalid contract")
+        return current
 
     return mutate(date, transform, dry_run=dry_run)
 
@@ -263,6 +312,10 @@ def main() -> int:
     done.add_argument("--match", required=True)
     done.add_argument("--section", choices=sorted(DAILY_TASK_SECTIONS), default="plans")
     done.add_argument("--dry-run", action="store_true")
+    grouped = sub.add_parser("batch")
+    grouped.add_argument("--date", required=True)
+    grouped.add_argument("--operations-json", required=True)
+    grouped.add_argument("--dry-run", action="store_true")
     carry = sub.add_parser("carryover")
     carry.add_argument("--source", required=True)
     carry.add_argument("--target", required=True)
@@ -277,6 +330,8 @@ def main() -> int:
             response = append(args.date, args.section, args.text, dry_run=args.dry_run)
         elif args.command == "check":
             response = check(args.date, args.match, section_name=args.section, dry_run=args.dry_run)
+        elif args.command == "batch":
+            response = batch(args.date, args.operations_json, dry_run=args.dry_run)
         elif args.command == "sessions":
             response = sessions(args.date, dry_run=args.dry_run)
         else:
