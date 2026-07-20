@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import signal
 import subprocess
@@ -17,6 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "release-acceptance.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from acceptance_fingerprints import cell_metadata, read_manifest
+
+
+module_spec = importlib.util.spec_from_file_location("release_acceptance_test", SCRIPT)
+assert module_spec is not None and module_spec.loader is not None
+release_acceptance = importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(release_acceptance)
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -126,6 +133,31 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'high',"
         "'actual':'bounded pass','cleanup':'none','evidence':'fixture'}))\n",
         encoding="utf-8",
+    )
+    checkpoint_rows = [
+        {
+            "phase": "final", "skill": name, "runtime": "claude",
+            "scenario": "checkpoint", "expected": "bounded",
+        }
+        for name in ("first", "later-prior")
+    ]
+    later_prior = {
+        **checkpoint_rows[1], "verdict": "pass", "model": "fixture",
+        "effort": "high", "actual": "prior", "cleanup": "ok", "evidence": "ok",
+    }
+    checkpoints: list[list[dict[str, object]]] = []
+    checkpoint_result = release_acceptance.run_matrix(
+        checkpoint_rows,
+        [sys.executable, str(runner)],
+        5,
+        prior=[later_prior],
+        checkpoint=lambda value: checkpoints.append(value),
+    )
+    check(
+        "checkpoint preserves valid rows later in matrix order",
+        len(checkpoints) == 1
+        and [row["skill"] for row in checkpoints[0]] == ["first", "later-prior"]
+        and [row["skill"] for row in checkpoint_result] == ["first", "later-prior"],
     )
     report = tmp / "report.json"
     result = run(

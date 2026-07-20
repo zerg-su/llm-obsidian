@@ -293,12 +293,15 @@ def run_matrix(
     commit: str = "",
     selected_skills: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    prior_by_key = {row_key(item): item for item in (prior or [])}
-    results: list[dict[str, Any]] = []
+    completed = {row_key(item): item for item in (prior or [])}
+
+    def completed_rows() -> list[dict[str, Any]]:
+        """Render every durable row in canonical matrix order for checkpoints."""
+        return [completed[row_key(row)] for row in rows if row_key(row) in completed]
+
     for row in rows:
-        previous = prior_by_key.get(row_key(row))
-        if previous is not None:
-            results.append(previous)
+        key = row_key(row)
+        if key in completed:
             continue
         if selected_skills is not None and row["skill"] not in selected_skills:
             continue
@@ -349,11 +352,11 @@ def run_matrix(
         if result.get("duration_seconds") is None:
             result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
         if metadata is not None:
-            result = decorate_result(result, metadata[row_key(row)], commit=commit)
-        results.append(result)
+            result = decorate_result(result, metadata[key], commit=commit)
+        completed[key] = result
         if checkpoint is not None:
-            checkpoint(results)
-    return results
+            checkpoint(completed_rows())
+    return completed_rows()
 
 
 def report_payload(
