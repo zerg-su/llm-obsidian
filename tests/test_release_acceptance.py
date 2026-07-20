@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import importlib.util
 import os
@@ -799,6 +800,40 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     check(
         "compatible orchestration change reuses live evidence",
         result.returncode == 0 and calls == [],
+        result.stderr,
+    )
+    legacy_report = json.loads(incremental_report.read_text(encoding="utf-8"))
+    for row in legacy_report["rows"]:
+        row["dependencies"] = sorted(
+            set(row["dependencies"]) | {"scripts/live-acceptance-runner.py"}
+        )
+        row["cell_fingerprint"] = hashlib.sha256(
+            (row["cell_fingerprint"] + ":legacy-global-runner").encode("utf-8")
+        ).hexdigest()
+        row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
+            row, row["cell_fingerprint"], row["provenance"]
+        )
+    incremental_report.write_text(json.dumps(legacy_report), encoding="utf-8")
+    invocation_log.write_text("", encoding="utf-8")
+    (incremental / "scripts/live-acceptance-runner.py").write_text(
+        "# compatible orchestration migration\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "move runner out of cell behavior"],
+        cwd=incremental, check=True,
+    )
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    migrated = json.loads(incremental_report.read_text(encoding="utf-8"))
+    check(
+        "legacy global runner dependency migrates without rerunning unaffected cells",
+        result.returncode == 0
+        and calls == []
+        and all(
+            row["reason"] == "reused-compatible-orchestration-migration"
+            for row in migrated["rows"]
+        ),
         result.stderr,
     )
     report_data = json.loads(incremental_report.read_text(encoding="utf-8"))

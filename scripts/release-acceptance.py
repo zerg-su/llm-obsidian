@@ -282,19 +282,45 @@ def load_resume_results(
             continue
         current = metadata[key]
         provenance = raw.get("provenance")
+        raw_fingerprint = str(raw.get("cell_fingerprint") or "")
+        raw_dependencies = raw.get("dependencies")
         if (
             unknown_changed
-            or raw.get("cell_fingerprint") != current["cell_fingerprint"]
-            or raw.get("dependencies") != current["dependencies"]
+            or not re.fullmatch(r"[0-9a-f]{64}", raw_fingerprint)
+            or not isinstance(raw_dependencies, list)
+            or any(not isinstance(item, str) for item in raw_dependencies)
             or raw.get("generation") != current["generation"]
             or not isinstance(provenance, dict)
             or raw.get("row_integrity_sha256")
-            != integrity_sha256(result, current["cell_fingerprint"], provenance)
+            != integrity_sha256(result, raw_fingerprint, provenance)
         ):
+            continue
+        exact = (
+            raw_fingerprint == current["cell_fingerprint"]
+            and raw_dependencies == current["dependencies"]
+        )
+        prior_dependency_set = set(raw_dependencies)
+        current_dependency_set = set(current["dependencies"])
+        compatible_orchestration_migration = (
+            not exact
+            and changed is not None
+            and not (current_dependency_set - prior_dependency_set)
+            and bool(prior_dependency_set - current_dependency_set)
+            and (prior_dependency_set - current_dependency_set) <= (orchestration or set())
+            and not (changed & current_dependency_set)
+        )
+        if not exact and not compatible_orchestration_migration:
             continue
         resumed.append(
             decorate_result(
-                result, current, commit=commit, reason="reused-identical", provenance=provenance
+                result,
+                current,
+                commit=commit,
+                reason=(
+                    "reused-identical"
+                    if exact else "reused-compatible-orchestration-migration"
+                ),
+                provenance=provenance,
             )
         )
     return resumed
