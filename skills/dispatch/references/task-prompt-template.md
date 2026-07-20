@@ -98,7 +98,9 @@ viewports. It only sends staged coordinator notifications after prolonged
 visible inactivity; it never sends you input, cancels work, or closes a surface.
 The supervisor may press Enter once only when the exact native Claude/Codex
 workspace-trust dialog appears on this approved task surface during startup.
-It does not answer any other prompt.
+For Claude, it may also confirm the exact native background-work exit dialog,
+but only after the validated lifecycle has armed this task or reviewer for
+closure. It does not answer any other prompt.
 
 Stop conditions still apply: a fork that materially changes the plan / a new
 risk / an out-of-scope item → call `python3 <vault-root>/scripts/task_escalation.py

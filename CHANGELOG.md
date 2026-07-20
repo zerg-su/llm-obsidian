@@ -32,6 +32,12 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Confirm Claude's exact native background-work exit dialog automatically only
+  after an unattended task or reviewer close has been lifecycle-authorized,
+  preventing completed task splits from lingering on an interactive prompt.
+- Deliver v3 review transitions through operation-bound task-local handoffs,
+  so executors run a short deterministic command instead of recopying long
+  registry paths that can silently lose a path segment.
 - Reviewer completion is now persisted in the exact broker lane before cmux
   closes the supervisor's own surface, preventing an approved review from
   remaining `callback-ready` after its tab disappears. Successful unattended

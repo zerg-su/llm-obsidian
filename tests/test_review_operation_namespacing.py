@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -177,6 +178,30 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     assert received.returncode == 0, received.stderr
     assert (first_dir / ".task-review.json").is_file()
     assert not (second_dir / ".task-review.json").exists()
+
+    send_script = ROOT / "skills" / "review-send" / "scripts" / "send_review.py"
+    send_spec = importlib.util.spec_from_file_location("review_send_namespacing_test", send_script)
+    assert send_spec is not None and send_spec.loader is not None
+    send_module = importlib.util.module_from_spec(send_spec)
+    send_spec.loader.exec_module(send_module)
+    callback_argv = send_module.drive_argv_for_callback(worktree, first_dir)
+    action_name = callback_argv[callback_argv.index("--action-file") + 1]
+    action_file = worktree / action_name
+    assert action_file.parent == worktree
+    assert first_meta["operation_id"] in action_file.name
+    assert "--operation-dir" not in callback_argv
+    assert str(first_dir) not in callback_argv
+    assert callback_argv[1] == "skills/review-dispatch/scripts/spawn_review.py"
+    assert callback_argv[callback_argv.index("--worktree") + 1] == "."
+    drive = run(
+        "drive", "--worktree", str(worktree), "--action-file", action_file.name,
+    )
+    assert drive.returncode == 0, drive.stderr
+    drive_payload = json.loads(drive.stdout)
+    assert drive_payload["operation_dir"] == str(first_dir)
+    assert drive_payload["action"] == "approve"
+    assert action_file.is_file(), "dry-run drive must preserve the one-shot handoff"
+    action_file.unlink()
 
     store = TaskSessionStore(vault)
     store.transition_operation(

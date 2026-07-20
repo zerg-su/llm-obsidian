@@ -128,9 +128,37 @@ def review_file(worktree: Path, name: str) -> Path:
 
 def configure_existing_review_state(ns: argparse.Namespace, worktree: Path, meta: dict[str, Any]) -> Path:
     raw = str(getattr(ns, "operation_dir", "") or "").strip()
+    action_raw = str(getattr(ns, "action_file", "") or "").strip()
+    if raw and action_raw:
+        die("use either --operation-dir or --action-file, not both")
+    action_path: Path | None = None
+    if action_raw:
+        unresolved_action = Path(action_raw).expanduser()
+        if not unresolved_action.is_absolute():
+            unresolved_action = worktree / unresolved_action
+        if unresolved_action.is_symlink():
+            die("review action file must be an exact task-local operation handoff")
+        action_path = unresolved_action.resolve()
+        name_match = re.fullmatch(r"\.task-review-drive-([0-9a-f-]{36})\.json", action_path.name)
+        if (
+            action_path.parent != worktree
+            or name_match is None
+        ):
+            die("review action file must be an exact task-local operation handoff")
+        action = read_json(action_path)
+        operation_id = str(uuid.UUID(name_match.group(1)))
+        if (
+            action.get("schema_version") != 1
+            or action.get("project_id") != meta.get("project_id")
+            or action.get("task_id") != meta.get("task_id")
+            or action.get("operation_id") != operation_id
+        ):
+            die("review action file identity does not match task metadata")
+        raw = str(action.get("operation_dir") or "").strip()
+        setattr(ns, "_action_file_path", action_path)
     if meta.get("version", 1) != 3:
-        if raw:
-            die("--operation-dir is supported only by task metadata v3")
+        if raw or action_raw:
+            die("operation handoffs are supported only by task metadata v3")
         set_review_state_dir(None)
         return worktree
     if not raw:
@@ -1781,6 +1809,9 @@ def cmd_drive(ns: argparse.Namespace) -> int:
         die("review action requires coordinator escalation; drive will not guess", 2)
     else:
         die(f"review action {action or 'unknown'} is not automatically applicable")
+    action_path = getattr(ns, "_action_file_path", None)
+    if isinstance(action_path, Path):
+        action_path.unlink(missing_ok=True)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
@@ -1951,6 +1982,11 @@ def build_parser() -> argparse.ArgumentParser:
     drive = sub.add_parser("drive", help="apply the deterministic next review-gate transition")
     drive.add_argument("--worktree", default=".", help="task worktree path")
     drive.add_argument("--operation-dir", default="", help="exact v3 broker operation directory")
+    drive.add_argument(
+        "--action-file",
+        default="",
+        help="exact task-local handoff containing the v3 broker operation identity",
+    )
     drive.add_argument(
         "--apply-action",
         action="store_true",

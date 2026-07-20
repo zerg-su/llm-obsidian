@@ -108,6 +108,55 @@ def write_callback(path: Path, data: dict[str, Any]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def write_drive_request(worktree: Path, state_dir: Path) -> Path:
+    """Publish one operation-bound, task-local drive request for model-safe execution."""
+    operation = read_json(state_dir / "operation.json")
+    task_meta = read_json(worktree / ".task-meta.json")
+    operation_id = str(operation.get("operation_id") or "").strip()
+    if (
+        operation.get("project_id") != task_meta.get("project_id")
+        or operation.get("task_id") != task_meta.get("task_id")
+        or not operation_id
+        or operation.get("operation_dir") != str(state_dir)
+    ):
+        die("review drive request identity does not match the task operation", 3)
+    path = worktree / f".task-review-drive-{operation_id}.json"
+    payload = {
+        "schema_version": 1,
+        "project_id": operation["project_id"],
+        "task_id": operation["task_id"],
+        "operation_id": operation_id,
+        "operation_dir": str(state_dir),
+    }
+    write_callback(path, payload)
+    return path
+
+
+def drive_argv_for_callback(worktree: Path, state_dir: Path) -> list[str]:
+    """Build a bounded executor command without repeating operation registry paths."""
+    if state_dir != worktree:
+        action_file = write_drive_request(worktree, state_dir)
+        argv = [
+            sys.executable,
+            "skills/review-dispatch/scripts/spawn_review.py",
+            "drive",
+            "--worktree",
+            ".",
+            "--action-file",
+            action_file.name,
+        ]
+    else:
+        argv = [
+            sys.executable,
+            str(VAULT_ROOT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"),
+            "drive",
+            "--worktree",
+            str(worktree),
+        ]
+    argv.append("--apply-action")
+    return argv
+
+
 def resolve_state_dir(worktree: Path, raw: str) -> Path:
     state_dir = Path(raw).expanduser().resolve() if raw else worktree
     meta = read_json(state_dir / ".review-meta.json")
@@ -309,16 +358,7 @@ def cmd_submit(ns: argparse.Namespace) -> int:
         return 0
     if meta.get("callback_transport") == SUPERVISED_RECEIVE_TRANSPORT:
         action, output = receive_callback(worktree, state_dir, relay_path)
-        drive_argv = [
-            sys.executable,
-            str(VAULT_ROOT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"),
-            "drive",
-            "--worktree",
-            str(worktree),
-        ]
-        if state_dir != worktree:
-            drive_argv.extend(["--operation-dir", str(state_dir)])
-        drive_argv.append("--apply-action")
+        drive_argv = drive_argv_for_callback(worktree, state_dir)
         message = (
             "Cross-model review callback was validated and received automatically by the trusted "
             f"supervisor. Review: {output}. Recommended action: {action}. "

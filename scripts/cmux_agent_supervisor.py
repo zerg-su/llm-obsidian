@@ -39,6 +39,7 @@ REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
 WORKSPACE_TRUST_POLL_SECONDS = 0.1
+ARMED_EXIT_POLL_SECONDS = 0.25
 # Codex may spend tens of seconds loading before its native workspace-trust
 # dialog is painted.  Keep this a bounded startup bootstrap, but do not expire
 # before a slow authenticated CLI has reached its first interactive screen.
@@ -1056,6 +1057,74 @@ def claude_mcp_trust_prompt_visible(screen: str) -> bool:
     return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)
 
 
+def claude_background_exit_prompt_visible(screen: str) -> bool:
+    """Recognize Claude's complete native background-work exit dialog."""
+    markers = (
+        "Background work is running",
+        "The following will stop when you exit:",
+        "1. Exit anyway",
+        "2. Move to background and exit",
+        "3. Stay",
+        "Enter to confirm",
+    )
+    compact_screen = re.sub(r"\s+", "", screen)
+    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)
+
+
+def auto_confirm_armed_claude_exit(
+    worktree: Path,
+    state_dir: Path,
+    kind: str,
+    surface: str,
+    stop: threading.Event,
+    state: dict[str, int],
+    runner: Any = subprocess.run,
+    *,
+    poll_seconds: float = ARMED_EXIT_POLL_SECONDS,
+) -> None:
+    """Confirm only an exact Claude exit dialog after lifecycle authorization."""
+    marker = (
+        state_dir / ".review-close-armed.json"
+        if kind == "reviewer"
+        else worktree / ".task-close-armed.json"
+    )
+    while not stop.wait(max(0.001, poll_seconds)):
+        if not marker.is_file():
+            continue
+        try:
+            result = runner(
+                ["cmux", "read-screen", "--surface", surface, "--lines", "40"],
+                text=True,
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            state["read_failures"] = state.get("read_failures", 0) + 1
+            continue
+        if result.returncode != 0:
+            state["read_failures"] = state.get("read_failures", 0) + 1
+            continue
+        if not claude_background_exit_prompt_visible(result.stdout):
+            continue
+        try:
+            confirmed = runner(
+                ["cmux", "send-key", "--surface", surface, "Enter"],
+                text=True,
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            state["send_failures"] = state.get("send_failures", 0) + 1
+            return
+        if confirmed.returncode == 0:
+            state["confirms"] = state.get("confirms", 0) + 1
+        else:
+            state["send_failures"] = state.get("send_failures", 0) + 1
+        return
+
+
 def automatic_workspace_trust_allowed(worktree: Path) -> bool:
     """Allow bootstrap only for a plan-bound unattended dispatch task."""
     try:
@@ -1156,6 +1225,9 @@ def run_agent(
     trust_stop: threading.Event | None = None
     trust_thread: threading.Thread | None = None
     trust_state: dict[str, int] = {}
+    exit_stop: threading.Event | None = None
+    exit_thread: threading.Thread | None = None
+    exit_state: dict[str, int] = {}
     review_runtime: Path | None = None
     agent_rc = 127
     try:
@@ -1198,6 +1270,15 @@ def run_agent(
                 daemon=True,
             )
             trust_thread.start()
+            if spec["runtime"] == "claude":
+                exit_stop = threading.Event()
+                exit_thread = threading.Thread(
+                    target=auto_confirm_armed_claude_exit,
+                    args=(worktree, state_dir, kind, surface, exit_stop, exit_state),
+                    name="armed-exit-confirmation",
+                    daemon=True,
+                )
+                exit_thread.start()
         agent_cwd = review_runtime or worktree
         agent_rc = subprocess.run(argv, cwd=agent_cwd, env=env, check=False).returncode
     except KeyboardInterrupt:
@@ -1214,6 +1295,10 @@ def run_agent(
             trust_stop.set()
         if trust_thread is not None:
             trust_thread.join(timeout=3)
+        if exit_stop is not None:
+            exit_stop.set()
+        if exit_thread is not None:
+            exit_thread.join(timeout=3)
 
     lifecycle = subprocess.run(
         [
@@ -1253,6 +1338,9 @@ def run_agent(
         "workspace_mcp_declines": nonnegative_int(trust_state.get("mcp_declines")),
         "workspace_trust_read_failures": nonnegative_int(trust_state.get("read_failures")),
         "workspace_trust_send_failures": nonnegative_int(trust_state.get("send_failures")),
+        "armed_exit_confirms": nonnegative_int(exit_state.get("confirms")),
+        "armed_exit_read_failures": nonnegative_int(exit_state.get("read_failures")),
+        "armed_exit_send_failures": nonnegative_int(exit_state.get("send_failures")),
     }
     emit_lifecycle_event(
         worktree,

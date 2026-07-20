@@ -758,6 +758,42 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         mcp_state.get("mcp_declines") == 1
         and [command[-1] for command in mcp_commands[1:]] == ["down", "down", "Enter"],
     )
+    claude_exit_screen = (
+        "Background work is running\n"
+        "The following will stop when you exit:\n"
+        "scheduled task · Runs once in 22s\n"
+        "1. Exit anyway\n"
+        "2. Move to background and exit\n"
+        "3. Stay\n"
+        "Enter to confirm\n"
+    )
+    check(
+        "supervisor recognizes only the complete Claude background-work exit prompt",
+        supervisor_module.claude_background_exit_prompt_visible(claude_exit_screen)
+        and not supervisor_module.claude_background_exit_prompt_visible(
+            "Background work is running\n1. Exit anyway\nEnter to confirm\n"
+        ),
+    )
+    exit_commands: list[list[str]] = []
+
+    def exit_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        exit_commands.append(command)
+        stdout = claude_exit_screen if command[1] == "read-screen" else ""
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    exit_state: dict[str, int] = {}
+    (worktree / ".task-close-armed.json").write_text("{}\n", encoding="utf-8")
+    supervisor_module.auto_confirm_armed_claude_exit(
+        worktree, worktree, "task", meta["task_surface"], threading.Event(), exit_state,
+        runner=exit_runner, poll_seconds=0.001,
+    )
+    (worktree / ".task-close-armed.json").unlink()
+    check(
+        "supervisor confirms an exact exit prompt only after close is armed",
+        exit_state.get("confirms") == 1
+        and exit_commands[-1]
+        == ["cmux", "send-key", "--surface", meta["task_surface"], "Enter"],
+    )
     check(
         "automatic trust requires an unattended approved task",
         supervisor_module.automatic_workspace_trust_allowed(worktree),
