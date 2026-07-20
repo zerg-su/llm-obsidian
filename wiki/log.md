@@ -29,6 +29,12 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ## [2026-07-19] review | v2.1.1 code-owned optimization plan review
 
+`c-000013` [[Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-20 03:48] backlog | add — review-verify-delta-context
+
+## [2026-07-19] review | v2.1.1 code-owned optimization plan review
+
 `c-000012` [[Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030]]. 3 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-19 05:00] backlog | add — cmux-acceptance-surface-cleanup
