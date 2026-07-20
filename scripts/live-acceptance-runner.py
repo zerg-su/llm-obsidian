@@ -450,6 +450,247 @@ def dispatch_fixture_prompt(fixture: dict[str, str]) -> str:
     )
 
 
+def review_acceptance_fixture(
+    sandbox: Path,
+    run_id: str,
+    runtime: str,
+    source_commit: str,
+    session_id: str,
+) -> dict[str, str]:
+    """Provision one committed, approved v3 task before testing review skills."""
+
+    token = run_id.split("-", 1)[0]
+    task_name = f"acceptance-review-{token}"
+    branch = f"task/{task_name}"
+    fixture_rel = f"acceptance-review-{token}.py"
+    fixture_text = (
+        "def render(ready: bool) -> str:\n"
+        "    if ready:\n"
+        "        return \"ready\"\n"
+        "    return \"ready\"\n"
+    )
+    plan_rel = f"wiki/plans/{date.today().isoformat()}-{task_name}.md"
+    plan_path = sandbox / plan_rel
+    plan_title = f"Acceptance review {token} plan"
+    plan_text = f"""---
+type: plan
+title: "{plan_title}"
+status: pending
+created: {date.today().isoformat()}
+updated: {date.today().isoformat()}
+tags:
+  - plan
+  - acceptance
+sessions: []
+---
+
+# {plan_title}
+
+## Approved scope
+
+Create only `{fixture_rel}` as the disposable review target and commit it once.
+Resolve its known non-blocking duplicate-branch warning if the required review
+finds it. The review lifecycle is verification of this scope, not another
+product action. Do not merge, push, publish, deploy, or expand scope.
+"""
+    run_checked(
+        [sys.executable, str(sandbox / "scripts" / "vault-write.py"), "--output", "json"],
+        cwd=sandbox,
+        input_text=json.dumps(
+            {
+                "schema_version": 1,
+                "request_id": f"acceptance-review-{token}",
+                "actor": "acceptance",
+                "session": session_id,
+                "pages": [{"op": "create", "path": plan_rel, "content": plan_text}],
+            },
+            ensure_ascii=False,
+        ),
+    )
+    nested_worktree = (
+        sandbox / ".vault-meta" / "acceptance-worktrees" / f"sandbox-{task_name}"
+    )
+    nested_worktree.parent.mkdir(parents=True, exist_ok=True)
+    run_checked(
+        [
+            "git", "-C", str(sandbox), "worktree", "add", "-b", branch,
+            str(nested_worktree), source_commit,
+        ],
+        cwd=sandbox,
+    )
+    (nested_worktree / fixture_rel).write_text(fixture_text, encoding="utf-8")
+    run_checked(["git", "add", "--", fixture_rel], cwd=nested_worktree)
+    run_checked(
+        [
+            "git", "-c", "user.name=Acceptance Runner",
+            "-c", "user.email=acceptance@example.invalid", "commit", "-m",
+            "test: add review acceptance fixture",
+        ],
+        cwd=nested_worktree,
+    )
+    identity = json.loads(
+        run_checked(
+            [
+                sys.executable,
+                str(sandbox / "scripts" / "task_sessions.py"),
+                "--vault-root", str(sandbox),
+                "init-task", "--worktree", str(nested_worktree),
+                "--task-id", run_id, "--runtime", runtime,
+                "--session-id", session_id,
+            ],
+            cwd=sandbox,
+        )
+    )
+    fixture = {
+        "fixture_kind": "review",
+        "task_name": task_name,
+        "branch": branch,
+        "plan_path": str(plan_path.resolve()),
+        "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+        "fixture_rel": fixture_rel,
+        "fixture_text": fixture_text,
+        "fixture_commit": run_checked(
+            ["git", "rev-parse", "HEAD"], cwd=nested_worktree
+        ).strip(),
+        "source_commit": source_commit,
+        "nested_worktree": str(nested_worktree.resolve()),
+        "project_id": str(identity["project_id"]),
+        "task_id": str(identity["task_id"]),
+        "session_id": session_id,
+        "runtime": runtime,
+        "result_title": f"Acceptance review {token} result",
+        "review_script": str(
+            (sandbox / "skills" / "review-dispatch" / "scripts" / "spawn_review.py").resolve()
+        ),
+    }
+    atomic_json(
+        sandbox / ".vault-meta" / "acceptance" / "review-fixture.json", fixture
+    )
+    return fixture
+
+
+def bind_review_acceptance_fixture(
+    sandbox: Path,
+    fixture: dict[str, str],
+    surface: str,
+    route: dict[str, Any],
+    config: Any,
+) -> None:
+    """Bind the prepared task to the exact live coordinator surface."""
+
+    worktree = Path(fixture["nested_worktree"])
+    handoffs = {
+        ".task-cmux-surface": surface,
+        ".wiki-cmux-surface": surface,
+        ".wiki-agent-runtime": fixture["runtime"],
+        ".wiki-reap-command": "$llm-obsidian:reap",
+        ".task-reap-send-skill": "$llm-obsidian:reap-send",
+        ".task-review-skill": "$llm-obsidian:review-dispatch",
+        ".task-review-send-skill": "$llm-obsidian:review-send",
+    }
+    for name, value in handoffs.items():
+        (worktree / name).write_text(value + "\n", encoding="utf-8")
+    (worktree / ".task-prompt.md").write_text(
+        f"# Task: {fixture['task_name']}\n\n"
+        f"Create only `{fixture['fixture_rel']}` as specified by the approved plan. "
+        "The required review gate is lifecycle verification, not product-scope drift.\n",
+        encoding="utf-8",
+    )
+    routing_session = {
+        "runtime": route["runtime"],
+        "model": route["model"],
+        "effort": route["effort"],
+        "source": "acceptance-fixture",
+    }
+    meta = {
+        "version": 3,
+        "project_id": fixture["project_id"],
+        "task_id": fixture["task_id"],
+        "task_name": fixture["task_name"],
+        "wiki_runtime": fixture["runtime"],
+        "executor_runtime": fixture["runtime"],
+        "runtime": fixture["runtime"],
+        "origin_session": fixture["session_id"],
+        "spawned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "wiki_surface": surface,
+        "task_surface": surface,
+        "target_repo": str(sandbox),
+        "vault_root": str(sandbox),
+        "branch": fixture["branch"],
+        "base_branch": fixture["source_commit"],
+        "wiki_reap_command": "$llm-obsidian:reap",
+        "reap_send_skill": "$llm-obsidian:reap-send",
+        "review_skill": "$llm-obsidian:review-dispatch",
+        "review_send_skill": "$llm-obsidian:review-send",
+        "routing": {
+            "schema_version": 1,
+            "session": routing_session,
+            "effective": {
+                "schema_version": 1,
+                **routing_session,
+                "role": "dispatch",
+                "source": ["session:acceptance-fixture"],
+                "config_sha256": config.fingerprint,
+                "local_override": config.local_override,
+            },
+        },
+        "plan_file": fixture["plan_path"],
+        "approved_plan_sha256": fixture["plan_sha256"],
+        "interaction_policy": "unattended",
+        "review_policy": {
+            "mode": "light",
+            "max_verify_iterations": 2,
+            "auto_resolve_severities": ["warning", "nit"],
+            "escalate_severities": ["blocking"],
+        },
+        "reap_policy": {
+            "mode": "final",
+            "auto_file": True,
+            "allowed_types": ["session"],
+            "title": fixture["result_title"],
+        },
+        "surface_policy": {"auto_close": True},
+        "watchdog_policy": {
+            "enabled": True,
+            "poll_seconds": 30,
+            "warn_after_seconds": 900,
+            "alert_after_seconds": 1200,
+        },
+        "forbidden_actions": [
+            "push", "deploy", "publish", "delete-worktree", "delete-branch",
+            "expand-scope",
+        ],
+        "suggested_agents": [],
+    }
+    atomic_json(worktree / ".task-meta.json", meta)
+    run_checked(
+        [sys.executable, str(sandbox / "scripts" / "task_contract.py"), "validate"],
+        cwd=worktree,
+    )
+
+
+def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
+    emphasis = (
+        "The opposite-runtime reviewer must exercise review-send exactly once and publish its "
+        "typed callback before you resolve it. "
+        if skill == "review-send"
+        else "Exercise the complete review-dispatch start/receive/resolve/verify/finish loop. "
+    )
+    return (
+        f"Use the runner-prepared approved task at `{fixture['nested_worktree']}` and its existing "
+        f"commit `{fixture['fixture_commit']}`. Do not create a plan, task, branch, worktree, metadata, "
+        "or another fixture commit, and do not enter Plan Mode or ask for approval. "
+        f"{emphasis}Start one light opposite-runtime review with "
+        f"`python3 {fixture['review_script']} start --light --worktree {fixture['nested_worktree']}`; "
+        "do not pass same-model, reviewer-runtime, model, or effort "
+        "overrides. Return idle after each launch and let typed callbacks start later turns; never poll. "
+        "Resolve only the known duplicate-branch warning by simplifying the prepared script, commit that "
+        "one fix, verify in the same reviewer lane, drive approval, and finish it. Then publish the "
+        "acceptance outbox. Leave the task worktree, branch, plan, registry, and review artifacts for "
+        "runner proof and cleanup."
+    )
+
+
 def close_acceptance_fixture(run_id: str) -> dict[str, str]:
     """Return one exact save target for the runner-owned close surface."""
 
@@ -915,8 +1156,9 @@ def prompt_text(
 - Exercise the named skill and close its task/reviewer processes through the documented lifecycle, but do not
   manually remove, prune, merge, restore, stash, or rewrite runner-owned branches, worktrees, registry state,
   review artifacts, `.acceptance-sandbox.json`, the operation outbox, or scratch.
-- Clean only fixture-created product output and non-runner scratch. The outer runner independently validates
-  operation identity, callback state, duplicate safety, and disposable-lane cleanup, then deletes the clone.
+- Leave the exact task-bound plan, reap result, and review archive pages in place. The outer runner resolves
+  them from durable task/review markers, rejects any unbound product residue, and deletes the whole clone.
+  Clean only unbound fixture scratch; never rewrite writer-owned log/hot bookkeeping.
 - Use `LLM_OBSIDIAN_WORKTREES` for every nested dispatch; do not invent another worktree root or pass
   `--tmp-root`/`--state-root`, and do not override `TMPDIR`/`TMP`/`TEMP`."""
     elif runner_fixture is None:
@@ -934,6 +1176,12 @@ def prompt_text(
   instead of requiring a second whole-vault validation or treating it as a product failure. Never put
   `wiki/log.md` or `wiki/hot.md` in cleanup `pages` operations: they are writer-owned and intentionally
   retain this disposable history until the outer runner deletes the clone."""
+    elif runner_fixture.get("fixture_kind") == "review":
+        cleanup_contract = f"""- The exact approved task at `{runner_fixture['nested_worktree']}` is runner-owned proof.
+- Do not create or approve a plan, task, branch, worktree, or metadata, and never enter Plan Mode.
+- After starting review, return idle without polling; typed callbacks start later turns automatically.
+- Close the reviewer through verified `finish`. Leave task plan/worktree/branch/registry/review artifacts
+  in place for outer proof and clone cleanup. Clean no runner-owned lifecycle state manually."""
     else:
         cleanup_contract = f"""- This cell's plan, result page, review archive, task branch, exact nested worktree,
   task-session registry, and lifecycle markers are runner-owned proof artifacts. Leave them in place.
@@ -970,6 +1218,19 @@ surface retention, exact-surface cleanup, and removal of the saved fixture page.
         )
     else:
         final_contract = "Do not merely describe a hypothetical test. The outbox is the final action after cleanup."
+    if runner_fixture is not None and runner_fixture.get("fixture_kind") == "review":
+        interaction_contract = (
+            "This fixture spans typed callback turns. After each launch, end the current turn at the "
+            "idle prompt; continue only when the trusted callback starts the next turn. Never use Plan "
+            "Mode, ask a human, or shell-poll while waiting."
+        )
+    else:
+        interaction_contract = (
+            "Complete this fixture in one bounded agent turn. If the named skill would normally "
+            "ask the user a question or present a quiz/draft for a later reply, that observable "
+            "response is the end of this acceptance interaction: record it and continue to "
+            "cleanup and the typed outbox instead of waiting for another human message."
+        )
     return f"""# Live release acceptance operation
 
 You are running one real, bounded acceptance cell in a disposable local clone.
@@ -991,10 +1252,7 @@ Exact skill fixture (treat this as the complete end-user request for the cell):
 
 > {fixture}
 
-Complete this fixture in one bounded agent turn. If the named skill would normally
-ask the user a question or present a quiz/draft for a later reply, that observable
-response is the end of this acceptance interaction: record it and continue to
-cleanup and the typed outbox instead of waiting for another human message.
+{interaction_contract}
 
 Hard boundaries:
 
@@ -1438,6 +1696,132 @@ def sandbox_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
     return True, "committed HEAD and worktree restored"
 
 
+def lifecycle_acceptance_cleanup_proof(sandbox: Path, commit: str) -> tuple[bool, str]:
+    """Allow only product pages durably bound to one disposable task lifecycle."""
+
+    ok, head = git_output(sandbox, "rev-parse", "HEAD")
+    if not ok or head.strip() != commit:
+        return False, "disposable lifecycle clone HEAD changed"
+    worktree_root = sandbox / ".vault-meta" / "acceptance-worktrees"
+    if worktree_root.is_symlink() or not worktree_root.is_dir():
+        return False, "disposable lifecycle worktree root is missing"
+    allowed_pages: set[str] = set()
+
+    def add_page(raw: object) -> bool:
+        value = str(raw or "").strip()
+        if not value:
+            return True
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = sandbox / candidate
+        resolved = candidate.resolve()
+        try:
+            relative = resolved.relative_to(sandbox.resolve())
+        except ValueError:
+            return False
+        if (
+            not relative.parts
+            or relative.parts[0] != "wiki"
+            or relative.suffix != ".md"
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            return False
+        allowed_pages.add(relative.as_posix())
+        return True
+
+    task_roots: list[Path] = []
+    for task_worktree in sorted(worktree_root.iterdir()):
+        if task_worktree.is_symlink() or not task_worktree.is_dir():
+            return False, "disposable lifecycle worktree identity is invalid"
+        try:
+            meta = read_json(task_worktree / ".task-meta.json")
+        except AcceptanceRunnerError as exc:
+            return False, str(exc)
+        if (
+            meta.get("version") != 3
+            or Path(str(meta.get("vault_root") or "")).resolve() != sandbox.resolve()
+            or Path(str(meta.get("target_repo") or "")).resolve() != sandbox.resolve()
+            or not add_page(meta.get("plan_file"))
+        ):
+            return False, "disposable lifecycle task metadata is not bound to this clone"
+        project_id = str(meta.get("project_id") or "")
+        task_id = str(meta.get("task_id") or "")
+        try:
+            if str(uuid.UUID(project_id)) != project_id or str(uuid.UUID(task_id)) != task_id:
+                raise ValueError
+        except ValueError:
+            return False, "disposable lifecycle task identity is invalid"
+        task_root = (
+            sandbox / ".vault-meta" / "task-sessions" / "projects" / project_id
+            / "tasks" / task_id
+        )
+        if task_root.is_symlink() or not task_root.is_dir():
+            return False, "disposable lifecycle task registry is missing"
+        task_roots.append(task_root.resolve())
+        for name in (".task-reap-prepared.json", ".task-reap-complete.json"):
+            artifact = task_worktree / name
+            if not artifact.is_file():
+                continue
+            try:
+                value = read_json(artifact)
+            except AcceptanceRunnerError as exc:
+                return False, str(exc)
+            if not add_page(value.get("plan_path")) or not add_page(value.get("result_path")):
+                return False, "disposable reap artifact escapes the coordinator wiki"
+            if not add_page(value.get("review_archive_path")):
+                return False, "disposable review archive escapes the coordinator wiki"
+            archives = value.get("review_archives", [])
+            if not isinstance(archives, list):
+                return False, "disposable reap archive list is invalid"
+            for archive in archives:
+                if not isinstance(archive, dict) or not add_page(archive.get("path")):
+                    return False, "disposable reap archive path is invalid"
+    if not task_roots:
+        return False, "disposable lifecycle task registry is empty"
+    for task_root in task_roots:
+        for marker_path in task_root.glob("lanes/*/operations/*/.review-archive.json"):
+            try:
+                marker = read_json(marker_path)
+            except AcceptanceRunnerError as exc:
+                return False, str(exc)
+            if not add_page(marker.get("path")):
+                return False, "disposable review marker path is invalid"
+            archive = sandbox / str(marker.get("path") or "")
+            digest = str(marker.get("content_sha256") or "")
+            if archive.exists() and (
+                archive.is_symlink()
+                or not archive.is_file()
+                or digest != hashlib.sha256(archive.read_bytes()).hexdigest()
+            ):
+                return False, "disposable review archive changed after its durable marker"
+
+    ok, status = git_output(sandbox, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    if not ok:
+        return False, "disposable lifecycle clone status is unreadable"
+    unexpected: list[str] = []
+    retained_pages = 0
+    for entry in status.split("\0"):
+        if not entry:
+            continue
+        code, path = entry[:2], entry[3:]
+        if path == ".acceptance-sandbox.json" or path.startswith(
+            ".vault-meta/acceptance-worktrees/"
+        ):
+            continue
+        if is_disposable_bookkeeping(path, code):
+            continue
+        if path in allowed_pages and code == "??":
+            page = sandbox / path
+            if page.is_symlink() or not page.is_file():
+                return False, "bound disposable lifecycle page is not a regular file"
+            retained_pages += 1
+            continue
+        unexpected.append(path)
+    if unexpected:
+        return False, "disposable clone retained product or vault changes: " + ", ".join(unexpected[:5])
+    return True, f"exact lifecycle state retained {retained_pages} bound page(s) for clone cleanup"
+
+
 def daily_acceptance_cleanup(sandbox: Path, commit: str) -> tuple[bool, str]:
     """Accept one exact disposable session-evidence commit deleted after proof."""
 
@@ -1524,6 +1908,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     surface = ""
     cleanup = "sandbox retained for diagnosis"
     prepared_dispatch: dict[str, str] | None = None
+    prepared_review: dict[str, str] | None = None
     prepared_close: dict[str, str] | None = None
     stage = "setup"
     stage_started = time.monotonic()
@@ -1546,6 +1931,11 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         if row["skill"] == "dispatch":
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
             fixture = dispatch_fixture_prompt(prepared_dispatch)
+        elif row["skill"] in {"review-dispatch", "review-send"}:
+            prepared_review = review_acceptance_fixture(
+                sandbox, run_id, row["runtime"], commit, acceptance_session_id
+            )
+            fixture = review_fixture_prompt(prepared_review, row["skill"])
         elif row["skill"] == "close":
             prepared_close = close_acceptance_fixture(run_id)
             fixture = close_fixture_prompt(prepared_close)
@@ -1558,7 +1948,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
         prompt = prompt_text(
             row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture,
-            prepared_dispatch,
+            prepared_dispatch or prepared_review,
         )
         prompt_path = run_dir / "prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
@@ -1575,6 +1965,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         }
         if prepared_dispatch is not None:
             spec["dispatch_fixture"] = prepared_dispatch
+        if prepared_review is not None:
+            spec["review_fixture"] = prepared_review
         spec_path = run_dir / "operation.json"
         atomic_json(spec_path, spec)
         try:
@@ -1590,6 +1982,10 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             }
         )
         atomic_json(spec_path, spec)
+        if prepared_review is not None:
+            bind_review_acceptance_fixture(
+                sandbox, prepared_review, surface, route, routing_config
+            )
         if prepared_dispatch is not None:
             write_dispatch_acceptance_request(
                 sandbox,
@@ -1652,6 +2048,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                     proof = f"{proof}; {cleanup_proof}"
             elif row["skill"] == "daily":
                 clean, proof = daily_acceptance_cleanup(sandbox, commit)
+            elif row["scenario"] == "dispatch-review-reap":
+                clean, proof = lifecycle_acceptance_cleanup_proof(sandbox, commit)
             else:
                 clean, proof = sandbox_cleanup_proof(sandbox, commit)
             if not clean:

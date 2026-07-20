@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import importlib.util
 import inspect
@@ -10,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 
@@ -688,6 +690,64 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "dispatch-review-reap" in inspect.getsource(module.run_live),
     )
 
+    lifecycle_repo = tmp / "lifecycle-cleanup-proof"
+    lifecycle_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=lifecycle_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=lifecycle_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=lifecycle_repo, check=True)
+    (lifecycle_repo / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore"], cwd=lifecycle_repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "release"], cwd=lifecycle_repo, check=True)
+    lifecycle_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=lifecycle_repo,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    lifecycle_worktree = lifecycle_repo / ".vault-meta/acceptance-worktrees/task"
+    lifecycle_worktree.mkdir(parents=True)
+    plan = lifecycle_repo / "wiki/plans/Acceptance lifecycle.md"
+    archive = lifecycle_repo / "wiki/meta/reviews/Acceptance lifecycle review.md"
+    plan.parent.mkdir(parents=True)
+    archive.parent.mkdir(parents=True)
+    plan.write_text("# Plan\n", encoding="utf-8")
+    archive.write_text("# Review\n", encoding="utf-8")
+    project_id = "11111111-1111-4111-8111-111111111111"
+    task_id = "22222222-2222-4222-8222-222222222222"
+    module.atomic_json(lifecycle_worktree / ".task-meta.json", {
+        "version": 3,
+        "vault_root": str(lifecycle_repo),
+        "target_repo": str(lifecycle_repo),
+        "plan_file": str(plan),
+        "project_id": project_id,
+        "task_id": task_id,
+    })
+    task_root = (
+        lifecycle_repo / ".vault-meta/task-sessions/projects" / project_id
+        / "tasks" / task_id
+    )
+    marker = task_root / "lanes/lane/operations/operation/.review-archive.json"
+    module.atomic_json(marker, {
+        "path": archive.relative_to(lifecycle_repo).as_posix(),
+        "content_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+    })
+    (lifecycle_repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
+    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
+        lifecycle_repo, lifecycle_commit
+    )
+    check(
+        "runner owns exact lifecycle page cleanup",
+        lifecycle_clean and "2 bound page(s)" in lifecycle_proof,
+        lifecycle_proof,
+    )
+    (lifecycle_repo / "unexpected.md").write_text("residue\n", encoding="utf-8")
+    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
+        lifecycle_repo, lifecycle_commit
+    )
+    check(
+        "lifecycle cleanup still rejects unbound product residue",
+        not lifecycle_clean and "unexpected.md" in lifecycle_proof,
+        lifecycle_proof,
+    )
+
     daily_repo = tmp / "daily-cleanup-proof"
     daily_repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=daily_repo, check=True)
@@ -760,8 +820,89 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "review rows preserve runner-owned nested lifecycle state",
         "do not\n  manually remove, prune" in review_send_prompt
         and "leave the runner-owned nested lane" in review_send_prompt
+        and "Leave the exact task-bound plan, reap result, and review archive pages" in review_send_prompt
         and "Clean every disposable page, branch, worktree" not in review_send_prompt,
         review_send_prompt,
+    )
+    check(
+        "review-send fixture separates product scope from lifecycle review",
+        "description and approved plan both say exactly"
+        in fixture_registry["skills"]["review-send"]["fixture"]
+        and "outside that product scope"
+        in fixture_registry["skills"]["review-send"]["fixture"]
+        and "Do not pass same-model review flags"
+        in fixture_registry["skills"]["review-send"]["fixture"],
+    )
+    prepared_review = {
+        "fixture_kind": "review",
+        "nested_worktree": str(repo / ".vault-meta/acceptance-worktrees/review"),
+        "fixture_commit": "a" * 40,
+        "review_script": str(repo / "skills/review-dispatch/scripts/spawn_review.py"),
+    }
+    review_fixture_text = module.review_fixture_prompt(prepared_review, "review-send")
+    check(
+        "review acceptance uses a runner-prepared approved task",
+        "runner-prepared approved task" in review_fixture_text
+        and "do not enter Plan Mode" in review_fixture_text
+        and "do not pass same-model" in review_fixture_text
+        and "Return idle after each launch" in review_fixture_text,
+    )
+    review_cleanup_prompt = module.prompt_text(
+        row(skill="review-send", scenario="dispatch-review-reap",
+            expected="Submit one typed product-read-only reviewer result exactly once."),
+        module.load_scenarios()["dispatch-review-reap"], repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model", "high", commit, review_fixture_text, prepared_review,
+    )
+    check(
+        "review acceptance forbids model-owned task setup",
+        "never enter Plan Mode" in review_cleanup_prompt
+        and "After starting review, return idle without polling" in review_cleanup_prompt,
+    )
+    prepared_repo = tmp / "prepared-review-repo"
+    cloned = subprocess.run(
+        ["git", "clone", "--shared", "--quiet", str(ROOT), str(prepared_repo)],
+        text=True, capture_output=True, check=False,
+    )
+    prepared_source = subprocess.run(
+        ["git", "-C", str(prepared_repo), "rev-parse", "HEAD"],
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    prepared_id = str(uuid.uuid4())
+    prepared_session = f"acceptance-{prepared_id}"
+    provisioned = module.review_acceptance_fixture(
+        prepared_repo, prepared_id, "claude", prepared_source, prepared_session
+    )
+    prepared_config = module.load_config(prepared_repo)
+    prepared_route = prepared_config.runtime_default("claude")
+    module.bind_review_acceptance_fixture(
+        prepared_repo,
+        provisioned,
+        "11111111-1111-4111-8111-111111111111",
+        prepared_route,
+        prepared_config,
+    )
+    provisioned_meta = json.loads(
+        (Path(provisioned["nested_worktree"]) / ".task-meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    changed = subprocess.run(
+        [
+            "git", "-C", provisioned["nested_worktree"], "diff", "--name-only",
+            f"{prepared_source}..HEAD",
+        ],
+        text=True, capture_output=True, check=True,
+    ).stdout.splitlines()
+    check(
+        "review fixture provisioner creates one valid approved task",
+        cloned.returncode == 0
+        and changed == [provisioned["fixture_rel"]]
+        and provisioned_meta["base_branch"] == prepared_source
+        and provisioned_meta["approved_plan_sha256"] == provisioned["plan_sha256"]
+        and provisioned_meta["task_surface"]
+        == "11111111-1111-4111-8111-111111111111",
+        cloned.stderr,
     )
     check(
         "review-dispatch fixture exercises a resolvable warning",
