@@ -24,6 +24,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Live acceptance can select bounded skills, hashes only the exact fixture and
   scenario registry fragments for each cell, and records the actual cheaper
   Sonnet/Terra test model separately from the production generation.
+- Exact reviewed release-packaging paths are classified as non-behavioral, so
+  metadata-only changes reuse valid acceptance evidence while every unknown
+  changed path continues to invalidate the matrix fail-closed.
 
 ### Fixed
 

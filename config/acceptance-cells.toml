@@ -1,6 +1,15 @@
 schema_version = 1
 runner_contract_version = 2
 
+# Exact release-packaging files that cannot change a live cell's behavior.
+# No globs: every path must be reviewed and listed separately.
+non_behavioral_paths = [
+  ".claude-plugin/marketplace.json",
+  ".claude-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  "CHANGELOG.md",
+]
+
 global_dependencies = [
   "config/acceptance-cells.toml",
   "config/model-routing.toml",

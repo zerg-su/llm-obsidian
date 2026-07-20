@@ -23,6 +23,7 @@ from acceptance_fingerprints import (
     changed_paths,
     environment_contract,
     generation_snapshot,
+    non_behavioral_paths,
     production_generations,
     read_manifest,
 )
@@ -227,6 +228,7 @@ def load_resume_results(
     fingerprint: str,
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
     root: Path,
+    non_behavioral: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -243,6 +245,7 @@ def load_resume_results(
         raise AcceptanceError("schema-1 acceptance evidence cannot cross commits; use --restart")
     changed = set() if prior_commit == commit else changed_paths(root, prior_commit)
     declared = {path for item in metadata.values() for path in item["dependencies"]}
+    declared.update(non_behavioral or set())
     unknown_changed = changed is None or bool(changed - declared)
     expected = {row_key(row): row for row in rows}
     resumed: list[dict[str, Any]] = []
@@ -465,6 +468,7 @@ def main() -> int:
         prior = [] if args.restart else load_resume_results(
             args.report, rows, phase=args.phase, commit=commit, fingerprint=fingerprint,
             metadata=metadata, root=args.root.resolve(),
+            non_behavioral=non_behavioral_paths(manifest),
         )
 
         def checkpoint(completed: list[dict[str, Any]]) -> None:

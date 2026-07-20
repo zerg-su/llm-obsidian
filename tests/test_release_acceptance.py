@@ -34,6 +34,19 @@ check("dynamic coverage", result.returncode == 0 and "runtimes" in result.stdout
 
 with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     tmp = Path(raw)
+    unsafe_manifest = tmp / "unsafe-acceptance-cells.toml"
+    unsafe_manifest.write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8").replace(
+            '"CHANGELOG.md"', '"../CHANGELOG.md"', 1
+        ),
+        encoding="utf-8",
+    )
+    result = run("--manifest", str(unsafe_manifest), "check")
+    check(
+        "non-behavioral paths reject parent traversal",
+        result.returncode == 3 and "unsafe acceptance dependency" in result.stderr,
+        result.stderr,
+    )
     matrix = tmp / "matrix.json"
     result = run("matrix", "--phase", "baseline", "--output", str(matrix))
     data = json.loads(matrix.read_text(encoding="utf-8"))
@@ -300,12 +313,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     (incremental / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
     (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n", encoding="utf-8")
     (incremental / "skills/demo-b/SKILL.md").write_text("# Demo B\n", encoding="utf-8")
+    (incremental / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
     (incremental / "config/model-routing.toml").write_text(
         (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     manifest = incremental / "config/acceptance-cells.toml"
     manifest.write_text(
         "schema_version = 1\nrunner_contract_version = 2\n"
+        "non_behavioral_paths = [\"CHANGELOG.md\"]\n"
         "global_dependencies = [\"config/acceptance-cells.toml\", \"config/model-routing.toml\"]\n"
         "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
         "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"
@@ -358,6 +373,17 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     check(
         "cross-commit reuse reruns only affected skill cells",
         result.returncode == 0 and {item[0] for item in calls} == {"demo-a"} and len(calls) == 2,
+        result.stderr,
+    )
+    invocation_log.write_text("", encoding="utf-8")
+    (incremental / "CHANGELOG.md").write_text("# Changelog\n\nRelease metadata only.\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "release metadata"], cwd=incremental, check=True)
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "exact non-behavioral path reuses every unchanged cell",
+        result.returncode == 0 and calls == [],
         result.stderr,
     )
     invocation_log.write_text("", encoding="utf-8")

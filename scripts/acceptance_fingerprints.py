@@ -34,6 +34,12 @@ def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
         raise FingerprintError("acceptance manifest must use schema 1 and runner contract 2")
     if not isinstance(value.get("global_dependencies"), list):
         raise FingerprintError("acceptance manifest global_dependencies must be an array")
+    raw_non_behavioral = value.get("non_behavioral_paths")
+    if not isinstance(raw_non_behavioral, list):
+        raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
+    for rel in safe_dependencies(raw_non_behavioral):
+        if not (root / rel).is_file():
+            raise FingerprintError(f"non-behavioral acceptance path is not a file: {rel}")
     return value
 
 
@@ -70,6 +76,15 @@ def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scen
         if path.is_file() and "__pycache__" not in path.parts
     )
     return sorted(safe_dependencies(values))
+
+
+def non_behavioral_paths(manifest: dict[str, Any]) -> set[str]:
+    """Return exact reviewed paths that are known not to affect live behavior."""
+
+    values = manifest.get("non_behavioral_paths")
+    if not isinstance(values, list):
+        raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
+    return set(safe_dependencies(values))
 
 
 def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]:
@@ -240,6 +255,7 @@ __all__ = [
     "environment_contract",
     "expanded_dependencies",
     "generation_snapshot",
+    "non_behavioral_paths",
     "production_generations",
     "read_manifest",
 ]
