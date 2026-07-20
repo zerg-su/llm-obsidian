@@ -28,6 +28,7 @@ ALLOWED_NON_BEHAVIORAL_PATHS = {
 ALLOWED_ORCHESTRATION_DEPENDENCIES = {
     "config/acceptance-cells.toml",
     "scripts/acceptance_fingerprints.py",
+    "scripts/acceptance-workspace-supervisor.py",
     "scripts/release-acceptance.py",
 }
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "release-acceptance.py"
+WORKSPACE_SCRIPT = ROOT / "scripts" / "acceptance-workspace-supervisor.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from acceptance_fingerprints import cell_metadata, read_manifest
 
@@ -25,6 +26,13 @@ module_spec = importlib.util.spec_from_file_location("release_acceptance_test", 
 assert module_spec is not None and module_spec.loader is not None
 release_acceptance = importlib.util.module_from_spec(module_spec)
 module_spec.loader.exec_module(release_acceptance)
+
+workspace_spec = importlib.util.spec_from_file_location(
+    "acceptance_workspace_test", WORKSPACE_SCRIPT
+)
+assert workspace_spec is not None and workspace_spec.loader is not None
+acceptance_workspaces = importlib.util.module_from_spec(workspace_spec)
+workspace_spec.loader.exec_module(acceptance_workspaces)
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -39,6 +47,142 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 result = run("check")
 check("dynamic coverage", result.returncode == 0 and "runtimes" in result.stdout, result.stderr)
+
+acceptance_workspaces.validate_limits(5, 5)
+for workspaces, jobs in ((6, 5), (5, 6), (0, 5), (5, 0)):
+    try:
+        acceptance_workspaces.validate_limits(workspaces, jobs)
+    except acceptance_workspaces.WorkspaceAcceptanceError:
+        pass
+    else:
+        check("workspace acceptance limits are code-owned", False)
+check("workspace acceptance limits are code-owned", True)
+
+timeout_args = acceptance_workspaces.parser().parse_args([
+    "run", "--phase", "final", "--runner", "fixture", "--report", "fixture.json",
+    "--cell-timeout", "0",
+])
+try:
+    acceptance_workspaces.supervise(timeout_args)
+except acceptance_workspaces.WorkspaceAcceptanceError as exc:
+    check("workspace acceptance rejects non-positive timeouts", "positive" in str(exc))
+else:
+    check("workspace acceptance rejects non-positive timeouts", False)
+
+partition_fixture = [
+    {"skill": skill, "runtime": runtime}
+    for skill in ("a", "b", "c", "d", "e", "f")
+    for runtime in (("claude", "codex") if skill in {"a", "b", "c"} else ("claude",))
+]
+partitions = acceptance_workspaces.partition_skills(partition_fixture, 5)
+flattened = [skill for partition in partitions for skill in partition]
+weights = {
+    skill: sum(1 for row in partition_fixture if row["skill"] == skill)
+    for skill in flattened
+}
+loads = [sum(weights[skill] for skill in partition) for partition in partitions]
+check(
+    "workspace shards assign each skill once and balance pending cells",
+    len(partitions) == 5
+    and sorted(flattened) == ["a", "b", "c", "d", "e", "f"]
+    and len(flattened) == len(set(flattened))
+    and max(loads) - min(loads) <= 1,
+)
+
+with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
+    tmp = Path(raw)
+    merge_row = {
+        "schema_version": 1,
+        "phase": "final",
+        "skill": "fixture",
+        "runtime": "codex",
+        "scenario": "workspace-shard",
+        "expected": "bounded",
+    }
+    merge_metadata = {
+        "cell_fingerprint": "f" * 64,
+        "dependencies": ["skills/fixture/SKILL.md"],
+        "generation": "codex:5.6",
+    }
+    merge_result = {
+        **merge_row,
+        "verdict": "pass",
+        "model": "gpt-5.6-terra",
+        "effort": "medium",
+        "actual": "bounded",
+        "cleanup": "clean",
+        "evidence": "proof",
+    }
+    merge_commit = "a" * 40
+    merge_fingerprint = "b" * 64
+    decorated = release_acceptance.decorate_result(
+        merge_result, merge_metadata, commit=merge_commit
+    )
+    merge_context = {
+        "rows": [merge_row],
+        "metadata": {release_acceptance.row_key(merge_row): merge_metadata},
+        "commit": merge_commit,
+        "fingerprint": merge_fingerprint,
+        "orchestration_version": 1,
+        "prior": [],
+    }
+    shard_report = tmp / "shard.json"
+    release_acceptance.write_json(
+        release_acceptance.report_payload(
+            "final",
+            [decorated],
+            planned_total=1,
+            commit=merge_commit,
+            fingerprint=merge_fingerprint,
+            orchestration_contract_version=1,
+        ),
+        shard_report,
+        announce=False,
+    )
+    merged = acceptance_workspaces.merge_shards(
+        [(shard_report, {"fixture"})], context=merge_context, phase="final"
+    )
+    check(
+        "workspace shard merge validates operation evidence",
+        len(merged) == 1 and merged[0]["row_integrity_sha256"] == decorated["row_integrity_sha256"],
+    )
+    try:
+        acceptance_workspaces.merge_shards(
+            [(shard_report, {"another-skill"})], context=merge_context, phase="final"
+        )
+    except acceptance_workspaces.WorkspaceAcceptanceError as exc:
+        check("workspace shard cannot emit unassigned skills", "unassigned" in str(exc))
+    else:
+        check("workspace shard cannot emit unassigned skills", False)
+
+    conflicting = dict(decorated)
+    conflicting["evidence"] = "different proof"
+    conflicting["row_integrity_sha256"] = release_acceptance.integrity_sha256(
+        conflicting, merge_metadata["cell_fingerprint"], conflicting["provenance"]
+    )
+    conflict_report = tmp / "conflict.json"
+    release_acceptance.write_json(
+        release_acceptance.report_payload(
+            "final",
+            [conflicting],
+            planned_total=1,
+            commit=merge_commit,
+            fingerprint=merge_fingerprint,
+            orchestration_contract_version=1,
+        ),
+        conflict_report,
+        announce=False,
+    )
+    try:
+        acceptance_workspaces.merge_shards(
+            [(shard_report, {"fixture"}), (conflict_report, {"fixture"})],
+            context=merge_context,
+            phase="final",
+        )
+    except acceptance_workspaces.WorkspaceAcceptanceError as exc:
+        check("workspace shard conflicts fail closed", "conflicting" in str(exc))
+    else:
+        check("workspace shard conflicts fail closed", False)
 
 with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     tmp = Path(raw)
@@ -549,12 +693,13 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     manifest = incremental / "config/acceptance-cells.toml"
     (incremental / "scripts/acceptance_fingerprints.py").write_text("# orchestration\n", encoding="utf-8")
+    (incremental / "scripts/acceptance-workspace-supervisor.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/release-acceptance.py").write_text("# orchestration\n", encoding="utf-8")
     manifest.write_text(
         "schema_version = 1\nrunner_contract_version = 2\norchestration_contract_version = 1\n"
         "non_behavioral_paths = [\"CHANGELOG.md\"]\n"
         "non_behavioral_prefixes = [\"tests/\"]\n"
-        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/release-acceptance.py\"]\n"
+        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/acceptance-workspace-supervisor.py\", \"scripts/release-acceptance.py\"]\n"
         "global_dependencies = [\".gitignore\", \"config/model-routing.toml\"]\n"
         "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
         "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"

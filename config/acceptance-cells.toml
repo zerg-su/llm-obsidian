@@ -20,6 +20,7 @@ non_behavioral_prefixes = ["tests/"]
 orchestration_dependencies = [
   "config/acceptance-cells.toml",
   "scripts/acceptance_fingerprints.py",
+  "scripts/acceptance-workspace-supervisor.py",
   "scripts/release-acceptance.py",
 ]
 
