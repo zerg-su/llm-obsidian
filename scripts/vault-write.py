@@ -80,6 +80,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from pipeline_events import emit_event
 from plan_lifecycle import PlanCloseError, render_plan_close
@@ -445,6 +446,87 @@ def validate_page_content(rel: str, content: str) -> None:
             raise PayloadError(f"{rel}: source verified_at must be YYYY-MM-DD")
         if not re.fullmatch(r"[0-9a-f]{64}", str(fm.get("content_sha256") or "")):
             raise PayloadError(f"{rel}: source content_sha256 must be lowercase SHA-256")
+        source_url = str(fm.get("source_url") or "").strip()
+        if source_url:
+            canonical_source_url(source_url, context=rel)
+
+
+def canonical_source_url(raw: str, *, context: str) -> str:
+    """Return the stable network-resource identity used for URL deduplication."""
+
+    try:
+        parsed = urlsplit(raw)
+        port = parsed.port
+    except ValueError as exc:
+        raise PayloadError(f"{context}: invalid source URL") from exc
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise PayloadError(f"{context}: source_url must be an absolute HTTP(S) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise PayloadError(f"{context}: source_url must not contain credentials")
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower()
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    default_port = (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    netloc = host if port is None or default_port else f"{host}:{port}"
+    return urlunsplit((scheme, netloc, parsed.path or "/", parsed.query, ""))
+
+
+def source_page_identity(content: str, *, context: str) -> str | None:
+    block = split_frontmatter(content)
+    if block is None:
+        return None
+    try:
+        fm = parse_frontmatter(block)
+    except FrontmatterError:
+        return None
+    if str(fm.get("type") or "") != "source":
+        return None
+    source_url = str(fm.get("source_url") or "").strip()
+    return canonical_source_url(source_url, context=context) if source_url else None
+
+
+def validate_unique_source_urls(
+    writes: list[tuple[Path, str]], deletes: list[tuple[Path, str]]
+) -> None:
+    """Fail closed when one canonical URL would own multiple source pages."""
+
+    pending: list[tuple[Path, str]] = []
+    replaced = {path.resolve() for path, _ in writes + deletes}
+    for path, content in writes:
+        if path.suffix != ".md" or REPO_ROOT / "wiki" not in path.parents:
+            continue
+        identity = source_page_identity(
+            content, context=str(path.relative_to(REPO_ROOT))
+        )
+        if identity:
+            pending.append((path.resolve(), identity))
+    if not pending:
+        return
+
+    owners: dict[str, Path] = {}
+    wiki_root = REPO_ROOT / "wiki"
+    for path in wiki_root.rglob("*.md"):
+        resolved = path.resolve()
+        if path.is_symlink() or resolved in replaced or not path.is_file():
+            continue
+        try:
+            identity = source_page_identity(
+                path.read_text(encoding="utf-8"),
+                context=str(path.relative_to(REPO_ROOT)),
+            )
+        except (OSError, UnicodeError):
+            continue
+        if identity:
+            owners.setdefault(identity, resolved)
+    for path, identity in pending:
+        owner = owners.get(identity)
+        if owner is not None and owner != path:
+            raise PayloadError(
+                f"{path.relative_to(REPO_ROOT)}: source_url already belongs to "
+                f"{owner.relative_to(REPO_ROOT)}; update that canonical source page"
+            )
+        owners[identity] = path
 
 
 def page_mutations(
@@ -604,6 +686,35 @@ def manifest_write(spec: object) -> tuple[Path, str] | None:
         raise PayloadError(f"manifest is invalid JSON: {exc}") from exc
     if not isinstance(current, dict):
         raise PayloadError("manifest root must be an object")
+    source_patch = merge.get("sources")
+    if source_patch is not None:
+        if not isinstance(source_patch, dict):
+            raise PayloadError("manifest_update.merge.sources must be an object")
+        current_sources = current.get("sources")
+        if current_sources is not None and not isinstance(current_sources, dict):
+            raise PayloadError("manifest sources must be an object")
+        known_urls: dict[str, str] = {}
+        for key in (current_sources or {}):
+            if isinstance(key, str) and key.startswith(("http://", "https://")):
+                known_urls.setdefault(
+                    canonical_source_url(key, context="manifest source key"), key
+                )
+        for key in source_patch:
+            if not isinstance(key, str):
+                raise PayloadError("manifest source keys must be strings")
+            if not key.startswith(("http://", "https://")):
+                continue
+            canonical = canonical_source_url(key, context="manifest source key")
+            if key != canonical:
+                raise PayloadError(
+                    "URL manifest source keys must use the canonical fragment-free URL"
+                )
+            prior = known_urls.get(canonical)
+            if prior is not None and prior != key:
+                raise PayloadError(
+                    "URL manifest source identity conflicts with an existing canonical key"
+                )
+            known_urls[canonical] = key
     return path, json.dumps(deep_merge(current, merge), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
@@ -846,6 +957,8 @@ def main(argv: list[str]) -> int:
         writes.extend(move_writes)
         deletes.extend(move_deletes)
         warnings: list[str] = []
+
+        validate_unique_source_urls(writes, deletes)
 
         manifest = manifest_write(payload.get("manifest_update"))
         if manifest:

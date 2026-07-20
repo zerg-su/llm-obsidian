@@ -711,7 +711,13 @@ def synth_prompt(
 ) -> str:
     flow_action = {
         "autoresearch": "Synthesize and file the research through one scripts/vault-write.py transaction, following vault schema and dedup rules.",
-        "url-ingest": "Ingest this one source through scripts/vault-write.py; search for duplicates before creating pages.",
+        "url-ingest": (
+            "Ingest this one source through scripts/vault-write.py. Treat the exact fragment-free "
+            "artifact URL as the stable manifest identity. If that URL already exists, update its "
+            "existing canonical source page in place and reuse its address even when content_sha256 "
+            "changed; record it in pages_updated. Never create a Snapshot/dated/hash-suffixed source "
+            "page or manifest key for the same URL."
+        ),
         "deep-query": "Write a cited answer to answer.md in this workspace. Do not mutate the vault unless the original request explicitly requires filing.",
     }[flow]
     validation_action = (

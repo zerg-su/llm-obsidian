@@ -321,6 +321,65 @@ python3 -c 'import json,sys; print(json.dumps({"manifest_update":{"path":".raw/.
 expect_exit "vw-manifest-merge" "$?" 0
 expect_grep "vw-manifest-merged" "$SANDBOX/.raw/.manifest.json" "Transaction Page.md"
 
+python3 - "$TODAY" <<'PY' | "$VW" >/dev/null 2>&1
+import json, sys
+today = sys.argv[1]
+content = f'''---
+type: source
+title: "Canonical URL Source"
+source_class: official
+source_url: "https://example.com/docs"
+verified_at: {today}
+content_sha256: {'a' * 64}
+status: active
+created: {today}
+updated: {today}
+tags: [source, test]
+sessions: []
+address: c-000020
+---
+
+# Canonical URL Source
+'''
+print(json.dumps({"pages": [{"op": "create", "path": "wiki/sources/Canonical URL Source.md", "content": content}]}))
+PY
+expect_exit "vw-source-url-first-owner" "$?" 0
+python3 - "$TODAY" <<'PY' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+import json, sys
+today = sys.argv[1]
+content = f'''---
+type: source
+title: "Duplicate URL Source"
+source_class: official
+source_url: "https://EXAMPLE.com:443/docs#snapshot"
+verified_at: {today}
+content_sha256: {'b' * 64}
+status: active
+created: {today}
+updated: {today}
+tags: [source, test]
+sessions: []
+address: c-000021
+---
+
+# Duplicate URL Source
+'''
+print(json.dumps({"pages": [{"op": "create", "path": "wiki/sources/Duplicate URL Source.md", "content": content}]}))
+PY
+expect_exit "vw-source-url-duplicate-rejected" "$?" 3
+expect_grep "vw-source-url-owner-guidance" "$SANDBOX/.err" "update that canonical source page"
+manifest_hash=$(shasum -a 256 "$SANDBOX/.raw/.manifest.json" | awk '{print $1}')
+python3 - "$manifest_hash" <<'PY' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+import json, sys
+print(json.dumps({"manifest_update": {
+    "path": ".raw/.manifest.json",
+    "expected_sha256": sys.argv[1],
+    "merge": {"sources": {"https://example.com/docs#sha256-" + "c" * 64: {"hash": "c" * 64}}},
+}}))
+PY
+expect_exit "vw-manifest-url-fragment-rejected" "$?" 3
+expect_grep "vw-manifest-url-fragment-guidance" "$SANDBOX/.err" "canonical fragment-free URL"
+
 # Exercise the real crash window: the subprocess durably writes a journal and
 # then dies before the first destination write. A fresh process must roll the
 # complete page + log transaction forward.

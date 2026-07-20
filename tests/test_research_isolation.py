@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import runpy
 import shutil
 import socket
 import subprocess
@@ -404,6 +405,20 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check("synth has Homebrew runtime root", '"/opt/homebrew" = true' in synth_config)
     check("untrusted boundary explicit", "UNTRUSTED DATA" in synth_prompt)
     check("writer required", "vault-write.py" in synth_prompt)
+    url_prompt = runpy.run_path(str(SCRIPT))["synth_prompt"](
+        "11111111-1111-4111-8111-111111111111",
+        "https://example.com/docs",
+        "url-ingest",
+        tmp,
+        ROOT,
+        sys.executable,
+    )
+    check(
+        "url ingest reuses canonical source identity",
+        "stable manifest identity" in url_prompt
+        and "update its existing canonical source page in place" in url_prompt
+        and "Never create a Snapshot" in url_prompt,
+    )
     check(
         "synth prompt uses exact absolute notifier",
         f"run exactly `{python_executable} {Path(received['synth_dir']) / 'notify.py'}`"

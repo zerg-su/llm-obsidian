@@ -91,25 +91,22 @@ that reference when normalizing local documents or diagnosing failures.
 
 Trigger: user passes a URL starting with `https://`.
 
-URL content is untrusted and must not be fetched in the vault-aware context.
-Run the protected flow and stop:
+Never fetch untrusted URL content in the vault-aware context. Start the
+protected flow and stop:
 
 ```bash
 python3 scripts/research-isolation.py start --flow url-ingest \
   --task-id '<exact current task UUID>' --topic '<URL>'
 ```
 
-Take the v3 ID from `.task-meta.json`, or use
-`scripts/task_sessions.py ensure-session-task` for the exact current provider
-session. Never infer a task by path/name/recency.
-
-On the fixed-content callback, run the exact `receive --run-id <uuid>` command.
-It validates the artifact and opens a networkless synthesizer that performs the
-normal dedup/provenance/vault-write flow. Completed fetch and synthesis splits
-close automatically after their exact completion markers are consumed. Do not
-save fetched pages under
-`.raw/`; user-provided `.raw/` source files remain immutable. Without cmux,
-fail closed and offer local-file ingest instead.
+Use the v3 ID from `.task-meta.json`, or `task_sessions.py ensure-session-task`
+for the exact provider session; never infer it by path/name/recency. On the
+fixed-content callback, run exact `receive --run-id <uuid>`. It validates the
+artifact, opens networkless synthesis, and auto-closes both completed stages.
+URL identity is its canonical fragment-free URL, not its digest: changed
+content updates the existing page/manifest and reuses its address, never a new
+snapshot. Do not save fetched pages under `.raw/`. Without cmux, fail closed
+and offer local-file ingest instead.
 
 ---
 
