@@ -59,6 +59,12 @@ def write_summary_views(worktree: Path, summary: dict[str, Any], render_markdown
 def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
     meta = read_json(worktree / ".task-meta.json")
     summary = read_json(worktree / ".task-summary.json")
+    pending_review_actions = sorted(worktree.glob(".task-review-drive-*.json"))
+    if pending_review_actions:
+        raise SendError(
+            "review transition is incomplete; apply the exact operation-bound review handoff "
+            "before final reap"
+        )
     vault = Path(str(meta.get("vault_root") or "")).expanduser().resolve()
     if not (vault / "scripts" / "reap-runner.py").is_file():
         raise SendError("task metadata does not identify a coordinator reap runner")

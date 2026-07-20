@@ -228,7 +228,12 @@ def request_exit(worktree: Path, kind: str) -> int:
     if kind == "task":
         require_origin_session(worktree)
     sentinel, surface, runtime = arm(worktree, kind)
-    if runtime == "codex":
+    if runtime == "claude":
+        cleared = run(["cmux", "send-key", "--surface", surface, "ctrl+u"])
+        if cleared.returncode != 0:
+            sentinel.unlink(missing_ok=True)
+            die((cleared.stdout + cleared.stderr).strip() or "cmux composer clear failed")
+    else:
         for _ in range(40):
             run(["cmux", "send-key", "--surface", surface, "backspace"])
     sent = run(["cmux", "send", "--surface", surface, "/exit"])

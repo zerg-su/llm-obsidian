@@ -985,7 +985,12 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--surface", review_surface, cwd=worktree, env=env,
     )
     check("reviewer surface closes", result.returncode == 0, result.stderr)
-    check("reviewer exact surface targeted", f"close-surface --surface {review_surface}" in cmux_log.read_text())
+    reviewer_close_log = cmux_log.read_text()
+    check("reviewer exact surface targeted", f"close-surface --surface {review_surface}" in reviewer_close_log)
+    check(
+        "Claude reviewer composer is cleared before exit",
+        f"send-key --surface {review_surface} ctrl+u" in reviewer_close_log,
+    )
 
     retry_review = broker_store.enqueue_operation(
         broker_project, broker_task, domain="review", runtime="claude", model="fable",

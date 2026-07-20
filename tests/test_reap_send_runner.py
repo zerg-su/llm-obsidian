@@ -133,6 +133,18 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
         [call[1] for call in send_calls] == ["send", "send-key"]
         and sleeps == [sender.CMUX_PASTE_SETTLE_SECONDS],
     )
+    pending_action = worktree / f".task-review-drive-{uuid.uuid4()}.json"
+    pending_action.write_text("{}\n", encoding="utf-8")
+    try:
+        sender.callback(worktree.resolve())
+    except sender.SendError as exc:
+        check(
+            "pending review transition blocks final reap",
+            "review transition is incomplete" in str(exc),
+        )
+    else:
+        check("pending review transition blocks final reap", False)
+    pending_action.unlink()
     drifted = dict(summary, title="Different")
     (worktree / ".task-summary.json").write_text(json.dumps(drifted), encoding="utf-8")
     try:

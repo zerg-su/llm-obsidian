@@ -363,7 +363,10 @@ def cmd_submit(ns: argparse.Namespace) -> int:
             "Cross-model review callback was validated and received automatically by the trusted "
             f"supervisor. Review: {output}. Recommended action: {action}. "
             "Continue the Review Gate without running receive again. After the required executor "
-            f"self-review or resolution, run this exact command: {shlex.join(drive_argv)}"
+            "self-review or resolution, run the following exact command as its own standalone tool "
+            "call: do not add a prefix, suffix, wrapper, &&, pipe, redirection, or substitution. "
+            "Proceed only if it exits zero and reports applied=true; otherwise treat the review "
+            f"transition as incomplete. Exact command: {shlex.join(drive_argv)}"
         )
     try:
         send_to_surface(surface, message)
