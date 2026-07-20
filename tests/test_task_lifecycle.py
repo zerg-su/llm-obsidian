@@ -25,6 +25,7 @@ WATCHDOG = ROOT / "scripts" / "cmux_task_watchdog.py"
 SUPERVISOR = ROOT / "scripts" / "cmux_agent_supervisor.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 import cmux_agent_supervisor as supervisor_module
+import cmux_agent_support as support_module
 import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
@@ -62,6 +63,12 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     worktree = Path(raw)
+    check(
+        "supervisor reuses shared cmux primitives",
+        supervisor_module.resolved_git_common_dir is support_module.resolved_git_common_dir
+        and supervisor_module.task_codex_config_values is support_module.task_codex_config_values
+        and supervisor_module.workspace_trust_prompt_visible is support_module.workspace_trust_prompt_visible,
+    )
     try:
         supervisor_module.resolved_task_model_route(
             ROOT, {"model": "fable", "effort": "high"}, "codex"

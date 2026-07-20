@@ -52,7 +52,7 @@ from model_routing import load_config  # noqa: E402
 from pipeline_events import emit_event  # noqa: E402
 from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
 from vault_schema import FrontmatterError, parse_frontmatter, split_frontmatter  # noqa: E402
-from cmux_agent_supervisor import (  # noqa: E402
+from cmux_agent_support import (  # noqa: E402
     SupervisorError,
     resolved_git_common_dir,
     task_codex_config_values,

@@ -71,6 +71,14 @@ with tempfile.TemporaryDirectory(prefix="session-preflight-test.") as raw:
         target = guessed_root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((ROOT / relative).read_bytes())
+    for prefix in manifest["non_behavioral_prefixes"]:
+        (guessed_root / prefix).mkdir(parents=True, exist_ok=True)
+    for relative in manifest["orchestration_dependencies"]:
+        target = guessed_root / relative
+        if target.is_file():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
     generation_file = guessed_root / ".vault-meta/acceptance/model-generations.json"
     generation_file.parent.mkdir(parents=True, exist_ok=True)
     generation_file.write_text(

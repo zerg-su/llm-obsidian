@@ -24,7 +24,10 @@ from acceptance_fingerprints import (
     dirty_paths,
     environment_contract,
     generation_snapshot,
+    is_non_behavioral_path,
     non_behavioral_paths,
+    non_behavioral_prefixes,
+    orchestration_dependencies,
     production_generations,
     read_manifest,
 )
@@ -229,6 +232,9 @@ def load_resume_results(
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
     root: Path,
     non_behavioral: set[str] | None = None,
+    non_behavioral_prefixes_: tuple[str, ...] = (),
+    orchestration: set[str] | None = None,
+    orchestration_contract_version: int = 1,
     include_dirty: bool = True,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
@@ -242,10 +248,20 @@ def load_resume_results(
     prior_commit = str(report.get("source_commit") or "")
     if schema == 1:
         raise AcceptanceError("schema-1 acceptance evidence requires --restart")
+    prior_orchestration = report.get("orchestration_contract_version", 1)
+    if prior_orchestration != orchestration_contract_version:
+        raise AcceptanceError(
+            "existing acceptance report uses an incompatible orchestration contract; use --restart"
+        )
     changed = changed_paths(root, prior_commit, include_dirty=include_dirty)
     declared = {path for item in metadata.values() for path in item["dependencies"]}
     declared.update(non_behavioral or set())
-    unknown_changed = changed is None or bool(changed - declared)
+    declared.update(orchestration or set())
+    unknown_changed = changed is None or any(
+        path not in declared
+        and not is_non_behavioral_path(path, non_behavioral or set(), non_behavioral_prefixes_)
+        for path in changed
+    )
     expected = {row_key(row): row for row in rows}
     resumed: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str, str]] = set()
@@ -366,6 +382,7 @@ def report_payload(
     planned_total: int | None = None,
     commit: str = "",
     fingerprint: str = "",
+    orchestration_contract_version: int = 1,
 ) -> dict[str, Any]:
     planned = len(rows) if planned_total is None else planned_total
     counts = {verdict: 0 for verdict in sorted(VERDICTS)}
@@ -375,6 +392,7 @@ def report_payload(
     accepted = passed + counts["n-a"]
     return {
         "schema_version": 2,
+        "orchestration_contract_version": orchestration_contract_version,
         "phase": phase,
         "source_commit": commit,
         "matrix_fingerprint": fingerprint,
@@ -431,6 +449,7 @@ def main() -> int:
         skills = load_spec(args.spec, args.root.resolve())
         validate_scenario_coverage(args.scenarios, skills)
         manifest = read_manifest(args.root.resolve(), args.manifest)
+        orchestration_version = int(manifest["orchestration_contract_version"])
         if args.command == "check":
             print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
             return 0
@@ -448,6 +467,7 @@ def main() -> int:
             write_json(
                 {
                     "schema_version": 2,
+                    "orchestration_contract_version": orchestration_version,
                     "phase": args.phase,
                     "rows": [{**row, **metadata[row_key(row)]} for row in rows],
                 },
@@ -456,6 +476,8 @@ def main() -> int:
             return 0
         commit = source_commit(args.root.resolve())
         allowed_dirty = non_behavioral_paths(manifest)
+        allowed_dirty_prefixes = non_behavioral_prefixes(manifest)
+        orchestration_only = orchestration_dependencies(manifest)
         canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
         try:
             args.report.resolve().relative_to(canonical_acceptance_root)
@@ -466,7 +488,10 @@ def main() -> int:
             dirty = dirty_paths(args.root.resolve())
             if dirty is None:
                 raise AcceptanceError("cannot inspect acceptance worktree state")
-            behavioral_dirty = sorted(dirty - allowed_dirty)
+            behavioral_dirty = sorted(
+                path for path in dirty
+                if not is_non_behavioral_path(path, allowed_dirty, allowed_dirty_prefixes)
+            )
             if behavioral_dirty:
                 preview = ", ".join(behavioral_dirty[:8])
                 suffix = " …" if len(behavioral_dirty) > 8 else ""
@@ -487,6 +512,9 @@ def main() -> int:
             args.report, rows, phase=args.phase, commit=commit,
             metadata=metadata, root=args.root.resolve(),
             non_behavioral=allowed_dirty,
+            non_behavioral_prefixes_=allowed_dirty_prefixes,
+            orchestration=orchestration_only,
+            orchestration_contract_version=orchestration_version,
             # Only canonical worktree-local reports are release evidence.
             # Explicit external reports remain useful for hermetic diagnostics.
             include_dirty=canonical_report,
@@ -497,6 +525,7 @@ def main() -> int:
                 report_payload(
                     args.phase, completed, planned_total=len(rows),
                     commit=commit, fingerprint=fingerprint,
+                    orchestration_contract_version=orchestration_version,
                 ),
                 args.report,
                 announce=False,
@@ -509,7 +538,8 @@ def main() -> int:
             selected_skills=selected_skills or None,
         )
         report = report_payload(
-            args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint
+            args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint,
+            orchestration_contract_version=orchestration_version,
         )
         write_json(report, args.report)
         if canonical_report and report["summary"]["failed"] == 0 and report["summary"]["complete"]:

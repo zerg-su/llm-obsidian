@@ -18,8 +18,25 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from lifecycle_telemetry import emit_lifecycle_event, nonnegative_int, read_object
-from model_routing import RoutingError, load_config as load_routing_config, resolve as resolve_model_route, session_from_meta
+from model_routing import (
+    RoutingError,
+    load_config as load_routing_config,
+    resolve as resolve_model_route,
+    session_from_meta,
+)
 from task_contract import ContractError, normalize, read_json as read_task_json
+from cmux_agent_support import (
+    CODEX_EFFORTS,
+    DEFAULT_CODEX_EFFORT,
+    ROUTING_CONFIG as _ROUTING_CONFIG,
+    SupervisorError,
+    codex_automation_service_tier_config,
+    codex_effort_config,
+    resolved_git_common_dir,
+    task_codex_config_values,
+    validated_cmux_socket_path,
+    workspace_trust_prompt_visible,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -44,12 +61,6 @@ ARMED_EXIT_POLL_SECONDS = 0.25
 # dialog is painted.  Keep this a bounded startup bootstrap, but do not expire
 # before a slow authenticated CLI has reached its first interactive screen.
 WORKSPACE_TRUST_TIMEOUT_SECONDS = 120
-try:
-    _ROUTING_CONFIG = load_routing_config(Path(__file__).resolve().parents[1])
-except RoutingError:  # Hermetic consumers may copy only the supervisor.
-    _ROUTING_CONFIG = load_routing_config()
-DEFAULT_CODEX_EFFORT = _ROUTING_CONFIG.runtime_default("codex")["effort"]
-CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {
     "--full-auto",
@@ -133,10 +144,6 @@ RUNTIME_DIRS = (
     Path("/usr/bin"),
     Path("/bin"),
 )
-
-
-class SupervisorError(RuntimeError):
-    pass
 
 
 def die(message: str, code: int = 2) -> NoReturn:
@@ -421,51 +428,6 @@ def require_option(argv: list[str], flag: str, expected: str) -> None:
         raise SupervisorError(f"agent command must pin {flag} {expected}")
 
 
-def validated_cmux_socket_path() -> Path:
-    raw = os.environ.get("CMUX_SOCKET_PATH") or os.environ.get("CMUX_SOCKET")
-    if raw and ("\n" in raw or "\0" in raw):
-        raise SupervisorError("cmux socket path is malformed")
-    path = (Path(raw).expanduser() if raw else Path.home() / ".local/state/cmux/cmux.sock").resolve()
-    try:
-        stat = path.stat()
-        available = path.is_socket()
-    except OSError:
-        available = False
-        stat = None
-    if not available or stat is None or stat.st_uid != os.getuid():
-        raise SupervisorError(f"cmux socket is unavailable or not user-owned: {path}")
-    return path
-
-
-def codex_effort_config(effort: str) -> str:
-    if effort not in CODEX_EFFORTS:
-        raise SupervisorError(f"Codex effort must be one of {sorted(CODEX_EFFORTS)}")
-    return f'model_reasoning_effort="{effort}"'
-
-
-def codex_automation_service_tier_config() -> str:
-    """Keep repo-spawned Codex runs off user-only Fast/priority service."""
-    return 'service_tier="default"'
-
-
-def task_codex_config_values(cmux_socket: Path, effort: str = DEFAULT_CODEX_EFFORT) -> list[str]:
-    socket_rule = json.dumps(str(cmux_socket), ensure_ascii=False)
-    return [
-        codex_automation_service_tier_config(),
-        "sandbox_workspace_write.network_access=true",
-        "features.network_proxy.enabled=true",
-        'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }',
-        f"features.network_proxy.unix_sockets={{ {socket_rule} = \"allow\" }}",
-        "features.network_proxy.allow_local_binding=true",
-        "features.network_proxy.allow_upstream_proxy=false",
-        "features.network_proxy.dangerously_allow_all_unix_sockets=false",
-        "features.network_proxy.dangerously_allow_non_loopback_proxy=false",
-        "features.network_proxy.enable_socks5=false",
-        "features.network_proxy.enable_socks5_udp=false",
-        codex_effort_config(effort),
-    ]
-
-
 def reviewer_codex_config_values(effort: str = "") -> list[str]:
     values = [
         codex_automation_service_tier_config(),
@@ -640,25 +602,6 @@ def resolved_task_model_route(worktree: Path, meta: dict[str, Any], runtime: str
         return default
     except RoutingError as exc:
         raise SupervisorError(str(exc)) from exc
-
-
-def resolved_git_common_dir(worktree: Path) -> Path:
-    result = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    raw = result.stdout.strip()
-    if result.returncode != 0 or not raw or "\n" in raw or "\0" in raw:
-        raise SupervisorError("cannot resolve the task Git metadata root")
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute():
-        candidate = worktree / candidate
-    common = candidate.resolve()
-    if not common.is_dir() or common.stat().st_uid != os.getuid():
-        raise SupervisorError("task Git metadata root is missing or not owned by the current user")
-    return common
 
 
 def validated_task_git_common_dir(worktree: Path, meta: dict[str, Any]) -> Path:
@@ -1016,31 +959,6 @@ def stop_watchdog(process: subprocess.Popen[bytes] | None) -> None:
             process.wait(timeout=3)
         except subprocess.TimeoutExpired:
             pass
-
-
-def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
-    """Recognize only the native first-run trust dialog for one runtime."""
-    markers = {
-        "claude": (
-            "Accessing workspace:",
-            "Quick safety check: Is this a project you created or one you trust?",
-            "Yes, I trust this folder",
-            "Enter to confirm",
-        ),
-        "codex": (
-            "Do you trust the contents of this directory?",
-            "Yes, continue",
-            "Press enter to continue",
-        ),
-    }
-    expected = markers.get(runtime)
-    if expected is None:
-        return False
-    # cmux read-screen reports visual terminal rows.  A narrow pane may split
-    # native dialog markers at arbitrary character boundaries, so compare the
-    # exact marker text after removing layout whitespace only.
-    compact_screen = re.sub(r"\s+", "", screen)
-    return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
 
 
 def claude_mcp_trust_prompt_visible(screen: str) -> bool:

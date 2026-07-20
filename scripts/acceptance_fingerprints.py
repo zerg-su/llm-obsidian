@@ -18,6 +18,18 @@ from model_routing import load_config
 
 DEFAULT_MANIFEST = "config/acceptance-cells.toml"
 SAFE_REL = re.compile(r"^[A-Za-z0-9._/-]+$")
+ALLOWED_NON_BEHAVIORAL_PREFIXES = {"tests/"}
+ALLOWED_NON_BEHAVIORAL_PATHS = {
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
+    "CHANGELOG.md",
+}
+ALLOWED_ORCHESTRATION_DEPENDENCIES = {
+    "config/acceptance-cells.toml",
+    "scripts/acceptance_fingerprints.py",
+    "scripts/release-acceptance.py",
+}
 
 
 class FingerprintError(ValueError):
@@ -30,16 +42,37 @@ def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
         value = tomllib.loads(source.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise FingerprintError(f"cannot read acceptance manifest: {exc}") from exc
-    if value.get("schema_version") != 1 or value.get("runner_contract_version") != 2:
-        raise FingerprintError("acceptance manifest must use schema 1 and runner contract 2")
+    if (
+        value.get("schema_version") != 1
+        or value.get("runner_contract_version") != 2
+        or value.get("orchestration_contract_version") != 1
+    ):
+        raise FingerprintError(
+            "acceptance manifest must use schema 1, runner contract 2, and orchestration contract 1"
+        )
     if not isinstance(value.get("global_dependencies"), list):
         raise FingerprintError("acceptance manifest global_dependencies must be an array")
     raw_non_behavioral = value.get("non_behavioral_paths")
     if not isinstance(raw_non_behavioral, list):
         raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
-    for rel in safe_dependencies(raw_non_behavioral):
+    exact_non_behavioral = set(safe_dependencies(raw_non_behavioral))
+    if exact_non_behavioral - ALLOWED_NON_BEHAVIORAL_PATHS:
+        raise FingerprintError("acceptance non-behavioral paths exceed the code-owned allowlist")
+    for rel in exact_non_behavioral:
         if not (root / rel).is_file():
             raise FingerprintError(f"non-behavioral acceptance path is not a file: {rel}")
+    prefixes = non_behavioral_prefixes(value)
+    if set(prefixes) - ALLOWED_NON_BEHAVIORAL_PREFIXES:
+        raise FingerprintError("acceptance manifest may classify only tests/ as a non-behavioral prefix")
+    for prefix in prefixes:
+        if not (root / prefix.removesuffix("/")).is_dir():
+            raise FingerprintError(f"non-behavioral acceptance prefix is not a directory: {prefix}")
+    orchestration = orchestration_dependencies(value)
+    if orchestration != ALLOWED_ORCHESTRATION_DEPENDENCIES:
+        raise FingerprintError("acceptance orchestration dependencies must match the code-owned allowlist")
+    for rel in orchestration:
+        if not (root / rel).is_file():
+            raise FingerprintError(f"acceptance orchestration dependency is not a file: {rel}")
     return value
 
 
@@ -85,6 +118,31 @@ def non_behavioral_paths(manifest: dict[str, Any]) -> set[str]:
     if not isinstance(values, list):
         raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
     return set(safe_dependencies(values))
+
+
+def non_behavioral_prefixes(manifest: dict[str, Any]) -> tuple[str, ...]:
+    """Return code-restricted directory prefixes that cannot affect product behavior."""
+
+    values = manifest.get("non_behavioral_prefixes")
+    if not isinstance(values, list):
+        raise FingerprintError("acceptance manifest non_behavioral_prefixes must be an array")
+    prefixes = tuple(safe_dependencies(values))
+    if any(not prefix.endswith("/") for prefix in prefixes):
+        raise FingerprintError("non-behavioral acceptance prefixes must end with /")
+    return prefixes
+
+
+def orchestration_dependencies(manifest: dict[str, Any]) -> set[str]:
+    """Return code-owned evidence orchestration paths excluded from cell behavior."""
+
+    values = manifest.get("orchestration_dependencies")
+    if not isinstance(values, list):
+        raise FingerprintError("acceptance manifest orchestration_dependencies must be an array")
+    return set(safe_dependencies(values))
+
+
+def is_non_behavioral_path(path: str, exact: set[str], prefixes: tuple[str, ...]) -> bool:
+    return path in exact or any(path.startswith(prefix) for prefix in prefixes)
 
 
 def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]:
@@ -268,6 +326,9 @@ __all__ = [
     "expanded_dependencies",
     "generation_snapshot",
     "non_behavioral_paths",
+    "non_behavioral_prefixes",
+    "orchestration_dependencies",
+    "is_non_behavioral_path",
     "production_generations",
     "read_manifest",
 ]

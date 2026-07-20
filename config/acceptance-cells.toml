@@ -1,5 +1,6 @@
 schema_version = 1
 runner_contract_version = 2
+orchestration_contract_version = 1
 
 # Exact release-packaging files that cannot change a live cell's behavior.
 # No globs: every path must be reviewed and listed separately.
@@ -10,18 +11,27 @@ non_behavioral_paths = [
   "CHANGELOG.md",
 ]
 
-global_dependencies = [
+# Test-only changes never alter installed product behavior. Prefix handling is
+# code-restricted to tests/; arbitrary directories cannot be configured here.
+non_behavioral_prefixes = ["tests/"]
+
+# These files own evidence selection/checkpointing, not live cell behavior.
+# Incompatible changes require an explicit orchestration_contract_version bump.
+orchestration_dependencies = [
   "config/acceptance-cells.toml",
+  "scripts/acceptance_fingerprints.py",
+  "scripts/release-acceptance.py",
+]
+
+global_dependencies = [
+  ".gitignore",
   "config/model-routing.toml",
   "evals/acceptance/scenarios.json",
   "evals/acceptance/skills.json",
-  "scripts/acceptance_fingerprints.py",
+  "scripts/cmux_agent_support.py",
   "scripts/live-acceptance-runner.py",
-  "scripts/release-acceptance.py",
   "scripts/model_routing.py",
   "scripts/task_sessions.py",
-  "scripts/cmux_agent_supervisor.py",
-  "scripts/cmux_surface_lifecycle.py",
   "scripts/pipeline_events.py",
 ]
 
@@ -64,6 +74,8 @@ dependencies = ["scripts/daily-collect.py", "scripts/daily-apply.py", "scripts/d
 
 [scenarios.dispatch-review-reap]
 dependencies = [
+  "scripts/cmux_agent_supervisor.py",
+  "scripts/cmux_surface_lifecycle.py",
   "scripts/dispatch-runner.py",
   "scripts/reap-runner.py",
   "scripts/task_contract.py",

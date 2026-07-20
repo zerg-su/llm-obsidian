@@ -54,6 +54,36 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.returncode == 3 and "unsafe acceptance dependency" in result.stderr,
         result.stderr,
     )
+    broadened_exact_manifest = tmp / "broadened-exact-acceptance-cells.toml"
+    broadened_exact_manifest.write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8").replace(
+            '  "CHANGELOG.md",',
+            '  "CHANGELOG.md",\n  "scripts/live-acceptance-runner.py",',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    result = run("--manifest", str(broadened_exact_manifest), "check")
+    check(
+        "non-behavioral exact paths are code-owned",
+        result.returncode == 3 and "code-owned allowlist" in result.stderr,
+        result.stderr,
+    )
+    unsafe_prefix_manifest = tmp / "unsafe-prefix-acceptance-cells.toml"
+    unsafe_prefix_manifest.write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8").replace(
+            'non_behavioral_prefixes = ["tests/"]',
+            'non_behavioral_prefixes = ["skills/"]',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    result = run("--manifest", str(unsafe_prefix_manifest), "check")
+    check(
+        "non-behavioral prefixes are restricted to tests",
+        result.returncode == 3 and "only tests/" in result.stderr,
+        result.stderr,
+    )
     matrix = tmp / "matrix.json"
     result = run("matrix", "--phase", "baseline", "--output", str(matrix))
     data = json.loads(matrix.read_text(encoding="utf-8"))
@@ -61,6 +91,34 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     check("matrix exit", result.returncode == 0, result.stderr)
     check("matrix complete", len(data["rows"]) == len(skills) * 2)
     check("matrix runtime parity", {row["runtime"] for row in data["rows"]} == {"claude", "codex"})
+    check(
+        "gitignore and shared support affect every live cell",
+        all(
+            ".gitignore" in row["dependencies"]
+            and "scripts/cmux_agent_support.py" in row["dependencies"]
+            for row in data["rows"]
+        ),
+    )
+    check(
+        "acceptance orchestration is absent from cell behavior fingerprints",
+        all(
+            "scripts/release-acceptance.py" not in row["dependencies"]
+            and "scripts/acceptance_fingerprints.py" not in row["dependencies"]
+            and "config/acceptance-cells.toml" not in row["dependencies"]
+            for row in data["rows"]
+        ),
+    )
+    lifecycle_scenarios = {"cmux-lifecycle", "dispatch-review-reap"}
+    check(
+        "supervisor and lifecycle invalidate only their scenarios",
+        all(
+            ("scripts/cmux_agent_supervisor.py" in row["dependencies"])
+            == (row["scenario"] in lifecycle_scenarios)
+            and ("scripts/cmux_surface_lifecycle.py" in row["dependencies"])
+            == (row["scenario"] in lifecycle_scenarios)
+            for row in data["rows"]
+        ),
+    )
 
     fragment_root = tmp / "fragment-root"
     (fragment_root / "evals/acceptance").mkdir(parents=True)
@@ -342,6 +400,8 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     (incremental / "skills/demo-b").mkdir(parents=True)
     (incremental / "config").mkdir()
     (incremental / "evals").mkdir()
+    (incremental / "scripts").mkdir()
+    (incremental / "tests").mkdir()
     (incremental / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
     (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n", encoding="utf-8")
     (incremental / "skills/demo-b/SKILL.md").write_text("# Demo B\n", encoding="utf-8")
@@ -350,10 +410,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     manifest = incremental / "config/acceptance-cells.toml"
+    (incremental / "scripts/acceptance_fingerprints.py").write_text("# orchestration\n", encoding="utf-8")
+    (incremental / "scripts/release-acceptance.py").write_text("# orchestration\n", encoding="utf-8")
     manifest.write_text(
-        "schema_version = 1\nrunner_contract_version = 2\n"
+        "schema_version = 1\nrunner_contract_version = 2\norchestration_contract_version = 1\n"
         "non_behavioral_paths = [\"CHANGELOG.md\"]\n"
-        "global_dependencies = [\"config/acceptance-cells.toml\", \"config/model-routing.toml\"]\n"
+        "non_behavioral_prefixes = [\"tests/\"]\n"
+        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/release-acceptance.py\"]\n"
+        "global_dependencies = [\".gitignore\", \"config/model-routing.toml\"]\n"
         "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
         "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"
         "[generation_routes]\ninclude = [\"runtimes.codex\", \"runtimes.claude\"]\nexclude = []\n"
@@ -429,6 +493,41 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     subprocess.run(["git", "add", "."], cwd=incremental, check=True)
     subprocess.run(["git", "commit", "-qm", "uncommitted metadata becomes committed"], cwd=incremental, check=True)
+    invocation_log.write_text("", encoding="utf-8")
+    test_only = incremental / "tests/test_only.py"
+    test_only.write_text("# no product behavior\n", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "dirty tests prefix is non-behavioral",
+        result.returncode == 0 and calls == [],
+        result.stderr,
+    )
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "test-only change"], cwd=incremental, check=True)
+    invocation_log.write_text("", encoding="utf-8")
+    orchestration_script = incremental / "scripts/release-acceptance.py"
+    orchestration_script.write_text("# orchestration-only change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(["git", "commit", "-qm", "orchestration-only change"], cwd=incremental, check=True)
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    check(
+        "compatible orchestration change reuses live evidence",
+        result.returncode == 0 and calls == [],
+        result.stderr,
+    )
+    report_data = json.loads(incremental_report.read_text(encoding="utf-8"))
+    report_data["orchestration_contract_version"] = 999
+    incremental_report.write_text(json.dumps(report_data), encoding="utf-8")
+    result = incremental_run()
+    check(
+        "incompatible orchestration version fails closed",
+        result.returncode == 3 and "incompatible orchestration contract" in result.stderr,
+        result.stderr,
+    )
+    report_data["orchestration_contract_version"] = 1
+    incremental_report.write_text(json.dumps(report_data), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     dirty_unknown = incremental / "dirty-unknown.txt"
     dirty_unknown.write_text("not committed\n", encoding="utf-8")
