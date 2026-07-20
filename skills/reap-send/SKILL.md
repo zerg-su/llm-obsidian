@@ -8,9 +8,8 @@ allowed-tools: Read Write Edit Glob Grep Bash
 
 # /reap-send — task-side final handoff
 
-Use only inside a dispatched task worktree. It sends one typed final summary to
-the exact coordinator; it does not write the coordinator vault and does not
-itself close the task.
+Use only in a dispatched task worktree. It sends one typed summary to the exact
+coordinator; it neither writes its vault nor closes the task.
 
 ## Normal unattended path
 
@@ -27,7 +26,7 @@ itself close the task.
 4. Validate and deliver exactly once through code:
 
    ```bash
-   python3 skills/reap-send/scripts/send_reap.py --worktree "$PWD"
+   python3 <vault-root>/skills/reap-send/scripts/send_reap.py --worktree "$PWD"
    ```
 
    The runner validates `task_contract.py`, canonical `.task-summary.json`,

@@ -38,21 +38,18 @@ For the canonical primary checkout only, explicit coordinator review may add
 `--coordinator-review --vault-root <vault-root>`; linked worktrees are rejected.
 `spawn` is a legacy alias.
 
-For v3, use the unique printed task-local `--operation-file` for manual
-receive/verify/status/archive/finish commands. The handoff validates the exact
-project/task/lane/operation directory without copying a long path; supervised
-callbacks use their own one-shot handoff. Project/task/lane/operation IDs prevent parallel
-coordinators or model lanes from overwriting each other. Start opens one split
+For v3 manual commands, use the printed task-local `--operation-file`; callbacks
+use one-shot handoffs. Both bind exact IDs, so parallel lanes cannot overwrite.
+Start opens one split
 anchored right of the caller and hands cmux only a short supervised command.
 Preparation/spawn/send failures mark the exact operation failed; never guess or
 silently create another lane.
 
-Reviewer security is code-owned. Claude runs interactive `dontAsk` with bounded
-read/test tools and only `.review-outbox.json` writable. Codex uses an external
-owner-only scratch, `approval=never`, no product write root, external network
-disabled, and hooks disabled. The supervisor validates the outbox, baseline,
-schema, operation, and callback. Never use `claude -p`/`--print`, expose cmux to
-the reviewer, or relax this profile.
+Security is code-owned. Claude runs interactive `dontAsk` with bounded reads/tests
+and only `.review-outbox.json` writable. Codex uses owner-only scratch,
+`approval=never`, no product writes, external network, or hooks. The supervisor
+validates outbox, baseline, schema, operation, and callback. Never use Claude
+print mode, expose cmux, or relax this profile.
 
 Do not interrupt visible reviewer activity. Wait 15 minutes without progress;
 by 20 minutes inspect and ask for a concise status rather than cancelling.

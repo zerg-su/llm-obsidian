@@ -149,6 +149,7 @@ _attachments/
 .vault-meta/skill-nudge-day.txt
 .vault-meta/evals/
 .vault-meta/acceptance/
+.vault-meta/turn-markers/
 .vault-meta/research-runs/
 .vault-meta/session-routing/
 .vault-meta/daily-runs/

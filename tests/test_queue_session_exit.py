@@ -37,8 +37,11 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     check(
         "Claude queues direct exit to exact surface",
         payload["status"] == "queued"
-        and calls[0] == f"send --surface {SURFACE} /exit"
-        and all(not line for line in calls[1:]),
+        and calls == [
+            f"send-key --surface {SURFACE} ctrl+u",
+            f"send --surface {SURFACE} /exit",
+            f"send-key --surface {SURFACE} Enter",
+        ],
     )
     check("runner never closes surface", all("close-surface" not in call for call in calls) and payload["surface_closed"] is False)
 

@@ -38,7 +38,9 @@ def queue_exit() -> dict[str, object]:
     if not surface or not SURFACE_RE.fullmatch(surface) or not cmux:
         return {**base, "status": "manual", "reason": "exact cmux surface unavailable"}
     if selected_runtime == "claude":
-        ok = run(cmux, "send", "--surface", surface, "/exit\n")
+        ok = run(cmux, "send-key", "--surface", surface, "ctrl+u")
+        ok = run(cmux, "send", "--surface", surface, "/exit") and ok
+        ok = run(cmux, "send-key", "--surface", surface, "Enter") and ok
     else:
         for _index in range(40):
             run(cmux, "send-key", "--surface", surface, "backspace")

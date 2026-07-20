@@ -867,6 +867,14 @@ registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encod
 skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
 check("acceptance runtime is gitignored", ".vault-meta/acceptance/" in (ROOT / ".gitignore").read_text(encoding="utf-8"))
 check(
+    "turn markers are gitignored",
+    subprocess.run(
+        ["git", "check-ignore", "-q", ".vault-meta/turn-markers/session.json"],
+        cwd=ROOT,
+        check=False,
+    ).returncode == 0,
+)
+check(
     "scenario registry exactly covers matrix",
     set(registry["scenarios"]) == {item["scenario"] for item in skills["skills"].values()},
 )
