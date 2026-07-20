@@ -146,6 +146,15 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and '"sonnet" = "claude"' in override_text
         and validated_override.runtime_default("claude")["model"] == "sonnet",
     )
+    module.disable_acceptance_autocommit(override_repo)
+    autocommit_guard = json.loads(
+        (override_repo / ".vault-meta/auto-commit.disabled").read_text(encoding="utf-8")
+    )
+    check(
+        "live clone disables host turn-end auto-commit",
+        autocommit_guard == {"schema_version": 1, "reason": "live-acceptance"}
+        and (override_repo / ".vault-meta/auto-commit.disabled").stat().st_mode & 0o777 == 0o600,
+    )
     previous_claude_override = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL")
     os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = "sonnet"
     try:

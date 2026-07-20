@@ -264,8 +264,18 @@ def create_sandbox(run_dir: Path) -> tuple[Path, str]:
     )
     if checked.returncode != 0:
         raise AcceptanceRunnerError(checked.stderr.strip() or "acceptance checkout failed")
+    disable_acceptance_autocommit(sandbox)
     atomic_json(sandbox / ".acceptance-sandbox.json", {"schema_version": 1, "run_dir": str(run_dir), "commit": commit})
     return sandbox, commit
+
+
+def disable_acceptance_autocommit(sandbox: Path) -> None:
+    """Keep host Stop hooks from committing inside a disposable live clone."""
+
+    atomic_json(
+        sandbox / ".vault-meta" / "auto-commit.disabled",
+        {"schema_version": 1, "reason": "live-acceptance"},
+    )
 
 
 def install_acceptance_model_overrides(

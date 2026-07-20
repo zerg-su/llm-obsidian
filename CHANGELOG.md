@@ -37,6 +37,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   remaining `callback-ready` after its tab disappears. Successful unattended
   reap-send output also omits the already-delivered coordinator command, so a
   task model cannot execute the coordinator-only reap a second time.
+- Disposable live-acceptance clones now carry the repository's standard
+  auto-commit opt-out marker, preventing host Codex Stop hooks from advancing
+  the coordinator HEAD even when the CLI hook-disable switch is ineffective.
 - Exact cmux cleanup now resolves and supplies the surface's window/workspace
   anchors, verifies disappearance in the cmux tree, and retries once instead of
   treating a misleading `not_found` response as success. The `/close` live
