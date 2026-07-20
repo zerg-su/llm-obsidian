@@ -307,6 +307,49 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         and [row["skill"] for row in checkpoints[0]] == ["first", "later-prior"]
         and [row["skill"] for row in checkpoint_result] == ["first", "later-prior"],
     )
+    parallel_markers = tmp / "parallel-markers"
+    parallel_runner = tmp / "parallel-runner.py"
+    parallel_runner.write_text(
+        "import json,sys,time\n"
+        "from pathlib import Path\n"
+        "row=json.load(sys.stdin); root=Path(sys.argv[1]); root.mkdir(exist_ok=True)\n"
+        "(root / row['skill']).write_text('started\\n')\n"
+        "deadline=time.monotonic()+3\n"
+        "while time.monotonic()<deadline and len(list(root.glob('*'))) < 5: time.sleep(0.02)\n"
+        "if len(list(root.glob('*'))) < 5: raise SystemExit(9)\n"
+        "print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'medium',"
+        "'actual':'parallel','cleanup':'ok','evidence':'five started'}))\n",
+        encoding="utf-8",
+    )
+    parallel_rows = [
+        {
+            "schema_version": 1, "phase": "final", "skill": f"parallel-{index}", "runtime": "claude",
+            "scenario": "parallel", "expected": "bounded",
+        }
+        for index in range(5)
+    ]
+    parallel_checkpoints: list[list[dict[str, object]]] = []
+    parallel_result = release_acceptance.run_matrix(
+        parallel_rows,
+        [sys.executable, str(parallel_runner), str(parallel_markers)],
+        5,
+        checkpoint=lambda value: parallel_checkpoints.append(value),
+        jobs=5,
+    )
+    check(
+        "five acceptance workers execute concurrently with canonical checkpoints",
+        len(parallel_result) == 5
+        and all(item["verdict"] == "pass" for item in parallel_result)
+        and len(parallel_checkpoints) == 5
+        and [item["skill"] for item in parallel_checkpoints[-1]]
+        == [item["skill"] for item in parallel_rows],
+    )
+    try:
+        release_acceptance.run_matrix([], [sys.executable, str(runner)], 5, jobs=16)
+    except release_acceptance.AcceptanceError as exc:
+        check("parallel worker limit is bounded at fifteen", "between 1 and 15" in str(exc))
+    else:
+        check("parallel worker limit is bounded at fifteen", False)
     report = tmp / "report.json"
     result = run(
         "run", "--restart", "--phase", "final", "--runner", f"{sys.executable} {runner}",
@@ -456,12 +499,15 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     interrupt_marker = tmp / "runner-interrupted"
     interrupt_runner = tmp / "interrupt-runner.py"
     interrupt_runner.write_text(
-        "import signal,sys,time\n"
+        "import json,signal,sys,time\n"
         "from pathlib import Path\n"
-        "marker=Path(sys.argv[1])\n"
-        "def stop(_signum,_frame): marker.write_text('cleanup-complete\\n'); raise SystemExit(130)\n"
+        "marker=Path(sys.argv[1]); row=json.load(sys.stdin)\n"
+        "token=row['skill']+'-'+row['runtime']\n"
+        "started=marker.with_name(marker.name+'.'+token+'.started')\n"
+        "cleaned=marker.with_name(marker.name+'.'+token+'.cleaned')\n"
+        "def stop(_signum,_frame): cleaned.write_text('cleanup-complete\\n'); raise SystemExit(130)\n"
         "signal.signal(signal.SIGINT, stop)\n"
-        "marker.with_suffix('.started').write_text('started\\n')\n"
+        "started.write_text('started\\n')\n"
         "while True: time.sleep(0.1)\n",
         encoding="utf-8",
     )
@@ -469,7 +515,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         [
             sys.executable, str(SCRIPT), "run", "--restart", "--phase", "final",
             "--runner", f"{sys.executable} {interrupt_runner} {interrupt_marker}",
-            "--timeout", "60", "--report", str(report),
+            "--timeout", "60", "--jobs", "5", "--report", str(report),
         ],
         text=True,
         stdout=subprocess.PIPE,
@@ -477,12 +523,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         start_new_session=True,
     )
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not interrupt_marker.with_suffix('.started').is_file():
+    while time.monotonic() < deadline and len(list(tmp.glob("runner-interrupted.*.started"))) < 5:
         time.sleep(0.05)
-    check("interrupt fixture starts", interrupt_marker.with_suffix('.started').is_file())
+    started_markers = list(tmp.glob("runner-interrupted.*.started"))
+    check("five interrupt fixtures start", len(started_markers) == 5)
     os.kill(interrupted.pid, signal.SIGINT)
     _stdout, interrupt_stderr = interrupted.communicate(timeout=15)
-    check("matrix interrupt reaches active runner cleanup", interrupt_marker.is_file())
+    cleaned_markers = list(tmp.glob("runner-interrupted.*.cleaned"))
+    check("matrix interrupt reaches every active runner cleanup", len(cleaned_markers) == len(started_markers) == 5)
     check("matrix interrupt exits without traceback", interrupted.returncode == 130 and "Traceback" not in interrupt_stderr)
 
     incremental = tmp / "incremental"

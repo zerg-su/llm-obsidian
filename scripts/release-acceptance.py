@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -308,20 +310,39 @@ def run_matrix(
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]] | None = None,
     commit: str = "",
     selected_skills: set[str] | None = None,
+    jobs: int = 1,
 ) -> list[dict[str, Any]]:
+    if not 1 <= jobs <= 15:
+        raise AcceptanceError("acceptance jobs must be between 1 and 15")
     completed = {row_key(item): item for item in (prior or [])}
+    row_order = {row_key(row): index for index, row in enumerate(rows)}
+    active: set[subprocess.Popen[str]] = set()
+    active_lock = threading.Lock()
 
     def completed_rows() -> list[dict[str, Any]]:
         """Render every durable row in canonical matrix order for checkpoints."""
         return [completed[row_key(row)] for row in rows if row_key(row) in completed]
 
+    pending = []
     for row in rows:
         key = row_key(row)
         if key in completed:
             continue
         if selected_skills is not None and row["skill"] not in selected_skills:
             continue
+        pending.append(row)
+
+    def signal_runner(proc: subprocess.Popen[str]) -> None:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+
+    def execute(row: dict[str, Any]) -> tuple[tuple[str, str, str, str, str], dict[str, Any]]:
+        key = row_key(row)
         started = datetime.now(timezone.utc)
+        proc: subprocess.Popen[str] | None = None
         try:
             proc = subprocess.Popen(
                 command,
@@ -331,13 +352,15 @@ def run_matrix(
                 text=True,
                 start_new_session=True,
             )
+            with active_lock:
+                active.add(proc)
             try:
                 stdout, stderr = proc.communicate(
                     json.dumps(row, ensure_ascii=False) + "\n", timeout=timeout
                 )
-            except (KeyboardInterrupt, subprocess.TimeoutExpired):
+            except subprocess.TimeoutExpired:
+                signal_runner(proc)
                 if proc.poll() is None:
-                    os.killpg(proc.pid, signal.SIGINT)
                     try:
                         proc.communicate(timeout=45)
                     except subprocess.TimeoutExpired:
@@ -348,10 +371,9 @@ def run_matrix(
                             proc.kill()
                             proc.communicate()
                 raise
-            proc = subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
             if proc.returncode != 0:
                 raise AcceptanceError(f"runner exit {proc.returncode}")
-            result = validate_result(row, json.loads(proc.stdout))
+            result = validate_result(row, json.loads(stdout))
         except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired, OSError) as exc:
             if isinstance(exc, subprocess.TimeoutExpired):
                 defect = "acceptance runner timed out"
@@ -365,13 +387,53 @@ def run_matrix(
                 "actual": "Acceptance runner did not return a valid bounded result.",
                 "defect": defect,
             }
+        finally:
+            if proc is not None:
+                with active_lock:
+                    active.discard(proc)
         if result.get("duration_seconds") is None:
             result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
         if metadata is not None:
             result = decorate_result(result, metadata[key], commit=commit)
-        completed[key] = result
-        if checkpoint is not None:
-            checkpoint(completed_rows())
+        return key, result
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=jobs, thread_name_prefix="acceptance-cell"
+    )
+    inflight: dict[concurrent.futures.Future[Any], dict[str, Any]] = {}
+    next_row = 0
+
+    def fill_slots() -> None:
+        nonlocal next_row
+        while next_row < len(pending) and len(inflight) < jobs:
+            row = pending[next_row]
+            next_row += 1
+            inflight[executor.submit(execute, row)] = row
+
+    try:
+        fill_slots()
+        while inflight:
+            done, _ = concurrent.futures.wait(
+                inflight, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for future in sorted(done, key=lambda item: row_order[row_key(inflight[item])]):
+                inflight.pop(future)
+                key, result = future.result()
+                completed[key] = result
+                if checkpoint is not None:
+                    checkpoint(completed_rows())
+            fill_slots()
+    except BaseException:
+        with active_lock:
+            running = list(active)
+        for proc in running:
+            signal_runner(proc)
+        for future in inflight:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown(wait=True)
     return completed_rows()
 
 
@@ -438,6 +500,10 @@ def main() -> int:
     run.add_argument("--phase", choices=PHASES, required=True)
     run.add_argument("--runner", required=True)
     run.add_argument("--timeout", type=float, default=900.0)
+    run.add_argument(
+        "--jobs", type=int, default=1,
+        help="maximum concurrent acceptance cells (1..15; default: 1)",
+    )
     run.add_argument("--report", type=Path, required=True)
     run.add_argument("--restart", action="store_true", help="ignore a matching partial/completed report")
     run.add_argument(
@@ -536,6 +602,7 @@ def main() -> int:
             rows, shlex.split(args.runner), args.timeout,
             prior=prior, checkpoint=checkpoint, metadata=metadata, commit=commit,
             selected_skills=selected_skills or None,
+            jobs=args.jobs,
         )
         report = report_payload(
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint,
