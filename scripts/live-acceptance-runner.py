@@ -279,9 +279,11 @@ def disable_acceptance_autocommit(sandbox: Path) -> None:
 
 
 def install_acceptance_model_overrides(
-    sandbox: Path, overrides: dict[str, str] | None = None
+    sandbox: Path,
+    overrides: dict[str, str] | None = None,
+    effort: str | None = None,
 ) -> None:
-    """Install ignored, sandbox-local model aliases for cost-aware live tests."""
+    """Install ignored, sandbox-local routes for cost-aware live tests."""
     if overrides is None:
         overrides = {
             runtime: str(
@@ -289,8 +291,12 @@ def install_acceptance_model_overrides(
             ).strip()
             for runtime in ("claude", "codex")
         }
+    if effort is None:
+        effort = str(os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_EFFORT") or "").strip()
     selected = {runtime: model for runtime, model in overrides.items() if model}
-    if not selected:
+    if effort and effort not in {"minimal", "low", "medium", "high", "xhigh", "max"}:
+        raise AcceptanceRunnerError("invalid acceptance effort override")
+    if not selected and not effort:
         return
     if set(selected) - {"claude", "codex"}:
         raise AcceptanceRunnerError("acceptance model override names an unknown runtime")
@@ -298,19 +304,24 @@ def install_acceptance_model_overrides(
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model):
             raise AcceptanceRunnerError(f"invalid {runtime} acceptance model override")
     lines = ["schema_version = 1", ""]
-    for runtime, model in sorted(selected.items()):
-        lines.extend(
-            (
-                f"[runtimes.{runtime}]",
-                f'model = "{model}"',
-                "",
-                f"[roles.review.{runtime}]",
-                f'model = "{model}"',
-                "",
-            )
-        )
-    lines.append("[model_registry]")
-    lines.extend(f'"{model}" = "{runtime}"' for runtime, model in sorted(selected.items()))
+    for runtime in ("claude", "codex"):
+        model = selected.get(runtime)
+        if model is None and not effort:
+            continue
+        lines.append(f"[runtimes.{runtime}]")
+        if model is not None:
+            lines.append(f'model = "{model}"')
+        if effort:
+            lines.append(f'effort = "{effort}"')
+        lines.extend(("", f"[roles.review.{runtime}]"))
+        if model is not None:
+            lines.append(f'model = "{model}"')
+        if effort:
+            lines.append(f'effort = "{effort}"')
+        lines.append("")
+    if selected:
+        lines.append("[model_registry]")
+        lines.extend(f'"{model}" = "{runtime}"' for runtime, model in sorted(selected.items()))
     path = sandbox / "config" / "model-routing.local.toml"
     if path.exists():
         raise AcceptanceRunnerError("acceptance sandbox unexpectedly contains a local routing override")
@@ -1657,6 +1668,9 @@ def blocked(row: dict[str, Any], message: str) -> dict[str, Any]:
     ).strip()
     if override:
         route = {**route, "model": override}
+    effort_override = str(os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_EFFORT") or "").strip()
+    if effort_override:
+        route = {**route, "effort": effort_override}
     clean, _ = sanitize(message[:300])
     return result_payload(
         row, verdict="blocked", model=route["model"], effort=route["effort"],

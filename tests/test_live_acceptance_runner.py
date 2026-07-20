@@ -146,6 +146,18 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and '"sonnet" = "claude"' in override_text
         and validated_override.runtime_default("claude")["model"] == "sonnet",
     )
+    effort_repo = tmp / "effort-override-repo"
+    (effort_repo / "config").mkdir(parents=True)
+    module.install_acceptance_model_overrides(
+        effort_repo, {"claude": "sonnet", "codex": "gpt-5.6-terra"}, "medium"
+    )
+    effort_text = (effort_repo / "config/model-routing.local.toml").read_text(
+        encoding="utf-8"
+    )
+    check(
+        "live acceptance effort override is code-owned",
+        effort_text.count('effort = "medium"') == 4,
+    )
     module.disable_acceptance_autocommit(override_repo)
     autocommit_guard = json.loads(
         (override_repo / ".vault-meta/auto-commit.disabled").read_text(encoding="utf-8")

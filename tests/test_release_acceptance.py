@@ -89,6 +89,10 @@ check(
     and len(flattened) == len(set(flattened))
     and max(loads) - min(loads) <= 1,
 )
+check(
+    "workspace supervisor forwards the code-owned effort override",
+    "LLM_OBSIDIAN_ACCEPTANCE_EFFORT" in acceptance_workspaces.FORWARDED_ENV,
+)
 
 with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
     tmp = Path(raw)
