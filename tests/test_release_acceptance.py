@@ -138,6 +138,19 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
             for row in data["rows"]
         ),
     )
+    daily_agent_dependencies = {
+        ".claude-plugin/plugin.json",
+        ".codex/agents/daily-summarizer.toml",
+        "agents/daily-summarizer.md",
+    }
+    check(
+        "bounded daily agents invalidate only daily-summary cells",
+        all(
+            daily_agent_dependencies.issubset(set(row["dependencies"]))
+            == (row["scenario"] == "daily-summary")
+            for row in data["rows"]
+        ),
+    )
 
     # A path declared by any cell is no longer protected by unknown-path
     # invalidation. Therefore every cell must include the complete local import

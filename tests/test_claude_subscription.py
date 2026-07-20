@@ -136,6 +136,7 @@ with tempfile.TemporaryDirectory(prefix="claude-subscription-test.") as raw:
     check("cmux shim bypassed for auth status", result.returncode == 0, result.stderr)
 
 agent = (ROOT / "agents" / "daily-summarizer.md").read_text(encoding="utf-8")
+plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
 frontmatter = agent.split("---", 2)[1]
 check("Claude daily inherits model at medium", "model: inherit" in frontmatter and "effort: medium" in frontmatter)
 check("Claude agent bounded", "maxTurns: 4" in frontmatter and "tools: Read" in frontmatter)
@@ -151,5 +152,9 @@ check("daily selects scoped Claude agent", "llm-obsidian:daily-summarizer" in sk
 check("daily forbids Claude parent fallback", "Never fall back to the parent Claude model" in skill)
 stats = (ROOT / "scripts" / "pipeline-stats.py").read_text(encoding="utf-8")
 check("Claude agent telemetry registered", 'CUSTOM_AGENTS: set[str] = {"daily-summarizer"}' in stats)
+check(
+    "Claude plugin explicitly registers the bounded daily agent",
+    plugin.get("agents") == ["./agents/daily-summarizer.md"],
+)
 
 print("\nAll Claude subscription tests passed.")

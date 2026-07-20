@@ -16,5 +16,8 @@
     "retrieval",
     "russian",
     "macos"
+  ],
+  "agents": [
+    "./agents/daily-summarizer.md"
   ]
 }

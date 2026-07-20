@@ -72,7 +72,14 @@ dependencies = [
 dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/queue-session-exit.py"]
 
 [scenarios.daily-summary]
-dependencies = ["scripts/daily-collect.py", "scripts/daily-apply.py", "scripts/daily-summary-save.py"]
+dependencies = [
+  ".claude-plugin/plugin.json",
+  ".codex/agents/daily-summarizer.toml",
+  "agents/daily-summarizer.md",
+  "scripts/daily-collect.py",
+  "scripts/daily-apply.py",
+  "scripts/daily-summary-save.py",
+]
 
 [scenarios.dispatch-review-reap]
 dependencies = [
