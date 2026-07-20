@@ -58,8 +58,8 @@ from cmux_agent_support import (  # noqa: E402
     resolved_git_common_dir,
     task_codex_config_values,
     validated_cmux_socket_path,
-    workspace_trust_prompt_visible,
 )
+from cmux_trust_prompt import workspace_trust_prompt_visible  # noqa: E402
 
 
 class AcceptanceRunnerError(ValueError):

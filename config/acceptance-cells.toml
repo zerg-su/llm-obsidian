@@ -70,7 +70,7 @@ dependencies = [
 ]
 
 [scenarios.cmux-lifecycle]
-dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/queue-session-exit.py"]
+dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/cmux_trust_prompt.py", "scripts/queue-session-exit.py"]
 
 [scenarios.daily-summary]
 dependencies = [
@@ -86,6 +86,7 @@ dependencies = [
 dependencies = [
   "scripts/cmux_agent_supervisor.py",
   "scripts/cmux_surface_lifecycle.py",
+  "scripts/cmux_trust_prompt.py",
   "scripts/dispatch-runner.py",
   "scripts/reap-runner.py",
   "scripts/task_contract.py",

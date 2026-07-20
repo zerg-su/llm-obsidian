@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor reuses shared cmux primitives",
         supervisor_module.resolved_git_common_dir is support_module.resolved_git_common_dir
         and supervisor_module.task_codex_config_values is support_module.task_codex_config_values
-        and supervisor_module.workspace_trust_prompt_visible is support_module.workspace_trust_prompt_visible,
+        and supervisor_module.workspace_trust_prompt_visible.__module__ == "cmux_trust_prompt",
     )
     try:
         supervisor_module.resolved_task_model_route(

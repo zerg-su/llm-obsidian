@@ -103,8 +103,7 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
         "codex": (
             "Do you trust the contents of this directory?",
             "Yes, continue",
-            "No, quit",
-            "Press enter",
+            "Press enter to continue",
         ),
     }
     expected = markers.get(runtime)
