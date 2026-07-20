@@ -226,6 +226,68 @@ def decorate_result(
     return value
 
 
+def build_environment_migration_metadata(
+    path: Path,
+    rows: list[dict[str, Any]],
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    generations: dict[str, dict[str, str]],
+    current_scope_version: int,
+) -> tuple[
+    dict[tuple[str, str, str, str, str], dict[str, Any]],
+    dict[tuple[str, str, str, str, str], dict[str, Any]],
+] | None:
+    """Build fail-closed metadata for a report created by an older env scope."""
+
+    if not path.is_file():
+        return None
+    report = read_object(path)
+    prior_scope = report.get("environment_scope_version", 1)
+    if (
+        isinstance(prior_scope, bool)
+        or not isinstance(prior_scope, int)
+        or prior_scope not in {1, 2}
+    ):
+        raise AcceptanceError("existing acceptance report has an invalid environment scope")
+    if prior_scope >= current_scope_version:
+        return None
+    prior_environment = report.get("environment")
+    required = {"os", "os_release", "architecture", "cmux", "claude", "codex"}
+    if (
+        not isinstance(prior_environment, dict)
+        or set(prior_environment) != required
+        or any(
+            not isinstance(value, str) or not value or len(value) > 200
+            for value in prior_environment.values()
+        )
+    ):
+        return None
+    legacy = {
+        row_key(row): cell_metadata(
+            root,
+            manifest,
+            row,
+            environment=prior_environment,
+            generations=generations,
+            environment_scope_version=prior_scope,
+        )
+        for row in rows
+    }
+    prior_scoped = {
+        row_key(row): cell_metadata(
+            root,
+            manifest,
+            row,
+            environment=prior_environment,
+            generations=generations,
+            environment_scope_version=current_scope_version,
+        )
+        for row in rows
+    }
+    return legacy, prior_scoped
+
+
 def load_resume_results(
     path: Path,
     rows: list[dict[str, Any]],
@@ -238,6 +300,11 @@ def load_resume_results(
     non_behavioral_prefixes_: tuple[str, ...] = (),
     orchestration: set[str] | None = None,
     orchestration_contract_version: int = 1,
+    environment_scope_version: int = 1,
+    environment_migration: tuple[
+        dict[tuple[str, str, str, str, str], dict[str, Any]],
+        dict[tuple[str, str, str, str, str], dict[str, Any]],
+    ] | None = None,
     include_dirty: bool = True,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
@@ -256,6 +323,13 @@ def load_resume_results(
         raise AcceptanceError(
             "existing acceptance report uses an incompatible orchestration contract; use --restart"
         )
+    prior_environment_scope = report.get("environment_scope_version", 1)
+    if (
+        isinstance(prior_environment_scope, bool)
+        or not isinstance(prior_environment_scope, int)
+        or prior_environment_scope not in {1, 2}
+    ):
+        raise AcceptanceError("existing acceptance report has an invalid environment scope")
     changed = changed_paths(root, prior_commit, include_dirty=include_dirty)
     declared = {path for item in metadata.values() for path in item["dependencies"]}
     declared.update(non_behavioral or set())
@@ -299,6 +373,8 @@ def load_resume_results(
         exact = (
             raw_fingerprint == current["cell_fingerprint"]
             and raw_dependencies == current["dependencies"]
+            and raw.get("environment_sha256") == current["environment_sha256"]
+            and provenance.get("environment_sha256") == current["environment_sha256"]
         )
         prior_dependency_set = set(raw_dependencies)
         current_dependency_set = set(current["dependencies"])
@@ -312,8 +388,32 @@ def load_resume_results(
             and (prior_dependency_set - current_dependency_set) <= (orchestration or set())
             and not (changed & current_dependency_set)
         )
-        if not exact and not compatible_orchestration_migration:
+        compatible_environment_migration = False
+        if (
+            not exact
+            and environment_migration is not None
+            and prior_environment_scope < environment_scope_version
+        ):
+            legacy, prior_scoped = environment_migration
+            legacy_current = legacy[key]
+            prior_scoped_current = prior_scoped[key]
+            compatible_environment_migration = (
+                raw_fingerprint == legacy_current["cell_fingerprint"]
+                and raw_dependencies == legacy_current["dependencies"]
+                and raw.get("generation") == legacy_current["generation"]
+                and raw.get("environment_sha256") == legacy_current["environment_sha256"]
+                and provenance.get("environment_sha256") == legacy_current["environment_sha256"]
+                and prior_scoped_current["cell_fingerprint"] == current["cell_fingerprint"]
+                and prior_scoped_current["environment_sha256"] == current["environment_sha256"]
+            )
+        if not exact and not compatible_orchestration_migration and not compatible_environment_migration:
             continue
+        reused_provenance = provenance
+        if compatible_environment_migration:
+            reused_provenance = {
+                **provenance,
+                "environment_sha256": current["environment_sha256"],
+            }
         resumed.append(
             decorate_result(
                 result,
@@ -321,9 +421,14 @@ def load_resume_results(
                 commit=commit,
                 reason=(
                     "reused-identical"
-                    if exact else "reused-compatible-orchestration-migration"
+                    if exact
+                    else (
+                        "reused-compatible-environment-scope-migration"
+                        if compatible_environment_migration
+                        else "reused-compatible-orchestration-migration"
+                    )
                 ),
-                provenance=provenance,
+                provenance=reused_provenance,
             )
         )
     return resumed
@@ -474,6 +579,8 @@ def report_payload(
     commit: str = "",
     fingerprint: str = "",
     orchestration_contract_version: int = 1,
+    environment_scope_version: int = 1,
+    environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     planned = len(rows) if planned_total is None else planned_total
     counts = {verdict: 0 for verdict in sorted(VERDICTS)}
@@ -484,6 +591,8 @@ def report_payload(
     return {
         "schema_version": 2,
         "orchestration_contract_version": orchestration_contract_version,
+        "environment_scope_version": environment_scope_version,
+        "environment": environment,
         "phase": phase,
         "source_commit": commit,
         "matrix_fingerprint": fingerprint,
@@ -551,6 +660,7 @@ def main() -> int:
             return 0
         rows = matrix_rows(skills, args.phase)
         environment = environment_contract()
+        environment_scope_version = int(manifest.get("environment_scope_version", 1))
         metadata = {
             row_key(row): cell_metadata(
                 args.root.resolve(), manifest, row,
@@ -610,6 +720,12 @@ def main() -> int:
             non_behavioral_prefixes_=allowed_dirty_prefixes,
             orchestration=orchestration_only,
             orchestration_contract_version=orchestration_version,
+            environment_scope_version=environment_scope_version,
+            environment_migration=build_environment_migration_metadata(
+                args.report, rows, args.root.resolve(), manifest,
+                generations=generations,
+                current_scope_version=environment_scope_version,
+            ),
             # Only canonical worktree-local reports are release evidence.
             # Explicit external reports remain useful for hermetic diagnostics.
             include_dirty=canonical_report,
@@ -621,6 +737,8 @@ def main() -> int:
                     args.phase, completed, planned_total=len(rows),
                     commit=commit, fingerprint=fingerprint,
                     orchestration_contract_version=orchestration_version,
+                    environment_scope_version=environment_scope_version,
+                    environment=environment,
                 ),
                 args.report,
                 announce=False,
@@ -636,6 +754,8 @@ def main() -> int:
         report = report_payload(
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint,
             orchestration_contract_version=orchestration_version,
+            environment_scope_version=environment_scope_version,
+            environment=environment,
         )
         write_json(report, args.report)
         if canonical_report and report["summary"]["failed"] == 0 and report["summary"]["complete"]:

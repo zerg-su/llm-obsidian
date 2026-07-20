@@ -303,6 +303,21 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.returncode == 3 and "only the two production runtime defaults" in result.stderr,
         result.stderr,
     )
+    invalid_environment_scope_manifest = tmp / "invalid-environment-scope.toml"
+    invalid_environment_scope_manifest.write_text(
+        (ROOT / "config/acceptance-cells.toml").read_text(encoding="utf-8").replace(
+            "environment_scope_version = 2",
+            "environment_scope_version = true",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    result = run("--manifest", str(invalid_environment_scope_manifest), "check")
+    check(
+        "environment scope rejects booleans",
+        result.returncode == 3 and "environment scope" in result.stderr,
+        result.stderr,
+    )
     matrix = tmp / "matrix.json"
     result = run("matrix", "--phase", "baseline", "--output", str(matrix))
     data = json.loads(matrix.read_text(encoding="utf-8"))
@@ -427,6 +442,113 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "claude": {"model": "opus", "generation": "claude:opus-4.8"},
         "codex": {"model": "gpt-5.6-sol", "generation": "codex:5.6"},
     }
+    changed_claude_environment = {**fixed_environment, "claude": "2"}
+    scoped_codex_row = next(
+        row for row in data["rows"]
+        if row["skill"] == "clarify" and row["runtime"] == "codex"
+    )
+    scoped_claude_row = next(
+        row for row in data["rows"]
+        if row["skill"] == "clarify" and row["runtime"] == "claude"
+    )
+    cross_runtime_row = next(
+        row for row in data["rows"]
+        if row["skill"] == "dispatch" and row["runtime"] == "codex"
+    )
+    scoped_before = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=fixed_environment, generations=fixed_generations,
+        )
+        for row in (scoped_codex_row, scoped_claude_row, cross_runtime_row)
+    }
+    scoped_after = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=changed_claude_environment, generations=fixed_generations,
+        )
+        for row in (scoped_codex_row, scoped_claude_row, cross_runtime_row)
+    }
+    check(
+        "runtime environment invalidation is cell-scoped",
+        scoped_before[release_acceptance.row_key(scoped_codex_row)]["cell_fingerprint"]
+        == scoped_after[release_acceptance.row_key(scoped_codex_row)]["cell_fingerprint"]
+        and scoped_before[release_acceptance.row_key(scoped_claude_row)]["cell_fingerprint"]
+        != scoped_after[release_acceptance.row_key(scoped_claude_row)]["cell_fingerprint"]
+        and scoped_before[release_acceptance.row_key(cross_runtime_row)]["cell_fingerprint"]
+        != scoped_after[release_acceptance.row_key(cross_runtime_row)]["cell_fingerprint"],
+    )
+
+    migration_report = tmp / "environment-scope-migration.json"
+    migration_rows = [scoped_codex_row, scoped_claude_row, cross_runtime_row]
+    legacy_metadata = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=fixed_environment,
+            generations=fixed_generations,
+            environment_scope_version=1,
+        )
+        for row in migration_rows
+    }
+    commit = release_acceptance.source_commit(ROOT)
+    legacy_results = []
+    for row in migration_rows:
+        result_row = {
+            **row,
+            "verdict": "pass",
+            "model": "fixture",
+            "effort": "medium",
+            "actual": "ok",
+            "cleanup": "ok",
+            "evidence": "ok",
+        }
+        legacy_results.append(release_acceptance.decorate_result(
+            result_row, legacy_metadata[release_acceptance.row_key(row)], commit=commit
+        ))
+    release_acceptance.write_json(
+        release_acceptance.report_payload(
+            "baseline",
+            legacy_results,
+            commit=commit,
+            environment_scope_version=1,
+            environment=fixed_environment,
+        ),
+        migration_report,
+        announce=False,
+    )
+    current_metadata = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=changed_claude_environment,
+            generations=fixed_generations,
+        )
+        for row in migration_rows
+    }
+    environment_migration = release_acceptance.build_environment_migration_metadata(
+        migration_report,
+        migration_rows,
+        ROOT,
+        fragment_manifest,
+        generations=fixed_generations,
+        current_scope_version=2,
+    )
+    migrated = release_acceptance.load_resume_results(
+        migration_report,
+        migration_rows,
+        phase="baseline",
+        commit=commit,
+        metadata=current_metadata,
+        root=ROOT,
+        environment_scope_version=2,
+        environment_migration=environment_migration,
+        include_dirty=False,
+    )
+    check(
+        "legacy full-environment evidence migrates only when the scoped runtime is unchanged",
+        [(row["skill"], row["runtime"]) for row in migrated] == [("clarify", "codex")]
+        and migrated[0]["reason"] == "reused-compatible-environment-scope-migration",
+    )
+
     close_row = next(row for row in data["rows"] if row["skill"] == "close" and row["runtime"] == "claude")
     clarify_row = next(row for row in data["rows"] if row["skill"] == "clarify" and row["runtime"] == "claude")
     close_before = cell_metadata(fragment_root, fragment_manifest, close_row, environment=fixed_environment, generations=fixed_generations)

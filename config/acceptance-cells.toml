@@ -1,6 +1,7 @@
 schema_version = 1
 runner_contract_version = 2
 orchestration_contract_version = 1
+environment_scope_version = 2
 
 # Exact release-packaging files that cannot change a live cell's behavior.
 # No globs: every path must be reviewed and listed separately.
@@ -83,6 +84,7 @@ dependencies = [
 ]
 
 [scenarios.dispatch-review-reap]
+runtime_tools = ["claude", "codex"]
 dependencies = [
   "scripts/cmux_agent_supervisor.py",
   "scripts/cmux_surface_lifecycle.py",

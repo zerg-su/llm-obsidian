@@ -129,6 +129,7 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
     rows = release.matrix_rows(skills, phase)
     generations = production_generations(root, manifest)
     environment = environment_contract()
+    environment_scope_version = int(manifest.get("environment_scope_version", 1))
     metadata = {
         release.row_key(row): cell_metadata(
             root, manifest, row, environment=environment, generations=generations
@@ -166,6 +167,15 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
         non_behavioral_prefixes_=allowed_prefixes,
         orchestration=orchestration,
         orchestration_contract_version=orchestration_version,
+        environment_scope_version=environment_scope_version,
+        environment_migration=release.build_environment_migration_metadata(
+            report,
+            rows,
+            root,
+            manifest,
+            generations=generations,
+            current_scope_version=environment_scope_version,
+        ),
         include_dirty=True,
     )
     return {
@@ -174,6 +184,8 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
         "commit": commit,
         "fingerprint": fingerprint,
         "orchestration_version": orchestration_version,
+        "environment_scope_version": environment_scope_version,
+        "environment": environment,
         "prior": prior,
     }
 
@@ -261,6 +273,8 @@ def checkpoint(report: Path, rows: list[dict[str, Any]], context: dict[str, Any]
             commit=context["commit"],
             fingerprint=context["fingerprint"],
             orchestration_contract_version=context["orchestration_version"],
+            environment_scope_version=context["environment_scope_version"],
+            environment=context["environment"],
         ),
         report,
         announce=False,
@@ -383,6 +397,8 @@ def supervise(args: argparse.Namespace) -> int:
         commit=context["commit"],
         fingerprint=context["fingerprint"],
         orchestration_contract_version=context["orchestration_version"],
+        environment_scope_version=context["environment_scope_version"],
+        environment=context["environment"],
     )
     for index, skills in enumerate(assignments, start=1):
         shard_report = run_dir / f"shard-{index}.json"

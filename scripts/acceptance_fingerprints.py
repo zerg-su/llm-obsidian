@@ -44,13 +44,18 @@ def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
         value = tomllib.loads(source.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise FingerprintError(f"cannot read acceptance manifest: {exc}") from exc
+    environment_scope_version = value.get("environment_scope_version", 1)
     if (
         value.get("schema_version") != 1
         or value.get("runner_contract_version") != 2
         or value.get("orchestration_contract_version") != 1
+        or isinstance(environment_scope_version, bool)
+        or not isinstance(environment_scope_version, int)
+        or environment_scope_version not in {1, 2}
     ):
         raise FingerprintError(
-            "acceptance manifest must use schema 1, runner contract 2, and orchestration contract 1"
+            "acceptance manifest must use schema 1, runner contract 2, "
+            "orchestration contract 1, and environment scope 1 or 2"
         )
     if not isinstance(value.get("global_dependencies"), list):
         raise FingerprintError("acceptance manifest global_dependencies must be an array")
@@ -210,6 +215,42 @@ def environment_contract() -> dict[str, str]:
     }
 
 
+def scoped_environment_contract(
+    manifest: dict[str, Any], row: dict[str, Any], environment: dict[str, str],
+    *, scope_version: int | None = None,
+) -> dict[str, str]:
+    """Return only host/runtime versions that can affect this acceptance cell."""
+
+    raw_version = (
+        manifest.get("environment_scope_version", 1)
+        if scope_version is None else scope_version
+    )
+    if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+        raise FingerprintError("acceptance environment scope must be an integer")
+    version = raw_version
+    if version == 1:
+        return dict(environment)
+    if version != 2:
+        raise FingerprintError(f"unsupported acceptance environment scope: {version}")
+    scenario = str(row["scenario"])
+    scenario_table = manifest.get("scenarios")
+    if not isinstance(scenario_table, dict) or not isinstance(scenario_table.get(scenario), dict):
+        raise FingerprintError(f"scenario {scenario!r} is missing from acceptance manifest")
+    runtime = str(row["runtime"])
+    raw_tools = scenario_table[scenario].get("runtime_tools", [runtime])
+    if (
+        not isinstance(raw_tools, list)
+        or runtime not in raw_tools
+        or any(tool not in {"claude", "codex"} for tool in raw_tools)
+    ):
+        raise FingerprintError(f"scenario {scenario!r} has invalid runtime_tools")
+    keys = ("os", "os_release", "architecture", "cmux", *sorted(set(raw_tools)))
+    missing = [key for key in keys if key not in environment]
+    if missing:
+        raise FingerprintError("acceptance environment is missing: " + ", ".join(missing))
+    return {key: environment[key] for key in keys}
+
+
 def canonical_generation(model: str, manifest: dict[str, Any]) -> str:
     registered = manifest.get("model_generations")
     if not isinstance(registered, dict):
@@ -245,11 +286,17 @@ def cell_metadata(
     *,
     environment: dict[str, str] | None = None,
     generations: dict[str, dict[str, str]] | None = None,
+    environment_scope_version: int | None = None,
 ) -> dict[str, Any]:
     dependencies = expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
     generation_map = generations or production_generations(root, manifest)
     generation = generation_map[str(row["runtime"])]["generation"]
-    environment_value = environment or environment_contract()
+    environment_value = scoped_environment_contract(
+        manifest,
+        row,
+        environment or environment_contract(),
+        scope_version=environment_scope_version,
+    )
     payload = {
         "runner_contract_version": manifest["runner_contract_version"],
         "phase": row["phase"],
@@ -333,6 +380,7 @@ __all__ = [
     "environment_contract",
     "expanded_dependencies",
     "generation_snapshot",
+    "scoped_environment_contract",
     "non_behavioral_paths",
     "non_behavioral_prefixes",
     "orchestration_dependencies",
