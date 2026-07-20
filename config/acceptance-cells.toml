@@ -97,7 +97,7 @@ dependencies = [
 dependencies = ["scripts/retrieve.py", "scripts/bm25-index.py", "scripts/dense-refresh-worker.py"]
 
 [scenarios.unsafe-web]
-dependencies = ["scripts/research-isolation.py", "scripts/research_contract.py", "hooks/run-hook.py"]
+dependencies = ["scripts/current-session-id.sh", "scripts/research-isolation.py", "scripts/research_contract.py", "hooks/run-hook.py"]
 
 [scenarios.vault-maintenance]
 dependencies = ["scripts/validate-vault.py", "scripts/vault-write.py"]

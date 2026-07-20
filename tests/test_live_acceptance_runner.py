@@ -286,6 +286,33 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "acceptance agent is anchored to its exact surface",
         scratch_env["CMUX_SURFACE_ID"] == "00000000-0000-0000-0000-000000000003",
     )
+    acceptance_session = "acceptance-00000000-0000-0000-0000-000000000004"
+    _argv, session_env = module.agent_argv(
+        "codex", repo, "fixture-model", "high", "prompt",
+        session_id=acceptance_session,
+    )
+    detected_session = subprocess.run(
+        [str(ROOT / "scripts/current-session-id.sh")],
+        text=True,
+        capture_output=True,
+        env=session_env,
+        check=False,
+    )
+    check(
+        "acceptance runner supplies its captured route identity",
+        detected_session.returncode == 0
+        and detected_session.stdout.strip() == acceptance_session,
+        detected_session.stderr,
+    )
+    try:
+        module.agent_argv(
+            "codex", repo, "fixture-model", "high", "prompt",
+            session_id="../invalid",
+        )
+    except module.AcceptanceRunnerError:
+        check("acceptance route identity rejects path syntax", True)
+    else:
+        check("acceptance route identity rejects path syntax", False)
 
     settling = tmp / "settling-outbox.json"
     state: dict[str, object] = {}

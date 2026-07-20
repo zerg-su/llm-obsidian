@@ -49,7 +49,7 @@ DISPOSABLE_VAULT_BOOKKEEPING = {
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402
-from model_routing import load_config  # noqa: E402
+from model_routing import capture_session, load_config  # noqa: E402
 from pipeline_events import emit_event  # noqa: E402
 from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
 from vault_schema import FrontmatterError, parse_frontmatter, split_frontmatter  # noqa: E402
@@ -1042,9 +1042,14 @@ def agent_argv(
     *,
     scratch_root: Path | None = None,
     surface: str = "",
+    session_id: str = "",
 ) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env["LLM_OBSIDIAN_ACCEPTANCE"] = "1"
+    if session_id:
+        if SAFE_ID.fullmatch(session_id) is None:
+            raise AcceptanceRunnerError("acceptance session id is invalid")
+        env["LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID"] = session_id
     env["LLM_OBSIDIAN_WORKTREES"] = str(sandbox / ".vault-meta" / "acceptance-worktrees")
     env["DCG_CONFIG"] = str(sandbox / "config" / "dcg" / "task.toml")
     if surface:
@@ -1111,6 +1116,7 @@ def run_agent_process(spec_path: Path) -> int:
         prompt_path.read_text(encoding="utf-8"),
         scratch_root=scratch_root,
         surface=str(spec.get("surface") or ""),
+        session_id=str(spec.get("session_id") or ""),
     )
     try:
         launch_cwd = run_dir if runtime == "claude" else sandbox
@@ -1524,7 +1530,17 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         install_acceptance_model_overrides(sandbox)
         if row["scenario"] == "dispatch-review-reap":
             install_acceptance_runtime_fixture(sandbox)
-        route = load_config(sandbox).runtime_default(row["runtime"])
+        routing_config = load_config(sandbox)
+        route = routing_config.runtime_default(row["runtime"])
+        acceptance_session_id = f"acceptance-{run_id}"
+        capture_session(
+            routing_config,
+            acceptance_session_id,
+            route["runtime"],
+            route["model"],
+            route["effort"],
+            source="acceptance-runner",
+        )
         if row["skill"] == "dispatch":
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
             fixture = dispatch_fixture_prompt(prepared_dispatch)
@@ -1550,6 +1566,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             "runtime": row["runtime"],
             "model": route["model"],
             "effort": route["effort"],
+            "session_id": acceptance_session_id,
             "sandbox": str(sandbox),
             "scratch_root": str(scratch_root),
             "prompt_file": str(prompt_path),
