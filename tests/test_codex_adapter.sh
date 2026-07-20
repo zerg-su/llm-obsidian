@@ -57,6 +57,10 @@ entry = market["plugins"][0]
 assert plugin["name"] == entry["name"] == "llm-obsidian"
 assert plugin["version"] == entry["version"] == market["metadata"]["version"]
 assert plugin["repository"] == "https://github.com/zerg-su/llm-obsidian"
+assert plugin["author"] == entry["author"] == {
+    "name": "zerg-su",
+    "url": "https://github.com/zerg-su",
+}
 assert entry["source"] == {
     "source": "github",
     "repo": "zerg-su/llm-obsidian",

@@ -156,5 +156,9 @@ check(
     "Claude plugin explicitly registers the bounded daily agent",
     plugin.get("agents") == ["./agents/daily-summarizer.md"],
 )
+check(
+    "Claude plugin author uses the current manifest schema",
+    plugin.get("author") == {"name": "zerg-su", "url": "https://github.com/zerg-su"},
+)
 
 print("\nAll Claude subscription tests passed.")

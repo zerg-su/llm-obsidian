@@ -18,7 +18,10 @@
       },
       "description": "Wiki companion skills, local hybrid retrieval (ollama bge-m3 + BM25), DragonScale memory, MCP HTTP gateway, parallel task orchestration.",
       "version": "2.1.1",
-      "author": "zerg-su (based on claude-obsidian by AgriciDaniel)",
+      "author": {
+        "name": "zerg-su",
+        "url": "https://github.com/zerg-su"
+      },
       "homepage": "https://github.com/zerg-su/llm-obsidian",
       "repository": "https://github.com/zerg-su/llm-obsidian",
       "license": "MIT"
