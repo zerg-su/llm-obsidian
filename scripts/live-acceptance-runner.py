@@ -36,6 +36,7 @@ AGENT_EXIT_GRACE_SECONDS = 300.0
 CHILD_SURFACE_SETTLE_SECONDS = 45.0
 AUTORESEARCH_OUTPUT_LIMIT = 15
 DISPOSABLE_VAULT_BOOKKEEPING = {
+    ".raw/.manifest.json",
     ".vault-meta/address-counter.txt",
     ".vault-meta/address-map.tsv",
     ".vault-meta/index.jsonl",
@@ -228,6 +229,20 @@ def validate_agent_result(row: dict[str, Any], raw: Any) -> dict[str, Any]:
 
 
 def git_head() -> str:
+    pinned = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT", "").strip()
+    if pinned:
+        if not re.fullmatch(r"[0-9a-f]{40}", pinned):
+            raise AcceptanceRunnerError("invalid pinned acceptance source commit")
+        exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{pinned}^{{commit}}"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if exists.returncode != 0:
+            raise AcceptanceRunnerError("pinned acceptance source commit is unavailable")
+        return pinned
     status = subprocess.run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=ROOT,
@@ -891,6 +906,16 @@ def prompt_text(
   the callback starts the next turn and preserves the observable unattended lifecycle.
 - Do not run `git restore`, `git checkout`, `git stash`, pass `--tmp-root`/`--state-root`, or override
   `TMPDIR`/`TMP`/`TEMP`."""
+    elif row["scenario"] == "dispatch-review-reap" and runner_fixture is None:
+        cleanup_contract = f"""- Treat every nested branch, worktree, task-session entry, and review operation under
+  `{sandbox / '.vault-meta' / 'acceptance-worktrees'}` as runner-owned lifecycle proof.
+- Exercise the named skill and close its task/reviewer processes through the documented lifecycle, but do not
+  manually remove, prune, merge, restore, stash, or rewrite runner-owned branches, worktrees, registry state,
+  review artifacts, `.acceptance-sandbox.json`, the operation outbox, or scratch.
+- Clean only fixture-created product output and non-runner scratch. The outer runner independently validates
+  operation identity, callback state, duplicate safety, and disposable-lane cleanup, then deletes the clone.
+- Use `LLM_OBSIDIAN_WORKTREES` for every nested dispatch; do not invent another worktree root or pass
+  `--tmp-root`/`--state-root`, and do not override `TMPDIR`/`TMP`/`TEMP`."""
     elif runner_fixture is None:
         cleanup_contract = f"""- Clean every disposable page, branch, worktree, surface, process, and scratch file you create before reporting pass.
 - Do not remove `.acceptance-sandbox.json`; it is the runner-owned cleanup marker.
@@ -1362,7 +1387,9 @@ def settle_operation_surfaces(
 
 def is_disposable_bookkeeping(path: str, status: str) -> bool:
     if status.startswith("??"):
-        return False
+        # A fresh ingestion manifest is derived provenance inside the disposable
+        # clone. Product pages and raw sources are still rejected independently.
+        return path == ".raw/.manifest.json"
     return path in DISPOSABLE_VAULT_BOOKKEEPING or re.fullmatch(
         r"wiki(?:/[^/]+)*/_index\.md", path
     ) is not None

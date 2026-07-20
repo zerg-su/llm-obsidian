@@ -701,13 +701,18 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "ted or one you trust?\n1. Yes, I trust this fol\nder\nEnter to confirm\n"
     )
     codex_trust_screen = (
-        "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue\n"
+        "Do you trust the contents of this directory?\n1. Yes, continue\n2. No, quit\nPress enter\n"
     )
     check(
         "supervisor recognizes only complete native trust prompts",
         supervisor_module.workspace_trust_prompt_visible("claude", claude_trust_screen)
         and supervisor_module.workspace_trust_prompt_visible("claude", wrapped_claude_trust_screen)
         and supervisor_module.workspace_trust_prompt_visible("codex", codex_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible(
+            "codex",
+            "Do you trust the contents of this direc\ntory?\n1. Yes, conti\nnue\n"
+            "2. No, q\nuit\nPress ent\ner\n",
+        )
         and not supervisor_module.workspace_trust_prompt_visible("claude", codex_trust_screen)
         and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
     )

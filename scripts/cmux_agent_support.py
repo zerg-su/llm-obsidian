@@ -103,7 +103,8 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
         "codex": (
             "Do you trust the contents of this directory?",
             "Yes, continue",
-            "Press enter to continue",
+            "No, quit",
+            "Press enter",
         ),
     }
     expected = markers.get(runtime)
@@ -111,4 +112,3 @@ def workspace_trust_prompt_visible(runtime: str, screen: str) -> bool:
         return False
     compact_screen = re.sub(r"\s+", "", screen)
     return all(re.sub(r"\s+", "", marker) in compact_screen for marker in expected)
-

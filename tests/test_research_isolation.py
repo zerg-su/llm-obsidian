@@ -199,7 +199,10 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check=False,
     )
     check("fetch launcher parses in target shell", launcher_syntax.returncode == 0, launcher_syntax.stderr)
-    check("fetch prompt uses local executable notifier", "run exactly `./notify.py`" in fetch_prompt)
+    check(
+        "fetch prompt uses exact absolute notifier",
+        f"run exactly `{python_executable} {fetch_dir / 'notify.py'}`" in fetch_prompt,
+    )
     check("fetch launcher has no tool-shell env dependency", "LLM_OBSIDIAN_RESEARCH_NOTIFY" not in fetch_launcher)
     check("fetch prompt pins string errors", "non-empty strings only" in fetch_prompt)
     check("fetch notifier pins shebang", notifier.startswith(f"#!{python_executable}\n"))
@@ -217,7 +220,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         text=True,
         capture_output=True,
         env=notify_env,
-        cwd=fetch_dir,
+        cwd=tmp,
     )
     check("callback failure is nonfatal", notified.returncode == 0, notified.stderr)
     notify_calls = cmux_log.read_text(encoding="utf-8").splitlines()
@@ -225,7 +228,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         (fetch_dir / "resume-checkpoint.json").read_text(encoding="utf-8")
     )
     check(
-        "notifier writes exact Codex checkpoint before callback",
+        "notifier anchors the exact Codex checkpoint before callback",
         checkpoint_sidecar["run_id"] == run_id
         and checkpoint_sidecar["stage"] == "fetch"
         and checkpoint_sidecar["checkpoint"] == {
@@ -319,7 +322,11 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
         check("synth has Homebrew runtime root", '"/opt/homebrew" = true' in synth_config)
     check("untrusted boundary explicit", "UNTRUSTED DATA" in synth_prompt)
     check("writer required", "vault-write.py" in synth_prompt)
-    check("synth prompt uses local executable notifier", "run exactly `./notify.py`" in synth_prompt)
+    check(
+        "synth prompt uses exact absolute notifier",
+        f"run exactly `{python_executable} {Path(received['synth_dir']) / 'notify.py'}`"
+        in synth_prompt,
+    )
     check(
         "synth completion pins exact product output paths",
         '"wiki/path/to/page.md"' in synth_prompt

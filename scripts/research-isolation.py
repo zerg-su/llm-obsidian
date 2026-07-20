@@ -581,6 +581,7 @@ message = {callback!r}
 surface = {coordinator!r}
 marker = {str(marker_path)!r}
 payload = {marker_payload!r}
+os.chdir(os.path.dirname(os.path.realpath(__file__)))
 checkpoint = os.environ.get("CODEX_THREAD_ID", "").strip()
 if re.fullmatch(r"[A-Za-z0-9._:-]+", checkpoint):
     checkpoint_marker = os.path.join(os.path.dirname(marker), "resume-checkpoint.json")
@@ -666,8 +667,9 @@ assets. For deep query, fetch only evidence needed to fill the stated gap.
 For local JSON and SHA-256 validation use the exact interpreter
 `{python_executable}`; do not call a bare `python3`, which can resolve to the
 macOS Command Line Tools placeholder in an isolated shell. After validating
-hashes, run exactly `./notify.py` from the current workspace without overriding
-its working directory or reconstructing its path. Do not include source content in
+hashes, run exactly `{python_executable} {workdir / 'notify.py'}`. The notifier
+anchors itself to its operation workspace before recording a resume checkpoint.
+Do not include source content in
 the callback. Do not begin more work after it; the coordinator closes this
 exact completed surface automatically.
 """
@@ -733,8 +735,8 @@ never include `complete.json`, synthesis-workspace files, `.vault-meta`,
 `wiki/log.md`, `wiki/hot.md`, or generated `_index.md` bookkeeping. For
 `deep-query`, `outputs` must be exactly `["answer.md"]`.
 After writing the valid completion object,
-then run exactly `./notify.py` from the current workspace without overriding
-its working directory or reconstructing its path. Use the pinned interpreter
+then run exactly `{python_executable} {synth_dir / 'notify.py'}`. The notifier
+anchors itself to its operation workspace before recording a resume checkpoint. Use the pinned interpreter
 above for all local JSON/hash helpers; do
 not call bare `python3`. Do not begin more work
 after the callback; the coordinator closes this exact completed surface

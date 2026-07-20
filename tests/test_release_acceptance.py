@@ -93,6 +93,23 @@ check(
     "workspace supervisor forwards the code-owned effort override",
     "LLM_OBSIDIAN_ACCEPTANCE_EFFORT" in acceptance_workspaces.FORWARDED_ENV,
 )
+check(
+    "workspace supervisor forwards its code-owned source pin",
+    "LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT" in acceptance_workspaces.FORWARDED_ENV,
+)
+old_pin = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT")
+os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = "f" * 40
+try:
+    shard_env = acceptance_workspaces.shard_environment("a" * 40)
+finally:
+    if old_pin is None:
+        os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT", None)
+    else:
+        os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = old_pin
+check(
+    "workspace supervisor cannot inherit a stale external source pin",
+    shard_env["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] == "a" * 40,
+)
 
 with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
     tmp = Path(raw)

@@ -39,6 +39,7 @@ FORWARDED_ENV = (
     "LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL",
     "LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL",
     "LLM_OBSIDIAN_ACCEPTANCE_EFFORT",
+    "LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT",
 )
 
 
@@ -88,6 +89,16 @@ def validate_limits(workspaces: int, jobs_per_workspace: int) -> None:
             "acceptance jobs per workspace must be between 1 and "
             f"{MAX_JOBS_PER_WORKSPACE}"
         )
+
+
+def shard_environment(commit: str) -> dict[str, str]:
+    environment = {
+        key: os.environ[key] for key in FORWARDED_ENV if os.environ.get(key)
+    }
+    # The supervisor owns the tested revision. Pin it after reading user-facing
+    # overrides so a long-running shard cannot silently follow a moving HEAD.
+    environment["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = commit
+    return environment
 
 
 def partition_skills(pending_rows: list[dict[str, Any]], workspaces: int) -> list[list[str]]:
@@ -337,9 +348,7 @@ def supervise(args: argparse.Namespace) -> int:
 
     run_dir = root / ".vault-meta/acceptance/workspace-runs" / str(uuid.uuid4())
     run_dir.mkdir(parents=True, exist_ok=False)
-    environment = {
-        key: os.environ[key] for key in FORWARDED_ENV if os.environ.get(key)
-    }
+    environment = shard_environment(context["commit"])
     shards: list[dict[str, Any]] = []
     seed = release.report_payload(
         args.phase,

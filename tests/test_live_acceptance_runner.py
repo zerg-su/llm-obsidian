@@ -193,6 +193,27 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
     ).stdout.strip()
+    original_root = module.ROOT
+    original_pin = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT")
+    module.ROOT = repo
+    (repo / "tracked.txt").write_text("dirty but uncommitted\n", encoding="utf-8")
+    os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = commit
+    try:
+        check("pinned source commit ignores later worktree drift", module.git_head() == commit)
+        os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = "not-a-commit"
+        try:
+            module.git_head()
+        except module.AcceptanceRunnerError as exc:
+            check("invalid source pin fails closed", "invalid pinned" in str(exc), str(exc))
+        else:
+            check("invalid source pin fails closed", False)
+    finally:
+        module.ROOT = original_root
+        if original_pin is None:
+            os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT", None)
+        else:
+            os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = original_pin
+        (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
     (repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
     clean, _ = module.sandbox_cleanup_proof(repo, commit)
     check("runner-owned marker is cleanup-neutral", clean)
@@ -223,6 +244,18 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     clean, reason = module.sandbox_cleanup_proof(repo, commit)
     check("runner rejects untracked product output", not clean and "changes" in reason, reason)
     (repo / "unexpected.md").unlink()
+    (repo / ".raw").mkdir()
+    (repo / ".raw" / ".manifest.json").write_text(
+        '{"sources":{},"address_map":{}}\n', encoding="utf-8"
+    )
+    clean, reason = module.sandbox_cleanup_proof(repo, commit)
+    check(
+        "runner accepts an exact untracked disposable ingest manifest",
+        clean and "bookkeeping" in reason,
+        reason,
+    )
+    (repo / ".raw" / ".manifest.json").unlink()
+    (repo / ".raw").rmdir()
 
     claude_argv, _ = module.agent_argv("claude", repo, "fixture-model", "high", "prompt")
     check("Claude acceptance runs outside project hooks", "--add-dir" in claude_argv and str(repo) in claude_argv)
@@ -667,6 +700,28 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             prepared["task_name"], prepared["branch"], prepared["plan_path"],
             prepared["nested_worktree"], prepared["result_title"], prepared["dispatch_spec"],
         )),
+    )
+    review_send_prompt = module.prompt_text(
+        row(skill="review-send", scenario="dispatch-review-reap",
+            expected="Submit one typed product-read-only reviewer result exactly once."),
+        module.load_scenarios()["dispatch-review-reap"], repo,
+        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model", "high", commit,
+        fixture_registry["skills"]["review-send"]["fixture"],
+    )
+    check(
+        "review rows preserve runner-owned nested lifecycle state",
+        "do not\n  manually remove, prune" in review_send_prompt
+        and "leave the runner-owned nested lane" in review_send_prompt
+        and "Clean every disposable page, branch, worktree" not in review_send_prompt,
+        review_send_prompt,
+    )
+    check(
+        "review-dispatch fixture exercises a resolvable warning",
+        "non-blocking maintainability warning"
+        in fixture_registry["skills"]["review-dispatch"]["fixture"]
+        and "blocking finding exceeds this fixture"
+        in fixture_registry["skills"]["review-dispatch"]["fixture"],
     )
     check(
         "dispatch prompt uses mechanical runner once",
