@@ -99,11 +99,13 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace-mobile.json",
 ]
 OPERATION_HANDOFF_GIT_EXCLUDES = [
+    ".task-review-operation-*.json",
     ".task-review-drive-*.json",
     ".task-review-resolution-*.md",
 ]
 OPERATION_HANDOFF_RX = re.compile(
-    r"^\.task-review-(?:drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"^\.task-review-(?:operation-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
     r"resolution-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.md)$"
 )
 REVIEW_CALLBACK_FILE = ".review-callback.json"

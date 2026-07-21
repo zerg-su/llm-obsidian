@@ -32,6 +32,7 @@
     "hooks/hooks.json",
     "hooks/run-hook.py",
     "scripts/acceptance/__init__.py",
+    "scripts/acceptance/adapters.py",
     "scripts/acceptance/contracts.py",
     "scripts/acceptance/launchers.py",
     "scripts/acceptance/prompting.py",
@@ -270,14 +271,6 @@
     ],
     "scripts/acceptance/runner.py": [
       "evals/acceptance/scenarios.json",
-      "evals/acceptance/seed/.vault-meta/address-counter.txt",
-      "evals/acceptance/seed/.vault-meta/address-map.tsv",
-      "evals/acceptance/seed/.vault-meta/index.jsonl",
-      "evals/acceptance/seed/.vault-meta/recent.jsonl",
-      "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl",
-      "evals/acceptance/seed/.vault-meta/tag-index.json",
-      "evals/acceptance/seed/wiki/hot.md",
-      "evals/acceptance/seed/wiki/log.md",
       "evals/acceptance/skills.json",
       "scripts/acceptance/adapters.py",
       "scripts/acceptance/contracts.py",
@@ -343,6 +336,7 @@
       "scripts/acceptance-workspace-supervisor.py",
       "scripts/acceptance/adapters.py",
       "scripts/acceptance/launchers.py",
+      "scripts/acceptance/sandbox.py",
       "scripts/acceptance/skill_adapters.py",
       "scripts/acceptance_dependencies.py",
       "scripts/model_routing.py",
@@ -936,5 +930,5 @@
       "skills/"
     ]
   },
-  "graph_sha256": "fbe9d796941cb95daf6c01099ea59a093b6eeeee67f2fde58ae0d330e1bf3e0e"
+  "graph_sha256": "d12c15daa1de76c5de7afada81252c235f2413002ab087dcaea14922f475e4de"
 }

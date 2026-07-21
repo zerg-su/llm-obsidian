@@ -68,7 +68,8 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace-mobile.json",
 ]
 OPERATION_HANDOFF_RX = re.compile(
-    r"^\.task-review-(?:drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"^\.task-review-(?:operation-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
     r"resolution-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.md)$"
 )
 CMUX_PASTE_SETTLE_SECONDS = 0.2

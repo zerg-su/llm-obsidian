@@ -43,8 +43,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   scenario registry fragments for each cell, and records the actual cheaper
   Sonnet/Terra test model separately from the production generation.
 - Exact reviewed release-packaging paths are classified as non-behavioral, so
-  metadata-only changes reuse valid acceptance evidence while every unknown
-  changed path continues to invalidate the matrix fail-closed.
+  metadata-only changes reuse valid acceptance evidence. Unregistered runtime
+  edges stop the model-free dependency-lock check; unknown non-runtime paths
+  neither invalidate evidence nor bypass the runtime graph.
 - Pipeline timing reports completed and incomplete model turns by runtime and
   coordinator/task/reviewer role; incomplete turns carry no fabricated latency.
 

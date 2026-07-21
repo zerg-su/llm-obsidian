@@ -638,11 +638,13 @@ spec = importlib.util.spec_from_file_location("review_send_handoff_test", sys.ar
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 operation_id = "11111111-1111-4111-8111-111111111111"
+assert module.is_handoff(f".task-review-operation-{operation_id}.json")
 assert module.is_handoff(f".task-review-drive-{operation_id}.json")
 assert module.is_handoff(f".task-review-resolution-{operation_id}.md")
 assert not module.is_handoff(".task-review-drive-x/evil.json")
 assert not module.is_handoff(".task-review-resolution-x/evil.md")
 assert not module.is_handoff(".task-review-drive-not-a-uuid.json")
+assert not module.is_handoff(".task-review-operation-not-a-uuid.json")
 assert not module.is_handoff(".task-review-resolution-not-a-uuid.md")
 assert not module.is_handoff("scripts/product-change.py")
 PY
@@ -656,9 +658,12 @@ spec = importlib.util.spec_from_file_location("review_dispatch_handoff_test", sy
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 operation_id = "11111111-1111-4111-8111-111111111111"
+assert ".task-review-operation-*.json" in module.OPERATION_HANDOFF_GIT_EXCLUDES
+assert module.is_handoff(f".task-review-operation-{operation_id}.json")
 assert module.is_handoff(f".task-review-drive-{operation_id}.json")
 assert module.is_handoff(f".task-review-resolution-{operation_id}.md")
 assert not module.is_handoff(".task-review-drive-not-a-uuid.json")
+assert not module.is_handoff(".task-review-operation-not-a-uuid.json")
 assert not module.is_handoff(".task-review-resolution-not-a-uuid.md")
 assert not module.is_handoff("scripts/product-change.py")
 PY

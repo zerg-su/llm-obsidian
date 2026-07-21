@@ -34,6 +34,7 @@ orchestration_dependencies = [
 behavioral_abi_dependencies = [
   "scripts/live-acceptance-runner.py",
   "scripts/acceptance/__init__.py",
+  "scripts/acceptance/adapters.py",
   "scripts/acceptance/contracts.py",
   "scripts/acceptance/launchers.py",
   "scripts/acceptance/prompting.py",

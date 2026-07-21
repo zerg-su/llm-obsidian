@@ -10,15 +10,12 @@ import os
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
-from datetime import date
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,37 +23,6 @@ STATE_ROOT = ROOT / ".vault-meta" / "acceptance" / "runs"
 SCENARIOS = ROOT / "evals" / "acceptance" / "scenarios.json"
 SKILLS = ROOT / "evals" / "acceptance" / "skills.json"
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
-SURFACE_RE = re.compile(
-    r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
-)
-OUTBOX_MAX_BYTES = 64 * 1024
-OUTBOX_INVALID_GRACE_SECONDS = 5.0
-OUTBOX_STABLE_SECONDS = 1.0
-AGENT_EXIT_GRACE_SECONDS = 300.0
-CHILD_SURFACE_SETTLE_SECONDS = 45.0
-AUTORESEARCH_OUTPUT_LIMIT = 15
-VAULT_REINDEX_SCENARIOS = {
-    "agenda-carry",
-    "protected-web",
-    "vault-capture",
-    "obsidian-authoring",
-    "cmux-lifecycle",
-    "daily-summary",
-    "dispatch-review-reap",
-    "vault-maintenance",
-    "ingest",
-}
-DISPOSABLE_VAULT_BOOKKEEPING = {
-    ".raw/.manifest.json",
-    ".vault-meta/address-counter.txt",
-    ".vault-meta/address-map.tsv",
-    ".vault-meta/index.jsonl",
-    ".vault-meta/recent.jsonl",
-    ".vault-meta/session-to-pages.jsonl",
-    ".vault-meta/tag-index.json",
-    "wiki/hot.md",
-    "wiki/log.md",
-}
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from lib_sanitize import residual_credential_kinds, sanitize  # noqa: E402

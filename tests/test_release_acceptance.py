@@ -8,6 +8,7 @@ import hashlib
 import json
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,7 @@ from acceptance_dependencies import (
     closure as dependency_closure,
     read_lock,
 )
+from acceptance.sandbox import acceptance_seed_sha256
 
 
 module_spec = importlib.util.spec_from_file_location("release_acceptance_test", SCRIPT)
@@ -447,11 +449,11 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         == {"scripts/acceptance/contracts.py": ["skills/"]},
     )
     check(
-        "every cell carries registration surfaces while adapter source is semantic-only",
+        "every cell carries registration and adapter binding surfaces",
         all(
             {"hooks/hooks.json", ".claude/skill-rules.json", ".codex/config.toml"}
             .issubset(set(row["dependencies"]))
-            and "scripts/acceptance/adapters.py" not in row["dependencies"]
+            and "scripts/acceptance/adapters.py" in row["dependencies"]
             and behavior_fragment_hashes(
                 ROOT, read_manifest(ROOT), row["skill"], row["scenario"]
             )
@@ -500,6 +502,153 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "claude": {"model": "opus", "generation": "claude:opus-4.8"},
         "codex": {"model": "gpt-5.6-sol", "generation": "codex:5.6"},
     }
+    seed_copy = tmp / "acceptance-seed"
+    shutil.copytree(ROOT / "evals" / "acceptance" / "seed", seed_copy)
+    seed_before = acceptance_seed_sha256(seed_copy)
+    seed_metadata_before = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=fixed_environment, generations=fixed_generations,
+            dependencies_override=[], include_live_runner_behavior=False,
+            seed_root=seed_copy,
+        )
+        for row in data["rows"]
+    }
+    seed_target = seed_copy / ".vault-meta" / "last-fold-count.txt"
+    seed_original = seed_target.read_bytes()
+    seed_target.write_bytes(seed_original + b"1\n")
+    seed_after = acceptance_seed_sha256(seed_copy)
+    seed_metadata_after = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=fixed_environment, generations=fixed_generations,
+            dependencies_override=[], include_live_runner_behavior=False,
+            seed_root=seed_copy,
+        )
+        for row in data["rows"]
+    }
+    seed_report = tmp / "seed-evidence.json"
+    seed_rows = []
+    for row in data["rows"]:
+        result_row = {
+            **row, "verdict": "pass", "model": "fixture", "effort": "medium",
+            "actual": "ok", "cleanup": "ok", "evidence": "seed fixture",
+        }
+        seed_rows.append(release_acceptance.decorate_result(
+            result_row, seed_metadata_before[release_acceptance.row_key(row)],
+            commit="1" * 40,
+        ))
+    seed_report.write_text(json.dumps({
+        "schema_version": 3, "evidence_epoch": 3,
+        "phase": "baseline", "rows": seed_rows,
+    }), encoding="utf-8")
+    seed_reused = release_acceptance.load_resume_results(
+        seed_report, data["rows"], phase="baseline", commit="2" * 40,
+        metadata=seed_metadata_after, evidence_epoch=3,
+    )
+    seed_target.write_bytes(seed_original)
+    seed_metadata_restored = {
+        release_acceptance.row_key(row): cell_metadata(
+            ROOT, fragment_manifest, row,
+            environment=fixed_environment, generations=fixed_generations,
+            dependencies_override=[], include_live_runner_behavior=False,
+            seed_root=seed_copy,
+        )
+        for row in data["rows"]
+    }
+    check(
+        "one canonical seed byte invalidates every cell and blocks stale reuse",
+        seed_before != seed_after
+        and not seed_reused
+        and all(
+            seed_metadata_before[key]["cell_fingerprint"]
+            != seed_metadata_after[key]["cell_fingerprint"]
+            and seed_metadata_before[key]["cell_fingerprint"]
+            == seed_metadata_restored[key]["cell_fingerprint"]
+            for key in seed_metadata_before
+        ),
+    )
+
+    adapters_source = (ROOT / "scripts/acceptance/adapters.py").read_text(encoding="utf-8")
+    rebound_adapters_source = adapters_source.replace(
+        "dispatch_acceptance_fixture, dispatch_acceptance_proof,",
+        "dispatch_acceptance_fixture, dispatch_acceptance_fixture as dispatch_acceptance_proof,",
+    )
+    check(
+        "adapter re-export changes invalidate the common behavioral ABI",
+        rebound_adapters_source != adapters_source
+        and live_runner_behavior_sha256(ROOT, review_row, source_text=adapters_source)
+        != live_runner_behavior_sha256(ROOT, review_row, source_text=rebound_adapters_source)
+        and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=adapters_source)
+        != live_runner_behavior_sha256(ROOT, ordinary_row, source_text=rebound_adapters_source),
+    )
+    imported_source = runner_source.replace(
+        "from .scenario_adapters import is_disposable_bookkeeping",
+        "from .scenario_adapters import sandbox_cleanup_proof as is_disposable_bookkeeping",
+    )
+    check(
+        "fragment hashes include module-level import bindings",
+        imported_source != runner_source
+        and behavior_fragment_hashes(
+            ROOT, fragment_manifest, review_row["skill"], review_row["scenario"],
+            source_overrides={"scripts/acceptance/skill_adapters.py": runner_source},
+        )
+        != behavior_fragment_hashes(
+            ROOT, fragment_manifest, review_row["skill"], review_row["scenario"],
+            source_overrides={"scripts/acceptance/skill_adapters.py": imported_source},
+        )
+        and behavior_fragment_hashes(
+            ROOT, fragment_manifest, ordinary_row["skill"], ordinary_row["scenario"],
+            source_overrides={"scripts/acceptance/skill_adapters.py": runner_source},
+        )
+        == behavior_fragment_hashes(
+            ROOT, fragment_manifest, ordinary_row["skill"], ordinary_row["scenario"],
+            source_overrides={"scripts/acceptance/skill_adapters.py": imported_source},
+        ),
+    )
+
+    routing_root = tmp / "routing-root"
+    (routing_root / "config").mkdir(parents=True)
+    (routing_root / "scripts" / "acceptance").mkdir(parents=True)
+    for name in ("scenario_adapters.py", "skill_adapters.py"):
+        shutil.copy2(
+            ROOT / "scripts" / "acceptance" / name,
+            routing_root / "scripts" / "acceptance" / name,
+        )
+    routing_seed = routing_root / "seed"
+    shutil.copytree(ROOT / "evals" / "acceptance" / "seed", routing_seed)
+    routing_path = routing_root / "config" / "model-routing.toml"
+    routing_source = (ROOT / "config" / "model-routing.toml").read_text(encoding="utf-8")
+    routing_path.write_text(routing_source, encoding="utf-8")
+    routing_row = review_row
+    routing_base = cell_metadata(
+        routing_root, fragment_manifest, routing_row,
+        environment=fixed_environment, generations=fixed_generations,
+        dependencies_override=["config/model-routing.toml"],
+        include_live_runner_behavior=False, seed_root=routing_seed,
+    )
+    head, tail = routing_source.rsplit('model = "gpt-5.6-sol"', 1)
+    routing_path.write_text(head + 'model = "gpt-5.6-terra"' + tail, encoding="utf-8")
+    routing_same_generation = cell_metadata(
+        routing_root, fragment_manifest, routing_row,
+        environment=fixed_environment, generations=fixed_generations,
+        dependencies_override=["config/model-routing.toml"],
+        include_live_runner_behavior=False, seed_root=routing_seed,
+    )
+    routing_path.write_text(
+        routing_source.replace('model = "fable"', 'model = "sonnet"'), encoding="utf-8"
+    )
+    routing_cross_generation = cell_metadata(
+        routing_root, fragment_manifest, routing_row,
+        environment=fixed_environment, generations=fixed_generations,
+        dependencies_override=["config/model-routing.toml"],
+        include_live_runner_behavior=False, seed_root=routing_seed,
+    )
+    check(
+        "routing hashes ignore same-generation aliases but retain generation changes",
+        routing_base["cell_fingerprint"] == routing_same_generation["cell_fingerprint"]
+        and routing_base["cell_fingerprint"] != routing_cross_generation["cell_fingerprint"],
+    )
     changed_claude_environment = {**fixed_environment, "claude": "2"}
     scoped_codex_row = next(
         row for row in data["rows"]
@@ -999,6 +1148,10 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     (incremental / "skills/demo-b").mkdir(parents=True)
     (incremental / "config").mkdir()
     (incremental / "evals").mkdir()
+    (incremental / "evals" / "acceptance" / "seed").mkdir(parents=True)
+    (incremental / "evals" / "acceptance" / "seed" / "fixture.txt").write_text(
+        "canonical seed\n", encoding="utf-8"
+    )
     (incremental / "scripts").mkdir()
     (incremental / "tests").mkdir()
     (incremental / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")

@@ -20,6 +20,7 @@ from acceptance_dependencies import (
     read_lock,
     verify_lock,
 )
+from acceptance.sandbox import acceptance_seed_sha256
 from model_routing import load_config
 
 
@@ -52,7 +53,7 @@ ROUTING_TOML_PATHS = {
     ".codex/agents/daily-summarizer.toml",
 }
 ROUTING_TOML_PREFIXES = (".codex/profiles/",)
-ROUTING_KEYS = {"model", "effort", "model_reasoning_effort", "reasoning_effort"}
+ROUTING_EFFORT_KEYS = {"effort", "model_reasoning_effort", "reasoning_effort"}
 
 
 class FingerprintError(ValueError):
@@ -214,7 +215,7 @@ def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scen
                             str(value).partition("#")[0]
                             for value in item.get("behavior_fragments", [])
                         )
-        semantic_boundaries = fragment_modules | {"scripts/acceptance/adapters.py"}
+        semantic_boundaries = fragment_modules
         all_scoped_roots: set[str] = set()
         for table_name in ("scenarios", "skills"):
             table = manifest.get(table_name, {})
@@ -244,19 +245,27 @@ def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scen
         raise FingerprintError(str(exc)) from exc
 
 
-def _strip_routing_values(value: Any) -> Any:
+def _strip_routing_values(value: Any, manifest: dict[str, Any]) -> Any:
     if isinstance(value, dict):
-        return {
-            key: _strip_routing_values(item)
-            for key, item in sorted(value.items())
-            if key not in ROUTING_KEYS and key != "model_registry"
-        }
+        result: dict[str, Any] = {}
+        for key, item in sorted(value.items()):
+            if key in ROUTING_EFFORT_KEYS or key == "model_registry":
+                continue
+            if key == "model":
+                if not isinstance(item, str):
+                    raise FingerprintError("routing model values must be strings")
+                result[key] = canonical_generation(item, manifest)
+            else:
+                result[key] = _strip_routing_values(item, manifest)
+        return result
     if isinstance(value, list):
-        return [_strip_routing_values(item) for item in value]
+        return [_strip_routing_values(item, manifest) for item in value]
     return value
 
 
-def _semantic_file_bytes(path: Path, rel: str) -> bytes:
+def _semantic_file_bytes(
+    path: Path, rel: str, *, manifest: dict[str, Any] | None = None,
+) -> bytes:
     if rel in MANIFEST_BEHAVIOR_FIELDS:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
@@ -270,16 +279,25 @@ def _semantic_file_bytes(path: Path, rel: str) -> bytes:
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise FingerprintError(f"cannot normalize routing config {rel}: {exc}") from exc
         return json.dumps(
-            _strip_routing_values(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            _strip_routing_values(
+                value,
+                manifest or read_manifest(path.parents[len(Path(rel).parts) - 1]),
+            ),
+            ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode()
     return path.read_bytes()
 
 
-def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]:
+def file_hashes(
+    root: Path, dependencies: Iterable[str], *, manifest: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
     values: list[dict[str, str]] = []
     for rel in sorted(set(dependencies)):
         path = root / rel
-        digest = hashlib.sha256(_semantic_file_bytes(path, rel)).hexdigest() if path.is_file() else "missing"
+        digest = (
+            hashlib.sha256(_semantic_file_bytes(path, rel, manifest=manifest)).hexdigest()
+            if path.is_file() else "missing"
+        )
         values.append({"path": rel, "sha256": digest})
     return values
 
@@ -326,6 +344,11 @@ def _fragment_payload(root: Path, fragment: str, *, source_text: str | None = No
         selected_assignments.update(loaded & set(assignments))
     return {
         "fragment": fragment,
+        "imports": [
+            ast.dump(node, include_attributes=False)
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ],
         "functions": {
             name: ast.dump(functions[name], include_attributes=False)
             for name in sorted(selected_functions)
@@ -356,19 +379,30 @@ def live_runner_behavior_sha256(
     """Compatibility helper: hash the row's semantic ABI without executing source."""
 
     manifest = read_manifest(root)
-    adapter_override = source_text is not None and "def review_acceptance_fixture" in source_text
+    skill_adapter_override = (
+        source_text is not None and "def review_acceptance_fixture" in source_text
+    )
     launcher_override = source_text is not None and "def agent_argv" in source_text
     abi_hashes = file_hashes(
-        root, safe_dependencies(_array(manifest, "behavioral_abi_dependencies"))
+        root, safe_dependencies(_array(manifest, "behavioral_abi_dependencies")),
+        manifest=manifest,
     )
     if launcher_override:
         digest = hashlib.sha256(source_text.encode()).hexdigest()
         for item in abi_hashes:
             if item["path"] == "scripts/acceptance/launchers.py":
                 item["sha256"] = digest
+    binding_adapter_override = (
+        source_text is not None and "from .skill_adapters import" in source_text
+    )
+    if binding_adapter_override:
+        digest = hashlib.sha256(source_text.encode()).hexdigest()
+        for item in abi_hashes:
+            if item["path"] == "scripts/acceptance/adapters.py":
+                item["sha256"] = digest
     overrides = (
         {"scripts/acceptance/skill_adapters.py": source_text}
-        if adapter_override else None
+        if skill_adapter_override else None
     )
     payload = {
         "abi": abi_hashes,
@@ -381,7 +415,8 @@ def live_runner_behavior_sha256(
 
 
 def cell_dependency_hashes(
-    root: Path, dependencies: Iterable[str], *, skill: str, scenario: str
+    root: Path, dependencies: Iterable[str], *, skill: str, scenario: str,
+    manifest: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     fragment_keys = {
         "evals/acceptance/skills.json": ("skills", skill),
@@ -391,7 +426,7 @@ def cell_dependency_hashes(
     for rel in sorted(set(dependencies)):
         fragment = fragment_keys.get(rel)
         if fragment is None:
-            values.extend(file_hashes(root, [rel]))
+            values.extend(file_hashes(root, [rel], manifest=manifest))
             continue
         try:
             registry = json.loads((root / rel).read_text(encoding="utf-8"))
@@ -504,6 +539,7 @@ def cell_metadata(
     dependencies_override: Iterable[str] | None = None,
     include_live_runner_behavior: bool = True,
     live_runner_source_override: str | None = None,
+    seed_root: Path | None = None,
 ) -> dict[str, Any]:
     dependencies = (
         expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
@@ -517,6 +553,9 @@ def cell_metadata(
     behavior = live_runner_behavior_sha256(
         root, row, source_text=live_runner_source_override
     ) if include_live_runner_behavior else None
+    seed_sha256 = acceptance_seed_sha256(
+        seed_root or root / "evals" / "acceptance" / "seed"
+    )
     payload: dict[str, Any] = {
         "evidence_epoch": manifest["evidence_epoch"],
         "runner_contract_version": manifest["runner_contract_version"],
@@ -525,8 +564,12 @@ def cell_metadata(
         "runtime": row["runtime"],
         "scenario": row["scenario"],
         "expected": row["expected"],
-        "dependencies": cell_dependency_hashes(root, dependencies, skill=str(row["skill"]), scenario=str(row["scenario"])),
+        "dependencies": cell_dependency_hashes(
+            root, dependencies, skill=str(row["skill"]), scenario=str(row["scenario"]),
+            manifest=manifest,
+        ),
         "behavior_fragments": behavior_fragment_hashes(root, manifest, str(row["skill"]), str(row["scenario"])),
+        "seed_sha256": seed_sha256,
         "environment": environment_value,
         "generation": launch["generation"],
     }
@@ -541,6 +584,7 @@ def cell_metadata(
         "launch_model": launch["model"],
         "live_runner_behavior_sha256": behavior,
         "environment_sha256": hashlib.sha256(environment_encoded.encode()).hexdigest(),
+        "seed_sha256": seed_sha256,
         "evidence_epoch": manifest["evidence_epoch"],
     }
 
