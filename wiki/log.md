@@ -27,6 +27,52 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-07-21] reap | v2.1.2 semantic acceptance refactor
+
+`c-000030` [[LLM Obsidian v2.1.2 semantic acceptance refactor]]. ## Result
+
+Prepared the local v2.1.2 release candidate by folding the unreleased v2.1.1 work into a semantic, finite acceptance pipeline. The former monolithic live runner is now a thin compatibility entrypoint over code-owned contracts, launchers, prompt rendering, sandbox construction, scenario adapters, and skill adapters. Per-cell fingerprints are derived from exact behavioral dependencies, resolved major model generation, the deterministic seed vault, and a generated fail-closed dependency
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000029` [[Cross-model review — v2.1.2 semantic acceptance refactor — 3444ea2dfa5f]]. 1 round(s), final verdict `approve`; reviewer claude/opus.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000028` [[Cross-model review — v2.1.2 semantic acceptance refactor — 22c7eb2777c5]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2-acceptance-final-fixes
+
+`c-000027` [[Cross-model review — v2.1.2-acceptance-final-fixes — 03ced8bcc75e]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000026` [[Cross-model review — v2.1.2 semantic acceptance refactor — 8648d54f453c]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000025` [[Cross-model review — v2.1.2 semantic acceptance refactor — 34cd03f732ac]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000024` [[Cross-model review — v2.1.2 semantic acceptance refactor — bbbdbba79f2a]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000023` [[Cross-model review — v2.1.2 semantic acceptance refactor — 60b927ff61a1]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000022` [[Cross-model review — v2.1.2 semantic acceptance refactor — 6a12aeccde78]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2 semantic acceptance refactor
+
+`c-000021` [[Cross-model review — v2.1.2 semantic acceptance refactor — f3e56a208804]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
+## [2026-07-21] review | v2.1.2-acceptance-final-fixes
+
+`c-000020` [[Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c]]. 1 round(s), final verdict `approve`; reviewer claude/fable.
+
 ## [2026-07-21] review | v2.1.1 final implementation review
 
 `c-000018` [[Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf]]. 2 round(s), final verdict `approve`; reviewer claude/fable.

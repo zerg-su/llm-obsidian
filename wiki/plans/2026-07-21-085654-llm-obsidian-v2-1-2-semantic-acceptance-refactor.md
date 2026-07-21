@@ -6,8 +6,10 @@ session_id: 019f6ddd-d07e-7a30-b018-f6358753fb91
 sessions:
   - id: 019f6ddd-d07e-7a30-b018-f6358753fb91
     date: 2026-07-21
+  - id: 019f6ddd-d07e-7a30-b018-f6358753fb91
+    date: 2026-07-21
 source_cwd: "/Users/zak/Projects/worktrees/llm-obsidian-v2.1.2-acceptance-refactor"
-status: pending
+status: executed
 created: 2026-07-21
 updated: 2026-07-21
 tags:
@@ -84,3 +86,5 @@ tags:
 - Production defaults остаются Sol/high и Opus/high; Terra/Sonnet/medium используются только внутри изолированной acceptance-матрицы.
 - Fable/high применяется только для review изменений, не для массовых acceptance-ячеек.
 - При внешней блокировке, credentials/dependency approval или конфликте с посторонней пользовательской работой состояние сохраняется без разрушительных действий; вся остальная работа продолжается автономно.
+
+Результат: [[LLM Obsidian v2.1.2 semantic acceptance refactor]] (reaped 2026-07-21)
