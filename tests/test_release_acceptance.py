@@ -24,6 +24,7 @@ from acceptance_fingerprints import (
     behavior_fragment_hashes,
     cell_dependency_hashes,
     cell_metadata,
+    command_version,
     generation_snapshot,
     live_runner_behavior_sha256,
     launch_generations,
@@ -210,6 +211,32 @@ check(
     "workspace supervisor cannot inherit a stale external source pin",
     shard_env["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] == "a" * 40,
 )
+
+with tempfile.TemporaryDirectory(prefix="acceptance-stable-cli.") as raw:
+    command_root = Path(raw)
+    shim_dir = command_root / "cmux-cli-shims" / "surface"
+    native_dir = command_root / "native"
+    shim_dir.mkdir(parents=True)
+    native_dir.mkdir()
+    shim = shim_dir / "claude"
+    native = native_dir / "claude"
+    shim.write_text("#!/bin/sh\necho shim-should-not-run\n", encoding="utf-8")
+    native.write_text("#!/bin/sh\necho '2.1.206 (Claude Code)'\n", encoding="utf-8")
+    shim.chmod(0o755)
+    native.chmod(0o755)
+    old_path = os.environ.get("PATH")
+    os.environ["PATH"] = os.pathsep.join((str(shim_dir), str(native_dir)))
+    try:
+        stable_claude_version = command_version("claude")
+    finally:
+        if old_path is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = old_path
+    check(
+        "acceptance environment ignores ephemeral cmux CLI shims",
+        stable_claude_version == "2.1.206 (Claude Code)",
+    )
 
 with tempfile.TemporaryDirectory(prefix="acceptance-generation-snapshot.") as raw:
     snapshot_root = Path(raw)

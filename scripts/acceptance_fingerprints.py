@@ -439,8 +439,31 @@ def cell_dependency_hashes(
 
 
 def command_version(command: str) -> str:
+    candidates: list[Path] = []
+    for raw in os.environ.get("PATH", "").split(os.pathsep):
+        if not raw:
+            continue
+        candidate = Path(raw) / command
+        if "cmux-cli-shims" in candidate.parts:
+            continue
+        candidates.append(candidate)
+    fallback = Path.home() / ".local" / "bin" / command
+    if fallback not in candidates:
+        candidates.append(fallback)
+    executable = next(
+        (candidate for candidate in candidates if candidate.is_file() and os.access(candidate, os.X_OK)),
+        None,
+    )
+    if executable is None:
+        return "unavailable"
     try:
-        result = subprocess.run([command, "--version"], text=True, capture_output=True, timeout=5, check=False)
+        result = subprocess.run(
+            [str(executable), "--version"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return "unavailable"
     lines = (result.stdout or result.stderr).splitlines()
