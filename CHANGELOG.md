@@ -25,7 +25,12 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 - Split the monolithic live-acceptance runner into contracts, sandbox,
   launchers, prompting, scenario adapters, and skill adapters behind the same
-  CLI. All 58 v2.1.1 prompts remain byte-identical on pinned inputs.
+  CLI. The refactor preserved all 58 v2.1.1 prompts byte-identically on pinned
+  inputs before the reviewed fixture corrections below.
+- Revised five live fixtures (backlog, distill-runbook, learn, reap, and
+  wiki-query) under the v2.1.2 prompt baseline to clarify operational setup
+  without changing their expected behavior contracts; the other 48 rendered
+  prompts remain byte-identical to v2.1.1.
 - Replaced unknown-path global invalidation and historical evidence migration
   with evidence epoch 3 and semantic per-cell fingerprints. Data-only,
   packaging-only, orchestration-only, and same-generation model-alias changes
