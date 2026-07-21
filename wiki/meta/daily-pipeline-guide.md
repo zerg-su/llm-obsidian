@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-18
+updated: 2026-07-21
 tags:
   - meta
   - guide
@@ -14,6 +14,7 @@ related:
 sessions:
   - public-template-v2
   - 019f72c4-816e-7200-a399-505adaa350e0
+  - 019f6ddd-d07e-7a30-b018-f6358753fb91
 ---
 
 # Daily Pipeline Guide
@@ -55,6 +56,7 @@ sessions:
 ### Оркестрация (требует cmux)
 
 - **dispatch** — вынести задачу в параллельный split + git worktree, с передачей approved-плана.
+- **dispatch-workspace** — тот же approved dispatch в отдельном unfocused cmux workspace.
 - **reap** — собрать результат task-split'а в вики (interim/final).
 - **reap-send** — вызывается ИЗ task-split'а: handoff summary в вики одной командой.
 - **review-dispatch** — запускает независимое cross-model review и bounded verify.
