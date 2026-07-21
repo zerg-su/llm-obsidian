@@ -40,7 +40,8 @@
     "wiki/concepts/Hot Cache.md"
   ],
   "cross-model": [
-    "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md"
+    "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md"
   ],
   "dashboard": [
     "wiki/meta/dashboard.md"
@@ -159,7 +160,8 @@
   ],
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
-    "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md"
+    "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md"
   ],
   "skills": [
     "wiki/meta/daily-pipeline-guide.md"
