@@ -64,6 +64,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Run one code-owned Claude subscription preflight before allocating live
   acceptance workspaces, avoiding model-side credential-status probes while
   retaining the normal-session fail-closed check.
+- Pin the Codex daily subagent against the observed legacy summary shape and
+  retry one invalid response in the same agent thread with the exact validator
+  error and schema, without spawning a fallback model.
 - Bound automatic retries to at most three attempts for explicit cmux
   allocation and agent-capacity transients. Product, permission, contract, and
   unknown failures are never retried.

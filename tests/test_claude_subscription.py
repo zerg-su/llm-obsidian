@@ -160,6 +160,12 @@ check(
     makefile.count("@python3 scripts/claude-subscription-check.py") == 2,
 )
 check("daily selects scoped Claude agent", "llm-obsidian:daily-summarizer" in skill)
+check(
+    "daily corrects invalid Codex JSON in the same agent thread",
+    "correct once in the same agent thread" in skill
+    and "validator error" in skill
+    and "never spawn/fallback" in skill,
+)
 check("daily forbids Claude parent fallback", "Never fall back to the parent Claude model" in skill)
 stats = (ROOT / "scripts" / "pipeline-stats.py").read_text(encoding="utf-8")
 check("Claude agent telemetry registered", 'CUSTOM_AGENTS: set[str] = {"daily-summarizer"}' in stats)

@@ -253,12 +253,23 @@ check(
     and '"evidence_ids": ["session:001"]' in agent
     and "never strings" in agent,
 )
+check(
+    "daily Codex agent rejects the observed legacy shape",
+    'schema_version as "daily-summary-v1"' in agent
+    and all(field in agent for field in ("headline", "completed", "source_ids")),
+)
 daily_skill = (ROOT / "skills/daily/SKILL.md").read_text(encoding="utf-8")
 check(
     "daily Codex delegation stays in the native agent tool",
-    "built-in Agent tool" in daily_skill
-    and "never shell out to `codex` or" in daily_skill
-    and "`codex exec`" in daily_skill,
+    "through built-in Agent" in daily_skill
+    and "never shell out to Codex" in daily_skill,
+)
+check(
+    "daily Codex invalid JSON reuses the same agent thread",
+    "paste" in daily_skill
+    and "correct once in the same agent thread" in daily_skill
+    and "validator error" in daily_skill
+    and "never spawn/fallback" in daily_skill,
 )
 check(
     "disabled MCP servers retain valid transports",

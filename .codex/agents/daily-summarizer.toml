@@ -30,6 +30,8 @@ The exact output shape is:
   "session_labels": []
 }
 schema_version is the integer 1, and bullets is an array of objects, never strings.
+Never return schema_version as "daily-summary-v1" or use headline, summary, completed,
+next_steps, or source_ids fields; those belong to a different unsupported contract.
 Never include commit hashes, branch names, repository paths, CLI flags, YAML fields, plans, or process-only trivia.
 Do not write files, call web or MCP tools, inspect the wider vault, or spawn another agent.
 """
