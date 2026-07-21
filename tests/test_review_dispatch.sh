@@ -616,6 +616,13 @@ target = state / ".task-review-resolution.md"
 assert target.read_text(encoding="utf-8").strip() == generic.read_text(encoding="utf-8").strip()
 assert cleanup == [generic]
 target.unlink()
+exact.write_text("# Exact operation resolution\n", encoding="utf-8")
+cleanup = module.prepare_drive_resolution(ns, worktree)
+assert target.read_text(encoding="utf-8").strip() == "# Exact operation resolution"
+assert cleanup == [exact]
+assert generic.read_text(encoding="utf-8").strip() == "# Applied\n\nBounded evidence."
+target.unlink()
+exact.unlink()
 second = worktree / ".task-review-drive-22222222-2222-4222-8222-222222222222.json"
 second.write_text("{}\n", encoding="utf-8")
 try:

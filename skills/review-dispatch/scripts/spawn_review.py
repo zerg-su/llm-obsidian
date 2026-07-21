@@ -1845,9 +1845,10 @@ def prepare_drive_resolution(ns: argparse.Namespace, worktree: Path) -> list[Pat
     exact = getattr(ns, "_resolution_file_path", None)
     generic = worktree / ".task-review-resolution.md"
     candidates: list[Path] = []
-    if isinstance(exact, Path) and exact.is_file():
+    exact_exists = isinstance(exact, Path) and exact.is_file()
+    if exact_exists:
         candidates.append(exact)
-    if generic != target and generic.is_file():
+    elif generic != target and generic.is_file():
         action = getattr(ns, "_action_file_path", None)
         active = sorted(worktree.glob(".task-review-drive-*.json"))
         if not isinstance(action, Path) or active != [action]:
