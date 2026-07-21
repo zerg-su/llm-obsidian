@@ -44,6 +44,7 @@ from task_sessions import (  # noqa: E402
     spawn_right,
     spawn_workspace,
 )
+from cmux_workspace_lifecycle import bind_workspace_identity  # noqa: E402
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 
 
@@ -843,6 +844,8 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
             if request["placement"] == "workspace"
             else spawn_right(request["origin_surface"])
         )
+        if request["placement"] == "workspace":
+            child = bind_workspace_identity(child)
         emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
                              counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
                              vault_root=request["vault_root"])

@@ -18,6 +18,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import task_sessions as task_sessions_module
+import cmux_workspace_lifecycle as workspace_lifecycle
 from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
@@ -662,6 +663,67 @@ check(
         for call in workspace_spawn_calls
     ),
 )
+bound_workspace = workspace_lifecycle.bind_workspace_identity(
+    workspace_spawn, workspace_spawn_runner
+)
+check(
+    "workspace binding records exact UUID ownership",
+    bound_workspace["workspace"] == "44444444-4444-4444-8444-444444444444"
+    and bound_workspace["window"] == "window-id"
+    and bound_workspace["workspace_ref"] == "workspace:22",
+)
+
+owned_workspace_open = True
+owned_workspace_calls: list[list[str]] = []
+
+
+def owned_workspace_runner(args: list[str], **_: object) -> Result:
+    global owned_workspace_open
+    owned_workspace_calls.append(args)
+    if args == ["cmux", "rpc", "system.tree", '{"all":true}']:
+        workspaces = []
+        if owned_workspace_open:
+            workspaces.append({
+                "id": "44444444-4444-4444-8444-444444444444",
+                "ref": "workspace:22",
+                "panes": [{"id": "pane-id", "ref": "pane:22", "surfaces": []}],
+            })
+        return Result(stdout=json.dumps({
+            "windows": [{"id": "window-id", "ref": "window:7", "workspaces": workspaces}],
+        }))
+    if args == [
+        "cmux", "workspace", "close", "44444444-4444-4444-8444-444444444444"
+    ]:
+        owned_workspace_open = False
+        return Result(stdout="OK")
+    return Result(returncode=1)
+
+
+check(
+    "dedicated task workspace closes by exact UUID",
+    workspace_lifecycle.close_workspace_exact(
+        "44444444-4444-4444-8444-444444444444", "window-id", owned_workspace_runner
+    ) == "closed",
+)
+check(
+    "workspace cleanup never targets focus or a short reused handle",
+    ["cmux", "workspace", "close", "44444444-4444-4444-8444-444444444444"]
+    in owned_workspace_calls,
+)
+with tempfile.TemporaryDirectory(prefix="workspace-container-test.") as raw_container:
+    container = Path(raw_container)
+    (container / ".task-meta.json").write_text(json.dumps({
+        "task_workspace": "44444444-4444-4444-8444-444444444444",
+        "task_window": "window-id",
+        "surface_policy": {"placement": "workspace"},
+    }), encoding="utf-8")
+    owned_workspace_open = True
+    check(
+        "task lifecycle selects its dedicated workspace container",
+        workspace_lifecycle.close_task_container(
+            container, "surface-must-not-be-used", owned_workspace_runner
+        ) == "closed",
+    )
 check(
     "workspace dispatch resolves one exact child surface",
     workspace_spawn["surface"] == "55555555-5555-4555-8555-555555555555"

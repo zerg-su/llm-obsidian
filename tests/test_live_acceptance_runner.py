@@ -133,6 +133,18 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and "answer note ranks first" in fixture_registry["skills"]["wiki-query"]["fixture"],
     )
     check(
+        "wiki-query fixture provisions the normal dense path before degradation",
+        "retrieve.py refresh-dense --quiet" in fixture_registry["skills"]["wiki-query"]["fixture"],
+    )
+    check(
+        "distill-runbook fixture satisfies the skill's meaningful-history floor",
+        "six distinct" in fixture_registry["skills"]["distill-runbook"]["fixture"],
+    )
+    check(
+        "learn fixture refreshes derived state before whole-vault validation",
+        "scripts/reindex.py" in fixture_registry["skills"]["learn"]["fixture"],
+    )
+    check(
         "reap fixtures require real registered task surfaces",
         all(
             "real disposable cmux task surface" in fixture_registry["skills"][skill]["fixture"]
@@ -158,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     prompt_baseline = json.loads(
-        (ROOT / "evals/acceptance/prompt-baseline-v2.1.1.json").read_text(encoding="utf-8")
+        (ROOT / "evals/acceptance/prompt-baseline-v2.1.2.json").read_text(encoding="utf-8")
     )
     prompt_scenarios = module.load_scenarios()
     prompt_fixtures = module.load_skill_fixtures()
@@ -195,7 +207,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             )
             rendered_hashes[key] = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     check(
-        "all 58 refactored prompts are byte-identical to v2.1.1",
+        "all 58 refactored prompts match the reviewed v2.1.2 baseline",
         rendered_hashes == prompt_baseline["prompts"] and len(rendered_hashes) == 58,
     )
     check(

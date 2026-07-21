@@ -33,6 +33,7 @@ from task_sessions import (
     close_surface_exact,
     validate_checkpoint,
 )
+from cmux_workspace_lifecycle import close_task_container
 
 
 HANDOFF_PREFIXES = (".task-", ".review-", ".wiki-")
@@ -340,7 +341,10 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     # the marker only when close returns a real error and this process survives.
     sentinel.unlink(missing_ok=True)
     try:
-        close_surface_exact(surface)
+        if kind == "task":
+            close_task_container(worktree, surface)
+        else:
+            close_surface_exact(surface)
     except (TaskSessionError, OSError) as exc:
         write_marker(sentinel, payload)
         die(str(exc) or "cmux close-surface failed")

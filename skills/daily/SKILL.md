@@ -31,7 +31,8 @@ Exit 4 means no completed-work evidence: do not create an empty entry.
 Resolve the host once with `./scripts/detect-runtime.sh --three-way`.
 
 On Codex, delegate only this bounded read task to the project custom agent
-`daily_summarizer`. Give it the exact evidence path and ask for JSON only. Resolve the
+`daily_summarizer` through the built-in Agent tool; never shell out to `codex` or
+`codex exec`. Give it the exact evidence path and ask for JSON only. Resolve the
 `daily` route through `scripts/model_routing.py`: it inherits the current session's
 runtime and exact model, changes only effort to medium, and stays read-only without
 web/apps/MCP or nested agents. If the host cannot preserve that route exactly, fail

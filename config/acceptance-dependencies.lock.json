@@ -46,6 +46,7 @@
     "scripts/cmux_agent_support.py",
     "scripts/cmux_surface_lifecycle.py",
     "scripts/cmux_trust_prompt.py",
+    "scripts/cmux_workspace_lifecycle.py",
     "scripts/current-session-id.sh",
     "scripts/daily-apply.py",
     "scripts/daily-collect.py",
@@ -385,6 +386,7 @@
       "scripts/model_routing.py"
     ],
     "scripts/cmux_surface_lifecycle.py": [
+      "scripts/cmux_workspace_lifecycle.py",
       "scripts/lifecycle_telemetry.py",
       "scripts/plan_lifecycle.py",
       "scripts/task_contract.py",
@@ -396,6 +398,9 @@
       "scripts/task_contract.py"
     ],
     "scripts/cmux_trust_prompt.py": [],
+    "scripts/cmux_workspace_lifecycle.py": [
+      "scripts/task_sessions.py"
+    ],
     "scripts/codex-adapter.py": [],
     "scripts/current-session-id.sh": [],
     "scripts/daily-apply.py": [
@@ -437,6 +442,7 @@
     "scripts/dispatch-runner.py": [
       ".codex/dispatch-env.toml",
       "scripts/cmux_agent_supervisor.py",
+      "scripts/cmux_workspace_lifecycle.py",
       "scripts/current-session-id.sh",
       "scripts/lifecycle_telemetry.py",
       "scripts/mcp-gateway/mcp-gateway.sh",
@@ -930,5 +936,5 @@
       "skills/"
     ]
   },
-  "graph_sha256": "d12c15daa1de76c5de7afada81252c235f2413002ab087dcaea14922f475e4de"
+  "graph_sha256": "4e7f985905a7bc851d90ba32d1475c27d2237aa5a22af566cd3a88a3d03f97df"
 }

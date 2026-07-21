@@ -878,6 +878,20 @@ assert json.loads(argv[idx+1]) == {"mcpServers": {}}
 PY
 [[ $? -eq 0 ]] && ok "claude-review-empty-mcp" || bad "claude-review-empty-mcp" "reviewer MCP config is not empty"
 expect_eq "claude-opt-in-meta" "$(json_get "$OPUS/.review-meta.json" reviewer_model)" "opus"
+python3 - "$SCRIPT" "$SANDBOX/operation-runtime" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("review_dispatch_submission_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+runtime = pathlib.Path(sys.argv[2]).resolve()
+text = module.submission_instructions("claude", "relay", pathlib.Path("/product"), runtime)
+assert f"`{runtime / '.review-outbox.json'}`" in text
+assert "only to `.review-outbox.json`" not in text
+PY
+[[ $? -eq 0 ]] && ok "claude-operation-outbox-is-absolute" || bad "claude-operation-outbox-is-absolute" "operation outbox remained cwd-ambiguous"
 
 CODEX_REVIEW="$SANDBOX/codex-review"
 write_fixture "$CODEX_REVIEW"

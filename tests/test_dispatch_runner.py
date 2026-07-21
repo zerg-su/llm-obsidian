@@ -197,6 +197,28 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")
     check("runner metadata records split placement", meta["surface_policy"]["placement"] == "split")
+    workspace_meta = runner.write_task_files(
+        workspace_request,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {
+            "surface": "22222222-2222-4222-8222-222222222222",
+            "surface_ref": "surface:2",
+            "workspace": "44444444-4444-4444-8444-444444444444",
+            "workspace_ref": "workspace:22",
+            "window": "55555555-5555-4555-8555-555555555555",
+            "window_ref": "window:7",
+        },
+    )
+    check(
+        "workspace dispatch persists exact container ownership",
+        workspace_meta["surface_policy"]["placement"] == "workspace"
+        and workspace_meta["task_workspace"] == "44444444-4444-4444-8444-444444444444"
+        and workspace_meta["task_window"] == "55555555-5555-4555-8555-555555555555",
+    )
 
     duplicate = json.loads(json.dumps(raw_request))
     expect_error(

@@ -21,7 +21,7 @@ implementation lives in `scripts/acceptance/`:
   cleanup behavior;
 - `runner.py` composes those pieces and retains the public CLI.
 
-`evals/acceptance/prompt-baseline-v2.1.1.json` hashes all rendered prompts on
+`evals/acceptance/prompt-baseline-v2.1.2.json` hashes all rendered prompts on
 fixed placeholders. Unit tests require all 58 hashes to remain identical. A
 real prompt correction therefore needs an explicit reviewed baseline change.
 

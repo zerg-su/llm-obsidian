@@ -1125,8 +1125,12 @@ def submission_instructions(
     review_runtime_dir: Path | None,
 ) -> str:
     if reviewer_runtime == "claude":
+        if review_runtime_dir is None:
+            outbox_instruction = "`.review-outbox.json`"
+        else:
+            outbox_instruction = f"`{review_runtime_dir / '.review-outbox.json'}`"
         return (
-            "Write the JSON object only to `.review-outbox.json` with the Write tool. "
+            f"Write the JSON object only to {outbox_instruction} with the Write tool. "
             "This isolated outbox is the only file you may write. Do not run `review-send`, "
             "do not call `cmux`, and do not try to access its socket. The trusted supervisor "
             "watches this exact file, validates and forwards the payload, then removes it. "

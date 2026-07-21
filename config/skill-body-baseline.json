@@ -8,7 +8,7 @@
     "canvas": {"body_bytes": 9556, "body_lines": 283, "closure_bytes": 18287, "closure_token_estimate": 4572, "token_estimate": 2389},
     "clarify": {"body_bytes": 1445, "body_lines": 33, "closure_bytes": 1445, "closure_token_estimate": 362, "token_estimate": 362},
     "close": {"body_bytes": 1735, "body_lines": 38, "closure_bytes": 1735, "closure_token_estimate": 434, "token_estimate": 434},
-    "daily": {"body_bytes": 3848, "body_lines": 98, "closure_bytes": 3848, "closure_token_estimate": 962, "token_estimate": 962},
+    "daily": {"body_bytes": 3924, "body_lines": 99, "closure_bytes": 3924, "closure_token_estimate": 981, "token_estimate": 981},
     "defuddle": {"body_bytes": 2665, "body_lines": 84, "closure_bytes": 2665, "closure_token_estimate": 667, "token_estimate": 667},
     "dispatch": {"body_bytes": 4615, "body_lines": 92, "closure_bytes": 4615, "closure_token_estimate": 1154, "token_estimate": 1154},
     "dispatch-workspace": {"body_bytes": 891, "body_lines": 20, "closure_bytes": 891, "closure_token_estimate": 223, "token_estimate": 223},

@@ -246,6 +246,13 @@ check("daily model is not hardcoded", "\nmodel = " not in agent)
 check("daily medium effort pinned", 'model_reasoning_effort = "medium"' in agent)
 check("daily agent read-only", 'sandbox_mode = "read-only"' in agent and 'web_search = "disabled"' in agent)
 check("daily agent hooks disabled", 'hooks = false' in agent and 'approval_policy = "never"' in agent)
+daily_skill = (ROOT / "skills/daily/SKILL.md").read_text(encoding="utf-8")
+check(
+    "daily Codex delegation stays in the native agent tool",
+    "built-in Agent tool" in daily_skill
+    and "never shell out to `codex` or" in daily_skill
+    and "`codex exec`" in daily_skill,
+)
 check(
     "disabled MCP servers retain valid transports",
     bool(mcp_servers)
