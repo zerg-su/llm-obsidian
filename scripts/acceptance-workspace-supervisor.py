@@ -23,24 +23,27 @@ from acceptance_fingerprints import (
     environment_contract,
     generation_snapshot,
     is_non_behavioral_path,
+    launch_generations,
     non_behavioral_paths,
     non_behavioral_prefixes,
-    orchestration_dependencies,
-    production_generations,
     read_manifest,
+    verify_dependency_lock,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_SCRIPT = ROOT / "scripts" / "release-acceptance.py"
-MAX_WORKSPACES = 5
+MAX_WORKSPACES = 10
 MAX_JOBS_PER_WORKSPACE = 5
-WORKSPACE_REF = re.compile(r"\bworkspace:\d+\b")
+WORKSPACE_ID = re.compile(
+    r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
+)
 FORWARDED_ENV = (
     "LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL",
     "LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL",
     "LLM_OBSIDIAN_ACCEPTANCE_EFFORT",
     "LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT",
+    "LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT_ROOT",
 )
 
 
@@ -122,12 +125,13 @@ def partition_skills(pending_rows: list[dict[str, Any]], workspaces: int) -> lis
     return [sorted(bucket) for bucket in buckets]
 
 
-def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
+def build_context(root: Path, phase: str, report: Path, *, restart: bool = False) -> dict[str, Any]:
     skills = release.load_spec(root / "evals/acceptance/skills.json", root)
     release.validate_scenario_coverage(root / "evals/acceptance/scenarios.json", skills)
     manifest = read_manifest(root)
+    verify_dependency_lock(root, manifest)
     rows = release.matrix_rows(skills, phase)
-    generations = production_generations(root, manifest)
+    generations = launch_generations(root, manifest)
     environment = environment_contract()
     environment_scope_version = int(manifest.get("environment_scope_version", 1))
     metadata = {
@@ -150,33 +154,19 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
             "workspace acceptance requires committed behavioral state; dirty paths: "
             + ", ".join(behavioral_dirty[:8])
         )
-    orchestration = orchestration_dependencies(manifest)
     orchestration_version = int(manifest["orchestration_contract_version"])
+    evidence_epoch = int(manifest["evidence_epoch"])
     fingerprint = release.matrix_fingerprint(
         [{**row, "cell_fingerprint": metadata[release.row_key(row)]["cell_fingerprint"]}
          for row in rows]
     )
-    prior = release.load_resume_results(
+    prior = [] if restart else release.load_resume_results(
         report,
         rows,
         phase=phase,
         commit=commit,
         metadata=metadata,
-        root=root,
-        non_behavioral=allowed_dirty,
-        non_behavioral_prefixes_=allowed_prefixes,
-        orchestration=orchestration,
-        orchestration_contract_version=orchestration_version,
-        environment_scope_version=environment_scope_version,
-        environment_migration=release.build_resume_migration_metadata(
-            report,
-            rows,
-            root,
-            manifest,
-            generations=generations,
-            current_scope_version=environment_scope_version,
-        ),
-        include_dirty=True,
+        evidence_epoch=evidence_epoch,
     )
     return {
         "rows": rows,
@@ -184,6 +174,7 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
         "commit": commit,
         "fingerprint": fingerprint,
         "orchestration_version": orchestration_version,
+        "evidence_epoch": evidence_epoch,
         "environment_scope_version": environment_scope_version,
         "environment": environment,
         "prior": prior,
@@ -200,7 +191,8 @@ def validate_shard_report(
 ) -> list[dict[str, Any]]:
     raw = read_object(path)
     if (
-        raw.get("schema_version") != 2
+        raw.get("schema_version") != 3
+        or raw.get("evidence_epoch") != context["evidence_epoch"]
         or raw.get("phase") != phase
         or raw.get("source_commit") != context["commit"]
         or raw.get("matrix_fingerprint") != context["fingerprint"]
@@ -227,6 +219,7 @@ def validate_shard_report(
             item.get("cell_fingerprint") != current["cell_fingerprint"]
             or item.get("dependencies") != current["dependencies"]
             or item.get("generation") != current["generation"]
+            or item.get("launch_model") != current["launch_model"]
             or not isinstance(provenance, dict)
             or item.get("row_integrity_sha256")
             != release.integrity_sha256(result, current["cell_fingerprint"], provenance)
@@ -273,6 +266,7 @@ def checkpoint(report: Path, rows: list[dict[str, Any]], context: dict[str, Any]
             commit=context["commit"],
             fingerprint=context["fingerprint"],
             orchestration_contract_version=context["orchestration_version"],
+            evidence_epoch=context["evidence_epoch"],
             environment_scope_version=context["environment_scope_version"],
             environment=context["environment"],
         ),
@@ -345,7 +339,7 @@ def worker(config_path: Path) -> int:
 def create_workspace(root: Path, name: str, command: list[str]) -> str:
     result = subprocess.run(
         [
-            "cmux", "new-workspace", "--name", name, "--cwd", str(root),
+            "cmux", "--id-format", "uuids", "new-workspace", "--name", name, "--cwd", str(root),
             "--command", shlex.join(command), "--focus", "false",
         ],
         text=True,
@@ -353,19 +347,31 @@ def create_workspace(root: Path, name: str, command: list[str]) -> str:
         check=False,
     )
     output = (result.stdout + result.stderr).strip()
-    match = WORKSPACE_REF.search(output)
+    match = WORKSPACE_ID.search(output)
     if result.returncode != 0 or match is None:
         raise WorkspaceAcceptanceError(output or "cmux did not create an acceptance workspace")
     return match.group(0)
 
 
 def close_workspace(workspace: str) -> None:
-    subprocess.run(
+    result = subprocess.run(
         ["cmux", "close-workspace", "--workspace", workspace],
         text=True,
         capture_output=True,
         check=False,
     )
+    if result.returncode != 0 and workspace_is_open(workspace):
+        raise WorkspaceAcceptanceError(f"owned acceptance workspace could not be closed: {workspace}")
+
+
+def workspace_is_open(workspace: str) -> bool:
+    result = subprocess.run(
+        ["cmux", "--id-format", "uuids", "list-workspaces"],
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise WorkspaceAcceptanceError("cannot reconcile owned acceptance workspaces")
+    return workspace.lower() in (result.stdout + result.stderr).lower()
 
 
 def supervise(args: argparse.Namespace) -> int:
@@ -374,7 +380,7 @@ def supervise(args: argparse.Namespace) -> int:
         raise WorkspaceAcceptanceError("acceptance workspace timeouts must be positive")
     root = args.root.resolve()
     report = args.report.resolve()
-    context = build_context(root, args.phase, report)
+    context = build_context(root, args.phase, report, restart=args.restart)
     prior_keys = {release.row_key(row) for row in context["prior"]}
     pending = [row for row in context["rows"] if release.row_key(row) not in prior_keys]
     assignments = partition_skills(pending, args.workspaces)
@@ -397,6 +403,7 @@ def supervise(args: argparse.Namespace) -> int:
         commit=context["commit"],
         fingerprint=context["fingerprint"],
         orchestration_contract_version=context["orchestration_version"],
+        evidence_epoch=context["evidence_epoch"],
         environment_scope_version=context["environment_scope_version"],
         environment=context["environment"],
     )
@@ -405,6 +412,10 @@ def supervise(args: argparse.Namespace) -> int:
         status = run_dir / f"shard-{index}.status.json"
         config = run_dir / f"shard-{index}.config.json"
         atomic_json(shard_report, seed)
+        shard_environment_values = {
+            **environment,
+            "LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT_ROOT": str(run_dir / f"shard-{index}-heartbeats"),
+        }
         atomic_json(config, {
             "schema_version": 1,
             "root": str(root),
@@ -415,7 +426,7 @@ def supervise(args: argparse.Namespace) -> int:
             "report": str(shard_report),
             "status": str(status),
             "skills": skills,
-            "environment": environment,
+            "environment": shard_environment_values,
         })
         shards.append({"skills": set(skills), "report": shard_report, "status": status})
 
@@ -423,7 +434,20 @@ def supervise(args: argparse.Namespace) -> int:
     created: list[str] = []
     closed: set[str] = set()
     last_completed = len(context["prior"])
-    deadline = time.monotonic() + args.supervisor_timeout
+    last_activity = time.monotonic()
+    activity_signature: tuple[tuple[str, int, int], ...] = ()
+
+    def run_activity() -> tuple[tuple[str, int, int], ...]:
+        values: list[tuple[str, int, int]] = []
+        for path in run_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                stat_value = path.stat()
+            except OSError:
+                continue
+            values.append((path.relative_to(run_dir).as_posix(), stat_value.st_mtime_ns, stat_value.st_size))
+        return tuple(sorted(values))
     try:
         for index, shard in enumerate(shards, start=1):
             command = [sys.executable, str(Path(__file__).resolve()), "worker", "--config", str(run_dir / f"shard-{index}.config.json")]
@@ -435,6 +459,10 @@ def supervise(args: argparse.Namespace) -> int:
             f"{args.jobs_per_workspace} jobs; {len(pending)} pending cells"
         )
         while True:
+            current_activity = run_activity()
+            if current_activity != activity_signature:
+                activity_signature = current_activity
+                last_activity = time.monotonic()
             reports = [(item["report"], item["skills"]) for item in shards]
             merged = merge_shards(reports, context=context, phase=args.phase)
             checkpoint(report, merged, context, args.phase)
@@ -451,8 +479,8 @@ def supervise(args: argparse.Namespace) -> int:
                         closed.add(workspace)
             if finished == len(shards):
                 break
-            if time.monotonic() >= deadline:
-                raise WorkspaceAcceptanceError("acceptance workspace supervisor timed out")
+            if time.monotonic() - last_activity >= args.supervisor_timeout:
+                raise WorkspaceAcceptanceError("acceptance workspace supervisor inactivity timeout")
             time.sleep(1)
         merged = merge_shards(
             [(item["report"], item["skills"]) for item in shards],
@@ -475,6 +503,12 @@ def supervise(args: argparse.Namespace) -> int:
         for workspace in created:
             if workspace not in closed:
                 close_workspace(workspace)
+                closed.add(workspace)
+        orphans = [workspace for workspace in created if workspace_is_open(workspace)]
+        if orphans:
+            raise WorkspaceAcceptanceError(
+                "owned acceptance workspaces remained open: " + ", ".join(orphans)
+            )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -485,10 +519,11 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--phase", choices=release.PHASES, required=True)
     run.add_argument("--runner", required=True)
     run.add_argument("--report", type=Path, required=True)
-    run.add_argument("--workspaces", type=int, default=1)
+    run.add_argument("--restart", action="store_true", help="discard prior evidence and run every cell")
+    run.add_argument("--workspaces", type=int, default=2)
     run.add_argument("--jobs-per-workspace", type=int, default=5)
-    run.add_argument("--cell-timeout", type=float, default=3700.0)
-    run.add_argument("--supervisor-timeout", type=float, default=14400.0)
+    run.add_argument("--cell-timeout", type=float, default=1200.0)
+    run.add_argument("--supervisor-timeout", type=float, default=1500.0)
     child = sub.add_parser("worker")
     child.add_argument("--config", type=Path, required=True)
     return value

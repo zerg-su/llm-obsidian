@@ -1,0 +1,4 @@
+{"address":"c-000001","created":"2026-01-01","path":"wiki/backlog.md","related":[],"sessions":["acceptance-seed"],"status":"living","tags":["backlog","todo","capture","acceptance"],"title":"Acceptance Capture Inbox","type":"backlog","updated":"2026-01-01"}
+{"address":null,"created":"2026-01-01","path":"wiki/hot.md","related":[],"sessions":["acceptance-seed"],"status":"evergreen","tags":["meta","hot-cache","acceptance"],"title":"Acceptance Hot Cache","type":"meta","updated":"2026-01-01"}
+{"address":null,"created":"2026-01-01","path":"wiki/index.md","related":[],"sessions":["acceptance-seed"],"status":"evergreen","tags":["meta","index","acceptance"],"title":"Acceptance Wiki Index","type":"meta","updated":"2026-01-01"}
+{"address":null,"created":"2026-01-01","path":"wiki/log.md","related":[],"sessions":["acceptance-seed"],"status":"evergreen","tags":["meta","log","acceptance"],"title":"Acceptance Operation Log","type":"meta","updated":"2026-01-01"}

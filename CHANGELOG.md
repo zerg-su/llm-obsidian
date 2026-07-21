@@ -4,9 +4,15 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
-## [2.1.1] - 2026-07-20
+## [2.1.2] - 2026-07-21
 
 ### Added
+
+- Added a generated fail-closed acceptance dependency lock covering static
+  Python imports, constant code/data paths, runtime registrations, and explicit
+  dynamic repo-path declarations without executing product or historical code.
+- Added a committed minimal seed vault and deterministic synthetic seed commit,
+  keeping live fixtures independent of the working wiki and `.vault-meta/` data.
 
 - Added content-free per-turn and runner-stage timing to the existing bounded
   pipeline event stream, including incomplete-turn accounting and p50/p95
@@ -16,6 +22,18 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   atomic checkpoints, and fail-closed selective reuse.
 
 ### Changed
+
+- Split the monolithic live-acceptance runner into contracts, sandbox,
+  launchers, prompting, scenario adapters, and skill adapters behind the same
+  CLI. All 58 v2.1.1 prompts remain byte-identical on pinned inputs.
+- Replaced unknown-path global invalidation and historical evidence migration
+  with evidence epoch 3 and semantic per-cell fingerprints. Data-only,
+  packaging-only, orchestration-only, and same-generation model-alias changes
+  reuse evidence; unregistered runtime edges stop the model-free check.
+- Acceptance now records the exact launched model while fingerprinting its
+  registered major generation, runs by default in two owned cmux workspaces
+  with five cells each, checkpoints every completed cell, and resumes only
+  unfinished fingerprints.
 
 - Compacted the normal dispatch, review, reap, reap-send, and close skill paths
   around deterministic repo-owned runners and conditional compatibility
@@ -31,6 +49,14 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   coordinator/task/reviewer role; incomplete turns carry no fabricated latency.
 
 ### Fixed
+
+- Bound automatic retries to at most three attempts for explicit cmux
+  allocation and agent-capacity transients. Product, permission, contract, and
+  unknown failures are never retried.
+- Replaced wall-clock cell termination with content-free screen/lifecycle
+  heartbeats, a 15-minute status probe, and an inactivity boundary; exact owned
+  surfaces and workspaces are reconciled after every run so empty shells and
+  orphan tabs fail the release gate.
 
 - Confirm Claude's exact native background-work exit dialog automatically only
   after an unattended task or reviewer close has been lifecycle-authorized,

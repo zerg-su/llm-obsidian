@@ -8,7 +8,6 @@ import hashlib
 import json
 import importlib.util
 import os
-import signal
 import subprocess
 import sys
 import tempfile
@@ -21,11 +20,20 @@ SCRIPT = ROOT / "scripts" / "release-acceptance.py"
 WORKSPACE_SCRIPT = ROOT / "scripts" / "acceptance-workspace-supervisor.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from acceptance_fingerprints import (
+    behavior_fragment_hashes,
+    cell_dependency_hashes,
     cell_metadata,
+    generation_snapshot,
     live_runner_behavior_sha256,
-    production_generations,
+    launch_generations,
     read_manifest,
     runtime_script_references,
+    verify_dependency_lock,
+)
+from acceptance_dependencies import (
+    _dynamic_repo_prefixes,
+    closure as dependency_closure,
+    read_lock,
 )
 
 
@@ -43,7 +51,10 @@ workspace_spec.loader.exec_module(acceptance_workspaces)
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(SCRIPT), *args], text=True, capture_output=True)
+    values = list(args)
+    if "run" in values and "--jobs" not in values:
+        values.extend(["--jobs", "5"])
+    return subprocess.run([sys.executable, str(SCRIPT), *values], text=True, capture_output=True)
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -55,8 +66,8 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 result = run("check")
 check("dynamic coverage", result.returncode == 0 and "runtimes" in result.stdout, result.stderr)
 
-acceptance_workspaces.validate_limits(5, 5)
-for workspaces, jobs in ((6, 5), (5, 6), (0, 5), (5, 0)):
+acceptance_workspaces.validate_limits(10, 5)
+for workspaces, jobs in ((11, 5), (10, 6), (0, 5), (5, 0)):
     try:
         acceptance_workspaces.validate_limits(workspaces, jobs)
     except acceptance_workspaces.WorkspaceAcceptanceError:
@@ -64,6 +75,16 @@ for workspaces, jobs in ((6, 5), (5, 6), (0, 5), (5, 0)):
     else:
         check("workspace acceptance limits are code-owned", False)
 check("workspace acceptance limits are code-owned", True)
+
+workspace_defaults = acceptance_workspaces.parser().parse_args([
+    "run", "--phase", "final", "--runner", "fixture", "--report", "fixture.json",
+])
+check(
+    "workspace acceptance defaults to two by five with exact UUID ownership",
+    workspace_defaults.workspaces == 2
+    and workspace_defaults.jobs_per_workspace == 5
+    and acceptance_workspaces.WORKSPACE_ID.fullmatch("12345678-1234-1234-1234-123456789abc") is not None,
+)
 
 timeout_args = acceptance_workspaces.parser().parse_args([
     "run", "--phase", "final", "--runner", "fixture", "--report", "fixture.json",
@@ -167,6 +188,8 @@ with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
         "cell_fingerprint": "f" * 64,
         "dependencies": ["skills/fixture/SKILL.md"],
         "generation": "codex:5.6",
+        "launch_model": "gpt-5.6-terra",
+        "evidence_epoch": 3,
         "environment_sha256": "e" * 64,
     }
     merge_result = {
@@ -189,6 +212,7 @@ with tempfile.TemporaryDirectory(prefix="acceptance-workspace-merge.") as raw:
         "commit": merge_commit,
         "fingerprint": merge_fingerprint,
         "orchestration_version": 1,
+        "evidence_epoch": 3,
         "prior": [],
     }
     shard_report = tmp / "shard.json"
@@ -306,7 +330,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     result = run("--manifest", str(dead_generation_route_manifest), "check")
     check(
         "generation routes reject dead or unknown configuration",
-        result.returncode == 3 and "only the two production runtime defaults" in result.stderr,
+        result.returncode == 3 and "only the two runtime defaults" in result.stderr,
         result.stderr,
     )
     invalid_environment_scope_manifest = tmp / "invalid-environment-scope.toml"
@@ -343,12 +367,13 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         ),
     )
     check(
-        "acceptance control orchestration is absent from declared behavior paths",
+        "behavioral runner is present while orchestration is absent from cell dependencies",
         all(
             "scripts/release-acceptance.py" not in row["dependencies"]
             and "scripts/acceptance_fingerprints.py" not in row["dependencies"]
             and "config/acceptance-cells.toml" not in row["dependencies"]
-            and "scripts/live-acceptance-runner.py" not in row["dependencies"]
+            and "config/acceptance-dependencies.lock.json" not in row["dependencies"]
+            and "scripts/live-acceptance-runner.py" in row["dependencies"]
             for row in data["rows"]
         ),
     )
@@ -376,7 +401,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
             for row in data["rows"]
         ),
     )
-    runner_source = (ROOT / "scripts/live-acceptance-runner.py").read_text(encoding="utf-8")
+    runner_source = (ROOT / "scripts/acceptance/skill_adapters.py").read_text(encoding="utf-8")
     review_source = runner_source.replace(
         "Resolve only the known redundant-f-string warning",
         "Resolve only the known behavior-preserving warning",
@@ -397,81 +422,41 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=runner_source)
         == live_runner_behavior_sha256(ROOT, ordinary_row, source_text=review_source),
     )
-    common_source = runner_source.replace(
+    launcher_source = (ROOT / "scripts/acceptance/launchers.py").read_text(encoding="utf-8")
+    common_source = launcher_source.replace(
         "OUTBOX_STABLE_SECONDS = 1.0", "OUTBOX_STABLE_SECONDS = 1.1"
     )
     check(
         "common live behavior invalidates every cell",
-        common_source != runner_source
-        and live_runner_behavior_sha256(ROOT, review_row, source_text=runner_source)
+        common_source != launcher_source
+        and live_runner_behavior_sha256(ROOT, review_row, source_text=launcher_source)
         != live_runner_behavior_sha256(ROOT, review_row, source_text=common_source)
-        and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=runner_source)
+        and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=launcher_source)
         != live_runner_behavior_sha256(ROOT, ordinary_row, source_text=common_source),
     )
 
-    # A path declared by any cell is no longer protected by unknown-path
-    # invalidation. Therefore every cell must include the complete local import
-    # closure of each Python dependency it declares. Modules declared nowhere
-    # intentionally remain fail-closed as unknown product paths.
-    declared_by_any_cell = {
-        rel for row in data["rows"] for rel in row["dependencies"]
-    }
-
-    def declared_local_imports(rel: str) -> set[str]:
-        source = ROOT / rel
-        if source.suffix != ".py" or not source.is_file():
-            return set()
-        tree = ast.parse(source.read_text(encoding="utf-8"), filename=rel)
-        names: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                names.update(alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names.add(node.module.split(".", 1)[0])
-        imported: set[str] = set()
-        for name in names:
-            candidates = {
-                candidate
-                for candidate in declared_by_any_cell
-                if Path(candidate).suffix == ".py" and Path(candidate).stem == name
-            }
-            sibling = (source.parent / f"{name}.py")
-            if sibling.is_file():
-                candidates.add(sibling.relative_to(ROOT).as_posix())
-            scripts_module = ROOT / "scripts" / f"{name}.py"
-            if scripts_module.is_file():
-                candidates.add(scripts_module.relative_to(ROOT).as_posix())
-            imported.update(candidates & declared_by_any_cell)
-        return imported
-
-    incomplete_closures: list[str] = []
-    for row in data["rows"]:
-        dependencies = set(row["dependencies"])
-        pending = list(dependencies)
-        visited: set[str] = set()
-        while pending:
-            importer = pending.pop()
-            if importer in visited:
-                continue
-            visited.add(importer)
-            for imported in declared_local_imports(importer):
-                if imported not in dependencies:
-                    incomplete_closures.append(
-                        f"{row['skill']}/{row['runtime']}: {importer} -> {imported}"
-                    )
-                elif imported not in visited:
-                    pending.append(imported)
-            for invoked in runtime_script_references(ROOT, importer):
-                if invoked not in dependencies:
-                    incomplete_closures.append(
-                        f"{row['skill']}/{row['runtime']}: {importer} -> {invoked}"
-                    )
-                elif invoked not in visited:
-                    pending.append(invoked)
+    dependency_lock = verify_dependency_lock(ROOT, read_manifest(ROOT))
     check(
-        "declared dependencies contain transitive imports and repo-script runtime edges",
-        not incomplete_closures,
-        "\n".join(sorted(incomplete_closures)),
+        "generated code/data/registration dependency lock is current",
+        dependency_lock == read_lock(ROOT),
+    )
+    check(
+        "dynamic repo paths are detected and exactly declared fail-closed",
+        _dynamic_repo_prefixes(ast.parse('path = ROOT / "scripts" / runtime_name')) == {"scripts/"}
+        and dependency_lock["dynamic_dependency_prefixes"]
+        == {"scripts/acceptance/contracts.py": ["skills/"]},
+    )
+    check(
+        "every cell carries registration surfaces while adapter source is semantic-only",
+        all(
+            {"hooks/hooks.json", ".claude/skill-rules.json", ".codex/config.toml"}
+            .issubset(set(row["dependencies"]))
+            and "scripts/acceptance/adapters.py" not in row["dependencies"]
+            and behavior_fragment_hashes(
+                ROOT, read_manifest(ROOT), row["skill"], row["scenario"]
+            )
+            for row in data["rows"]
+        ),
     )
     required_reap_edges = {
         "scripts/allocate-address.sh",
@@ -484,9 +469,9 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     }
     check(
         "runtime edge detector covers the reviewed reap and callback subprocesses",
-        required_reap_edges.issubset(
-            set(runtime_script_references(ROOT, "scripts/reap-runner.py"))
-        )
+        required_reap_edges.issubset(set(dependency_closure(
+            dependency_lock, ["scripts/reap-runner.py"]
+        )))
         and "skills/review-send/scripts/send_review.py" in runtime_script_references(
             ROOT, "scripts/cmux_agent_supervisor.py"
         )
@@ -527,6 +512,49 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     cross_runtime_row = next(
         row for row in data["rows"]
         if row["skill"] == "dispatch" and row["runtime"] == "codex"
+    )
+    terra_generations = {
+        **fixed_generations,
+        "codex": {"model": "gpt-5.6-terra", "generation": "codex:5.6"},
+    }
+    sol_metadata = cell_metadata(
+        ROOT, fragment_manifest, scoped_codex_row,
+        environment=fixed_environment, generations=fixed_generations,
+    )
+    terra_metadata = cell_metadata(
+        ROOT, fragment_manifest, scoped_codex_row,
+        environment=fixed_environment, generations=terra_generations,
+    )
+    check(
+        "model aliases within one major generation share behavior but retain exact launch identity",
+        sol_metadata["cell_fingerprint"] == terra_metadata["cell_fingerprint"]
+        and sol_metadata["launch_model"] == "gpt-5.6-sol"
+        and terra_metadata["launch_model"] == "gpt-5.6-terra",
+    )
+    resolved_test_routes = launch_generations(
+        ROOT, fragment_manifest,
+        overrides={"claude": "sonnet", "codex": "gpt-5.6-terra"},
+    )
+    check(
+        "fingerprints resolve the actual acceptance launch overrides",
+        resolved_test_routes == {
+            "claude": {"model": "sonnet", "generation": "claude:sonnet"},
+            "codex": {"model": "gpt-5.6-terra", "generation": "codex:5.6"},
+        },
+    )
+    original_acceptance_codex = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL")
+    os.environ["LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL"] = "gpt-5.6-terra"
+    try:
+        production_snapshot = generation_snapshot(ROOT, fragment_manifest)
+    finally:
+        if original_acceptance_codex is None:
+            os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL", None)
+        else:
+            os.environ["LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL"] = original_acceptance_codex
+    check(
+        "production generation drift scan ignores cheaper acceptance aliases",
+        set(production_snapshot) == {"schema_version", "generations"}
+        and production_snapshot["generations"]["codex"] == "codex:5.6",
     )
     scoped_before = {
         release_acceptance.row_key(row): cell_metadata(
@@ -583,90 +611,46 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         and patch_before["cell_fingerprint"] != minor_after["cell_fingerprint"],
     )
 
-    migration_report = tmp / "environment-scope-migration.json"
-    migration_rows = [scoped_codex_row, scoped_claude_row, cross_runtime_row]
-    legacy_metadata = {
-        release_acceptance.row_key(row): cell_metadata(
-            ROOT, fragment_manifest, row,
-            environment=fixed_environment,
-            generations=fixed_generations,
-            environment_scope_version=1,
+    migration_report = tmp / "old-evidence-epoch.json"
+    migration_report.write_text(
+        json.dumps({"schema_version": 2, "phase": "baseline", "rows": []}),
+        encoding="utf-8",
+    )
+    try:
+        release_acceptance.load_resume_results(
+            migration_report,
+            [scoped_codex_row],
+            phase="baseline",
+            commit=release_acceptance.source_commit(ROOT),
+            metadata={release_acceptance.row_key(scoped_codex_row): scoped_before[release_acceptance.row_key(scoped_codex_row)]},
+            evidence_epoch=3,
         )
-        for row in migration_rows
-    }
-    commit = release_acceptance.source_commit(ROOT)
-    legacy_results = []
-    for row in migration_rows:
-        result_row = {
-            **row,
-            "verdict": "pass",
-            "model": "fixture",
-            "effort": "medium",
-            "actual": "ok",
-            "cleanup": "ok",
-            "evidence": "ok",
-        }
-        legacy_results.append(release_acceptance.decorate_result(
-            result_row, legacy_metadata[release_acceptance.row_key(row)], commit=commit
-        ))
-    release_acceptance.write_json(
-        release_acceptance.report_payload(
-            "baseline",
-            legacy_results,
-            commit=commit,
-            environment_scope_version=1,
-            environment=fixed_environment,
-        ),
-        migration_report,
-        announce=False,
-    )
-    current_metadata = {
-        release_acceptance.row_key(row): cell_metadata(
-            ROOT, fragment_manifest, row,
-            environment=changed_claude_environment,
-            generations=fixed_generations,
-        )
-        for row in migration_rows
-    }
-    environment_migration = release_acceptance.build_resume_migration_metadata(
-        migration_report,
-        migration_rows,
-        ROOT,
-        fragment_manifest,
-        generations=fixed_generations,
-        current_scope_version=2,
-    )
-    migrated = release_acceptance.load_resume_results(
-        migration_report,
-        migration_rows,
-        phase="baseline",
-        commit=commit,
-        metadata=current_metadata,
-        root=ROOT,
-        environment_scope_version=2,
-        environment_migration=environment_migration,
-        include_dirty=False,
-    )
-    check(
-        "legacy full-environment evidence migrates only when the scoped runtime is unchanged",
-        [(row["skill"], row["runtime"]) for row in migrated] == [("agenda", "codex")]
-        and migrated[0]["reason"] == "reused-compatible-resume-migration",
-    )
+    except release_acceptance.AcceptanceError as exc:
+        check("v2.1.1 evidence cannot migrate into the new epoch", "evidence epoch" in str(exc))
+    else:
+        check("v2.1.1 evidence cannot migrate into the new epoch", False)
 
     close_row = next(row for row in data["rows"] if row["skill"] == "close" and row["runtime"] == "claude")
     clarify_row = next(row for row in data["rows"] if row["skill"] == "clarify" and row["runtime"] == "claude")
-    close_before = cell_metadata(fragment_root, fragment_manifest, close_row, environment=fixed_environment, generations=fixed_generations)
-    clarify_before = cell_metadata(fragment_root, fragment_manifest, clarify_row, environment=fixed_environment, generations=fixed_generations)
+    close_before = cell_dependency_hashes(
+        fragment_root, ["evals/acceptance/skills.json"], skill="close", scenario=close_row["scenario"]
+    )
+    clarify_before = cell_dependency_hashes(
+        fragment_root, ["evals/acceptance/skills.json"], skill="clarify", scenario=clarify_row["scenario"]
+    )
     fragment_skills_path = fragment_root / "evals/acceptance/skills.json"
     fragment_skills = json.loads(fragment_skills_path.read_text(encoding="utf-8"))
     fragment_skills["skills"]["close"]["fixture"] += " changed"
     fragment_skills_path.write_text(json.dumps(fragment_skills), encoding="utf-8")
-    close_after = cell_metadata(fragment_root, fragment_manifest, close_row, environment=fixed_environment, generations=fixed_generations)
-    clarify_after = cell_metadata(fragment_root, fragment_manifest, clarify_row, environment=fixed_environment, generations=fixed_generations)
+    close_after = cell_dependency_hashes(
+        fragment_root, ["evals/acceptance/skills.json"], skill="close", scenario=close_row["scenario"]
+    )
+    clarify_after = cell_dependency_hashes(
+        fragment_root, ["evals/acceptance/skills.json"], skill="clarify", scenario=clarify_row["scenario"]
+    )
     check(
         "shared registry hashes only the exact cell fragment",
-        close_before["cell_fingerprint"] != close_after["cell_fingerprint"]
-        and clarify_before["cell_fingerprint"] == clarify_after["cell_fingerprint"],
+        close_before != close_after and clarify_before == clarify_after,
     )
 
     spec = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
@@ -786,7 +770,10 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("green report", result.returncode == 0 and payload["summary"]["failed"] == 0, result.stderr)
-    check("schema-2 evidence", payload["schema_version"] == 2)
+    check(
+        "schema-3 evidence epoch",
+        payload["schema_version"] == 3 and payload["evidence_epoch"] == 3,
+    )
     check(
         "rows carry content-addressed proof",
         all(
@@ -835,8 +822,11 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     payload = json.loads(report.read_text(encoding="utf-8"))
     check(
-        "unknown prior commit reruns instead of guessing",
-        result.returncode == 1 and payload["summary"]["verdicts"]["blocked"] == len(payload["rows"]),
+        "source commit identity does not invalidate matching semantic evidence",
+        result.returncode == 1
+        and payload["summary"]["verdicts"]["blocked"] == 1
+        and sum(row["reason"] == "reused-identical" for row in payload["rows"])
+        == len(payload["rows"]) - 1,
         result.stderr,
     )
 
@@ -940,27 +930,69 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         "while True: time.sleep(0.1)\n",
         encoding="utf-8",
     )
-    interrupted = subprocess.Popen(
-        [
-            sys.executable, str(SCRIPT), "run", "--restart", "--phase", "final",
-            "--runner", f"{sys.executable} {interrupt_runner} {interrupt_marker}",
-            "--timeout", "60", "--jobs", "5", "--report", str(report),
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
+    timeout_row = {
+        "schema_version": 1, "phase": "final", "skill": "timeout-fixture",
+        "runtime": "codex", "scenario": "timeout", "expected": "bounded",
+    }
+    timeout_result = release_acceptance.run_matrix(
+        [timeout_row],
+        [sys.executable, str(interrupt_runner), str(interrupt_marker)],
+        0.2,
     )
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and len(list(tmp.glob("runner-interrupted.*.started"))) < 5:
-        time.sleep(0.05)
-    started_markers = list(tmp.glob("runner-interrupted.*.started"))
-    check("five interrupt fixtures start", len(started_markers) == 5)
-    os.kill(interrupted.pid, signal.SIGINT)
-    _stdout, interrupt_stderr = interrupted.communicate(timeout=15)
-    cleaned_markers = list(tmp.glob("runner-interrupted.*.cleaned"))
-    check("matrix interrupt reaches every active runner cleanup", len(cleaned_markers) == len(started_markers) == 5)
-    check("matrix interrupt exits without traceback", interrupted.returncode == 130 and "Traceback" not in interrupt_stderr)
+    check(
+        "inactivity timeout reaches the exact active runner cleanup",
+        timeout_result[0]["verdict"] == "blocked"
+        and len(list(tmp.glob("runner-interrupted.*.cleaned"))) == 1,
+    )
+
+    retry_counter = tmp / "retry-counter.txt"
+    retry_runner = tmp / "retry-runner.py"
+    retry_runner.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "row=json.load(sys.stdin); p=Path(sys.argv[1]); n=int(p.read_text() if p.exists() else '0')+1; p.write_text(str(n))\n"
+        "if n < 3: print(json.dumps({**row,'verdict':'blocked','defect':'capacity','failure_kind':'agent-capacity'}))\n"
+        "else: print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'medium','actual':'ok','cleanup':'ok','evidence':'ok'}))\n",
+        encoding="utf-8",
+    )
+    retry_result = release_acceptance.run_matrix(
+        [timeout_row], [sys.executable, str(retry_runner), str(retry_counter)], 2
+    )
+    check(
+        "closed typed transient retries stop after the third successful attempt",
+        retry_result[0]["verdict"] == "pass"
+        and retry_result[0]["attempts"] == 3
+        and retry_result[0]["retry_count"] == 2,
+    )
+
+    heartbeat_runner = tmp / "heartbeat-runner.py"
+    heartbeat_runner.write_text(
+        "import json,os,sys,time\nfrom pathlib import Path\nrow=json.load(sys.stdin); p=Path(os.environ['LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT'])\n"
+        "for n in range(6): p.write_text(json.dumps({'schema_version':1,'stage':'model-wait','monotonic_ms':n})); time.sleep(0.1)\n"
+        "print(json.dumps({**row,'verdict':'pass','model':'fixture','effort':'medium','actual':'ok','cleanup':'ok','evidence':'ok'}))\n",
+        encoding="utf-8",
+    )
+    heartbeat_result = release_acceptance.run_matrix(
+        [timeout_row], [sys.executable, str(heartbeat_runner)], 0.2
+    )
+    check(
+        "content-free heartbeat resets inactivity without extending a dead runner",
+        heartbeat_result[0]["verdict"] == "pass"
+        and heartbeat_result[0]["attempts"] == 1,
+    )
+
+    fail_runner = tmp / "product-fail-runner.py"
+    fail_runner.write_text(
+        "import json,sys\nrow=json.load(sys.stdin)\n"
+        "print(json.dumps({**row,'verdict':'fail','model':'fixture','effort':'medium','actual':'bad','cleanup':'ok','evidence':'proof','defect':'product assertion'}))\n",
+        encoding="utf-8",
+    )
+    fail_result = release_acceptance.run_matrix(
+        [timeout_row], [sys.executable, str(fail_runner)], 2
+    )
+    check(
+        "product failures are never retried",
+        fail_result[0]["verdict"] == "fail" and fail_result[0]["attempts"] == 1,
+    )
 
     incremental = tmp / "incremental"
     (incremental / "skills/demo-a").mkdir(parents=True)
@@ -977,6 +1009,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         (ROOT / "config/model-routing.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     manifest = incremental / "config/acceptance-cells.toml"
+    (incremental / "scripts/acceptance_dependencies.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/acceptance_fingerprints.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/acceptance-workspace-supervisor.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/live-acceptance-runner.py").write_bytes(
@@ -984,15 +1017,20 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     (incremental / "scripts/release-acceptance.py").write_text("# orchestration\n", encoding="utf-8")
     manifest.write_text(
-        "schema_version = 1\nrunner_contract_version = 2\norchestration_contract_version = 1\n"
+        "schema_version = 1\nrunner_contract_version = 3\norchestration_contract_version = 2\n"
+        "environment_scope_version = 2\nevidence_epoch = 3\n"
         "non_behavioral_paths = [\"CHANGELOG.md\"]\n"
         "non_behavioral_prefixes = [\"tests/\"]\n"
-        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"scripts/acceptance_fingerprints.py\", \"scripts/acceptance-workspace-supervisor.py\", \"scripts/live-acceptance-runner.py\", \"scripts/release-acceptance.py\"]\n"
+        "orchestration_dependencies = [\"config/acceptance-cells.toml\", \"config/acceptance-dependencies.lock.json\", \"scripts/acceptance_dependencies.py\", \"scripts/acceptance_fingerprints.py\", \"scripts/acceptance-workspace-supervisor.py\", \"scripts/release-acceptance.py\"]\n"
+        "behavioral_abi_dependencies = [\"scripts/live-acceptance-runner.py\"]\n"
+        "behavioral_abi_fragments = []\nregistration_dependencies = []\n"
         "global_dependencies = [\".gitignore\", \"config/model-routing.toml\"]\n"
-        "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n"
-        "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\n"
+        "[model_generations]\n\"gpt-5.6-sol\" = \"codex:5.6\"\n\"gpt-5.6-terra\" = \"codex:5.6\"\n"
+        "opus = \"claude:opus-4.8\"\nfable = \"claude:fable\"\nsonnet = \"claude:sonnet\"\n"
         "[generation_routes]\ninclude = [\"runtimes.codex\", \"runtimes.claude\"]\n"
-        "[scenarios.demo]\ndependencies = []\n",
+        "[scenarios.demo]\ndependencies = []\n"
+        "[skills.demo-a]\ndependencies = []\n"
+        "[skills.demo-b]\ndependencies = []\n",
         encoding="utf-8",
     )
     mini_spec = incremental / "evals/skills.json"
@@ -1005,6 +1043,10 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     }), encoding="utf-8")
     mini_scenarios = incremental / "evals/scenarios.json"
     mini_scenarios.write_text(json.dumps({"schema_version": 1, "scenarios": {"demo": {}}}), encoding="utf-8")
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts/acceptance_dependencies.py"), "--root", str(incremental), "--write"],
+        check=True, capture_output=True, text=True,
+    )
     subprocess.run(["git", "init", "-q"], cwd=incremental, check=True)
     subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=incremental, check=True)
     subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=incremental, check=True)
@@ -1026,52 +1068,19 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
             sys.executable, str(SCRIPT), "--root", str(incremental), "--spec", str(mini_spec),
             "--scenarios", str(mini_scenarios), "--manifest", str(manifest), "run",
             "--phase", "final", "--runner", f"{sys.executable} {incremental_runner} {invocation_log}",
-            "--timeout", "5", "--report", str(incremental_report),
+            "--timeout", "5", "--jobs", "4", "--report", str(incremental_report),
         ], text=True, capture_output=True, check=False)
 
     result = incremental_run()
     check("incremental fixture starts green", result.returncode == 0, result.stderr)
-    legacy_dependency_report = json.loads(incremental_report.read_text(encoding="utf-8"))
-    incremental_manifest = read_manifest(incremental, manifest)
-    incremental_generations = production_generations(incremental, incremental_manifest)
-    for row in legacy_dependency_report["rows"]:
-        if row["skill"] != "demo-a":
-            continue
-        legacy_dependencies = [
-            dependency for dependency in row["dependencies"]
-            if dependency != "skills/demo-a/SKILL.md"
-        ]
-        legacy_metadata = cell_metadata(
-            incremental,
-            incremental_manifest,
-            row,
-            environment=legacy_dependency_report["environment"],
-            generations=incremental_generations,
-            environment_scope_version=legacy_dependency_report["environment_scope_version"],
-            dependencies_override=legacy_dependencies,
-        )
-        row.update(legacy_metadata)
-        row["provenance"]["environment_sha256"] = legacy_metadata["environment_sha256"]
-        row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
-            row, row["cell_fingerprint"], row["provenance"]
-        )
-    incremental_report.write_text(json.dumps(legacy_dependency_report), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
-    migrated_dependency_report = json.loads(incremental_report.read_text(encoding="utf-8"))
     check(
-        "unchanged newly discovered dependency migrates without rerunning",
-        result.returncode == 0
-        and calls == []
-        and all(
-            row["reason"] == "reused-compatible-resume-migration"
-            for row in migrated_dependency_report["rows"]
-            if row["skill"] == "demo-a"
-        ),
+        "identical semantic fingerprints reuse without rerunning",
+        result.returncode == 0 and calls == [],
         result.stderr,
     )
-    incremental_report.write_text(json.dumps(legacy_dependency_report), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n\nchanged\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=incremental, check=True)
@@ -1079,7 +1088,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
     check(
-        "changed newly discovered dependency reruns only affected skill cells",
+        "changed skill dependency reruns only affected skill cells",
         result.returncode == 0 and {item[0] for item in calls} == {"demo-a"} and len(calls) == 2,
         result.stderr,
     )
@@ -1143,19 +1152,14 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
     check(
-        "orchestration migration rejects environment drift",
+        "evidence provenance mismatch reruns every cell",
         result.returncode == 0 and len(calls) == 4,
         result.stderr,
     )
     incremental_report.write_text(json.dumps(compatible_report), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     live_runner = incremental / "scripts/live-acceptance-runner.py"
-    live_runner.write_text(
-        live_runner.read_text(encoding="utf-8").replace(
-            "OUTBOX_STABLE_SECONDS = 1.0", "OUTBOX_STABLE_SECONDS = 1.1"
-        ),
-        encoding="utf-8",
-    )
+    live_runner.write_text(live_runner.read_text(encoding="utf-8") + "\n# behavioral ABI change\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=incremental, check=True)
     subprocess.run(
         ["git", "commit", "-qm", "change live acceptance behavior"],
@@ -1169,15 +1173,15 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.stderr,
     )
     report_data = json.loads(incremental_report.read_text(encoding="utf-8"))
-    report_data["orchestration_contract_version"] = 999
+    report_data["evidence_epoch"] = 999
     incremental_report.write_text(json.dumps(report_data), encoding="utf-8")
     result = incremental_run()
     check(
-        "incompatible orchestration version fails closed",
-        result.returncode == 3 and "incompatible orchestration contract" in result.stderr,
+        "incompatible evidence epoch fails closed",
+        result.returncode == 3 and "evidence epoch" in result.stderr,
         result.stderr,
     )
-    report_data["orchestration_contract_version"] = 1
+    report_data["evidence_epoch"] = 3
     incremental_report.write_text(json.dumps(report_data), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     dirty_unknown = incremental / "dirty-unknown.txt"
@@ -1213,6 +1217,10 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     subprocess.run(["git", "commit", "-qm", "unknown dependency"], cwd=incremental, check=True)
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
-    check("unknown changed path reruns every cell", result.returncode == 0 and len(calls) == 4, result.stderr)
+    check(
+        "committed unknown data path does not invalidate semantic evidence",
+        result.returncode == 0 and calls == [],
+        result.stderr,
+    )
 
 print("\nAll release acceptance tests passed.")

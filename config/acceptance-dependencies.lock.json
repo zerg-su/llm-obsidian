@@ -1,0 +1,940 @@
+{
+  "schema_version": 1,
+  "generator_contract_version": 1,
+  "roots": [
+    ".claude-plugin/plugin.json",
+    ".claude/hooks/skill-router.py",
+    ".claude/skill-rules.json",
+    ".codex-plugin/plugin.json",
+    ".codex/agents/daily-summarizer.toml",
+    ".codex/config.toml",
+    ".codex/dispatch-env.toml",
+    ".codex/profiles/deep.toml",
+    ".codex/profiles/default.toml",
+    ".codex/profiles/reviewer-readonly.toml",
+    ".codex/profiles/wiki-write.toml",
+    ".gitignore",
+    "agents/daily-summarizer.md",
+    "config/model-routing.toml",
+    "evals/acceptance/scenarios.json",
+    "evals/acceptance/seed/.vault-meta/address-counter.txt",
+    "evals/acceptance/seed/.vault-meta/address-map.tsv",
+    "evals/acceptance/seed/.vault-meta/index.jsonl",
+    "evals/acceptance/seed/.vault-meta/last-fold-count.txt",
+    "evals/acceptance/seed/.vault-meta/recent.jsonl",
+    "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl",
+    "evals/acceptance/seed/.vault-meta/tag-index.json",
+    "evals/acceptance/seed/wiki/backlog.md",
+    "evals/acceptance/seed/wiki/hot.md",
+    "evals/acceptance/seed/wiki/index.md",
+    "evals/acceptance/seed/wiki/log.md",
+    "evals/acceptance/skills.json",
+    "hooks/hooks.json",
+    "hooks/run-hook.py",
+    "scripts/acceptance/__init__.py",
+    "scripts/acceptance/contracts.py",
+    "scripts/acceptance/launchers.py",
+    "scripts/acceptance/prompting.py",
+    "scripts/acceptance/runner.py",
+    "scripts/acceptance/sandbox.py",
+    "scripts/acceptance/scenario_adapters.py",
+    "scripts/acceptance/skill_adapters.py",
+    "scripts/agenda.py",
+    "scripts/bm25-index.py",
+    "scripts/cmux_agent_supervisor.py",
+    "scripts/cmux_agent_support.py",
+    "scripts/cmux_surface_lifecycle.py",
+    "scripts/cmux_trust_prompt.py",
+    "scripts/current-session-id.sh",
+    "scripts/daily-apply.py",
+    "scripts/daily-collect.py",
+    "scripts/daily-summary-save.py",
+    "scripts/dense-refresh-worker.py",
+    "scripts/dispatch-runner.py",
+    "scripts/document-normalize.py",
+    "scripts/journal-write.py",
+    "scripts/lifecycle_telemetry.py",
+    "scripts/live-acceptance-runner.py",
+    "scripts/model_routing.py",
+    "scripts/pipeline_events.py",
+    "scripts/queue-session-exit.py",
+    "scripts/reap-runner.py",
+    "scripts/research-isolation.py",
+    "scripts/research_contract.py",
+    "scripts/retrieve.py",
+    "scripts/task_contract.py",
+    "scripts/task_sessions.py",
+    "scripts/turn_telemetry.py",
+    "scripts/validate-vault.py",
+    "scripts/vault-write.py",
+    "skills/agenda/SKILL.md",
+    "skills/agenda/agents/openai.yaml",
+    "skills/autoresearch/SKILL.md",
+    "skills/autoresearch/references/program.md",
+    "skills/backlog/SKILL.md",
+    "skills/canvas/SKILL.md",
+    "skills/canvas/agents/openai.yaml",
+    "skills/canvas/references/canvas-spec.md",
+    "skills/clarify/SKILL.md",
+    "skills/clarify/agents/openai.yaml",
+    "skills/close/SKILL.md",
+    "skills/daily/SKILL.md",
+    "skills/defuddle/SKILL.md",
+    "skills/dispatch-workspace/SKILL.md",
+    "skills/dispatch-workspace/agents/openai.yaml",
+    "skills/dispatch/SKILL.md",
+    "skills/dispatch/references/compatibility.md",
+    "skills/dispatch/references/task-prompt-template.md",
+    "skills/distill-runbook/SKILL.md",
+    "skills/draft/SKILL.md",
+    "skills/find-session/SKILL.md",
+    "skills/journal/SKILL.md",
+    "skills/learn/SKILL.md",
+    "skills/obsidian-bases/SKILL.md",
+    "skills/obsidian-markdown/SKILL.md",
+    "skills/reap-send/SKILL.md",
+    "skills/reap-send/references/compatibility.md",
+    "skills/reap-send/scripts/send_reap.py",
+    "skills/reap/SKILL.md",
+    "skills/reap/references/compatibility.md",
+    "skills/reap/references/filing-rules.md",
+    "skills/review-dispatch/SKILL.md",
+    "skills/review-dispatch/references/compatibility.md",
+    "skills/review-dispatch/references/review-prompt-template.md",
+    "skills/review-dispatch/scripts/archive_review.py",
+    "skills/review-dispatch/scripts/spawn_review.py",
+    "skills/review-send/SKILL.md",
+    "skills/review-send/scripts/send_review.py",
+    "skills/save-plan/SKILL.md",
+    "skills/save/SKILL.md",
+    "skills/unsafe-research/SKILL.md",
+    "skills/wiki-fold/SKILL.md",
+    "skills/wiki-ingest/SKILL.md",
+    "skills/wiki-ingest/references/document-normalization.md",
+    "skills/wiki-ingest/references/frontmatter.md",
+    "skills/wiki-lint/SKILL.md",
+    "skills/wiki-lint/references/address-validation.md",
+    "skills/wiki-lint/references/semantic-tiling.md",
+    "skills/wiki-query/SKILL.md",
+    "skills/wiki/SKILL.md",
+    "skills/wiki/agents/openai.yaml",
+    "skills/wiki/references/css-snippets.md",
+    "skills/wiki/references/frontmatter.md",
+    "skills/wiki/references/git-setup.md",
+    "skills/wiki/references/mcp-setup.md",
+    "skills/wiki/references/modes.md",
+    "skills/wiki/references/plugins.md",
+    "skills/wiki/references/rest-api.md"
+  ],
+  "edges": {
+    ".claude-plugin/plugin.json": [
+      "agents/daily-summarizer.md"
+    ],
+    ".claude/hooks/command-capture.py": [
+      "scripts/lib_sanitize.py"
+    ],
+    ".claude/hooks/plan-capture.sh": [
+      "hooks/hooks.json",
+      "scripts/allocate-address.sh",
+      "scripts/detect-runtime.sh",
+      "scripts/vault-write.py"
+    ],
+    ".claude/hooks/session-nudge.sh": [
+      "scripts/detect-runtime.sh",
+      "scripts/fold-log.py",
+      "scripts/mcp-gateway/config-sync.py",
+      "scripts/mcp-gateway/mcp-gateway.sh",
+      "scripts/memory-backup.py",
+      "scripts/pipeline-stats.py"
+    ],
+    ".claude/hooks/skill-router.py": [
+      ".claude/skill-rules.json"
+    ],
+    ".claude/hooks/stop.sh": [
+      "scripts/detect-runtime.sh",
+      "scripts/stop-hook.py"
+    ],
+    ".claude/skill-rules.json": [
+      "evals/acceptance/seed/wiki/backlog.md"
+    ],
+    ".codex-plugin/plugin.json": [],
+    ".codex/agents/daily-summarizer.toml": [],
+    ".codex/config.toml": [],
+    ".codex/dispatch-env.toml": [],
+    ".codex/profiles/deep.toml": [],
+    ".codex/profiles/default.toml": [],
+    ".codex/profiles/reviewer-readonly.toml": [],
+    ".codex/profiles/wiki-write.toml": [],
+    ".gitignore": [],
+    "agents/daily-summarizer.md": [],
+    "bin/setup-clean-machine.sh": [
+      "bin/setup-vault.sh",
+      "scripts/codex-adapter.py",
+      "scripts/document-normalize.py",
+      "scripts/install-docling.py",
+      "scripts/mcp-gateway/config-sync.py",
+      "scripts/mcp-gateway/install-proxy.py",
+      "scripts/mcp-gateway/mcp-gateway.sh",
+      "scripts/mcp-gateway/mcp-proxy.lock.json",
+      "scripts/mcp-gateway/runtime.env.example",
+      "scripts/mcp-gateway/secrets.env.example"
+    ],
+    "bin/setup-dragonscale.sh": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "scripts/allocate-address.sh",
+      "scripts/tiling-check.py",
+      "skills/wiki-fold/SKILL.md",
+      "skills/wiki-lint/SKILL.md"
+    ],
+    "bin/setup-vault.sh": [
+      "config/obsidian-excalidraw-main.lock.json",
+      "config/obsidian-tasks.defaults.json",
+      "config/obsidian-tasks.lock.json",
+      "scripts/setup-obsidian-tasks.py"
+    ],
+    "config/acceptance-cells.toml": [],
+    "config/acceptance-dependencies.lock.json": [],
+    "config/dcg/config.toml": [],
+    "config/dcg/task.toml": [],
+    "config/document-tools.json": [],
+    "config/memory-backup.example.json": [],
+    "config/model-routing.toml": [],
+    "config/obsidian-excalidraw-main.lock.json": [],
+    "config/obsidian-tasks.defaults.json": [],
+    "config/obsidian-tasks.lock.json": [],
+    "evals/acceptance/scenarios.json": [],
+    "evals/acceptance/seed/.vault-meta/address-counter.txt": [],
+    "evals/acceptance/seed/.vault-meta/address-map.tsv": [],
+    "evals/acceptance/seed/.vault-meta/index.jsonl": [],
+    "evals/acceptance/seed/.vault-meta/last-fold-count.txt": [],
+    "evals/acceptance/seed/.vault-meta/recent.jsonl": [],
+    "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl": [],
+    "evals/acceptance/seed/.vault-meta/tag-index.json": [],
+    "evals/acceptance/seed/wiki/backlog.md": [],
+    "evals/acceptance/seed/wiki/hot.md": [],
+    "evals/acceptance/seed/wiki/index.md": [],
+    "evals/acceptance/seed/wiki/log.md": [],
+    "evals/acceptance/skills.json": [],
+    "hooks/hooks.json": [
+      "hooks/run-hook.sh",
+      "scripts/vault-write.py"
+    ],
+    "hooks/run-hook.py": [
+      ".claude/hooks/command-capture.py",
+      ".claude/hooks/plan-capture.sh",
+      ".claude/hooks/session-nudge.sh",
+      ".claude/hooks/skill-router.py",
+      ".claude/hooks/stop.sh",
+      "evals/acceptance/seed/wiki/hot.md",
+      "scripts/lifecycle_telemetry.py",
+      "scripts/session-preflight.py",
+      "scripts/turn_telemetry.py",
+      "scripts/vault-write.py"
+    ],
+    "hooks/run-hook.sh": [
+      "hooks/run-hook.py"
+    ],
+    "scripts/acceptance-workspace-supervisor.py": [
+      "evals/acceptance/scenarios.json",
+      "evals/acceptance/skills.json",
+      "scripts/acceptance_fingerprints.py",
+      "scripts/release-acceptance.py"
+    ],
+    "scripts/acceptance/__init__.py": [],
+    "scripts/acceptance/adapters.py": [
+      "scripts/acceptance/prompting.py",
+      "scripts/acceptance/scenario_adapters.py",
+      "scripts/acceptance/skill_adapters.py"
+    ],
+    "scripts/acceptance/contracts.py": [
+      "evals/acceptance/scenarios.json",
+      "evals/acceptance/skills.json",
+      "scripts/lib_sanitize.py",
+      "scripts/model_routing.py"
+    ],
+    "scripts/acceptance/launchers.py": [
+      ".codex/dispatch-env.toml",
+      "config/dcg/task.toml",
+      "scripts/acceptance/contracts.py",
+      "scripts/acceptance/sandbox.py",
+      "scripts/cmux_agent_support.py",
+      "scripts/cmux_trust_prompt.py",
+      "scripts/model_routing.py",
+      "scripts/task_sessions.py"
+    ],
+    "scripts/acceptance/prompting.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/queue-session-exit.py",
+      "scripts/reindex.py"
+    ],
+    "scripts/acceptance/runner.py": [
+      "evals/acceptance/scenarios.json",
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "evals/acceptance/seed/.vault-meta/address-map.tsv",
+      "evals/acceptance/seed/.vault-meta/index.jsonl",
+      "evals/acceptance/seed/.vault-meta/recent.jsonl",
+      "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl",
+      "evals/acceptance/seed/.vault-meta/tag-index.json",
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "evals/acceptance/skills.json",
+      "scripts/acceptance/adapters.py",
+      "scripts/acceptance/contracts.py",
+      "scripts/acceptance/launchers.py",
+      "scripts/acceptance/sandbox.py",
+      "scripts/cmux_agent_support.py",
+      "scripts/cmux_trust_prompt.py",
+      "scripts/lib_sanitize.py",
+      "scripts/model_routing.py",
+      "scripts/pipeline_events.py",
+      "scripts/task_sessions.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/acceptance/sandbox.py": [
+      "scripts/acceptance/contracts.py",
+      "scripts/mcp-gateway/runtime.env.example"
+    ],
+    "scripts/acceptance/scenario_adapters.py": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "evals/acceptance/seed/.vault-meta/address-map.tsv",
+      "evals/acceptance/seed/.vault-meta/index.jsonl",
+      "evals/acceptance/seed/.vault-meta/recent.jsonl",
+      "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl",
+      "evals/acceptance/seed/.vault-meta/tag-index.json",
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/acceptance/contracts.py",
+      "scripts/acceptance/sandbox.py"
+    ],
+    "scripts/acceptance/skill_adapters.py": [
+      "scripts/acceptance/contracts.py",
+      "scripts/acceptance/sandbox.py",
+      "scripts/acceptance/scenario_adapters.py",
+      "scripts/dispatch-runner.py",
+      "scripts/mcp-gateway/runtime.env.example",
+      "scripts/task_contract.py",
+      "scripts/task_sessions.py",
+      "scripts/validate-vault.py",
+      "scripts/vault-write.py",
+      "scripts/vault_schema.py",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "scripts/acceptance_dependencies.py": [
+      ".claude-plugin/plugin.json",
+      ".claude/skill-rules.json",
+      ".codex-plugin/plugin.json",
+      "config/acceptance-cells.toml",
+      "config/acceptance-dependencies.lock.json",
+      "hooks/hooks.json",
+      "scripts/acceptance/__init__.py"
+    ],
+    "scripts/acceptance_fingerprints.py": [
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      ".codex/agents/daily-summarizer.toml",
+      ".codex/config.toml",
+      ".codex/dispatch-env.toml",
+      "config/acceptance-cells.toml",
+      "config/acceptance-dependencies.lock.json",
+      "config/model-routing.toml",
+      "evals/acceptance/scenarios.json",
+      "evals/acceptance/skills.json",
+      "scripts/acceptance-workspace-supervisor.py",
+      "scripts/acceptance/adapters.py",
+      "scripts/acceptance/launchers.py",
+      "scripts/acceptance/skill_adapters.py",
+      "scripts/acceptance_dependencies.py",
+      "scripts/model_routing.py",
+      "scripts/release-acceptance.py"
+    ],
+    "scripts/agenda.py": [
+      "scripts/current-session-id.sh",
+      "scripts/daily_contract.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/allocate-address.py": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/allocate-address.sh": [
+      "scripts/allocate-address.py"
+    ],
+    "scripts/archive_task_reviews.py": [
+      "scripts/task_sessions.py",
+      "skills/review-dispatch/scripts/archive_review.py"
+    ],
+    "scripts/bm25-index.py": [
+      "evals/acceptance/seed/wiki/log.md"
+    ],
+    "scripts/boundary-score.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md"
+    ],
+    "scripts/claude-subscription-check.py": [],
+    "scripts/cmux_agent_supervisor.py": [
+      "config/dcg/task.toml",
+      "config/model-routing.toml",
+      "scripts/cmux_agent_support.py",
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/cmux_task_watchdog.py",
+      "scripts/cmux_trust_prompt.py",
+      "scripts/dcg-test-suite.sh",
+      "scripts/lifecycle_telemetry.py",
+      "scripts/lint-instructions.py",
+      "scripts/model_routing.py",
+      "scripts/task_contract.py",
+      "skills/review-send/scripts/send_review.py"
+    ],
+    "scripts/cmux_agent_support.py": [
+      "scripts/model_routing.py"
+    ],
+    "scripts/cmux_surface_lifecycle.py": [
+      "scripts/lifecycle_telemetry.py",
+      "scripts/plan_lifecycle.py",
+      "scripts/task_contract.py",
+      "scripts/task_sessions.py",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "scripts/cmux_task_watchdog.py": [
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/task_contract.py"
+    ],
+    "scripts/cmux_trust_prompt.py": [],
+    "scripts/codex-adapter.py": [],
+    "scripts/current-session-id.sh": [],
+    "scripts/daily-apply.py": [
+      "scripts/current-session-id.sh",
+      "scripts/daily_contract.py",
+      "scripts/daily_timing.py",
+      "scripts/pipeline_events.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/daily-collect.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/daily_contract.py",
+      "scripts/daily_timing.py",
+      "scripts/pipeline_events.py",
+      "scripts/session-map.py"
+    ],
+    "scripts/daily-summary-save.py": [
+      "scripts/daily_contract.py",
+      "scripts/daily_timing.py",
+      "scripts/pipeline_events.py"
+    ],
+    "scripts/daily_contract.py": [],
+    "scripts/daily_timing.py": [],
+    "scripts/dcg-test-suite.sh": [
+      "config/dcg/config.toml",
+      "config/dcg/task.toml"
+    ],
+    "scripts/dense-refresh-worker.py": [
+      "scripts/pipeline_events.py",
+      "scripts/retrieve.py"
+    ],
+    "scripts/detect-runtime.sh": [],
+    "scripts/dispatch-resolver.py": [
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/retrieve.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/dispatch-runner.py": [
+      ".codex/dispatch-env.toml",
+      "scripts/cmux_agent_supervisor.py",
+      "scripts/current-session-id.sh",
+      "scripts/lifecycle_telemetry.py",
+      "scripts/mcp-gateway/mcp-gateway.sh",
+      "scripts/model_routing.py",
+      "scripts/task_contract.py",
+      "scripts/task_sessions.py",
+      "scripts/vault-write.py",
+      "skills/dispatch/references/task-prompt-template.md"
+    ],
+    "scripts/document-normalize.py": [
+      "config/document-tools.json",
+      "scripts/install-docling.py"
+    ],
+    "scripts/fold-log.py": [
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/current-session-id.sh",
+      "scripts/pipeline_events.py",
+      "scripts/vault-write.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/install-docling.py": [
+      "config/document-tools.json"
+    ],
+    "scripts/journal-write.py": [
+      "scripts/agenda.py",
+      "scripts/current-session-id.sh",
+      "scripts/daily_contract.py",
+      "scripts/session-map.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/lib_sanitize.py": [
+      "scripts/memory-backup.py"
+    ],
+    "scripts/lifecycle_telemetry.py": [
+      "scripts/pipeline_events.py"
+    ],
+    "scripts/lint-instructions.py": [
+      "agents/daily-summarizer.md",
+      "config/document-tools.json",
+      "scripts/claude-subscription-check.py",
+      "scripts/cmux_agent_supervisor.py",
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/cmux_task_watchdog.py",
+      "scripts/detect-runtime.sh",
+      "scripts/document-normalize.py",
+      "scripts/reap-runner.py",
+      "scripts/research-isolation.py",
+      "scripts/task_contract.py",
+      "scripts/task_escalation.py",
+      "scripts/vault-write.py",
+      "skills/dispatch/references/task-prompt-template.md",
+      "skills/reap-send/scripts/send_reap.py",
+      "skills/review-dispatch/scripts/spawn_review.py",
+      "skills/wiki-ingest/references/document-normalization.md"
+    ],
+    "scripts/live-acceptance-runner.py": [
+      "scripts/acceptance/runner.py"
+    ],
+    "scripts/mcp-gateway/codex-sync.py": [],
+    "scripts/mcp-gateway/config-sync.py": [
+      "scripts/mcp-gateway/config.json.example"
+    ],
+    "scripts/mcp-gateway/config.json.example": [],
+    "scripts/mcp-gateway/install-proxy.py": [],
+    "scripts/mcp-gateway/mcp-gateway.sh": [
+      "scripts/mcp-gateway/codex-sync.py",
+      "scripts/mcp-gateway/config-sync.py",
+      "scripts/mcp-gateway/config.json.example",
+      "scripts/mcp-gateway/runtime.env.example",
+      "scripts/mcp-gateway/schema-lock.py",
+      "scripts/mcp-gateway/secrets.env.example",
+      "scripts/mcp-gateway/smoke.py",
+      "scripts/mcp-gateway/tools.json",
+      "scripts/mcp-gateway/update-pins.py"
+    ],
+    "scripts/mcp-gateway/mcp-proxy.lock.json": [],
+    "scripts/mcp-gateway/mcp-schema.lock.json": [],
+    "scripts/mcp-gateway/runtime.env.example": [],
+    "scripts/mcp-gateway/schema-lock.py": [
+      "scripts/mcp-gateway/mcp-schema.lock.json",
+      "scripts/mcp-gateway/smoke.py"
+    ],
+    "scripts/mcp-gateway/secrets.env.example": [],
+    "scripts/mcp-gateway/smoke.py": [],
+    "scripts/mcp-gateway/tools.json": [],
+    "scripts/mcp-gateway/update-pins.py": [
+      "scripts/mcp-gateway/tools.json"
+    ],
+    "scripts/memory-backup.py": [
+      "config/memory-backup.example.json",
+      "scripts/lib_sanitize.py"
+    ],
+    "scripts/model_routing.py": [
+      ".codex/agents/daily-summarizer.toml",
+      ".codex/config.toml",
+      ".codex/profiles/deep.toml",
+      ".codex/profiles/default.toml",
+      ".codex/profiles/reviewer-readonly.toml",
+      ".codex/profiles/wiki-write.toml",
+      "config/model-routing.toml"
+    ],
+    "scripts/parse-wiki-summary.py": [
+      "scripts/wiki_summary_contract.py"
+    ],
+    "scripts/pipeline-stats.py": [
+      "scripts/semantic-search.py",
+      "scripts/tag-search.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/pipeline_events.py": [],
+    "scripts/plan_lifecycle.py": [],
+    "scripts/queue-session-exit.py": [],
+    "scripts/reap-runner.py": [
+      "scripts/allocate-address.sh",
+      "scripts/archive_task_reviews.py",
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/current-session-id.sh",
+      "scripts/lifecycle_telemetry.py",
+      "scripts/parse-wiki-summary.py",
+      "scripts/reindex.py",
+      "scripts/task_contract.py",
+      "scripts/validate-vault.py",
+      "scripts/vault-write.py",
+      "scripts/vault_schema.py",
+      "scripts/wiki_summary_contract.py"
+    ],
+    "scripts/reindex.py": [
+      "evals/acceptance/seed/.vault-meta/address-map.tsv",
+      "evals/acceptance/seed/.vault-meta/index.jsonl",
+      "evals/acceptance/seed/.vault-meta/recent.jsonl",
+      "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl",
+      "evals/acceptance/seed/.vault-meta/tag-index.json",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/release-acceptance.py": [
+      "evals/acceptance/scenarios.json",
+      "evals/acceptance/skills.json",
+      "scripts/acceptance/contracts.py",
+      "scripts/acceptance_fingerprints.py",
+      "scripts/lib_sanitize.py"
+    ],
+    "scripts/research-isolation.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/model_routing.py",
+      "scripts/reindex.py",
+      "scripts/research_contract.py",
+      "scripts/task_sessions.py",
+      "scripts/validate-vault.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/research_contract.py": [],
+    "scripts/retrieve.py": [
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/pipeline_events.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/review_contract.py": [],
+    "scripts/semantic-search.py": [
+      "scripts/retrieve.py"
+    ],
+    "scripts/session-map.py": [
+      "evals/acceptance/seed/.vault-meta/index.jsonl"
+    ],
+    "scripts/session-preflight.py": [
+      "config/acceptance-cells.toml",
+      "scripts/acceptance_fingerprints.py",
+      "scripts/codex-adapter.py",
+      "scripts/current-session-id.sh",
+      "scripts/model_routing.py",
+      "scripts/task_sessions.py"
+    ],
+    "scripts/setup-obsidian-tasks.py": [
+      "bin/setup-vault.sh"
+    ],
+    "scripts/stop-hook.py": [
+      "scripts/bm25-index.py",
+      "scripts/dense-refresh-worker.py",
+      "scripts/fold-log.py",
+      "scripts/memory-backup.py",
+      "scripts/reindex.py",
+      "scripts/retrieve.py",
+      "scripts/validate-vault.py",
+      "scripts/vault-write.py"
+    ],
+    "scripts/tag-search.py": [
+      "evals/acceptance/seed/.vault-meta/tag-index.json",
+      "scripts/reindex.py"
+    ],
+    "scripts/task_contract.py": [],
+    "scripts/task_escalation.py": [
+      "scripts/lifecycle_telemetry.py",
+      "scripts/task_contract.py"
+    ],
+    "scripts/task_sessions.py": [],
+    "scripts/tiling-check.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md"
+    ],
+    "scripts/turn_telemetry.py": [
+      "scripts/pipeline_events.py"
+    ],
+    "scripts/validate-vault.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/fold-log.py",
+      "scripts/vault-write.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/vault-write.py": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/pipeline_events.py",
+      "scripts/plan_lifecycle.py",
+      "scripts/validate-vault.py",
+      "scripts/vault_schema.py"
+    ],
+    "scripts/vault_schema.py": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "evals/acceptance/seed/.vault-meta/address-map.tsv"
+    ],
+    "scripts/wiki_summary_contract.py": [],
+    "skills/agenda/SKILL.md": [
+      "scripts/agenda.py"
+    ],
+    "skills/agenda/agents/openai.yaml": [],
+    "skills/autoresearch/SKILL.md": [
+      "scripts/boundary-score.py",
+      "scripts/current-session-id.sh",
+      "scripts/research-isolation.py",
+      "scripts/task_sessions.py",
+      "scripts/vault-write.py",
+      "skills/autoresearch/references/program.md"
+    ],
+    "skills/autoresearch/references/program.md": [],
+    "skills/backlog/SKILL.md": [
+      "evals/acceptance/seed/wiki/backlog.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/vault-write.py"
+    ],
+    "skills/canvas/SKILL.md": [
+      "evals/acceptance/seed/wiki/index.md",
+      "skills/canvas/references/canvas-spec.md"
+    ],
+    "skills/canvas/agents/openai.yaml": [],
+    "skills/canvas/references/canvas-spec.md": [],
+    "skills/clarify/SKILL.md": [],
+    "skills/clarify/agents/openai.yaml": [],
+    "skills/close/SKILL.md": [
+      "scripts/queue-session-exit.py"
+    ],
+    "skills/daily/SKILL.md": [
+      "scripts/claude-subscription-check.py",
+      "scripts/current-session-id.sh",
+      "scripts/daily-apply.py",
+      "scripts/daily-collect.py",
+      "scripts/daily-summary-save.py",
+      "scripts/detect-runtime.sh",
+      "scripts/model_routing.py",
+      "scripts/pipeline-stats.py"
+    ],
+    "skills/defuddle/SKILL.md": [],
+    "skills/dispatch-workspace/SKILL.md": [
+      "scripts/dispatch-runner.py"
+    ],
+    "skills/dispatch-workspace/agents/openai.yaml": [],
+    "skills/dispatch/SKILL.md": [
+      ".codex/dispatch-env.toml",
+      "evals/acceptance/seed/wiki/hot.md",
+      "scripts/dispatch-resolver.py",
+      "scripts/dispatch-runner.py",
+      "scripts/model_routing.py"
+    ],
+    "skills/dispatch/references/compatibility.md": [
+      ".claude/skill-rules.json",
+      "scripts/cmux_agent_supervisor.py",
+      "scripts/dispatch-runner.py",
+      "scripts/task_sessions.py"
+    ],
+    "skills/dispatch/references/task-prompt-template.md": [
+      "config/model-routing.toml",
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "scripts/current-session-id.sh",
+      "scripts/task_contract.py",
+      "scripts/task_escalation.py",
+      "skills/reap-send/scripts/send_reap.py",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "skills/distill-runbook/SKILL.md": [
+      "scripts/allocate-address.sh",
+      "scripts/current-session-id.sh",
+      "scripts/vault-write.py"
+    ],
+    "skills/draft/SKILL.md": [],
+    "skills/find-session/SKILL.md": [
+      "evals/acceptance/seed/.vault-meta/address-map.tsv",
+      "evals/acceptance/seed/.vault-meta/index.jsonl",
+      "evals/acceptance/seed/.vault-meta/session-to-pages.jsonl"
+    ],
+    "skills/journal/SKILL.md": [
+      "scripts/journal-write.py"
+    ],
+    "skills/learn/SKILL.md": [
+      "scripts/allocate-address.sh",
+      "scripts/vault-write.py"
+    ],
+    "skills/obsidian-bases/SKILL.md": [],
+    "skills/obsidian-markdown/SKILL.md": [],
+    "skills/reap-send/SKILL.md": [
+      "skills/reap-send/scripts/send_reap.py"
+    ],
+    "skills/reap-send/references/compatibility.md": [
+      "scripts/task_contract.py",
+      "skills/reap-send/scripts/send_reap.py"
+    ],
+    "skills/reap-send/scripts/send_reap.py": [
+      "scripts/reap-runner.py",
+      "scripts/task_contract.py",
+      "scripts/vault_schema.py",
+      "scripts/wiki_summary_contract.py"
+    ],
+    "skills/reap/SKILL.md": [
+      "scripts/current-session-id.sh",
+      "scripts/reap-runner.py"
+    ],
+    "skills/reap/references/compatibility.md": [
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/parse-wiki-summary.py",
+      "scripts/reap-runner.py",
+      "scripts/vault-write.py"
+    ],
+    "skills/reap/references/filing-rules.md": [
+      "scripts/allocate-address.sh",
+      "scripts/current-session-id.sh",
+      "scripts/parse-wiki-summary.py"
+    ],
+    "skills/review-dispatch/SKILL.md": [
+      "config/model-routing.toml",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "skills/review-dispatch/references/compatibility.md": [
+      "scripts/cmux_agent_supervisor.py",
+      "scripts/cmux_surface_lifecycle.py",
+      "skills/review-dispatch/references/review-prompt-template.md",
+      "skills/review-dispatch/scripts/archive_review.py",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "skills/review-dispatch/references/review-prompt-template.md": [],
+    "skills/review-dispatch/scripts/archive_review.py": [
+      "scripts/allocate-address.sh",
+      "scripts/current-session-id.sh",
+      "scripts/review_contract.py",
+      "scripts/vault-write.py",
+      "scripts/vault_schema.py"
+    ],
+    "skills/review-dispatch/scripts/spawn_review.py": [
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      ".codex/dispatch-env.toml",
+      "config/model-routing.toml",
+      "scripts/claude-subscription-check.py",
+      "scripts/cmux_agent_supervisor.py",
+      "scripts/cmux_surface_lifecycle.py",
+      "scripts/dcg-test-suite.sh",
+      "scripts/lifecycle_telemetry.py",
+      "scripts/lint-instructions.py",
+      "scripts/model_routing.py",
+      "scripts/review_contract.py",
+      "scripts/task_contract.py",
+      "scripts/task_sessions.py",
+      "scripts/vault-write.py",
+      "skills/review-dispatch/references/review-prompt-template.md",
+      "skills/review-dispatch/scripts/archive_review.py"
+    ],
+    "skills/review-send/SKILL.md": [],
+    "skills/review-send/scripts/send_review.py": [
+      "scripts/review_contract.py",
+      "skills/review-dispatch/scripts/spawn_review.py"
+    ],
+    "skills/save-plan/SKILL.md": [
+      ".claude/hooks/plan-capture.sh",
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/allocate-address.sh",
+      "scripts/current-session-id.sh",
+      "scripts/vault-write.py"
+    ],
+    "skills/save/SKILL.md": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/allocate-address.sh",
+      "scripts/current-session-id.sh",
+      "scripts/vault-write.py"
+    ],
+    "skills/unsafe-research/SKILL.md": [
+      "scripts/current-session-id.sh",
+      "scripts/model_routing.py",
+      "scripts/vault-write.py"
+    ],
+    "skills/wiki-fold/SKILL.md": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/fold-log.py"
+    ],
+    "skills/wiki-ingest/SKILL.md": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/allocate-address.sh",
+      "scripts/document-normalize.py",
+      "scripts/research-isolation.py",
+      "scripts/vault-write.py",
+      "skills/wiki-ingest/references/document-normalization.md",
+      "skills/wiki/references/css-snippets.md"
+    ],
+    "skills/wiki-ingest/references/document-normalization.md": [
+      "bin/setup-clean-machine.sh",
+      "scripts/document-normalize.py",
+      "scripts/install-docling.py"
+    ],
+    "skills/wiki-ingest/references/frontmatter.md": [],
+    "skills/wiki-lint/SKILL.md": [
+      ".claude/skill-rules.json",
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "evals/acceptance/seed/.vault-meta/index.jsonl",
+      "evals/acceptance/seed/wiki/index.md",
+      "scripts/allocate-address.sh",
+      "scripts/pipeline-stats.py",
+      "scripts/reindex.py",
+      "scripts/tiling-check.py",
+      "scripts/validate-vault.py",
+      "skills/wiki-lint/references/address-validation.md",
+      "skills/wiki-lint/references/semantic-tiling.md"
+    ],
+    "skills/wiki-lint/references/address-validation.md": [
+      "evals/acceptance/seed/.vault-meta/address-counter.txt",
+      "scripts/allocate-address.sh"
+    ],
+    "skills/wiki-lint/references/semantic-tiling.md": [
+      "bin/setup-dragonscale.sh",
+      "scripts/tiling-check.py"
+    ],
+    "skills/wiki-query/SKILL.md": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "scripts/research-isolation.py",
+      "scripts/retrieve.py",
+      "scripts/tag-search.py",
+      "scripts/task_sessions.py"
+    ],
+    "skills/wiki/SKILL.md": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/vault-write.py",
+      "skills/wiki/references/css-snippets.md",
+      "skills/wiki/references/git-setup.md",
+      "skills/wiki/references/modes.md"
+    ],
+    "skills/wiki/agents/openai.yaml": [],
+    "skills/wiki/references/css-snippets.md": [],
+    "skills/wiki/references/frontmatter.md": [
+      "evals/acceptance/seed/wiki/hot.md",
+      "evals/acceptance/seed/wiki/log.md",
+      "scripts/current-session-id.sh"
+    ],
+    "skills/wiki/references/git-setup.md": [],
+    "skills/wiki/references/mcp-setup.md": [
+      "evals/acceptance/seed/wiki/index.md"
+    ],
+    "skills/wiki/references/modes.md": [],
+    "skills/wiki/references/plugins.md": [
+      "bin/setup-vault.sh"
+    ],
+    "skills/wiki/references/rest-api.md": [
+      "evals/acceptance/seed/wiki/index.md",
+      "evals/acceptance/seed/wiki/log.md"
+    ]
+  },
+  "dynamic_dependency_prefixes": {
+    "scripts/acceptance/contracts.py": [
+      "skills/"
+    ]
+  },
+  "graph_sha256": "fbe9d796941cb95daf6c01099ea59a093b6eeeee67f2fde58ae0d330e1bf3e0e"
+}

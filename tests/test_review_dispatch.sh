@@ -648,6 +648,22 @@ assert not module.is_handoff("scripts/product-change.py")
 PY
 [[ $? -eq 0 ]] && ok "operation-scoped-review-handoffs" || bad "operation-scoped-review-handoffs" "operation handoffs were treated as product drift"
 
+python3 - "$SCRIPT" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("review_dispatch_handoff_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+operation_id = "11111111-1111-4111-8111-111111111111"
+assert module.is_handoff(f".task-review-drive-{operation_id}.json")
+assert module.is_handoff(f".task-review-resolution-{operation_id}.md")
+assert not module.is_handoff(".task-review-drive-not-a-uuid.json")
+assert not module.is_handoff(".task-review-resolution-not-a-uuid.md")
+assert not module.is_handoff("scripts/product-change.py")
+PY
+[[ $? -eq 0 ]] && ok "review-baseline-operation-handoffs" || bad "review-baseline-operation-handoffs" "review baseline disagrees with review-send handoff classification"
+
 LEGACY="$SANDBOX/legacy-payload"
 write_fixture "$LEGACY"
 "$SCRIPT" start --light --no-spawn --worktree "$LEGACY" --vault-root "$REPO_ROOT" >/dev/null 2>"$SANDBOX/legacy-start.err"

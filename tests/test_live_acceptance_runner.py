@@ -16,8 +16,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "scripts" / "live-acceptance-runner.py"
+RUNNER = ROOT / "scripts" / "acceptance" / "runner.py"
 RELEASE = ROOT / "scripts" / "release-acceptance.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from acceptance import launchers as acceptance_launchers  # noqa: E402
+from acceptance import sandbox as acceptance_sandbox  # noqa: E402
+from acceptance import skill_adapters as acceptance_skill_adapters  # noqa: E402
 failures: list[str] = []
 
 
@@ -153,6 +157,47 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     spec = importlib.util.spec_from_file_location("live_acceptance_runner_test", RUNNER)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    prompt_baseline = json.loads(
+        (ROOT / "evals/acceptance/prompt-baseline-v2.1.1.json").read_text(encoding="utf-8")
+    )
+    prompt_scenarios = module.load_scenarios()
+    prompt_fixtures = module.load_skill_fixtures()
+    rendered_hashes: dict[str, str] = {}
+    for skill, fixture_item in sorted(prompt_fixtures.items()):
+        for runtime in ("claude", "codex"):
+            prompt_row = {
+                "schema_version": 1,
+                "phase": "final",
+                "skill": skill,
+                "runtime": runtime,
+                "scenario": fixture_item["scenario"],
+                "expected": fixture_item["expected"],
+            }
+            runner_fixture = None
+            if skill in {"review-dispatch", "review-send"}:
+                runner_fixture = {"fixture_kind": "review", "nested_worktree": "/acceptance/task"}
+            elif skill in {"dispatch", "dispatch-workspace"}:
+                runner_fixture = {"fixture_kind": "dispatch", "nested_worktree": "/acceptance/task"}
+            rendered = module.prompt_text(
+                prompt_row,
+                prompt_scenarios[fixture_item["scenario"]],
+                Path(prompt_baseline["placeholders"]["sandbox"]),
+                Path(prompt_baseline["placeholders"]["outbox"]),
+                prompt_baseline["placeholders"]["model"],
+                prompt_baseline["placeholders"]["effort"],
+                prompt_baseline["placeholders"]["commit"],
+                fixture_item["fixture"],
+                runner_fixture,
+            )
+            key = "|".join(
+                str(prompt_row[name])
+                for name in ("phase", "skill", "runtime", "scenario", "expected")
+            )
+            rendered_hashes[key] = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+    check(
+        "all 58 refactored prompts are byte-identical to v2.1.1",
+        rendered_hashes == prompt_baseline["prompts"] and len(rendered_hashes) == 58,
+    )
     check(
         "live runner uses the canonical trust prompt matcher",
         module.workspace_trust_prompt_visible.__module__ == "cmux_trust_prompt",
@@ -202,6 +247,35 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         autocommit_guard == {"schema_version": 1, "reason": "live-acceptance"}
         and (override_repo / ".vault-meta/auto-commit.disabled").stat().st_mode & 0o777 == 0o600,
     )
+    seed_repo = tmp / "seed-repo"
+    (seed_repo / "wiki").mkdir(parents=True)
+    (seed_repo / ".vault-meta").mkdir()
+    (seed_repo / "wiki/user-data.md").write_text("must disappear\n", encoding="utf-8")
+    (seed_repo / ".vault-meta/user-data.json").write_text("{}\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=seed_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=seed_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=seed_repo, check=True)
+    subprocess.run(["git", "add", "-f", "wiki", ".vault-meta"], cwd=seed_repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "source data"], cwd=seed_repo, check=True)
+    seed_commit = acceptance_sandbox.materialize_seed_commit(seed_repo)
+    seed_status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=seed_repo,
+        text=True, capture_output=True, check=True,
+    ).stdout
+    check(
+        "sandbox data layer is replaced by one clean canonical seed commit",
+        not seed_status
+        and not (seed_repo / "wiki/user-data.md").exists()
+        and not (seed_repo / ".vault-meta/user-data.json").exists()
+        and (seed_repo / "wiki/backlog.md").is_file()
+        and len(seed_commit) == 40,
+    )
+    check(
+        "acceptance seed hash is deterministic and independent of the working vault",
+        acceptance_sandbox.acceptance_seed_sha256()
+        == acceptance_sandbox.acceptance_seed_sha256()
+        and len(acceptance_sandbox.acceptance_seed_sha256()) == 64,
+    )
     previous_claude_override = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL")
     os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = "sonnet"
     try:
@@ -228,9 +302,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
     ).stdout.strip()
-    original_root = module.ROOT
+    original_root = acceptance_sandbox.ROOT
     original_pin = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT")
-    module.ROOT = repo
+    acceptance_sandbox.ROOT = repo
     (repo / "tracked.txt").write_text("dirty but uncommitted\n", encoding="utf-8")
     os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = commit
     try:
@@ -243,7 +317,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         else:
             check("invalid source pin fails closed", False)
     finally:
-        module.ROOT = original_root
+        acceptance_sandbox.ROOT = original_root
         if original_pin is None:
             os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT", None)
         else:
@@ -302,7 +376,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "Claude acceptance cannot block on interactive questions",
         claude_argv[claude_argv.index("--disallowedTools") + 1] == "AskUserQuestion",
     )
-    module.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
+    acceptance_launchers.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
     codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
     check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
     check("Codex acceptance keeps Fast user-only", 'service_tier="default"' in codex_argv)
@@ -389,19 +463,19 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     exited = tmp / "agent-exit.json"
     exited.write_text('{"schema_version": 1}\n', encoding="utf-8")
     close_calls: list[list[str]] = []
-    original_run = module.subprocess.run
-    original_send_surface = module.send_surface
-    original_close_exact = module.close_surface_exact
-    module.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    original_run = acceptance_launchers.subprocess.run
+    original_send_surface = acceptance_launchers.send_surface
+    original_close_exact = acceptance_launchers.close_surface_exact
+    acceptance_launchers.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError("already-exited agent must not receive /exit")
     )
-    module.close_surface_exact = lambda surface, _runner: close_calls.append([surface]) or "closed"
+    acceptance_launchers.close_surface_exact = lambda surface, _runner: close_calls.append([surface]) or "closed"
     try:
         close_result = module.close_surface("00000000-0000-0000-0000-000000000001", "codex", exited)
     finally:
-        module.subprocess.run = original_run
-        module.send_surface = original_send_surface
-        module.close_surface_exact = original_close_exact
+        acceptance_launchers.subprocess.run = original_run
+        acceptance_launchers.send_surface = original_send_surface
+        acceptance_launchers.close_surface_exact = original_close_exact
     check("interrupted exited agent closes without a second command", close_result == "exact surface closed")
     check("interrupted cleanup targets exact surface once", close_calls == [[
         "00000000-0000-0000-0000-000000000001"
@@ -409,10 +483,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
     forced_exit = tmp / "forced-agent-exit.json"
     force_calls: list[list[str]] = []
-    module.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    acceptance_launchers.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         AssertionError("forced interrupt cleanup must not wait for agent commands")
     )
-    module.close_surface_exact = lambda surface, _runner: force_calls.append([surface]) or "closed"
+    acceptance_launchers.close_surface_exact = lambda surface, _runner: force_calls.append([surface]) or "closed"
     try:
         forced_result = module.close_surface(
             "00000000-0000-0000-0000-000000000007",
@@ -421,8 +495,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             force=True,
         )
     finally:
-        module.send_surface = original_send_surface
-        module.close_surface_exact = original_close_exact
+        acceptance_launchers.send_surface = original_send_surface
+        acceptance_launchers.close_surface_exact = original_close_exact
     check("forced interrupt closes without an exit-marker wait", forced_result == "exact surface closed")
     check("forced interrupt targets the exact surface once", force_calls == [[
         "00000000-0000-0000-0000-000000000007"
@@ -430,7 +504,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
 
     confirming_exit = tmp / "confirming-agent-exit.json"
     confirm_calls: list[list[str]] = []
-    module.send_surface = lambda *_args, **_kwargs: None
+    acceptance_launchers.send_surface = lambda *_args, **_kwargs: None
     def confirm_run(argv, **_kwargs):
         confirm_calls.append(list(argv))
         if argv[1] == "read-screen":
@@ -448,16 +522,16 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         if argv[1] == "send-key":
             confirming_exit.write_text('{"schema_version": 1}\n', encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
-    module.subprocess.run = confirm_run
-    module.close_surface_exact = lambda surface, _runner: confirm_calls.append(
+    acceptance_launchers.subprocess.run = confirm_run
+    acceptance_launchers.close_surface_exact = lambda surface, _runner: confirm_calls.append(
         ["close-exact", surface]
     ) or "closed"
     try:
         close_result = module.close_surface("00000000-0000-0000-0000-000000000002", "claude", confirming_exit)
     finally:
-        module.subprocess.run = original_run
-        module.send_surface = original_send_surface
-        module.close_surface_exact = original_close_exact
+        acceptance_launchers.subprocess.run = original_run
+        acceptance_launchers.send_surface = original_send_surface
+        acceptance_launchers.close_surface_exact = original_close_exact
     check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
     check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
     check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 300)
@@ -572,7 +646,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     }), encoding="utf-8")
     cleanup_calls: list[list[str]] = []
     cleanup_payloads: list[dict[str, object]] = []
-    original_run_checked = module.run_checked
+    original_run_checked = acceptance_skill_adapters.run_checked
     def fake_run_checked(argv, *, cwd, input_text=None, **_kwargs):
         cleanup_calls.append(list(argv))
         if input_text is not None:
@@ -585,7 +659,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
                 else:
                     target.write_text(page["content"], encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
-    module.run_checked = fake_run_checked
+    acceptance_skill_adapters.run_checked = fake_run_checked
     try:
         clean, reason = module.autoresearch_acceptance_cleanup(
             autoresearch_repo, autoresearch_commit, coordinator_surface
@@ -618,7 +692,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             escaped_reason,
         )
     finally:
-        module.run_checked = original_run_checked
+        acceptance_skill_adapters.run_checked = original_run_checked
 
     close_fixture = module.close_acceptance_fixture("abcdef12-0000-0000-0000-000000000000")
     close_prompt = module.prompt_text(
@@ -680,10 +754,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "Disposable local acceptance record for exact-surface graceful exit.\n",
         encoding="utf-8",
     )
-    original_checked = module.run_checked
-    original_run = module.subprocess.run
+    original_checked = acceptance_skill_adapters.run_checked
+    original_run = acceptance_skill_adapters.subprocess.run
     delete_payloads: list[dict[str, object]] = []
-    module.subprocess.run = lambda argv, **_kwargs: subprocess.CompletedProcess(
+    acceptance_skill_adapters.subprocess.run = lambda argv, **_kwargs: subprocess.CompletedProcess(
         argv, 0, stdout="OK", stderr=""
     )
 
@@ -692,12 +766,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         close_page.unlink()
         return "{}"
 
-    module.run_checked = fake_checked
+    acceptance_skill_adapters.run_checked = fake_checked
     try:
         close_clean, close_proof = module.close_acceptance_proof(close_repo, close_fixture)
     finally:
-        module.run_checked = original_checked
-        module.subprocess.run = original_run
+        acceptance_skill_adapters.run_checked = original_checked
+        acceptance_skill_adapters.subprocess.run = original_run
     check(
         "runner proves and transactionally deletes the close fixture",
         close_clean
@@ -1058,8 +1132,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     cleanup_sandbox = cleanup_run / "sandbox"
     system_tmp = tmp / "system-tmp"
     system_tmp.mkdir()
-    original_gettempdir = module.tempfile.gettempdir
-    module.tempfile.gettempdir = lambda: str(system_tmp)
+    original_gettempdir = acceptance_sandbox.tempfile.gettempdir
+    acceptance_sandbox.tempfile.gettempdir = lambda: str(system_tmp)
     cleanup_scratch = module.scratch_root_for(cleanup_run)
     cleanup_sandbox.mkdir(parents=True)
     cleanup_scratch.mkdir()
@@ -1071,7 +1145,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     (cleanup_scratch / "nested").mkdir()
     (cleanup_scratch / "nested" / "artifact.json").write_text("{}\n", encoding="utf-8")
     module.safe_cleanup(cleanup_run)
-    module.tempfile.gettempdir = original_gettempdir
+    acceptance_sandbox.tempfile.gettempdir = original_gettempdir
     check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
 
     proof_repo = tmp / "dispatch-proof"
@@ -1188,13 +1262,13 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "task_surface": "00000000-0000-0000-0000-000000000006",
     }), encoding="utf-8")
     child_calls: list[list[str]] = []
-    module.close_surface_exact = lambda surface, _runner: child_calls.append([surface]) or "closed"
+    acceptance_launchers.close_surface_exact = lambda surface, _runner: child_calls.append([surface]) or "closed"
     try:
         child_closed, child_failures = module.close_operation_children(
             child_root, "00000000-0000-0000-0000-000000000003"
         )
     finally:
-        module.close_surface_exact = original_close_exact
+        acceptance_launchers.close_surface_exact = original_close_exact
     check("interrupted operation closes exact registered children", child_closed == 3 and not child_failures)
     check("registered child close never targets coordinator", {call[0] for call in child_calls} == {
         "00000000-0000-0000-0000-000000000004",
@@ -1202,12 +1276,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "00000000-0000-0000-0000-000000000006",
     })
     surface_order: list[str] = []
-    original_close_surface = module.close_surface
-    original_close_children = module.close_operation_children
-    original_wait_children = module.wait_for_operation_children
-    module.close_surface = lambda *_args, **_kwargs: surface_order.append("coordinator") or "exact surface closed"
-    module.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
-    module.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
+    original_close_surface = acceptance_launchers.close_surface
+    original_close_children = acceptance_launchers.close_operation_children
+    original_wait_children = acceptance_launchers.wait_for_operation_children
+    acceptance_launchers.close_surface = lambda *_args, **_kwargs: surface_order.append("coordinator") or "exact surface closed"
+    acceptance_launchers.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
+    acceptance_launchers.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
     try:
         settled = module.settle_operation_surfaces(
             child_root,
@@ -1216,9 +1290,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             child_root / "agent-exit.json",
         )
     finally:
-        module.close_surface = original_close_surface
-        module.wait_for_operation_children = original_wait_children
-        module.close_operation_children = original_close_children
+        acceptance_launchers.close_surface = original_close_surface
+        acceptance_launchers.wait_for_operation_children = original_wait_children
+        acceptance_launchers.close_operation_children = original_close_children
     check(
         "cleanup stops coordinator and gives children an auto-close grace",
         surface_order == ["coordinator", "wait", "children"]
@@ -1226,11 +1300,11 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         and module.CHILD_SURFACE_SETTLE_SECONDS >= 30,
     )
     surface_order = []
-    module.close_surface = lambda *_args, **kwargs: surface_order.append(
+    acceptance_launchers.close_surface = lambda *_args, **kwargs: surface_order.append(
         f"coordinator-force={kwargs.get('force')}"
     ) or "exact surface closed"
-    module.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
-    module.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
+    acceptance_launchers.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
+    acceptance_launchers.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
     try:
         forced_settled = module.settle_operation_surfaces(
             child_root,
@@ -1240,9 +1314,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             force=True,
         )
     finally:
-        module.close_surface = original_close_surface
-        module.wait_for_operation_children = original_wait_children
-        module.close_operation_children = original_close_children
+        acceptance_launchers.close_surface = original_close_surface
+        acceptance_launchers.wait_for_operation_children = original_wait_children
+        acceptance_launchers.close_operation_children = original_close_children
     check(
         "forced interrupt skips grace and closes exact children immediately",
         surface_order == ["coordinator-force=True", "children"]

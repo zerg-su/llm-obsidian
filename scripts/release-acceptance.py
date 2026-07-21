@@ -13,25 +13,28 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from acceptance.contracts import TRANSIENT_FAILURE_KINDS
 
 from lib_sanitize import residual_credential_kinds, sanitize
 from acceptance_fingerprints import (
     FingerprintError,
     cell_metadata,
-    changed_paths,
     dirty_paths,
     environment_contract,
     generation_snapshot,
     is_non_behavioral_path,
+    launch_generations,
     non_behavioral_paths,
     non_behavioral_prefixes,
-    orchestration_dependencies,
-    production_generations,
     read_manifest,
+    verify_dependency_lock,
 )
 
 
@@ -133,7 +136,7 @@ def validate_result(row: dict[str, Any], result: Any) -> dict[str, Any]:
     bounded: dict[str, Any] = {key: result.get(key) for key in (
         "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
         "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
-        "duration_seconds",
+        "duration_seconds", "failure_kind", "attempts", "retry_count",
     )}
     bounded["expected"] = row["expected"]
     for field in ("model", "effort", "actual", "cleanup", "defect", "decision", "evidence"):
@@ -149,6 +152,17 @@ def validate_result(row: dict[str, Any], result: Any) -> dict[str, Any]:
     duration = bounded.get("duration_seconds")
     if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0):
         raise AcceptanceError("duration_seconds must be non-negative")
+    failure_kind = str(bounded.get("failure_kind") or "")
+    if failure_kind and failure_kind not in TRANSIENT_FAILURE_KINDS:
+        raise AcceptanceError("runner result has an unsupported failure_kind")
+    if failure_kind and verdict != "blocked":
+        raise AcceptanceError("failure_kind is valid only for blocked results")
+    for field in ("attempts", "retry_count"):
+        number = bounded.get(field)
+        if number is not None and (
+            isinstance(number, bool) or not isinstance(number, int) or number < 0 or number > 3
+        ):
+            raise AcceptanceError(f"{field} must be a bounded integer")
     required = ("model", "effort", "actual", "cleanup", "evidence")
     if verdict in {"pass", "fail"} and any(not str(bounded.get(field) or "").strip() for field in required):
         raise AcceptanceError(f"{verdict} requires model, effort, actual, cleanup, and evidence")
@@ -181,7 +195,7 @@ def matrix_fingerprint(rows: list[dict[str, Any]]) -> str:
 RESULT_FIELDS = (
     "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
     "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
-    "duration_seconds",
+    "duration_seconds", "failure_kind", "attempts", "retry_count",
 )
 
 
@@ -226,111 +240,6 @@ def decorate_result(
     return value
 
 
-def build_resume_migration_metadata(
-    path: Path,
-    rows: list[dict[str, Any]],
-    root: Path,
-    manifest: dict[str, Any],
-    *,
-    generations: dict[str, dict[str, str]],
-    current_scope_version: int,
-) -> tuple[
-    dict[tuple[str, str, str, str, str], dict[str, Any]],
-    dict[tuple[str, str, str, str, str], dict[str, Any]],
-] | None:
-    """Build fail-closed metadata for compatible env/dependency migrations."""
-
-    if not path.is_file():
-        return None
-    report = read_object(path)
-    prior_commit = str(report.get("source_commit") or "")
-    if not re.fullmatch(r"[0-9a-f]{40}", prior_commit):
-        return None
-    prior_runner = subprocess.run(
-        ["git", "show", f"{prior_commit}:scripts/live-acceptance-runner.py"],
-        cwd=root, text=True, capture_output=True, check=False,
-    )
-    if prior_runner.returncode != 0 or not prior_runner.stdout:
-        return None
-    prior_runner_source = prior_runner.stdout
-    prior_scope = report.get("environment_scope_version", 1)
-    if (
-        isinstance(prior_scope, bool)
-        or not isinstance(prior_scope, int)
-        or prior_scope not in {1, 2}
-    ):
-        raise AcceptanceError("existing acceptance report has an invalid environment scope")
-    prior_environment = report.get("environment")
-    required = {"os", "os_release", "architecture", "cmux", "claude", "codex"}
-    if (
-        not isinstance(prior_environment, dict)
-        or set(prior_environment) != required
-        or any(
-            not isinstance(value, str) or not value or len(value) > 200
-            for value in prior_environment.values()
-        )
-    ):
-        return None
-    prior_rows: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
-    raw_rows = report.get("rows")
-    if not isinstance(raw_rows, list):
-        return None
-    for raw in raw_rows:
-        if not isinstance(raw, dict):
-            return None
-        try:
-            key = row_key(raw)
-        except KeyError:
-            return None
-        if key in prior_rows:
-            return None
-        dependencies = raw.get("dependencies")
-        live_behavior = raw.get("live_runner_behavior_sha256")
-        if (
-            not isinstance(dependencies, list)
-            or any(not isinstance(item, str) for item in dependencies)
-            or (
-                live_behavior is not None
-                and not re.fullmatch(r"[0-9a-f]{64}", str(live_behavior))
-            )
-        ):
-            return None
-        prior_rows[key] = raw
-    prior_raw = {
-        row_key(row): cell_metadata(
-            root,
-            manifest,
-            row,
-            environment=prior_environment,
-            generations=generations,
-            environment_scope_version=prior_scope,
-            dependencies_override=(
-                prior_rows[row_key(row)].get("dependencies")
-                if row_key(row) in prior_rows else None
-            ),
-            include_live_runner_behavior=(
-                prior_rows[row_key(row)].get("live_runner_behavior_sha256") is not None
-                if row_key(row) in prior_rows else True
-            ),
-            live_runner_source_override=prior_runner_source,
-        )
-        for row in rows
-    }
-    prior_scoped = {
-        row_key(row): cell_metadata(
-            root,
-            manifest,
-            row,
-            environment=prior_environment,
-            generations=generations,
-            environment_scope_version=current_scope_version,
-            live_runner_source_override=prior_runner_source,
-        )
-        for row in rows
-    }
-    return prior_raw, prior_scoped
-
-
 def load_resume_results(
     path: Path,
     rows: list[dict[str, Any]],
@@ -338,54 +247,20 @@ def load_resume_results(
     phase: str,
     commit: str,
     metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
-    root: Path,
-    non_behavioral: set[str] | None = None,
-    non_behavioral_prefixes_: tuple[str, ...] = (),
-    orchestration: set[str] | None = None,
-    orchestration_contract_version: int = 1,
-    environment_scope_version: int = 1,
-    environment_migration: tuple[
-        dict[tuple[str, str, str, str, str], dict[str, Any]],
-        dict[tuple[str, str, str, str, str], dict[str, Any]],
-    ] | None = None,
-    include_dirty: bool = True,
+    evidence_epoch: int,
 ) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     report = read_object(path)
-    schema = report.get("schema_version")
-    if schema not in {1, 2} or report.get("phase") != phase or not isinstance(report.get("rows"), list):
-        raise AcceptanceError(
-            "existing acceptance report does not match this phase/matrix; use --restart"
-        )
-    prior_commit = str(report.get("source_commit") or "")
-    if schema == 1:
-        raise AcceptanceError("schema-1 acceptance evidence requires --restart")
-    prior_orchestration = report.get("orchestration_contract_version", 1)
-    if prior_orchestration != orchestration_contract_version:
-        raise AcceptanceError(
-            "existing acceptance report uses an incompatible orchestration contract; use --restart"
-        )
-    prior_environment_scope = report.get("environment_scope_version", 1)
     if (
-        isinstance(prior_environment_scope, bool)
-        or not isinstance(prior_environment_scope, int)
-        or prior_environment_scope not in {1, 2}
+        report.get("schema_version") != 3
+        or report.get("evidence_epoch") != evidence_epoch
+        or report.get("phase") != phase
+        or not isinstance(report.get("rows"), list)
     ):
-        raise AcceptanceError("existing acceptance report has an invalid environment scope")
-    if prior_environment_scope > environment_scope_version:
         raise AcceptanceError(
-            "existing acceptance report uses a newer environment scope; use --restart"
+            "existing acceptance report uses another evidence epoch or matrix; use --restart"
         )
-    changed = changed_paths(root, prior_commit, include_dirty=include_dirty)
-    declared = {path for item in metadata.values() for path in item["dependencies"]}
-    declared.update(non_behavioral or set())
-    declared.update(orchestration or set())
-    unknown_changed = changed is None or any(
-        path not in declared
-        and not is_non_behavioral_path(path, non_behavioral or set(), non_behavioral_prefixes_)
-        for path in changed
-    )
     expected = {row_key(row): row for row in rows}
     resumed: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str, str]] = set()
@@ -408,95 +283,35 @@ def load_resume_results(
         raw_dependencies = raw.get("dependencies")
         raw_live_behavior = raw.get("live_runner_behavior_sha256")
         if (
-            unknown_changed
-            or not re.fullmatch(r"[0-9a-f]{64}", raw_fingerprint)
+            not re.fullmatch(r"[0-9a-f]{64}", raw_fingerprint)
             or not isinstance(raw_dependencies, list)
             or any(not isinstance(item, str) for item in raw_dependencies)
             or (
                 raw_live_behavior is not None
                 and not re.fullmatch(r"[0-9a-f]{64}", str(raw_live_behavior))
             )
+            or raw.get("evidence_epoch") != evidence_epoch
             or raw.get("generation") != current["generation"]
             or not isinstance(provenance, dict)
             or raw.get("row_integrity_sha256")
             != integrity_sha256(result, raw_fingerprint, provenance)
         ):
             continue
-        exact = (
+        if not (
             raw_fingerprint == current["cell_fingerprint"]
             and raw_dependencies == current["dependencies"]
             and raw_live_behavior == current["live_runner_behavior_sha256"]
             and raw.get("environment_sha256") == current["environment_sha256"]
             and provenance.get("environment_sha256") == current["environment_sha256"]
-        )
-        prior_dependency_set = set(raw_dependencies)
-        current_dependency_set = set(current["dependencies"])
-        prior_raw = prior_scoped = None
-        if environment_migration is not None:
-            prior_raw, prior_scoped = environment_migration
-        live_behavior_compatible = (
-            raw_live_behavior == current["live_runner_behavior_sha256"]
-            if raw_live_behavior is not None
-            else prior_scoped is not None
-            and prior_scoped[key]["live_runner_behavior_sha256"]
-            == current["live_runner_behavior_sha256"]
-        )
-        compatible_orchestration_migration = (
-            not exact
-            and provenance.get("environment_sha256")
-            == current["environment_sha256"]
-            and changed is not None
-            and not (current_dependency_set - prior_dependency_set)
-            and bool(prior_dependency_set - current_dependency_set)
-            and (prior_dependency_set - current_dependency_set) <= (orchestration or set())
-            and not (changed & current_dependency_set)
-            and live_behavior_compatible
-        )
-        compatible_environment_migration = False
-        if (
-            not exact
-            and prior_raw is not None
-            and prior_scoped is not None
         ):
-            legacy_current = prior_raw[key]
-            prior_scoped_current = prior_scoped[key]
-            added_dependencies = current_dependency_set - prior_dependency_set
-            compatible_environment_migration = (
-                raw_fingerprint == legacy_current["cell_fingerprint"]
-                and raw_dependencies == legacy_current["dependencies"]
-                and raw.get("generation") == legacy_current["generation"]
-                and raw.get("environment_sha256") == legacy_current["environment_sha256"]
-                and provenance.get("environment_sha256") == legacy_current["environment_sha256"]
-                and not (prior_dependency_set - current_dependency_set)
-                and changed is not None
-                and not (changed & added_dependencies)
-                and live_behavior_compatible
-                and prior_scoped_current["cell_fingerprint"] == current["cell_fingerprint"]
-                and prior_scoped_current["environment_sha256"] == current["environment_sha256"]
-            )
-        if not exact and not compatible_orchestration_migration and not compatible_environment_migration:
             continue
-        reused_provenance = provenance
-        if compatible_environment_migration:
-            reused_provenance = {
-                **provenance,
-                "environment_sha256": current["environment_sha256"],
-            }
         resumed.append(
             decorate_result(
                 result,
                 current,
                 commit=commit,
-                reason=(
-                    "reused-identical"
-                    if exact
-                    else (
-                        "reused-compatible-resume-migration"
-                        if compatible_environment_migration
-                        else "reused-compatible-orchestration-migration"
-                    )
-                ),
-                provenance=reused_provenance,
+                reason="reused-identical",
+                provenance=provenance,
             )
         )
     return resumed
@@ -544,55 +359,97 @@ def run_matrix(
     def execute(row: dict[str, Any]) -> tuple[tuple[str, str, str, str, str], dict[str, Any]]:
         key = row_key(row)
         started = datetime.now(timezone.utc)
-        proc: subprocess.Popen[str] | None = None
-        try:
-            proc = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                start_new_session=True,
-            )
-            with active_lock:
-                active.add(proc)
+        result: dict[str, Any] = {}
+        attempts = 0
+        while attempts < 3:
+            attempts += 1
+            proc: subprocess.Popen[str] | None = None
+            heartbeat_parent = str(
+                os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT_ROOT") or ""
+            ).strip()
+            if heartbeat_parent:
+                parent = Path(heartbeat_parent).resolve()
+                parent.mkdir(parents=True, exist_ok=True)
+                heartbeat_dir = Path(tempfile.mkdtemp(prefix="cell-", dir=parent))
+            else:
+                heartbeat_dir = Path(tempfile.mkdtemp(prefix="acceptance-heartbeat-"))
+            heartbeat_path = heartbeat_dir / "heartbeat.json"
             try:
-                stdout, stderr = proc.communicate(
-                    json.dumps(row, ensure_ascii=False) + "\n", timeout=timeout
+                env = dict(os.environ)
+                env["LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT"] = str(heartbeat_path)
+                proc = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    start_new_session=True,
+                    env=env,
                 )
-            except subprocess.TimeoutExpired:
-                signal_runner(proc)
-                if proc.poll() is None:
+                with active_lock:
+                    active.add(proc)
+                assert proc.stdin is not None
+                proc.stdin.write(json.dumps(row, ensure_ascii=False) + "\n")
+                proc.stdin.close()
+                last_activity = time.monotonic()
+                heartbeat_signature: tuple[int, int] | None = None
+                timed_out = False
+                while proc.poll() is None:
                     try:
-                        proc.communicate(timeout=45)
+                        stat_value = heartbeat_path.stat()
+                        signature = (stat_value.st_mtime_ns, stat_value.st_size)
+                    except OSError:
+                        signature = None
+                    if signature is not None and signature != heartbeat_signature:
+                        heartbeat_signature = signature
+                        last_activity = time.monotonic()
+                    if time.monotonic() - last_activity >= timeout:
+                        timed_out = True
+                        signal_runner(proc)
+                        break
+                    time.sleep(0.1)
+                if timed_out and proc.poll() is None:
+                    try:
+                        proc.wait(timeout=45)
                     except subprocess.TimeoutExpired:
                         proc.terminate()
                         try:
-                            proc.communicate(timeout=5)
+                            proc.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             proc.kill()
-                            proc.communicate()
-                raise
-            if proc.returncode != 0:
-                raise AcceptanceError(f"runner exit {proc.returncode}")
-            result = validate_result(row, json.loads(stdout))
-        except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired, OSError) as exc:
-            if isinstance(exc, subprocess.TimeoutExpired):
-                defect = "acceptance runner timed out"
-            elif isinstance(exc, OSError):
-                defect = "acceptance runner is unavailable or not executable"
-            else:
-                defect, _ = sanitize(str(exc)[:300])
-            result = {
-                **row,
-                "verdict": "blocked",
-                "actual": "Acceptance runner did not return a valid bounded result.",
-                "defect": defect,
-            }
-        finally:
-            if proc is not None:
-                with active_lock:
-                    active.discard(proc)
+                            proc.wait()
+                assert proc.stdout is not None and proc.stderr is not None
+                stdout = proc.stdout.read()
+                _stderr = proc.stderr.read()
+                if timed_out:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                if proc.returncode != 0:
+                    raise AcceptanceError(f"runner exit {proc.returncode}")
+                result = validate_result(row, json.loads(stdout))
+            except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired, OSError) as exc:
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    defect = "acceptance runner exceeded its inactivity timeout"
+                elif isinstance(exc, OSError):
+                    defect = "acceptance runner is unavailable or not executable"
+                else:
+                    defect, _ = sanitize(str(exc)[:300])
+                result = {
+                    **row,
+                    "verdict": "blocked",
+                    "actual": "Acceptance runner did not return a valid bounded result.",
+                    "defect": defect,
+                }
+            finally:
+                if proc is not None:
+                    with active_lock:
+                        active.discard(proc)
+                for child in heartbeat_dir.iterdir():
+                    child.unlink(missing_ok=True)
+                heartbeat_dir.rmdir()
+            if result.get("failure_kind") not in TRANSIENT_FAILURE_KINDS:
+                break
+        result["attempts"] = attempts
+        result["retry_count"] = attempts - 1
         if result.get("duration_seconds") is None:
             result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
         if metadata is not None:
@@ -647,6 +504,7 @@ def report_payload(
     commit: str = "",
     fingerprint: str = "",
     orchestration_contract_version: int = 1,
+    evidence_epoch: int = 3,
     environment_scope_version: int = 1,
     environment: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -657,7 +515,8 @@ def report_payload(
     passed = counts["pass"]
     accepted = passed + counts["n-a"]
     return {
-        "schema_version": 2,
+        "schema_version": 3,
+        "evidence_epoch": evidence_epoch,
         "orchestration_contract_version": orchestration_contract_version,
         "environment_scope_version": environment_scope_version,
         "environment": environment,
@@ -705,7 +564,10 @@ def main() -> int:
     run = sub.add_parser("run")
     run.add_argument("--phase", choices=PHASES, required=True)
     run.add_argument("--runner", required=True)
-    run.add_argument("--timeout", type=float, default=900.0)
+    run.add_argument(
+        "--timeout", type=float, default=1200.0,
+        help="runner inactivity timeout in seconds (active heartbeats reset it; default: 1200)",
+    )
     run.add_argument(
         "--jobs", type=int, default=1,
         help="maximum concurrent acceptance cells in one cmux workspace (1..5; default: 1)",
@@ -721,8 +583,10 @@ def main() -> int:
         skills = load_spec(args.spec, args.root.resolve())
         validate_scenario_coverage(args.scenarios, skills)
         manifest = read_manifest(args.root.resolve(), args.manifest)
+        verify_dependency_lock(args.root.resolve(), manifest)
         orchestration_version = int(manifest["orchestration_contract_version"])
-        generations = production_generations(args.root.resolve(), manifest)
+        evidence_epoch = int(manifest["evidence_epoch"])
+        generations = launch_generations(args.root.resolve(), manifest)
         if args.command == "check":
             print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
             return 0
@@ -739,7 +603,8 @@ def main() -> int:
         if args.command == "matrix":
             write_json(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
+                    "evidence_epoch": evidence_epoch,
                     "orchestration_contract_version": orchestration_version,
                     "phase": args.phase,
                     "rows": [{**row, **metadata[row_key(row)]} for row in rows],
@@ -750,7 +615,6 @@ def main() -> int:
         commit = source_commit(args.root.resolve())
         allowed_dirty = non_behavioral_paths(manifest)
         allowed_dirty_prefixes = non_behavioral_prefixes(manifest)
-        orchestration_only = orchestration_dependencies(manifest)
         canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
         try:
             args.report.resolve().relative_to(canonical_acceptance_root)
@@ -783,20 +647,7 @@ def main() -> int:
         )
         prior = [] if args.restart else load_resume_results(
             args.report, rows, phase=args.phase, commit=commit,
-            metadata=metadata, root=args.root.resolve(),
-            non_behavioral=allowed_dirty,
-            non_behavioral_prefixes_=allowed_dirty_prefixes,
-            orchestration=orchestration_only,
-            orchestration_contract_version=orchestration_version,
-            environment_scope_version=environment_scope_version,
-            environment_migration=build_resume_migration_metadata(
-                args.report, rows, args.root.resolve(), manifest,
-                generations=generations,
-                current_scope_version=environment_scope_version,
-            ),
-            # Only canonical worktree-local reports are release evidence.
-            # Explicit external reports remain useful for hermetic diagnostics.
-            include_dirty=canonical_report,
+            metadata=metadata, evidence_epoch=evidence_epoch,
         )
 
         def checkpoint(completed: list[dict[str, Any]]) -> None:
@@ -805,6 +656,7 @@ def main() -> int:
                     args.phase, completed, planned_total=len(rows),
                     commit=commit, fingerprint=fingerprint,
                     orchestration_contract_version=orchestration_version,
+                    evidence_epoch=evidence_epoch,
                     environment_scope_version=environment_scope_version,
                     environment=environment,
                 ),
@@ -822,6 +674,7 @@ def main() -> int:
         report = report_payload(
             args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint,
             orchestration_contract_version=orchestration_version,
+            evidence_epoch=evidence_epoch,
             environment_scope_version=environment_scope_version,
             environment=environment,
         )

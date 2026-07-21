@@ -98,6 +98,14 @@ HANDOFF_EXCLUDES = [
     ".obsidian/workspace.json",
     ".obsidian/workspace-mobile.json",
 ]
+OPERATION_HANDOFF_GIT_EXCLUDES = [
+    ".task-review-drive-*.json",
+    ".task-review-resolution-*.md",
+]
+OPERATION_HANDOFF_RX = re.compile(
+    r"^\.task-review-(?:drive-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.json|"
+    r"resolution-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\.md)$"
+)
 REVIEW_CALLBACK_FILE = ".review-callback.json"
 REVIEW_ROUND_ARTIFACTS = (
     ".task-review.md",
@@ -865,13 +873,15 @@ def ensure_excludes(worktree: Path) -> None:
     if exclude.exists():
         existing = {line.strip() for line in exclude.read_text(encoding="utf-8").splitlines()}
     with exclude.open("a", encoding="utf-8") as fh:
-        for item in HANDOFF_EXCLUDES:
+        for item in [*HANDOFF_EXCLUDES, *OPERATION_HANDOFF_GIT_EXCLUDES]:
             if item not in existing:
                 fh.write(item + "\n")
 
 
 def is_handoff(path: str) -> bool:
-    return any(fnmatch.fnmatch(path, pattern) for pattern in HANDOFF_EXCLUDES)
+    return OPERATION_HANDOFF_RX.fullmatch(path) is not None or any(
+        fnmatch.fnmatch(path, pattern) for pattern in HANDOFF_EXCLUDES
+    )
 
 
 def run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:

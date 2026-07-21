@@ -1,0 +1,15 @@
+{
+  "acceptance": [
+    "wiki/backlog.md",
+    "wiki/hot.md",
+    "wiki/index.md",
+    "wiki/log.md"
+  ],
+  "backlog": ["wiki/backlog.md"],
+  "capture": ["wiki/backlog.md"],
+  "hot-cache": ["wiki/hot.md"],
+  "index": ["wiki/index.md"],
+  "log": ["wiki/log.md"],
+  "meta": ["wiki/hot.md", "wiki/index.md", "wiki/log.md"],
+  "todo": ["wiki/backlog.md"]
+}

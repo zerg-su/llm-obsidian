@@ -1,7 +1,8 @@
 schema_version = 1
-runner_contract_version = 2
-orchestration_contract_version = 1
+runner_contract_version = 3
+orchestration_contract_version = 2
 environment_scope_version = 2
+evidence_epoch = 3
 
 # Exact release-packaging files that cannot change a live cell's behavior.
 # No globs: every path must be reviewed and listed separately.
@@ -20,10 +21,46 @@ non_behavioral_prefixes = ["tests/"]
 # Incompatible changes require an explicit orchestration_contract_version bump.
 orchestration_dependencies = [
   "config/acceptance-cells.toml",
+  "config/acceptance-dependencies.lock.json",
+  "scripts/acceptance_dependencies.py",
   "scripts/acceptance_fingerprints.py",
   "scripts/acceptance-workspace-supervisor.py",
-  "scripts/live-acceptance-runner.py",
   "scripts/release-acceptance.py",
+]
+
+# Shared code which directly shapes the sandbox, model invocation, prompt and
+# typed outbox contract.  Scheduler/checkpoint/retry code is intentionally not
+# listed here and is guarded by the exact orchestration allowlist above.
+behavioral_abi_dependencies = [
+  "scripts/live-acceptance-runner.py",
+  "scripts/acceptance/__init__.py",
+  "scripts/acceptance/contracts.py",
+  "scripts/acceptance/launchers.py",
+  "scripts/acceptance/prompting.py",
+  "scripts/acceptance/runner.py",
+  "scripts/acceptance/sandbox.py",
+]
+
+# Registration surfaces loaded by every synthetic live sandbox.  The generated
+# lock follows their transitive code/data references.  Manifest packaging fields
+# are normalized by the fingerprint layer, so release version bumps stay data-only.
+registration_dependencies = [
+  "hooks/hooks.json",
+  ".claude/skill-rules.json",
+  ".claude-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  ".codex/config.toml",
+  ".codex/dispatch-env.toml",
+  ".codex/profiles/deep.toml",
+  ".codex/profiles/default.toml",
+  ".codex/profiles/reviewer-readonly.toml",
+  ".codex/profiles/wiki-write.toml",
+]
+
+# Function roots are adapter-owned semantic units.  The fingerprint code walks
+# their same-module call graph without importing or executing the module.
+behavioral_abi_fragments = [
+  "scripts/acceptance/scenario_adapters.py#sandbox_cleanup_proof",
 ]
 
 global_dependencies = [
@@ -39,6 +76,9 @@ global_dependencies = [
   "scripts/task_sessions.py",
   "scripts/turn_telemetry.py",
 ]
+
+[dynamic_dependency_prefixes]
+"scripts/acceptance/contracts.py" = ["skills/"]
 
 [model_generations]
 "gpt-5.6-sol" = "codex:5.6"
@@ -95,6 +135,9 @@ dependencies = [
   "skills/review-dispatch/scripts/spawn_review.py",
   "skills/reap-send/scripts/send_reap.py",
 ]
+behavior_fragments = [
+  "scripts/acceptance/scenario_adapters.py#lifecycle_acceptance_cleanup_proof",
+]
 
 [scenarios.retrieval]
 dependencies = ["scripts/retrieve.py", "scripts/bm25-index.py", "scripts/dense-refresh-worker.py"]
@@ -110,3 +153,50 @@ dependencies = ["scripts/document-normalize.py", "scripts/research-isolation.py"
 
 [skills.journal]
 dependencies = ["scripts/journal-write.py"]
+
+[skills.dispatch]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#dispatch_fixture_prompt",
+  "scripts/acceptance/skill_adapters.py#write_dispatch_acceptance_request",
+  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_proof",
+]
+
+[skills.dispatch-workspace]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#dispatch_fixture_prompt",
+  "scripts/acceptance/skill_adapters.py#write_dispatch_acceptance_request",
+  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_proof",
+]
+
+[skills.review-dispatch]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#review_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#bind_review_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#review_fixture_prompt",
+]
+
+[skills.review-send]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#review_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#bind_review_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#review_fixture_prompt",
+]
+
+[skills.close]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#close_acceptance_fixture",
+  "scripts/acceptance/skill_adapters.py#close_fixture_prompt",
+  "scripts/acceptance/skill_adapters.py#close_acceptance_proof",
+]
+
+[skills.autoresearch]
+behavior_fragments = [
+  "scripts/acceptance/skill_adapters.py#autoresearch_acceptance_cleanup",
+]
+
+[skills.daily]
+behavior_fragments = [
+  "scripts/acceptance/scenario_adapters.py#daily_acceptance_cleanup",
+]

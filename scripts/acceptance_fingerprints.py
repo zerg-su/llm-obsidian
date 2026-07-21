@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic acceptance-cell dependencies, generations, and fingerprints."""
+"""Semantic acceptance-cell dependencies, generations, and fingerprints."""
 
 from __future__ import annotations
 
 import ast
-import functools
 import hashlib
 import json
 import os
@@ -15,11 +14,17 @@ import tomllib
 from pathlib import Path
 from typing import Any, Iterable
 
+from acceptance_dependencies import (
+    DependencyLockError,
+    closure as dependency_closure,
+    read_lock,
+    verify_lock,
+)
 from model_routing import load_config
 
 
 DEFAULT_MANIFEST = "config/acceptance-cells.toml"
-SAFE_REL = re.compile(r"^[A-Za-z0-9._/-]+$")
+SAFE_REL = re.compile(r"^[A-Za-z0-9._/#-]+$")
 ALLOWED_NON_BEHAVIORAL_PREFIXES = {"tests/"}
 ALLOWED_NON_BEHAVIORAL_PATHS = {
     ".claude-plugin/marketplace.json",
@@ -29,55 +34,52 @@ ALLOWED_NON_BEHAVIORAL_PATHS = {
 }
 ALLOWED_ORCHESTRATION_DEPENDENCIES = {
     "config/acceptance-cells.toml",
+    "config/acceptance-dependencies.lock.json",
+    "scripts/acceptance_dependencies.py",
     "scripts/acceptance_fingerprints.py",
     "scripts/acceptance-workspace-supervisor.py",
-    "scripts/live-acceptance-runner.py",
     "scripts/release-acceptance.py",
 }
-RUNTIME_SCRIPT_PREFIXES = ("scripts/", "skills/", "hooks/", ".claude/hooks/", "bin/")
-RUNTIME_SCRIPT_SUFFIXES = {".py", ".sh"}
-LIVE_RUNNER_BEHAVIOR_PATH = "scripts/live-acceptance-runner.py"
-LIVE_RUNNER_PROMPT_FUNCTION = "prompt_text"
-LIVE_RUNNER_COMMON_FUNCTIONS = {
-    "die", "read_json", "atomic_json", "load_scenarios", "load_skill_fixtures",
-    "validate_row", "result_payload", "validate_agent_result", "git_head",
-    "create_sandbox", "disable_acceptance_autocommit", "install_acceptance_model_overrides",
-    "run_checked", "git_output", "agent_argv", "run_agent_process", "send_surface",
-    "settled_outbox", "wait_for_outbox", "close_surface", "scratch_root_for",
-    "safe_cleanup", "operation_child_surfaces", "surface_is_open",
-    "wait_for_operation_children", "close_operation_children", "settle_operation_surfaces",
-    "is_disposable_bookkeeping", "sandbox_cleanup_proof", "run_with_backend", "run_live",
-    "blocked", "build_parser", "main",
+FRAGMENT_RE = re.compile(r"^([A-Za-z0-9._/-]+)#([A-Za-z_][A-Za-z0-9_]*)$")
+MANIFEST_BEHAVIOR_FIELDS = {
+    ".claude-plugin/plugin.json": ("agents",),
+    ".codex-plugin/plugin.json": ("skills",),
 }
-LIVE_RUNNER_SCENARIO_FUNCTIONS = {
-    "dispatch-review-reap": {
-        "install_acceptance_runtime_fixture",
-        "lifecycle_acceptance_cleanup_proof",
-    },
+ROUTING_TOML_PATHS = {
+    "config/model-routing.toml",
+    ".codex/config.toml",
+    ".codex/dispatch-env.toml",
+    ".codex/agents/daily-summarizer.toml",
 }
-LIVE_RUNNER_SKILL_FUNCTIONS = {
-    "dispatch": {
-        "dispatch_acceptance_fixture", "dispatch_fixture_prompt",
-        "write_dispatch_acceptance_request", "dispatch_acceptance_proof",
-    },
-    "dispatch-workspace": {
-        "dispatch_acceptance_fixture", "dispatch_fixture_prompt",
-        "write_dispatch_acceptance_request", "dispatch_acceptance_proof",
-    },
-    "review-dispatch": {
-        "review_acceptance_fixture", "bind_review_acceptance_fixture", "review_fixture_prompt",
-    },
-    "review-send": {
-        "review_acceptance_fixture", "bind_review_acceptance_fixture", "review_fixture_prompt",
-    },
-    "close": {"close_acceptance_fixture", "close_fixture_prompt", "close_acceptance_proof"},
-    "autoresearch": {"commit_file", "autoresearch_acceptance_cleanup"},
-    "daily": {"daily_acceptance_cleanup"},
-}
+ROUTING_TOML_PREFIXES = (".codex/profiles/",)
+ROUTING_KEYS = {"model", "effort", "model_reasoning_effort", "reasoning_effort"}
 
 
 class FingerprintError(ValueError):
     pass
+
+
+def safe_dependencies(values: Iterable[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        item = str(value or "").strip().replace("\\", "/")
+        if (
+            not item
+            or not SAFE_REL.fullmatch(item)
+            or item.startswith("/")
+            or ".." in Path(item.partition("#")[0]).parts
+        ):
+            raise FingerprintError(f"unsafe acceptance dependency: {item!r}")
+        if item not in result:
+            result.append(item)
+    return result
+
+
+def _array(value: dict[str, Any], key: str) -> list[object]:
+    raw = value.get(key)
+    if not isinstance(raw, list):
+        raise FingerprintError(f"acceptance manifest {key} must be an array")
+    return raw
 
 
 def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
@@ -86,345 +88,301 @@ def read_manifest(root: Path, path: Path | None = None) -> dict[str, Any]:
         value = tomllib.loads(source.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise FingerprintError(f"cannot read acceptance manifest: {exc}") from exc
-    environment_scope_version = value.get("environment_scope_version", 1)
     if (
         value.get("schema_version") != 1
-        or value.get("runner_contract_version") != 2
-        or value.get("orchestration_contract_version") != 1
-        or isinstance(environment_scope_version, bool)
-        or not isinstance(environment_scope_version, int)
-        or environment_scope_version not in {1, 2}
+        or value.get("runner_contract_version") != 3
+        or value.get("orchestration_contract_version") != 2
+        or value.get("environment_scope_version") != 2
+        or value.get("evidence_epoch") != 3
     ):
         raise FingerprintError(
-            "acceptance manifest must use schema 1, runner contract 2, "
-            "orchestration contract 1, and environment scope 1 or 2"
+            "acceptance manifest must use schema 1, runner 3, orchestration 2, "
+            "environment scope 2, and evidence epoch 3"
         )
-    if not isinstance(value.get("global_dependencies"), list):
-        raise FingerprintError("acceptance manifest global_dependencies must be an array")
-    raw_non_behavioral = value.get("non_behavioral_paths")
-    if not isinstance(raw_non_behavioral, list):
-        raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
-    exact_non_behavioral = set(safe_dependencies(raw_non_behavioral))
+    _array(value, "global_dependencies")
+    _array(value, "behavioral_abi_dependencies")
+    _array(value, "behavioral_abi_fragments")
+    _array(value, "registration_dependencies")
+    exact_non_behavioral = set(safe_dependencies(_array(value, "non_behavioral_paths")))
     if exact_non_behavioral - ALLOWED_NON_BEHAVIORAL_PATHS:
         raise FingerprintError("acceptance non-behavioral paths exceed the code-owned allowlist")
-    for rel in exact_non_behavioral:
-        if not (root / rel).is_file():
-            raise FingerprintError(f"non-behavioral acceptance path is not a file: {rel}")
     prefixes = non_behavioral_prefixes(value)
     if set(prefixes) - ALLOWED_NON_BEHAVIORAL_PREFIXES:
-        raise FingerprintError("acceptance manifest may classify only tests/ as a non-behavioral prefix")
-    for prefix in prefixes:
-        if not (root / prefix.removesuffix("/")).is_dir():
-            raise FingerprintError(f"non-behavioral acceptance prefix is not a directory: {prefix}")
+        raise FingerprintError("acceptance manifest may classify only tests/ as non-behavioral")
     orchestration = orchestration_dependencies(value)
     if orchestration != ALLOWED_ORCHESTRATION_DEPENDENCIES:
         raise FingerprintError("acceptance orchestration dependencies must match the code-owned allowlist")
-    for rel in orchestration:
+    for rel in exact_non_behavioral | orchestration:
         if not (root / rel).is_file():
-            raise FingerprintError(f"acceptance orchestration dependency is not a file: {rel}")
+            raise FingerprintError(f"acceptance classified path is not a file: {rel}")
+    for prefix in prefixes:
+        if not (root / prefix.removesuffix("/")).is_dir():
+            raise FingerprintError(f"non-behavioral acceptance prefix is not a directory: {prefix}")
     return value
 
 
-def safe_dependencies(values: Iterable[object]) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        item = str(value or "").strip().replace("\\", "/")
-        if not item or not SAFE_REL.fullmatch(item) or item.startswith("/") or ".." in Path(item).parts:
-            raise FingerprintError(f"unsafe acceptance dependency: {item!r}")
-        if item not in result:
-            result.append(item)
-    return result
-
-
-@functools.lru_cache(maxsize=32)
-def _runtime_script_index(root_text: str) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
-    root = Path(root_text)
-    candidates = [
-        path.relative_to(root).as_posix()
-        for prefix in RUNTIME_SCRIPT_PREFIXES
-        for path in (root / prefix).rglob("*")
-        if path.is_file() and path.suffix in RUNTIME_SCRIPT_SUFFIXES
-    ]
-    by_name: dict[str, list[str]] = {}
-    for candidate in candidates:
-        by_name.setdefault(Path(candidate).name, []).append(candidate)
-    return tuple(candidates), {name: tuple(values) for name, values in by_name.items()}
-
-
-@functools.lru_cache(maxsize=1024)
-def _cached_runtime_script_references(
-    root_text: str, rel: str, source_sha256: str,
-) -> tuple[str, ...]:
-    root = Path(root_text)
-    source = root / rel
-    try:
-        tree = ast.parse(source.read_text(encoding="utf-8"), filename=rel)
-    except (OSError, SyntaxError, UnicodeError) as exc:
-        raise FingerprintError(f"cannot inspect acceptance runtime dependency {rel}: {exc}") from exc
-    _candidates, by_name = _runtime_script_index(root_text)
-    runtime_helpers = {"run", "run_checked", "runner"}
-
-    def invokes_process(function: ast.AST) -> bool:
-        for item in ast.walk(function):
-            if not isinstance(item, ast.Call):
-                continue
-            if isinstance(item.func, ast.Name) and item.func.id in runtime_helpers:
-                return True
-            if (
-                isinstance(item.func, ast.Attribute)
-                and isinstance(item.func.value, ast.Name)
-                and item.func.value.id == "subprocess"
-                and item.func.attr in {"run", "Popen", "check_call", "check_output"}
-            ):
-                return True
-        return False
-
-    runtime_functions = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and invokes_process(node)
-    ]
-    loaded_names = {
-        node.id
-        for function in runtime_functions
-        for node in ast.walk(function)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
-    }
-    relevant_nodes: list[ast.AST] = list(runtime_functions)
-    for node in tree.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        names = {
-            item.id for target in targets for item in ast.walk(target)
-            if isinstance(item, ast.Name)
-        }
-        if names & loaded_names:
-            relevant_nodes.append(node)
-
-    references: set[str] = set()
-    for relevant in relevant_nodes:
-        for node in ast.walk(relevant):
-            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
-                continue
-            value = node.value.strip().replace("\\", "/")
-            if Path(value).suffix not in RUNTIME_SCRIPT_SUFFIXES:
-                continue
-            if (
-                any(value.startswith(prefix) for prefix in RUNTIME_SCRIPT_PREFIXES)
-                and (root / value).is_file()
-            ):
-                references.add(value)
-                continue
-            matches = by_name.get(Path(value).name, [])
-            if len(matches) == 1:
-                references.add(matches[0])
-    references.discard(rel)
-    return tuple(sorted(references))
-
-
-def runtime_script_references(root: Path, rel: str) -> list[str]:
-    """Resolve repo-owned script literals used by a Python runtime dependency."""
-
-    source = root / rel
-    if source.suffix != ".py" or not source.is_file():
-        return []
-    try:
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise FingerprintError(f"cannot inspect acceptance runtime dependency {rel}: {exc}") from exc
-    return list(_cached_runtime_script_references(str(root.resolve()), rel, digest))
-
-
-def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scenario: str) -> list[str]:
-    scenario_table = manifest.get("scenarios")
-    if not isinstance(scenario_table, dict) or not isinstance(scenario_table.get(scenario), dict):
-        raise FingerprintError(f"scenario {scenario!r} is missing from acceptance manifest")
-    values = list(manifest["global_dependencies"])
-    values.extend(scenario_table[scenario].get("dependencies") or [])
-    skill_table = manifest.get("skills") or {}
-    if not isinstance(skill_table, dict):
-        raise FingerprintError("acceptance manifest skills must be a table")
-    override = skill_table.get(skill) or {}
-    if not isinstance(override, dict):
-        raise FingerprintError(f"acceptance manifest skill {skill!r} must be a table")
-    values.extend(override.get("dependencies") or [])
-    skill_root = root / "skills" / skill
-    if not (skill_root / "SKILL.md").is_file():
-        raise FingerprintError(f"skill {skill!r} is not installed")
-    values.extend(
-        path.relative_to(root).as_posix()
-        for path in sorted(skill_root.rglob("*"))
-        if path.is_file() and "__pycache__" not in path.parts
-    )
-    dependencies = set(safe_dependencies(values))
-    pending = list(dependencies)
-    while pending:
-        rel = pending.pop()
-        for reference in runtime_script_references(root, rel):
-            if reference not in dependencies:
-                dependencies.add(reference)
-                pending.append(reference)
-    return sorted(dependencies)
-
-
 def non_behavioral_paths(manifest: dict[str, Any]) -> set[str]:
-    """Return exact reviewed paths that are known not to affect live behavior."""
-
-    values = manifest.get("non_behavioral_paths")
-    if not isinstance(values, list):
-        raise FingerprintError("acceptance manifest non_behavioral_paths must be an array")
-    return set(safe_dependencies(values))
+    return set(safe_dependencies(_array(manifest, "non_behavioral_paths")))
 
 
 def non_behavioral_prefixes(manifest: dict[str, Any]) -> tuple[str, ...]:
-    """Return code-restricted directory prefixes that cannot affect product behavior."""
-
-    values = manifest.get("non_behavioral_prefixes")
-    if not isinstance(values, list):
-        raise FingerprintError("acceptance manifest non_behavioral_prefixes must be an array")
-    prefixes = tuple(safe_dependencies(values))
+    prefixes = tuple(safe_dependencies(_array(manifest, "non_behavioral_prefixes")))
     if any(not prefix.endswith("/") for prefix in prefixes):
         raise FingerprintError("non-behavioral acceptance prefixes must end with /")
     return prefixes
 
 
 def orchestration_dependencies(manifest: dict[str, Any]) -> set[str]:
-    """Return code-owned evidence orchestration paths excluded from cell behavior."""
-
-    values = manifest.get("orchestration_dependencies")
-    if not isinstance(values, list):
-        raise FingerprintError("acceptance manifest orchestration_dependencies must be an array")
-    return set(safe_dependencies(values))
+    return set(safe_dependencies(_array(manifest, "orchestration_dependencies")))
 
 
 def is_non_behavioral_path(path: str, exact: set[str], prefixes: tuple[str, ...]) -> bool:
     return path in exact or any(path.startswith(prefix) for prefix in prefixes)
 
 
+def verify_dependency_lock(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return verify_lock(root, manifest)
+    except DependencyLockError as exc:
+        raise FingerprintError(str(exc)) from exc
+
+
+def runtime_script_references(root: Path, rel: str) -> list[str]:
+    """Compatibility view of direct statically locked runtime edges."""
+
+    try:
+        lock = read_lock(root)
+    except DependencyLockError as exc:
+        raise FingerprintError(str(exc)) from exc
+    values = lock.get("edges", {}).get(rel, [])
+    return [item for item in values if Path(item).suffix in {".py", ".sh"}]
+
+
+def _row_table(manifest: dict[str, Any], table: str, name: str) -> dict[str, Any]:
+    raw = manifest.get(table)
+    if not isinstance(raw, dict):
+        raise FingerprintError(f"acceptance manifest {table} must be a table")
+    item = raw.get(name, {})
+    if not isinstance(item, dict):
+        raise FingerprintError(f"acceptance manifest {table}.{name} must be a table")
+    return item
+
+
+def _skill_files(root: Path, skill: str) -> list[str]:
+    skill_root = root / "skills" / skill
+    if not (skill_root / "SKILL.md").is_file():
+        raise FingerprintError(f"skill {skill!r} is not installed")
+    return [
+        path.relative_to(root).as_posix()
+        for path in sorted(skill_root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    ]
+
+
+def behavior_fragments(manifest: dict[str, Any], skill: str, scenario: str) -> list[str]:
+    values = list(_array(manifest, "behavioral_abi_fragments"))
+    values.extend(_row_table(manifest, "scenarios", scenario).get("behavior_fragments", []))
+    values.extend(_row_table(manifest, "skills", skill).get("behavior_fragments", []))
+    result = safe_dependencies(values)
+    if any(FRAGMENT_RE.fullmatch(item) is None for item in result):
+        raise FingerprintError("behavior fragments must use path.py#function syntax")
+    return sorted(result)
+
+
+def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scenario: str) -> list[str]:
+    scenario_item = _row_table(manifest, "scenarios", scenario)
+    skill_item = _row_table(manifest, "skills", skill)
+    common_roots: list[object] = []
+    for key in ("global_dependencies", "registration_dependencies", "behavioral_abi_dependencies"):
+        common_roots.extend(_array(manifest, key))
+    scoped_roots: list[object] = []
+    scoped_roots.extend(scenario_item.get("dependencies", []))
+    scoped_roots.extend(skill_item.get("dependencies", []))
+    scoped_roots.extend(_skill_files(root, skill))
+    try:
+        lock = read_lock(root)
+        fragment_modules = {
+            item.partition("#")[0]
+            for item in safe_dependencies(_array(manifest, "behavioral_abi_fragments"))
+        }
+        for table_name in ("scenarios", "skills"):
+            table = manifest.get(table_name, {})
+            if isinstance(table, dict):
+                for item in table.values():
+                    if isinstance(item, dict):
+                        fragment_modules.update(
+                            str(value).partition("#")[0]
+                            for value in item.get("behavior_fragments", [])
+                        )
+        semantic_boundaries = fragment_modules | {"scripts/acceptance/adapters.py"}
+        all_scoped_roots: set[str] = set()
+        for table_name in ("scenarios", "skills"):
+            table = manifest.get(table_name, {})
+            if isinstance(table, dict):
+                for item in table.values():
+                    if isinstance(item, dict):
+                        all_scoped_roots.update(safe_dependencies(item.get("dependencies", [])))
+        all_scoped_roots.update(
+            rel for rel in lock.get("roots", [])
+            if isinstance(rel, str) and rel.startswith("skills/")
+        )
+        all_scoped_roots.difference_update(safe_dependencies(common_roots))
+        hard_boundaries = orchestration_dependencies(manifest) | semantic_boundaries
+        dependencies = set(dependency_closure(
+            lock,
+            safe_dependencies(common_roots),
+            stop=hard_boundaries | all_scoped_roots,
+        ))
+        for scoped_root in safe_dependencies(scoped_roots):
+            dependencies.update(dependency_closure(
+                lock,
+                [scoped_root],
+                stop=hard_boundaries | (all_scoped_roots - {scoped_root}),
+            ))
+        return sorted(dependencies)
+    except DependencyLockError as exc:
+        raise FingerprintError(str(exc)) from exc
+
+
+def _strip_routing_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_routing_values(item)
+            for key, item in sorted(value.items())
+            if key not in ROUTING_KEYS and key != "model_registry"
+        }
+    if isinstance(value, list):
+        return [_strip_routing_values(item) for item in value]
+    return value
+
+
+def _semantic_file_bytes(path: Path, rel: str) -> bytes:
+    if rel in MANIFEST_BEHAVIOR_FIELDS:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            value = {key: raw.get(key) for key in MANIFEST_BEHAVIOR_FIELDS[rel]}
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise FingerprintError(f"cannot normalize behavioral manifest {rel}: {exc}") from exc
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    if rel in ROUTING_TOML_PATHS or any(rel.startswith(prefix) for prefix in ROUTING_TOML_PREFIXES):
+        try:
+            value = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise FingerprintError(f"cannot normalize routing config {rel}: {exc}") from exc
+        return json.dumps(
+            _strip_routing_values(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    return path.read_bytes()
+
+
 def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]:
     values: list[dict[str, str]] = []
     for rel in sorted(set(dependencies)):
         path = root / rel
-        if path.is_file():
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        else:
-            digest = "missing"
+        digest = hashlib.sha256(_semantic_file_bytes(path, rel)).hexdigest() if path.is_file() else "missing"
         values.append({"path": rel, "sha256": digest})
     return values
 
 
-@functools.lru_cache(maxsize=16)
-def _live_runner_program(
-    path_text: str, _source_sha256: str, source: str,
-) -> tuple[tuple[str, ...], dict[str, str], Any]:
+def _fragment_payload(root: Path, fragment: str, *, source_text: str | None = None) -> dict[str, Any]:
+    match = FRAGMENT_RE.fullmatch(fragment)
+    if match is None:
+        raise FingerprintError(f"invalid behavior fragment: {fragment}")
+    rel, entry = match.groups()
+    path = root / rel
     try:
-        tree = ast.parse(source, filename=LIVE_RUNNER_BEHAVIOR_PATH)
-    except (SyntaxError, UnicodeError) as exc:
-        raise FingerprintError(f"cannot inspect live acceptance behavior: {exc}") from exc
+        source = source_text if source_text is not None else path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=rel)
+    except (OSError, UnicodeError, SyntaxError) as exc:
+        raise FingerprintError(f"cannot inspect behavior fragment {fragment}: {exc}") from exc
     functions = {
-        node.name: node
-        for node in tree.body
+        node.name: node for node in tree.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    scoped_names = set().union(*LIVE_RUNNER_SCENARIO_FUNCTIONS.values())
-    scoped_names.update(set().union(*LIVE_RUNNER_SKILL_FUNCTIONS.values()))
-    expected_names = LIVE_RUNNER_COMMON_FUNCTIONS | scoped_names | {LIVE_RUNNER_PROMPT_FUNCTION}
-    if set(functions) != expected_names:
-        missing = sorted(expected_names - set(functions))
-        unknown = sorted(set(functions) - expected_names)
-        raise FingerprintError(
-            "live acceptance behavior classification drifted; "
-            f"missing={missing}, unclassified={unknown}"
-        )
-    module_nodes: list[str] = []
+    assignments: dict[str, ast.AST] = {}
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = {
-                item.id for target in targets for item in ast.walk(target)
-                if isinstance(item, ast.Name)
-            }
-            if "VAULT_REINDEX_SCENARIOS" in names:
-                continue
-        module_nodes.append(ast.dump(node, include_attributes=False))
-    namespace: dict[str, Any] = {
-        "__file__": path_text,
-        "__name__": "acceptance_behavior_fingerprint",
-    }
-    try:
-        exec(compile(source, path_text, "exec"), namespace)
-    except Exception as exc:
-        raise FingerprintError(f"cannot load live acceptance behavior: {exc}") from exc
-    return (
-        tuple(module_nodes),
-        {
-            name: ast.dump(node, include_attributes=False)
-            for name, node in functions.items()
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for target in targets:
+            for item in ast.walk(target):
+                if isinstance(item, ast.Name):
+                    assignments[item.id] = node
+    if entry not in functions:
+        raise FingerprintError(f"behavior fragment entry is missing: {fragment}")
+    selected_functions: set[str] = set()
+    selected_assignments: set[str] = set()
+    pending = [entry]
+    while pending:
+        name = pending.pop()
+        if name in selected_functions:
+            continue
+        selected_functions.add(name)
+        loaded = {
+            node.id for node in ast.walk(functions[name])
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        }
+        pending.extend(sorted((loaded & set(functions)) - selected_functions))
+        selected_assignments.update(loaded & set(assignments))
+    return {
+        "fragment": fragment,
+        "functions": {
+            name: ast.dump(functions[name], include_attributes=False)
+            for name in sorted(selected_functions)
         },
-        namespace[LIVE_RUNNER_PROMPT_FUNCTION],
-    )
+        "assignments": {
+            name: ast.dump(assignments[name], include_attributes=False)
+            for name in sorted(selected_assignments)
+        },
+    }
+
+
+def behavior_fragment_hashes(
+    root: Path, manifest: dict[str, Any], skill: str, scenario: str,
+    *, source_overrides: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    for fragment in behavior_fragments(manifest, skill, scenario):
+        rel = fragment.partition("#")[0]
+        payload = _fragment_payload(root, fragment, source_text=(source_overrides or {}).get(rel))
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        result.append({"fragment": fragment, "sha256": hashlib.sha256(encoded.encode()).hexdigest()})
+    return result
 
 
 def live_runner_behavior_sha256(
     root: Path, row: dict[str, Any], *, source_text: str | None = None,
 ) -> str:
-    """Hash common code, scoped proof helpers, and the exact rendered row prompt."""
+    """Compatibility helper: hash the row's semantic ABI without executing source."""
 
-    path = root / LIVE_RUNNER_BEHAVIOR_PATH
-    try:
-        source = source_text if source_text is not None else path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise FingerprintError(f"cannot inspect live acceptance behavior: {exc}") from exc
-    module_nodes, function_dumps, prompt_renderer = _live_runner_program(
-        str(path), hashlib.sha256(source.encode("utf-8")).hexdigest(), source,
+    manifest = read_manifest(root)
+    adapter_override = source_text is not None and "def review_acceptance_fixture" in source_text
+    launcher_override = source_text is not None and "def agent_argv" in source_text
+    abi_hashes = file_hashes(
+        root, safe_dependencies(_array(manifest, "behavioral_abi_dependencies"))
     )
-    selected_names = set(LIVE_RUNNER_COMMON_FUNCTIONS)
-    selected_names.update(LIVE_RUNNER_SCENARIO_FUNCTIONS.get(str(row["scenario"]), set()))
-    selected_names.update(LIVE_RUNNER_SKILL_FUNCTIONS.get(str(row["skill"]), set()))
-    try:
-        runner_fixture = None
-        if row["skill"] in {"review-dispatch", "review-send"}:
-            runner_fixture = {
-                "fixture_kind": "review",
-                "nested_worktree": "/acceptance/task",
-            }
-        elif row["skill"] in {"dispatch", "dispatch-workspace"}:
-            runner_fixture = {
-                "fixture_kind": "dispatch",
-                "nested_worktree": "/acceptance/task",
-            }
-        prompt = prompt_renderer(
-            row,
-            {"network": "network-class", "instructions": "scenario instructions"},
-            Path("/acceptance/sandbox"),
-            Path("/acceptance/outbox.json"),
-            "acceptance-model",
-            "medium",
-            "0" * 40,
-            "skill fixture",
-            runner_fixture,
-        )
-    except Exception as exc:
-        raise FingerprintError(f"cannot render live acceptance behavior: {exc}") from exc
+    if launcher_override:
+        digest = hashlib.sha256(source_text.encode()).hexdigest()
+        for item in abi_hashes:
+            if item["path"] == "scripts/acceptance/launchers.py":
+                item["sha256"] = digest
+    overrides = (
+        {"scripts/acceptance/skill_adapters.py": source_text}
+        if adapter_override else None
+    )
     payload = {
-        "module_nodes": module_nodes,
-        "functions": {
-            name: function_dumps[name]
-            for name in sorted(selected_names)
-        },
-        "prompt": prompt,
+        "abi": abi_hashes,
+        "fragments": behavior_fragment_hashes(
+            root, manifest, str(row["skill"]), str(row["scenario"]), source_overrides=overrides
+        ),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def cell_dependency_hashes(
     root: Path, dependencies: Iterable[str], *, skill: str, scenario: str
 ) -> list[dict[str, str]]:
-    """Hash shared registries by the exact row fragment, not as all-cell blobs."""
-
     fragment_keys = {
         "evals/acceptance/skills.json": ("skills", skill),
         "evals/acceptance/scenarios.json": ("scenarios", scenario),
@@ -435,29 +393,23 @@ def cell_dependency_hashes(
         if fragment is None:
             values.extend(file_hashes(root, [rel]))
             continue
-        path = root / rel
         try:
-            registry = json.loads(path.read_text(encoding="utf-8"))
+            registry = json.loads((root / rel).read_text(encoding="utf-8"))
             value = registry[fragment[0]][fragment[1]]
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
             raise FingerprintError(f"cannot read acceptance registry fragment {rel}#{fragment[1]}") from exc
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        values.append({
-            "path": rel,
-            "sha256": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
-        })
+        values.append({"path": f"{rel}#{fragment[1]}", "sha256": hashlib.sha256(encoded.encode()).hexdigest()})
     return values
 
 
 def command_version(command: str) -> str:
     try:
-        result = subprocess.run(
-            [command, "--version"], text=True, capture_output=True, timeout=5, check=False
-        )
+        result = subprocess.run([command, "--version"], text=True, capture_output=True, timeout=5, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return "unavailable"
-    line = (result.stdout or result.stderr).splitlines()
-    return line[0].strip()[:120] if result.returncode == 0 and line else "unavailable"
+    lines = (result.stdout or result.stderr).splitlines()
+    return lines[0].strip()[:120] if result.returncode == 0 and lines else "unavailable"
 
 
 def environment_contract() -> dict[str, str]:
@@ -472,8 +424,6 @@ def environment_contract() -> dict[str, str]:
 
 
 def compatible_runtime_version(value: str) -> str:
-    """Collapse agent CLI patch releases into their supported major.minor line."""
-
     match = re.search(r"(?<!\d)(\d+)\.(\d+)(?:\.\d+)?(?!\d)", value)
     return f"{match.group(1)}.{match.group(2)}" if match else value
 
@@ -482,28 +432,14 @@ def scoped_environment_contract(
     manifest: dict[str, Any], row: dict[str, Any], environment: dict[str, str],
     *, scope_version: int | None = None,
 ) -> dict[str, str]:
-    """Return only host/runtime versions that can affect this acceptance cell."""
-
-    raw_version = (
-        manifest.get("environment_scope_version", 1)
-        if scope_version is None else scope_version
-    )
-    if isinstance(raw_version, bool) or not isinstance(raw_version, int):
-        raise FingerprintError("acceptance environment scope must be an integer")
-    version = raw_version
-    if version == 1:
-        return dict(environment)
+    version = manifest.get("environment_scope_version") if scope_version is None else scope_version
     if version != 2:
         raise FingerprintError(f"unsupported acceptance environment scope: {version}")
     scenario = str(row["scenario"])
-    scenario_table = manifest.get("scenarios")
-    if not isinstance(scenario_table, dict) or not isinstance(scenario_table.get(scenario), dict):
-        raise FingerprintError(f"scenario {scenario!r} is missing from acceptance manifest")
-    runtime = str(row["runtime"])
-    raw_tools = scenario_table[scenario].get("runtime_tools", [runtime])
+    raw_tools = _row_table(manifest, "scenarios", scenario).get("runtime_tools", [row["runtime"]])
     if (
         not isinstance(raw_tools, list)
-        or runtime not in raw_tools
+        or row["runtime"] not in raw_tools
         or any(tool not in {"claude", "codex"} for tool in raw_tools)
     ):
         raise FingerprintError(f"scenario {scenario!r} has invalid runtime_tools")
@@ -512,11 +448,7 @@ def scoped_environment_contract(
     if missing:
         raise FingerprintError("acceptance environment is missing: " + ", ".join(missing))
     return {
-        key: (
-            compatible_runtime_version(environment[key])
-            if key in {"claude", "codex"}
-            else environment[key]
-        )
+        key: compatible_runtime_version(environment[key]) if key in {"claude", "codex"} else environment[key]
         for key in keys
     }
 
@@ -531,22 +463,34 @@ def canonical_generation(model: str, manifest: dict[str, Any]) -> str:
     match = re.fullmatch(r"gpt-(\d+\.\d+)(?:-[A-Za-z0-9._-]+)?", model)
     if match:
         return f"codex:{match.group(1)}"
-    raise FingerprintError(f"production model {model!r} has no registered major generation")
+    raise FingerprintError(f"launch model {model!r} has no registered major generation")
+
+
+def launch_generations(
+    root: Path, manifest: dict[str, Any], *, overrides: dict[str, str] | None = None,
+) -> dict[str, dict[str, str]]:
+    routes = manifest.get("generation_routes")
+    if routes != {"include": ["runtimes.codex", "runtimes.claude"]}:
+        raise FingerprintError("generation routes must contain only the two runtime defaults")
+    config = load_config(root)
+    selected = (
+        {
+            runtime: str(os.environ.get(f"LLM_OBSIDIAN_ACCEPTANCE_{runtime.upper()}_MODEL") or "").strip()
+            for runtime in ("claude", "codex")
+        }
+        if overrides is None else dict(overrides)
+    )
+    result: dict[str, dict[str, str]] = {}
+    for runtime in ("claude", "codex"):
+        model = selected.get(runtime) or str(config.runtime_default(runtime)["model"])
+        result[runtime] = {"model": model, "generation": canonical_generation(model, manifest)}
+    return result
 
 
 def production_generations(root: Path, manifest: dict[str, Any]) -> dict[str, dict[str, str]]:
-    routes = manifest.get("generation_routes")
-    expected_routes = {"include": ["runtimes.codex", "runtimes.claude"]}
-    if routes != expected_routes:
-        raise FingerprintError(
-            "generation routes must contain only the two production runtime defaults"
-        )
-    config = load_config(root)
-    result: dict[str, dict[str, str]] = {}
-    for runtime in ("claude", "codex"):
-        model = str(config.runtime_default(runtime)["model"])
-        result[runtime] = {"model": model, "generation": canonical_generation(model, manifest)}
-    return result
+    """Return production defaults, intentionally ignoring acceptance overrides."""
+
+    return launch_generations(root, manifest, overrides={})
 
 
 def cell_metadata(
@@ -563,59 +507,48 @@ def cell_metadata(
 ) -> dict[str, Any]:
     dependencies = (
         expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
-        if dependencies_override is None
-        else sorted(safe_dependencies(dependencies_override))
+        if dependencies_override is None else sorted(safe_dependencies(dependencies_override))
     )
-    generation_map = generations or production_generations(root, manifest)
-    generation = generation_map[str(row["runtime"])]["generation"]
+    generation_map = generations or launch_generations(root, manifest)
+    launch = generation_map[str(row["runtime"])]
     environment_value = scoped_environment_contract(
-        manifest,
-        row,
-        environment or environment_contract(),
-        scope_version=environment_scope_version,
+        manifest, row, environment or environment_contract(), scope_version=environment_scope_version
     )
-    live_behavior = (
-        live_runner_behavior_sha256(
-            root, row, source_text=live_runner_source_override,
-        ) if include_live_runner_behavior else None
-    )
-    payload = {
+    behavior = live_runner_behavior_sha256(
+        root, row, source_text=live_runner_source_override
+    ) if include_live_runner_behavior else None
+    payload: dict[str, Any] = {
+        "evidence_epoch": manifest["evidence_epoch"],
         "runner_contract_version": manifest["runner_contract_version"],
         "phase": row["phase"],
         "skill": row["skill"],
         "runtime": row["runtime"],
         "scenario": row["scenario"],
         "expected": row["expected"],
-        "dependencies": cell_dependency_hashes(
-            root,
-            dependencies,
-            skill=str(row["skill"]),
-            scenario=str(row["scenario"]),
-        ),
+        "dependencies": cell_dependency_hashes(root, dependencies, skill=str(row["skill"]), scenario=str(row["scenario"])),
+        "behavior_fragments": behavior_fragment_hashes(root, manifest, str(row["skill"]), str(row["scenario"])),
         "environment": environment_value,
-        "generation": generation,
+        "generation": launch["generation"],
     }
-    if live_behavior is not None:
-        payload["live_runner_behavior_sha256"] = live_behavior
+    if behavior is not None:
+        payload["live_runner_behavior_sha256"] = behavior
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    environment_encoded = json.dumps(
-        environment_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    environment_encoded = json.dumps(environment_value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return {
-        "cell_fingerprint": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        "cell_fingerprint": hashlib.sha256(encoded.encode()).hexdigest(),
         "dependencies": dependencies,
-        "generation": generation,
-        "live_runner_behavior_sha256": live_behavior,
-        "environment_sha256": hashlib.sha256(
-            environment_encoded.encode("utf-8")
-        ).hexdigest(),
+        "generation": launch["generation"],
+        "launch_model": launch["model"],
+        "live_runner_behavior_sha256": behavior,
+        "environment_sha256": hashlib.sha256(environment_encoded.encode()).hexdigest(),
+        "evidence_epoch": manifest["evidence_epoch"],
     }
 
 
 def generation_snapshot(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     routes = production_generations(root, manifest)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generations": {runtime: item["generation"] for runtime, item in routes.items()},
     }
 
@@ -623,55 +556,32 @@ def generation_snapshot(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
 def changed_paths(root: Path, prior_commit: str, *, include_dirty: bool = True) -> set[str] | None:
     if not re.fullmatch(r"[0-9a-f]{40}", prior_commit):
         return None
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", prior_commit, "HEAD"],
-        cwd=root, text=True, capture_output=True, check=False,
-    )
+    ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", prior_commit, "HEAD"], cwd=root, text=True, capture_output=True, check=False)
     if ancestry.returncode != 0:
         return None
-    diff = subprocess.run(
-        ["git", "diff", "--name-only", prior_commit, "HEAD"],
-        cwd=root, text=True, capture_output=True, check=False,
-    )
+    diff = subprocess.run(["git", "diff", "--name-only", prior_commit, "HEAD"], cwd=root, text=True, capture_output=True, check=False)
     dirty = dirty_paths(root) if include_dirty else set()
     if diff.returncode != 0 or dirty is None:
         return None
-    values = {line.strip() for line in diff.stdout.splitlines() if line.strip()}
-    values.update(dirty)
-    return values
+    return {line.strip() for line in diff.stdout.splitlines() if line.strip()} | dirty
 
 
 def dirty_paths(root: Path) -> set[str] | None:
-    """Return staged, unstaged, and non-ignored untracked repo-relative paths."""
-
-    status = subprocess.run(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-        cwd=root, text=True, capture_output=True, check=False,
-    )
+    status = subprocess.run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=root, text=True, capture_output=True, check=False)
     if status.returncode != 0:
         return None
-    values: set[str] = set()
-    for line in status.stdout.splitlines():
-        if len(line) >= 4:
-            values.add(line[3:].split(" -> ")[-1].strip('"'))
-    return values
+    return {
+        line[3:].split(" -> ")[-1].strip('"')
+        for line in status.stdout.splitlines() if len(line) >= 4
+    }
 
 
 __all__ = [
-    "FingerprintError",
-    "cell_metadata",
-    "changed_paths",
-    "dirty_paths",
-    "environment_contract",
-    "expanded_dependencies",
-    "generation_snapshot",
-    "live_runner_behavior_sha256",
-    "scoped_environment_contract",
-    "non_behavioral_paths",
-    "non_behavioral_prefixes",
-    "orchestration_dependencies",
-    "is_non_behavioral_path",
-    "production_generations",
-    "read_manifest",
+    "FingerprintError", "behavior_fragment_hashes", "canonical_generation",
+    "cell_metadata", "changed_paths", "dirty_paths", "environment_contract",
+    "expanded_dependencies", "generation_snapshot", "is_non_behavioral_path",
+    "launch_generations", "live_runner_behavior_sha256", "non_behavioral_paths",
+    "non_behavioral_prefixes", "orchestration_dependencies", "production_generations",
+    "read_manifest", "scoped_environment_contract", "verify_dependency_lock",
     "runtime_script_references",
 ]
