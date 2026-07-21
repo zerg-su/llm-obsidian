@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-18
+updated: 2026-07-21
 tags:
   - meta
   - log
@@ -26,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-21] review | v2.1.1 final implementation review
+
+`c-000011` [[Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-18] reap | v2.0.8-rd-upstream-audit
 
