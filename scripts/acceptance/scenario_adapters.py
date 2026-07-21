@@ -207,9 +207,10 @@ def daily_acceptance_cleanup(sandbox: Path, commit: str) -> tuple[bool, str]:
         and re.fullmatch(r"wiki/meta/sessions/Acceptance[^/]*\.md", path)
     ]
     if (
-        len(changes) != 2
+        len(changes) != 3
         or len(session_paths) != 1
         or ("M", "wiki/log.md") not in changes
+        or ("M", ".vault-meta/address-counter.txt") not in changes
     ):
         return False, "daily evidence commit changed unexpected paths"
     path = session_paths[0]
@@ -217,6 +218,28 @@ def daily_acceptance_cleanup(sandbox: Path, commit: str) -> tuple[bool, str]:
         return False, "daily evidence commit used an unexpected fixture path"
     if (sandbox / path).exists():
         return False, "daily fixture session was not removed after verification"
+    counter_values: list[int] = []
+    for revision in (commit, "HEAD"):
+        counter = subprocess.run(
+            ["git", "show", f"{revision}:.vault-meta/address-counter.txt"],
+            cwd=sandbox, text=True, capture_output=True, check=False,
+        )
+        if counter.returncode != 0 or re.fullmatch(r"[0-9]+\n", counter.stdout) is None:
+            return False, "daily evidence address counter is unreadable"
+        counter_values.append(int(counter.stdout.strip()))
+    if counter_values[1] != counter_values[0] + 1:
+        return False, "daily evidence address counter did not advance exactly once"
+    committed_page = subprocess.run(
+        ["git", "show", f"HEAD:{path}"], cwd=sandbox,
+        text=True, capture_output=True, check=False,
+    )
+    address = re.search(r"(?m)^address: c-([0-9]{6})$", committed_page.stdout)
+    if (
+        committed_page.returncode != 0
+        or address is None
+        or int(address.group(1)) != counter_values[0]
+    ):
+        return False, "daily fixture address does not match its exact allocation"
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=sandbox,
         text=True, capture_output=True, check=False,

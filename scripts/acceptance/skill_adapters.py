@@ -328,7 +328,7 @@ def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
         "The opposite-runtime reviewer must exercise review-send exactly once and publish its "
         "typed callback before you resolve it. "
         if skill == "review-send"
-        else "Exercise the complete review-dispatch start/receive/resolve/verify/finish loop. "
+        else "Exercise review-dispatch start/receive and its exact typed finish path. "
     )
     return (
         f"Use the runner-prepared approved task at `{fixture['nested_worktree']}` and its existing "
@@ -338,9 +338,11 @@ def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
         f"`python3 {fixture['review_script']} start --light --worktree {fixture['nested_worktree']}`; "
         "do not pass same-model, reviewer-runtime, model, or effort "
         "overrides. Return idle after each launch and let typed callbacks start later turns; never poll. "
-        "Resolve only the known redundant-f-string warning by returning the prepared `status` value "
-        "directly, commit that one behavior-preserving fix, verify in the same reviewer lane, drive "
-        "approval, and finish it. Once the code-owned drive command reports exit 0 with `applied=true`, "
+        "A real reviewer may either approve the fixture or report its known redundant-f-string warning; "
+        "never fabricate a finding to force a verify round. On approve, make no product change and drive "
+        "finish directly. On a warning or nit, return the prepared `status` value directly, commit only "
+        "that behavior-preserving fix, verify in the same reviewer lane, then drive approval and finish. "
+        "Either validated path is a pass. Once the code-owned drive command reports exit 0 with `applied=true`, "
         "treat that durable operation result as authoritative and publish the acceptance outbox "
         "immediately; do not wait for, inspect, or poll the already-finished reviewer surface. Leave the "
         "task worktree, branch, plan, registry, and review artifacts for "

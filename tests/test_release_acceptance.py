@@ -503,8 +503,8 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     runner_source = (ROOT / "scripts/acceptance/skill_adapters.py").read_text(encoding="utf-8")
     review_source = runner_source.replace(
-        "Resolve only the known redundant-f-string warning",
-        "Resolve only the known behavior-preserving warning",
+        "never fabricate a finding to force a verify round",
+        "never invent a finding to force a verify round",
     )
     review_row = next(
         row for row in data["rows"]

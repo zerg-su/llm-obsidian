@@ -77,8 +77,13 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   prepared plan close, and bind the Codex daily summarizer to the complete
   object schema instead of relying on prose-only shape hints.
 - Make daily acceptance account for the canonical writer-owned `wiki/log.md`
-  evidence update, while backlog acceptance restores the inbox byte-for-byte
-  through the canonical writer instead of weakening product-residue checks.
+  evidence update and one exact address allocation, while backlog acceptance
+  restores the inbox byte-for-byte through the canonical writer instead of
+  weakening product-residue checks.
+- Treat either a real reviewer approval or a reviewed warning/fix/verification
+  round as valid live review evidence. Acceptance no longer fabricates a
+  finding—or fails a healthy review—merely to force a nondeterministic model
+  through the optional verification branch.
 - Use the standard `python3` entrypoint and a neutral authoritative-result
   contract for task-local review drive callbacks, avoiding Claude auto-mode
   classifier denials on Homebrew interpreter paths.

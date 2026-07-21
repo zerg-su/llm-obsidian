@@ -117,6 +117,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "exactly one local commit" in fixture_registry["skills"]["daily"]["fixture"]
         and "Acceptance Daily Fixture.md" in fixture_registry["skills"]["daily"]["fixture"]
         and "writer-owned wiki/log.md update" in fixture_registry["skills"]["daily"]["fixture"]
+        and "exact one-step .vault-meta/address-counter.txt allocation"
+        in fixture_registry["skills"]["daily"]["fixture"]
         and "without committing that deletion" in fixture_registry["skills"]["daily"]["fixture"]
         and "Do not create a cleanup commit" in fixture_registry["skills"]["daily"]["fixture"],
     )
@@ -902,9 +904,14 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=daily_repo, check=True)
     subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=daily_repo, check=True)
     (daily_repo / "tracked.txt").write_text("release\n", encoding="utf-8")
+    (daily_repo / ".vault-meta").mkdir()
+    (daily_repo / ".vault-meta/address-counter.txt").write_text("7\n", encoding="utf-8")
     (daily_repo / "wiki").mkdir()
     (daily_repo / "wiki/log.md").write_text("release log\n", encoding="utf-8")
-    subprocess.run(["git", "add", "tracked.txt", "wiki/log.md"], cwd=daily_repo, check=True)
+    subprocess.run(
+        ["git", "add", "tracked.txt", ".vault-meta/address-counter.txt", "wiki/log.md"],
+        cwd=daily_repo, check=True,
+    )
     subprocess.run(["git", "commit", "-qm", "release"], cwd=daily_repo, check=True)
     daily_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=daily_repo,
@@ -912,10 +919,16 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     ).stdout.strip()
     daily_page = daily_repo / "wiki/meta/sessions/Acceptance daily fixture.md"
     daily_page.parent.mkdir(parents=True)
-    daily_page.write_text("---\ntype: session\n---\n", encoding="utf-8")
+    daily_page.write_text(
+        "---\ntype: session\naddress: c-000007\n---\n", encoding="utf-8"
+    )
+    (daily_repo / ".vault-meta/address-counter.txt").write_text("8\n", encoding="utf-8")
     (daily_repo / "wiki/log.md").write_text("daily evidence log\n", encoding="utf-8")
     subprocess.run(
-        ["git", "add", str(daily_page.relative_to(daily_repo)), "wiki/log.md"],
+        [
+            "git", "add", str(daily_page.relative_to(daily_repo)),
+            ".vault-meta/address-counter.txt", "wiki/log.md",
+        ],
         cwd=daily_repo,
         check=True,
     )
@@ -933,6 +946,20 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check(
         "daily cleanup still rejects unrelated residue",
         not daily_clean and "retained" in daily_proof,
+        daily_proof,
+    )
+    (daily_repo / "unexpected.md").unlink()
+    (daily_repo / ".vault-meta/address-counter.txt").write_text("9\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".vault-meta/address-counter.txt"], cwd=daily_repo, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "--amend", "--no-edit", "-q"], cwd=daily_repo, check=True
+    )
+    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
+    check(
+        "daily cleanup rejects a multi-step address allocation",
+        not daily_clean and "did not advance exactly once" in daily_proof,
         daily_proof,
     )
 
@@ -1007,6 +1034,13 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "reports exit 0 with `applied=true`" in review_fixture_text
         and "publish the acceptance outbox immediately" in review_fixture_text
         and "do not wait for, inspect, or poll" in review_fixture_text,
+    )
+    check(
+        "review acceptance preserves the real nondeterministic verdict",
+        "never fabricate a finding" in review_fixture_text
+        and "On approve, make no product change" in review_fixture_text
+        and "On a warning or nit" in review_fixture_text
+        and "Either validated path is a pass" in review_fixture_text,
     )
     review_cleanup_prompt = module.prompt_text(
         row(skill="review-send", scenario="dispatch-review-reap",
