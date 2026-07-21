@@ -88,6 +88,77 @@ check(
     and acceptance_workspaces.WORKSPACE_ID.fullmatch("12345678-1234-1234-1234-123456789abc") is not None,
 )
 
+workspace_uuid = "12345678-1234-1234-1234-123456789abc"
+workspace_calls: list[list[str]] = []
+real_workspace_run = acceptance_workspaces.subprocess.run
+
+
+def fake_workspace_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    workspace_calls.append(command)
+    if command[3:5] == ["workspace", "create"]:
+        return subprocess.CompletedProcess(command, 0, stdout="OK workspace:7\n", stderr="")
+    if command[3:5] == ["workspace", "list"]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({
+                "workspaces": [
+                    {"ref": "workspace:7", "id": workspace_uuid},
+                    {"ref": "workspace:8", "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+                ]
+            }),
+            stderr="",
+        )
+    raise AssertionError(f"unexpected cmux call: {command}")
+
+
+acceptance_workspaces.subprocess.run = fake_workspace_run
+try:
+    resolved_workspace = acceptance_workspaces.create_workspace(
+        ROOT, "Acceptance test", ["python3", "worker.py"]
+    )
+finally:
+    acceptance_workspaces.subprocess.run = real_workspace_run
+check(
+    "workspace creation resolves current cmux short ref to exact UUID",
+    resolved_workspace == workspace_uuid
+    and workspace_calls[0][3:5] == ["workspace", "create"]
+    and workspace_calls[1] == [
+        "cmux", "--id-format", "both", "workspace", "list", "--json"
+    ],
+)
+
+cleanup_calls: list[list[str]] = []
+
+
+def fake_unresolvable_workspace_run(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    cleanup_calls.append(command)
+    if command[3:5] == ["workspace", "create"]:
+        return subprocess.CompletedProcess(command, 0, stdout="OK workspace:9\n", stderr="")
+    if command[3:5] == ["workspace", "list"]:
+        return subprocess.CompletedProcess(command, 0, stdout='{"workspaces": []}', stderr="")
+    if command[:3] == ["cmux", "workspace", "close"]:
+        return subprocess.CompletedProcess(command, 0, stdout="OK workspace:9\n", stderr="")
+    raise AssertionError(f"unexpected cmux call: {command}")
+
+
+acceptance_workspaces.subprocess.run = fake_unresolvable_workspace_run
+try:
+    try:
+        acceptance_workspaces.create_workspace(ROOT, "Acceptance test", ["python3", "worker.py"])
+    except acceptance_workspaces.WorkspaceAcceptanceError:
+        pass
+    else:
+        check("unresolved created workspace is contained", False)
+finally:
+    acceptance_workspaces.subprocess.run = real_workspace_run
+check(
+    "unresolved created workspace is contained",
+    cleanup_calls[-1] == ["cmux", "workspace", "close", "workspace:9"],
+)
+
 timeout_args = acceptance_workspaces.parser().parse_args([
     "run", "--phase", "final", "--runner", "fixture", "--report", "fixture.json",
     "--cell-timeout", "0",

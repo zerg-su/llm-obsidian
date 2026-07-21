@@ -38,6 +38,7 @@ MAX_JOBS_PER_WORKSPACE = 5
 WORKSPACE_ID = re.compile(
     r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b"
 )
+WORKSPACE_REF = re.compile(r"\bworkspace:[0-9]+\b")
 FORWARDED_ENV = (
     "LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL",
     "LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL",
@@ -336,10 +337,42 @@ def worker(config_path: Path) -> int:
     return result.returncode
 
 
+def workspace_inventory() -> list[dict[str, Any]]:
+    result = subprocess.run(
+        ["cmux", "--id-format", "both", "workspace", "list", "--json"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise WorkspaceAcceptanceError("cannot reconcile owned acceptance workspaces")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise WorkspaceAcceptanceError("cmux workspace inventory is not valid JSON") from exc
+    workspaces = payload.get("workspaces") if isinstance(payload, dict) else None
+    if not isinstance(workspaces, list) or any(not isinstance(item, dict) for item in workspaces):
+        raise WorkspaceAcceptanceError("cmux workspace inventory has an invalid schema")
+    return workspaces
+
+
+def resolve_workspace_id(workspace_ref: str) -> str:
+    matches = [
+        str(item.get("id", ""))
+        for item in workspace_inventory()
+        if item.get("ref") == workspace_ref
+    ]
+    if len(matches) != 1 or WORKSPACE_ID.fullmatch(matches[0]) is None:
+        raise WorkspaceAcceptanceError(
+            f"cmux did not resolve the created workspace exactly: {workspace_ref}"
+        )
+    return matches[0]
+
+
 def create_workspace(root: Path, name: str, command: list[str]) -> str:
     result = subprocess.run(
         [
-            "cmux", "--id-format", "uuids", "new-workspace", "--name", name, "--cwd", str(root),
+            "cmux", "--id-format", "both", "workspace", "create", "--name", name, "--cwd", str(root),
             "--command", shlex.join(command), "--focus", "false",
         ],
         text=True,
@@ -347,15 +380,32 @@ def create_workspace(root: Path, name: str, command: list[str]) -> str:
         check=False,
     )
     output = (result.stdout + result.stderr).strip()
-    match = WORKSPACE_ID.search(output)
-    if result.returncode != 0 or match is None:
+    if result.returncode != 0:
         raise WorkspaceAcceptanceError(output or "cmux did not create an acceptance workspace")
-    return match.group(0)
+    identifier = WORKSPACE_ID.search(output)
+    if identifier is not None:
+        return identifier.group(0)
+    reference = WORKSPACE_REF.search(output)
+    if reference is None:
+        raise WorkspaceAcceptanceError(output or "cmux did not identify the created workspace")
+    workspace_ref = reference.group(0)
+    try:
+        return resolve_workspace_id(workspace_ref)
+    except WorkspaceAcceptanceError:
+        # The create call has already had an external effect. Contain it even
+        # when a cmux version cannot provide the exact UUID ownership token.
+        subprocess.run(
+            ["cmux", "workspace", "close", workspace_ref],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        raise
 
 
 def close_workspace(workspace: str) -> None:
     result = subprocess.run(
-        ["cmux", "close-workspace", "--workspace", workspace],
+        ["cmux", "workspace", "close", workspace],
         text=True,
         capture_output=True,
         check=False,
@@ -365,13 +415,8 @@ def close_workspace(workspace: str) -> None:
 
 
 def workspace_is_open(workspace: str) -> bool:
-    result = subprocess.run(
-        ["cmux", "--id-format", "uuids", "list-workspaces"],
-        text=True, capture_output=True, check=False,
-    )
-    if result.returncode != 0:
-        raise WorkspaceAcceptanceError("cannot reconcile owned acceptance workspaces")
-    return workspace.lower() in (result.stdout + result.stderr).lower()
+    expected = workspace.lower()
+    return any(str(item.get("id", "")).lower() == expected for item in workspace_inventory())
 
 
 def supervise(args: argparse.Namespace) -> int:
