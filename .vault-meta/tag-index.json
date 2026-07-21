@@ -9,10 +9,14 @@
     "wiki/concepts/DragonScale Memory.md"
   ],
   "backlog": [
+    "wiki/backlog.md",
     "wiki/concepts/cherry-picks.md"
   ],
   "brand": [
     "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "capture": [
+    "wiki/backlog.md"
   ],
   "cherry-picks": [
     "wiki/concepts/cherry-picks.md"
@@ -41,7 +45,13 @@
   ],
   "cross-model": [
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
-    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md"
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 06aeda67d29d.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 43a447bc1b02.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 6fb4143a11f2.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — ab4803b6000c.md"
   ],
   "dashboard": [
     "wiki/meta/dashboard.md"
@@ -161,7 +171,13 @@
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
-    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md"
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 06aeda67d29d.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 43a447bc1b02.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — 6fb4143a11f2.md",
+    "wiki/meta/reviews/Cross-model review — v2.1.1 final implementation review — ab4803b6000c.md"
   ],
   "skills": [
     "wiki/meta/daily-pipeline-guide.md"
@@ -174,6 +190,9 @@
   ],
   "synthesis": [
     "wiki/concepts/Source-First Synthesis.md"
+  ],
+  "todo": [
+    "wiki/backlog.md"
   ],
   "v2-0-8": [
     "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md"
