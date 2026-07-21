@@ -1,8 +1,14 @@
 # Changelog
 
+Language: **English** · [Русский](CHANGELOG.ru.md)
+
 All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
+
+Only public releases are listed. Versions 2.0.5 and 2.1.1 were internal
+checkpoints folded into the following public releases; no public tags or
+packages were published for them.
 
 ## [2.1.2] - 2026-07-21
 
