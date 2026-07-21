@@ -93,6 +93,7 @@ dependencies = [
   "scripts/reap-runner.py",
   "scripts/task_contract.py",
   "skills/review-dispatch/scripts/spawn_review.py",
+  "skills/reap-send/scripts/send_reap.py",
 ]
 
 [scenarios.retrieval]

@@ -470,6 +470,10 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
     check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
     check(
+        "read-only fixtures omit vault reindex instructions",
+        "run `python3 scripts/reindex.py`" not in prompt,
+    )
+    check(
         "conversation scenario requires plain output instead of interactive UI",
         "Do not invoke an interactive question tool" in prompt,
     )
@@ -1029,6 +1033,20 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check(
         "acceptance request binds exact coordinator surface",
         prepared_request["origin_surface"] == "22222222-2222-4222-8222-222222222222",
+    )
+    module.write_dispatch_acceptance_request(
+        repo,
+        prepared,
+        source_commit=commit,
+        coordinator_surface="22222222-2222-4222-8222-222222222222",
+        coordinator_model="gpt-5.6-sol",
+        coordinator_effort="high",
+        placement="workspace",
+    )
+    workspace_request = json.loads(Path(prepared["dispatch_spec"]).read_text(encoding="utf-8"))
+    check(
+        "workspace dispatch acceptance is explicit",
+        workspace_request["placement"] == "workspace",
     )
     Path(prepared["dispatch_spec"]).unlink()
     check(

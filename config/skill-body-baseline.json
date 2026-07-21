@@ -11,6 +11,7 @@
     "daily": {"body_bytes": 3848, "body_lines": 98, "closure_bytes": 3848, "closure_token_estimate": 962, "token_estimate": 962},
     "defuddle": {"body_bytes": 2665, "body_lines": 84, "closure_bytes": 2665, "closure_token_estimate": 667, "token_estimate": 667},
     "dispatch": {"body_bytes": 4615, "body_lines": 92, "closure_bytes": 4615, "closure_token_estimate": 1154, "token_estimate": 1154},
+    "dispatch-workspace": {"body_bytes": 891, "body_lines": 20, "closure_bytes": 891, "closure_token_estimate": 223, "token_estimate": 223},
     "distill-runbook": {"body_bytes": 4395, "body_lines": 82, "closure_bytes": 4395, "closure_token_estimate": 1099, "token_estimate": 1099},
     "draft": {"body_bytes": 7840, "body_lines": 202, "closure_bytes": 7840, "closure_token_estimate": 1960, "token_estimate": 1960},
     "find-session": {"body_bytes": 6745, "body_lines": 197, "closure_bytes": 6745, "closure_token_estimate": 1687, "token_estimate": 1687},

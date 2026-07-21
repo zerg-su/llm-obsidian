@@ -128,6 +128,24 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("prompt omits empty agents", "## Suggested sub-agents" not in prompt)
     check("prompt has no branch control markers", "<!-- BRANCH" not in prompt)
     check("prompt binds reap skill", "$llm-obsidian:reap" in prompt)
+    check("classic dispatch defaults to split placement", request["placement"] == "split")
+    workspace_raw = json.loads(json.dumps(raw_request))
+    workspace_raw["placement"] = "workspace"
+    workspace_request = runner.validate_request(workspace_raw)
+    workspace_prompt = runner.render_task_prompt(workspace_request, config)
+    check(
+        "workspace dispatch is explicit and rewrites coordinator navigation",
+        workspace_request["placement"] == "workspace"
+        and "the coordinator workspace" in workspace_prompt
+        and "the left wiki split" not in workspace_prompt,
+    )
+    invalid_placement = json.loads(json.dumps(raw_request))
+    invalid_placement["placement"] = "focused"
+    expect_error(
+        "dispatch placement never guesses from focus",
+        lambda: runner.validate_request(invalid_placement),
+        "split or workspace",
+    )
     check(
         "unattended finalization uses the code-owned reap sender",
         "do not depend on runtime skill discovery" in prompt
@@ -178,6 +196,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("runner writes exact task handoff", (worktree / ".task-cmux-surface").read_text().strip() == meta["task_surface"])
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")
+    check("runner metadata records split placement", meta["surface_policy"]["placement"] == "split")
 
     duplicate = json.loads(json.dumps(raw_request))
     expect_error(

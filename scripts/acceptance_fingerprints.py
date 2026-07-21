@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import ast
+import functools
 import hashlib
 import json
 import os
@@ -31,6 +33,46 @@ ALLOWED_ORCHESTRATION_DEPENDENCIES = {
     "scripts/acceptance-workspace-supervisor.py",
     "scripts/live-acceptance-runner.py",
     "scripts/release-acceptance.py",
+}
+RUNTIME_SCRIPT_PREFIXES = ("scripts/", "skills/", "hooks/", ".claude/hooks/", "bin/")
+RUNTIME_SCRIPT_SUFFIXES = {".py", ".sh"}
+LIVE_RUNNER_BEHAVIOR_PATH = "scripts/live-acceptance-runner.py"
+LIVE_RUNNER_PROMPT_FUNCTION = "prompt_text"
+LIVE_RUNNER_COMMON_FUNCTIONS = {
+    "die", "read_json", "atomic_json", "load_scenarios", "load_skill_fixtures",
+    "validate_row", "result_payload", "validate_agent_result", "git_head",
+    "create_sandbox", "disable_acceptance_autocommit", "install_acceptance_model_overrides",
+    "run_checked", "git_output", "agent_argv", "run_agent_process", "send_surface",
+    "settled_outbox", "wait_for_outbox", "close_surface", "scratch_root_for",
+    "safe_cleanup", "operation_child_surfaces", "surface_is_open",
+    "wait_for_operation_children", "close_operation_children", "settle_operation_surfaces",
+    "is_disposable_bookkeeping", "sandbox_cleanup_proof", "run_with_backend", "run_live",
+    "blocked", "build_parser", "main",
+}
+LIVE_RUNNER_SCENARIO_FUNCTIONS = {
+    "dispatch-review-reap": {
+        "install_acceptance_runtime_fixture",
+        "lifecycle_acceptance_cleanup_proof",
+    },
+}
+LIVE_RUNNER_SKILL_FUNCTIONS = {
+    "dispatch": {
+        "dispatch_acceptance_fixture", "dispatch_fixture_prompt",
+        "write_dispatch_acceptance_request", "dispatch_acceptance_proof",
+    },
+    "dispatch-workspace": {
+        "dispatch_acceptance_fixture", "dispatch_fixture_prompt",
+        "write_dispatch_acceptance_request", "dispatch_acceptance_proof",
+    },
+    "review-dispatch": {
+        "review_acceptance_fixture", "bind_review_acceptance_fixture", "review_fixture_prompt",
+    },
+    "review-send": {
+        "review_acceptance_fixture", "bind_review_acceptance_fixture", "review_fixture_prompt",
+    },
+    "close": {"close_acceptance_fixture", "close_fixture_prompt", "close_acceptance_proof"},
+    "autoresearch": {"commit_file", "autoresearch_acceptance_cleanup"},
+    "daily": {"daily_acceptance_cleanup"},
 }
 
 
@@ -94,6 +136,105 @@ def safe_dependencies(values: Iterable[object]) -> list[str]:
     return result
 
 
+@functools.lru_cache(maxsize=32)
+def _runtime_script_index(root_text: str) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
+    root = Path(root_text)
+    candidates = [
+        path.relative_to(root).as_posix()
+        for prefix in RUNTIME_SCRIPT_PREFIXES
+        for path in (root / prefix).rglob("*")
+        if path.is_file() and path.suffix in RUNTIME_SCRIPT_SUFFIXES
+    ]
+    by_name: dict[str, list[str]] = {}
+    for candidate in candidates:
+        by_name.setdefault(Path(candidate).name, []).append(candidate)
+    return tuple(candidates), {name: tuple(values) for name, values in by_name.items()}
+
+
+@functools.lru_cache(maxsize=1024)
+def _cached_runtime_script_references(
+    root_text: str, rel: str, source_sha256: str,
+) -> tuple[str, ...]:
+    root = Path(root_text)
+    source = root / rel
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=rel)
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise FingerprintError(f"cannot inspect acceptance runtime dependency {rel}: {exc}") from exc
+    _candidates, by_name = _runtime_script_index(root_text)
+    runtime_helpers = {"run", "run_checked", "runner"}
+
+    def invokes_process(function: ast.AST) -> bool:
+        for item in ast.walk(function):
+            if not isinstance(item, ast.Call):
+                continue
+            if isinstance(item.func, ast.Name) and item.func.id in runtime_helpers:
+                return True
+            if (
+                isinstance(item.func, ast.Attribute)
+                and isinstance(item.func.value, ast.Name)
+                and item.func.value.id == "subprocess"
+                and item.func.attr in {"run", "Popen", "check_call", "check_output"}
+            ):
+                return True
+        return False
+
+    runtime_functions = [
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and invokes_process(node)
+    ]
+    loaded_names = {
+        node.id
+        for function in runtime_functions
+        for node in ast.walk(function)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    relevant_nodes: list[ast.AST] = list(runtime_functions)
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names = {
+            item.id for target in targets for item in ast.walk(target)
+            if isinstance(item, ast.Name)
+        }
+        if names & loaded_names:
+            relevant_nodes.append(node)
+
+    references: set[str] = set()
+    for relevant in relevant_nodes:
+        for node in ast.walk(relevant):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            value = node.value.strip().replace("\\", "/")
+            if Path(value).suffix not in RUNTIME_SCRIPT_SUFFIXES:
+                continue
+            if (
+                any(value.startswith(prefix) for prefix in RUNTIME_SCRIPT_PREFIXES)
+                and (root / value).is_file()
+            ):
+                references.add(value)
+                continue
+            matches = by_name.get(Path(value).name, [])
+            if len(matches) == 1:
+                references.add(matches[0])
+    references.discard(rel)
+    return tuple(sorted(references))
+
+
+def runtime_script_references(root: Path, rel: str) -> list[str]:
+    """Resolve repo-owned script literals used by a Python runtime dependency."""
+
+    source = root / rel
+    if source.suffix != ".py" or not source.is_file():
+        return []
+    try:
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise FingerprintError(f"cannot inspect acceptance runtime dependency {rel}: {exc}") from exc
+    return list(_cached_runtime_script_references(str(root.resolve()), rel, digest))
+
+
 def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scenario: str) -> list[str]:
     scenario_table = manifest.get("scenarios")
     if not isinstance(scenario_table, dict) or not isinstance(scenario_table.get(scenario), dict):
@@ -115,7 +256,15 @@ def expanded_dependencies(root: Path, manifest: dict[str, Any], skill: str, scen
         for path in sorted(skill_root.rglob("*"))
         if path.is_file() and "__pycache__" not in path.parts
     )
-    return sorted(safe_dependencies(values))
+    dependencies = set(safe_dependencies(values))
+    pending = list(dependencies)
+    while pending:
+        rel = pending.pop()
+        for reference in runtime_script_references(root, rel):
+            if reference not in dependencies:
+                dependencies.add(reference)
+                pending.append(reference)
+    return sorted(dependencies)
 
 
 def non_behavioral_paths(manifest: dict[str, Any]) -> set[str]:
@@ -162,6 +311,113 @@ def file_hashes(root: Path, dependencies: Iterable[str]) -> list[dict[str, str]]
             digest = "missing"
         values.append({"path": rel, "sha256": digest})
     return values
+
+
+@functools.lru_cache(maxsize=16)
+def _live_runner_program(
+    path_text: str, _source_sha256: str, source: str,
+) -> tuple[tuple[str, ...], dict[str, str], Any]:
+    try:
+        tree = ast.parse(source, filename=LIVE_RUNNER_BEHAVIOR_PATH)
+    except (SyntaxError, UnicodeError) as exc:
+        raise FingerprintError(f"cannot inspect live acceptance behavior: {exc}") from exc
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    scoped_names = set().union(*LIVE_RUNNER_SCENARIO_FUNCTIONS.values())
+    scoped_names.update(set().union(*LIVE_RUNNER_SKILL_FUNCTIONS.values()))
+    expected_names = LIVE_RUNNER_COMMON_FUNCTIONS | scoped_names | {LIVE_RUNNER_PROMPT_FUNCTION}
+    if set(functions) != expected_names:
+        missing = sorted(expected_names - set(functions))
+        unknown = sorted(set(functions) - expected_names)
+        raise FingerprintError(
+            "live acceptance behavior classification drifted; "
+            f"missing={missing}, unclassified={unknown}"
+        )
+    module_nodes: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = {
+                item.id for target in targets for item in ast.walk(target)
+                if isinstance(item, ast.Name)
+            }
+            if "VAULT_REINDEX_SCENARIOS" in names:
+                continue
+        module_nodes.append(ast.dump(node, include_attributes=False))
+    namespace: dict[str, Any] = {
+        "__file__": path_text,
+        "__name__": "acceptance_behavior_fingerprint",
+    }
+    try:
+        exec(compile(source, path_text, "exec"), namespace)
+    except Exception as exc:
+        raise FingerprintError(f"cannot load live acceptance behavior: {exc}") from exc
+    return (
+        tuple(module_nodes),
+        {
+            name: ast.dump(node, include_attributes=False)
+            for name, node in functions.items()
+        },
+        namespace[LIVE_RUNNER_PROMPT_FUNCTION],
+    )
+
+
+def live_runner_behavior_sha256(
+    root: Path, row: dict[str, Any], *, source_text: str | None = None,
+) -> str:
+    """Hash common code, scoped proof helpers, and the exact rendered row prompt."""
+
+    path = root / LIVE_RUNNER_BEHAVIOR_PATH
+    try:
+        source = source_text if source_text is not None else path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise FingerprintError(f"cannot inspect live acceptance behavior: {exc}") from exc
+    module_nodes, function_dumps, prompt_renderer = _live_runner_program(
+        str(path), hashlib.sha256(source.encode("utf-8")).hexdigest(), source,
+    )
+    selected_names = set(LIVE_RUNNER_COMMON_FUNCTIONS)
+    selected_names.update(LIVE_RUNNER_SCENARIO_FUNCTIONS.get(str(row["scenario"]), set()))
+    selected_names.update(LIVE_RUNNER_SKILL_FUNCTIONS.get(str(row["skill"]), set()))
+    try:
+        runner_fixture = None
+        if row["skill"] in {"review-dispatch", "review-send"}:
+            runner_fixture = {
+                "fixture_kind": "review",
+                "nested_worktree": "/acceptance/task",
+            }
+        elif row["skill"] in {"dispatch", "dispatch-workspace"}:
+            runner_fixture = {
+                "fixture_kind": "dispatch",
+                "nested_worktree": "/acceptance/task",
+            }
+        prompt = prompt_renderer(
+            row,
+            {"network": "network-class", "instructions": "scenario instructions"},
+            Path("/acceptance/sandbox"),
+            Path("/acceptance/outbox.json"),
+            "acceptance-model",
+            "medium",
+            "0" * 40,
+            "skill fixture",
+            runner_fixture,
+        )
+    except Exception as exc:
+        raise FingerprintError(f"cannot render live acceptance behavior: {exc}") from exc
+    payload = {
+        "module_nodes": module_nodes,
+        "functions": {
+            name: function_dumps[name]
+            for name in sorted(selected_names)
+        },
+        "prompt": prompt,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def cell_dependency_hashes(
@@ -215,6 +471,13 @@ def environment_contract() -> dict[str, str]:
     }
 
 
+def compatible_runtime_version(value: str) -> str:
+    """Collapse agent CLI patch releases into their supported major.minor line."""
+
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)(?:\.\d+)?(?!\d)", value)
+    return f"{match.group(1)}.{match.group(2)}" if match else value
+
+
 def scoped_environment_contract(
     manifest: dict[str, Any], row: dict[str, Any], environment: dict[str, str],
     *, scope_version: int | None = None,
@@ -248,7 +511,14 @@ def scoped_environment_contract(
     missing = [key for key in keys if key not in environment]
     if missing:
         raise FingerprintError("acceptance environment is missing: " + ", ".join(missing))
-    return {key: environment[key] for key in keys}
+    return {
+        key: (
+            compatible_runtime_version(environment[key])
+            if key in {"claude", "codex"}
+            else environment[key]
+        )
+        for key in keys
+    }
 
 
 def canonical_generation(model: str, manifest: dict[str, Any]) -> str:
@@ -287,8 +557,15 @@ def cell_metadata(
     environment: dict[str, str] | None = None,
     generations: dict[str, dict[str, str]] | None = None,
     environment_scope_version: int | None = None,
+    dependencies_override: Iterable[str] | None = None,
+    include_live_runner_behavior: bool = True,
+    live_runner_source_override: str | None = None,
 ) -> dict[str, Any]:
-    dependencies = expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
+    dependencies = (
+        expanded_dependencies(root, manifest, str(row["skill"]), str(row["scenario"]))
+        if dependencies_override is None
+        else sorted(safe_dependencies(dependencies_override))
+    )
     generation_map = generations or production_generations(root, manifest)
     generation = generation_map[str(row["runtime"])]["generation"]
     environment_value = scoped_environment_contract(
@@ -296,6 +573,11 @@ def cell_metadata(
         row,
         environment or environment_contract(),
         scope_version=environment_scope_version,
+    )
+    live_behavior = (
+        live_runner_behavior_sha256(
+            root, row, source_text=live_runner_source_override,
+        ) if include_live_runner_behavior else None
     )
     payload = {
         "runner_contract_version": manifest["runner_contract_version"],
@@ -313,6 +595,8 @@ def cell_metadata(
         "environment": environment_value,
         "generation": generation,
     }
+    if live_behavior is not None:
+        payload["live_runner_behavior_sha256"] = live_behavior
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     environment_encoded = json.dumps(
         environment_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -321,6 +605,7 @@ def cell_metadata(
         "cell_fingerprint": hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
         "dependencies": dependencies,
         "generation": generation,
+        "live_runner_behavior_sha256": live_behavior,
         "environment_sha256": hashlib.sha256(
             environment_encoded.encode("utf-8")
         ).hexdigest(),
@@ -380,6 +665,7 @@ __all__ = [
     "environment_contract",
     "expanded_dependencies",
     "generation_snapshot",
+    "live_runner_behavior_sha256",
     "scoped_environment_contract",
     "non_behavioral_paths",
     "non_behavioral_prefixes",
@@ -387,4 +673,5 @@ __all__ = [
     "is_non_behavioral_path",
     "production_generations",
     "read_manifest",
+    "runtime_script_references",
 ]

@@ -184,6 +184,10 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     surface = meta.get("surface_policy")
     if not isinstance(surface, dict) or not isinstance(surface.get("auto_close"), bool):
         raise ContractError("surface_policy.auto_close must be boolean")
+    placement = str(surface.get("placement") or "split")
+    if placement not in {"split", "workspace"}:
+        raise ContractError("surface_policy.placement must be split or workspace")
+    surface = {**surface, "placement": placement}
     raw_watchdog = meta.get("watchdog_policy")
     if raw_watchdog is None:
         watchdog = dict(DEFAULT_WATCHDOG_POLICY)

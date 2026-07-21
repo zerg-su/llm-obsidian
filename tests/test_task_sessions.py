@@ -27,6 +27,7 @@ from task_sessions import (
     lane_id_for,
     project_id_for,
     spawn_right,
+    spawn_workspace,
     surface_context,
 )
 from task_contract import v3_session_is_bound
@@ -610,6 +611,62 @@ retry_spawn = spawn_right("origin-1", cmux_workspace_retry)
 check(
     "spawn retries with exact workspace for current cmux",
     retry_spawn["surface"] == "22222222-2222-4222-8222-222222222222",
+)
+
+workspace_created = False
+workspace_spawn_calls: list[list[str]] = []
+
+
+def workspace_spawn_runner(args: list[str], **_: object) -> Result:
+    global workspace_created
+    workspace_spawn_calls.append(args)
+    if args == ["cmux", "rpc", "system.tree", '{"all":true}']:
+        workspaces = [{
+            "id": "origin-workspace-id",
+            "ref": "workspace:1",
+            "panes": [{
+                "id": "origin-pane-id",
+                "ref": "pane:1",
+                "surfaces": [{"id": "origin-1", "ref": "surface:1"}],
+            }],
+        }]
+        if workspace_created:
+            workspaces.append({
+                "id": "44444444-4444-4444-8444-444444444444",
+                "ref": "workspace:22",
+                "panes": [{
+                    "id": "55555555-5555-4555-8555-555555555556",
+                    "ref": "pane:22",
+                    "surfaces": [{
+                        "id": "55555555-5555-4555-8555-555555555555",
+                        "ref": "surface:22",
+                    }],
+                }],
+            })
+        return Result(stdout=json.dumps({
+            "windows": [{"id": "window-id", "ref": "window:7", "workspaces": workspaces}],
+        }))
+    if "new-workspace" in args:
+        workspace_created = True
+        return Result(stdout="OK workspace:22 (44444444-4444-4444-8444-444444444444)")
+    return Result(returncode=1)
+
+
+workspace_spawn = spawn_workspace("origin-1", ROOT, "Task · demo", workspace_spawn_runner)
+check(
+    "workspace dispatch targets the exact origin window without focus",
+    any(
+        "new-workspace" in call
+        and call[call.index("--window") + 1] == "window:7"
+        and call[call.index("--focus") + 1] == "false"
+        for call in workspace_spawn_calls
+    ),
+)
+check(
+    "workspace dispatch resolves one exact child surface",
+    workspace_spawn["surface"] == "55555555-5555-4555-8555-555555555555"
+    and workspace_spawn["surface_ref"] == "surface:22"
+    and workspace_spawn["workspace_ref"] == "workspace:22",
 )
 
 exact_surface = "33333333-3333-4333-8333-333333333333"

@@ -226,7 +226,7 @@ def decorate_result(
     return value
 
 
-def build_environment_migration_metadata(
+def build_resume_migration_metadata(
     path: Path,
     rows: list[dict[str, Any]],
     root: Path,
@@ -238,11 +238,21 @@ def build_environment_migration_metadata(
     dict[tuple[str, str, str, str, str], dict[str, Any]],
     dict[tuple[str, str, str, str, str], dict[str, Any]],
 ] | None:
-    """Build fail-closed metadata for a report created by an older env scope."""
+    """Build fail-closed metadata for compatible env/dependency migrations."""
 
     if not path.is_file():
         return None
     report = read_object(path)
+    prior_commit = str(report.get("source_commit") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", prior_commit):
+        return None
+    prior_runner = subprocess.run(
+        ["git", "show", f"{prior_commit}:scripts/live-acceptance-runner.py"],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    if prior_runner.returncode != 0 or not prior_runner.stdout:
+        return None
+    prior_runner_source = prior_runner.stdout
     prior_scope = report.get("environment_scope_version", 1)
     if (
         isinstance(prior_scope, bool)
@@ -250,8 +260,6 @@ def build_environment_migration_metadata(
         or prior_scope not in {1, 2}
     ):
         raise AcceptanceError("existing acceptance report has an invalid environment scope")
-    if prior_scope >= current_scope_version:
-        return None
     prior_environment = report.get("environment")
     required = {"os", "os_release", "architecture", "cmux", "claude", "codex"}
     if (
@@ -263,7 +271,32 @@ def build_environment_migration_metadata(
         )
     ):
         return None
-    legacy = {
+    prior_rows: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    raw_rows = report.get("rows")
+    if not isinstance(raw_rows, list):
+        return None
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            key = row_key(raw)
+        except KeyError:
+            return None
+        if key in prior_rows:
+            return None
+        dependencies = raw.get("dependencies")
+        live_behavior = raw.get("live_runner_behavior_sha256")
+        if (
+            not isinstance(dependencies, list)
+            or any(not isinstance(item, str) for item in dependencies)
+            or (
+                live_behavior is not None
+                and not re.fullmatch(r"[0-9a-f]{64}", str(live_behavior))
+            )
+        ):
+            return None
+        prior_rows[key] = raw
+    prior_raw = {
         row_key(row): cell_metadata(
             root,
             manifest,
@@ -271,6 +304,15 @@ def build_environment_migration_metadata(
             environment=prior_environment,
             generations=generations,
             environment_scope_version=prior_scope,
+            dependencies_override=(
+                prior_rows[row_key(row)].get("dependencies")
+                if row_key(row) in prior_rows else None
+            ),
+            include_live_runner_behavior=(
+                prior_rows[row_key(row)].get("live_runner_behavior_sha256") is not None
+                if row_key(row) in prior_rows else True
+            ),
+            live_runner_source_override=prior_runner_source,
         )
         for row in rows
     }
@@ -282,10 +324,11 @@ def build_environment_migration_metadata(
             environment=prior_environment,
             generations=generations,
             environment_scope_version=current_scope_version,
+            live_runner_source_override=prior_runner_source,
         )
         for row in rows
     }
-    return legacy, prior_scoped
+    return prior_raw, prior_scoped
 
 
 def load_resume_results(
@@ -330,6 +373,10 @@ def load_resume_results(
         or prior_environment_scope not in {1, 2}
     ):
         raise AcceptanceError("existing acceptance report has an invalid environment scope")
+    if prior_environment_scope > environment_scope_version:
+        raise AcceptanceError(
+            "existing acceptance report uses a newer environment scope; use --restart"
+        )
     changed = changed_paths(root, prior_commit, include_dirty=include_dirty)
     declared = {path for item in metadata.values() for path in item["dependencies"]}
     declared.update(non_behavioral or set())
@@ -359,11 +406,16 @@ def load_resume_results(
         provenance = raw.get("provenance")
         raw_fingerprint = str(raw.get("cell_fingerprint") or "")
         raw_dependencies = raw.get("dependencies")
+        raw_live_behavior = raw.get("live_runner_behavior_sha256")
         if (
             unknown_changed
             or not re.fullmatch(r"[0-9a-f]{64}", raw_fingerprint)
             or not isinstance(raw_dependencies, list)
             or any(not isinstance(item, str) for item in raw_dependencies)
+            or (
+                raw_live_behavior is not None
+                and not re.fullmatch(r"[0-9a-f]{64}", str(raw_live_behavior))
+            )
             or raw.get("generation") != current["generation"]
             or not isinstance(provenance, dict)
             or raw.get("row_integrity_sha256")
@@ -373,11 +425,22 @@ def load_resume_results(
         exact = (
             raw_fingerprint == current["cell_fingerprint"]
             and raw_dependencies == current["dependencies"]
+            and raw_live_behavior == current["live_runner_behavior_sha256"]
             and raw.get("environment_sha256") == current["environment_sha256"]
             and provenance.get("environment_sha256") == current["environment_sha256"]
         )
         prior_dependency_set = set(raw_dependencies)
         current_dependency_set = set(current["dependencies"])
+        prior_raw = prior_scoped = None
+        if environment_migration is not None:
+            prior_raw, prior_scoped = environment_migration
+        live_behavior_compatible = (
+            raw_live_behavior == current["live_runner_behavior_sha256"]
+            if raw_live_behavior is not None
+            else prior_scoped is not None
+            and prior_scoped[key]["live_runner_behavior_sha256"]
+            == current["live_runner_behavior_sha256"]
+        )
         compatible_orchestration_migration = (
             not exact
             and provenance.get("environment_sha256")
@@ -387,22 +450,27 @@ def load_resume_results(
             and bool(prior_dependency_set - current_dependency_set)
             and (prior_dependency_set - current_dependency_set) <= (orchestration or set())
             and not (changed & current_dependency_set)
+            and live_behavior_compatible
         )
         compatible_environment_migration = False
         if (
             not exact
-            and environment_migration is not None
-            and prior_environment_scope < environment_scope_version
+            and prior_raw is not None
+            and prior_scoped is not None
         ):
-            legacy, prior_scoped = environment_migration
-            legacy_current = legacy[key]
+            legacy_current = prior_raw[key]
             prior_scoped_current = prior_scoped[key]
+            added_dependencies = current_dependency_set - prior_dependency_set
             compatible_environment_migration = (
                 raw_fingerprint == legacy_current["cell_fingerprint"]
                 and raw_dependencies == legacy_current["dependencies"]
                 and raw.get("generation") == legacy_current["generation"]
                 and raw.get("environment_sha256") == legacy_current["environment_sha256"]
                 and provenance.get("environment_sha256") == legacy_current["environment_sha256"]
+                and not (prior_dependency_set - current_dependency_set)
+                and changed is not None
+                and not (changed & added_dependencies)
+                and live_behavior_compatible
                 and prior_scoped_current["cell_fingerprint"] == current["cell_fingerprint"]
                 and prior_scoped_current["environment_sha256"] == current["environment_sha256"]
             )
@@ -423,7 +491,7 @@ def load_resume_results(
                     "reused-identical"
                     if exact
                     else (
-                        "reused-compatible-environment-scope-migration"
+                        "reused-compatible-resume-migration"
                         if compatible_environment_migration
                         else "reused-compatible-orchestration-migration"
                     )
@@ -721,7 +789,7 @@ def main() -> int:
             orchestration=orchestration_only,
             orchestration_contract_version=orchestration_version,
             environment_scope_version=environment_scope_version,
-            environment_migration=build_environment_migration_metadata(
+            environment_migration=build_resume_migration_metadata(
                 args.report, rows, args.root.resolve(), manifest,
                 generations=generations,
                 current_scope_version=environment_scope_version,

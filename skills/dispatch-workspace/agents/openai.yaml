@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dispatch Workspace"
+  short_description: "Launch an approved task in a new cmux workspace"
+  default_prompt: "Use $dispatch-workspace to launch this approved plan in a separate cmux workspace."

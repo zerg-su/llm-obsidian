@@ -35,6 +35,17 @@ OUTBOX_STABLE_SECONDS = 1.0
 AGENT_EXIT_GRACE_SECONDS = 300.0
 CHILD_SURFACE_SETTLE_SECONDS = 45.0
 AUTORESEARCH_OUTPUT_LIMIT = 15
+VAULT_REINDEX_SCENARIOS = {
+    "agenda-carry",
+    "protected-web",
+    "vault-capture",
+    "obsidian-authoring",
+    "cmux-lifecycle",
+    "daily-summary",
+    "dispatch-review-reap",
+    "vault-maintenance",
+    "ingest",
+}
 DISPOSABLE_VAULT_BOOKKEEPING = {
     ".raw/.manifest.json",
     ".vault-meta/address-counter.txt",
@@ -963,7 +974,7 @@ def autoresearch_acceptance_cleanup(
 
 def write_dispatch_acceptance_request(
     sandbox: Path, fixture: dict[str, str], *, source_commit: str, coordinator_surface: str,
-    coordinator_model: str, coordinator_effort: str,
+    coordinator_model: str, coordinator_effort: str, placement: str = "split",
 ) -> None:
     atomic_json(Path(fixture["dispatch_spec"]), {
         "schema_version": 1,
@@ -980,6 +991,7 @@ def write_dispatch_acceptance_request(
         "base_branch": source_commit,
         "plan_file": fixture["plan_path"],
         "origin_surface": coordinator_surface,
+        "placement": placement,
         "session_route": {
             "runtime": fixture["coordinator_runtime"],
             "model": coordinator_model,
@@ -1135,6 +1147,12 @@ def prompt_text(
     model: str, effort: str, commit: str, fixture: str,
     runner_fixture: dict[str, str] | None = None,
 ) -> str:
+    reindex_contract = ""
+    if row["scenario"] in VAULT_REINDEX_SCENARIOS:
+        reindex_contract = """- When a fixture validates product pages after a `vault-write.py` mutation, run `python3 scripts/reindex.py`
+  before the whole-vault validation. Refreshing this derived index is normal fixture procedure, not a
+  product repair. Do not add an extra whole-vault validation after the fixture's final page cleanup.
+"""
     if row["skill"] == "close":
         cleanup_contract = f"""- This current acceptance surface is the only session fixture. Do not create or close another surface.
 - Leave the exact saved page in place for runner proof. The runner owns its transactional deletion,
@@ -1265,10 +1283,7 @@ Hard boundaries:
 - A public web read is allowed only when the declared network class permits it.
 - If authentication is required, return `blocked` and name only the credential class; never print a value.
 - Install nothing unless it is already covered by an explicit local noninteractive fixture. Missing optional dependencies must produce a visible blocked/degraded result.
-- When a fixture validates product pages after a `vault-write.py` mutation, run `python3 scripts/reindex.py`
-  before the whole-vault validation. Refreshing this derived index is normal fixture procedure, not a
-  product repair. Do not add an extra whole-vault validation after the fixture's final page cleanup.
-{cleanup_contract}
+{reindex_contract}{cleanup_contract}
 - Exercise the exact live fixture once. Do not precede it with a `--no-spawn`/dry-run copy of the flow.
 - Preserve real first-failure evidence; do not turn a retry into a clean pass without mentioning it.
 - An acceptance cell must not repair or edit product scripts, skills, tests, hooks, or configuration. If a
@@ -1934,7 +1949,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             route["effort"],
             source="acceptance-runner",
         )
-        if row["skill"] == "dispatch":
+        if row["skill"] in {"dispatch", "dispatch-workspace"}:
             prepared_dispatch = dispatch_acceptance_fixture(sandbox, run_id, row["runtime"])
             fixture = dispatch_fixture_prompt(prepared_dispatch)
         elif row["skill"] in {"review-dispatch", "review-send"}:
@@ -2000,6 +2015,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 coordinator_surface=surface,
                 coordinator_model=route["model"],
                 coordinator_effort=route["effort"],
+                placement="workspace" if row["skill"] == "dispatch-workspace" else "split",
             )
         command = shlex.join([sys.executable, str(Path(__file__).resolve()), "agent", "--spec", str(spec_path)])
         send_surface(surface, command)

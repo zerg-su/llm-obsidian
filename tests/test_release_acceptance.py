@@ -20,7 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "release-acceptance.py"
 WORKSPACE_SCRIPT = ROOT / "scripts" / "acceptance-workspace-supervisor.py"
 sys.path.insert(0, str(ROOT / "scripts"))
-from acceptance_fingerprints import cell_metadata, read_manifest
+from acceptance_fingerprints import (
+    cell_metadata,
+    live_runner_behavior_sha256,
+    production_generations,
+    read_manifest,
+    runtime_script_references,
+)
 
 
 module_spec = importlib.util.spec_from_file_location("release_acceptance_test", SCRIPT)
@@ -337,11 +343,12 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         ),
     )
     check(
-        "acceptance orchestration is absent from cell behavior fingerprints",
+        "acceptance control orchestration is absent from declared behavior paths",
         all(
             "scripts/release-acceptance.py" not in row["dependencies"]
             and "scripts/acceptance_fingerprints.py" not in row["dependencies"]
             and "config/acceptance-cells.toml" not in row["dependencies"]
+            and "scripts/live-acceptance-runner.py" not in row["dependencies"]
             for row in data["rows"]
         ),
     )
@@ -368,6 +375,38 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
             == (row["scenario"] == "daily-summary")
             for row in data["rows"]
         ),
+    )
+    runner_source = (ROOT / "scripts/live-acceptance-runner.py").read_text(encoding="utf-8")
+    review_source = runner_source.replace(
+        "Resolve only the known redundant-f-string warning",
+        "Resolve only the known behavior-preserving warning",
+    )
+    review_row = next(
+        row for row in data["rows"]
+        if row["skill"] == "review-dispatch" and row["runtime"] == "codex"
+    )
+    ordinary_row = next(
+        row for row in data["rows"]
+        if row["skill"] == "clarify" and row["runtime"] == "codex"
+    )
+    check(
+        "live review behavior invalidates only its scoped cells",
+        review_source != runner_source
+        and live_runner_behavior_sha256(ROOT, review_row, source_text=runner_source)
+        != live_runner_behavior_sha256(ROOT, review_row, source_text=review_source)
+        and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=runner_source)
+        == live_runner_behavior_sha256(ROOT, ordinary_row, source_text=review_source),
+    )
+    common_source = runner_source.replace(
+        "OUTBOX_STABLE_SECONDS = 1.0", "OUTBOX_STABLE_SECONDS = 1.1"
+    )
+    check(
+        "common live behavior invalidates every cell",
+        common_source != runner_source
+        and live_runner_behavior_sha256(ROOT, review_row, source_text=runner_source)
+        != live_runner_behavior_sha256(ROOT, review_row, source_text=common_source)
+        and live_runner_behavior_sha256(ROOT, ordinary_row, source_text=runner_source)
+        != live_runner_behavior_sha256(ROOT, ordinary_row, source_text=common_source),
     )
 
     # A path declared by any cell is no longer protected by unknown-path
@@ -422,20 +461,54 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
                     )
                 elif imported not in visited:
                     pending.append(imported)
+            for invoked in runtime_script_references(ROOT, importer):
+                if invoked not in dependencies:
+                    incomplete_closures.append(
+                        f"{row['skill']}/{row['runtime']}: {importer} -> {invoked}"
+                    )
+                elif invoked not in visited:
+                    pending.append(invoked)
     check(
-        "declared Python dependencies contain their transitive local import closure",
+        "declared dependencies contain transitive imports and repo-script runtime edges",
         not incomplete_closures,
         "\n".join(sorted(incomplete_closures)),
+    )
+    required_reap_edges = {
+        "scripts/allocate-address.sh",
+        "scripts/archive_task_reviews.py",
+        "scripts/current-session-id.sh",
+        "scripts/parse-wiki-summary.py",
+        "scripts/reindex.py",
+        "scripts/validate-vault.py",
+        "scripts/vault-write.py",
+    }
+    check(
+        "runtime edge detector covers the reviewed reap and callback subprocesses",
+        required_reap_edges.issubset(
+            set(runtime_script_references(ROOT, "scripts/reap-runner.py"))
+        )
+        and "skills/review-send/scripts/send_review.py" in runtime_script_references(
+            ROOT, "scripts/cmux_agent_supervisor.py"
+        )
+        and all(
+            "skills/reap-send/scripts/send_reap.py" in row["dependencies"]
+            for row in data["rows"]
+            if row["scenario"] == "dispatch-review-reap"
+        ),
     )
 
     fragment_root = tmp / "fragment-root"
     (fragment_root / "evals/acceptance").mkdir(parents=True)
     (fragment_root / "skills/close").mkdir(parents=True)
     (fragment_root / "skills/clarify").mkdir(parents=True)
+    (fragment_root / "scripts").mkdir(parents=True)
     for rel in ("evals/acceptance/skills.json", "evals/acceptance/scenarios.json"):
         (fragment_root / rel).write_bytes((ROOT / rel).read_bytes())
     (fragment_root / "skills/close/SKILL.md").write_text("# Close\n", encoding="utf-8")
     (fragment_root / "skills/clarify/SKILL.md").write_text("# Clarify\n", encoding="utf-8")
+    (fragment_root / "scripts/live-acceptance-runner.py").write_bytes(
+        (ROOT / "scripts/live-acceptance-runner.py").read_bytes()
+    )
     fragment_manifest = read_manifest(ROOT)
     fixed_environment = {"os": "test", "os_release": "1", "architecture": "test", "cmux": "1", "claude": "1", "codex": "1"}
     fixed_generations = {
@@ -445,11 +518,11 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     changed_claude_environment = {**fixed_environment, "claude": "2"}
     scoped_codex_row = next(
         row for row in data["rows"]
-        if row["skill"] == "clarify" and row["runtime"] == "codex"
+        if row["skill"] == "agenda" and row["runtime"] == "codex"
     )
     scoped_claude_row = next(
         row for row in data["rows"]
-        if row["skill"] == "clarify" and row["runtime"] == "claude"
+        if row["skill"] == "agenda" and row["runtime"] == "claude"
     )
     cross_runtime_row = next(
         row for row in data["rows"]
@@ -477,6 +550,37 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         != scoped_after[release_acceptance.row_key(scoped_claude_row)]["cell_fingerprint"]
         and scoped_before[release_acceptance.row_key(cross_runtime_row)]["cell_fingerprint"]
         != scoped_after[release_acceptance.row_key(cross_runtime_row)]["cell_fingerprint"],
+    )
+    patch_environment = {
+        **fixed_environment,
+        "claude": "2.1.205 (Claude Code)",
+        "codex": "codex-cli 0.144.6",
+    }
+    patch_environment_after = {
+        **patch_environment,
+        "claude": "2.1.206 (Claude Code)",
+        "codex": "codex-cli 0.144.9",
+    }
+    minor_environment_after = {
+        **patch_environment_after,
+        "claude": "2.2.0 (Claude Code)",
+    }
+    patch_before = cell_metadata(
+        ROOT, fragment_manifest, cross_runtime_row,
+        environment=patch_environment, generations=fixed_generations,
+    )
+    patch_after = cell_metadata(
+        ROOT, fragment_manifest, cross_runtime_row,
+        environment=patch_environment_after, generations=fixed_generations,
+    )
+    minor_after = cell_metadata(
+        ROOT, fragment_manifest, cross_runtime_row,
+        environment=minor_environment_after, generations=fixed_generations,
+    )
+    check(
+        "runtime patch releases share one acceptance compatibility line",
+        patch_before["cell_fingerprint"] == patch_after["cell_fingerprint"]
+        and patch_before["cell_fingerprint"] != minor_after["cell_fingerprint"],
     )
 
     migration_report = tmp / "environment-scope-migration.json"
@@ -524,7 +628,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         )
         for row in migration_rows
     }
-    environment_migration = release_acceptance.build_environment_migration_metadata(
+    environment_migration = release_acceptance.build_resume_migration_metadata(
         migration_report,
         migration_rows,
         ROOT,
@@ -545,8 +649,8 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     )
     check(
         "legacy full-environment evidence migrates only when the scoped runtime is unchanged",
-        [(row["skill"], row["runtime"]) for row in migrated] == [("clarify", "codex")]
-        and migrated[0]["reason"] == "reused-compatible-environment-scope-migration",
+        [(row["skill"], row["runtime"]) for row in migrated] == [("agenda", "codex")]
+        and migrated[0]["reason"] == "reused-compatible-resume-migration",
     )
 
     close_row = next(row for row in data["rows"] if row["skill"] == "close" and row["runtime"] == "claude")
@@ -875,7 +979,9 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     manifest = incremental / "config/acceptance-cells.toml"
     (incremental / "scripts/acceptance_fingerprints.py").write_text("# orchestration\n", encoding="utf-8")
     (incremental / "scripts/acceptance-workspace-supervisor.py").write_text("# orchestration\n", encoding="utf-8")
-    (incremental / "scripts/live-acceptance-runner.py").write_text("# orchestration\n", encoding="utf-8")
+    (incremental / "scripts/live-acceptance-runner.py").write_bytes(
+        (ROOT / "scripts/live-acceptance-runner.py").read_bytes()
+    )
     (incremental / "scripts/release-acceptance.py").write_text("# orchestration\n", encoding="utf-8")
     manifest.write_text(
         "schema_version = 1\nrunner_contract_version = 2\norchestration_contract_version = 1\n"
@@ -925,6 +1031,47 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
 
     result = incremental_run()
     check("incremental fixture starts green", result.returncode == 0, result.stderr)
+    legacy_dependency_report = json.loads(incremental_report.read_text(encoding="utf-8"))
+    incremental_manifest = read_manifest(incremental, manifest)
+    incremental_generations = production_generations(incremental, incremental_manifest)
+    for row in legacy_dependency_report["rows"]:
+        if row["skill"] != "demo-a":
+            continue
+        legacy_dependencies = [
+            dependency for dependency in row["dependencies"]
+            if dependency != "skills/demo-a/SKILL.md"
+        ]
+        legacy_metadata = cell_metadata(
+            incremental,
+            incremental_manifest,
+            row,
+            environment=legacy_dependency_report["environment"],
+            generations=incremental_generations,
+            environment_scope_version=legacy_dependency_report["environment_scope_version"],
+            dependencies_override=legacy_dependencies,
+        )
+        row.update(legacy_metadata)
+        row["provenance"]["environment_sha256"] = legacy_metadata["environment_sha256"]
+        row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
+            row, row["cell_fingerprint"], row["provenance"]
+        )
+    incremental_report.write_text(json.dumps(legacy_dependency_report), encoding="utf-8")
+    invocation_log.write_text("", encoding="utf-8")
+    result = incremental_run()
+    calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    migrated_dependency_report = json.loads(incremental_report.read_text(encoding="utf-8"))
+    check(
+        "unchanged newly discovered dependency migrates without rerunning",
+        result.returncode == 0
+        and calls == []
+        and all(
+            row["reason"] == "reused-compatible-resume-migration"
+            for row in migrated_dependency_report["rows"]
+            if row["skill"] == "demo-a"
+        ),
+        result.stderr,
+    )
+    incremental_report.write_text(json.dumps(legacy_dependency_report), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
     (incremental / "skills/demo-a/SKILL.md").write_text("# Demo A\n\nchanged\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=incremental, check=True)
@@ -932,7 +1079,7 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
     check(
-        "cross-commit reuse reruns only affected skill cells",
+        "changed newly discovered dependency reruns only affected skill cells",
         result.returncode == 0 and {item[0] for item in calls} == {"demo-a"} and len(calls) == 2,
         result.stderr,
     )
@@ -982,28 +1129,8 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.returncode == 0 and calls == [],
         result.stderr,
     )
-    legacy_report = json.loads(incremental_report.read_text(encoding="utf-8"))
-    for row in legacy_report["rows"]:
-        row["dependencies"] = sorted(
-            set(row["dependencies"]) | {"scripts/live-acceptance-runner.py"}
-        )
-        row["cell_fingerprint"] = hashlib.sha256(
-            (row["cell_fingerprint"] + ":legacy-global-runner").encode("utf-8")
-        ).hexdigest()
-        row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
-            row, row["cell_fingerprint"], row["provenance"]
-        )
-    incremental_report.write_text(json.dumps(legacy_report), encoding="utf-8")
-    invocation_log.write_text("", encoding="utf-8")
-    (incremental / "scripts/live-acceptance-runner.py").write_text(
-        "# compatible orchestration migration\n", encoding="utf-8"
-    )
-    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
-    subprocess.run(
-        ["git", "commit", "-qm", "move runner out of cell behavior"],
-        cwd=incremental, check=True,
-    )
-    mismatched_environment_report = json.loads(json.dumps(legacy_report))
+    compatible_report = json.loads(incremental_report.read_text(encoding="utf-8"))
+    mismatched_environment_report = json.loads(json.dumps(compatible_report))
     for row in mismatched_environment_report["rows"]:
         row["provenance"]["environment_sha256"] = "0" * 64
         row["row_integrity_sha256"] = release_acceptance.integrity_sha256(
@@ -1020,19 +1147,25 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         result.returncode == 0 and len(calls) == 4,
         result.stderr,
     )
-    incremental_report.write_text(json.dumps(legacy_report), encoding="utf-8")
+    incremental_report.write_text(json.dumps(compatible_report), encoding="utf-8")
     invocation_log.write_text("", encoding="utf-8")
+    live_runner = incremental / "scripts/live-acceptance-runner.py"
+    live_runner.write_text(
+        live_runner.read_text(encoding="utf-8").replace(
+            "OUTBOX_STABLE_SECONDS = 1.0", "OUTBOX_STABLE_SECONDS = 1.1"
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=incremental, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "change live acceptance behavior"],
+        cwd=incremental, check=True,
+    )
     result = incremental_run()
     calls = [json.loads(line) for line in invocation_log.read_text().splitlines()]
-    migrated = json.loads(incremental_report.read_text(encoding="utf-8"))
     check(
-        "legacy global runner dependency migrates without rerunning unaffected cells",
-        result.returncode == 0
-        and calls == []
-        and all(
-            row["reason"] == "reused-compatible-orchestration-migration"
-            for row in migrated["rows"]
-        ),
+        "live runner behavior change reruns every cell",
+        result.returncode == 0 and len(calls) == 4,
         result.stderr,
     )
     report_data = json.loads(incremental_report.read_text(encoding="utf-8"))

@@ -733,6 +733,20 @@ def parse_surface(output: str) -> tuple[str, str]:
     return uuid_match.group(0), ref_match.group(0) if ref_match else ""
 
 
+def parse_workspace(output: str) -> tuple[str, str]:
+    uuid_match = re.search(
+        r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b",
+        output,
+    )
+    ref_match = re.search(r"\bworkspace:\d+\b", output)
+    if uuid_match is None and ref_match is None:
+        raise TaskSessionError("cmux did not return a workspace identity")
+    return (
+        uuid_match.group(0) if uuid_match else "",
+        ref_match.group(0) if ref_match else "",
+    )
+
+
 def cmux_tree(runner: Any = subprocess.run) -> dict[str, Any]:
     result = runner(
         ["cmux", "rpc", "system.tree", '{"all":true}'],
@@ -966,6 +980,53 @@ def spawn_right(origin_surface: str, runner: Any = subprocess.run) -> dict[str, 
         raise TaskSessionError("anchored cmux split failed")
     surface, surface_ref = parse_surface(output)
     return {"surface": surface, "surface_ref": surface_ref, "origin_surface": origin_surface}
+
+
+def spawn_workspace(
+    origin_surface: str, cwd: Path, title: str, runner: Any = subprocess.run,
+) -> dict[str, str]:
+    """Create one unfocused task workspace in the exact origin window."""
+
+    origin_surface = require_token(origin_surface, "origin_surface")
+    cwd = cwd.resolve()
+    if not cwd.is_dir():
+        raise TaskSessionError("workspace cwd is unavailable")
+    if not title.strip() or "\0" in title or len(title) > 120:
+        raise TaskSessionError("workspace title is invalid")
+    context = surface_context(origin_surface, runner)
+    assert context is not None
+    window = str(context.get("window_ref") or context.get("window") or "")
+    if not window:
+        raise TaskSessionError("origin surface has no exact cmux window")
+    result = runner(
+        [
+            "cmux", "--id-format", "both", "new-workspace",
+            "--name", title.strip(), "--cwd", str(cwd),
+            "--window", window, "--focus", "false",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        raise TaskSessionError("anchored cmux workspace creation failed")
+    workspace, workspace_ref = parse_workspace(output)
+    workspace_key = workspace_ref or workspace
+    layout = workspace_layout(cmux_tree(runner), window, workspace_key)
+    assert layout is not None
+    surfaces = [surface for pane in layout.values() for surface in pane]
+    if len(surfaces) != 1 or not surfaces[0].get("surface"):
+        raise TaskSessionError("new cmux workspace did not contain one exact surface")
+    return {
+        **surfaces[0],
+        "origin_surface": origin_surface,
+        "workspace": workspace,
+        "workspace_ref": workspace_ref,
+        "window": str(context.get("window") or ""),
+        "window_ref": str(context.get("window_ref") or ""),
+        "placement": "workspace",
+    }
 
 
 def capture_resume(surface: str, runtime: str, runner: Any = subprocess.run) -> dict[str, str]:

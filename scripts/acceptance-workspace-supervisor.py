@@ -168,7 +168,7 @@ def build_context(root: Path, phase: str, report: Path) -> dict[str, Any]:
         orchestration=orchestration,
         orchestration_contract_version=orchestration_version,
         environment_scope_version=environment_scope_version,
-        environment_migration=release.build_environment_migration_metadata(
+        environment_migration=release.build_resume_migration_metadata(
             report,
             rows,
             root,

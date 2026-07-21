@@ -38,7 +38,12 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
-from task_sessions import TaskSessionError, close_surface_exact, spawn_right  # noqa: E402
+from task_sessions import (  # noqa: E402
+    TaskSessionError,
+    close_surface_exact,
+    spawn_right,
+    spawn_workspace,
+)
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 
 
@@ -248,6 +253,9 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         raise DispatchError("new dispatch branch must equal task/<task_name>")
     base_branch = require_string(raw.get("base_branch"), "base_branch", maximum=300)
     origin_surface = require_string(raw.get("origin_surface"), "origin_surface", maximum=100)
+    placement = str(raw.get("placement") or "split").strip()
+    if placement not in {"split", "workspace"}:
+        raise DispatchError("placement must be split or workspace")
     origin_session = require_string(raw.get("origin_session"), "origin_session", maximum=128)
     session_route = raw.get("session_route")
     if not isinstance(session_route, dict):
@@ -311,6 +319,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "base_branch": base_branch,
         "plan_file": plan_file,
         "origin_surface": origin_surface,
+        "placement": placement,
         "origin_session": origin_session,
         "session_route": {
             "runtime": session_runtime,
@@ -451,6 +460,8 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     }
     for old, new in replacements.items():
         body = body.replace(old, new)
+    if request["placement"] == "workspace":
+        body = body.replace("the left wiki split", "the coordinator workspace")
     if "<!-- BRANCH" in body or "<description from user" in body:
         raise DispatchError("dispatch prompt rendering left control placeholders")
     return body.rstrip() + "\n"
@@ -620,6 +631,10 @@ def write_task_files(
         "wiki_surface_ref": origin["surface_ref"],
         "task_surface": child["surface"],
         "task_surface_ref": child["surface_ref"],
+        "task_workspace": child.get("workspace", ""),
+        "task_workspace_ref": child.get("workspace_ref", ""),
+        "task_window": child.get("window", ""),
+        "task_window_ref": child.get("window_ref", ""),
         "target_repo": str(request["target_repo"]),
         "vault_root": str(request["vault_root"]),
         "branch": request["branch"],
@@ -655,7 +670,10 @@ def write_task_files(
             "allowed_types": [request["reap"]["type"]],
             "title": request["reap"]["title"],
         },
-        "surface_policy": {"auto_close": config["auto_close_surfaces"]},
+        "surface_policy": {
+            "auto_close": config["auto_close_surfaces"],
+            "placement": request["placement"],
+        },
         "watchdog_policy": {
             "enabled": config["watchdog_enabled"],
             "poll_seconds": config["watchdog_poll_seconds"],
@@ -706,8 +724,8 @@ def dispatch_log(request: dict[str, Any], effective: dict[str, Any], child: dict
     links = ", ".join(f"[[{item['title']}]]" for item in request["wiki_context"]) or "none"
     entry = (
         f"## [{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')}] dispatch | {request['task_name']}\n\n"
-        f"Spawned an approved unattended task split (cmux `{child['surface']}`, runtime "
-        f"{effective['runtime']}, model {effective['model']}) to the right of the coordinator in worktree "
+        f"Spawned an approved unattended task session (cmux `{child['surface']}`, runtime "
+        f"{effective['runtime']}, model {effective['model']}) in {request['placement']} placement in worktree "
         f"`{request['worktree']}`. Target repo `{request['target_repo']}`, branch `{request['branch']}` "
         f"from `{request['base_branch']}`. Plan: `{request['plan_file']}`. Pre-loaded context: {links}. "
         "Awaiting typed review and final reap."
@@ -817,7 +835,14 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
                              vault_root=request["vault_root"])
         stage = "surface"
         stage_started = time.monotonic()
-        child = spawn_right(request["origin_surface"])
+        child = (
+            spawn_workspace(
+                request["origin_surface"], request["worktree"],
+                f"Task · {request['task_name']}",
+            )
+            if request["placement"] == "workspace"
+            else spawn_right(request["origin_surface"])
+        )
         emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
                              counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
                              vault_root=request["vault_root"])
@@ -859,6 +884,9 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
             "task_surface": child["surface"],
             "task_surface_ref": child["surface_ref"],
             "origin_surface": origin["surface_id"],
+            "placement": request["placement"],
+            "task_workspace": child.get("workspace", ""),
+            "task_workspace_ref": child.get("workspace_ref", ""),
             "log_status": log_status,
             "coordinator_action": COORDINATOR_ACTION,
             "setup_duration_ms": round((time.monotonic() - run_started) * 1000),
@@ -922,6 +950,7 @@ def main() -> int:
                 "plan_sha256": sha256_file(request["plan_file"]),
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
+                "placement": request["placement"],
             }, sort_keys=True))
             return 0
         print(json.dumps(start(request, spec_sha256), ensure_ascii=False, sort_keys=True))
