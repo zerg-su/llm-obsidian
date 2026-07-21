@@ -75,3 +75,8 @@ LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL=gpt-5.6-terra \
 LLM_OBSIDIAN_ACCEPTANCE_EFFORT=medium \
 make acceptance-live-restart
 ```
+
+Both live-acceptance entrypoints run the fail-closed Claude subscription check
+once before allocating workspaces. Cells inherit that harness proof, so the
+model does not run a credential-status probe. Normal Claude daily sessions
+still run the same preflight directly.

@@ -56,6 +56,14 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 ### Fixed
 
+- Made operation-scoped review drive callbacks fully independent of the
+  executor's current directory by carrying absolute script, worktree, and
+  action-handoff paths.
+- Kept resumed scratch reviewers on their existing owner-only working
+  directory instead of letting a model reconstruct a stale nested path.
+- Run one code-owned Claude subscription preflight before allocating live
+  acceptance workspaces, avoiding model-side credential-status probes while
+  retaining the normal-session fail-closed check.
 - Bound automatic retries to at most three attempts for explicit cmux
   allocation and agent-capacity transients. Product, permission, contract, and
   unknown failures are never retried.

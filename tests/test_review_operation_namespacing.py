@@ -214,8 +214,7 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     send_module = importlib.util.module_from_spec(send_spec)
     send_spec.loader.exec_module(send_module)
     callback_argv = send_module.drive_argv_for_callback(worktree, first_dir)
-    action_name = callback_argv[callback_argv.index("--action-file") + 1]
-    action_file = worktree / action_name
+    action_file = Path(callback_argv[callback_argv.index("--action-file") + 1])
     action_payload = json.loads(action_file.read_text(encoding="utf-8"))
     assert action_file.parent == worktree
     assert first_meta["operation_id"] in action_file.name
@@ -225,10 +224,12 @@ with tempfile.TemporaryDirectory(prefix="review-operation-test.") as raw:
     assert "--operation-dir" not in callback_argv
     assert str(first_dir) not in callback_argv
     assert callback_argv[0] == "python3"
-    assert callback_argv[1] == "skills/review-dispatch/scripts/spawn_review.py"
-    assert callback_argv[callback_argv.index("--worktree") + 1] == "."
-    drive = run(
-        "drive", "--worktree", str(worktree), "--action-file", action_file.name,
+    assert Path(callback_argv[1]) == SPAWN
+    assert callback_argv[callback_argv.index("--worktree") + 1] == str(worktree)
+    elsewhere = tmp / "executor-cwd"
+    elsewhere.mkdir()
+    drive = subprocess.run(
+        callback_argv[:-1], cwd=elsewhere, text=True, capture_output=True,
     )
     assert drive.returncode == 0, drive.stderr
     drive_payload = json.loads(drive.stdout)

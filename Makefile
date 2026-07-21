@@ -94,9 +94,11 @@ acceptance-check:
 	@python3 scripts/release-acceptance.py check
 
 acceptance-live:
+	@python3 scripts/claude-subscription-check.py
 	@python3 scripts/acceptance-workspace-supervisor.py run --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --cell-timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --workspaces "$${ACCEPTANCE_WORKSPACES:-2}" --jobs-per-workspace "$${ACCEPTANCE_JOBS_PER_WORKSPACE:-5}" --report .vault-meta/acceptance/latest-live.json
 
 acceptance-live-restart:
+	@python3 scripts/claude-subscription-check.py
 	@python3 scripts/acceptance-workspace-supervisor.py run --restart --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --cell-timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --workspaces "$${ACCEPTANCE_WORKSPACES:-2}" --jobs-per-workspace "$${ACCEPTANCE_JOBS_PER_WORKSPACE:-5}" --report .vault-meta/acceptance/latest-live.json
 
 test-release-acceptance:

@@ -1201,7 +1201,9 @@ def repository_inspection_instructions(
         f"path against `{worktree}`. The only pre-approved Git commands are "
         + ", ".join(f"`{shlex.join(command)}`" for command in commands)
         + ". Use Read, Grep, or Glob for narrower inspection; do not add arguments, pipes, redirects, or "
-        "wrappers. Read product files by absolute path and never write inside the product worktree."
+        "wrappers. Read product files by absolute path and never write inside the product worktree. "
+        "When a shell tool exposes a `workdir` parameter, omit it so the tool inherits the existing scratch "
+        "directory; never derive, shorten, or replace that working directory."
     )
 
 

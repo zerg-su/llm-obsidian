@@ -1013,6 +1013,7 @@ grep -q 'Codex reviewer effort must be one of' "$SANDBOX/codex-effort-bad.err" &
 grep -qF -- "$CODEX_RUNTIME/.review-outbox.json" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-relay-outbox-prompt" || bad "codex-relay-outbox-prompt" "relay outbox missing"
 grep -q 'Do not run `review-send`' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-no-socket-prompt" || bad "codex-no-socket-prompt" "socket boundary missing"
 grep -qF -- "git -C $CODEX_REVIEW_RESOLVED status --porcelain=v1" "$CODEX_REVIEW/.review-prompt.md" && ok "codex-worktree-git-prompt" || bad "codex-worktree-git-prompt" "scratch reviewer lacks exact worktree git guidance"
+grep -qF -- 'omit it so the tool inherits the existing scratch directory' "$CODEX_REVIEW/.review-prompt.md" && ok "codex-scratch-workdir-prompt" || bad "codex-scratch-workdir-prompt" "scratch reviewer may invent a stale workdir"
 "$SUPERVISOR" validate --worktree "$CODEX_REVIEW" --kind reviewer --surface 00000000-0000-0000-0000-000000000000 >/dev/null 2>"$SANDBOX/codex-supervisor.err"
 expect_eq "codex-review-supervisor-valid" "$?" 0
 python3 - "$CODEX_SPEC" <<'PY'

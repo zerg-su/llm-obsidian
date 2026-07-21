@@ -141,17 +141,17 @@ def write_drive_request(worktree: Path, state_dir: Path) -> Path:
 
 
 def drive_argv_for_callback(worktree: Path, state_dir: Path) -> list[str]:
-    """Build a bounded executor command without repeating operation registry paths."""
+    """Build a bounded executor command that is independent of executor cwd."""
     if state_dir != worktree:
         action_file = write_drive_request(worktree, state_dir)
         argv = [
             "python3",
-            "skills/review-dispatch/scripts/spawn_review.py",
+            str(VAULT_ROOT / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"),
             "drive",
             "--worktree",
-            ".",
+            str(worktree),
             "--action-file",
-            action_file.name,
+            str(action_file),
         ]
     else:
         argv = [

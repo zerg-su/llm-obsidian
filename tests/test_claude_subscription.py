@@ -147,7 +147,18 @@ check(
 check("Claude agent carries summary contract", '"evidence_bundle_id"' in agent and '"evidence_ids"' in agent)
 
 skill = (ROOT / "skills" / "daily" / "SKILL.md").read_text(encoding="utf-8")
+makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
 check("daily runs subscription preflight", "scripts/claude-subscription-check.py" in skill)
+check(
+    "daily live acceptance uses harness proof",
+    "LLM_OBSIDIAN_ACCEPTANCE=1" in skill
+    and "harness preflight" in skill
+    and "do not probe auth" in skill,
+)
+check(
+    "both live acceptance entrypoints preflight Claude once",
+    makefile.count("@python3 scripts/claude-subscription-check.py") == 2,
+)
 check("daily selects scoped Claude agent", "llm-obsidian:daily-summarizer" in skill)
 check("daily forbids Claude parent fallback", "Never fall back to the parent Claude model" in skill)
 stats = (ROOT / "scripts" / "pipeline-stats.py").read_text(encoding="utf-8")
