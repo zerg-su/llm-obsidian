@@ -14,6 +14,22 @@ evidence bundle_id exactly into evidence_bundle_id.
 Use 1-7 bullets, normally 3-7 when the evidence supports distinct themes.
 Every bullet must cite its evidence_ids. Keep subject names grounded in those items.
 Write concise first-person outcomes suitable for an external daily status.
+The exact output shape is:
+{
+  "schema_version": 1,
+  "date": "YYYY-MM-DD",
+  "evidence_bundle_id": "sha256:<copy from evidence>",
+  "bullets": [
+    {
+      "subject": "grounded project or object name",
+      "outcome": "first-person action and concrete outcome",
+      "compact": "short index version",
+      "evidence_ids": ["session:001"]
+    }
+  ],
+  "session_labels": []
+}
+schema_version is the integer 1, and bullets is an array of objects, never strings.
 Never include commit hashes, branch names, repository paths, CLI flags, YAML fields, plans, or process-only trivia.
 Do not write files, call web or MCP tools, inspect the wider vault, or spawn another agent.
 """

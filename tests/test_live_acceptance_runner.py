@@ -115,8 +115,16 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     check(
         "daily fixture preserves one independently provable evidence commit",
         "exactly one local commit" in fixture_registry["skills"]["daily"]["fixture"]
+        and "Acceptance Daily Fixture.md" in fixture_registry["skills"]["daily"]["fixture"]
+        and "writer-owned wiki/log.md update" in fixture_registry["skills"]["daily"]["fixture"]
         and "without committing that deletion" in fixture_registry["skills"]["daily"]["fixture"]
         and "Do not create a cleanup commit" in fixture_registry["skills"]["daily"]["fixture"],
+    )
+    check(
+        "backlog fixture restores the canonical inbox exactly",
+        "Snapshot the exact original bytes" in fixture_registry["skills"]["backlog"]["fixture"]
+        and "vault-write.py update" in fixture_registry["skills"]["backlog"]["fixture"]
+        and "current expected_sha256" in fixture_registry["skills"]["backlog"]["fixture"],
     )
     check(
         "wiki-lint fixture stays inside canonical writer schema",
@@ -894,7 +902,9 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=daily_repo, check=True)
     subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=daily_repo, check=True)
     (daily_repo / "tracked.txt").write_text("release\n", encoding="utf-8")
-    subprocess.run(["git", "add", "tracked.txt"], cwd=daily_repo, check=True)
+    (daily_repo / "wiki").mkdir()
+    (daily_repo / "wiki/log.md").write_text("release log\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt", "wiki/log.md"], cwd=daily_repo, check=True)
     subprocess.run(["git", "commit", "-qm", "release"], cwd=daily_repo, check=True)
     daily_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=daily_repo,
@@ -903,7 +913,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     daily_page = daily_repo / "wiki/meta/sessions/Acceptance daily fixture.md"
     daily_page.parent.mkdir(parents=True)
     daily_page.write_text("---\ntype: session\n---\n", encoding="utf-8")
-    subprocess.run(["git", "add", str(daily_page.relative_to(daily_repo))], cwd=daily_repo, check=True)
+    (daily_repo / "wiki/log.md").write_text("daily evidence log\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", str(daily_page.relative_to(daily_repo)), "wiki/log.md"],
+        cwd=daily_repo,
+        check=True,
+    )
     subprocess.run(["git", "commit", "-qm", "daily evidence"], cwd=daily_repo, check=True)
     daily_page.unlink()
     (daily_repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")

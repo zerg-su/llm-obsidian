@@ -198,9 +198,21 @@ def daily_acceptance_cleanup(sandbox: Path, commit: str) -> tuple[bool, str]:
         text=True, capture_output=True, check=False,
     )
     parts = changed.stdout.rstrip("\0").split("\0") if changed.returncode == 0 else []
-    if len(parts) != 2 or parts[0] != "A":
+    if len(parts) % 2:
         return False, "daily evidence commit changed unexpected paths"
-    path = parts[1]
+    changes = list(zip(parts[0::2], parts[1::2]))
+    session_paths = [
+        path for status, path in changes
+        if status == "A"
+        and re.fullmatch(r"wiki/meta/sessions/Acceptance[^/]*\.md", path)
+    ]
+    if (
+        len(changes) != 2
+        or len(session_paths) != 1
+        or ("M", "wiki/log.md") not in changes
+    ):
+        return False, "daily evidence commit changed unexpected paths"
+    path = session_paths[0]
     if re.fullmatch(r"wiki/meta/sessions/Acceptance[^/]*\.md", path) is None:
         return False, "daily evidence commit used an unexpected fixture path"
     if (sandbox / path).exists():

@@ -27,9 +27,9 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
   launchers, prompting, scenario adapters, and skill adapters behind the same
   CLI. The refactor preserved all 58 v2.1.1 prompts byte-identically on pinned
   inputs before the reviewed fixture corrections below.
-- Revised five live fixtures (backlog, distill-runbook, learn, reap, and
+- Revised six live fixtures (backlog, daily, distill-runbook, learn, reap, and
   wiki-query) under the v2.1.2 prompt baseline to clarify operational setup
-  without changing their expected behavior contracts; the other 48 rendered
+  without changing their expected behavior contracts; the other 46 rendered
   prompts remain byte-identical to v2.1.1.
 - Replaced unknown-path global invalidation and historical evidence migration
   with evidence epoch 3 and semantic per-cell fingerprints. Data-only,
@@ -73,6 +73,12 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 - Block final reap while an operation-bound review transition is still pending,
   require its drive command to run standalone, and clear Claude's composer
   before lifecycle `/exit` so suggested text cannot swallow the command.
+- Keep duplicate reap-send callbacks idempotent after the coordinator's exact
+  prepared plan close, and bind the Codex daily summarizer to the complete
+  object schema instead of relying on prose-only shape hints.
+- Make daily acceptance account for the canonical writer-owned `wiki/log.md`
+  evidence update, while backlog acceptance restores the inbox byte-for-byte
+  through the canonical writer instead of weakening product-residue checks.
 - Use the standard `python3` entrypoint and a neutral authoritative-result
   contract for task-local review drive callbacks, avoiding Claude auto-mode
   classifier denials on Homebrew interpreter paths.

@@ -146,6 +146,38 @@ with tempfile.TemporaryDirectory(prefix="reap-send-runner.") as raw:
         sender.claim_delivery(worktree.resolve(), value) is True
         and sender.claim_delivery(worktree.resolve(), value) is False,
     )
+    original_plan = plan.read_text(encoding="utf-8")
+    plan.write_text("---\nstatus: executed\n---\n", encoding="utf-8")
+    closed_hash = hashlib.sha256(plan.read_bytes()).hexdigest()
+    binding = vault / ".vault-meta/task-sessions/session-bindings/fixture/origin.json"
+    binding.parent.mkdir(parents=True)
+    binding.write_text(json.dumps({
+        "session_id": meta["origin_session"],
+        "project_id": meta["project_id"],
+        "task_id": meta["task_id"],
+    }), encoding="utf-8")
+    prepared = {
+        "version": 1,
+        "task_name": meta["task_name"],
+        "current_session": meta["origin_session"],
+        "approved_plan_sha256": meta["approved_plan_sha256"],
+        "meta_sha256": hashlib.sha256((worktree / ".task-meta.json").read_bytes()).hexdigest(),
+        "summary_sha256": hashlib.sha256((worktree / ".task-summary.json").read_bytes()).hexdigest(),
+        "plan_path": str(plan),
+        "closed_plan_sha256": closed_hash,
+    }
+    (worktree / ".task-reap-prepared.json").write_text(
+        json.dumps(prepared), encoding="utf-8"
+    )
+    terminal_value = sender.callback(worktree.resolve())
+    check(
+        "matching callback remains valid after exact prepared plan close",
+        terminal_value["command"] == value["command"]
+        and sender.claim_delivery(worktree.resolve(), terminal_value) is False,
+    )
+    plan.write_text(original_plan, encoding="utf-8")
+    (worktree / ".task-reap-prepared.json").unlink()
+    binding.unlink()
     changed_callback = dict(value, command=value["command"] + " --changed")
     try:
         sender.claim_delivery(worktree.resolve(), changed_callback)

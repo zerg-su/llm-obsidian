@@ -246,6 +246,13 @@ check("daily model is not hardcoded", "\nmodel = " not in agent)
 check("daily medium effort pinned", 'model_reasoning_effort = "medium"' in agent)
 check("daily agent read-only", 'sandbox_mode = "read-only"' in agent and 'web_search = "disabled"' in agent)
 check("daily agent hooks disabled", 'hooks = false' in agent and 'approval_policy = "never"' in agent)
+check(
+    "daily Codex agent pins the exact summary object shape",
+    '"schema_version": 1' in agent
+    and '"bullets": [' in agent
+    and '"evidence_ids": ["session:001"]' in agent
+    and "never strings" in agent,
+)
 daily_skill = (ROOT / "skills/daily/SKILL.md").read_text(encoding="utf-8")
 check(
     "daily Codex delegation stays in the native agent tool",

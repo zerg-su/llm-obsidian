@@ -125,7 +125,7 @@ def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
     if not (vault / "scripts" / "reap-runner.py").is_file():
         raise SendError("task metadata does not identify a coordinator reap runner")
     sys.path.insert(0, str(vault / "scripts"))
-    from task_contract import ContractError, normalize  # type: ignore
+    from task_contract import ContractError, normalize_for_runtime  # type: ignore
     from vault_schema import neutralize_unresolved_wikilinks  # type: ignore
     from wiki_summary_contract import (  # type: ignore
         WikiSummaryError,
@@ -134,7 +134,7 @@ def callback(worktree: Path, *, persist_repairs: bool = True) -> dict[str, Any]:
     )
 
     try:
-        normalize(meta)
+        normalize_for_runtime(meta, worktree)
         typed = validate_summary(summary, allow_missing_session=False, require_schema=True)
     except (ContractError, WikiSummaryError) as exc:
         raise SendError(str(exc)) from exc
