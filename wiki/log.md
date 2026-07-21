@@ -27,6 +27,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-07-21] review | v2.1.2 bilingual documentation
+
+`c-000031` [[Cross-model review — v2.1.2 bilingual documentation — 421315369f47]]. 1 round(s), final verdict `approve`; reviewer claude/opus.
+
 ## [2026-07-21] reap | v2.1.2 semantic acceptance refactor
 
 `c-000030` [[LLM Obsidian v2.1.2 semantic acceptance refactor]]. ## Result
