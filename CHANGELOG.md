@@ -42,6 +42,9 @@ packages were published for them.
   while retaining compatibility with older CLIs, so review/dispatch can resolve
   the caller's exact workspace instead of failing after cmux changed its default
   ID format.
+- Live primary coordinator reviews now anchor to the current exact
+  `CMUX_SURFACE_ID` instead of reusing a stale root-level task handoff from an
+  older review cycle.
 
 ## [2.1.2] - 2026-07-21
 

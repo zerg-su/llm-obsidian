@@ -439,6 +439,24 @@ COORDINATOR="$SANDBOX/coordinator"
 write_fixture "$COORDINATOR"
 mkdir -p "$COORDINATOR/wiki" "$COORDINATOR/scripts" \
   "$COORDINATOR/skills/review-dispatch/scripts"
+CMUX_SURFACE_ID=AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA \
+python3 - "$SCRIPT" "$COORDINATOR" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("review_coordinator_surface_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+worktree = pathlib.Path(sys.argv[2])
+(worktree / ".task-cmux-surface").write_text(
+    "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB\n", encoding="utf-8"
+)
+assert module.review_executor_surface(
+    worktree, {}, coordinator_review=True, no_spawn=False
+) == "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+PY
+[[ $? -eq 0 ]] && ok "coordinator-review-uses-current-surface" || bad "coordinator-review-uses-current-surface" "stale task surface overrode the live coordinator"
 printf '# fixture\n' > "$COORDINATOR/scripts/vault-write.py"
 cat > "$COORDINATOR/skills/review-dispatch/scripts/archive_review.py" <<'PY'
 import json

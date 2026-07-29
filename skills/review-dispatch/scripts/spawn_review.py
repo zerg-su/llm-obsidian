@@ -951,6 +951,28 @@ def spawn_cmux_split(no_spawn: bool, origin_surface: str) -> tuple[str, str, str
     return created["surface"], created["surface_ref"], "anchored-right"
 
 
+def review_executor_surface(
+    worktree: Path,
+    meta: dict[str, Any],
+    *,
+    coordinator_review: bool,
+    no_spawn: bool,
+) -> str:
+    """Resolve the callback surface without reusing stale coordinator state."""
+    persisted = (
+        read_text_file(worktree / ".task-cmux-surface")
+        or str(meta.get("task_surface") or "")
+    )
+    if coordinator_review and not no_spawn:
+        current = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
+        try:
+            uuid.UUID(current)
+        except (ValueError, AttributeError):
+            die("coordinator review requires the current exact CMUX_SURFACE_ID")
+        return current
+    return persisted
+
+
 def prepare_review_runtime(
     worktree: Path,
     vault: Path,
@@ -1325,7 +1347,12 @@ def cmd_start(ns: argparse.Namespace) -> int:
         if subscription.returncode != 0:
             die(subscription.stderr.strip() or "Claude subscription preflight failed")
 
-    executor_surface = read_text_file(worktree / ".task-cmux-surface") or str(meta.get("task_surface") or "")
+    executor_surface = review_executor_surface(
+        worktree,
+        meta,
+        coordinator_review=bool(ns.coordinator_review),
+        no_spawn=bool(ns.no_spawn),
+    )
     if not executor_surface:
         die(".task-cmux-surface missing; cannot callback executor")
 
