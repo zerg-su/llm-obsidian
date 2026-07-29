@@ -8,6 +8,7 @@ import json
 import importlib.util
 import inspect
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -434,6 +435,37 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         detected_session.returncode == 0
         and detected_session.stdout.strip() == acceptance_session,
         detected_session.stderr,
+    )
+    acceptance_repo = tmp / "acceptance-session-repo"
+    (acceptance_repo / "scripts").mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "scripts" / "current-session-id.sh",
+        acceptance_repo / "scripts" / "current-session-id.sh",
+    )
+    (acceptance_repo / ".acceptance-sandbox.json").write_text(
+        '{"schema_version":1}\n', encoding="utf-8"
+    )
+    persisted = module.persist_acceptance_session(
+        acceptance_repo, acceptance_session
+    )
+    fallback_env = os.environ.copy()
+    fallback_env.pop("LLM_OBSIDIAN_ACCEPTANCE", None)
+    fallback_env.pop("LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID", None)
+    fallback_env.pop("CLAUDE_CODE_SESSION_ID", None)
+    fallback_env["CODEX_THREAD_ID"] = "actual-codex-thread"
+    detected_fallback = subprocess.run(
+        [str(acceptance_repo / "scripts" / "current-session-id.sh")],
+        text=True,
+        capture_output=True,
+        env=fallback_env,
+        check=False,
+    )
+    check(
+        "acceptance session survives Codex command environment filtering",
+        persisted.stat().st_mode & 0o777 == 0o600
+        and detected_fallback.returncode == 0
+        and detected_fallback.stdout.strip() == acceptance_session,
+        detected_fallback.stderr,
     )
     try:
         module.agent_argv(

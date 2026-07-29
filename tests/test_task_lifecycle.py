@@ -734,8 +734,8 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
     )
     check(
-        "supervisor keeps trust bootstrap alive through slow native startup",
-        supervisor_module.WORKSPACE_TRUST_TIMEOUT_SECONDS >= 60,
+        "supervisor keeps trust bootstrap alive for the owned agent lifetime",
+        supervisor_module.WORKSPACE_TRUST_TIMEOUT_SECONDS is None,
     )
     trust_commands: list[list[str]] = []
 
@@ -753,6 +753,32 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor accepts one exact trust prompt on the bound surface",
         trust_state.get("accepts") == 1
         and trust_commands[-1]
+        == ["cmux", "send-key", "--surface", meta["task_surface"], "Enter"],
+    )
+    delayed_reads = [0]
+    delayed_commands: list[list[str]] = []
+
+    def delayed_trust_runner(
+        command: list[str], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        delayed_commands.append(command)
+        stdout = ""
+        if command[1] == "read-screen":
+            delayed_reads[0] += 1
+            if delayed_reads[0] >= 5:
+                stdout = codex_trust_screen
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    delayed_state: dict[str, int] = {}
+    supervisor_module.auto_accept_workspace_trust(
+        meta["task_surface"], "codex", threading.Event(), delayed_state,
+        runner=delayed_trust_runner, timeout_seconds=0.2, poll_seconds=0.001,
+    )
+    check(
+        "supervisor accepts an exact trust prompt after delayed startup",
+        delayed_reads[0] >= 5
+        and delayed_state.get("accepts") == 1
+        and delayed_commands[-1]
         == ["cmux", "send-key", "--surface", meta["task_surface"], "Enter"],
     )
     claude_mcp_screen = (

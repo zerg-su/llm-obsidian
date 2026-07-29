@@ -1014,10 +1014,9 @@ def launch_command(
         "LLM_OBSIDIAN_SESSION_ROLE": "reviewer",
     }
     if reviewer_runtime == "claude":
-        # Claude Code documents Edit(...) as the canonical scoped permission
-        # for every built-in file editor, including the Write tool.  Anchor the
-        # sole writable handoff at the reviewer's original cwd; scoped Write
-        # rules are not matched consistently by current Claude Code releases.
+        # Claude releases have matched the Write tool against either Edit(...)
+        # or Write(...) rules. Permit both native editors, anchored to the same
+        # sole callback file at the reviewer's original cwd.
         argv = [
             "claude", "--permission-mode", "dontAsk",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',

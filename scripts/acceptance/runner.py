@@ -86,6 +86,17 @@ def run_with_backend(row: dict[str, Any], command: list[str]) -> dict[str, Any]:
     return validate_agent_result(row, raw)
 
 
+def persist_acceptance_session(sandbox: Path, session_id: str) -> Path:
+    """Keep acceptance identity available when an agent filters inherited env."""
+    if SAFE_ID.fullmatch(session_id) is None:
+        raise AcceptanceRunnerError("acceptance session id is invalid")
+    path = sandbox / ".vault-meta" / "acceptance" / "session-id"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(session_id + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dict[str, Any]:
     origin = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
     if not origin or shutil.which("cmux") is None:
@@ -110,6 +121,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         routing_config = load_config(sandbox)
         route = routing_config.runtime_default(row["runtime"])
         acceptance_session_id = f"acceptance-{run_id}"
+        persist_acceptance_session(sandbox, acceptance_session_id)
         capture_session(
             routing_config,
             acceptance_session_id,

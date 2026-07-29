@@ -60,10 +60,10 @@ REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
 WORKSPACE_TRUST_POLL_SECONDS = 0.1
 ARMED_EXIT_POLL_SECONDS = 0.25
-# Codex may spend tens of seconds loading before its native workspace-trust
-# dialog is painted.  Keep this a bounded startup bootstrap, but do not expire
-# before a slow authenticated CLI has reached its first interactive screen.
-WORKSPACE_TRUST_TIMEOUT_SECONDS = 120
+# A cold runtime may paint its native workspace-trust dialog long after launch.
+# The owned supervisor stops this exact-prompt watcher when the agent exits, so
+# no separate wall-clock cutoff is needed.
+WORKSPACE_TRUST_TIMEOUT_SECONDS: float | None = None
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {
     "--full-auto",
@@ -80,6 +80,7 @@ CLAUDE_REVIEW_BASE_ALLOWED_TOOLS = (
     "Glob",
     "Grep",
     "Edit(./.review-outbox.json)",
+    "Write(./.review-outbox.json)",
     # Repository test entrypoints are executable code, but reviewers already
     # need to run changed tests to verify a task. These end-anchored patterns
     # deny the observed pipe/redirect/wrapper forms, but the embedded wildcard
@@ -1049,13 +1050,20 @@ def auto_accept_workspace_trust(
     state: dict[str, int],
     runner: Any = subprocess.run,
     *,
-    timeout_seconds: float = WORKSPACE_TRUST_TIMEOUT_SECONDS,
+    timeout_seconds: float | None = WORKSPACE_TRUST_TIMEOUT_SECONDS,
     poll_seconds: float = WORKSPACE_TRUST_POLL_SECONDS,
 ) -> None:
-    """Handle only exact native bootstrap prompts on the owned surface."""
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    """Handle exact native bootstrap prompts while the owned agent is alive."""
+    deadline = (
+        time.monotonic() + max(0.0, timeout_seconds)
+        if timeout_seconds is not None
+        else None
+    )
     workspace_handled = False
-    while time.monotonic() < deadline and not stop.wait(max(0.001, poll_seconds)):
+    while (
+        (deadline is None or time.monotonic() < deadline)
+        and not stop.wait(max(0.001, poll_seconds))
+    ):
         try:
             result = runner(
                 ["cmux", "read-screen", "--surface", surface, "--lines", "80"],

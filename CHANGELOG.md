@@ -28,6 +28,16 @@ packages were published for them.
   routing before launching subprocess fixtures, so `make test` remains
   hermetic inside active Claude and Codex sessions without changing product
   routing.
+- Kept acceptance coordinator identity stable when Codex filters inherited
+  environment variables from tool commands: disposable acceptance clones now
+  persist their synthetic session ID locally, while normal Claude/Codex
+  sessions keep their existing identity precedence.
+- Restored opposite-model Claude review callbacks by allowing both native
+  editors on the same exact `.review-outbox.json` target. The reviewer remains
+  `dontAsk`, product-read-only, and unable to write any other checkout path.
+- Kept the exact native workspace-trust bootstrap active for the full lifetime
+  of an approved unattended agent instead of abandoning slow cold starts after
+  120 seconds.
 
 ## [2.1.2] - 2026-07-21
 

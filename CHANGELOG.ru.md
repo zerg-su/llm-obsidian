@@ -34,6 +34,17 @@
   coordinator-сессии перед запуском subprocess-фикстур. Благодаря этому
   `make test` остаётся hermetic внутри активных Claude/Codex-сессий без
   изменения продуктового routing.
+- Синтетическая identity acceptance-координатора теперь сохраняется локально в
+  disposable clone и не теряется, когда Codex фильтрует у tool-команд
+  унаследованные env-переменные. Приоритет identity обычных Claude/Codex-
+  сессий не меняется.
+- Восстановлен callback opposite-model Claude review: оба нативных редактора
+  разрешены для одного и того же точного `.review-outbox.json`. Reviewer
+  остаётся в `dontAsk`, product-read-only и не получает записи в другие пути
+  checkout-а.
+- Обработчик точного native workspace-trust prompt теперь живёт столько же,
+  сколько утверждённый unattended agent, и не бросает медленный cold start
+  через 120 секунд.
 
 ## [2.1.2] — 2026-07-21
 

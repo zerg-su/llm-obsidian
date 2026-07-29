@@ -154,7 +154,19 @@ grep -qF -- 'Bash(bash tests/test_*.sh)' "$LIGHT_SPEC" && ok "claude-shell-tests
 grep -qF -- 'Bash(bash scripts/dcg-test-suite.sh)' "$LIGHT_SPEC" && ok "claude-dcg-smoke-allowed" || bad "claude-dcg-smoke-allowed" "exact DCG smoke rule missing"
 grep -qF -- '`bash scripts/dcg-test-suite.sh`' "$LIGHT/.review-prompt.md" && ok "claude-dcg-smoke-advertised" || bad "claude-dcg-smoke-advertised" "DCG smoke command missing from prompt"
 grep -qF -- '`python3 tests/test_document_normalize.py 2>&1 | tail -50`' "$LIGHT/.review-prompt.md" && ok "claude-test-shell-composition-denied" || bad "claude-test-shell-composition-denied" "prompt does not explain bounded test form"
-grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-only-write" || bad "claude-outbox-only-write" "cwd-anchored outbox Edit rule missing"
+grep -qF -- 'Edit(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-edit" || bad "claude-outbox-edit" "cwd-anchored outbox Edit rule missing"
+grep -qF -- 'Write(./.review-outbox.json)' "$LIGHT_SPEC" && ok "claude-outbox-write" || bad "claude-outbox-write" "cwd-anchored outbox Write rule missing"
+python3 - "$LIGHT_SPEC" <<'PY'
+import json, sys
+argv = json.load(open(sys.argv[1], encoding="utf-8"))["argv"]
+allowed = argv[argv.index("--allowedTools") + 1:argv.index("--model")]
+write_rules = [item for item in allowed if item.startswith(("Edit(", "Write("))]
+assert write_rules == [
+    "Edit(./.review-outbox.json)",
+    "Write(./.review-outbox.json)",
+]
+PY
+[[ $? -eq 0 ]] && ok "claude-outbox-is-only-write-target" || bad "claude-outbox-is-only-write-target" "reviewer gained another product write target"
 grep -qF -- 'supervisor relay watches' "$LIGHT/.review-prompt.md" && ok "claude-outbox-transport" || bad "claude-outbox-transport" "supervised outbox callback missing"
 grep -q 'Do not run `review-send`' "$LIGHT/.review-prompt.md" && ok "claude-no-callback-command" || bad "claude-no-callback-command" "Claude reviewer is still told to invoke the callback command"
 grep -qF -- 'Do not exit on your own, call wait/poll tools, start a polling loop' "$LIGHT/.review-prompt.md" && ok "reviewer-returns-idle-after-submit" || bad "reviewer-returns-idle-after-submit" "reviewer may busy-wait after submitting its outbox"
