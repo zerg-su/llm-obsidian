@@ -44,6 +44,7 @@
     "wiki/concepts/Hot Cache.md"
   ],
   "cross-model": [
+    "wiki/meta/reviews/Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",
@@ -186,6 +187,7 @@
   ],
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
+    "wiki/meta/reviews/Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",

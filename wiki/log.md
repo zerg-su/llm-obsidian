@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-21
+updated: 2026-07-29
 tags:
   - meta
   - log
@@ -26,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-29] review | LLM Obsidian 2.1.3 lifecycle fixes
+
+`c-000032` [[Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718]]. 3 round(s), final verdict `approve`; reviewer claude/fable.
 
 ## [2026-07-21] review | v2.1.2 bilingual documentation
 
