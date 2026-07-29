@@ -21,9 +21,16 @@ implementation lives in `scripts/acceptance/`:
   cleanup behavior;
 - `runner.py` composes those pieces and retains the public CLI.
 
-`evals/acceptance/prompt-baseline-v2.1.2.json` hashes all rendered prompts on
+`evals/acceptance/prompt-baseline-v2.1.3.json` hashes all rendered prompts on
 fixed placeholders. Unit tests require all 58 hashes to remain identical. A
 real prompt correction therefore needs an explicit reviewed baseline change.
+
+`reap` and `reap-send` use a runner-prepared v3 task with one exact product
+commit, canonical typed summary, and separate coordinator/task surfaces. The
+coordinator first publishes a code-owned readiness claim; only then does the
+runner launch the task agent. The agents still exercise real review,
+duplicate-safe reap-send, final reap, and graceful exit, while the outer runner
+independently proves every durable artifact.
 
 ## Dependency lock and fingerprints
 
@@ -67,7 +74,7 @@ stopped at the configured inactivity boundary (20 minutes by default). Cleanup
 uses stored UUIDs, closes only owned surfaces/workspaces, and fails the release
 gate if reconciliation finds an orphan.
 
-For the v2.1.2 release gate, use Sonnet and `gpt-5.6-terra` at medium effort:
+For the v2.1.3 release gate, use Sonnet and `gpt-5.6-terra` at medium effort:
 
 ```bash
 LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL=sonnet \

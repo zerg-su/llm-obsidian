@@ -52,6 +52,11 @@ packages were published for them.
   escalate policy instead of inheriting stale legacy task metadata. A verified
   approval is mechanically applicable, and finish arms exact-surface cleanup
   even when no unattended dispatch contract exists.
+- Replaced model-authored `reap`/`reap-send` acceptance setup with a
+  runner-prepared v3 task, canonical summary, exact coordinator/task surfaces,
+  and a readiness handshake. The live cells still exercise real opposite-model
+  review, duplicate-safe reap-send, final reap, graceful task exit, and
+  independent durable proof, without failing on invented plan addresses.
 
 ## [2.1.2] - 2026-07-21
 

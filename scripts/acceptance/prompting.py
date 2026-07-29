@@ -72,6 +72,16 @@ def prompt_text(
 - After starting review, return idle without polling; typed callbacks start later turns automatically.
 - Close the reviewer through verified `finish`. Leave task plan/worktree/branch/registry/review artifacts
   in place for outer proof and clone cleanup. Clean no runner-owned lifecycle state manually."""
+    elif runner_fixture.get("fixture_kind") == "reap":
+        cleanup_contract = f"""- The exact prepared task at `{runner_fixture['nested_worktree']}`, its separate task
+  surface, plan, result, review archive, branch, task-session registry, readiness marker, and lifecycle
+  markers are runner-owned proof. Do not create, delete, merge, restore, stash, or rewrite them.
+- First publish only the code-owned coordinator readiness marker and return idle. The runner launches
+  the exact bound task agent after that marker; do not launch it yourself or shell-poll any state.
+- Typed review and final-reap callbacks start later turns automatically. Run only their exact code-owned
+  commands, and publish the acceptance outbox only after final reap reports `status: complete`.
+- Do not run `dispatch-runner.py`, invent another worktree root, inspect cmux screens, close surfaces
+  directly, pass `--tmp-root`/`--state-root`, or override `TMPDIR`/`TMP`/`TEMP`."""
     else:
         cleanup_contract = f"""- This cell's plan, result page, review archive, task branch, exact nested worktree,
   task-session registry, and lifecycle markers are runner-owned proof artifacts. Leave them in place.
@@ -108,7 +118,10 @@ surface retention, exact-surface cleanup, and removal of the saved fixture page.
         )
     else:
         final_contract = "Do not merely describe a hypothetical test. The outbox is the final action after cleanup."
-    if runner_fixture is not None and runner_fixture.get("fixture_kind") == "review":
+    if (
+        runner_fixture is not None
+        and runner_fixture.get("fixture_kind") in {"review", "reap"}
+    ):
         interaction_contract = (
             "This fixture spans typed callback turns. After each launch, end the current turn at the "
             "idle prompt; continue only when the trusted callback starts the next turn. Never use Plan "

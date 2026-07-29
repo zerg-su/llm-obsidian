@@ -113,21 +113,41 @@ def review_acceptance_fixture(
     runtime: str,
     source_commit: str,
     session_id: str,
+    *,
+    fixture_kind: str = "review",
+    cell_skill: str = "",
 ) -> dict[str, str]:
-    """Provision one committed, approved v3 task before testing review skills."""
+    """Provision one committed, approved v3 task before review/reap skill tests."""
 
     token = run_id.split("-", 1)[0]
-    task_name = f"acceptance-review-{token}"
+    if fixture_kind not in {"review", "reap"}:
+        raise AcceptanceRunnerError("review fixture kind must be review or reap")
+    prefix = "review" if fixture_kind == "review" else "reap"
+    task_name = f"acceptance-{prefix}-{token}"
     branch = f"task/{task_name}"
-    fixture_rel = f"acceptance-review-{token}.py"
-    fixture_text = (
-        "def render(ready: bool) -> str:\n"
-        "    status = \"ready\" if ready else \"not ready\"\n"
-        "    return f\"{status}\"\n"
-    )
+    if fixture_kind == "review":
+        fixture_rel = f"acceptance-review-{token}.py"
+        fixture_text = (
+            "def render(ready: bool) -> str:\n"
+            "    status = \"ready\" if ready else \"not ready\"\n"
+            "    return f\"{status}\"\n"
+        )
+        approved_scope = f"""Create only `{fixture_rel}` as the disposable review target and commit it once.
+Resolve its known non-blocking redundant-f-string warning if the required
+review finds it. The review lifecycle is verification of this scope, not another
+product action. Do not merge, push, publish, deploy, or expand scope."""
+        commit_message = "test: add review acceptance fixture"
+    else:
+        fixture_rel = f"acceptance-reap-{token}.txt"
+        fixture_text = f"reap acceptance {token}\n"
+        approved_scope = f"""Use the already-committed `{fixture_rel}` as the exact disposable task result.
+Make no further product change. Run one light opposite-model review, deliver the
+prepared typed summary through reap-send, and finalize it through coordinator
+reap. Do not merge, push, publish, deploy, delete the task worktree, or expand scope."""
+        commit_message = "test: add reap acceptance fixture"
     plan_rel = f"wiki/plans/{date.today().isoformat()}-{task_name}.md"
     plan_path = sandbox / plan_rel
-    plan_title = f"Acceptance review {token} plan"
+    plan_title = f"Acceptance {prefix} {token} plan"
     plan_text = f"""---
 type: plan
 title: "{plan_title}"
@@ -144,10 +164,7 @@ sessions: []
 
 ## Approved scope
 
-Create only `{fixture_rel}` as the disposable review target and commit it once.
-Resolve its known non-blocking redundant-f-string warning if the required
-review finds it. The review lifecycle is verification of this scope, not another
-product action. Do not merge, push, publish, deploy, or expand scope.
+{approved_scope}
 """
     run_checked(
         [sys.executable, str(sandbox / "scripts" / "vault-write.py"), "--output", "json"],
@@ -180,7 +197,7 @@ product action. Do not merge, push, publish, deploy, or expand scope.
         [
             "git", "-c", "user.name=Acceptance Runner",
             "-c", "user.email=acceptance@example.invalid", "commit", "-m",
-            "test: add review acceptance fixture",
+            commit_message,
         ],
         cwd=nested_worktree,
     )
@@ -197,10 +214,27 @@ product action. Do not merge, push, publish, deploy, or expand scope.
             cwd=sandbox,
         )
     )
+    result_title = f"Acceptance {prefix} {token} result"
+    if fixture_kind == "reap":
+        atomic_json(
+            nested_worktree / ".task-summary.json",
+            {
+                "schema_version": 1,
+                "type": "session",
+                "title": result_title,
+                "session": f"acceptance-task-{run_id}",
+                "body": (
+                    f"Completed the exact disposable reap acceptance fixture `{fixture_rel}` "
+                    "and its required light review."
+                ),
+            },
+        )
     fixture = {
-        "fixture_kind": "review",
+        "fixture_kind": fixture_kind,
+        "cell_skill": cell_skill,
         "task_name": task_name,
         "branch": branch,
+        "plan_rel": plan_rel,
         "plan_path": str(plan_path.resolve()),
         "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
         "fixture_rel": fixture_rel,
@@ -214,13 +248,16 @@ product action. Do not merge, push, publish, deploy, or expand scope.
         "task_id": str(identity["task_id"]),
         "session_id": session_id,
         "runtime": runtime,
-        "result_title": f"Acceptance review {token} result",
+        "result_title": result_title,
+        "ready_path": str(
+            (sandbox / ".vault-meta" / "acceptance" / "reap-coordinator-ready.json").resolve()
+        ),
         "review_script": str(
             (sandbox / "skills" / "review-dispatch" / "scripts" / "spawn_review.py").resolve()
         ),
     }
     atomic_json(
-        sandbox / ".vault-meta" / "acceptance" / "review-fixture.json", fixture
+        sandbox / ".vault-meta" / "acceptance" / f"{prefix}-fixture.json", fixture
     )
     return fixture
 
@@ -230,12 +267,16 @@ def bind_review_acceptance_fixture(
     surface: str,
     route: dict[str, Any],
     config: Any,
+    *,
+    task_surface: str = "",
+    task_surface_ref: str = "",
 ) -> None:
     """Bind the prepared task to the exact live coordinator surface."""
 
     worktree = Path(fixture["nested_worktree"])
+    exact_task_surface = task_surface or surface
     handoffs = {
-        ".task-cmux-surface": surface,
+        ".task-cmux-surface": exact_task_surface,
         ".wiki-cmux-surface": surface,
         ".wiki-agent-runtime": fixture["runtime"],
         ".wiki-reap-command": "$llm-obsidian:reap",
@@ -245,12 +286,34 @@ def bind_review_acceptance_fixture(
     }
     for name, value in handoffs.items():
         (worktree / name).write_text(value + "\n", encoding="utf-8")
-    (worktree / ".task-prompt.md").write_text(
-        f"# Task: {fixture['task_name']}\n\n"
-        f"Create only `{fixture['fixture_rel']}` as specified by the approved plan. "
-        "The required review gate is lifecycle verification, not product-scope drift.\n",
-        encoding="utf-8",
-    )
+    if fixture.get("fixture_kind") == "reap":
+        duplicate = (
+            "Run the same send command a second time and require its code-owned "
+            "`already-delivered` idempotency result. "
+            if fixture.get("cell_skill") == "reap-send"
+            else ""
+        )
+        task_prompt = (
+            f"# Task: {fixture['task_name']}\n\n"
+            f"The runner already committed the exact approved `{fixture['fixture_rel']}` fixture "
+            "and prepared `.task-summary.json`. Do not edit product files, create another commit, "
+            "or rewrite the plan, metadata, or summary. Read the local review-dispatch and reap-send "
+            "skills completely. Start exactly one light opposite-runtime review with "
+            f"`python3 {fixture['review_script']} start --light --worktree {worktree}` and return "
+            "idle without polling. Follow only trusted typed callbacks. A clean approval is required; "
+            "do not fabricate findings or change the product to force a verify round. After the "
+            "code-owned drive reports exit 0 with `applied=true`, run exactly "
+            f"`python3 {sandbox / 'skills/reap-send/scripts/send_reap.py'} --worktree {worktree}`. "
+            f"{duplicate}Return idle after delivery. Do not run reap yourself, write the acceptance "
+            "outbox, close a surface directly, or perform any other product action.\n"
+        )
+    else:
+        task_prompt = (
+            f"# Task: {fixture['task_name']}\n\n"
+            f"Create only `{fixture['fixture_rel']}` as specified by the approved plan. "
+            "The required review gate is lifecycle verification, not product-scope drift.\n"
+        )
+    (worktree / ".task-prompt.md").write_text(task_prompt, encoding="utf-8")
     routing_session = {
         "runtime": route["runtime"],
         "model": route["model"],
@@ -268,7 +331,8 @@ def bind_review_acceptance_fixture(
         "origin_session": fixture["session_id"],
         "spawned_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "wiki_surface": surface,
-        "task_surface": surface,
+        "task_surface": exact_task_surface,
+        "task_surface_ref": task_surface_ref,
         "target_repo": str(sandbox),
         "vault_root": str(sandbox),
         "branch": fixture["branch"],
@@ -347,6 +411,28 @@ def review_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
         "immediately; do not wait for, inspect, or poll the already-finished reviewer surface. Leave the "
         "task worktree, branch, plan, registry, and review artifacts for "
         "runner proof and cleanup."
+    )
+
+def reap_fixture_prompt(fixture: dict[str, str], skill: str) -> str:
+    """Render the coordinator half of a runner-prepared reap lifecycle."""
+
+    named_path = (
+        "The task agent will exercise reap-send, including its duplicate-delivery path; "
+        if skill == "reap-send"
+        else "The task agent will deliver one canonical reap-send callback; "
+    )
+    return (
+        f"Use only the runner-prepared approved task at `{fixture['nested_worktree']}`. "
+        "Do not create a plan, task, branch, worktree, metadata, summary, fixture commit, or cmux "
+        "surface, and do not enter Plan Mode or ask for approval. "
+        f"First run exactly `{fixture['ready_command']}` and immediately return idle without polling. "
+        "The outer runner will then launch the separately bound task agent and its real review flow. "
+        f"{named_path}when its trusted typed final-reap callback starts the later turn, read the local "
+        "reap skill completely and run the callback's exact code-owned command once. Require exit 0 "
+        "and `status: complete`, then publish the typed acceptance outbox immediately. Do not replay "
+        "reap phases manually, run reap-send from the coordinator, inspect task/reviewer screens, or "
+        "close any surface directly. Leave the task worktree, branch, plan, result, review archive, "
+        "registry, readiness marker, and lifecycle markers for independent runner proof and cleanup."
     )
 
 def close_acceptance_fixture(run_id: str) -> dict[str, str]:

@@ -41,10 +41,10 @@
     "final|obsidian-bases|codex|obsidian-authoring|Create and validate one disposable Obsidian Base.": "efa2c15be658513a00f8581fddf01921520d6f796fb12ff8fd9baee676eb5708",
     "final|obsidian-markdown|claude|obsidian-authoring|Produce valid Obsidian-flavoured Markdown with links and properties.": "8516940dcf1556812b3ab8eaa850ba30ab2dc9ab704e463459ee228dfd926d45",
     "final|obsidian-markdown|codex|obsidian-authoring|Produce valid Obsidian-flavoured Markdown with links and properties.": "d10596f064551a4d46bf4e8b1f168f8db9f79312d328d01a1fdf1168f15aee10",
-    "final|reap-send|claude|dispatch-review-reap|Validate and deliver one typed task summary callback exactly once.": "223a4fb34415d74acdf3f44c11df3f7225315211e5fdf7e1b8d1244dd0a9d031",
-    "final|reap-send|codex|dispatch-review-reap|Validate and deliver one typed task summary callback exactly once.": "985303fb14e3598c9d09f289e1e1157067105399dc06a7b00ae58266d6f04da5",
-    "final|reap|claude|dispatch-review-reap|Collect the typed task summary and finalize the approved lifecycle state.": "f1c39a00148466ca29e0836b3f1f311a8d896e354bbb2cc883a15403a186c092",
-    "final|reap|codex|dispatch-review-reap|Collect the typed task summary and finalize the approved lifecycle state.": "3ab1f2155a0ca453b8a6a8b3c10b90caf349237e044101e42ecebc2a17a0695c",
+    "final|reap-send|claude|dispatch-review-reap|Validate and deliver one typed task summary callback exactly once.": "6b2828b47a41cddb50c122a1fe3d889f70539e2abeda0286bddbf2d3c15ad116",
+    "final|reap-send|codex|dispatch-review-reap|Validate and deliver one typed task summary callback exactly once.": "30f536a500aa2f7da8b9b21c09f423929218b02dea1c8e2aaffb1f0de05ec094",
+    "final|reap|claude|dispatch-review-reap|Collect the typed task summary and finalize the approved lifecycle state.": "a9280e5f79a4e3e04983e30e0e0b6ccf11b659c3003273d363efe0a8626f2add",
+    "final|reap|codex|dispatch-review-reap|Collect the typed task summary and finalize the approved lifecycle state.": "ee02532a0e99fec7d8e1358cee4dfbd3f043c36ee703d360fa48ed311589c509",
     "final|review-dispatch|claude|dispatch-review-reap|Complete an opposite-runtime review and bounded same-session verification loop.": "08a0a7e30c677c7afc04fe09fac942351e6a7d64886e4f6c68da05d0d56fb3a5",
     "final|review-dispatch|codex|dispatch-review-reap|Complete an opposite-runtime review and bounded same-session verification loop.": "e5e197f5c1e3915d3c8a27f56ce277687da52fc804e82e7dd6b3cec0ff44df68",
     "final|review-send|claude|dispatch-review-reap|Submit one typed product-read-only reviewer result exactly once.": "1f861cd478648aea541c2558ac31774c12cb339e58178c3f46ff7ff2dc195f5b",
@@ -66,6 +66,6 @@
     "final|wiki|claude|obsidian-authoring|Route one supported wiki authoring request to the correct workflow.": "2695b41b9d8014a858dd776683fb4dbf619390b0d268abd0fbde14c9b12a4680",
     "final|wiki|codex|obsidian-authoring|Route one supported wiki authoring request to the correct workflow.": "f24dd6a52352264b11cce172c83e8c84194155ad4731618d196ad6a28788951b"
   },
-  "renderer_contract": "v2.1.2",
+  "renderer_contract": "v2.1.3",
   "schema_version": 1
 }

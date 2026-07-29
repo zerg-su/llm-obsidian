@@ -277,6 +277,7 @@
       "scripts/acceptance/contracts.py",
       "scripts/acceptance/launchers.py",
       "scripts/acceptance/sandbox.py",
+      "scripts/cmux_agent_supervisor.py",
       "scripts/cmux_agent_support.py",
       "scripts/cmux_trust_prompt.py",
       "scripts/lib_sanitize.py",
@@ -312,6 +313,7 @@
       "scripts/validate-vault.py",
       "scripts/vault-write.py",
       "scripts/vault_schema.py",
+      "skills/reap-send/scripts/send_reap.py",
       "skills/review-dispatch/scripts/spawn_review.py"
     ],
     "scripts/acceptance_dependencies.py": [
@@ -936,5 +938,5 @@
       "skills/"
     ]
   },
-  "graph_sha256": "4e7f985905a7bc851d90ba32d1475c27d2237aa5a22af566cd3a88a3d03f97df"
+  "graph_sha256": "37845f66357ad0a61031fb69f34c1a355e7adbab72fedc52fb8f57ec831e8ce6"
 }

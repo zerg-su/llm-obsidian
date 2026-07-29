@@ -58,6 +58,12 @@
   политику approve/resolve/escalate вместо устаревшей legacy task metadata.
   Подтверждённый approve механически применим, а finish ставит exact-surface
   cleanup даже без unattended dispatch contract.
+- Model-authored setup для acceptance-ячеек `reap`/`reap-send` заменён на
+  подготовленные runner-ом v3 task, canonical summary, точные coordinator/task
+  surfaces и readiness handshake. Ячейки по-прежнему выполняют настоящий
+  opposite-model review, duplicate-safe reap-send, final reap, graceful task
+  exit и независимый durable proof, но больше не падают из-за выдуманных
+  моделью адресов плана.
 
 ## [2.1.2] — 2026-07-21
 

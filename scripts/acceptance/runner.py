@@ -48,7 +48,7 @@ from acceptance.adapters import (
     daily_acceptance_cleanup, dispatch_acceptance_fixture,
     dispatch_acceptance_proof, dispatch_fixture_prompt,
     is_disposable_bookkeeping, lifecycle_acceptance_cleanup_proof, prompt_text,
-    review_acceptance_fixture, review_fixture_prompt,
+    reap_fixture_prompt, review_acceptance_fixture, review_fixture_prompt,
     sandbox_cleanup_proof, write_dispatch_acceptance_request,
 )
 from acceptance.contracts import (
@@ -97,6 +97,121 @@ def persist_acceptance_session(sandbox: Path, session_id: str) -> Path:
     return path
 
 
+def mark_reap_coordinator_ready(spec_path: Path) -> dict[str, Any]:
+    """Claim that the exact acceptance coordinator is idle before task launch."""
+
+    spec = read_json(spec_path)
+    sandbox = Path(str(spec.get("sandbox") or "")).resolve()
+    fixture = spec.get("reap_fixture")
+    if not isinstance(fixture, dict) or fixture.get("fixture_kind") != "reap":
+        raise AcceptanceRunnerError("operation is not a prepared reap acceptance fixture")
+    if spec.get("status") != "running":
+        raise AcceptanceRunnerError("prepared reap operation is not running")
+    expected_surface = str(spec.get("surface") or "")
+    actual_surface = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
+    if not expected_surface or (actual_surface and actual_surface != expected_surface):
+        raise AcceptanceRunnerError("reap coordinator readiness surface drifted")
+    ready_path = Path(str(fixture.get("ready_path") or "")).resolve()
+    expected_path = (sandbox / ".vault-meta" / "acceptance" / "reap-coordinator-ready.json").resolve()
+    if ready_path != expected_path:
+        raise AcceptanceRunnerError("reap coordinator readiness path drifted")
+    payload = {
+        "schema_version": 1,
+        "surface": expected_surface,
+        "task_id": fixture.get("task_id"),
+        "status": "idle",
+    }
+    atomic_json(ready_path, payload)
+    return payload
+
+
+def wait_for_reap_coordinator_ready(
+    fixture: dict[str, str],
+    exit_marker: Path,
+    *,
+    surface: str,
+    runtime: str,
+    timeout: int,
+) -> None:
+    """Wait only for the bounded, code-owned coordinator readiness claim."""
+
+    ready_path = Path(fixture["ready_path"])
+    deadline = time.monotonic() + min(600.0, max(60.0, float(timeout)))
+    trust_accepted = False
+    while time.monotonic() < deadline:
+        if ready_path.is_file():
+            ready = read_json(ready_path)
+            if (
+                ready.get("status") != "idle"
+                or ready.get("surface") != surface
+                or ready.get("task_id") != fixture["task_id"]
+            ):
+                raise AcceptanceRunnerError("reap coordinator readiness claim is inconsistent")
+            return
+        if exit_marker.is_file():
+            raise AcceptanceRunnerError("acceptance coordinator exited before task launch")
+        screen = subprocess.run(
+            ["cmux", "read-screen", "--surface", surface, "--lines", "80"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if screen.returncode == 0:
+            lowered = screen.stdout.lower()
+            if any(token in lowered for token in (
+                "selected model is at capacity",
+                "rate limit exceeded",
+                "usage limit reached",
+                "too many requests",
+            )):
+                raise AcceptanceTransientError(
+                    "agent-capacity", "agent runtime reported an explicit capacity or rate limit"
+                )
+            if not trust_accepted and workspace_trust_prompt_visible(runtime, screen.stdout):
+                accepted = subprocess.run(
+                    ["cmux", "send-key", "--surface", surface, "Enter"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if accepted.returncode != 0:
+                    raise AcceptanceRunnerError(
+                        "exact workspace trust prompt could not be accepted"
+                    )
+                trust_accepted = True
+        time.sleep(1)
+    raise AcceptanceRunnerError("acceptance coordinator did not become ready for task launch")
+
+
+def launch_prepared_reap_task(
+    sandbox: Path, fixture: dict[str, str],
+) -> None:
+    """Launch the exact runner-bound task only after its coordinator is idle."""
+
+    worktree = Path(fixture["nested_worktree"])
+    surface = fixture["task_surface"]
+    supervisor = sandbox / "scripts" / "cmux_agent_supervisor.py"
+    run_checked(
+        [
+            sys.executable, str(supervisor), "prepare-task",
+            "--worktree", str(worktree), "--surface", surface,
+        ],
+        cwd=sandbox,
+    )
+    command = shlex.join([
+        sys.executable,
+        str(supervisor),
+        "run",
+        "--worktree",
+        str(worktree),
+        "--kind",
+        "task",
+        "--surface",
+        surface,
+    ])
+    send_surface(surface, command)
+
+
 def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dict[str, Any]:
     origin = str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
     if not origin or shutil.which("cmux") is None:
@@ -106,9 +221,11 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
     run_dir.mkdir(parents=True, mode=0o700)
     run_dir.chmod(0o700)
     surface = ""
+    task_surface_id = ""
     cleanup = "sandbox retained for diagnosis"
     prepared_dispatch: dict[str, str] | None = None
     prepared_review: dict[str, str] | None = None
+    prepared_reap: dict[str, str] | None = None
     prepared_close: dict[str, str] | None = None
     stage = "setup"
     stage_started = time.monotonic()
@@ -138,6 +255,25 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 sandbox, run_id, row["runtime"], commit, acceptance_session_id
             )
             fixture = review_fixture_prompt(prepared_review, row["skill"])
+        elif row["skill"] in {"reap", "reap-send"}:
+            prepared_reap = review_acceptance_fixture(
+                sandbox,
+                run_id,
+                row["runtime"],
+                commit,
+                acceptance_session_id,
+                fixture_kind="reap",
+                cell_skill=row["skill"],
+            )
+            spec_path = run_dir / "operation.json"
+            prepared_reap["ready_command"] = shlex.join([
+                sys.executable,
+                str(sandbox / "scripts" / "acceptance" / "runner.py"),
+                "coordinator-ready",
+                "--spec",
+                str(spec_path),
+            ])
+            fixture = reap_fixture_prompt(prepared_reap, row["skill"])
         elif row["skill"] == "close":
             prepared_close = close_acceptance_fixture(run_id)
             fixture = close_fixture_prompt(prepared_close)
@@ -150,7 +286,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         outbox = sandbox / ".vault-meta" / "acceptance" / "agent-outbox.json"
         prompt = prompt_text(
             row, scenario, sandbox, outbox, route["model"], route["effort"], commit, fixture,
-            prepared_dispatch or prepared_review,
+            prepared_dispatch or prepared_review or prepared_reap,
         )
         prompt_path = run_dir / "prompt.md"
         prompt_path.write_text(prompt, encoding="utf-8")
@@ -169,6 +305,8 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             spec["dispatch_fixture"] = prepared_dispatch
         if prepared_review is not None:
             spec["review_fixture"] = prepared_review
+        if prepared_reap is not None:
+            spec["reap_fixture"] = prepared_reap
         spec_path = run_dir / "operation.json"
         atomic_json(spec_path, spec)
         try:
@@ -176,6 +314,17 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
         except TaskSessionError as exc:
             raise AcceptanceTransientError("surface-allocation-transient", str(exc)) from exc
         surface = created["surface"]
+        task_surface: dict[str, str] | None = None
+        if prepared_reap is not None:
+            try:
+                task_surface = spawn_right(surface)
+            except TaskSessionError as exc:
+                raise AcceptanceTransientError(
+                    "surface-allocation-transient", str(exc)
+                ) from exc
+            prepared_reap["task_surface"] = task_surface["surface"]
+            prepared_reap["task_surface_ref"] = task_surface.get("surface_ref") or ""
+            task_surface_id = prepared_reap["task_surface"]
         spec.update(
             {
                 "surface": surface,
@@ -183,10 +332,24 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 "status": "running",
             }
         )
+        if prepared_reap is not None:
+            spec["reap_fixture"] = prepared_reap
+            spec["task_surface"] = prepared_reap["task_surface"]
+            spec["task_surface_ref"] = prepared_reap["task_surface_ref"]
         atomic_json(spec_path, spec)
         if prepared_review is not None:
             bind_review_acceptance_fixture(
                 sandbox, prepared_review, surface, route, routing_config
+            )
+        if prepared_reap is not None:
+            bind_review_acceptance_fixture(
+                sandbox,
+                prepared_reap,
+                surface,
+                route,
+                routing_config,
+                task_surface=prepared_reap["task_surface"],
+                task_surface_ref=prepared_reap["task_surface_ref"],
             )
         if prepared_dispatch is not None:
             write_dispatch_acceptance_request(
@@ -200,6 +363,15 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             )
         command = shlex.join([sys.executable, str(Path(__file__).resolve()), "agent", "--spec", str(spec_path)])
         send_surface(surface, command)
+        if prepared_reap is not None:
+            wait_for_reap_coordinator_ready(
+                prepared_reap,
+                run_dir / "agent-exit.json",
+                surface=surface,
+                runtime=row["runtime"],
+                timeout=int(scenario["timeout_seconds"]),
+            )
+            launch_prepared_reap_task(sandbox, prepared_reap)
         emit_event(
             "acceptance-cell-stage", actor="setup", session=run_id,
             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)}, root=ROOT,
@@ -246,8 +418,10 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             result["verdict"] = "blocked"
             result["defect"] = close
         elif result["verdict"] in {"pass", "n-a"}:
-            if prepared_dispatch is not None:
-                clean, proof = dispatch_acceptance_proof(sandbox, commit, prepared_dispatch)
+            if prepared_dispatch is not None or prepared_reap is not None:
+                clean, proof = dispatch_acceptance_proof(
+                    sandbox, commit, prepared_dispatch or prepared_reap
+                )
             elif prepared_close is not None:
                 clean, proof = close_acceptance_proof(sandbox, prepared_close)
                 if clean:
@@ -306,6 +480,11 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
                 run_dir / "agent-exit.json",
                 force=isinstance(exc, KeyboardInterrupt),
             )
+        if task_surface_id and surface_is_open(task_surface_id):
+            try:
+                close_surface_exact(task_surface_id)
+            except (TaskSessionError, OSError):
+                close = f"{close}; exact prepared task surface remains visible"
         spec_path = run_dir / "operation.json"
         if spec_path.is_file():
             try:
@@ -326,6 +505,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     agent = sub.add_parser("agent", help=argparse.SUPPRESS)
     agent.add_argument("--spec", type=Path, required=True)
+    ready = sub.add_parser("coordinator-ready", help=argparse.SUPPRESS)
+    ready.add_argument("--spec", type=Path, required=True)
     return parser
 
 
@@ -334,6 +515,9 @@ def main() -> int:
     try:
         if args.command == "agent":
             return run_agent_process(args.spec.resolve())
+        if args.command == "coordinator-ready":
+            print(json.dumps(mark_reap_coordinator_ready(args.spec.resolve()), sort_keys=True))
+            return 0
         scenarios = load_scenarios(args.scenarios.resolve())
         fixtures = load_skill_fixtures(args.skills.resolve())
         row = validate_row(json.load(sys.stdin), scenarios, fixtures)

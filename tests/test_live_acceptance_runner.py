@@ -156,11 +156,12 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "scripts/reindex.py" in fixture_registry["skills"]["learn"]["fixture"],
     )
     check(
-        "reap fixtures require real registered task surfaces",
+        "reap fixtures use runner-prepared lifecycle infrastructure",
         all(
-            "real disposable cmux task surface" in fixture_registry["skills"][skill]["fixture"]
-            and "task_sessions.py init-task" in fixture_registry["skills"][skill]["fixture"]
-            and "never fabricate a surface handle" in fixture_registry["skills"][skill]["fixture"]
+            "runner-prepared approved task" in fixture_registry["skills"][skill]["fixture"]
+            and "separate bound task surface" in fixture_registry["skills"][skill]["fixture"]
+            and "do not create or rewrite fixture infrastructure"
+            in fixture_registry["skills"][skill]["fixture"]
             for skill in ("reap", "reap-send")
         ),
     )
@@ -181,7 +182,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     prompt_baseline = json.loads(
-        (ROOT / "evals/acceptance/prompt-baseline-v2.1.2.json").read_text(encoding="utf-8")
+        (ROOT / "evals/acceptance/prompt-baseline-v2.1.3.json").read_text(encoding="utf-8")
     )
     prompt_scenarios = module.load_scenarios()
     prompt_fixtures = module.load_skill_fixtures()
@@ -201,6 +202,8 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
                 runner_fixture = {"fixture_kind": "review", "nested_worktree": "/acceptance/task"}
             elif skill in {"dispatch", "dispatch-workspace"}:
                 runner_fixture = {"fixture_kind": "dispatch", "nested_worktree": "/acceptance/task"}
+            elif skill in {"reap", "reap-send"}:
+                runner_fixture = {"fixture_kind": "reap", "nested_worktree": "/acceptance/task"}
             rendered = module.prompt_text(
                 prompt_row,
                 prompt_scenarios[fixture_item["scenario"]],
@@ -218,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
             )
             rendered_hashes[key] = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     check(
-        "all 58 refactored prompts match the reviewed v2.1.2 baseline",
+        "all 58 refactored prompts match the reviewed v2.1.3 baseline",
         rendered_hashes == prompt_baseline["prompts"] and len(rendered_hashes) == 58,
     )
     check(
@@ -1141,6 +1144,113 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         )
         and "redundant-f-string warning"
         in module.review_fixture_prompt(provisioned, "review-dispatch"),
+    )
+    reap_id = str(uuid.uuid4())
+    reap_fixture = module.review_acceptance_fixture(
+        prepared_repo,
+        reap_id,
+        "codex",
+        prepared_source,
+        f"acceptance-{reap_id}",
+        fixture_kind="reap",
+        cell_skill="reap-send",
+    )
+    coordinator_surface = "22222222-2222-4222-8222-222222222222"
+    task_surface = "33333333-3333-4333-8333-333333333333"
+    module.bind_review_acceptance_fixture(
+        prepared_repo,
+        reap_fixture,
+        coordinator_surface,
+        prepared_config.runtime_default("codex"),
+        prepared_config,
+        task_surface=task_surface,
+        task_surface_ref="surface:fixture",
+    )
+    reap_worktree = Path(reap_fixture["nested_worktree"])
+    reap_meta = json.loads((reap_worktree / ".task-meta.json").read_text(encoding="utf-8"))
+    reap_summary = json.loads(
+        (reap_worktree / ".task-summary.json").read_text(encoding="utf-8")
+    )
+    reap_changed = subprocess.run(
+        [
+            "git", "-C", str(reap_worktree), "diff", "--name-only",
+            f"{prepared_source}..HEAD",
+        ],
+        text=True, capture_output=True, check=True,
+    ).stdout.splitlines()
+    check(
+        "reap fixture provisioner owns infrastructure but preserves real lifecycle",
+        reap_fixture["plan_rel"].startswith("wiki/plans/")
+        and reap_changed == [reap_fixture["fixture_rel"]]
+        and reap_summary["title"] == reap_fixture["result_title"]
+        and reap_meta["wiki_surface"] == coordinator_surface
+        and reap_meta["task_surface"] == task_surface
+        and reap_meta["task_surface_ref"] == "surface:fixture"
+        and "send_reap.py" in (reap_worktree / ".task-prompt.md").read_text(encoding="utf-8")
+        and "already-delivered" in (reap_worktree / ".task-prompt.md").read_text(
+            encoding="utf-8"
+        ),
+    )
+    ready_spec = tmp / "reap-ready-operation.json"
+    reap_fixture["ready_command"] = (
+        f"python3 scripts/acceptance/runner.py coordinator-ready --spec {ready_spec}"
+    )
+    ready_spec.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "running",
+                "surface": coordinator_surface,
+                "sandbox": str(prepared_repo),
+                "reap_fixture": reap_fixture,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    prior_surface = os.environ.get("CMUX_SURFACE_ID")
+    os.environ["CMUX_SURFACE_ID"] = coordinator_surface
+    try:
+        ready = module.mark_reap_coordinator_ready(ready_spec)
+    finally:
+        if prior_surface is None:
+            os.environ.pop("CMUX_SURFACE_ID", None)
+        else:
+            os.environ["CMUX_SURFACE_ID"] = prior_surface
+    check(
+        "reap coordinator readiness is exact and code-owned",
+        ready == {
+            "schema_version": 1,
+            "surface": coordinator_surface,
+            "task_id": reap_fixture["task_id"],
+            "status": "idle",
+        }
+        and json.loads(Path(reap_fixture["ready_path"]).read_text(encoding="utf-8"))
+        == ready,
+    )
+    reap_fixture_text = module.reap_fixture_prompt(reap_fixture, "reap-send")
+    reap_cleanup_prompt = module.prompt_text(
+        row(
+            skill="reap-send",
+            scenario="dispatch-review-reap",
+            expected="Validate and deliver one typed task summary callback exactly once.",
+        ),
+        module.load_scenarios()["dispatch-review-reap"],
+        prepared_repo,
+        prepared_repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
+        "fixture-model",
+        "high",
+        prepared_source,
+        reap_fixture_text,
+        reap_fixture,
+    )
+    check(
+        "reap coordinator prompt waits for callbacks without recreating infrastructure",
+        reap_fixture["ready_command"] in reap_cleanup_prompt
+        and "immediately return idle without polling" in reap_cleanup_prompt
+        and "runner launches\n  the exact bound task agent" in reap_cleanup_prompt
+        and "Do not run `dispatch-runner.py`" in reap_cleanup_prompt
+        and "publish the acceptance outbox only after final reap" in reap_cleanup_prompt,
     )
     check(
         "review-dispatch fixture exercises a resolvable warning",

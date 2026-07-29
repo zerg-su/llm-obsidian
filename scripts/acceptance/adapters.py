@@ -9,7 +9,8 @@ from .skill_adapters import (
     autoresearch_acceptance_cleanup, bind_review_acceptance_fixture,
     close_acceptance_fixture, close_acceptance_proof, close_fixture_prompt,
     dispatch_acceptance_fixture, dispatch_acceptance_proof,
-    dispatch_fixture_prompt, review_acceptance_fixture, review_fixture_prompt,
+    dispatch_fixture_prompt, reap_fixture_prompt, review_acceptance_fixture,
+    review_fixture_prompt,
     write_dispatch_acceptance_request,
 )
 
