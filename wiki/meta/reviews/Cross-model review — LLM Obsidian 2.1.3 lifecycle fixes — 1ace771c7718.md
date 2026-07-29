@@ -34,6 +34,9 @@ verdict: approve
 
 Review the implementation for **LLM Obsidian 2.1.3 lifecycle fixes** in `main` against `origin/main` using the `full` cross-model gate.
 
+> [!warning] Historical metadata mismatch
+> The quoted request below came from stale coordinator handoff metadata and is not the scope of this review. The actual scope was the LLM Obsidian v2.1.3 lifecycle-fix diff on `main` against `origin/main`, as recorded in the outcome and round evidence on this page.
+
 > [!quote] Original task request
 > Perform a final full, read-only cross-model code review of the public LLM Obsidian release candidate on branch `release/v2.0.7` against tag `v2.0.6`.
 >

@@ -27,6 +27,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-07-29] review | LLM Obsidian v2.1.3 final release
+
+`c-000033` [[Cross-model review — LLM Obsidian v2.1.3 final release — b5385c24fe5b]]. 2 round(s), final verdict `approve`; reviewer claude/fable.
+
 ## [2026-07-29] review | LLM Obsidian 2.1.3 lifecycle fixes
 
 `c-000032` [[Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718]]. 3 round(s), final verdict `approve`; reviewer claude/fable.
