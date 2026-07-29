@@ -1062,6 +1062,10 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "reviewer_runtime": "claude",
         "executor_surface": meta["task_surface"],
     })
+    write_json(worktree / ".task-meta.json", {
+        "task_name": "root coordinator review",
+        "executor_runtime": "codex",
+    })
     cmux_log.write_text("", encoding="utf-8")
     result = run(
         LIFECYCLE, "request-exit", "--worktree", str(worktree),
@@ -1090,6 +1094,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "coordinator reviewer targets exact root-state surface",
         f"close-surface --surface {coordinator_review_surface}" in coordinator_close_log,
     )
+    write_json(worktree / ".task-meta.json", meta)
     write_json(worktree / ".review-meta.json", {
         "review_surface": review_surface,
         "reviewer_runtime": "claude",

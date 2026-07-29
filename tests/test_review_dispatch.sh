@@ -466,6 +466,64 @@ PY
   --vault-root "$COORDINATOR" >"$SANDBOX/coordinator-start.out" 2>"$SANDBOX/coordinator-start.err"
 expect_eq "coordinator-review-start" "$?" 0
 expect_eq "coordinator-review-mode" "$(json_get "$COORDINATOR/.review-meta.json" archive_mode)" "coordinator"
+python3 - "$SCRIPT" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("coordinator_review_action_test", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+base = {
+    "schema_version": 1,
+    "run_id": "00000000-0000-4000-8000-000000000001",
+    "mode": "full",
+    "verification_gaps": [],
+    "notes_for_executor": [],
+    "residual_risks": [],
+}
+assert module.coordinator_review_action(
+    {**base, "verdict": "approve", "findings": []}, 1
+) == "approve"
+assert module.coordinator_review_action(
+    {**base, "verdict": "changes-requested", "findings": [{"severity": "warning"}]}, 0
+) == "resolve"
+assert module.coordinator_review_action(
+    {**base, "verdict": "changes-requested", "findings": [{"severity": "blocking"}]}, 0
+) == "escalate"
+PY
+[[ $? -eq 0 ]] && ok "coordinator-review-bounded-action-policy" || bad "coordinator-review-bounded-action-policy" "root review still depends on stale task policy"
+(cd "$COORDINATOR" && "$SCRIPT" finish --no-send --worktree "$COORDINATOR") \
+  >"$SANDBOX/coordinator-finish.out" 2>"$SANDBOX/coordinator-finish.err"
+expect_eq "coordinator-review-finish-dry" "$?" 0
+grep -q 'arm close=true' "$SANDBOX/coordinator-finish.out" && ok "coordinator-review-auto-close" || bad "coordinator-review-auto-close" "explicit root review would leave its surface open"
+python3 - "$COORDINATOR/.review-meta.json" "$COORDINATOR/.task-review.json" <<'PY'
+import json
+import sys
+
+meta_path, review_path = sys.argv[1:]
+meta = json.load(open(meta_path, encoding="utf-8"))
+meta.update({
+    "status": "review_received",
+    "recommended_action": "interactive",
+    "sent_output_json_file": ".task-review.json",
+})
+open(meta_path, "w", encoding="utf-8").write(json.dumps(meta) + "\n")
+review = {
+    "schema_version": 1,
+    "run_id": meta["run_id"],
+    "mode": meta["review_mode"],
+    "verdict": "approve",
+    "findings": [],
+    "verification_gaps": [],
+    "notes_for_executor": [],
+    "residual_risks": [],
+}
+open(review_path, "w", encoding="utf-8").write(json.dumps(review) + "\n")
+PY
+"$SCRIPT" drive --worktree "$COORDINATOR" \
+  >"$SANDBOX/coordinator-drive.out" 2>"$SANDBOX/coordinator-drive.err"
+expect_eq "coordinator-review-drive-recovers-legacy-action" "$?" 0
+grep -q '"action": "approve"' "$SANDBOX/coordinator-drive.out" && ok "coordinator-review-drive-approve" || bad "coordinator-review-drive-approve" "verified root approval remained interactive"
 (cd "$COORDINATOR" && "$SCRIPT" archive --dry-run --worktree "$COORDINATOR") \
   >"$SANDBOX/coordinator-archive.out" 2>"$SANDBOX/coordinator-archive.err"
 expect_eq "coordinator-review-archive" "$?" 0

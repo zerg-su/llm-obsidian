@@ -54,6 +54,10 @@
 - Root-scoped coordinator review больше не захватывает и не валидирует
   неиспользуемый resume checkpoint; broker-scoped review rounds сохраняют
   прежнее checkpoint-поведение.
+- Явный review primary checkout теперь использует собственную ограниченную
+  политику approve/resolve/escalate вместо устаревшей legacy task metadata.
+  Подтверждённый approve механически применим, а finish ставит exact-surface
+  cleanup даже без unattended dispatch contract.
 
 ## [2.1.2] — 2026-07-21
 

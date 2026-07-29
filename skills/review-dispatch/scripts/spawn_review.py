@@ -53,6 +53,7 @@ CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 # Preserve an explicitly requested review effort with a later argv override.
 CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CMUX_PASTE_SETTLE_SECONDS = 0.2
+COORDINATOR_MAX_VERIFY_ITERATIONS = 2
 HANDOFF_EXCLUDES = [
     ".task-prompt.md",
     ".task-summary.md",
@@ -1258,6 +1259,65 @@ def review_mode_instructions(review_mode: str) -> str:
     )
 
 
+def coordinator_review_action(review: dict[str, Any], iteration: int) -> str:
+    """Apply the bounded unattended decision policy of an explicit root review."""
+
+    if iteration < 0:
+        raise TaskContractError("review iteration cannot be negative")
+    findings = review.get("findings")
+    if not isinstance(findings, list):
+        raise TaskContractError("review findings must be an array")
+    if review.get("verdict") == "blocked" or any(
+        finding.get("severity") == "blocking"
+        for finding in findings
+        if isinstance(finding, dict)
+    ):
+        return "escalate"
+    if review.get("verdict") == "approve" and not findings:
+        return "approve"
+    if not findings or iteration >= COORDINATOR_MAX_VERIFY_ITERATIONS:
+        return "escalate"
+    severities = {
+        finding.get("severity")
+        for finding in findings
+        if isinstance(finding, dict)
+    }
+    return "resolve" if severities <= {"warning", "nit"} else "escalate"
+
+
+def current_received_review(
+    worktree: Path, review_meta: dict[str, Any]
+) -> dict[str, Any]:
+    """Reload and revalidate the exact callback already bound to this round."""
+
+    output = str(
+        review_meta.get("sent_output_json_file")
+        or review_meta.get("output_json_file")
+        or ""
+    ).strip()
+    if not output:
+        raise ReviewContractError("received review output file is missing")
+    return parse_review_json(
+        review_file(worktree, output).read_text(encoding="utf-8"),
+        expected_run_id=str(review_meta.get("run_id") or ""),
+        expected_mode=str(review_meta.get("review_mode") or ""),
+    )
+
+
+def review_auto_close(
+    worktree: Path,
+    vault: Path,
+    review_meta: dict[str, Any],
+    task_policy: dict[str, Any],
+) -> bool:
+    """Close explicit root reviews or contract-authorized unattended reviews."""
+
+    return is_primary_coordinator_review(worktree, vault, review_meta) or (
+        task_policy["interaction_policy"] == "unattended"
+        and task_policy["surface_policy"].get("auto_close") is True
+    )
+
+
 def render_review_prompt(
     worktree: Path,
     vault: Path,
@@ -1643,8 +1703,11 @@ def cmd_verify(ns: argparse.Namespace) -> int:
         policy = normalize_task_contract(meta)
     except TaskContractError as exc:
         die(str(exc))
-    if policy["interaction_policy"] == "unattended":
-        completed_verifies = max(0, int(review_meta.get("iteration") or 1) - 1)
+    completed_verifies = max(0, int(review_meta.get("iteration") or 1) - 1)
+    if is_primary_coordinator_review(worktree, vault, review_meta):
+        if completed_verifies >= COORDINATOR_MAX_VERIFY_ITERATIONS:
+            die("coordinator review verify iteration limit reached")
+    elif policy["interaction_policy"] == "unattended":
         if completed_verifies >= int(policy["review_policy"]["max_verify_iterations"]):
             die("unattended verify iteration limit reached; escalate to the coordinator")
     task_name = ns.task_name or str(review_meta.get("task_name") or read_task_name(worktree, meta))
@@ -1803,7 +1866,14 @@ def cmd_receive(ns: argparse.Namespace) -> int:
     review_meta["sent_output_json_file"] = output_json_file
     try:
         completed_verifies = max(0, int(review_meta.get("iteration") or 1) - 1)
-        review_meta["recommended_action"] = review_action(task_meta, review, completed_verifies)
+        if is_primary_coordinator_review(worktree, vault, review_meta):
+            review_meta["recommended_action"] = coordinator_review_action(
+                review, completed_verifies
+            )
+        else:
+            review_meta["recommended_action"] = review_action(
+                task_meta, review, completed_verifies
+            )
     except TaskContractError as exc:
         die(str(exc))
     write_json(review_file(worktree, ".review-meta.json"), review_meta)
@@ -1914,6 +1984,22 @@ def cmd_drive(ns: argparse.Namespace) -> int:
     if review_meta.get("status") != "review_received":
         die("review-dispatch drive requires a received callback")
     action = str(review_meta.get("recommended_action") or "")
+    vault = resolve_vault_root(
+        worktree, task_meta=task_meta, review_meta=review_meta
+    )
+    if action == "interactive" and is_primary_coordinator_review(
+        worktree, vault, review_meta
+    ):
+        try:
+            completed_verifies = max(
+                0, int(review_meta.get("iteration") or 1) - 1
+            )
+            action = coordinator_review_action(
+                current_received_review(worktree, review_meta),
+                completed_verifies,
+            )
+        except (OSError, ReviewContractError, TaskContractError) as exc:
+            die(f"cannot recover coordinator review action: {exc}")
     payload = {
         "schema_version": 1,
         "operation_dir": str(state_dir),
@@ -1923,6 +2009,10 @@ def cmd_drive(ns: argparse.Namespace) -> int:
     if not ns.apply_action:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 0
+    if action != review_meta.get("recommended_action"):
+        review_meta["recommended_action"] = action
+        review_meta["updated_at"] = utc_now()
+        write_json(review_file(worktree, ".review-meta.json"), review_meta)
     if action == "approve":
         finish_ns = argparse.Namespace(
             worktree=str(worktree), operation_dir=str(state_dir), no_send=False
@@ -1997,10 +2087,10 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     if not surface:
         die("review surface missing; cannot finish")
 
+    auto_close = review_auto_close(
+        worktree, vault, review_meta, task_policy
+    )
     if ns.no_send:
-        auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
-            "surface_policy"
-        ].get("auto_close") is True
         archive_result = archive_or_defer(worktree, review_meta, dry_run=True)
         print(
             f"would archive={archive_result.get('status')} arm close={str(auto_close).lower()} "
@@ -2008,12 +2098,9 @@ def cmd_finish(ns: argparse.Namespace) -> int:
         )
         return 0
 
-    auto_close = task_policy["interaction_policy"] == "unattended" and task_policy[
-        "surface_policy"
-    ].get("auto_close") is True
     if auto_close:
         if review_meta.get("status") != "review_received" or review_meta.get("recommended_action") != "approve":
-            die("unattended reviewer finish requires a received approve callback")
+            die("auto-closing reviewer finish requires a received approve callback")
     archive_result = archive_or_defer(worktree, review_meta)
     review_meta["archive_status"] = str(archive_result.get("status") or "unknown")
     if archive_result.get("wikilink"):

@@ -59,6 +59,26 @@ def reviewer_captures_checkpoint(worktree: Path) -> bool:
     return _STATE_DIR is None or reviewer_uses_broker_state(worktree)
 
 
+def root_coordinator_reviewer(worktree: Path, kind: str) -> bool:
+    """Recognize an explicit primary-checkout review lifecycle."""
+
+    if (
+        kind != "reviewer"
+        or _STATE_DIR is None
+        or _STATE_DIR.resolve() != worktree.resolve()
+    ):
+        return False
+    try:
+        return (
+            read_json(lifecycle_file(worktree, ".review-meta.json")).get(
+                "archive_mode"
+            )
+            == "coordinator"
+        )
+    except SystemExit:
+        return False
+
+
 def die(message: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(code)
@@ -143,20 +163,21 @@ def telemetry_surface_context(worktree: Path, kind: str) -> tuple[str, int]:
 
 def surface_and_runtime(worktree: Path, kind: str) -> tuple[str, str]:
     task_meta = read_json(worktree / ".task-meta.json")
-    try:
-        # A task plan is intentionally executed before its final /exit.  Only
-        # the exact coordinator-prepared close is valid during that phase.
-        policy = (
-            normalize_for_runtime(task_meta, worktree)
-            if kind == "task"
-            else normalize(task_meta)
-        )
-    except ContractError as exc:
-        die(str(exc), 3 if kind == "task" else 2)
-    if policy["interaction_policy"] != "unattended":
-        die("surface auto-close is allowed only for unattended tasks")
-    if policy["surface_policy"].get("auto_close") is not True:
-        die("surface auto-close is not approved by the task contract")
+    if not root_coordinator_reviewer(worktree, kind):
+        try:
+            # A task plan is intentionally executed before its final /exit.  Only
+            # the exact coordinator-prepared close is valid during that phase.
+            policy = (
+                normalize_for_runtime(task_meta, worktree)
+                if kind == "task"
+                else normalize(task_meta)
+            )
+        except ContractError as exc:
+            die(str(exc), 3 if kind == "task" else 2)
+        if policy["interaction_policy"] != "unattended":
+            die("surface auto-close is allowed only for unattended tasks")
+        if policy["surface_policy"].get("auto_close") is not True:
+            die("surface auto-close is not approved by the task contract")
     _, surface_key, runtime_key = names(kind)
     source = task_meta
     if kind == "reviewer":

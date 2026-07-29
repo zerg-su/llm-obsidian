@@ -48,6 +48,10 @@ packages were published for them.
 - Root-scoped coordinator reviews no longer capture or validate an unused
   resume checkpoint; broker-scoped review rounds retain their existing
   checkpoint behavior.
+- Explicit primary-checkout reviews now use their own bounded approve/resolve/
+  escalate policy instead of inheriting stale legacy task metadata. A verified
+  approval is mechanically applicable, and finish arms exact-surface cleanup
+  even when no unattended dispatch contract exists.
 
 ## [2.1.2] - 2026-07-21
 
