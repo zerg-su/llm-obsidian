@@ -598,7 +598,9 @@ def cmux_workspace_retry(args: list[str], **_: object) -> Result:
             and args[args.index("--surface") + 1] == "origin-1",
         )
         return Result(stdout="OK surface:10 (22222222-2222-4222-8222-222222222222)")
-    if args == ["cmux", "rpc", "system.tree", '{"all":true}']:
+    if args == [
+        "cmux", "--id-format", "both", "rpc", "system.tree", '{"all":true}'
+    ]:
         return Result(stdout=json.dumps({
             "windows": [{"workspaces": [{
                 "id": "workspace-1",

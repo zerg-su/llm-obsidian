@@ -38,6 +38,10 @@ packages were published for them.
 - Kept the exact native workspace-trust bootstrap active for the full lifetime
   of an approved unattended agent instead of abandoning slow cold starts after
   120 seconds.
+- Requested both UUIDs and short refs explicitly from current cmux tree output,
+  while retaining compatibility with older CLIs, so review/dispatch can resolve
+  the caller's exact workspace instead of failing after cmux changed its default
+  ID format.
 
 ## [2.1.2] - 2026-07-21
 

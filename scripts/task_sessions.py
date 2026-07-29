@@ -748,21 +748,32 @@ def parse_workspace(output: str) -> tuple[str, str]:
 
 
 def cmux_tree(runner: Any = subprocess.run) -> dict[str, Any]:
-    result = runner(
+    commands = (
+        ["cmux", "--id-format", "both", "rpc", "system.tree", '{"all":true}'],
+        # Compatibility with older cmux releases and test doubles that predate
+        # the explicit output-format switch.
         ["cmux", "rpc", "system.tree", '{"all":true}'],
-        text=True,
-        capture_output=True,
-        check=False,
     )
-    if result.returncode != 0:
-        raise TaskSessionError("cmux surface workspace lookup failed")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise TaskSessionError("cmux surface workspace lookup returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise TaskSessionError("cmux surface workspace lookup returned invalid data")
-    return payload
+    for index, command in enumerate(commands):
+        result = runner(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            continue
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            if index == 0:
+                continue
+            raise TaskSessionError("cmux surface workspace lookup returned invalid JSON")
+        if isinstance(payload, dict):
+            return payload
+        if index != 0:
+            raise TaskSessionError("cmux surface workspace lookup returned invalid data")
+    raise TaskSessionError("cmux surface workspace lookup failed")
 
 
 def pane_layout(workspace: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
