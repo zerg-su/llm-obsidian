@@ -57,6 +57,9 @@ packages were published for them.
   and a readiness handshake. The live cells still exercise real opposite-model
   review, duplicate-safe reap-send, final reap, graceful task exit, and
   independent durable proof, without failing on invented plan addresses.
+- Pinned unsafe-research acceptance to one stable official PEP page with a
+  bounded same-URL GET fallback, so the cell tests its single-context route
+  rather than an unreliable documentation endpoint choice.
 
 ## [2.1.2] - 2026-07-21
 

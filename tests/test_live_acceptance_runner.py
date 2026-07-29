@@ -156,6 +156,16 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "scripts/reindex.py" in fixture_registry["skills"]["learn"]["fixture"],
     )
     check(
+        "unsafe research fixture pins one stable official read",
+        "https://peps.python.org/pep-0008/"
+        in fixture_registry["skills"]["unsafe-research"]["fixture"]
+        and "PEP 8 — Style Guide for Python Code"
+        in fixture_registry["skills"]["unsafe-research"]["fixture"]
+        and "--fail --location --max-time 15"
+        in fixture_registry["skills"]["unsafe-research"]["fixture"]
+        and "same URL" in fixture_registry["skills"]["unsafe-research"]["fixture"],
+    )
+    check(
         "reap fixtures use runner-prepared lifecycle infrastructure",
         all(
             "runner-prepared approved task" in fixture_registry["skills"][skill]["fixture"]

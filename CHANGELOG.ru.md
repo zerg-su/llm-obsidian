@@ -64,6 +64,9 @@
   opposite-model review, duplicate-safe reap-send, final reap, graceful task
   exit и независимый durable proof, но больше не падают из-за выдуманных
   моделью адресов плана.
+- Unsafe-research acceptance закреплён на одной стабильной официальной
+  PEP-странице с ограниченным same-URL GET fallback. Теперь ячейка проверяет
+  single-context route, а не случайный выбор ненадёжного documentation endpoint.
 
 ## [2.1.2] — 2026-07-21
 
