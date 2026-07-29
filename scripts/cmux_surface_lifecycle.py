@@ -47,6 +47,12 @@ def lifecycle_file(worktree: Path, name: str, kind: str = "reviewer") -> Path:
     return worktree / name
 
 
+def reviewer_uses_broker_state(worktree: Path) -> bool:
+    """Return whether reviewer state belongs to a v3 broker operation."""
+
+    return _STATE_DIR is not None and _STATE_DIR.resolve() != worktree.resolve()
+
+
 def die(message: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(code)
@@ -266,7 +272,7 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
     sentinel_name, _, _ = names(kind)
     sentinel = lifecycle_file(worktree, sentinel_name, kind)
     if not sentinel.exists():
-        if kind == "reviewer" and _STATE_DIR is not None:
+        if kind == "reviewer" and reviewer_uses_broker_state(worktree):
             if transition_broker_review(
                 worktree, "failed", degradation="reviewer exited without an armed completion"
             ):
@@ -309,7 +315,7 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
                 file=sys.stderr,
             )
     broker_transitioned = True
-    if kind == "reviewer" and _STATE_DIR is not None:
+    if kind == "reviewer" and reviewer_uses_broker_state(worktree):
         broker_transitioned = transition_broker_review(
             worktree, "complete", checkpoint=checkpoint, degradation=degradation
         )

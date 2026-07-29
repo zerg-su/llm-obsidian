@@ -25,6 +25,22 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from task_sessions import TaskSessionStore, project_id_for
 
 
+AMBIENT_SESSION_KEYS = (
+    "CMUX_SURFACE_ID",
+    "CODEX_THREAD_ID",
+    "LLM_OBSIDIAN_SESSION_RUNTIME",
+    "LLM_OBSIDIAN_SESSION_MODEL",
+    "LLM_OBSIDIAN_SESSION_EFFORT",
+)
+
+
+def clean_environment() -> dict[str, str]:
+    result = dict(os.environ)
+    for key in AMBIENT_SESSION_KEYS:
+        result.pop(key, None)
+    return result
+
+
 def run(
     *args: str,
     env: dict[str, str] | None = None,
@@ -34,7 +50,7 @@ def run(
         [sys.executable, str(SCRIPT), *args],
         text=True,
         capture_output=True,
-        env=env,
+        env=clean_environment() if env is None else env,
         cwd=cwd,
     )
 
@@ -99,8 +115,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     socket_path = tmp / "cmux.sock"
     socket_fixture = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     socket_fixture.bind(str(socket_path))
-    env = dict(os.environ)
-    env.pop("CMUX_SURFACE_ID", None)
+    env = clean_environment()
     fake_env = dict(env)
     fake_env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
     fake_env["CMUX_LOG"] = str(cmux_log)
@@ -126,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     result = run(
         "start", "--topic", "safe research topic", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--state-root", str(state_root),
-        "--tmp-root", str(tmp), "--no-spawn",
+        "--tmp-root", str(tmp), "--no-spawn", env=env,
     )
     check("dry start", result.returncode == 0, result.stderr)
     state = json.loads(result.stdout)
@@ -154,7 +169,7 @@ with tempfile.TemporaryDirectory(prefix="research-isolation-test.") as raw:
     keep = run(
         "start", "--topic", "debug surfaces", "--flow", "autoresearch",
         "--coordinator-surface", "surface:test", "--state-root", str(state_root),
-        "--tmp-root", str(tmp), "--no-spawn", "--keep-surfaces",
+        "--tmp-root", str(tmp), "--no-spawn", "--keep-surfaces", env=env,
     )
     check("surface keep is explicit opt-in", json.loads(keep.stdout)["surface_policy"] == "keep")
     run_id = state["run_id"]

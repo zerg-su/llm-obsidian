@@ -10,6 +10,25 @@ Only public releases are listed. Versions 2.0.5 and 2.1.1 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.1.3] - 2026-07-29
+
+### Fixed
+
+- Fixed primary coordinator-review cleanup so root-scoped review state is no
+  longer mistaken for a v3 broker operation merely because `--state-dir`
+  points at the canonical checkout. An approved coordinator reviewer now closes
+  its exact cmux surface after process exit without requiring nonexistent
+  `project_id`, `task_id`, or `lane_id` values.
+- Preserved fail-closed broker behavior for real v3 operation directories:
+  missing or corrupt broker identity still leaves the exact reviewer surface
+  visible and retryable.
+- Added a hermetic regression covering the complete root-state
+  `request-exit` → `after-exit` path and exact-surface close.
+- Made the protected-research test harness discard ambient coordinator session
+  routing before launching subprocess fixtures, so `make test` remains
+  hermetic inside active Claude and Codex sessions without changing product
+  routing.
+
 ## [2.1.2] - 2026-07-21
 
 ### Added

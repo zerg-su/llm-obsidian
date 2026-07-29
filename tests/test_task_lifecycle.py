@@ -1027,6 +1027,42 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         f"send-key --surface {review_surface} ctrl+u" in reviewer_close_log,
     )
 
+    coordinator_review_surface = "33333333-3333-3333-3333-333333333333"
+    write_json(worktree / ".review-meta.json", {
+        "archive_mode": "coordinator",
+        "review_surface": coordinator_review_surface,
+        "reviewer_runtime": "claude",
+        "executor_surface": meta["task_surface"],
+    })
+    result = run(
+        LIFECYCLE, "request-exit", "--worktree", str(worktree),
+        "--state-dir", str(worktree), "--kind", "reviewer",
+        cwd=worktree, env=env,
+    )
+    check("coordinator reviewer root-state exit armed", result.returncode == 0, result.stderr)
+    result = run(
+        LIFECYCLE, "after-exit", "--worktree", str(worktree),
+        "--state-dir", str(worktree), "--kind", "reviewer",
+        "--surface", coordinator_review_surface, cwd=worktree, env=env,
+    )
+    check(
+        "coordinator reviewer root-state surface closes without broker identity",
+        result.returncode == 0
+        and "lacks exact broker identity" not in result.stderr
+        and not (worktree / ".review-close-armed.json").exists(),
+        result.stderr,
+    )
+    coordinator_close_log = cmux_log.read_text()
+    check(
+        "coordinator reviewer targets exact root-state surface",
+        f"close-surface --surface {coordinator_review_surface}" in coordinator_close_log,
+    )
+    write_json(worktree / ".review-meta.json", {
+        "review_surface": review_surface,
+        "reviewer_runtime": "claude",
+        "executor_surface": meta["task_surface"],
+    })
+
     retry_review = broker_store.enqueue_operation(
         broker_project, broker_task, domain="review", runtime="claude", model="fable",
         effort="high", operation_type="review", coordinator_surface="surface-retry-executor",
