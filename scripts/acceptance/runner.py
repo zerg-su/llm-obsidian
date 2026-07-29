@@ -58,7 +58,7 @@ from acceptance.contracts import (
 )
 from acceptance.launchers import (
     AGENT_EXIT_GRACE_SECONDS, CHILD_SURFACE_SETTLE_SECONDS, OUTBOX_MAX_BYTES,
-    agent_argv, close_operation_children, close_surface,
+    acceptance_network_domains, agent_argv, close_operation_children, close_surface,
     operation_child_surfaces, run_agent_process, send_surface,
     settle_operation_surfaces, settled_outbox, surface_is_open,
     wait_for_operation_children, wait_for_outbox,
@@ -300,6 +300,7 @@ def run_live(row: dict[str, Any], scenario: dict[str, Any], fixture: str) -> dic
             "sandbox": str(sandbox),
             "scratch_root": str(scratch_root),
             "prompt_file": str(prompt_path),
+            "network_domains": list(acceptance_network_domains(row)),
         }
         if prepared_dispatch is not None:
             spec["dispatch_fixture"] = prepared_dispatch

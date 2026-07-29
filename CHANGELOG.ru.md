@@ -67,6 +67,8 @@
 - Unsafe-research acceptance закреплён на одной стабильной официальной
   PEP-странице с ограниченным same-URL GET fallback. Теперь ячейка проверяет
   single-context route, а не случайный выбор ненадёжного documentation endpoint.
+  Outbound proxy access к `peps.python.org` получает только эта точная Codex
+  acceptance-ячейка; политики остальных acceptance и product task не меняются.
 
 ## [2.1.2] — 2026-07-21
 

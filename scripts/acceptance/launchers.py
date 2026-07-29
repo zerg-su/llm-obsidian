@@ -26,12 +26,41 @@ OUTBOX_INVALID_GRACE_SECONDS = 5.0
 OUTBOX_STABLE_SECONDS = 1.0
 AGENT_EXIT_GRACE_SECONDS = 300.0
 CHILD_SURFACE_SETTLE_SECONDS = 45.0
+ACCEPTANCE_NETWORK_DOMAINS = {
+    ("unsafe-research", "codex", "unsafe-web"): ("peps.python.org",),
+}
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from cmux_agent_support import resolved_git_common_dir, task_codex_config_values, validated_cmux_socket_path  # noqa: E402
 from cmux_trust_prompt import claude_background_exit_prompt_visible, workspace_trust_prompt_visible  # noqa: E402
 from model_routing import load_config  # noqa: E402
 from task_sessions import TaskSessionError, close_surface_exact  # noqa: E402
+
+def acceptance_network_domains(row: dict[str, Any]) -> tuple[str, ...]:
+    """Return the exact code-owned outbound hosts for one acceptance row."""
+
+    key = (
+        str(row.get("skill") or ""),
+        str(row.get("runtime") or ""),
+        str(row.get("scenario") or ""),
+    )
+    return ACCEPTANCE_NETWORK_DOMAINS.get(key, ())
+
+def validated_network_domains(values: Any) -> tuple[str, ...]:
+    if not isinstance(values, (list, tuple)) or any(
+        not isinstance(value, str) for value in values
+    ):
+        raise AcceptanceRunnerError("acceptance network domains must be a string array")
+    domains = tuple(values)
+    allowed = {domain for configured in ACCEPTANCE_NETWORK_DOMAINS.values() for domain in configured}
+    if len(set(domains)) != len(domains) or any(domain not in allowed for domain in domains):
+        raise AcceptanceRunnerError("acceptance network domain is not code-owned")
+    return domains
+
+def codex_network_domains_config(domains: tuple[str, ...]) -> str:
+    values = ("localhost", "127.0.0.1", "::1", *domains)
+    entries = ", ".join(f"{json.dumps(value)} = \"allow\"" for value in values)
+    return f"features.network_proxy.domains={{ {entries} }}"
 
 def agent_argv(
     runtime: str,
@@ -43,6 +72,7 @@ def agent_argv(
     scratch_root: Path | None = None,
     surface: str = "",
     session_id: str = "",
+    network_domains: tuple[str, ...] = (),
 ) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env["LLM_OBSIDIAN_ACCEPTANCE"] = "1"
@@ -60,6 +90,10 @@ def agent_argv(
         for name in ("TMPDIR", "TMP", "TEMP"):
             env[name] = str(scratch_root)
     if runtime == "claude":
+        if network_domains:
+            raise AcceptanceRunnerError(
+                "acceptance network domain overrides are Codex-only"
+            )
         return [
             "claude", "--permission-mode", "auto", "--add-dir", str(sandbox),
             "--plugin-dir", str(sandbox),
@@ -75,6 +109,9 @@ def agent_argv(
     ]
     for value in task_codex_config_values(socket, effort):
         argv.extend(["-c", value])
+    exact_network_domains = validated_network_domains(network_domains)
+    if exact_network_domains:
+        argv.extend(["-c", codex_network_domains_config(exact_network_domains)])
     dispatch_env = sandbox / ".codex" / "dispatch-env.toml"
     if dispatch_env.is_file() and sys.version_info >= (3, 11):
         import tomllib
@@ -103,6 +140,12 @@ def run_agent_process(spec_path: Path) -> int:
     if scratch_root != scratch_root_for(run_dir) or not (scratch_root / ".acceptance-scratch.json").is_file():
         raise AcceptanceRunnerError("acceptance scratch directory is not operation-scoped")
     runtime = str(spec.get("runtime") or "")
+    row = spec.get("row")
+    if not isinstance(row, dict):
+        raise AcceptanceRunnerError("acceptance operation row is missing")
+    expected_network_domains = acceptance_network_domains(row)
+    if validated_network_domains(spec.get("network_domains", [])) != expected_network_domains:
+        raise AcceptanceRunnerError("acceptance operation network scope drifted")
     config = load_config(sandbox)
     route = config.runtime_default(runtime)
     if route["model"] != spec.get("model") or route["effort"] != spec.get("effort"):
@@ -116,6 +159,7 @@ def run_agent_process(spec_path: Path) -> int:
         scratch_root=scratch_root,
         surface=str(spec.get("surface") or ""),
         session_id=str(spec.get("session_id") or ""),
+        network_domains=expected_network_domains,
     )
     try:
         launch_cwd = run_dir if runtime == "claude" else sandbox

@@ -59,7 +59,9 @@ packages were published for them.
   independent durable proof, without failing on invented plan addresses.
 - Pinned unsafe-research acceptance to one stable official PEP page with a
   bounded same-URL GET fallback, so the cell tests its single-context route
-  rather than an unreliable documentation endpoint choice.
+  rather than an unreliable documentation endpoint choice. Only that exact
+  Codex acceptance row receives outbound proxy access to `peps.python.org`;
+  every other acceptance and product task policy is unchanged.
 
 ## [2.1.2] - 2026-07-21
 

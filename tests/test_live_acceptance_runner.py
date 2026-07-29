@@ -420,6 +420,53 @@ with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
         "Codex acceptance grants only disposable Git metadata",
         codex_argv[codex_argv.index("--add-dir") + 1] == str(module.resolved_git_common_dir(repo)),
     )
+    unsafe_row = row(
+        skill="unsafe-research",
+        runtime="codex",
+        scenario="unsafe-web",
+        expected=(
+            "After one warning, run one bounded single-context web scenario on the "
+            "exact current session route without a second model run."
+        ),
+    )
+    unsafe_domains = module.acceptance_network_domains(unsafe_row)
+    unsafe_argv, _ = module.agent_argv(
+        "codex",
+        repo,
+        "fixture-model",
+        "high",
+        "prompt",
+        network_domains=unsafe_domains,
+    )
+    network_configs = [
+        unsafe_argv[index + 1]
+        for index, value in enumerate(unsafe_argv[:-1])
+        if value == "-c" and unsafe_argv[index + 1].startswith(
+            "features.network_proxy.domains="
+        )
+    ]
+    check(
+        "unsafe Codex acceptance grants only its pinned public host",
+        unsafe_domains == ("peps.python.org",)
+        and "peps.python.org" not in " ".join(codex_argv)
+        and len(network_configs) == 2
+        and "peps.python.org" in network_configs[-1]
+        and "localhost" in network_configs[-1]
+        and "python.org" not in network_configs[-1].replace("peps.python.org", ""),
+    )
+    try:
+        module.agent_argv(
+            "codex",
+            repo,
+            "fixture-model",
+            "high",
+            "prompt",
+            network_domains=("example.com",),
+        )
+    except module.AcceptanceRunnerError:
+        check("acceptance rejects unregistered public hosts", True)
+    else:
+        check("acceptance rejects unregistered public hosts", False)
     scratch = tmp / "scratch"
     scratch.mkdir()
     _argv, scratch_env = module.agent_argv(
