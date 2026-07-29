@@ -58,12 +58,12 @@ REVIEW_RELAY_FILE = ".review-relay.json"
 REVIEW_OUTBOX_FILE = ".review-outbox.json"
 REVIEW_RELAY_POLL_SECONDS = 0.25
 REVIEW_RELAY_TIMEOUT_SECONDS = 15
-WORKSPACE_TRUST_POLL_SECONDS = 0.1
+WORKSPACE_TRUST_POLL_SECONDS = 0.5
 ARMED_EXIT_POLL_SECONDS = 0.25
 # A cold runtime may paint its native workspace-trust dialog long after launch.
-# The owned supervisor stops this exact-prompt watcher when the agent exits, so
-# no separate wall-clock cutoff is needed.
-WORKSPACE_TRUST_TIMEOUT_SECONDS: float | None = None
+# Thirty minutes covers slow subscription/auth startup without polling the
+# surface for the full lifetime of a long-running agent.
+WORKSPACE_TRUST_TIMEOUT_SECONDS = 30 * 60
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 CODEX_FORBIDDEN_OPTIONS = {
     "--full-auto",

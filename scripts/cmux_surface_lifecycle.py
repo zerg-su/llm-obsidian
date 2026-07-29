@@ -53,6 +53,12 @@ def reviewer_uses_broker_state(worktree: Path) -> bool:
     return _STATE_DIR is not None and _STATE_DIR.resolve() != worktree.resolve()
 
 
+def reviewer_captures_checkpoint(worktree: Path) -> bool:
+    """Retain resume state only when a later reviewer round can consume it."""
+
+    return _STATE_DIR is None or reviewer_uses_broker_state(worktree)
+
+
 def die(message: str, code: int = 2) -> NoReturn:
     print(f"ERROR: {message}", file=sys.stderr)
     raise SystemExit(code)
@@ -221,7 +227,7 @@ def arm(worktree: Path, kind: str) -> tuple[Path, str, str]:
     payload: dict[str, Any] = {
         "version": 1, "kind": kind, "surface": surface, "armed_at": utc_now()
     }
-    if kind == "reviewer":
+    if kind == "reviewer" and reviewer_captures_checkpoint(worktree):
         try:
             # Provider hooks may clear their cmux resume binding as the agent
             # exits. Capture it while the interactive process is still alive,
@@ -292,7 +298,7 @@ def after_exit(worktree: Path, kind: str, surface: str) -> int:
         die("close sentinel does not match the exiting surface", 3)
     checkpoint: dict[str, str] | None = None
     degradation = ""
-    if kind == "reviewer" and _STATE_DIR is not None:
+    if kind == "reviewer" and reviewer_uses_broker_state(worktree):
         meta = read_json(lifecycle_file(worktree, ".review-meta.json"))
         runtime = str(meta.get("reviewer_runtime") or "")
         raw_checkpoint = payload.get("checkpoint")

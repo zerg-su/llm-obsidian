@@ -35,9 +35,9 @@ packages were published for them.
 - Restored opposite-model Claude review callbacks by allowing both native
   editors on the same exact `.review-outbox.json` target. The reviewer remains
   `dontAsk`, product-read-only, and unable to write any other checkout path.
-- Kept the exact native workspace-trust bootstrap active for the full lifetime
-  of an approved unattended agent instead of abandoning slow cold starts after
-  120 seconds.
+- Kept the exact native workspace-trust bootstrap active for a bounded
+  30-minute window instead of abandoning slow cold starts after 120 seconds;
+  the lower polling rate avoids lifetime subprocess churn on long tasks.
 - Requested both UUIDs and short refs explicitly from current cmux tree output,
   while retaining compatibility with older CLIs, so review/dispatch can resolve
   the caller's exact workspace instead of failing after cmux changed its default
@@ -45,6 +45,9 @@ packages were published for them.
 - Live primary coordinator reviews now anchor to the current exact
   `CMUX_SURFACE_ID` instead of reusing a stale root-level task handoff from an
   older review cycle.
+- Root-scoped coordinator reviews no longer capture or validate an unused
+  resume checkpoint; broker-scoped review rounds retain their existing
+  checkpoint behavior.
 
 ## [2.1.2] - 2026-07-21
 

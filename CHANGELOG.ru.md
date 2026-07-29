@@ -42,15 +42,18 @@
   разрешены для одного и того же точного `.review-outbox.json`. Reviewer
   остаётся в `dontAsk`, product-read-only и не получает записи в другие пути
   checkout-а.
-- Обработчик точного native workspace-trust prompt теперь живёт столько же,
-  сколько утверждённый unattended agent, и не бросает медленный cold start
-  через 120 секунд.
+- Обработчик точного native workspace-trust prompt теперь ждёт ограниченные
+  30 минут вместо прежних 120 секунд; сниженная частота polling не создаёт
+  пожизненный поток subprocess-ов у длинных задач.
 - Tree-запрос к актуальному cmux теперь явно просит UUID и short refs, сохраняя
   совместимость со старыми CLI. Поэтому review/dispatch снова разрешает точный
   workspace вызывающего координатора после изменения формата cmux по умолчанию.
 - Live primary coordinator review теперь якорится к текущему точному
   `CMUX_SURFACE_ID`, а не переиспользует устаревший корневой task-handoff от
   предыдущего review cycle.
+- Root-scoped coordinator review больше не захватывает и не валидирует
+  неиспользуемый resume checkpoint; broker-scoped review rounds сохраняют
+  прежнее checkpoint-поведение.
 
 ## [2.1.2] — 2026-07-21
 

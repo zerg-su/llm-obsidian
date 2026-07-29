@@ -391,6 +391,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "#!/bin/sh\n"
         "case \"$1\" in\n"
         "  surface) if [ \"$2 $3\" = \"resume get\" ]; then "
+        "printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; "
         "printf '{\"resume_binding\":{\"kind\":\"claude\",\"checkpoint_id\":\"review-checkpoint-1\",\"cwd\":\"%s\"}}\\n' \"$PWD\"; exit 0; fi ;;\n"
         "  read-screen)\n"
         "    if [ \"${CMUX_SCREEN_GONE:-0}\" = 1 ]; then echo 'not_found: surface' >&2; exit 1; fi\n"
@@ -734,8 +735,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
     )
     check(
-        "supervisor keeps trust bootstrap alive for the owned agent lifetime",
-        supervisor_module.WORKSPACE_TRUST_TIMEOUT_SECONDS is None,
+        "supervisor gives slow trust bootstrap a bounded thirty-minute window",
+        supervisor_module.WORKSPACE_TRUST_TIMEOUT_SECONDS == 30 * 60
+        and supervisor_module.WORKSPACE_TRUST_POLL_SECONDS >= 0.5,
     )
     trust_commands: list[list[str]] = []
 
@@ -1060,12 +1062,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "reviewer_runtime": "claude",
         "executor_surface": meta["task_surface"],
     })
+    cmux_log.write_text("", encoding="utf-8")
     result = run(
         LIFECYCLE, "request-exit", "--worktree", str(worktree),
         "--state-dir", str(worktree), "--kind", "reviewer",
         cwd=worktree, env=env,
     )
     check("coordinator reviewer root-state exit armed", result.returncode == 0, result.stderr)
+    check(
+        "coordinator reviewer skips unused resume checkpoint capture",
+        "surface resume get" not in cmux_log.read_text(encoding="utf-8"),
+    )
     result = run(
         LIFECYCLE, "after-exit", "--worktree", str(worktree),
         "--state-dir", str(worktree), "--kind", "reviewer",
