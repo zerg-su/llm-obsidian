@@ -14,6 +14,13 @@ IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 SCHEMA_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 ENFORCEMENT = {"policy-only", "sandbox-enforced"}
+SESSION_MODES = {
+    "controller",
+    "parent-child",
+    "review",
+    "verification",
+    "worktree",
+}
 COMPILER_VERSION = "1.0.0"
 
 
@@ -156,6 +163,7 @@ class PipelineStep:
     primitive_version: str
     input_schema: str
     output_schema: str
+    session_mode: str
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -166,6 +174,19 @@ class PipelineStep:
         _version(self.primitive_version, "step primitive_version")
         _schema_id(self.input_schema, "step input_schema")
         _schema_id(self.output_schema, "step output_schema")
+        if self.session_mode not in SESSION_MODES:
+            raise ContractError("step session_mode is invalid")
+        allowed_modes = {
+            "bounded_loop": {"controller"},
+            "human_gate": {"controller"},
+            "model_step": {"parent-child", "worktree"},
+            "review": {"review"},
+            "verify": {"verification"},
+        }.get(self.primitive_id)
+        if allowed_modes is not None and self.session_mode not in allowed_modes:
+            raise ContractError(
+                f"{self.primitive_id} cannot use {self.session_mode} session mode"
+            )
 
 
 @dataclass(frozen=True)
@@ -264,6 +285,7 @@ class PipelineOperationBinding:
     step_id: str
     primitive_id: str
     primitive_version: str
+    session_mode: str
     input_sha256: str
     output_schema: str
     replay_key: str
@@ -277,6 +299,8 @@ class PipelineOperationBinding:
         _identifier(self.step_id, "pipeline step_id")
         _identifier(self.primitive_id, "pipeline primitive_id")
         _version(self.primitive_version, "pipeline primitive_version")
+        if self.session_mode not in SESSION_MODES - {"controller"}:
+            raise ContractError("operation binding requires an executable session mode")
         _sha256(self.input_sha256, "pipeline step input")
         _schema_id(self.output_schema, "pipeline step output_schema")
         _sha256(self.replay_key, "pipeline replay key")
@@ -422,6 +446,7 @@ def bind_step_operation(
         step_id=step.step_id,
         primitive_id=step.primitive_id,
         primitive_version=step.primitive_version,
+        session_mode=step.session_mode,
         input_sha256=input_digest,
         output_schema=step.output_schema,
         replay_key=replay_key,

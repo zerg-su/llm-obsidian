@@ -108,6 +108,7 @@ definition = PipelineDefinition(
             "1.0.0",
             "task-contract/v1",
             "approved-contract/v1",
+            "controller",
         ),
         PipelineStep(
             "implement",
@@ -115,6 +116,7 @@ definition = PipelineDefinition(
             "1.0.0",
             "approved-contract/v1",
             "change/v1",
+            "worktree",
         ),
         PipelineStep(
             "verify",
@@ -122,6 +124,7 @@ definition = PipelineDefinition(
             "1.0.0",
             "change/v1",
             "change/v1",
+            "verification",
         ),
         PipelineStep(
             "review",
@@ -129,6 +132,7 @@ definition = PipelineDefinition(
             "1.0.0",
             "change/v1",
             "review-approved/v1",
+            "review",
         ),
     ),
     permission_ceiling=("product-write",),
@@ -226,6 +230,7 @@ expect_compile_error(
                 "1.0.0",
                 "review-approved/v1",
                 "review-approved/v1",
+                "controller",
             ),
         ),
     ),

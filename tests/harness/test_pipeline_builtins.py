@@ -79,3 +79,27 @@ check(
         for item in compiled.values()
     ),
 )
+check(
+    "lifecycle session mapping reuses the existing worktree and review lanes",
+    tuple(
+        step.session_mode
+        for step in compiled["lifecycle/default"].definition.steps
+    )
+    == ("controller", "worktree", "review"),
+)
+check(
+    "fix keeps diagnosis rounds in the original worktree session",
+    tuple(
+        step.session_mode
+        for step in compiled["engineering/fix"].definition.steps
+    )
+    == (
+        "controller",
+        "worktree",
+        "parent-child",
+        "parent-child",
+        "parent-child",
+        "verification",
+        "review",
+    ),
+)

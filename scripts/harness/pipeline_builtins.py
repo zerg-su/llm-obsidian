@@ -16,25 +16,33 @@ from .pipelines import (
 
 
 VERSION = "1.0.0"
-StepSpec = tuple[str, str, str, str]
+StepSpec = tuple[str, str, str, str, str]
 
 BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
     "lifecycle/default": (
         "lifecycle",
         "default",
         (
-            ("approve", "human_gate", "task-contract/v1", "approved-plan/v1"),
+            (
+                "approve",
+                "human_gate",
+                "task-contract/v1",
+                "approved-plan/v1",
+                "controller",
+            ),
             (
                 "dispatch",
                 "model_step",
                 "approved-plan/v1",
                 "implementation-result/v1",
+                "worktree",
             ),
             (
                 "review",
                 "review",
                 "implementation-result/v1",
                 "reap-ready/v1",
+                "review",
             ),
         ),
     ),
@@ -42,48 +50,89 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
         "engineering",
         "change",
         (
-            ("approve", "human_gate", "task-contract/v1", "approved-plan/v1"),
+            (
+                "approve",
+                "human_gate",
+                "task-contract/v1",
+                "approved-plan/v1",
+                "controller",
+            ),
             (
                 "tdd-slices",
                 "model_step",
                 "approved-plan/v1",
                 "implementation-result/v1",
+                "worktree",
             ),
             (
                 "verify",
                 "verify",
                 "implementation-result/v1",
                 "verified-result/v1",
+                "verification",
             ),
-            ("review", "review", "verified-result/v1", "reap-ready/v1"),
+            (
+                "review",
+                "review",
+                "verified-result/v1",
+                "reap-ready/v1",
+                "review",
+            ),
         ),
     ),
     "engineering/fix": (
         "engineering",
         "fix",
         (
-            ("approve", "human_gate", "task-contract/v1", "approved-plan/v1"),
-            ("reproduce", "model_step", "approved-plan/v1", "reproduction/v1"),
-            ("root-cause", "model_step", "reproduction/v1", "diagnosis/v1"),
+            (
+                "approve",
+                "human_gate",
+                "task-contract/v1",
+                "approved-plan/v1",
+                "controller",
+            ),
+            (
+                "reproduce",
+                "model_step",
+                "approved-plan/v1",
+                "reproduction/v1",
+                "worktree",
+            ),
+            (
+                "root-cause",
+                "model_step",
+                "reproduction/v1",
+                "diagnosis/v1",
+                "parent-child",
+            ),
             (
                 "regression-test",
                 "model_step",
                 "diagnosis/v1",
                 "regression-test/v1",
+                "parent-child",
             ),
             (
                 "minimal-fix",
                 "model_step",
                 "regression-test/v1",
                 "implementation-result/v1",
+                "parent-child",
             ),
             (
                 "verify",
                 "verify",
                 "implementation-result/v1",
                 "verified-result/v1",
+                "verification",
             ),
-            ("review", "review", "verified-result/v1", "reap-ready/v1"),
+            (
+                "review",
+                "review",
+                "verified-result/v1",
+                "reap-ready/v1",
+                "review",
+            ),
         ),
     ),
 }
@@ -163,8 +212,21 @@ def _definition(
         input_schema="task-contract/v1",
         output_schema="reap-ready/v1",
         steps=tuple(
-            PipelineStep(step_id, primitive_id, VERSION, input_schema, output_schema)
-            for step_id, primitive_id, input_schema, output_schema in steps
+            PipelineStep(
+                step_id,
+                primitive_id,
+                VERSION,
+                input_schema,
+                output_schema,
+                session_mode,
+            )
+            for (
+                step_id,
+                primitive_id,
+                input_schema,
+                output_schema,
+                session_mode,
+            ) in steps
         ),
         permission_ceiling=("product-write",),
         side_effect_ceiling=("verification-process", "workspace-write"),
