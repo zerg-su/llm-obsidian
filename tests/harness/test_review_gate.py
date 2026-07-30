@@ -24,6 +24,7 @@ from harness.callbacks import CallbackBroker
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
+    OperationSpec,
     OwnedResources,
     RuntimeRoute,
     to_dict,
@@ -1027,6 +1028,97 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             capture_output=True,
             text=True,
         ).stdout.strip(),
+    )
+    recovery_id = str(uuid.uuid4())
+    recovery_meta = {**meta, "task_id": recovery_id}
+    (product / ".task-meta.json").write_text(
+        json.dumps(recovery_meta, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    dispatch_spec = OperationSpec(
+        operation_id=recovery_id,
+        idempotency_key="review-recovery-dispatch",
+        kind="dispatch",
+        owner_id=recovery_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+    )
+    task_store.create(
+        dispatch_spec,
+        lane_id="review-recovery-lane",
+        run_id="review-recovery-run",
+    )
+    for state in (
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+    ):
+        task_store.transition(recovery_id, recovery_id, state)
+    task_store.transition(
+        recovery_id,
+        recovery_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+
+    class FailBeforeReviewLane(FakeRuntime):
+        def __init__(self, store: OperationStore) -> None:
+            super().__init__(store)
+            self.fail_once = True
+
+        def start(
+            self, request: object, *, on_surface_opened=None
+        ) -> FakeSessionResult:
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeError("simulated review drive interruption")
+            return super().start(
+                request, on_surface_opened=on_surface_opened
+            )
+
+    recovery_runtime = FailBeforeReviewLane(task_store)
+    try:
+        task_review_runner.run_task_review(
+            product, runtime_manager=recovery_runtime
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("review drive interruption fixture did not fail")
+    recovery_gate = ReviewGateController(
+        vault
+        / ".vault-meta/harness/review-data"
+        / recovery_id
+        / recovery_id,
+        recovery_runtime,
+        task_store,
+    )
+    recovery_gate.mark_pending_attention()
+    still_paused = task_review_runner.run_task_review(
+        product, runtime_manager=recovery_runtime
+    )
+    task_store.transition(
+        recovery_id,
+        recovery_id,
+        "awaiting-callback",
+    )
+    recovered = task_review_runner.run_task_review(
+        product, runtime_manager=recovery_runtime
+    )
+    check(
+        "resumed dispatch restarts only an evidence-free pre-launch review gate",
+        still_paused["status"] == "attention-required"
+        and recovered["status"] == "reviewing"
+        and len(recovered["lanes"]) == 1
+        and recovery_gate.read()["status"] == "reviewing",
     )
     skip_id = str(uuid.uuid4())
     skip_meta = {

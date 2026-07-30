@@ -411,7 +411,10 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         isinstance(simple, ReviewExecution)
         and [lane.axis for lane in simple.lanes] == ["holistic"]
         and len(runtime.started) == 1
-        and runtime.started[0].spec.operation_id == "review-simple"
+        and runtime.started[0].spec.operation_id.startswith(
+            "review-simple-holistic-"
+        )
+        and runtime.started[0].spec.operation_id != "review-simple"
         and runtime.started[0].lane_id == "composition-lane"
         and runtime.started[0].placement == "workspace"
         and runtime.started[0].callback_pointer
@@ -470,7 +473,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         == [
             (
                 "owner-1",
-                "review-simple",
+                original.operation_id,
                 original.checkpoint,
                 "packets/review/verify-1.md",
             )
@@ -611,8 +614,8 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
     )
     check(
         "terminal approval exits and cleans only the parent reviewer session",
-        runtime.exits == [("owner-1", "review-simple")]
-        and runtime.cleanups == [("owner-1", "review-simple")]
+        runtime.exits == [("owner-1", original.operation_id)]
+        and runtime.cleanups == [("owner-1", original.operation_id)]
         and [item.operation_id for item in runtime.callbacks]
         == [first_round.operation_id, verification_round.operation_id],
     )
@@ -689,7 +692,9 @@ with tempfile.TemporaryDirectory(prefix="review-runner.") as raw:
         and receipt["lanes"][0]["surface_id"]
         == "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1"
         and round_meta["transport"] == "review-round"
-        and round_meta["parent_session_operation_id"] == "review-cli"
+        and round_meta["parent_session_operation_id"].startswith(
+            "review-cli-holistic-"
+        )
         and receipt["lanes"][0]["round_operation_id"]
         == round_meta["operation_id"],
     )

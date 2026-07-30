@@ -383,8 +383,6 @@ def _session_spec(
     request: ReviewOperationRequest, axis: str
 ) -> OperationSpec:
     base = operation_spec(request)
-    if request.policy.depth == "simple":
-        return replace(base, route=request.route_for(axis))
     operation_id = _derived_id(base.operation_id, axis)
     route = request.route_for(axis)
     identity = (
@@ -396,11 +394,13 @@ def _session_spec(
         base,
         operation_id=operation_id,
         idempotency_key=hashlib.sha256(identity).hexdigest(),
-        kind=(
-            "deep-review-spec"
-            if axis == "spec"
-            else "deep-review-correctness"
-        ),
+        kind={
+            "holistic": "simple-review-holistic",
+            "spec": "deep-review-spec",
+            "standards-correctness-architecture-security": (
+                "deep-review-correctness"
+            ),
+        }[axis],
         route=route,
     )
 

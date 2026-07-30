@@ -702,6 +702,23 @@ def _run_review(
     pending_replay = False
     if gate_exists:
         initial_state = gate.read()
+        if (
+            initial_state.get("status") == "attention-required"
+            and initial_state.get("lanes") == []
+        ):
+            try:
+                dispatch_record = store.read(task_id, task_id)
+            except StoreError:
+                dispatch_record = None
+            if (
+                dispatch_record is not None
+                and dispatch_record.state not in {
+                    "attention-required",
+                    *TERMINAL,
+                }
+            ):
+                gate.resume_unbound_attention()
+                initial_state = gate.read()
         pending_replay = initial_state.get("status") == "pending"
         if pending_replay and initial_state.get("lanes") != []:
             raise TaskReviewError("pending review gate already owns lanes")

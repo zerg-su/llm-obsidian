@@ -321,6 +321,20 @@ class ReviewGateController:
             )
         self._replace(status="attention-required")
 
+    def resume_unbound_attention(self) -> None:
+        state = self.read()
+        if (
+            state.get("status") != "attention-required"
+            or state.get("lanes") != []
+            or state.get("evidence") not in ({}, None)
+            or state.get("round_results") not in ({}, None)
+            or state.get("final_results") not in ({}, None)
+        ):
+            raise ValueError(
+                "only an evidence-free pre-launch review may resume as pending"
+            )
+        self._replace(status="pending")
+
     @staticmethod
     def _policy(preset: ReviewPreset) -> dict[str, object]:
         return {
