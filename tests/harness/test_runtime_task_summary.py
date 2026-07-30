@@ -534,3 +534,102 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and automatic_marker["operation_id"] == automatic_task,
         automatic_marker,
     )
+
+    asynchronous_task = "99999999-9999-4999-8999-999999999999"
+    asynchronous_calls: list[str] = []
+
+    def complete_when_callback_arrives(vault: Path, worktree: Path) -> None:
+        asynchronous_calls.append(str(worktree))
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        profile_sha = meta["review_policy"]["verification_profile_sha256"]
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        gate_root = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / asynchronous_task
+            / asynchronous_task
+        )
+        if len(asynchronous_calls) == 1:
+            write_json(
+                gate_root / "review-gate.json",
+                {
+                    "schema_version": 1,
+                    "dispatch_operation_id": asynchronous_task,
+                    "owner_id": asynchronous_task,
+                    "status": "reviewing",
+                    "product_root": str(worktree),
+                    "context": {
+                        "head_sha": head,
+                        "verification_profile": "scoped",
+                        "verification_profile_sha256": profile_sha,
+                    },
+                },
+            )
+
+            def deliver_callback() -> None:
+                import time
+
+                time.sleep(0.1)
+                write_json(
+                    vault
+                    / ".vault-meta"
+                    / "harness"
+                    / "review-runtime"
+                    / asynchronous_task
+                    / "callbacks"
+                    / "spec"
+                    / ".review-callback.json",
+                    {"schema_version": 1, "status": "ready"},
+                )
+
+            threading.Thread(target=deliver_callback).start()
+            return
+        (gate_root / "review-gate.json").unlink()
+        ReviewGateController.skip(
+            gate_root,
+            dispatch_operation_id=asynchronous_task,
+            owner_id=asynchronous_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                profile_sha,
+            ),
+            product_root=worktree,
+        )
+
+    (
+        asynchronous_store,
+        asynchronous_cmux,
+        _asynchronous_state,
+        asynchronous_rc,
+    ) = run_case(
+        root,
+        asynchronous_task,
+        valid_summary,
+        review_state="missing",
+        review_launcher=complete_when_callback_arrives,
+    )
+    asynchronous_record = asynchronous_store.read(
+        "owner-1", asynchronous_task
+    )
+    check(
+        "worker drives an active review again when its callback arrives",
+        asynchronous_rc == 0
+        and len(asynchronous_calls) == 2
+        and asynchronous_record.state == "finalizing"
+        and asynchronous_record.accepted_callback_kind == "wiki-summary"
+        and len(asynchronous_cmux.sent) == 1,
+        (asynchronous_calls, asynchronous_record),
+    )

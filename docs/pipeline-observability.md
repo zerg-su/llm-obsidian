@@ -95,21 +95,24 @@ fixed before adding more orchestration.
 
 ## Compiled pipeline catalog
 
-LLM Obsidian 2.4 adds a pure catalog/compiler for lifecycle and engineering
-semantic contracts. It is intentionally not a production execution path and
-therefore emits no runtime telemetry. The compiler exposes only code-owned
-identifiers, versions, schema links, required capabilities, and a canonical
-definition hash. It does not report budgets, enforcement, progress, or effects
-that the 2.3 kernel did not actually bind.
+LLM Obsidian 2.4 adds a catalog/compiler for lifecycle and engineering semantic
+contracts. The existing harness remains the sole executor: it derives the next
+action from the compiled step order plus existing `OperationRecord` and review
+gate evidence. No pipeline controller, second operation identity, progress
+store, or parallel telemetry path exists.
 
 The existing `dispatch-runner.py validate` preview renders the lifecycle
 contract before approval. Rendering the summary is not execution and creates no
-worktree, provider session, or external effect.
+worktree, provider session, or external effect. The summary labels both the
+sandbox-enforced write/socket classes and the code-policy-enforced sequencing
+boundary.
 
-Existing operation and lifecycle events remain authoritative. Do not infer that
-a compiled catalog entry was executed from its presence or hash. The boundary
-and the failed production-switch net-value gate are recorded in
-[the 2.4 composition ADR](decisions/v2.4-pipeline-composition-boundary.md).
+Existing operation and lifecycle events remain authoritative; compiled progress
+is derived and is never a second durable truth. The original rejected
+controller design and the later state-free execution decision are recorded in
+[the original boundary ADR](decisions/v2.4-pipeline-composition-boundary.md)
+and its
+[superseding ADR](decisions/v2.4-state-free-executable-lifecycle.md).
 
 ## Dogfood acceptance window
 

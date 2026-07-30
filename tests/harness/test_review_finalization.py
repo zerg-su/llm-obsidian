@@ -134,6 +134,19 @@ with tempfile.TemporaryDirectory(prefix="review-finalization.") as raw:
         "active review is a typed non-terminal wait state",
         active.status == "reviewing",
     )
+    active_state = json.loads(
+        (gate / "review-gate.json").read_text(encoding="utf-8")
+    )
+    active_state["status"] = "awaiting-resolution"
+    (gate / "review-gate.json").write_text(
+        json.dumps(active_state) + "\n",
+        encoding="utf-8",
+    )
+    awaiting_resolution = task_review_status(active_meta, worktree)
+    check(
+        "executor resolution remains a typed non-terminal review state",
+        awaiting_resolution.status == "reviewing",
+    )
     (gate / "review-gate.json").unlink()
 
     ReviewGateController.skip(

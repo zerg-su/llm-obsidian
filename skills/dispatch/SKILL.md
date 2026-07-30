@@ -77,12 +77,14 @@ failed requests fail closed.
 The metadata retains `interaction_policy`, `approved_plan_sha256`,
 `forbidden_actions`, and `watchdog_policy`. It also freezes the exact review
 preset, its deterministic simple/deep/skip budget (1/2/0), and the coordinator
-verification profile digest. The task invokes
-`python3 <vault-root>/scripts/task-review-runner.py run --worktree <worktree>`
-before writing its summary; generic target repositories do not need to ship
-swarm scripts or routing/verification configuration. The code-owned provider runtime
-owns runtime argv, trust prompts, process lifecycle, watchdog, and
-close-after-exit.
+verification profile digest. After committing and verifying, the task writes
+`.task-summary.json` and remains available. The harness then drives
+`task-review-runner.py` idempotently through callback consumption, executor
+resolution, same-session verification, and terminal authorization; the task
+must not launch or orchestrate reviewer sessions itself. Generic target
+repositories do not need to ship swarm scripts or routing/verification
+configuration. The code-owned provider runtime owns runtime argv, trust
+prompts, process lifecycle, watchdog, and close-after-exit.
 Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
 write roots, `DCG_CONFIG`, localhost-only loopback policy, and trusted `PATH`.
 Never weaken those controls or reproduce their shell commands manually.

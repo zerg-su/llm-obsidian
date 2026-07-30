@@ -120,13 +120,14 @@ check(
 
 summary = render_contract(compiled)
 check(
-    "contract is bounded and cannot claim production enforcement",
+    "contract is bounded and labels its real enforcement boundary",
     len(summary.encode()) < 2_000
     and "engineering/change@1.0.0" in summary
     and compiled.definition_sha256 in summary
     and "state-free reconciliation" in summary
     and "budget" not in summary.lower()
-    and "sandbox-enforced" not in summary,
+    and "sandbox-enforced" in summary
+    and "code-policy-enforced" in summary,
 )
 
 dispatch_wait = reconcile_pipeline(

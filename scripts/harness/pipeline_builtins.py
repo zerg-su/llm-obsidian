@@ -1,4 +1,4 @@
-"""Code-owned semantic pipeline catalog for the 2.4 fallback."""
+"""Code-owned semantic pipeline catalog for state-free harness reconciliation."""
 
 from __future__ import annotations
 

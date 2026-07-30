@@ -32,6 +32,7 @@ ACTIVE_GATE_STATUSES = {
     "reviewing",
     "verifying",
     "fresh-reevaluation",
+    "awaiting-resolution",
 }
 
 

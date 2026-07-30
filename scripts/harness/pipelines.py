@@ -318,7 +318,7 @@ def compile_pipeline(
 
 
 def render_contract(compiled: CompiledPipeline) -> str:
-    """Render a bounded, explicitly non-executable semantic contract."""
+    """Render the bounded semantic contract and its execution bindings."""
 
     definition = compiled.definition
     lines = [
@@ -336,6 +336,10 @@ def render_contract(compiled: CompiledPipeline) -> str:
         "Required capabilities: "
         + (", ".join(compiled.required_capabilities) or "none"),
         "Execution: existing harness supervisor with state-free reconciliation",
+        "Bindings: route/review policy are identity-bound; worktree, Git common "
+        "dir, loopback, and cmux socket grants are validated at launch",
+        "Enforcement: workspace and extra write roots are sandbox-enforced; "
+        "task/review sequencing is code-policy-enforced",
     ]
     rendered = "\n".join(lines) + "\n"
     if len(rendered.encode()) > 8_192:

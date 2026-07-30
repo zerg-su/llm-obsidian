@@ -1175,6 +1175,129 @@ def run(
                 expected_vault=trusted_vault,
                 expected_operation_id=spec["operation_id"],
             )
+            marker_path = spec_path.parent / "pipeline-review-start.json"
+            marker = None
+            if marker_path.is_file() and not marker_path.is_symlink():
+                marker = json.loads(marker_path.read_text(encoding="utf-8"))
+                if (
+                    marker.get("schema_version") != 1
+                    or marker.get("operation_id") != spec["operation_id"]
+                    or marker.get("definition_sha256")
+                    != lifecycle.definition_sha256
+                    or marker.get("status") not in {"pending", "started"}
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline review launch receipt is invalid"
+                    )
+
+            def review_drive_sha256() -> str:
+                digest = hashlib.sha256()
+                gate_state = review.gate_root / "review-gate.json"
+                if gate_state.is_file():
+                    if gate_state.is_symlink():
+                        raise RuntimeWorkerError(
+                            "review gate state cannot be a symlink"
+                        )
+                    digest.update(gate_state.read_bytes())
+                head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=spec["cwd"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if head.returncode:
+                    raise RuntimeWorkerError(
+                        "automatic review cannot resolve product HEAD"
+                    )
+                digest.update(head.stdout.strip().encode())
+                callback_root = (
+                    trusted_vault
+                    / ".vault-meta"
+                    / "harness"
+                    / "review-runtime"
+                    / spec["operation_id"]
+                    / "callbacks"
+                )
+                if callback_root.is_dir():
+                    for callback in sorted(
+                        callback_root.rglob(".review-callback.json")
+                    ):
+                        if callback.is_symlink():
+                            raise RuntimeWorkerError(
+                                "review callback cannot be a symlink"
+                            )
+                        digest.update(
+                            callback.relative_to(callback_root)
+                            .as_posix()
+                            .encode()
+                        )
+                        digest.update(callback.read_bytes())
+                return digest.hexdigest()
+
+            def drive_review() -> bool:
+                try:
+                    if review_launcher is not None:
+                        review_launcher(trusted_vault, spec["cwd"])
+                    else:
+                        runner = (
+                            trusted_vault
+                            / "scripts"
+                            / "task-review-runner.py"
+                        )
+                        if not runner.is_file() or runner.is_symlink():
+                            raise RuntimeWorkerError(
+                                "trusted task review runner is unavailable"
+                            )
+                        launched = subprocess.run(
+                            [
+                                sys.executable,
+                                str(runner),
+                                "run",
+                                "--worktree",
+                                str(spec["cwd"]),
+                            ],
+                            cwd=trusted_vault,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            timeout=10,
+                        )
+                        if launched.returncode != 0:
+                            raise RuntimeWorkerError(
+                                "automatic task review drive failed"
+                            )
+                except (
+                    OSError,
+                    RuntimeWorkerError,
+                    subprocess.TimeoutExpired,
+                ):
+                    summary_attention(
+                        "review-drive-failed",
+                        AttentionReason.ATTENTION_REQUIRED,
+                    )
+                    return False
+                _atomic_json(
+                    marker_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": lifecycle.definition_sha256,
+                        "status": "started",
+                        "drive_sha256": review_drive_sha256(),
+                    },
+                )
+                return True
+
+            if (
+                marker is not None
+                and marker["status"] == "started"
+                and review.status in {"reviewing", "stale"}
+            ):
+                current_drive_sha256 = review_drive_sha256()
+                if marker.get("drive_sha256") != current_drive_sha256:
+                    drive_review()
+                return
             operation = store.read(
                 spec["owner_id"], spec["operation_id"]
             )
@@ -1192,29 +1315,24 @@ def run(
                 "attention": "attention",
                 "stale": "attention",
             }[review.status]
+            lifecycle_steps = lifecycle.definition.steps
+            if (
+                len(lifecycle_steps) != 2
+                or lifecycle_steps[0].primitive_id != "model_step"
+                or lifecycle_steps[1].primitive_id != "review"
+            ):
+                raise RuntimeWorkerError(
+                    "compiled lifecycle shape is unsupported"
+                )
             progress = reconcile_pipeline(
                 lifecycle,
                 {
-                    "dispatch": "complete",
-                    "review": review_observation,
+                    lifecycle_steps[0].step_id: "complete",
+                    lifecycle_steps[1].step_id: review_observation,
                 },
             )
             if progress.action == "start":
-                marker_path = spec_path.parent / "pipeline-review-start.json"
-                marker = None
-                if marker_path.is_file() and not marker_path.is_symlink():
-                    marker = json.loads(marker_path.read_text(encoding="utf-8"))
                 if marker is not None:
-                    if (
-                        marker.get("schema_version") != 1
-                        or marker.get("operation_id") != spec["operation_id"]
-                        or marker.get("definition_sha256")
-                        != lifecycle.definition_sha256
-                        or marker.get("status") not in {"pending", "started"}
-                    ):
-                        raise RuntimeWorkerError(
-                            "pipeline review launch receipt is invalid"
-                        )
                     if marker["status"] == "started":
                         return
                 _atomic_json(
@@ -1226,46 +1344,7 @@ def run(
                         "status": "pending",
                     },
                 )
-                if review_launcher is not None:
-                    review_launcher(trusted_vault, spec["cwd"])
-                else:
-                    runner = trusted_vault / "scripts" / "task-review-runner.py"
-                    if not runner.is_file() or runner.is_symlink():
-                        raise RuntimeWorkerError(
-                            "trusted task review runner is unavailable"
-                        )
-                    try:
-                        launched = subprocess.run(
-                            [
-                                sys.executable,
-                                str(runner),
-                                "run",
-                                "--worktree",
-                                str(spec["cwd"]),
-                            ],
-                            cwd=trusted_vault,
-                            text=True,
-                            capture_output=True,
-                            check=False,
-                            timeout=30,
-                        )
-                    except (OSError, subprocess.TimeoutExpired) as exc:
-                        raise RuntimeWorkerError(
-                            "automatic task review launch failed"
-                        ) from exc
-                    if launched.returncode != 0:
-                        raise RuntimeWorkerError(
-                            "automatic task review launch failed"
-                        )
-                _atomic_json(
-                    marker_path,
-                    {
-                        "schema_version": 1,
-                        "operation_id": spec["operation_id"],
-                        "definition_sha256": lifecycle.definition_sha256,
-                        "status": "started",
-                    },
-                )
+                drive_review()
                 return
             if progress.action == "wait":
                 return
