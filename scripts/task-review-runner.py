@@ -33,6 +33,7 @@ from harness.workflows.review import (
     ReviewResult,
     ReviewRound,
     review_session_specs,
+    runtime_status_is_live,
 )
 from harness.workflows.review_gate import (
     ReviewGateController,
@@ -712,7 +713,7 @@ def _run_review(
         if request is None:
             raise TaskReviewError("enabled review has no request")
         if pending_replay and not _pending_replay_is_safe(
-            request, store, gate
+            request, store, gate, runtime
         ):
             return _receipt(
                 status="attention-required",
@@ -750,17 +751,31 @@ def _run_review(
                 round_=round_,
             )
 
-        run = gate.begin(
-            dispatch_operation_id=task_id,
-            request=request,
-            origin_surface=str(meta.get("task_surface") or ""),
-            cwd=runtime_root,
-            product_root=worktree,
-            prompt_pointer=prompt_pointers[request.policy.axes[0]],
-            prompt_pointers=prompt_pointers,
-            callback_root="callbacks",
-            prepare_lane=prepare_lane,
-        )
+        try:
+            run = gate.begin(
+                dispatch_operation_id=task_id,
+                request=request,
+                origin_surface=str(meta.get("task_surface") or ""),
+                cwd=runtime_root,
+                product_root=worktree,
+                prompt_pointer=prompt_pointers[request.policy.axes[0]],
+                prompt_pointers=prompt_pointers,
+                callback_root="callbacks",
+                prepare_lane=prepare_lane,
+            )
+        except ValueError:
+            if pending_replay and not _pending_replay_is_safe(
+                request, store, gate, runtime
+            ):
+                return _receipt(
+                    status="attention-required",
+                    meta=meta,
+                    vault=vault,
+                    worktree=worktree,
+                    runtime_root=runtime_root,
+                    context_manifest=context_manifest,
+                )
+            raise
         return _receipt(
             status="reviewing",
             meta=meta,
@@ -1042,6 +1057,7 @@ def _pending_replay_is_safe(
     request: ReviewOperationRequest,
     store: OperationStore,
     gate: ReviewGateController,
+    runtime: object,
 ) -> bool:
     for identity in review_session_specs(request):
         try:
@@ -1064,6 +1080,15 @@ def _pending_replay_is_safe(
                 )
             )
         )
+        observed: object | None = None
+        if record.state in {"running", "awaiting-callback", "verifying"}:
+            try:
+                observed = runtime.status(
+                    request.owner_id, identity.spec.operation_id
+                )
+            except Exception:
+                observed = None
+        observed_record = getattr(observed, "record", None)
         proven_live = (
             record.state
             in {"running", "awaiting-callback", "verifying"}
@@ -1072,6 +1097,8 @@ def _pending_replay_is_safe(
             and resources.supervisor_pid > 1
             and bool(resources.process_identity)
             and bool(resources.supervisor_identity)
+            and observed_record == record
+            and runtime_status_is_live(observed)
         )
         if clean_created or proven_live:
             continue

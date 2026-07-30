@@ -75,6 +75,8 @@ class FakeSessionResult:
     record: object
     checkpoint: str
     action: str = ""
+    process_status: str = ""
+    surface_status: str = ""
 
 
 class FakeRuntime:
@@ -1276,6 +1278,10 @@ with tempfile.TemporaryDirectory(prefix="pending-review-terminal.") as raw:
         def mark_pending_attention(self) -> None:
             self.marked = True
 
+    class UnusedRuntime:
+        def status(self, owner_id: str, operation_id: str) -> object:
+            raise AssertionError("terminal parent must not be probed")
+
     pending_gate = PendingGateMarker()
     check(
         "terminal parent cannot turn a pending gate into reviewing",
@@ -1283,6 +1289,7 @@ with tempfile.TemporaryDirectory(prefix="pending-review-terminal.") as raw:
             unsafe_request,
             unsafe_store,
             pending_gate,
+            UnusedRuntime(),
         )
         and pending_gate.marked
         and unsafe_store.read(
@@ -1290,6 +1297,75 @@ with tempfile.TemporaryDirectory(prefix="pending-review-terminal.") as raw:
             unsafe_identity.spec.operation_id,
         ).state
         == "failed",
+    )
+
+with tempfile.TemporaryDirectory(prefix="pending-review-dead.") as raw:
+    dead_store = OperationStore(Path(raw) / "store")
+    dead_context = ReviewContext(
+        manifest="packets/review/manifest.json",
+        head_sha="6" * 40,
+        verification_profile="scoped",
+        verification_profile_sha256="5" * 64,
+    )
+    dead_request = request_for("pending-dead", context=dead_context)
+    dead_identity = task_review_runner.review_session_specs(dead_request)[0]
+    dead_record = dead_store.create(
+        dead_identity.spec,
+        lane_id=dead_identity.lane_id,
+        run_id=dead_identity.run_id,
+    )
+    dead_record = replace(
+        dead_record,
+        resources=replace(
+            dead_record.resources,
+            surface_id="AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+            process_group=4321,
+            supervisor_pid=4322,
+            process_identity="4" * 64,
+            supervisor_identity="3" * 64,
+        ),
+    )
+    dead_store.save(dead_record, expected_revision=0)
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        dead_store.transition(
+            dead_request.owner_id,
+            dead_identity.spec.operation_id,
+            state,
+        )
+    dead_record = dead_store.read(
+        dead_request.owner_id, dead_identity.spec.operation_id
+    )
+
+    class DeadStatusRuntime:
+        calls = 0
+
+        def status(self, owner_id: str, operation_id: str) -> object:
+            self.calls += 1
+            return FakeSessionResult(
+                dead_record,
+                "checkpoint-dead",
+                "observed",
+                "dead",
+                "alive",
+            )
+
+    dead_runtime = DeadStatusRuntime()
+    dead_gate = PendingGateMarker()
+    check(
+        "dead identified parent cannot turn a pending gate into reviewing",
+        not task_review_runner._pending_replay_is_safe(
+            dead_request,
+            dead_store,
+            dead_gate,
+            dead_runtime,
+        )
+        and dead_runtime.calls == 1
+        and dead_gate.marked
+        and dead_store.read(
+            dead_request.owner_id,
+            dead_identity.spec.operation_id,
+        ).state
+        == "attention-required",
     )
 
 print("\nAll review gate tests passed.")
