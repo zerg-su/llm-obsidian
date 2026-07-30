@@ -16,7 +16,7 @@ from .pipelines import (
 
 
 VERSION = "1.0.0"
-StepSpec = tuple[str, str, str, str, str]
+StepSpec = tuple[str, str, str, str, str, tuple[str, ...]]
 
 BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
     "lifecycle/default": (
@@ -29,6 +29,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "task-contract/v1",
                 "approved-plan/v1",
                 "controller",
+                (),
             ),
             (
                 "dispatch",
@@ -36,6 +37,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "approved-plan/v1",
                 "implementation-result/v1",
                 "worktree",
+                ("dispatch",),
             ),
             (
                 "review",
@@ -43,6 +45,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "implementation-result/v1",
                 "reap-ready/v1",
                 "review",
+                ("review",),
             ),
         ),
     ),
@@ -56,6 +59,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "task-contract/v1",
                 "approved-plan/v1",
                 "controller",
+                (),
             ),
             (
                 "tdd-slices",
@@ -63,6 +67,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "approved-plan/v1",
                 "implementation-result/v1",
                 "worktree",
+                ("tdd",),
             ),
             (
                 "verify",
@@ -70,6 +75,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "implementation-result/v1",
                 "verified-result/v1",
                 "verification",
+                (),
             ),
             (
                 "review",
@@ -77,6 +83,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "verified-result/v1",
                 "reap-ready/v1",
                 "review",
+                ("review",),
             ),
         ),
     ),
@@ -90,6 +97,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "task-contract/v1",
                 "approved-plan/v1",
                 "controller",
+                (),
             ),
             (
                 "reproduce",
@@ -97,6 +105,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "approved-plan/v1",
                 "reproduction/v1",
                 "worktree",
+                ("debug",),
             ),
             (
                 "root-cause",
@@ -104,6 +113,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "reproduction/v1",
                 "diagnosis/v1",
                 "parent-child",
+                ("debug",),
             ),
             (
                 "regression-test",
@@ -111,6 +121,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "diagnosis/v1",
                 "regression-test/v1",
                 "parent-child",
+                ("debug", "tdd"),
             ),
             (
                 "minimal-fix",
@@ -118,6 +129,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "regression-test/v1",
                 "implementation-result/v1",
                 "parent-child",
+                ("debug", "tdd"),
             ),
             (
                 "verify",
@@ -125,6 +137,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "implementation-result/v1",
                 "verified-result/v1",
                 "verification",
+                (),
             ),
             (
                 "review",
@@ -132,6 +145,7 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
                 "verified-result/v1",
                 "reap-ready/v1",
                 "review",
+                ("review",),
             ),
         ),
     ),
@@ -197,6 +211,7 @@ def builtin_registry() -> PrimitiveRegistry:
                 "policy-only",
             ),
         ),
+        semantic_skills=("debug", "dispatch", "review", "tdd"),
     )
 
 
@@ -219,6 +234,7 @@ def _definition(
                 input_schema,
                 output_schema,
                 session_mode,
+                semantic_skills,
             )
             for (
                 step_id,
@@ -226,6 +242,7 @@ def _definition(
                 input_schema,
                 output_schema,
                 session_mode,
+                semantic_skills,
             ) in steps
         ),
         permission_ceiling=("product-write",),

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -103,3 +104,43 @@ check(
         "review",
     ),
 )
+fix_steps = {
+    step.step_id: step
+    for step in compiled["engineering/fix"].definition.steps
+}
+check(
+    "engineering steps retain the installed skill semantics",
+    compiled["engineering/change"].definition.steps[1].semantic_skills
+    == ("tdd",)
+    and fix_steps["reproduce"].semantic_skills == ("debug",)
+    and fix_steps["root-cause"].semantic_skills == ("debug",)
+    and fix_steps["regression-test"].semantic_skills == ("debug", "tdd")
+    and fix_steps["minimal-fix"].semantic_skills == ("debug", "tdd")
+    and fix_steps["review"].semantic_skills == ("review",),
+)
+unknown_semantics = dataclasses.replace(
+    definitions["engineering/change"],
+    steps=(
+        definitions["engineering/change"].steps[:1]
+        + (
+            dataclasses.replace(
+                definitions["engineering/change"].steps[1],
+                semantic_skills=("missing-skill",),
+            ),
+        )
+        + definitions["engineering/change"].steps[2:]
+    ),
+)
+try:
+    compile_pipeline(
+        unknown_semantics,
+        registry,
+        capabilities=("provider:authenticated",),
+    )
+except Exception as exc:
+    check(
+        "compiler rejects unregistered skill semantics",
+        "unregistered semantic skills" in str(exc),
+    )
+else:
+    check("compiler rejects unregistered skill semantics", False)

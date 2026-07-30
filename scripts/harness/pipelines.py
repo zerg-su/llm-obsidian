@@ -164,6 +164,7 @@ class PipelineStep:
     input_schema: str
     output_schema: str
     session_mode: str
+    semantic_skills: tuple[str, ...] = ()
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -176,6 +177,11 @@ class PipelineStep:
         _schema_id(self.output_schema, "step output_schema")
         if self.session_mode not in SESSION_MODES:
             raise ContractError("step session_mode is invalid")
+        object.__setattr__(
+            self,
+            "semantic_skills",
+            _identifiers(self.semantic_skills, "step semantic skill"),
+        )
         allowed_modes = {
             "bounded_loop": {"controller"},
             "human_gate": {"controller"},
@@ -233,6 +239,7 @@ class PrimitiveRegistry:
 
     primitives: tuple[PrimitiveDefinition, ...]
     bindings: tuple[PolicyBinding, ...] = ()
+    semantic_skills: tuple[str, ...] = ()
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -248,6 +255,11 @@ class PrimitiveRegistry:
         )
         if len(set(binding_ids)) != len(binding_ids):
             raise ContractError("policy bindings must be unique")
+        object.__setattr__(
+            self,
+            "semantic_skills",
+            _identifiers(self.semantic_skills, "registry semantic skill"),
+        )
 
     def resolve(self, primitive_id: str, version: str) -> PrimitiveDefinition:
         identity = f"{primitive_id}@{version}"
@@ -328,6 +340,15 @@ def compile_pipeline(
                 "bounded_loop requires an explicit bounded control contract"
             )
         primitive = registry.resolve(step.primitive_id, step.primitive_version)
+        missing_skills = set(step.semantic_skills) - set(
+            registry.semantic_skills
+        )
+        if missing_skills:
+            raise ContractError(
+                "step "
+                f"{step.step_id} uses unregistered semantic skills: "
+                f"{','.join(sorted(missing_skills))}"
+            )
         if previous and previous.output_schema != step.input_schema:
             raise ContractError(
                 f"schema mismatch before step {step.step_id}: "
