@@ -106,6 +106,8 @@ def run_pipeline(
     )
     for step in semantic_steps:
         route = request.routes.get(step.session_mode)
+        if route is None and step.session_mode == "parent-child":
+            route = request.routes.get("worktree")
         if route is None:
             raise PipelineControllerError(
                 f"no route for pipeline session mode: {step.session_mode}"

@@ -131,3 +131,58 @@ with tempfile.TemporaryDirectory(prefix="pipeline-controller-resume.") as raw:
         resumed.state.status == "reap-ready"
         and failed_calls == ["tdd-slices", "verify", "verify", "review"],
     )
+
+fix_compiled = compile_pipeline(
+    builtin_definitions()["engineering/fix"],
+    builtin_registry(),
+    capabilities=("provider:authenticated",),
+)
+fix_request = PipelineRunRequest(
+    owner_id="owner-1",
+    pipeline_run_id="fix-run-1",
+    approved_input_sha256="d" * 64,
+    context_manifest="packets/fix/manifest.json",
+    verification_profile="full",
+    routes={
+        "worktree": executor,
+        "verification": executor,
+        "review": reviewer,
+    },
+)
+with tempfile.TemporaryDirectory(prefix="pipeline-controller-fix.") as raw:
+    ledger = PipelineLedger(OperationStore(Path(raw) / "harness"))
+    fix_calls: list[tuple[str, str, str]] = []
+
+    def execute_fix(binding, step):
+        fix_calls.append(
+            (
+                step.step_id,
+                binding.session_mode,
+                binding.spec.route.profile,
+            )
+        )
+        return PipelineStepResult(
+            hashlib.sha256(
+                f"{binding.input_sha256}:{step.step_id}".encode()
+            ).hexdigest()
+        )
+
+    fixed = run_pipeline(
+        fix_compiled,
+        ledger,
+        fix_request,
+        execute=execute_fix,
+    )
+    check(
+        "fix child rounds inherit the original worktree route",
+        fixed.state.status == "reap-ready"
+        and fix_calls
+        == [
+            ("reproduce", "worktree", "executor"),
+            ("root-cause", "parent-child", "executor"),
+            ("regression-test", "parent-child", "executor"),
+            ("minimal-fix", "parent-child", "executor"),
+            ("verify", "verification", "executor"),
+            ("review", "review", "reviewer-readonly"),
+        ],
+    )
