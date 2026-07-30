@@ -841,3 +841,79 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and pending_record.state == "finalizing",
         (pending_calls, pending_record),
     )
+
+    resumed_task = "abababab-abab-4bab-8bab-abababababab"
+    resumed_calls: list[str] = []
+
+    def fail_once_then_approve(vault: Path, worktree: Path) -> None:
+        resumed_calls.append(str(worktree))
+        store = OperationStore(vault / ".vault-meta" / "harness")
+        if len(resumed_calls) == 1:
+            def resume_after_attention() -> None:
+                import time
+
+                for _ in range(100):
+                    record = store.read("owner-1", resumed_task)
+                    if record.state == "attention-required":
+                        store.transition(
+                            "owner-1",
+                            resumed_task,
+                            record.resume_state,
+                        )
+                        return
+                    time.sleep(0.01)
+
+            threading.Thread(target=resume_after_attention).start()
+            raise OSError("simulated review drive failure")
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            store.root / "review-data" / resumed_task / resumed_task,
+            dispatch_operation_id=resumed_task,
+            owner_id=resumed_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    (
+        resumed_store,
+        _resumed_cmux,
+        resumed_state,
+        resumed_rc,
+    ) = run_case(
+        root,
+        resumed_task,
+        valid_summary,
+        review_state="missing",
+        review_launcher=fail_once_then_approve,
+    )
+    resumed_record = resumed_store.read("owner-1", resumed_task)
+    recovery = json.loads(
+        (resumed_state / "callback-recovery.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "explicit durable resume clears only the matching summary attention latch",
+        resumed_rc == 0
+        and len(resumed_calls) == 2
+        and resumed_record.state == "finalizing"
+        and recovery["status"] == "resumed"
+        and recovery["resumed_revision"]
+        > recovery["attention_revision"],
+        (resumed_calls, resumed_record, recovery),
+    )

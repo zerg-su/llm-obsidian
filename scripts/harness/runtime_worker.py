@@ -674,6 +674,7 @@ def run(
     registration_invalid = False
     summary_digest = ""
     summary_stable_reads = 0
+    summary_attention_revision = -1
     cmux_adapter = cmux_adapter or CmuxAdapter()
     lifecycle = compiled_builtin("lifecycle/default")
     last_prompt_digest = ""
@@ -933,7 +934,7 @@ def run(
         status: str,
         reason: AttentionReason = AttentionReason.CALLBACK_INVALID,
     ) -> None:
-        nonlocal callback_handled
+        nonlocal callback_handled, summary_attention_revision
         callback_handled = True
         try:
             store.transition(
@@ -944,10 +945,53 @@ def run(
             )
         except Exception:
             pass
+        try:
+            current = store.read(
+                spec["owner_id"], spec["operation_id"]
+            )
+            if current.state == "attention-required":
+                summary_attention_revision = current.revision
+        except Exception:
+            pass
         _atomic_json(
             spec_path.parent / "callback-error.json",
             {"schema_version": 1, "status": status},
         )
+
+    def recover_task_summary_attention() -> None:
+        nonlocal callback_handled, summary_digest, summary_stable_reads
+        nonlocal summary_attention_revision
+        if (
+            spec["callback_mode"] != "task-summary"
+            or not callback_handled
+            or summary_attention_revision < 0
+        ):
+            return
+        try:
+            current = store.read(
+                spec["owner_id"], spec["operation_id"]
+            )
+        except Exception:
+            return
+        if (
+            current.state not in CALLBACK_WAIT_STATES
+            or current.revision <= summary_attention_revision
+        ):
+            return
+        _atomic_json(
+            spec_path.parent / "callback-recovery.json",
+            {
+                "schema_version": 1,
+                "operation_id": spec["operation_id"],
+                "attention_revision": summary_attention_revision,
+                "resumed_revision": current.revision,
+                "status": "resumed",
+            },
+        )
+        callback_handled = False
+        summary_digest = ""
+        summary_stable_reads = 0
+        summary_attention_revision = -1
 
     def inspect_task_summary() -> None:
         nonlocal callback_handled, summary_digest, summary_stable_reads
@@ -1661,6 +1705,7 @@ def run(
     while True:
         inspect_control()
         if spec["callback_mode"] == "task-summary":
+            recover_task_summary_attention()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",
@@ -1779,6 +1824,7 @@ def run(
         time.sleep(max(0.02, poll_seconds))
     for _ in range(3):
         if spec["callback_mode"] == "task-summary":
+            recover_task_summary_attention()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",
