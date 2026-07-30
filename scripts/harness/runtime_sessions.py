@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Protocol, Sequence
 
@@ -853,7 +853,12 @@ class RuntimeSessionManager:
                 raise RuntimeSessionError(
                     "idempotent start request changed runtime session identity"
                 )
-            return self._result(record, "already-started")
+            return replace(
+                self.status(
+                    request.spec.owner_id, request.spec.operation_id
+                ),
+                action="already-started",
+            )
         supervisor = OperationSupervisor(
             self.store, request.spec.owner_id, request.spec.operation_id
         )

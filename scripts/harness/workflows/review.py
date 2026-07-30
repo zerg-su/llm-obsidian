@@ -441,7 +441,8 @@ def runtime_status_is_live(value: object) -> bool:
     """Accept only a fully observed, resumable reviewer status result."""
 
     return (
-        str(getattr(value, "action", "") or "") == "observed"
+        str(getattr(value, "action", "") or "")
+        in {"observed", "already-started"}
         and str(getattr(value, "process_status", "") or "") == "alive"
         and str(getattr(value, "surface_status", "") or "") == "alive"
         and bool(str(getattr(value, "checkpoint", "") or ""))
@@ -459,9 +460,12 @@ def _runtime_lane(
     if record.spec != spec:
         raise ValueError("review runtime returned a different operation")
     action = str(getattr(value, "action", "") or "")
-    if action in {"observed", "attention-required", "terminal"} and not (
-        runtime_status_is_live(value)
-    ):
+    if action in {
+        "observed",
+        "already-started",
+        "attention-required",
+        "terminal",
+    } and not runtime_status_is_live(value):
         raise ValueError("stored review runtime is not live and resumable")
     checkpoint = str(getattr(value, "checkpoint", "") or "")
     return ReviewLaneSession(

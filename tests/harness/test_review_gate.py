@@ -31,6 +31,7 @@ from harness.workflows.review import (
     ReviewOperationRequest,
     ReviewResult,
     review_round_envelope,
+    start_review,
 )
 from harness.workflows.review_gate import (
     ReviewGateController,
@@ -113,7 +114,13 @@ class FakeRuntime:
         return result
 
     def status(self, owner_id: str, operation_id: str) -> object:
-        return self.store.read(owner_id, operation_id)
+        return FakeSessionResult(
+            self.store.read(owner_id, operation_id),
+            "checkpoint-live",
+            "observed",
+            "alive",
+            "alive",
+        )
 
     def continue_session(
         self,
@@ -1359,7 +1366,7 @@ with tempfile.TemporaryDirectory(prefix="pending-review-dead.") as raw:
             dead_gate,
             dead_runtime,
         )
-        and dead_runtime.calls == 1
+        and dead_runtime.calls == 2
         and dead_gate.marked
         and dead_store.read(
             dead_request.owner_id,
@@ -1367,5 +1374,142 @@ with tempfile.TemporaryDirectory(prefix="pending-review-dead.") as raw:
         ).state
         == "attention-required",
     )
+
+with tempfile.TemporaryDirectory(prefix="pending-review-retry.") as raw:
+    retry_store = OperationStore(Path(raw) / "store")
+    retry_context = ReviewContext(
+        manifest="packets/review/manifest.json",
+        head_sha="2" * 40,
+        verification_profile="scoped",
+        verification_profile_sha256="1" * 64,
+    )
+    retry_request = request_for("pending-retry", context=retry_context)
+    retry_identity = task_review_runner.review_session_specs(
+        retry_request
+    )[0]
+    retry_record = retry_store.create(
+        retry_identity.spec,
+        lane_id=retry_identity.lane_id,
+        run_id=retry_identity.run_id,
+    )
+    retry_record = replace(
+        retry_record,
+        resources=replace(
+            retry_record.resources,
+            surface_id="BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB",
+            process_group=5321,
+            supervisor_pid=5322,
+            process_identity="2" * 64,
+            supervisor_identity="1" * 64,
+        ),
+    )
+    retry_store.save(retry_record, expected_revision=0)
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        retry_store.transition(
+            retry_request.owner_id,
+            retry_identity.spec.operation_id,
+            state,
+        )
+
+    class RetryStatusRuntime:
+        calls = 0
+
+        def status(self, owner_id: str, operation_id: str) -> object:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("transient read-only probe failure")
+            return FakeSessionResult(
+                retry_store.read(owner_id, operation_id),
+                "checkpoint-retry",
+                "observed",
+                "alive",
+                "alive",
+            )
+
+    retry_runtime = RetryStatusRuntime()
+    retry_gate = PendingGateMarker()
+    check(
+        "pending replay retries one inconclusive read-only liveness probe",
+        task_review_runner._pending_replay_is_safe(
+            retry_request,
+            retry_store,
+            retry_gate,
+            retry_runtime,
+        )
+        and retry_runtime.calls == 2
+        and not retry_gate.marked,
+    )
+
+with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
+    raced_root = Path(raw)
+    raced_store = OperationStore(raced_root / "store")
+    raced_context = ReviewContext(
+        manifest="packets/review/manifest.json",
+        head_sha="9" * 40,
+        verification_profile="scoped",
+        verification_profile_sha256="8" * 64,
+    )
+    raced_request = request_for("raced-parent", context=raced_context)
+
+    class RacedDeadRuntime(FakeRuntime):
+        def start(
+            self, request: object, *, on_surface_opened=None
+        ) -> FakeSessionResult:
+            record = self.store.create(
+                request.spec,
+                lane_id=request.lane_id,
+                run_id=request.run_id,
+            )
+            record = replace(
+                record,
+                resources=replace(
+                    record.resources,
+                    surface_id="CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC",
+                    process_group=6321,
+                    supervisor_pid=6322,
+                    process_identity="9" * 64,
+                    supervisor_identity="8" * 64,
+                ),
+            )
+            self.store.save(record, expected_revision=0)
+            for state in (
+                "preflight",
+                "starting",
+                "running",
+                "awaiting-callback",
+            ):
+                self.store.transition(
+                    request.spec.owner_id,
+                    request.spec.operation_id,
+                    state,
+                )
+            return FakeSessionResult(
+                self.store.read(
+                    request.spec.owner_id, request.spec.operation_id
+                ),
+                "checkpoint-raced",
+                "already-started",
+                "dead",
+                "alive",
+            )
+
+    try:
+        start_review(
+            raced_request,
+            RacedDeadRuntime(raced_store),
+            origin_surface="44444444-4444-4444-8444-444444444444",
+            cwd=raced_root,
+            product_root=ROOT,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks",
+            round_store=raced_store,
+        )
+    except ValueError as exc:
+        check(
+            "raced already-started parent must prove resumable liveness",
+            str(exc) == "stored review runtime is not live and resumable",
+        )
+    else:
+        raise AssertionError("dead raced reviewer must not become reviewing")
 
 print("\nAll review gate tests passed.")

@@ -651,8 +651,23 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     duplicate = manager.start(request)
     check(
         "idempotent repeated start never opens a duplicate surface",
-        duplicate.record == started.record and cmux.opens == 1,
+        duplicate.record == started.record
+        and duplicate.action == "already-started"
+        and duplicate.process_status == "alive"
+        and duplicate.surface_status == "alive"
+        and duplicate.checkpoint == "checkpoint-1"
+        and cmux.opens == 1,
     )
+    process.status_value = "dead"
+    dead_duplicate = manager.start(request)
+    check(
+        "idempotent start exposes non-live replay status",
+        dead_duplicate.action == "already-started"
+        and dead_duplicate.process_status == "dead"
+        and dead_duplicate.surface_status == "alive"
+        and not dead_duplicate.checkpoint,
+    )
+    process.status_value = "alive"
     (cwd / "callbacks" / "other").mkdir()
     try:
         manager.start(replace(request, callback_pointer="callbacks/other/result.json"))

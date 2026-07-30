@@ -1060,47 +1060,71 @@ def _pending_replay_is_safe(
     runtime: object,
 ) -> bool:
     for identity in review_session_specs(request):
+        record = None
+        safe = False
+        for _attempt in range(2):
+            try:
+                record = store.read(
+                    request.owner_id, identity.spec.operation_id
+                )
+            except StoreError:
+                safe = True
+                break
+            resources = record.resources
+            clean_created = (
+                record.state == "created"
+                and not record.pending_effect
+                and not any(
+                    (
+                        resources.surface_id,
+                        resources.process_group,
+                        resources.supervisor_pid,
+                        resources.process_identity,
+                        resources.supervisor_identity,
+                    )
+                )
+            )
+            if clean_created:
+                safe = True
+                break
+            if record.state not in {
+                "running",
+                "awaiting-callback",
+                "verifying",
+            }:
+                break
+            try:
+                observed = runtime.status(
+                    request.owner_id, identity.spec.operation_id
+                )
+                latest = store.read(
+                    request.owner_id, identity.spec.operation_id
+                )
+            except Exception:
+                continue
+            observed_record = getattr(observed, "record", None)
+            observed_resources = getattr(
+                observed_record, "resources", None
+            )
+            if (
+                observed_record == latest
+                and observed_resources is not None
+                and bool(observed_resources.surface_id)
+                and observed_resources.process_group > 1
+                and observed_resources.supervisor_pid > 1
+                and bool(observed_resources.process_identity)
+                and bool(observed_resources.supervisor_identity)
+                and runtime_status_is_live(observed)
+            ):
+                safe = True
+                break
+        if safe:
+            continue
         try:
             record = store.read(
                 request.owner_id, identity.spec.operation_id
             )
         except StoreError:
-            continue
-        resources = record.resources
-        clean_created = (
-            record.state == "created"
-            and not record.pending_effect
-            and not any(
-                (
-                    resources.surface_id,
-                    resources.process_group,
-                    resources.supervisor_pid,
-                    resources.process_identity,
-                    resources.supervisor_identity,
-                )
-            )
-        )
-        observed: object | None = None
-        if record.state in {"running", "awaiting-callback", "verifying"}:
-            try:
-                observed = runtime.status(
-                    request.owner_id, identity.spec.operation_id
-                )
-            except Exception:
-                observed = None
-        observed_record = getattr(observed, "record", None)
-        proven_live = (
-            record.state
-            in {"running", "awaiting-callback", "verifying"}
-            and bool(resources.surface_id)
-            and resources.process_group > 1
-            and resources.supervisor_pid > 1
-            and bool(resources.process_identity)
-            and bool(resources.supervisor_identity)
-            and observed_record == record
-            and runtime_status_is_live(observed)
-        )
-        if clean_created or proven_live:
             continue
         if (
             record.state not in TERMINAL
