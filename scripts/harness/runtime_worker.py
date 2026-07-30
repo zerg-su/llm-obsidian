@@ -1547,13 +1547,38 @@ def run(
                 raise RuntimeWorkerError(
                     "task verification profile binding is stale"
                 )
+            verification_head = ""
+            if verify_step is not None:
+                head_result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=spec["cwd"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                verification_head = head_result.stdout.strip()
+                if (
+                    head_result.returncode
+                    or not re.fullmatch(
+                        r"[0-9a-f]{40,64}", verification_head
+                    )
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline verification HEAD is unavailable"
+                    )
             verification_input_sha256 = hashlib.sha256(
                 json.dumps(
                     {
                         "definition_sha256": (
                             pipeline.definition_sha256
                         ),
+                        "head_sha": verification_head,
                         "profile_sha256": profile.sha256,
+                        "schema_version": (
+                            verify_step.schema_version
+                            if verify_step is not None
+                            else 1
+                        ),
                         "summary": summary,
                     },
                     sort_keys=True,
@@ -1593,13 +1618,13 @@ def run(
                     or receipt.get("definition_sha256")
                     != pipeline.definition_sha256
                     or receipt.get("step_id") != "verify"
-                    or receipt.get("input_sha256")
-                    != verification_input_sha256
                     or receipt.get("profile") != profile.name
                     or receipt.get("profile_sha256")
                     != profile.sha256
-                    or receipt.get("effect_id")
-                    != verification_effect_id
+                    or not re.fullmatch(
+                        r"[0-9a-f]{40,64}",
+                        str(receipt.get("head_sha") or ""),
+                    )
                     or receipt.get("status")
                     not in {"complete", "failed"}
                     or not isinstance(evidence, list)
@@ -1607,6 +1632,36 @@ def run(
                 ):
                     raise RuntimeWorkerError(
                         "pipeline verification receipt is invalid"
+                    )
+                receipt_head = str(receipt["head_sha"])
+                receipt_input_sha256 = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "definition_sha256": (
+                                pipeline.definition_sha256
+                            ),
+                            "head_sha": receipt_head,
+                            "profile_sha256": profile.sha256,
+                            "schema_version": (
+                                verify_step.schema_version
+                                if verify_step is not None
+                                else 1
+                            ),
+                            "summary": summary,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                if (
+                    receipt.get("input_sha256")
+                    != receipt_input_sha256
+                    or receipt.get("effect_id")
+                    != "pipeline-verify-"
+                    + receipt_input_sha256[:32]
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline verification replay identity is invalid"
                     )
                 exit_codes: list[int] = []
                 heads: set[str] = set()
@@ -1652,6 +1707,7 @@ def run(
                 ]
                 if (
                     len(heads) != 1
+                    or heads != {receipt_head}
                     or command_ids
                     != expected_command_ids[: len(command_ids)]
                     or (
@@ -1671,7 +1727,123 @@ def run(
                     raise RuntimeWorkerError(
                         "pipeline verification outcome is invalid"
                     )
+                if receipt_head != verification_head:
+                    return None
                 return receipt
+
+            def notify_verification_attention(
+                receipt: dict[str, object],
+            ) -> None:
+                raw_evidence = receipt.get("evidence")
+                if not isinstance(raw_evidence, list):
+                    raise RuntimeWorkerError(
+                        "verification attention evidence is invalid"
+                    )
+                packet_evidence = [
+                    {
+                        "command_id": str(row["command_id"]),
+                        "exit_code": int(row["exit_code"]),
+                        "output_pointer": str(
+                            (
+                                spec_path.parent
+                                / str(row["output_pointer"])
+                            ).resolve()
+                        ),
+                    }
+                    for row in raw_evidence
+                    if isinstance(row, dict)
+                ]
+                if len(packet_evidence) != len(raw_evidence):
+                    raise RuntimeWorkerError(
+                        "verification attention evidence is invalid"
+                    )
+                packet = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "definition_sha256": (
+                        pipeline.definition_sha256
+                    ),
+                    "step_id": "verify",
+                    "head_sha": str(receipt["head_sha"]),
+                    "status": "attention-required",
+                    "reason": "verification-failed",
+                    "safe_boundary": "tdd-slices-complete",
+                    "allowed_responses": [
+                        "fix-and-resubmit",
+                        "escalate",
+                    ],
+                    "receipt_pointer": str(
+                        verification_receipt_path
+                    ),
+                    "evidence": packet_evidence,
+                }
+                encoded = json.dumps(
+                    packet, sort_keys=True, separators=(",", ":")
+                ).encode()
+                if len(encoded) > MAX_OUTBOX_BYTES:
+                    raise RuntimeWorkerError(
+                        "verification attention packet is too large"
+                    )
+                packet_sha256 = hashlib.sha256(encoded).hexdigest()
+                packet_path = spec["cwd"] / ".task-verification.json"
+                if packet_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "verification attention packet cannot be a symlink"
+                    )
+                _atomic_json(packet_path, packet)
+                notify_path = (
+                    spec_path.parent
+                    / "pipeline-verification-attention-notify.json"
+                )
+                if notify_path.is_file():
+                    if notify_path.is_symlink():
+                        raise RuntimeWorkerError(
+                            "verification attention notification is invalid"
+                        )
+                    notified = json.loads(
+                        notify_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        not isinstance(notified, dict)
+                        or notified.get("schema_version") != 1
+                        or notified.get("operation_id")
+                        != spec["operation_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "verification attention notification is invalid"
+                        )
+                    if (
+                        notified.get("packet_sha256")
+                        == packet_sha256
+                        and notified.get("status") == "sent"
+                    ):
+                        return
+                _atomic_json(
+                    notify_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "packet_sha256": packet_sha256,
+                        "status": "pending",
+                    },
+                )
+                cmux_adapter.send(
+                    spec["surface_id"],
+                    "Typed pipeline verification attention is ready in "
+                    ".task-verification.json. Resolve it within the "
+                    "approved scope or use task_escalation.py; do not "
+                    "launch review or reap.",
+                )
+                cmux_adapter.send_key(spec["surface_id"], "Enter")
+                _atomic_json(
+                    notify_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "packet_sha256": packet_sha256,
+                        "status": "sent",
+                    },
+                )
 
             def run_verification() -> None:
                 current = store.read(
@@ -1712,7 +1884,7 @@ def run(
                     def execute_verification(
                         _record: object,
                     ) -> list[object]:
-                        return list(
+                        evidence = list(
                             run_profile(
                                 profile,
                                 root=spec["cwd"],
@@ -1727,6 +1899,26 @@ def run(
                                 pointer_root=spec_path.parent,
                             )
                         )
+                        verified_heads = {
+                            str(item.head_sha) for item in evidence
+                        }
+                        current_head = subprocess.run(
+                            ["git", "rev-parse", "HEAD"],
+                            cwd=spec["cwd"],
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
+                        if (
+                            current_head.returncode
+                            or current_head.stdout.strip()
+                            != verification_head
+                            or verified_heads != {verification_head}
+                        ):
+                            raise VerificationError(
+                                "verification HEAD changed during execution"
+                            )
+                        return evidence
 
                     def persist_verification(
                         _record: object,
@@ -1742,6 +1934,7 @@ def run(
                                     pipeline.definition_sha256
                                 ),
                                 "step_id": "verify",
+                                "head_sha": verification_head,
                                 "input_sha256": (
                                     verification_input_sha256
                                 ),
@@ -1760,6 +1953,10 @@ def run(
                             },
                         )
 
+                    # The accepted state-free 2.4 boundary keeps this as the
+                    # dispatch operation's next write-ahead effect. A derived
+                    # verify operation would restore the rejected second
+                    # controller/operation identity.
                     OperationSupervisor(
                         store,
                         spec["owner_id"],
@@ -1775,6 +1972,7 @@ def run(
                         "pipeline verification produced no receipt"
                     )
                 if existing["status"] == "failed":
+                    notify_verification_attention(existing)
                     summary_attention(
                         "pipeline-verification-failed",
                         AttentionReason.ATTENTION_REQUIRED,
@@ -1808,20 +2006,11 @@ def run(
             if (
                 existing_verification is not None
                 and existing_verification["status"] == "complete"
-                and marker is None
             ):
-                head = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=spec["cwd"],
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
                 evidence = existing_verification["evidence"]
                 if (
-                    head.returncode
-                    or not isinstance(evidence, list)
-                    or head.stdout.strip()
+                    not isinstance(evidence, list)
+                    or verification_head
                     != evidence[0]["head_sha"]
                 ):
                     summary_attention(

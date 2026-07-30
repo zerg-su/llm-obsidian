@@ -479,16 +479,37 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             encoding="utf-8"
         )
     )
+    failed_packet = json.loads(
+        (
+            root
+            / f"worktree-{failing_task}"
+            / ".task-verification.json"
+        ).read_text(encoding="utf-8")
+    )
     check(
-        "engineering verification failure becomes typed attention before review",
+        "engineering verification failure returns an actionable typed attention packet",
         failed_rc == 0
         and failed_record.state == "attention-required"
         and failed_record.attention_reason
         == AttentionReason.ATTENTION_REQUIRED
         and not failed_record.accepted_callback_id
         and failed_receipt["status"] == "failed"
-        and failed_cmux.sent == [],
-        (failed_record, failed_receipt, failed_cmux.sent),
+        and failed_packet["status"] == "attention-required"
+        and failed_packet["step_id"] == "verify"
+        and failed_packet["safe_boundary"] == "tdd-slices-complete"
+        and failed_packet["allowed_responses"]
+        == ["fix-and-resubmit", "escalate"]
+        and failed_packet["evidence"][0]["command_id"]
+        == "scoped-1"
+        and failed_cmux.sent
+        and failed_cmux.sent[0][0] == CHILD
+        and ".task-verification.json" in failed_cmux.sent[0][1],
+        (
+            failed_record,
+            failed_receipt,
+            failed_packet,
+            failed_cmux.sent,
+        ),
     )
 
     # A restarted worker sees a duplicate durable callback and the sent marker;
@@ -653,6 +674,26 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
     asynchronous_task = "99999999-9999-4999-8999-999999999999"
     asynchronous_calls: list[str] = []
+    asynchronous_verification_heads: list[str] = []
+    asynchronous_verification_calls: list[tuple[str, ...]] = []
+
+    def record_asynchronous_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            result = subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            asynchronous_verification_heads.append(
+                result.stdout.strip()
+            )
+            return result
+        asynchronous_verification_calls.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
 
     def complete_when_callback_arrives(vault: Path, worktree: Path) -> None:
         asynchronous_calls.append(str(worktree))
@@ -816,21 +857,30 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         valid_summary,
         review_state="missing",
         review_launcher=complete_when_callback_arrives,
+        pipeline_name="engineering/change",
+        verification_runner=record_asynchronous_verification,
     )
     asynchronous_record = asynchronous_store.read(
         "owner-1", asynchronous_task
     )
     check(
-        "worker delivers findings and drives same-session resolution",
+        "engineering change re-verifies the new resolution HEAD before same-session review",
         asynchronous_rc == 0
         and len(asynchronous_calls) == 4
+        and len(set(asynchronous_verification_heads)) == 2
+        and len(asynchronous_verification_calls) == 6
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
         and len(asynchronous_cmux.sent) == 2
         and asynchronous_cmux.sent[0][0] == CHILD
         and "Typed review findings" in asynchronous_cmux.sent[0][1]
         and asynchronous_cmux.sent[1][0] == ORIGIN,
-        (asynchronous_calls, asynchronous_record),
+        (
+            asynchronous_calls,
+            asynchronous_verification_heads,
+            asynchronous_verification_calls,
+            asynchronous_record,
+        ),
     )
     asynchronous_packet = (
         root / f"worktree-{asynchronous_task}" / ".task-review.json"
