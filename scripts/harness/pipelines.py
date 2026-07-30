@@ -262,6 +262,8 @@ class PipelineOperationBinding:
 
     definition_sha256: str
     step_id: str
+    primitive_id: str
+    primitive_version: str
     input_sha256: str
     output_schema: str
     replay_key: str
@@ -273,6 +275,8 @@ class PipelineOperationBinding:
             raise ContractError("unsupported PipelineOperationBinding schema")
         _sha256(self.definition_sha256, "pipeline definition")
         _identifier(self.step_id, "pipeline step_id")
+        _identifier(self.primitive_id, "pipeline primitive_id")
+        _version(self.primitive_version, "pipeline primitive_version")
         _sha256(self.input_sha256, "pipeline step input")
         _schema_id(self.output_schema, "pipeline step output_schema")
         _sha256(self.replay_key, "pipeline replay key")
@@ -416,6 +420,8 @@ def bind_step_operation(
     return PipelineOperationBinding(
         definition_sha256=compiled.definition_sha256,
         step_id=step.step_id,
+        primitive_id=step.primitive_id,
+        primitive_version=step.primitive_version,
         input_sha256=input_digest,
         output_schema=step.output_schema,
         replay_key=replay_key,
