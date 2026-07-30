@@ -29,6 +29,15 @@ check(
     == {"model_step", "review", "verify"},
 )
 check(
+    "built-in model work requires only the preflight fact it can prove",
+    {
+        capability
+        for primitive in registry.primitives
+        for capability in primitive.required_capabilities
+    }
+    == {"route:resolved"},
+)
+check(
     "built-ins cover lifecycle and both engineering profiles",
     set(definitions) == {"engineering/change", "engineering/fix", "lifecycle/default"},
 )
@@ -37,7 +46,7 @@ compiled = {
     name: compile_pipeline(
         definition,
         registry,
-        capabilities=("provider:authenticated",),
+        capabilities=("route:resolved",),
     )
     for name, definition in definitions.items()
 }

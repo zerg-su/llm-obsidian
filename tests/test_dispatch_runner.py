@@ -127,6 +127,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     prompt = runner.render_task_prompt(request, config)
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
+    lifecycle_contract = runner.lifecycle_contract()
+    check(
+        "route preview consumes the compiled lifecycle catalog",
+        lifecycle_contract["pipeline"] == "lifecycle/default@1.0.0"
+        and len(lifecycle_contract["definition_sha256"]) == 64
+        and "harness 2.3 remains the execution engine"
+        in lifecycle_contract["summary"],
+    )
     check(
         "runner tells coordinator to return idle without polling",
         runner.COORDINATOR_ACTION == "return-to-idle-without-polling",

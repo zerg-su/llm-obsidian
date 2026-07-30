@@ -133,7 +133,7 @@ def builtin_registry() -> PrimitiveRegistry:
                 "model_step",
                 VERSION,
                 session_modes=("parent-child", "worktree"),
-                required_capabilities=("provider:authenticated",),
+                required_capabilities=("route:resolved",),
             ),
             PrimitiveDefinition(
                 "verify",
@@ -144,7 +144,7 @@ def builtin_registry() -> PrimitiveRegistry:
                 "review",
                 VERSION,
                 session_modes=("review",),
-                required_capabilities=("provider:authenticated",),
+                required_capabilities=("route:resolved",),
             ),
         ),
         semantic_skills=("debug", "dispatch", "review", "tdd"),

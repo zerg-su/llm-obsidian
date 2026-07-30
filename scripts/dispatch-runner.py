@@ -40,6 +40,11 @@ from task_contract import ContractError, normalize as normalize_task_contract  #
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from harness.contracts import RuntimeRoute  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
+from harness.pipeline_builtins import (  # noqa: E402
+    builtin_definitions,
+    builtin_registry,
+)
+from harness.pipelines import compile_pipeline, render_contract  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
@@ -829,6 +834,24 @@ def harness_request(
     )
 
 
+def lifecycle_contract() -> dict[str, str]:
+    """Compile the read-only lifecycle summary shown before dispatch approval."""
+
+    definition = builtin_definitions()["lifecycle/default"]
+    compiled = compile_pipeline(
+        definition,
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
+    return {
+        "pipeline": (
+            f"{definition.pipeline_id}/{definition.profile}@{definition.version}"
+        ),
+        "definition_sha256": compiled.definition_sha256,
+        "summary": render_contract(compiled),
+    }
+
+
 def completed_replay(raw: dict[str, Any], spec_sha256: str) -> dict[str, Any] | None:
     """Return an exact completed result before mutable plan/worktree validation."""
     request_id = str(raw.get("request_id") or "")
@@ -1163,6 +1186,7 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
+                "pipeline": lifecycle_contract(),
                 "review": {
                     "mode": review.mode,
                     "cross_model": review.cross_model,

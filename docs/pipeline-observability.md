@@ -102,6 +102,10 @@ identifiers, versions, schema links, required capabilities, and a canonical
 definition hash. It does not report budgets, enforcement, progress, or effects
 that the 2.3 kernel did not actually bind.
 
+The existing `dispatch-runner.py validate` preview renders the lifecycle
+contract before approval. Rendering the summary is not execution and creates no
+worktree, provider session, or external effect.
+
 Existing operation and lifecycle events remain authoritative. Do not infer that
 a compiled catalog entry was executed from its presence or hash. The boundary
 and the failed production-switch net-value gate are recorded in
