@@ -22,7 +22,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker
 from harness.adapters.claude import ClaudeDriver
-from harness.contracts import AttentionReason, RuntimeRoute, to_dict
+from harness.contracts import (
+    AttentionReason,
+    OwnedResources,
+    RuntimeRoute,
+    to_dict,
+)
+from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.workflows.review import (
@@ -1245,6 +1251,57 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(current_runtime.started) == 1
             and len(current_runtime.continued) == 1
             and current_runtime.continued[0][1] == lane["operation_id"],
+        )
+        current_gate_state = json.loads(
+            (current_gate_root / "review-gate.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        current_gate_state["status"] = "attention-required"
+        (current_gate_root / "review-gate.json").write_text(
+            json.dumps(current_gate_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        for record in current_store.list(started["task_id"]):
+            if record.state in TERMINAL:
+                continue
+            current_store.transition(
+                started["task_id"],
+                record.spec.operation_id,
+                "cancelling",
+            )
+            current_store.transition(
+                started["task_id"],
+                record.spec.operation_id,
+                "exiting",
+            )
+            current_store.transition(
+                started["task_id"],
+                record.spec.operation_id,
+                "cancelled",
+            )
+            cancelled = current_store.read(
+                started["task_id"], record.spec.operation_id
+            )
+            if cancelled.resources != OwnedResources():
+                current_store.save(
+                    replace(
+                        cancelled,
+                        resources=OwnedResources(),
+                        revision=cancelled.revision + 1,
+                    ),
+                    expected_revision=cancelled.revision,
+                )
+        restarted = task_review_runner.run_current_review(
+            product,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "quiescent attention gate permits one fresh current review",
+            restarted["status"] == "reviewing"
+            and restarted["task_id"] != started["task_id"],
         )
     finally:
         for name, value in old_environment.items():

@@ -266,6 +266,19 @@ def _gate_root(vault: Path, task_id: str) -> Path:
     ).resolve()
 
 
+def _current_review_is_quiescent(vault: Path, task_id: str) -> bool:
+    """Permit a fresh current review only after exact old ownership is gone."""
+
+    rows = OperationStore(vault / ".vault-meta" / "harness").list(task_id)
+    return bool(rows) and all(
+        row.state in TERMINAL
+        and not row.resources.surface_id
+        and row.resources.process_group == 0
+        and row.resources.supervisor_pid == 0
+        for row in rows
+    )
+
+
 def _context(
     meta: Mapping[str, Any],
     vault: Path,
@@ -1210,6 +1223,9 @@ def run_current_review(
                     bound_head != _git(worktree, "rev-parse", "HEAD")
                     or not same_policy
                 )
+            ) or (
+                status == "attention-required"
+                and _current_review_is_quiescent(vault, task_id)
             )
         elif gate_state_path.exists():
             raise TaskReviewError("current review gate is not a regular file")
