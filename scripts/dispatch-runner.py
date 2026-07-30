@@ -41,6 +41,7 @@ from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from harness.contracts import RuntimeRoute  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
+    EXECUTABLE_BUILTINS,
     compiled_builtin,
 )
 from harness.pipelines import render_contract  # noqa: E402
@@ -265,6 +266,9 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     placement = str(raw.get("placement") or "split").strip()
     if placement not in {"split", "workspace"}:
         raise DispatchError("placement must be split or workspace")
+    pipeline = str(raw.get("pipeline") or "lifecycle/default").strip()
+    if pipeline not in EXECUTABLE_BUILTINS:
+        raise DispatchError("pipeline must name an executable pipeline")
     origin_session = require_string(raw.get("origin_session"), "origin_session", maximum=128)
     session_route = raw.get("session_route")
     if not isinstance(session_route, dict):
@@ -369,6 +373,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "plan_file": plan_file,
         "origin_surface": origin_surface,
         "placement": placement,
+        "pipeline": pipeline,
         "origin_session": origin_session,
         "session_route": {
             "runtime": session_runtime,
@@ -826,15 +831,19 @@ def harness_request(
         route=route,
         placement=request["placement"],
         review=review,
+        pipeline_name=request["pipeline"],
     )
 
 
 def lifecycle_contract(
     review: ReviewPolicy | None = None,
+    pipeline_name: str = "lifecycle/default",
 ) -> dict[str, str]:
     """Compile the lifecycle summary shown before dispatch approval."""
 
-    compiled = compiled_builtin("lifecycle/default")
+    if pipeline_name not in EXECUTABLE_BUILTINS:
+        raise DispatchError("pipeline must name an executable pipeline")
+    compiled = compiled_builtin(pipeline_name)
     definition = compiled.definition
     review = review or ReviewPolicy(
         verification_profile="scoped",
@@ -1188,7 +1197,7 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
-                "pipeline": lifecycle_contract(review),
+                "pipeline": lifecycle_contract(review, request["pipeline"]),
                 "review": {
                     "mode": review.mode,
                     "cross_model": review.cross_model,

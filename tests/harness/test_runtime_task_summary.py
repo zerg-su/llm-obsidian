@@ -65,10 +65,11 @@ def dispatch_record(
     operation_id: str,
     *,
     bind_contract: bool = True,
+    pipeline_name: str = "lifecycle/default",
 ) -> None:
     route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
     lifecycle = compile_pipeline(
-        builtin_definitions()["lifecycle/default"],
+        builtin_definitions()[pipeline_name],
         builtin_registry(),
         capabilities=("route:resolved",),
     )
@@ -157,6 +158,9 @@ def run_case(
         Callable[[Path, Path, Path, str], None] | None
     ) = None,
     bind_contract: bool = True,
+    pipeline_name: str = "lifecycle/default",
+    verification_runner: Callable[..., subprocess.CompletedProcess[str]]
+    | None = None,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -215,7 +219,12 @@ def run_case(
         },
     )
     store = OperationStore(vault / ".vault-meta" / "harness")
-    dispatch_record(store, operation_id, bind_contract=bind_contract)
+    dispatch_record(
+        store,
+        operation_id,
+        bind_contract=bind_contract,
+        pipeline_name=pipeline_name,
+    )
     profile_sha = load_profiles(
         vault / "config" / "verification-profiles.toml"
     )["scoped"].sha256
@@ -310,6 +319,7 @@ def run_case(
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
                 cmux_adapter=cmux,
                 review_launcher=review_launcher,
+                verification_runner=verification_runner,
             )
         )
     )
@@ -383,6 +393,102 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         sent_marker["status"] == "sent"
         and sent_marker["callback_id"] == record.accepted_callback_id,
         sent_marker,
+    )
+
+    engineering_task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    verification_calls: list[tuple[str, ...]] = []
+
+    def pass_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        verification_calls.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    (
+        engineering_store,
+        engineering_cmux,
+        engineering_state,
+        engineering_rc,
+    ) = run_case(
+        root,
+        engineering_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=pass_verification,
+    )
+    engineering_record = engineering_store.read(
+        "owner-1", engineering_task
+    )
+    verification_receipt = json.loads(
+        (
+            engineering_state / "pipeline-step-verify.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "engineering change runs configured verification inside the same operation",
+        engineering_rc == 0
+        and engineering_record.spec.operation_id == engineering_task
+        and engineering_record.state == "finalizing"
+        and engineering_record.accepted_callback_kind == "wiki-summary"
+        and verification_receipt["status"] == "complete"
+        and verification_receipt["step_id"] == "verify"
+        and len(verification_receipt["evidence"]) == 3
+        and verification_calls
+        == [
+            ("make", "test-harness"),
+            ("make", "test-model-routing"),
+            ("git", "diff", "--check"),
+        ]
+        and len(engineering_cmux.sent) == 1,
+        (engineering_record, verification_receipt, verification_calls),
+    )
+
+    failing_task = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    def fail_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 1, "", "failed\n")
+
+    failed_store, failed_cmux, failed_state, failed_rc = run_case(
+        root,
+        failing_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=fail_verification,
+    )
+    failed_record = failed_store.read("owner-1", failing_task)
+    failed_receipt = json.loads(
+        (failed_state / "pipeline-step-verify.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "engineering verification failure becomes typed attention before review",
+        failed_rc == 0
+        and failed_record.state == "attention-required"
+        and failed_record.attention_reason
+        == AttentionReason.ATTENTION_REQUIRED
+        and not failed_record.accepted_callback_id
+        and failed_receipt["status"] == "failed"
+        and failed_cmux.sent == [],
+        (failed_record, failed_receipt, failed_cmux.sent),
     )
 
     # A restarted worker sees a duplicate durable callback and the sent marker;

@@ -195,6 +195,33 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and "task-review-runner.py run" not in prompt,
         prompt,
     )
+    change_raw = json.loads(json.dumps(raw_request))
+    change_raw["pipeline"] = "engineering/change"
+    change_request = runner.validate_request(change_raw)
+    change_contract = runner.lifecycle_contract(
+        review,
+        change_request["pipeline"],
+    )
+    check(
+        "approved dispatch can select the built-in engineering change profile",
+        change_request["pipeline"] == "engineering/change"
+        and change_contract["pipeline"] == "engineering/change@1.0.0"
+        and "tdd-slices:model_step@1.0.0"
+        in change_contract["summary"]
+        and runner.harness_request(
+            change_request,
+            config,
+            effective,
+        ).pipeline_name
+        == "engineering/change",
+    )
+    invalid_pipeline = json.loads(json.dumps(raw_request))
+    invalid_pipeline["pipeline"] = "engineering/fix"
+    expect_error(
+        "dispatch rejects a catalog-only pipeline without a production executor",
+        lambda: runner.validate_request(invalid_pipeline),
+        "executable pipeline",
+    )
 
     expert_raw = json.loads(json.dumps(raw_request))
     expert_raw["review"] = {
