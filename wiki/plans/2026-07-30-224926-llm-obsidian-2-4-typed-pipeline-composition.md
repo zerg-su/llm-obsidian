@@ -256,13 +256,16 @@ enforceable binding fail closed.
   не превращаются в multi-effect store.
 - Новый per-step output receipt сохраняет content hash, schema version,
   definition hash, step id и input hash; raw prompt в ledger не попадает.
-- Replay key: `definition_hash + step_id + input_hash`. Только точное совпадение
-  позволяет переиспользовать accepted typed output без повторного model call.
+- Replay key: `definition_hash + step_id + input_hash + schema_version`.
+  Только точное совпадение позволяет переиспользовать accepted typed output без
+  повторного model call.
 - Side effects остаются write-ahead и idempotent через существующий supervisor.
 - Compiled definition нельзя менять во время run.
 - Допустимый mechanism repair создаёт новую definition/version и новый run,
-  который может переиспользовать только exact-key receipts и уже завершённые
-  idempotent effects с доказанной identity; state converters не добавляются.
+  сохраняет `predecessor_definition_hash` и может переиспользовать receipt по exact
+  key предшественника только когда primitive id/version и input/output schemas этого
+  step не изменились между definitions. Уже завершённые idempotent effects требуют
+  доказанной identity; state converters не добавляются.
 - Недопустимый или неоднозначный repair паркует operation в durable attention.
 
 ## Возврат к пользователю

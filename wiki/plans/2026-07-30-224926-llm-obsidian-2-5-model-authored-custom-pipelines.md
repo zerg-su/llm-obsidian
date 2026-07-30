@@ -208,7 +208,8 @@ enforced capability.
 
 - Canonical spec, primitive versions и compiler version входят в hash.
 - Outputs model steps фиксируются per-step receipt из 2.4 по exact replay key:
-  definition hash + step id + input hash + schema version.
+  `definition_hash + step_id + input_hash + schema_version`; repair reuse следует
+  правилу `predecessor_definition_hash` из 2.4.
 - Decision переход воспроизводится из принятого output, а не повторным вызовом
   модели.
 - Effects используют отдельные step operations, существующий per-operation
