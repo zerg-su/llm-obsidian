@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-21
+updated: 2026-07-30
 tags:
   - meta
   - guide
@@ -15,6 +15,7 @@ sessions:
   - public-template-v2
   - 019f72c4-816e-7200-a399-505adaa350e0
   - 019f6ddd-d07e-7a30-b018-f6358753fb91
+  - 019fab00-3160-7380-8920-4b20183afb76
 ---
 
 # Daily Pipeline Guide
@@ -33,7 +34,6 @@ sessions:
 - **save** — зафиксировать вывод текущего разговора страницей + bookkeeping.
 - **save-plan** — зафайлить план из разговора в `wiki/plans/` без исполнения.
 - **close** — save + аккуратно выйти из сессии.
-- **autoresearch** — автономный research-цикл по теме (или frontier-кандидаты без темы).
 - **unsafe-research** — только по явному запросу: один vault-aware web-контекст с предупреждением о риске.
 - **canvas** — визуальные канвасы: изображения, страницы, PDF.
 - **defuddle** — очистить веб-страницу от мусора перед ингестом.
@@ -55,12 +55,19 @@ sessions:
 
 ### Оркестрация (требует cmux)
 
-- **dispatch** — вынести задачу в параллельный split + git worktree, с передачей approved-плана.
-- **dispatch-workspace** — тот же approved dispatch в отдельном unfocused cmux workspace.
-- **reap** — собрать результат task-split'а в вики (interim/final).
-- **reap-send** — вызывается ИЗ task-split'а: handoff summary в вики одной командой.
-- **review-dispatch** — запускает независимое cross-model review и bounded verify.
-- **review-send** — возвращает типизированный reviewer verdict исполнителю.
+- **dispatch** — approved plan → видимый task split/workspace + git worktree через code-owned harness.
+- **review** — единый simple/deep review для dispatched task или текущего checkout; поддерживает cross-model и model aliases.
+- **research** — защищённый research: vaultless network fetch → networkless synthesis → coordinator-owned запись.
+- **reap** — собрать typed Wiki Summary завершённого task и закрыть его точный lifecycle.
+
+### Инженерная работа
+
+- **design** — уточнить домен и выбрать минимальный дизайн до реализации.
+- **tdd** — вести изменение коротким red → green → regression циклом.
+- **debug** — локализовать root cause и проверить исходный failing loop.
+- **prototype** — проверить риск в disposable worktree, не смешивая прототип с production.
+- **resolve-conflict** — собрать BASE/ours/theirs evidence и разрешать только явно авторизованные пути.
+- **improve-skills** — структурный аудит скиллов по закреплённым snapshot Superpowers и Matt Pocock Skills.
 
 ### Reference (не вызываются, подгружаются по контексту)
 
@@ -75,4 +82,4 @@ sessions:
 
 - Новый материал: `ingest <источник>` → `lint the wiki` (раз в неделю) → `/wiki-fold` (по нуджу).
 - Рабочий день: `/journal` утром → `agenda scan` и при необходимости `agenda collect` → работа с `/save` → `/daily` вечером.
-- Большая задача: `/clarify` → план в plan mode → auto-capture в `wiki/plans/` → `/dispatch` на исполнение → `/reap` результата.
+- Большая задача: `/clarify` → план → `/dispatch` → автоматический `/review` → `/reap` результата.
