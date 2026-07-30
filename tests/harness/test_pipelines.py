@@ -69,6 +69,7 @@ registry = PrimitiveRegistry(
             ),
             required_capabilities=("provider:authenticated",),
         ),
+        PrimitiveDefinition("bounded_loop", "1.0.0"),
     ),
     bindings=(
         PolicyBinding(
@@ -208,4 +209,22 @@ expect_compile_error(
     "compiler rejects a mismatched pipeline output schema",
     replace(definition, output_schema="wrong/v1"),
     "pipeline output schema",
+)
+expect_compile_error(
+    "compiler rejects a loop without an explicit bounded control contract",
+    replace(
+        definition,
+        output_schema="review-approved/v1",
+        steps=definition.steps
+        + (
+            PipelineStep(
+                "retry",
+                "bounded_loop",
+                "1.0.0",
+                "review-approved/v1",
+                "review-approved/v1",
+            ),
+        ),
+    ),
+    "bounded_loop requires",
 )

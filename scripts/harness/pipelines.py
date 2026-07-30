@@ -265,6 +265,10 @@ def compile_pipeline(
     side_effects: set[str] = set()
     previous: PipelineStep | None = None
     for step in definition.steps:
+        if step.primitive_id == "bounded_loop":
+            raise ContractError(
+                "bounded_loop requires an explicit bounded control contract"
+            )
         primitive = registry.resolve(step.primitive_id, step.primitive_version)
         if previous and previous.output_schema != step.input_schema:
             raise ContractError(
