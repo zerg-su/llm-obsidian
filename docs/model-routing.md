@@ -2,7 +2,8 @@
 
 `config/model-routing.toml` is the single tracked source of concrete runtime,
 model-alias, and role-specific model/effort defaults. Simple profiles use
-Sol/high and Opus/high; deep profiles use Sol/xhigh and Fable/xhigh. A user may
+Sol/high and Claude Opus 5/high (`claude-opus-5`); deep profiles use Sol/xhigh
+and Fable/xhigh. A user may
 add the gitignored `config/model-routing.local.toml`; the SessionStart preflight
 makes that override visible. Native Codex configs are derived copies checked by
 `scripts/model_routing.py check`.
@@ -30,6 +31,10 @@ Review model overrides accept only the registered aliases `sol`, `terra`,
 records remain readable. Concrete top-level model/effort fields in old metadata
 are treated as explicit historical overrides. New task metadata carries both
 `routing.session` and `routing.effective`.
+
+The tracked `opus` alias resolves to the versioned `claude-opus-5` target
+instead of the host's moving `opus` alias, so older Claude Code installations
+cannot silently route a 2.3 review to Opus 4.8.
 
 ## Session snapshots
 

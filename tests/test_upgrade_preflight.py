@@ -46,7 +46,10 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check("confirmed migration succeeds", result.returncode == 0)
     check("migration writes ignored-style local config", (root / "config/model-routing.local.toml").is_file())
     migrated = load_config(root)
-    check("migration preserves ordinary Claude default", migrated.runtime_default("claude")["model"] == "opus")
+    check(
+        "migration preserves ordinary Claude default",
+        migrated.runtime_default("claude")["model"] == "claude-opus-5",
+    )
     check("migration changes only Claude reviewer role", migrated.reviewer_default("claude") == {
         "runtime": "claude", "model": "custom-claude", "effort": "xhigh"
     })

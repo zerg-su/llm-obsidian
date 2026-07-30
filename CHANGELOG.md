@@ -32,7 +32,8 @@ packages were published for them.
 - Moved cmux, provider process, worktree, context, callback, verification,
   retry, and cleanup mechanics behind code-owned harness modules.
 - Centralized Sol, Terra, Opus, and Fable aliases and review profiles in
-  `config/model-routing.toml`.
+  `config/model-routing.toml`; the Opus alias pins `claude-opus-5` rather than
+  relying on a host-moving default.
 - Protected research now uses vaultless fetch, networkless synthesis, hashed
   pointer artifacts, and coordinator-owned vault writes.
 - Version 2.3.0 is a clean runtime baseline; pre-harness operation state is not

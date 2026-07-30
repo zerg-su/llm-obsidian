@@ -38,24 +38,46 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
 
     config = routing.load_config(root)
     codex = {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"}
-    claude = {"runtime": "claude", "model": "opus", "effort": "high"}
+    claude = {
+        "runtime": "claude",
+        "model": "claude-opus-5",
+        "effort": "high",
+    }
 
-    check("Claude runtime default is Opus", config.runtime_default("claude")["model"] == "opus")
-    check("Claude simple reviewer default is Opus", config.reviewer_default("claude")["model"] == "opus")
+    check(
+        "Claude runtime default is Opus 5",
+        config.runtime_default("claude")["model"] == "claude-opus-5",
+    )
+    check(
+        "Claude simple reviewer default is Opus 5",
+        config.reviewer_default("claude")["model"] == "claude-opus-5",
+    )
     check("Claude deep reviewer default is Fable", config.reviewer_default("claude", "deep")["model"] == "fable")
     check("historical reviewer defaults are centrally tracked", config.legacy_reviewer_default("claude") == {
         "runtime": "claude", "model": "fable", "effort": "high"
     })
-    check("all concrete defaults are discoverable", config.default_models() == {"gpt-5.6-sol", "opus", "fable"})
+    check(
+        "all concrete defaults are discoverable",
+        config.default_models()
+        == {"gpt-5.6-sol", "claude-opus-5", "fable"},
+    )
     check("Sol alias resolves to concrete Codex target", config.resolve_alias("sol") == {"runtime": "codex", "model": "gpt-5.6-sol"})
 
     route = routing.resolve(config, "dispatch", session=codex)
     check("dispatch inherits exact session", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "high"))
     route = routing.resolve(config, "daily", session=claude)
-    check("daily inherits runtime and model", (route["runtime"], route["model"]) == ("claude", "opus"))
+    check(
+        "daily inherits runtime and model",
+        (route["runtime"], route["model"])
+        == ("claude", "claude-opus-5"),
+    )
     check("daily uses medium effort", route["effort"] == "medium")
     route = routing.resolve(config, "review", session=codex)
-    check("simple review defaults opposite", (route["runtime"], route["model"], route["effort"]) == ("claude", "opus", "high"))
+    check(
+        "simple review defaults opposite",
+        (route["runtime"], route["model"], route["effort"])
+        == ("claude", "claude-opus-5", "high"),
+    )
     route = routing.resolve(config, "review", session=codex, review_profile="deep")
     check(
         "deep review uses the opposite runtime deep profile",
@@ -90,7 +112,11 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     route = routing.resolve(config, "protected-research", session=codex)
     check("protected research from Codex inherits", route["source"][0] == "session")
     route = routing.resolve(config, "unsafe-research", session=claude)
-    check("unsafe research inherits full session", (route["runtime"], route["model"], route["effort"]) == ("claude", "opus", "high"))
+    check(
+        "unsafe research inherits full session",
+        (route["runtime"], route["model"], route["effort"])
+        == ("claude", "claude-opus-5", "high"),
+    )
     route = routing.resolve(config, "dispatch", session=claude, explicit_model="terra")
     check("registered alias override infers runtime", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-terra"))
 
@@ -136,7 +162,7 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("local runtime override is visible", local.local_override and local.runtime_default("claude")["model"] == "sonnet")
     check("local reviewer override is independent", local.reviewer_default("codex")["model"] == "codex-review")
     route = routing.resolve(local, "review", session=codex)
-    check("review uses local role default", route["model"] == "opus")
+    check("review uses local role default", route["model"] == "claude-opus-5")
     reviewer_profile = local.root / ".codex/profiles/reviewer-readonly.toml"
     check(
         "native reviewer profile uses reviewer role default",
