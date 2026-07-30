@@ -125,7 +125,14 @@ check(
     and "engineering/change@1.0.0" in summary
     and compiled.definition_sha256 in summary
     and "state-free reconciliation" in summary
-    and "budget" not in summary.lower()
+    and "Limits: attempts=3, model-restarts=1, deadline=1800s, tokens=200000"
+    in summary
+    and "Review: mode=simple, verification-iterations=1" in summary
+    and "Side effects: worktree, git-write, cmux-surface, provider, callback, reap"
+    in summary
+    and "cmux target scope=policy-only" in summary
+    and "Returns: completed, escalation, attention-required, cancelled, timeout"
+    in summary
     and "sandbox-enforced" in summary
     and "code-policy-enforced" in summary,
 )

@@ -91,11 +91,12 @@ Unknown ownership, prompt, callback, or upgrade state becomes
 Commit the explicit product files, run the configured verification profile,
 then write `.task-summary.json` to trigger the automatic review gate. Do not
 invoke a review runner or orchestrate its provider/cmux lifecycle yourself.
-Remain available in this session while the harness launches review. Apply or
-reject findings as executor and follow the typed gate state until it authorizes
-finalization. If a resolution changes HEAD, update the summary and continue
-through the same-session verification required by the gate. The provider
-worker delivers the approved Wiki Summary through the internal callback broker;
-the coordinator owns the one reap transaction and terminal cleanup. The task
-does not send a separate reap command.
+Remain available in this session while the harness launches review. Material
+findings arrive in `.task-review.json` plus one typed surface notification.
+Apply or reject every finding in a new commit, or use the normal escalation
+contract; do not invoke the review runner. The harness continues same-session
+verification and authorizes finalization. The provider worker delivers the
+approved Wiki Summary through the internal callback broker; the coordinator owns
+the one reap transaction and terminal cleanup. The task does not send a separate
+reap command.
 ```

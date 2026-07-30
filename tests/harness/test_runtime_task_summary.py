@@ -153,6 +153,9 @@ def run_case(
     *,
     review_state: str = "skipped",
     review_launcher: Callable[[Path, Path], None] | None = None,
+    before_start: (
+        Callable[[Path, Path, Path, str], None] | None
+    ) = None,
     bind_contract: bool = True,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
@@ -291,6 +294,13 @@ def run_case(
         origin_surface=ORIGIN,
     )
     cmux = FakeCmux()
+    if before_start is not None:
+        before_start(
+            vault,
+            worktree,
+            launch.spec_path.parent,
+            profile_sha,
+        )
     result: list[int] = []
     thread = threading.Thread(
         target=lambda: result.append(
@@ -575,24 +585,104 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     },
                 },
             )
+            # The callback lands before the launch facade returns. The receipt
+            # must not acknowledge it as processed until a later drive.
+            write_json(
+                vault
+                / ".vault-meta"
+                / "harness"
+                / "review-runtime"
+                / asynchronous_task
+                / "callbacks"
+                / "spec"
+                / ".review-callback.json",
+                {"schema_version": 1, "status": "ready"},
+            )
+            return
+        if len(asynchronous_calls) == 2:
+            # A second deep-review axis lands while the facade is already
+            # returning from its first incomplete readiness scan.
+            write_json(
+                vault
+                / ".vault-meta"
+                / "harness"
+                / "review-runtime"
+                / asynchronous_task
+                / "callbacks"
+                / "standards"
+                / ".review-callback.json",
+                {"schema_version": 1, "status": "ready"},
+            )
+            return
+        if len(asynchronous_calls) == 3:
+            result_pointer = (
+                gate_root / asynchronous_task / "round-spec-0.json"
+            )
+            write_json(
+                result_pointer,
+                {
+                    "axis": "spec",
+                    "verdict": "changes-requested",
+                    "verification_iteration": 0,
+                    "findings": [
+                        {
+                            "axis": "spec",
+                            "finding_id": "F-material",
+                            "severity": "important",
+                            "file": "product.txt",
+                            "line": 1,
+                            "summary": "Material review finding",
+                            "evidence": "The original content is incomplete.",
+                            "recommendation": "Commit the exact correction.",
+                        }
+                    ],
+                },
+            )
+            gate_state = json.loads(
+                (gate_root / "review-gate.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            gate_state["status"] = "awaiting-resolution"
+            gate_state["awaiting_resolution"] = {
+                "spec": {
+                    "pointer": result_pointer.relative_to(
+                        gate_root
+                    ).as_posix(),
+                    "reviewed_head_sha": head,
+                }
+            }
+            write_json(gate_root / "review-gate.json", gate_state)
 
-            def deliver_callback() -> None:
+            def resolve_after_packet() -> None:
                 import time
 
-                time.sleep(0.1)
-                write_json(
-                    vault
-                    / ".vault-meta"
-                    / "harness"
-                    / "review-runtime"
-                    / asynchronous_task
-                    / "callbacks"
-                    / "spec"
-                    / ".review-callback.json",
-                    {"schema_version": 1, "status": "ready"},
+                packets: list[Path] = []
+                for _ in range(100):
+                    packet = worktree / ".task-review.json"
+                    packets = [packet] if packet.is_file() else []
+                    if packets:
+                        break
+                    time.sleep(0.02)
+                if not packets:
+                    return
+                (worktree / "resolution.txt").write_text(
+                    "resolved\n", encoding="utf-8"
+                )
+                subprocess.run(
+                    ["git", "add", "resolution.txt"],
+                    cwd=worktree,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "resolve review"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
                 )
 
-            threading.Thread(target=deliver_callback).start()
+            threading.Thread(target=resolve_after_packet).start()
             return
         (gate_root / "review-gate.json").unlink()
         ReviewGateController.skip(
@@ -625,11 +715,129 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "owner-1", asynchronous_task
     )
     check(
-        "worker drives an active review again when its callback arrives",
+        "worker delivers findings and drives same-session resolution",
         asynchronous_rc == 0
-        and len(asynchronous_calls) == 2
+        and len(asynchronous_calls) == 4
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
-        and len(asynchronous_cmux.sent) == 1,
+        and len(asynchronous_cmux.sent) == 2
+        and asynchronous_cmux.sent[0][0] == CHILD
+        and "Typed review findings" in asynchronous_cmux.sent[0][1]
+        and asynchronous_cmux.sent[1][0] == ORIGIN,
         (asynchronous_calls, asynchronous_record),
+    )
+    asynchronous_packet = (
+        root / f"worktree-{asynchronous_task}" / ".task-review.json"
+    )
+    check(
+        "executor receives a bounded typed decision packet",
+        asynchronous_packet.is_file()
+        and json.loads(
+            asynchronous_packet.read_text(encoding="utf-8")
+        )["findings"][0]["finding_id"]
+        == "F-material",
+        asynchronous_packet,
+    )
+
+    pending_task = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    pending_calls: list[str] = []
+
+    def prepare_pending_review(
+        vault: Path,
+        worktree: Path,
+        state: Path,
+        profile_sha: str,
+    ) -> None:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        write_json(
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / pending_task
+            / pending_task
+            / "review-gate.json",
+            {
+                "schema_version": 1,
+                "dispatch_operation_id": pending_task,
+                "owner_id": pending_task,
+                "status": "reviewing",
+                "product_root": str(worktree),
+                "context": {
+                    "head_sha": head,
+                    "verification_profile": "scoped",
+                    "verification_profile_sha256": profile_sha,
+                },
+            },
+        )
+        write_json(
+            state / "pipeline-review-start.json",
+            {
+                "schema_version": 1,
+                "operation_id": pending_task,
+                "definition_sha256": compile_pipeline(
+                    builtin_definitions()["lifecycle/default"],
+                    builtin_registry(),
+                    capabilities=("route:resolved",),
+                ).definition_sha256,
+                "status": "pending",
+            },
+        )
+
+    def approve_pending(vault: Path, worktree: Path) -> None:
+        pending_calls.append(str(worktree))
+        gate = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / pending_task
+            / pending_task
+        )
+        (gate / "review-gate.json").unlink()
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=pending_task,
+            owner_id=pending_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    pending_store, _pending_cmux, _pending_state, pending_rc = run_case(
+        root,
+        pending_task,
+        valid_summary,
+        review_state="missing",
+        review_launcher=approve_pending,
+        before_start=prepare_pending_review,
+    )
+    pending_record = pending_store.read("owner-1", pending_task)
+    check(
+        "pending receipt plus live gate resumes the idempotent drive",
+        pending_rc == 0
+        and len(pending_calls) == 1
+        and pending_record.state == "finalizing",
+        (pending_calls, pending_record),
     )

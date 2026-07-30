@@ -255,7 +255,8 @@ def check_repo(root: Path) -> list[str]:
             issues.append(f"dispatch missing unattended contract invariant {required!r}")
     for required in (
         "-a never", "workspace-write", "code-owned provider runtime",
-        "DCG_CONFIG", "localhost", "trusted `PATH`",
+        "localhost", "cmux-socket policy", "classic compatibility",
+        "not this generic harness path",
     ):
         if required not in dispatch_text:
             issues.append(f"Codex dispatch missing unattended approval invariant {required!r}")

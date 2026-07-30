@@ -80,14 +80,19 @@ preset, its deterministic simple/deep/skip budget (1/2/0), and the coordinator
 verification profile digest. After committing and verifying, the task writes
 `.task-summary.json` and remains available. The harness then drives
 `task-review-runner.py` idempotently through callback consumption, executor
-resolution, same-session verification, and terminal authorization; the task
-must not launch or orchestrate reviewer sessions itself. Generic target
+resolution, same-session verification, and terminal authorization. Material
+findings arrive as a typed `.task-review.json` packet plus one exact-surface
+notification; the task applies or rejects every finding in a new commit, or
+uses the normal escalation contract. The task must not launch or orchestrate
+reviewer sessions itself. Generic target
 repositories do not need to ship swarm scripts or routing/verification
 configuration. The code-owned provider runtime owns runtime argv, trust
 prompts, process lifecycle, watchdog, and close-after-exit.
 Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
-write roots, `DCG_CONFIG`, localhost-only loopback policy, and trusted `PATH`.
-Never weaken those controls or reproduce their shell commands manually.
+write roots plus localhost-only loopback and cmux-socket policy. `DCG_CONFIG`
+and trusted-`PATH` hardening currently belong to the classic compatibility
+supervisor, not this generic harness path. Never reproduce either launch path's
+shell commands manually.
 
 The task may auto-repair only eligible repo-owned mechanism failures under the
 central failure-repair contract. Scope/security/permission/external decisions

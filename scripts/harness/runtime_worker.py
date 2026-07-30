@@ -1236,6 +1236,17 @@ def run(
                 return digest.hexdigest()
 
             def drive_review() -> bool:
+                input_sha256 = review_drive_sha256()
+                _atomic_json(
+                    marker_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": lifecycle.definition_sha256,
+                        "status": "pending",
+                        "drive_sha256": input_sha256,
+                    },
+                )
                 try:
                     if review_launcher is not None:
                         review_launcher(trusted_vault, spec["cwd"])
@@ -1284,18 +1295,209 @@ def run(
                         "operation_id": spec["operation_id"],
                         "definition_sha256": lifecycle.definition_sha256,
                         "status": "started",
-                        "drive_sha256": review_drive_sha256(),
+                        "drive_sha256": input_sha256,
                     },
                 )
                 return True
 
+            def review_gate_state() -> dict[str, object]:
+                gate_path = review.gate_root / "review-gate.json"
+                if not gate_path.is_file() or gate_path.is_symlink():
+                    return {}
+                state = json.loads(gate_path.read_text(encoding="utf-8"))
+                if (
+                    not isinstance(state, dict)
+                    or state.get("schema_version") != 1
+                    or state.get("dispatch_operation_id")
+                    != spec["operation_id"]
+                ):
+                    raise RuntimeWorkerError(
+                        "review gate state is invalid"
+                    )
+                return state
+
+            def notify_review_resolution(
+                gate_state: dict[str, object],
+            ) -> None:
+                awaiting = gate_state.get("awaiting_resolution")
+                if not isinstance(awaiting, dict) or not awaiting:
+                    raise RuntimeWorkerError(
+                        "review resolution evidence is unavailable"
+                    )
+                findings: list[dict[str, object]] = []
+                reviewed_heads: set[str] = set()
+                for axis in sorted(awaiting):
+                    evidence = awaiting[axis]
+                    if not isinstance(evidence, dict):
+                        raise RuntimeWorkerError(
+                            "review resolution evidence is invalid"
+                        )
+                    pointer = Path(str(evidence.get("pointer") or ""))
+                    result_path = (review.gate_root / pointer).resolve()
+                    if (
+                        pointer.is_absolute()
+                        or review.gate_root not in result_path.parents
+                        or not result_path.is_file()
+                        or result_path.is_symlink()
+                    ):
+                        raise RuntimeWorkerError(
+                            "review result pointer is invalid"
+                        )
+                    result = json.loads(
+                        result_path.read_text(encoding="utf-8")
+                    )
+                    rows = (
+                        result.get("findings")
+                        if isinstance(result, dict)
+                        else None
+                    )
+                    if (
+                        not isinstance(result, dict)
+                        or result.get("axis") != axis
+                        or not isinstance(rows, list)
+                    ):
+                        raise RuntimeWorkerError(
+                            "review result evidence is invalid"
+                        )
+                    for finding in rows:
+                        if not isinstance(finding, dict):
+                            raise RuntimeWorkerError(
+                                "review finding evidence is invalid"
+                            )
+                        findings.append(dict(finding))
+                    reviewed_heads.add(
+                        str(evidence.get("reviewed_head_sha") or "")
+                    )
+                if (
+                    not findings
+                    or len(findings) > 50
+                    or len(reviewed_heads) != 1
+                    or "" in reviewed_heads
+                ):
+                    raise RuntimeWorkerError(
+                        "review decision packet is invalid"
+                    )
+                packet = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "reviewed_head_sha": next(iter(reviewed_heads)),
+                    "allowed_responses": [
+                        "applied",
+                        "rejected",
+                        "escalated",
+                    ],
+                    "findings": findings,
+                }
+                encoded = json.dumps(
+                    packet, sort_keys=True, separators=(",", ":")
+                ).encode()
+                if len(encoded) > MAX_OUTBOX_BYTES:
+                    raise RuntimeWorkerError(
+                        "review decision packet exceeds size cap"
+                    )
+                packet_sha256 = hashlib.sha256(encoded).hexdigest()
+                packet_path = spec["cwd"] / ".task-review.json"
+                if packet_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "review decision packet cannot be a symlink"
+                    )
+                if packet_path.exists():
+                    current = json.loads(
+                        packet_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        not isinstance(current, dict)
+                        or current.get("schema_version") != 1
+                        or current.get("operation_id")
+                        != spec["operation_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "review decision packet identity changed"
+                        )
+                _atomic_json(packet_path, packet)
+                notify_path = (
+                    spec_path.parent
+                    / "pipeline-review-resolution-notify.json"
+                )
+                notified = None
+                if notify_path.is_file() and not notify_path.is_symlink():
+                    notified = json.loads(
+                        notify_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        not isinstance(notified, dict)
+                        or notified.get("schema_version") != 1
+                        or notified.get("operation_id")
+                        != spec["operation_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "review resolution notification is invalid"
+                        )
+                    if (
+                        notified.get("packet_sha256") == packet_sha256
+                        and notified.get("status") == "sent"
+                    ):
+                        return
+                _atomic_json(
+                    notify_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "packet_sha256": packet_sha256,
+                        "status": "pending",
+                    },
+                )
+                message = (
+                    "Typed review findings are ready in "
+                    f"{packet_path.name}. Resolve every finding as applied or "
+                    "rejected and commit a new HEAD; for escalation use the "
+                    "task_escalation.py raise contract. Do not launch review. "
+                    "Remain available for same-session verification."
+                )
+                if len(message.encode()) > 4096:
+                    raise RuntimeWorkerError(
+                        "review resolution notification is too large"
+                    )
+                cmux_adapter.send(spec["surface_id"], message)
+                cmux_adapter.send_key(spec["surface_id"], "Enter")
+                _atomic_json(
+                    notify_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "packet_sha256": packet_sha256,
+                        "status": "sent",
+                    },
+                )
+
+            gate_state = review_gate_state()
+            if gate_state.get("status") == "awaiting-resolution":
+                notify_review_resolution(gate_state)
+                if review.status == "stale":
+                    drive_review()
+                    return
+                _atomic_json(
+                    marker_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": lifecycle.definition_sha256,
+                        "status": "started",
+                        "drive_sha256": review_drive_sha256(),
+                    },
+                )
+                return
+
             if (
                 marker is not None
-                and marker["status"] == "started"
                 and review.status in {"reviewing", "stale"}
             ):
                 current_drive_sha256 = review_drive_sha256()
-                if marker.get("drive_sha256") != current_drive_sha256:
+                if (
+                    marker["status"] == "pending"
+                    or marker.get("drive_sha256")
+                    != current_drive_sha256
+                ):
                     drive_review()
                 return
             operation = store.read(
@@ -1335,15 +1537,6 @@ def run(
                 if marker is not None:
                     if marker["status"] == "started":
                         return
-                _atomic_json(
-                    marker_path,
-                    {
-                        "schema_version": 1,
-                        "operation_id": spec["operation_id"],
-                        "definition_sha256": lifecycle.definition_sha256,
-                        "status": "pending",
-                    },
-                )
                 drive_review()
                 return
             if progress.action == "wait":

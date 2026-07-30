@@ -105,7 +105,8 @@ The existing `dispatch-runner.py validate` preview renders the lifecycle
 contract before approval. Rendering the summary is not execution and creates no
 worktree, provider session, or external effect. The summary labels both the
 sandbox-enforced write/socket classes and the code-policy-enforced sequencing
-boundary.
+boundary, plus exact model/review limits, side-effect classes, and typed return
+categories.
 
 Existing operation and lifecycle events remain authoritative; compiled progress
 is derived and is never a second durable truth. The original rejected

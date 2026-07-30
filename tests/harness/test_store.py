@@ -333,6 +333,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         def __init__(self, status: str) -> None:
             self.status = status
             self.terminated: list[int] = []
+            self.guardian_requests: list[dict[str, object]] = []
 
         def process_status(
             self, _process_group: int, _identity: str
@@ -344,6 +345,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         ) -> None:
             self.terminated.append(process_group)
             self.status = "dead"
+
+        def request_guardian_signal(
+            self,
+            _control_path: Path,
+            **request: object,
+        ) -> None:
+            self.guardian_requests.append(dict(request))
 
     class FakeCmux:
         def __init__(self, status: str) -> None:
@@ -727,19 +735,23 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
 
     create_cli_operation("op-owned-cli", state="running")
     bind_owned_resources("op-owned-cli")
+    owned_process = FakeProcess("alive")
     contained_rc, _contained_output = run_cli_in_process(
         "cancel",
         "op-owned-cli",
-        process=FakeProcess("alive"),
+        process=owned_process,
         cmux=FakeCmux("alive"),
     )
     owned_after_cancel = store.read("owner-cli", "op-owned-cli")
     check(
-        "CLI cancel keeps live exact resources attention-required",
+        "CLI cancel asks the exact live guardian to exit",
         contained_rc == 0
-        and owned_after_cancel.state == "attention-required"
+        and owned_after_cancel.state == "exiting"
         and bool(owned_after_cancel.resources.surface_id)
-        and owned_after_cancel.attention_reason == AttentionReason.CLEANUP_INCOMPLETE,
+        and len(owned_process.guardian_requests) == 1
+        and owned_process.guardian_requests[0]["action"] == "request-exit"
+        and owned_process.guardian_requests[0]["operation_id"]
+        == "op-owned-cli",
     )
 
     create_cli_operation("op-unknown-cli", state="running")

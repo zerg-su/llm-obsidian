@@ -207,6 +207,21 @@ def _cancel_or_close(
         decision = _reconcile_owned_resources(
             store, record, process_adapter, cmux_adapter
         )
+        if decision.action == "continue":
+            requested = RuntimeSessionManager(
+                store,
+                cmux_adapter,
+                process_adapter,
+            ).request_exit(owner, operation_id)
+            current = requested.record
+            return TransitionResult(
+                operation_id,
+                record.state,
+                current.state,
+                current.revision,
+                current.revision != record.revision,
+                current.attention_reason,
+            )
         if decision.action != "complete":
             return _attention(
                 store,

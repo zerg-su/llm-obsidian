@@ -8,7 +8,15 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-from .contracts import ContractError, ID_RE, to_dict
+from .contracts import (
+    ContractError,
+    DEFAULT_ATTEMPT_LIMIT,
+    DEFAULT_MODEL_RESTART_LIMIT,
+    DEFAULT_TIME_BUDGET_SECONDS,
+    DEFAULT_TOKEN_LIMIT,
+    ID_RE,
+    to_dict,
+)
 
 
 SCHEMA_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
@@ -317,9 +325,26 @@ def compile_pipeline(
     )
 
 
-def render_contract(compiled: CompiledPipeline) -> str:
+def render_contract(
+    compiled: CompiledPipeline,
+    *,
+    review_mode: str = "simple",
+    max_verify_iterations: int = 1,
+    verification_profile: str = "scoped",
+) -> str:
     """Render the bounded semantic contract and its execution bindings."""
 
+    if (
+        review_mode not in {"simple", "deep", "skip"}
+        or type(max_verify_iterations) is not int
+        or max_verify_iterations
+        != {"simple": 1, "deep": 2, "skip": 0}[review_mode]
+    ):
+        raise ContractError("rendered review budget is invalid")
+    _require_identifier(
+        verification_profile or "unbound",
+        "verification profile",
+    )
     definition = compiled.definition
     lines = [
         f"Pipeline: {definition.pipeline_id}/{definition.profile}@{definition.version}",
@@ -336,10 +361,20 @@ def render_contract(compiled: CompiledPipeline) -> str:
         "Required capabilities: "
         + (", ".join(compiled.required_capabilities) or "none"),
         "Execution: existing harness supervisor with state-free reconciliation",
-        "Bindings: route/review policy are identity-bound; worktree, Git common "
-        "dir, loopback, and cmux socket grants are validated at launch",
-        "Enforcement: workspace and extra write roots are sandbox-enforced; "
-        "task/review sequencing is code-policy-enforced",
+        "Limits: "
+        f"attempts={DEFAULT_ATTEMPT_LIMIT}, "
+        f"model-restarts={DEFAULT_MODEL_RESTART_LIMIT}, "
+        f"deadline={int(DEFAULT_TIME_BUDGET_SECONDS)}s, "
+        f"tokens={DEFAULT_TOKEN_LIMIT}",
+        f"Review: mode={review_mode}, "
+        f"verification-iterations={max_verify_iterations}, "
+        f"profile={verification_profile or 'unbound'}",
+        "Side effects: worktree, git-write, cmux-surface, provider, callback, reap",
+        "Permissions: product worktree and Git common dir=sandbox-enforced; "
+        "loopback and cmux socket=sandbox-enforced; "
+        "cmux target scope=policy-only",
+        "Enforcement: task/review sequencing=code-policy-enforced",
+        "Returns: completed, escalation, attention-required, cancelled, timeout",
     ]
     rendered = "\n".join(lines) + "\n"
     if len(rendered.encode()) > 8_192:

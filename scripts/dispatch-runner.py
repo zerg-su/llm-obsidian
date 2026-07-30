@@ -829,17 +829,28 @@ def harness_request(
     )
 
 
-def lifecycle_contract() -> dict[str, str]:
+def lifecycle_contract(
+    review: ReviewPolicy | None = None,
+) -> dict[str, str]:
     """Compile the lifecycle summary shown before dispatch approval."""
 
     compiled = compiled_builtin("lifecycle/default")
     definition = compiled.definition
+    review = review or ReviewPolicy(
+        verification_profile="scoped",
+        verification_profile_sha256="0" * 64,
+    )
     return {
         "pipeline": (
             f"{definition.pipeline_id}/{definition.profile}@{definition.version}"
         ),
         "definition_sha256": compiled.definition_sha256,
-        "summary": render_contract(compiled),
+        "summary": render_contract(
+            compiled,
+            review_mode=review.mode,
+            max_verify_iterations=review.max_verify_iterations,
+            verification_profile=review.verification_profile or "unbound",
+        ),
     }
 
 
@@ -1177,7 +1188,7 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
-                "pipeline": lifecycle_contract(),
+                "pipeline": lifecycle_contract(review),
                 "review": {
                     "mode": review.mode,
                     "cross_model": review.cross_model,

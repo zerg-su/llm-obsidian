@@ -24,6 +24,10 @@ from .contracts import (
     AttentionReason,
     CallbackEnvelope,
     CapabilityReport,
+    DEFAULT_ATTEMPT_LIMIT,
+    DEFAULT_MODEL_RESTART_LIMIT,
+    DEFAULT_TIME_BUDGET_SECONDS,
+    DEFAULT_TOKEN_LIMIT,
     EffectOutcome,
     OperationRecord,
     OperationSpec,
@@ -134,10 +138,10 @@ class RuntimeSessionRequest:
     runtime_home: Path | None = None
     research_request_sha256: str = ""
     callback_wake: str = ""
-    attempt_limit: int = 3
-    model_restart_limit: int = 1
-    time_budget_seconds: float = 1800.0
-    token_limit: int = 200_000
+    attempt_limit: int = DEFAULT_ATTEMPT_LIMIT
+    model_restart_limit: int = DEFAULT_MODEL_RESTART_LIMIT
+    time_budget_seconds: float = DEFAULT_TIME_BUDGET_SECONDS
+    token_limit: int = DEFAULT_TOKEN_LIMIT
 
     def __post_init__(self) -> None:
         if not IDENTIFIER.fullmatch(self.lane_id):

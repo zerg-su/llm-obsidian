@@ -15,6 +15,10 @@ from typing import Any, ClassVar, Mapping, TypeVar
 
 
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+DEFAULT_ATTEMPT_LIMIT = 3
+DEFAULT_MODEL_RESTART_LIMIT = 1
+DEFAULT_TIME_BUDGET_SECONDS = 1800.0
+DEFAULT_TOKEN_LIMIT = 200_000
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 RUNTIMES = frozenset({"claude", "codex"})
 
@@ -176,11 +180,11 @@ class OperationRecord:
     run_id: str
     resources: OwnedResources = field(default_factory=OwnedResources)
     attempt: int = 0
-    attempt_limit: int = 3
+    attempt_limit: int = DEFAULT_ATTEMPT_LIMIT
     model_restarts: int = 0
-    model_restart_limit: int = 1
+    model_restart_limit: int = DEFAULT_MODEL_RESTART_LIMIT
     deadline_at: float = 0.0
-    token_limit: int = 200_000
+    token_limit: int = DEFAULT_TOKEN_LIMIT
     tokens_used: int = 0
     attention_reason: AttentionReason | None = None
     resume_state: str = ""
@@ -408,11 +412,13 @@ def operation_record_from_dict(value: Mapping[str, Any]) -> OperationRecord:
         run_id=value.get("run_id", "legacy-run"),
         resources=OwnedResources(**value.get("resources", {})),
         attempt=value.get("attempt", 0),
-        attempt_limit=value.get("attempt_limit", 3),
+        attempt_limit=value.get("attempt_limit", DEFAULT_ATTEMPT_LIMIT),
         model_restarts=value.get("model_restarts", 0),
-        model_restart_limit=value.get("model_restart_limit", 1),
+        model_restart_limit=value.get(
+            "model_restart_limit", DEFAULT_MODEL_RESTART_LIMIT
+        ),
         deadline_at=value.get("deadline_at", 0.0),
-        token_limit=value.get("token_limit", 200_000),
+        token_limit=value.get("token_limit", DEFAULT_TOKEN_LIMIT),
         tokens_used=value.get("tokens_used", 0),
         attention_reason=AttentionReason(reason) if reason else None,
         resume_state=value.get("resume_state", ""),

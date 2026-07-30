@@ -127,12 +127,21 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     prompt = runner.render_task_prompt(request, config)
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
-    lifecycle_contract = runner.lifecycle_contract()
+    review = runner.review_policy(request, config)
+    lifecycle_contract = runner.lifecycle_contract(review)
     check(
         "route preview consumes the compiled lifecycle catalog",
         lifecycle_contract["pipeline"] == "lifecycle/default@1.0.0"
         and len(lifecycle_contract["definition_sha256"]) == 64
         and "state-free reconciliation"
+        in lifecycle_contract["summary"],
+    )
+    check(
+        "route preview renders the exact review and execution envelope",
+        "Review: mode=simple, verification-iterations=1"
+        in lifecycle_contract["summary"]
+        and "deadline=1800s" in lifecycle_contract["summary"]
+        and "cmux target scope=policy-only"
         in lifecycle_contract["summary"],
     )
     check(
