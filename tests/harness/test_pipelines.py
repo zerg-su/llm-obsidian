@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Typed pipeline compiler contracts."""
+"""Thin compiled-contract fallback after the 2.4 net-value gate."""
 
 from __future__ import annotations
 
@@ -13,18 +13,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.pipelines import (
-    PipelineBudget,
     PipelineDefinition,
-    PipelineOperationBinding,
     PipelineStep,
-    PolicyBinding,
     PrimitiveDefinition,
     PrimitiveRegistry,
-    bind_step_operation,
     compile_pipeline,
     render_contract,
 )
-from harness.contracts import RuntimeRoute
 
 
 def check(label: str, value: bool) -> None:
@@ -36,107 +31,59 @@ def check(label: str, value: bool) -> None:
 registry = PrimitiveRegistry(
     primitives=(
         PrimitiveDefinition(
-            "human_gate",
-            "1.0.0",
-        ),
-        PrimitiveDefinition(
             "model_step",
             "1.0.0",
-            budget=PipelineBudget(
-                model_calls=1,
-                token_limit=20_000,
-                deadline_seconds=600,
-                restart_limit=1,
-            ),
-            permissions=("product-write",),
-            side_effects=("workspace-write",),
+            session_modes=("parent-child", "worktree"),
             required_capabilities=("provider:authenticated",),
         ),
         PrimitiveDefinition(
             "verify",
             "1.0.0",
-            budget=PipelineBudget(
-                verification_calls=2,
-                deadline_seconds=120,
-            ),
-            side_effects=("verification-process",),
+            session_modes=("verification",),
         ),
         PrimitiveDefinition(
             "review",
             "1.0.0",
-            budget=PipelineBudget(
-                review_calls=1,
-                token_limit=40_000,
-                deadline_seconds=900,
-                restart_limit=1,
-            ),
+            session_modes=("review",),
             required_capabilities=("provider:authenticated",),
         ),
-        PrimitiveDefinition("bounded_loop", "1.0.0"),
     ),
-    bindings=(
-        PolicyBinding(
-            "permission",
-            "product-write",
-            "workspace-root",
-            "sandbox-enforced",
-        ),
-        PolicyBinding(
-            "side-effect",
-            "workspace-write",
-            "operation-supervisor",
-            "sandbox-enforced",
-        ),
-        PolicyBinding(
-            "side-effect",
-            "verification-process",
-            "verification-profile",
-            "policy-only",
-        ),
-    ),
+    semantic_skills=("review", "tdd"),
 )
 definition = PipelineDefinition(
     pipeline_id="engineering",
     version="1.0.0",
     profile="change",
-    input_schema="task-contract/v1",
-    output_schema="review-approved/v1",
+    input_schema="approved-plan/v1",
+    output_schema="reap-ready/v1",
     steps=(
-        PipelineStep(
-            "approve",
-            "human_gate",
-            "1.0.0",
-            "task-contract/v1",
-            "approved-contract/v1",
-            "controller",
-        ),
         PipelineStep(
             "implement",
             "model_step",
             "1.0.0",
-            "approved-contract/v1",
+            "approved-plan/v1",
             "change/v1",
             "worktree",
+            ("tdd",),
         ),
         PipelineStep(
             "verify",
             "verify",
             "1.0.0",
             "change/v1",
-            "change/v1",
+            "verified/v1",
             "verification",
         ),
         PipelineStep(
             "review",
             "review",
             "1.0.0",
-            "change/v1",
-            "review-approved/v1",
+            "verified/v1",
+            "reap-ready/v1",
             "review",
+            ("review",),
         ),
     ),
-    permission_ceiling=("product-write",),
-    side_effect_ceiling=("verification-process", "workspace-write"),
 )
 
 compiled = compile_pipeline(
@@ -150,57 +97,47 @@ recompiled = compile_pipeline(
     capabilities=("provider:authenticated",),
 )
 
-check("pipeline contracts are frozen", dataclasses.is_dataclass(compiled) and compiled.__dataclass_params__.frozen)
+check(
+    "pipeline contracts are frozen",
+    dataclasses.is_dataclass(compiled) and compiled.__dataclass_params__.frozen,
+)
 check("compiled contract pins compiler compatibility", compiled.compiler_version == "1.0.0")
-check("canonical definition hash is stable", compiled.definition_sha256 == recompiled.definition_sha256 and len(compiled.definition_sha256) == 64)
+check(
+    "canonical definition hash is stable",
+    compiled.definition_sha256 == recompiled.definition_sha256
+    and len(compiled.definition_sha256) == 64,
+)
 check(
     "compiler resolves exact primitive versions",
     compiled.resolved_primitives
-    == (
-        "human_gate@1.0.0",
-        "model_step@1.0.0",
-        "verify@1.0.0",
-        "review@1.0.0",
-    ),
+    == ("model_step@1.0.0", "verify@1.0.0", "review@1.0.0"),
 )
 check(
-    "compiler calculates the static worst-case budget",
-    compiled.budget
-    == PipelineBudget(
-        model_calls=1,
-        review_calls=1,
-        verification_calls=2,
-        token_limit=60_000,
-        deadline_seconds=1_620,
-        restart_limit=2,
-    ),
-)
-check(
-    "compiler summarizes bound policy before execution",
-    compiled.permissions == ("product-write",)
-    and compiled.side_effects == ("verification-process", "workspace-write")
-    and {binding.enforcement for binding in compiled.bindings}
-    == {"policy-only", "sandbox-enforced"},
+    "compiler exposes only declared capability requirements",
+    compiled.required_capabilities == ("provider:authenticated",),
 )
 
 summary = render_contract(compiled)
 check(
-    "approval contract is bounded and user-readable",
+    "contract is bounded and cannot claim production enforcement",
     len(summary.encode()) < 2_000
     and "engineering/change@1.0.0" in summary
     and compiled.definition_sha256 in summary
-    and "model=1 review=1 verify=2" in summary
-    and "product-write [sandbox-enforced:workspace-root]" in summary,
+    and "harness 2.3 remains the execution engine" in summary
+    and "budget" not in summary.lower()
+    and "sandbox-enforced" not in summary,
 )
 
 
-def expect_compile_error(label: str, value: PipelineDefinition, token: str) -> None:
+def expect_compile_error(
+    label: str,
+    value: PipelineDefinition,
+    token: str,
+    *,
+    capabilities: tuple[str, ...] = ("provider:authenticated",),
+) -> None:
     try:
-        compile_pipeline(
-            value,
-            registry,
-            capabilities=("provider:authenticated",),
-        )
+        compile_pipeline(value, registry, capabilities=capabilities)
     except Exception as exc:
         check(label, token in str(exc))
     else:
@@ -218,68 +155,30 @@ expect_compile_error(
     "pipeline output schema",
 )
 expect_compile_error(
-    "compiler rejects a loop without an explicit bounded control contract",
+    "compiler rejects an unsupported session mode",
     replace(
         definition,
-        output_schema="review-approved/v1",
-        steps=definition.steps
-        + (
-            PipelineStep(
-                "retry",
-                "bounded_loop",
-                "1.0.0",
-                "review-approved/v1",
-                "review-approved/v1",
-                "controller",
-            ),
+        steps=(
+            replace(definition.steps[0], session_mode="review"),
+            *definition.steps[1:],
         ),
     ),
-    "bounded_loop requires",
+    "does not support session mode",
 )
-
-route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
-operation = bind_step_operation(
-    compiled,
-    step_id="implement",
-    operation_id="pipeline-implement-1",
-    owner_id="owner-1",
-    route=route,
-    context_manifest="packets/one/manifest.json",
-    verification_profile="scoped",
-    input_sha256="b" * 64,
+expect_compile_error(
+    "compiler rejects a missing route capability",
+    definition,
+    "lacks capabilities",
+    capabilities=(),
 )
-rebound = bind_step_operation(
-    compiled,
-    step_id="implement",
-    operation_id="pipeline-implement-1",
-    owner_id="owner-1",
-    route=route,
-    context_manifest="packets/one/manifest.json",
-    verification_profile="scoped",
-    input_sha256="b" * 64,
-)
-check(
-    "semantic step binds to one exact OperationSpec",
-    isinstance(operation, PipelineOperationBinding)
-    and operation == rebound
-    and operation.spec.operation_id == "pipeline-implement-1"
-    and operation.spec.kind == "pipeline-model-step"
-    and operation.spec.idempotency_key == operation.replay_key
-    and operation.definition_sha256 == compiled.definition_sha256
-    and operation.input_sha256 == "b" * 64
-    and operation.output_schema == "change/v1",
-)
-changed_input = bind_step_operation(
-    compiled,
-    step_id="implement",
-    operation_id="pipeline-implement-2",
-    owner_id="owner-1",
-    route=route,
-    context_manifest="packets/one/manifest.json",
-    verification_profile="scoped",
-    input_sha256="c" * 64,
-)
-check(
-    "replay identity changes with exact step input",
-    changed_input.replay_key != operation.replay_key,
+expect_compile_error(
+    "compiler rejects unregistered skill semantics",
+    replace(
+        definition,
+        steps=(
+            replace(definition.steps[0], semantic_skills=("missing-skill",)),
+            *definition.steps[1:],
+        ),
+    ),
+    "unregistered semantic skills",
 )

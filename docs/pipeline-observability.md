@@ -93,6 +93,20 @@ is the review gate doing useful work. Repeated transport-invalid callbacks,
 auto-close misses, unresolved escalations, or delivery failures are mechanism failures and should be
 fixed before adding more orchestration.
 
+## Compiled pipeline catalog
+
+LLM Obsidian 2.4 adds a pure catalog/compiler for lifecycle and engineering
+semantic contracts. It is intentionally not a production execution path and
+therefore emits no runtime telemetry. The compiler exposes only code-owned
+identifiers, versions, schema links, required capabilities, and a canonical
+definition hash. It does not report budgets, enforcement, progress, or effects
+that the 2.3 kernel did not actually bind.
+
+Existing operation and lifecycle events remain authoritative. Do not infer that
+a compiled catalog entry was executed from its presence or hash. The boundary
+and the failed production-switch net-value gate are recorded in
+[the 2.4 composition ADR](decisions/v2.4-pipeline-composition-boundary.md).
+
 ## Dogfood acceptance window
 
 For a release candidate, collect at least 10 completed real tasks across both

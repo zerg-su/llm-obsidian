@@ -1,4 +1,4 @@
-"""Code-owned built-in pipelines for the 2.4 shadow path."""
+"""Code-owned semantic pipeline catalog for the 2.4 fallback."""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .pipelines import (
-    PipelineBudget,
     PipelineDefinition,
     PipelineStep,
-    PolicyBinding,
     PrimitiveDefinition,
     PrimitiveRegistry,
 )
@@ -23,14 +21,6 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
         "lifecycle",
         "default",
         (
-            (
-                "approve",
-                "human_gate",
-                "task-contract/v1",
-                "approved-plan/v1",
-                "controller",
-                (),
-            ),
             (
                 "dispatch",
                 "model_step",
@@ -53,14 +43,6 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
         "engineering",
         "change",
         (
-            (
-                "approve",
-                "human_gate",
-                "task-contract/v1",
-                "approved-plan/v1",
-                "controller",
-                (),
-            ),
             (
                 "tdd-slices",
                 "model_step",
@@ -91,14 +73,6 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
         "engineering",
         "fix",
         (
-            (
-                "approve",
-                "human_gate",
-                "task-contract/v1",
-                "approved-plan/v1",
-                "controller",
-                (),
-            ),
             (
                 "reproduce",
                 "model_step",
@@ -155,60 +129,22 @@ BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
 def builtin_registry() -> PrimitiveRegistry:
     return PrimitiveRegistry(
         primitives=(
-            PrimitiveDefinition("human_gate", VERSION),
             PrimitiveDefinition(
                 "model_step",
                 VERSION,
-                budget=PipelineBudget(
-                    model_calls=1,
-                    token_limit=20_000,
-                    deadline_seconds=600,
-                    restart_limit=1,
-                ),
-                permissions=("product-write",),
-                side_effects=("workspace-write",),
+                session_modes=("parent-child", "worktree"),
                 required_capabilities=("provider:authenticated",),
             ),
             PrimitiveDefinition(
                 "verify",
                 VERSION,
-                budget=PipelineBudget(
-                    verification_calls=1,
-                    deadline_seconds=120,
-                ),
-                side_effects=("verification-process",),
+                session_modes=("verification",),
             ),
             PrimitiveDefinition(
                 "review",
                 VERSION,
-                budget=PipelineBudget(
-                    review_calls=1,
-                    token_limit=40_000,
-                    deadline_seconds=900,
-                    restart_limit=1,
-                ),
+                session_modes=("review",),
                 required_capabilities=("provider:authenticated",),
-            ),
-            PrimitiveDefinition("bounded_loop", VERSION),
-        ),
-        bindings=(
-            PolicyBinding(
-                "permission",
-                "product-write",
-                "workspace-root",
-                "sandbox-enforced",
-            ),
-            PolicyBinding(
-                "side-effect",
-                "workspace-write",
-                "operation-supervisor",
-                "sandbox-enforced",
-            ),
-            PolicyBinding(
-                "side-effect",
-                "verification-process",
-                "verification-profile",
-                "policy-only",
             ),
         ),
         semantic_skills=("debug", "dispatch", "review", "tdd"),
@@ -224,7 +160,7 @@ def _definition(
         pipeline_id=pipeline_id,
         version=VERSION,
         profile=profile,
-        input_schema="task-contract/v1",
+        input_schema="approved-plan/v1",
         output_schema="reap-ready/v1",
         steps=tuple(
             PipelineStep(
@@ -245,8 +181,6 @@ def _definition(
                 semantic_skills,
             ) in steps
         ),
-        permission_ceiling=("product-write",),
-        side_effect_ceiling=("verification-process", "workspace-write"),
     )
 
 

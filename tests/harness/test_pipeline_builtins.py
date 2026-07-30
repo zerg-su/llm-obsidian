@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Built-in pipeline proof-of-use contracts."""
+"""Built-in catalog contracts for the thinned 2.4 fallback."""
 
 from __future__ import annotations
 
-import dataclasses
 import sys
 from pathlib import Path
 
@@ -25,9 +24,9 @@ registry = builtin_registry()
 definitions = builtin_definitions()
 
 check(
-    "registry exposes only the approved 2.4 primitive vocabulary",
+    "registry exposes only descriptors backed by existing 2.3 operations",
     {primitive.primitive_id for primitive in registry.primitives}
-    == {"bounded_loop", "human_gate", "model_step", "review", "verify"},
+    == {"model_step", "review", "verify"},
 )
 check(
     "built-ins cover lifecycle and both engineering profiles",
@@ -44,21 +43,27 @@ compiled = {
 }
 
 check(
-    "lifecycle keeps dispatch review reap-ready semantics",
+    "approval is a precondition rather than a fake runtime primitive",
+    all(
+        item.definition.input_schema == "approved-plan/v1"
+        and all(step.step_id != "approve" for step in item.definition.steps)
+        for item in compiled.values()
+    ),
+)
+check(
+    "lifecycle describes dispatch review reap-ready semantics",
     tuple(step.step_id for step in compiled["lifecycle/default"].definition.steps)
-    == ("approve", "dispatch", "review")
-    and compiled["lifecycle/default"].definition.output_schema == "reap-ready/v1",
+    == ("dispatch", "review"),
 )
 check(
-    "change profile encodes the approved engineering sequence",
+    "change profile describes the engineering sequence",
     tuple(step.step_id for step in compiled["engineering/change"].definition.steps)
-    == ("approve", "tdd-slices", "verify", "review"),
+    == ("tdd-slices", "verify", "review"),
 )
 check(
-    "fix profile encodes reproduce root-cause regression minimal-fix",
+    "fix profile describes reproduce root-cause regression minimal-fix",
     tuple(step.step_id for step in compiled["engineering/fix"].definition.steps)
     == (
-        "approve",
         "reproduce",
         "root-cause",
         "regression-test",
@@ -68,40 +73,11 @@ check(
     ),
 )
 check(
-    "model work is statically visible in the worst-case budget",
-    compiled["engineering/change"].budget.model_calls == 1
-    and compiled["engineering/fix"].budget.model_calls == 4,
-)
-check(
-    "all built-ins end at the same coordinator-owned boundary",
+    "all built-ins end at the coordinator-owned reap-ready boundary",
     all(
         item.definition.output_schema == "reap-ready/v1"
         and item.definition.steps[-1].primitive_id == "review"
         for item in compiled.values()
-    ),
-)
-check(
-    "lifecycle session mapping reuses the existing worktree and review lanes",
-    tuple(
-        step.session_mode
-        for step in compiled["lifecycle/default"].definition.steps
-    )
-    == ("controller", "worktree", "review"),
-)
-check(
-    "fix keeps diagnosis rounds in the original worktree session",
-    tuple(
-        step.session_mode
-        for step in compiled["engineering/fix"].definition.steps
-    )
-    == (
-        "controller",
-        "worktree",
-        "parent-child",
-        "parent-child",
-        "parent-child",
-        "verification",
-        "review",
     ),
 )
 fix_steps = {
@@ -109,38 +85,10 @@ fix_steps = {
     for step in compiled["engineering/fix"].definition.steps
 }
 check(
-    "engineering steps retain the installed skill semantics",
-    compiled["engineering/change"].definition.steps[1].semantic_skills
+    "engineering descriptors retain installed skill semantics",
+    compiled["engineering/change"].definition.steps[0].semantic_skills
     == ("tdd",)
     and fix_steps["reproduce"].semantic_skills == ("debug",)
-    and fix_steps["root-cause"].semantic_skills == ("debug",)
     and fix_steps["regression-test"].semantic_skills == ("debug", "tdd")
-    and fix_steps["minimal-fix"].semantic_skills == ("debug", "tdd")
     and fix_steps["review"].semantic_skills == ("review",),
 )
-unknown_semantics = dataclasses.replace(
-    definitions["engineering/change"],
-    steps=(
-        definitions["engineering/change"].steps[:1]
-        + (
-            dataclasses.replace(
-                definitions["engineering/change"].steps[1],
-                semantic_skills=("missing-skill",),
-            ),
-        )
-        + definitions["engineering/change"].steps[2:]
-    ),
-)
-try:
-    compile_pipeline(
-        unknown_semantics,
-        registry,
-        capabilities=("provider:authenticated",),
-    )
-except Exception as exc:
-    check(
-        "compiler rejects unregistered skill semantics",
-        "unregistered semantic skills" in str(exc),
-    )
-else:
-    check("compiler rejects unregistered skill semantics", False)
