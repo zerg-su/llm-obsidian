@@ -12,6 +12,7 @@ test-harness:
 	@python3 tests/harness/test_pipeline_builtins.py
 	@python3 tests/harness/test_pipeline_state.py
 	@python3 tests/harness/test_pipeline_shadow.py
+	@python3 tests/harness/test_pipeline_controller.py
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
