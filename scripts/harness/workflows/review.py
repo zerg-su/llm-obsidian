@@ -539,7 +539,21 @@ def start_review(
                 )
             except Exception:
                 existing = None
-            if existing is not None:
+            restartable_created = (
+                existing is not None
+                and existing.state == "created"
+                and not existing.pending_effect
+                and not any(
+                    (
+                        existing.resources.surface_id,
+                        existing.resources.process_group,
+                        existing.resources.supervisor_pid,
+                        existing.resources.process_identity,
+                        existing.resources.supervisor_identity,
+                    )
+                )
+            )
+            if existing is not None and not restartable_created:
                 if (
                     existing.spec != spec
                     or existing.lane_id != lane_id

@@ -313,6 +313,14 @@ class ReviewGateController:
             _atomic_json(self.state_path, state)
             return state
 
+    def mark_pending_attention(self) -> None:
+        state = self.read()
+        if state.get("status") != "pending" or state.get("lanes") != []:
+            raise ValueError(
+                "only an unbound pending review may require attention"
+            )
+        self._replace(status="attention-required")
+
     @staticmethod
     def _policy(preset: ReviewPreset) -> dict[str, object]:
         return {

@@ -1111,6 +1111,11 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 )
             if self.fail_once:
                 self.fail_once = False
+                self.store.create(
+                    request.spec,
+                    lane_id=request.lane_id,
+                    run_id=request.run_id,
+                )
                 raise RuntimeError("simulated pre-launch interruption")
             return super().start(
                 request, on_surface_opened=on_surface_opened
@@ -1238,5 +1243,53 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+with tempfile.TemporaryDirectory(prefix="pending-review-terminal.") as raw:
+    unsafe_store = OperationStore(Path(raw) / "store")
+    unsafe_context = ReviewContext(
+        manifest="packets/review/manifest.json",
+        head_sha="8" * 40,
+        verification_profile="scoped",
+        verification_profile_sha256="7" * 64,
+    )
+    unsafe_request = request_for(
+        "pending-terminal",
+        context=unsafe_context,
+    )
+    unsafe_identity = task_review_runner.review_session_specs(
+        unsafe_request
+    )[0]
+    unsafe_store.create(
+        unsafe_identity.spec,
+        lane_id=unsafe_identity.lane_id,
+        run_id=unsafe_identity.run_id,
+    )
+    unsafe_store.transition(
+        unsafe_request.owner_id,
+        unsafe_identity.spec.operation_id,
+        "failed",
+    )
+
+    class PendingGateMarker:
+        marked = False
+
+        def mark_pending_attention(self) -> None:
+            self.marked = True
+
+    pending_gate = PendingGateMarker()
+    check(
+        "terminal parent cannot turn a pending gate into reviewing",
+        not task_review_runner._pending_replay_is_safe(
+            unsafe_request,
+            unsafe_store,
+            pending_gate,
+        )
+        and pending_gate.marked
+        and unsafe_store.read(
+            unsafe_request.owner_id,
+            unsafe_identity.spec.operation_id,
+        ).state
+        == "failed",
+    )
 
 print("\nAll review gate tests passed.")

@@ -16,9 +16,15 @@ from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Sequence
 
 from harness.context import ContextBuilder, ContextInput
-from harness.contracts import CallbackEnvelope, RuntimeRoute, to_dict
+from harness.contracts import (
+    AttentionReason,
+    CallbackEnvelope,
+    RuntimeRoute,
+    to_dict,
+)
 from harness.runtime_sessions import RuntimeSessionManager
-from harness.store import OperationStore
+from harness.state_machine import TERMINAL
+from harness.store import OperationStore, StoreError
 from harness.verification import load_profiles
 from harness.workflows.review import (
     ReviewContext,
@@ -26,6 +32,7 @@ from harness.workflows.review import (
     ReviewOperationRequest,
     ReviewResult,
     ReviewRound,
+    review_session_specs,
 )
 from harness.workflows.review_gate import (
     ReviewGateController,
@@ -704,6 +711,17 @@ def _run_review(
             )
         if request is None:
             raise TaskReviewError("enabled review has no request")
+        if pending_replay and not _pending_replay_is_safe(
+            request, store, gate
+        ):
+            return _receipt(
+                status="attention-required",
+                meta=meta,
+                vault=vault,
+                worktree=worktree,
+                runtime_root=runtime_root,
+                context_manifest=context_manifest,
+            )
         prompt_pointers = {
             axis: _prompt(
                 vault=vault,
@@ -767,6 +785,16 @@ def _run_review(
             raise TaskReviewError(
                 "terminal review evidence is stale for the product HEAD"
             )
+        stored_lanes = state.get("lanes")
+        receipt_run = (
+            None
+            if status == "skipped"
+            or (
+                status == "attention-required"
+                and stored_lanes == []
+            )
+            else gate.rehydrate()
+        )
         return _receipt(
             status=status,
             meta=meta,
@@ -774,7 +802,7 @@ def _run_review(
             worktree=worktree,
             runtime_root=runtime_root,
             context_manifest=context_manifest,
-            run=None if status == "skipped" else gate.rehydrate(),
+            run=receipt_run,
         )
     run = gate.rehydrate()
     if status == "awaiting-resolution":
@@ -1008,6 +1036,58 @@ def _same_requested_policy(
             "verification_profile_sha256",
         )
     )
+
+
+def _pending_replay_is_safe(
+    request: ReviewOperationRequest,
+    store: OperationStore,
+    gate: ReviewGateController,
+) -> bool:
+    for identity in review_session_specs(request):
+        try:
+            record = store.read(
+                request.owner_id, identity.spec.operation_id
+            )
+        except StoreError:
+            continue
+        resources = record.resources
+        clean_created = (
+            record.state == "created"
+            and not record.pending_effect
+            and not any(
+                (
+                    resources.surface_id,
+                    resources.process_group,
+                    resources.supervisor_pid,
+                    resources.process_identity,
+                    resources.supervisor_identity,
+                )
+            )
+        )
+        proven_live = (
+            record.state
+            in {"running", "awaiting-callback", "verifying"}
+            and bool(resources.surface_id)
+            and resources.process_group > 1
+            and resources.supervisor_pid > 1
+            and bool(resources.process_identity)
+            and bool(resources.supervisor_identity)
+        )
+        if clean_created or proven_live:
+            continue
+        if (
+            record.state not in TERMINAL
+            and record.state != "attention-required"
+        ):
+            store.transition(
+                request.owner_id,
+                record.spec.operation_id,
+                "attention-required",
+                reason=AttentionReason.ATTENTION_REQUIRED,
+            )
+        gate.mark_pending_attention()
+        return False
+    return True
 
 
 def run_current_review(
