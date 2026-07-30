@@ -853,11 +853,13 @@ class RuntimeSessionManager:
                 raise RuntimeSessionError(
                     "idempotent start request changed runtime session identity"
                 )
-            return replace(
-                self.status(
-                    request.spec.owner_id, request.spec.operation_id
-                ),
-                action="already-started",
+            observed = self.status(
+                request.spec.owner_id, request.spec.operation_id
+            )
+            return (
+                replace(observed, action="already-started")
+                if observed.action == "observed"
+                else observed
             )
         supervisor = OperationSupervisor(
             self.store, request.spec.owner_id, request.spec.operation_id

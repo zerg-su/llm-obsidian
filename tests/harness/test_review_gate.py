@@ -1488,8 +1488,8 @@ with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
                     request.spec.owner_id, request.spec.operation_id
                 ),
                 "checkpoint-raced",
-                "already-started",
-                "dead",
+                "attention-required",
+                "alive",
                 "alive",
             )
 
@@ -1506,7 +1506,7 @@ with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
         )
     except ValueError as exc:
         check(
-            "raced already-started parent must prove resumable liveness",
+            "raced supervisor-dead parent must prove resumable liveness",
             str(exc) == "stored review runtime is not live and resumable",
         )
     else:

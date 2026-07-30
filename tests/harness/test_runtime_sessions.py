@@ -668,6 +668,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and not dead_duplicate.checkpoint,
     )
     process.status_value = "alive"
+    process.supervisor_status_value = "dead"
+    supervisor_dead_duplicate = manager.start(request)
+    check(
+        "idempotent start preserves supervisor attention status",
+        supervisor_dead_duplicate.action == "attention-required"
+        and supervisor_dead_duplicate.process_status == "alive"
+        and supervisor_dead_duplicate.surface_status == "alive"
+        and supervisor_dead_duplicate.checkpoint == "checkpoint-1",
+    )
+    process.supervisor_status_value = "alive"
     (cwd / "callbacks" / "other").mkdir()
     try:
         manager.start(replace(request, callback_pointer="callbacks/other/result.json"))
