@@ -359,8 +359,9 @@ There is no speculative roadmap in this README. The repository describes what is
 | Dispatch, review, watchdog, and close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
+| v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
-| v2.3.0 install, upgrade, rollback, and release commands | [v2.3.0 release notes](docs/releases/v2.3.0.md) |
+| v2.4.0 install, upgrade, rollback, and release commands | [v2.4.0 release notes](docs/releases/v2.4.0.md) |
 | Numeric, content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |
 | Local PDF/Office/OCR path | [Document ingestion](docs/document-ingestion.md) |
 | MCP service operations | [MCP gateway](docs/mcp-gateway.md) |

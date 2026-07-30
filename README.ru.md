@@ -368,8 +368,9 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Dispatch, review, watchdog, close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
+| Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
-| Install, upgrade, rollback и release-команды 2.3.0 | [Release notes 2.3.0](docs/releases/v2.3.0.md) |
+| Install, upgrade, rollback и release-команды 2.4.0 | [Release notes 2.4.0](docs/releases/v2.4.0.md) |
 | Numeric content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |
 | PDF/Office/OCR | [Document ingestion](docs/document-ingestion.md) |
 | MCP service operations | [MCP gateway](docs/mcp-gateway.md) |
