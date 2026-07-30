@@ -18,6 +18,7 @@ from .contracts import (
     TransitionResult,
     to_dict,
 )
+from .diagnostics import observe as observe_diagnostics
 from .reconciliation import ReconcileDecision, reconcile
 from .state_machine import TERMINAL
 from .status_segment import publish as publish_status
@@ -43,6 +44,7 @@ def parser() -> argparse.ArgumentParser:
     close = commands.add_parser("close")
     close.add_argument("operation_id")
     commands.add_parser("doctor")
+    commands.add_parser("diagnose")
     return result
 
 
@@ -327,6 +329,8 @@ def main(
                 "claude": bool(shutil.which("claude")),
                 "codex": bool(shutil.which("codex")),
             }
+        elif args.command == "diagnose":
+            value = observe_diagnostics(args.store, args.owner)
         elif args.command == "reconcile":
             value = []
             for row in store.list(args.owner):

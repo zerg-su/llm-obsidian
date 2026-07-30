@@ -30,6 +30,7 @@ test-harness:
 	@python3 tests/harness/test_runtime_inventory.py
 	@python3 tests/harness/test_release_blocker_runtime.py
 	@python3 tests/harness/test_status_segment.py
+	@python3 tests/harness/test_diagnostics.py
 
 test-task-sessions:
 	@echo "=== test_task_sessions.py ==="

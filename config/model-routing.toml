@@ -16,6 +16,10 @@ effort = "medium"
 [roles.deep]
 effort = "xhigh"
 
+[roles.diagnostic-fast]
+model = "terra"
+effort = "low"
+
 [roles.review.codex]
 model = "gpt-5.6-sol"
 effort = "high"

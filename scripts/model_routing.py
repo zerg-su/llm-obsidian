@@ -22,7 +22,15 @@ LOCAL_CONFIG = Path("config/model-routing.local.toml")
 RUNTIMES = {"codex", "claude"}
 CODEX_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 CLAUDE_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
-ROLES = {"dispatch", "daily", "review", "protected-research", "unsafe-research", "deep"}
+ROLES = {
+    "dispatch",
+    "daily",
+    "review",
+    "protected-research",
+    "unsafe-research",
+    "deep",
+    "diagnostic-fast",
+}
 SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
@@ -69,9 +77,13 @@ class RoutingConfig:
         return {"runtime": runtime, "model": value["model"], "effort": value["effort"]}
 
     def default_models(self) -> set[str]:
+        diagnostic = self.resolve_alias(
+            self.data["roles"]["diagnostic-fast"]["model"]
+        )
         return {
             *(self.runtime_default(runtime)["model"] for runtime in RUNTIMES),
             *(self.reviewer_default(runtime, profile)["model"] for runtime in RUNTIMES for profile in ("simple", "deep")),
+            diagnostic["model"],
         }
 
 
@@ -144,8 +156,15 @@ def _validate(data: dict[str, Any]) -> None:
         if registry.get(model) != runtime:
             raise RoutingError(f"default model {model!r} is not registered for {runtime}")
     roles = data.get("roles")
-    if not isinstance(roles, dict) or set(roles) != {"daily", "deep", "review"}:
-        raise RoutingError("roles must define exactly daily, deep, and review")
+    if not isinstance(roles, dict) or set(roles) != {
+        "daily",
+        "deep",
+        "diagnostic-fast",
+        "review",
+    }:
+        raise RoutingError(
+            "roles must define exactly daily, deep, diagnostic-fast, and review"
+        )
     for role in ("daily", "deep"):
         item = roles[role]
         if not isinstance(item, dict) or set(item) != {"effort"} or not isinstance(item["effort"], str):
@@ -196,6 +215,27 @@ def _validate(data: dict[str, Any]) -> None:
         runtime: 2 for runtime in RUNTIMES
     }:
         raise RoutingError("model_aliases must define two targets per runtime")
+    diagnostic = roles["diagnostic-fast"]
+    if (
+        not isinstance(diagnostic, dict)
+        or set(diagnostic) != {"model", "effort"}
+        or not isinstance(diagnostic["model"], str)
+        or not isinstance(diagnostic["effort"], str)
+    ):
+        raise RoutingError(
+            "roles.diagnostic-fast must contain model and effort"
+        )
+    diagnostic_model = diagnostic["model"]
+    diagnostic_runtime = (
+        aliases[diagnostic_model]["runtime"]
+        if diagnostic_model in aliases
+        else registry.get(diagnostic_model)
+    )
+    if diagnostic_runtime is None:
+        raise RoutingError(
+            "roles.diagnostic-fast.model must be a registered model or alias"
+        )
+    validate_effort(diagnostic_runtime, diagnostic["effort"])
     profiles = data.get("review_profiles")
     if not isinstance(profiles, dict) or set(profiles) != {"simple", "deep"}:
         raise RoutingError("review_profiles must define simple and deep")
@@ -340,6 +380,15 @@ def resolve(
         source.append(
             f"{'same-runtime' if same_model else 'opposite-runtime'}-{review_profile}-profile"
         )
+    elif role == "diagnostic-fast":
+        diagnostic = config.data["roles"]["diagnostic-fast"]
+        target = config.resolve_alias(diagnostic["model"])
+        base = {
+            "runtime": target["runtime"],
+            "model": target["model"],
+            "effort": diagnostic["effort"],
+        }
+        source.append("diagnostic-fast-profile")
     elif role == "protected-research":
         if session and session["runtime"] == "codex":
             base = inherit_session()

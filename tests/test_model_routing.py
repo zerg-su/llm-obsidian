@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check(
         "all concrete defaults are discoverable",
         config.default_models()
-        == {"gpt-5.6-sol", "claude-opus-5", "fable"},
+        == {"gpt-5.6-sol", "gpt-5.6-terra", "claude-opus-5", "fable"},
     )
     check("Sol alias resolves to concrete Codex target", config.resolve_alias("sol") == {"runtime": "codex", "model": "gpt-5.6-sol"})
 
@@ -111,6 +111,13 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("protected research from Claude uses Codex default", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-sol"))
     route = routing.resolve(config, "protected-research", session=codex)
     check("protected research from Codex inherits", route["source"][0] == "session")
+    route = routing.resolve(config, "diagnostic-fast", session=claude)
+    check(
+        "fast diagnostics use bounded Terra low without inheriting session context",
+        (route["runtime"], route["model"], route["effort"])
+        == ("codex", "gpt-5.6-terra", "low")
+        and route["source"] == ["diagnostic-fast-profile"],
+    )
     route = routing.resolve(config, "unsafe-research", session=claude)
     check(
         "unsafe research inherits full session",
