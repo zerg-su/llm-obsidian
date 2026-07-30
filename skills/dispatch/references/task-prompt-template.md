@@ -89,17 +89,13 @@ Unknown ownership, prompt, callback, or upgrade state becomes
 `attention-required`.
 
 Commit the explicit product files, run the configured verification profile,
-and then invoke the exact code-owned automatic review gate before writing the
-summary:
-
-`<task-review-command>`
-
-Do not substitute a target-repository script or orchestrate its provider/cmux
-lifecycle yourself. Apply or reject findings as executor and follow the typed
-gate state until it authorizes finalization. If a resolution changes HEAD,
-continue through the same-session verification required by the gate. Only
-after authorization write `.task-summary.json`. The provider worker delivers
-review and Wiki Summary through the internal callback broker; the coordinator owns
-the one reap transaction and terminal cleanup. The task does not send a separate
-reap command.
+then write `.task-summary.json` to trigger the automatic review gate. Do not
+invoke a review runner or orchestrate its provider/cmux lifecycle yourself.
+Remain available in this session while the harness launches review. Apply or
+reject findings as executor and follow the typed gate state until it authorizes
+finalization. If a resolution changes HEAD, update the summary and continue
+through the same-session verification required by the gate. The provider
+worker delivers the approved Wiki Summary through the internal callback broker;
+the coordinator owns the one reap transaction and terminal cleanup. The task
+does not send a separate reap command.
 ```

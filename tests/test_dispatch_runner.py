@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "route preview consumes the compiled lifecycle catalog",
         lifecycle_contract["pipeline"] == "lifecycle/default@1.0.0"
         and len(lifecycle_contract["definition_sha256"]) == 64
-        and "harness 2.3 remains the execution engine"
+        and "state-free reconciliation"
         in lifecycle_contract["summary"],
     )
     check(
@@ -180,14 +180,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         prompt,
     )
     check(
-        "task prompt invokes one coordinator-owned automatic review command",
-        (
-            f"python3 {request['vault_root']}/scripts/task-review-runner.py run "
-            f"--worktree {request['worktree']}"
-        )
+        "task prompt leaves automatic review launch to the harness",
+        "write `.task-summary.json` to trigger the automatic review gate"
         in prompt
-        and str(request["worktree"] / "scripts" / "task-review-runner.py")
-        not in prompt,
+        and "task-review-runner.py run" not in prompt,
         prompt,
     )
 
@@ -222,6 +218,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check(
         "expert review override participates in operation identity",
         base_spec.idempotency_key != expert_spec.idempotency_key,
+    )
+    check(
+        "dispatch operation binds the exact compiled lifecycle hash",
+        base_spec.contract_sha256
+        == lifecycle_contract["definition_sha256"],
     )
     no_review_conflict = json.loads(json.dumps(raw_request))
     no_review_conflict["review"] = {
@@ -529,6 +530,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and harness_result["harness"]["run_id"] == harness_record.run_id
         and harness_replay == harness_result
         and harness_record.state == "awaiting-callback",
+    )
+    check(
+        "dispatch binds the product root for provider permission compilation",
+        fake_runtime.requests[0].product_root
+        == Path(harness_request["worktree"]).resolve(),
     )
     spec_hash = "a" * 64
     state_path, prior = runner.begin_run(second, spec_hash)

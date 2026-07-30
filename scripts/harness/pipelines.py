@@ -1,4 +1,4 @@
-"""Pure pipeline catalog compiler; harness 2.3 remains the execution engine."""
+"""Typed pipeline catalog, compiler, and state-free progress reconciliation."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from typing import Mapping
 
 from .contracts import ContractError, ID_RE, to_dict
 
@@ -178,6 +179,75 @@ class CompiledPipeline:
     schema_version: int = 1
 
 
+@dataclass(frozen=True)
+class PipelineProgress:
+    """One action derived from durable step observations, never stored itself."""
+
+    action: str
+    step_id: str = ""
+    completed_steps: tuple[str, ...] = ()
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported PipelineProgress schema")
+        if self.action not in {"start", "wait", "attention", "reap-ready"}:
+            raise ContractError("pipeline progress action is invalid")
+        if self.action == "reap-ready":
+            if self.step_id:
+                raise ContractError("reap-ready cannot carry a step")
+        else:
+            _require_identifier(self.step_id, "pipeline progress step_id")
+        for step_id in self.completed_steps:
+            _require_identifier(step_id, "completed pipeline step")
+
+
+def reconcile_pipeline(
+    compiled: CompiledPipeline,
+    observations: Mapping[str, str],
+) -> PipelineProgress:
+    """Derive the next action from existing operation/gate observations.
+
+    The compiled definition owns ordering. Callers own durable operations and
+    translate their typed states into pending/running/complete/attention.
+    """
+
+    if not isinstance(observations, Mapping):
+        raise ContractError("pipeline observations must be a mapping")
+    steps = compiled.definition.steps
+    step_ids = tuple(step.step_id for step in steps)
+    if set(observations) != set(step_ids):
+        raise ContractError("pipeline observations must cover the exact definition")
+    statuses = tuple(observations[step_id] for step_id in step_ids)
+    if any(
+        not isinstance(status, str)
+        or status not in {"pending", "running", "complete", "attention"}
+        for status in statuses
+    ):
+        raise ContractError("pipeline observation status is invalid")
+
+    completed: list[str] = []
+    for index, (step_id, status) in enumerate(zip(step_ids, statuses, strict=True)):
+        if status == "complete":
+            if index != len(completed):
+                raise ContractError(
+                    "completed pipeline steps must form an ordered prefix"
+                )
+            completed.append(step_id)
+            continue
+        if any(later != "pending" for later in statuses[index + 1 :]):
+            raise ContractError(
+                "completed pipeline steps must form an ordered prefix"
+            )
+        action = {
+            "pending": "start",
+            "running": "wait",
+            "attention": "attention",
+        }[status]
+        return PipelineProgress(action, step_id, tuple(completed))
+    return PipelineProgress("reap-ready", completed_steps=tuple(completed))
+
+
 def compile_pipeline(
     definition: PipelineDefinition,
     registry: PrimitiveRegistry,
@@ -265,7 +335,7 @@ def render_contract(compiled: CompiledPipeline) -> str:
         ),
         "Required capabilities: "
         + (", ".join(compiled.required_capabilities) or "none"),
-        "Execution: harness 2.3 remains the execution engine",
+        "Execution: existing harness supervisor with state-free reconciliation",
     ]
     rendered = "\n".join(lines) + "\n"
     if len(rendered.encode()) > 8_192:

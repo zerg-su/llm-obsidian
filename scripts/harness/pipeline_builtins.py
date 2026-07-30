@@ -6,10 +6,12 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .pipelines import (
+    CompiledPipeline,
     PipelineDefinition,
     PipelineStep,
     PrimitiveDefinition,
     PrimitiveRegistry,
+    compile_pipeline,
 )
 
 
@@ -190,4 +192,18 @@ def builtin_definitions() -> Mapping[str, PipelineDefinition]:
             name: _definition(pipeline_id, profile, steps)
             for name, (pipeline_id, profile, steps) in BUILTINS.items()
         }
+    )
+
+
+def compiled_builtin(name: str) -> CompiledPipeline:
+    """Compile one exact code-owned built-in against runtime route support."""
+
+    try:
+        definition = builtin_definitions()[name]
+    except KeyError as exc:
+        raise ValueError(f"unknown built-in pipeline: {name}") from exc
+    return compile_pipeline(
+        definition,
+        builtin_registry(),
+        capabilities=("route:resolved",),
     )

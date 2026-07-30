@@ -17,6 +17,7 @@ from ..contracts import (
     OwnedResources,
     RuntimeRoute,
 )
+from ..pipeline_builtins import compiled_builtin
 from ..state_machine import TERMINAL
 from ..store import OperationStore
 from ..supervisor import OperationSupervisor, SupervisorError
@@ -112,6 +113,7 @@ class DispatchRequest:
 
 
 def operation_spec(request: DispatchRequest) -> OperationSpec:
+    contract = compiled_builtin("lifecycle/default")
     identity = json.dumps(
         {
             "task_id": request.task_id,
@@ -126,6 +128,7 @@ def operation_spec(request: DispatchRequest) -> OperationSpec:
                 "routing_sha256": request.route.routing_sha256,
             },
             "placement": request.placement,
+            "contract_sha256": contract.definition_sha256,
             "review": {
                 "mode": request.review.mode,
                 "cross_model": request.review.cross_model,
@@ -156,6 +159,7 @@ def operation_spec(request: DispatchRequest) -> OperationSpec:
         verification_profile=(
             request.review.verification_profile or "full"
         ),
+        contract_sha256=contract.definition_sha256,
     )
 
 
@@ -200,6 +204,7 @@ def start_dispatch(
             prompt_pointer=prompt_pointer,
             callback_pointer=summary_pointer,
             placement=request.placement,
+            product_root=cwd,
             callback_mode="task-summary",
             task_summary_pointer=summary_pointer,
         ),

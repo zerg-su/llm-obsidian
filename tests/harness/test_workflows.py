@@ -13,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from harness.contracts import RuntimeRoute
+from harness.pipeline_builtins import builtin_definitions, builtin_registry
+from harness.pipelines import compile_pipeline
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor, SupervisorError
 from harness.workflows.dispatch import (
@@ -42,7 +44,17 @@ def check(label: str, value: bool) -> None:
 route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
 request = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route)
 spec = operation_spec(request)
-check("dispatch emits stable OperationSpec", spec.kind == "dispatch" and len(spec.idempotency_key) == 64)
+lifecycle = compile_pipeline(
+    builtin_definitions()["lifecycle/default"],
+    builtin_registry(),
+    capabilities=("route:resolved",),
+)
+check(
+    "dispatch binds the executable compiled lifecycle",
+    spec.kind == "dispatch"
+    and len(spec.idempotency_key) == 64
+    and spec.contract_sha256 == lifecycle.definition_sha256,
+)
 check("dispatch defaults to automatic simple review", request.review == ReviewPolicy())
 workspace = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route, placement="workspace")
 check("workspace is a dispatch placement", workspace.placement == "workspace")

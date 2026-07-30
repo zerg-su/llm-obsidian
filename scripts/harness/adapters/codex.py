@@ -31,7 +31,7 @@ class CodexDriver:
         product_root: Path | None = None,
         session_root: Path | None = None,
     ) -> tuple[str, ...]:
-        del callback_pointer, product_root
+        del callback_pointer
         if route.runtime != "codex":
             raise CodexDriverError("Codex driver received a non-Codex route")
         if self.registered_models and route.model not in self.registered_models:
@@ -49,12 +49,63 @@ class CodexDriver:
         if route.profile not in profiles:
             raise CodexDriverError("unsupported Codex permission profile")
         sandbox, approval = profiles[route.profile]
-        args = [
-            str(self.binary), "--model", route.model,
-            "--config", f"model_reasoning_effort={route.effort}",
-            "--sandbox", sandbox,
-            "--ask-for-approval", approval,
-        ]
+        args = [str(self.binary), "--model", route.model]
+        if route.profile == "executor" and product_root is not None:
+            from cmux_agent_support import (
+                SupervisorError,
+                resolved_git_common_dir,
+                task_codex_config_values,
+                validated_cmux_socket_path,
+            )
+
+            product = product_root.expanduser().resolve()
+            session = (
+                session_root.expanduser().resolve()
+                if session_root is not None
+                else None
+            )
+            if (
+                not product.is_dir()
+                or session != product
+            ):
+                raise CodexDriverError(
+                    "executor product and session roots must match exactly"
+                )
+            try:
+                git_common = resolved_git_common_dir(product)
+                cmux_socket = validated_cmux_socket_path()
+            except (OSError, SupervisorError) as exc:
+                raise CodexDriverError(
+                    "executor Git/cmux capabilities are unavailable"
+                ) from exc
+            args.extend(
+                [
+                    "--cd",
+                    str(product),
+                    "--add-dir",
+                    str(git_common),
+                    "--sandbox",
+                    sandbox,
+                    "--ask-for-approval",
+                    approval,
+                ]
+            )
+            for value in task_codex_config_values(
+                cmux_socket,
+                route.effort,
+            ):
+                args.extend(["--config", value])
+        else:
+            args.extend(
+                [
+                    "--config",
+                    f"model_reasoning_effort={route.effort}",
+                    "--sandbox",
+                    sandbox,
+                    "--ask-for-approval",
+                    approval,
+                ]
+            )
         if route.profile == "research-safe":
             if session_root is None or not session_root.is_absolute():
                 raise CodexDriverError(

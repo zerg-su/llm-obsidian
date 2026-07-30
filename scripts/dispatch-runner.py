@@ -41,10 +41,9 @@ from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from harness.contracts import RuntimeRoute  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
-    builtin_definitions,
-    builtin_registry,
+    compiled_builtin,
 )
-from harness.pipelines import compile_pipeline, render_contract  # noqa: E402
+from harness.pipelines import render_contract  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
@@ -510,10 +509,6 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<codex-home/profile or inherited>": codex_env,
         "<wiki-reap-command>": config["reap_skill"],
         "<review-skill>": config["review_skill"],
-        "<task-review-command>": (
-            f"python3 {request['vault_root']}/scripts/task-review-runner.py "
-            f"run --worktree {request['worktree']}"
-        ),
         "<absolute path to wiki/plans/<file>.md>": str(request["plan_file"]),
     }
     for old, new in replacements.items():
@@ -835,14 +830,10 @@ def harness_request(
 
 
 def lifecycle_contract() -> dict[str, str]:
-    """Compile the read-only lifecycle summary shown before dispatch approval."""
+    """Compile the lifecycle summary shown before dispatch approval."""
 
-    definition = builtin_definitions()["lifecycle/default"]
-    compiled = compile_pipeline(
-        definition,
-        builtin_registry(),
-        capabilities=("route:resolved",),
-    )
+    compiled = compiled_builtin("lifecycle/default")
+    definition = compiled.definition
     return {
         "pipeline": (
             f"{definition.pipeline_id}/{definition.profile}@{definition.version}"

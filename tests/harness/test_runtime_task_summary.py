@@ -11,13 +11,16 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.process import ProcessAdapter
-from harness.contracts import OperationSpec, RuntimeRoute
+from harness.contracts import AttentionReason, OperationSpec, RuntimeRoute
+from harness.pipeline_builtins import builtin_definitions, builtin_registry
+from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.runtime_worker import run as run_worker
 from harness.store import OperationStore
@@ -57,8 +60,18 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def dispatch_record(store: OperationStore, operation_id: str) -> None:
+def dispatch_record(
+    store: OperationStore,
+    operation_id: str,
+    *,
+    bind_contract: bool = True,
+) -> None:
     route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
+    lifecycle = compile_pipeline(
+        builtin_definitions()["lifecycle/default"],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
     store.create(
         OperationSpec(
             operation_id,
@@ -68,14 +81,15 @@ def dispatch_record(store: OperationStore, operation_id: str) -> None:
             route,
             "packets/task.json",
             "scoped",
+            contract_sha256=(
+                lifecycle.definition_sha256 if bind_contract else ""
+            ),
         ),
         lane_id="lane-1",
         run_id=f"run-{operation_id}",
     )
     for state in ("preflight", "starting", "running", "awaiting-callback"):
         store.transition("owner-1", operation_id, state)
-
-
 def task_meta(
     vault: Path,
     worktree: Path,
@@ -138,6 +152,8 @@ def run_case(
     summary: object,
     *,
     review_state: str = "skipped",
+    review_launcher: Callable[[Path, Path], None] | None = None,
+    bind_contract: bool = True,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -196,7 +212,7 @@ def run_case(
         },
     )
     store = OperationStore(vault / ".vault-meta" / "harness")
-    dispatch_record(store, operation_id)
+    dispatch_record(store, operation_id, bind_contract=bind_contract)
     profile_sha = load_profiles(
         vault / "config" / "verification-profiles.toml"
     )["scoped"].sha256
@@ -283,6 +299,7 @@ def run_case(
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
                 cmux_adapter=cmux,
+                review_launcher=review_launcher,
             )
         )
     )
@@ -412,9 +429,37 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         invalid_record,
     )
 
+    drift_task = "88888888-8888-4888-8888-888888888888"
+    drift_store, drift_cmux, drift_state, drift_rc = run_case(
+        root,
+        drift_task,
+        valid_summary,
+        review_state="skipped",
+        bind_contract=False,
+    )
+    drift_record = drift_store.read("owner-1", drift_task)
+    check(
+        "unbound lifecycle operation stops as typed contract drift",
+        drift_rc == 0
+        and drift_record.state == "attention-required"
+        and drift_record.attention_reason
+        == AttentionReason.CONTRACT_DRIFT
+        and not drift_record.accepted_callback_id
+        and drift_cmux.sent == []
+        and json.loads(
+            (drift_state / "callback-error.json").read_text(encoding="utf-8")
+        )["status"]
+        == "pipeline-contract-drift",
+        drift_record,
+    )
+
     delayed_task = BLOCKED_TASK
     delayed_store, delayed_cmux, _delayed_state, delayed_rc = run_case(
-        root, delayed_task, valid_summary, review_state="delayed-skip"
+        root,
+        delayed_task,
+        valid_summary,
+        review_state="delayed-skip",
+        review_launcher=lambda _vault, _worktree: None,
     )
     delayed_record = delayed_store.read("owner-1", delayed_task)
     check(
@@ -424,4 +469,68 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and delayed_record.accepted_callback_kind == "wiki-summary"
         and len(delayed_cmux.sent) == 1,
         delayed_record,
+    )
+
+    automatic_task = "77777777-7777-4777-8777-777777777777"
+    automatic_calls: list[str] = []
+
+    def approve_automatically(vault: Path, worktree: Path) -> None:
+        automatic_calls.append(str(worktree))
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        profile_sha = meta["review_policy"]["verification_profile_sha256"]
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / automatic_task
+            / automatic_task,
+            dispatch_operation_id=automatic_task,
+            owner_id=automatic_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                profile_sha,
+            ),
+            product_root=worktree,
+        )
+
+    automatic_store, automatic_cmux, automatic_state, automatic_rc = run_case(
+        root,
+        automatic_task,
+        valid_summary,
+        review_state="missing",
+        review_launcher=approve_automatically,
+    )
+    automatic_record = automatic_store.read("owner-1", automatic_task)
+    check(
+        "compiled lifecycle starts the missing review gate without model orchestration",
+        automatic_rc == 0
+        and len(automatic_calls) == 1
+        and automatic_record.state == "finalizing"
+        and automatic_record.accepted_callback_kind == "wiki-summary"
+        and len(automatic_cmux.sent) == 1,
+        (automatic_calls, automatic_record),
+    )
+    automatic_marker = json.loads(
+        (automatic_state / "pipeline-review-start.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "automatic review launch has one durable local receipt",
+        automatic_marker["status"] == "started"
+        and automatic_marker["operation_id"] == automatic_task,
+        automatic_marker,
     )

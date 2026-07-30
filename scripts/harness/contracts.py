@@ -36,6 +36,7 @@ class AttentionReason(str, enum.Enum):
     SURFACE_LOST = "surface-lost"
     PROCESS_ORPHANED = "process-orphaned"
     CLEANUP_INCOMPLETE = "cleanup-incomplete"
+    CONTRACT_DRIFT = "contract-drift"
     ATTENTION_REQUIRED = "attention-required"
 
 
@@ -104,6 +105,7 @@ class OperationSpec:
     context_manifest: str
     verification_profile: str
     keep_open: bool = False
+    contract_sha256: str = ""
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -118,6 +120,8 @@ class OperationSpec:
         ):
             _identifier(value, label)
         _relative_path(self.context_manifest, "context_manifest")
+        if self.contract_sha256:
+            _sha256(self.contract_sha256, "contract_sha256")
 
 
 @dataclass(frozen=True)
@@ -381,6 +385,7 @@ def operation_spec_from_dict(value: Mapping[str, Any]) -> OperationSpec:
         context_manifest=value.get("context_manifest", ""),
         verification_profile=value.get("verification_profile", ""),
         keep_open=value.get("keep_open", False),
+        contract_sha256=value.get("contract_sha256", ""),
         schema_version=value.get("schema_version", 0),
     )
 

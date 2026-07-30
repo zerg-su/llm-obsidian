@@ -8,6 +8,7 @@ import errno
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -723,6 +724,93 @@ claude = ClaudeDriver(Path("/usr/bin/claude")).command(claude_route)
 codex = CodexDriver(Path("/usr/bin/codex")).command(codex_route)
 check("Claude reviewer is interactive dontAsk", "--permission-mode" in claude and "dontAsk" in claude and "--print" not in claude)
 check("Codex reviewer is read-only approval-never", "read-only" in codex and "never" in codex)
+with tempfile.TemporaryDirectory(prefix="codex-executor-policy.") as raw:
+    policy_root = Path(raw)
+    source = policy_root / "source"
+    source.mkdir()
+    product = policy_root / "product"
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "policy@example.invalid"],
+        cwd=source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Policy Test"],
+        cwd=source,
+        check=True,
+    )
+    (source / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "seed.txt"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "task/policy", str(product)],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    cmux_socket = policy_root / "cmux.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(cmux_socket))
+    previous_socket = os.environ.get("CMUX_SOCKET_PATH")
+    os.environ["CMUX_SOCKET_PATH"] = str(cmux_socket)
+    try:
+        executor = CodexDriver(Path("/usr/bin/codex")).command(
+            RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "high",
+                "executor",
+                digest,
+            ),
+            product_root=product,
+            session_root=product,
+        )
+    finally:
+        if previous_socket is None:
+            os.environ.pop("CMUX_SOCKET_PATH", None)
+        else:
+            os.environ["CMUX_SOCKET_PATH"] = previous_socket
+        server.close()
+    git_common = (
+        subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=product,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+    )
+    git_common_path = (product / git_common).resolve()
+    check(
+        "Codex executor receives exact Git and cmux capabilities",
+        "--cd" in executor
+        and executor[executor.index("--cd") + 1] == str(product.resolve())
+        and "--add-dir" in executor
+        and executor[executor.index("--add-dir") + 1]
+        == str(git_common_path)
+        and git_common_path == (source / ".git").resolve()
+        and "workspace-write" in executor
+        and "never" in executor
+        and any(
+            str(cmux_socket.resolve()) in item
+            and "features.network_proxy.unix_sockets" in item
+            for item in executor
+        ),
+    )
 for label, call in (
     ("Claude rejects wrong runtime", lambda: ClaudeDriver(Path("/usr/bin/claude")).command(codex_route)),
     ("Codex rejects wrong runtime", lambda: CodexDriver(Path("/usr/bin/codex")).command(claude_route)),

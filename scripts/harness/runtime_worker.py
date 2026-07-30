@@ -9,6 +9,8 @@ import os
 import re
 import shlex
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -23,6 +25,8 @@ from .callbacks import (
 )
 from .contracts import AttentionReason, CallbackEnvelope
 from .prompts import PromptDecision, classify
+from .pipeline_builtins import compiled_builtin
+from .pipelines import reconcile_pipeline
 from .review_finalization import task_review_status
 from .state_machine import TERMINAL
 from .store import OperationStore
@@ -586,6 +590,7 @@ def run(
     poll_seconds: float = 0.1,
     checkpoint_probe: Callable[[str, str], str] | None = None,
     cmux_adapter: object | None = None,
+    review_launcher: Callable[[Path, Path], None] | None = None,
 ) -> int:
     spec = load_spec(spec_path.resolve())
     ready = spec["ready_path"]
@@ -670,6 +675,7 @@ def run(
     summary_digest = ""
     summary_stable_reads = 0
     cmux_adapter = cmux_adapter or CmuxAdapter()
+    lifecycle = compiled_builtin("lifecycle/default")
     last_prompt_digest = ""
     next_prompt_probe = 0.0
     handled_control_id = ""
@@ -923,7 +929,10 @@ def run(
                 {"schema_version": 1, "status": "callback-invalid"},
             )
 
-    def summary_attention(status: str) -> None:
+    def summary_attention(
+        status: str,
+        reason: AttentionReason = AttentionReason.CALLBACK_INVALID,
+    ) -> None:
         nonlocal callback_handled
         callback_handled = True
         try:
@@ -931,7 +940,7 @@ def run(
                 spec["owner_id"],
                 spec["operation_id"],
                 "attention-required",
-                reason=AttentionReason.CALLBACK_INVALID,
+                reason=reason,
             )
         except Exception:
             pass
@@ -1166,11 +1175,107 @@ def run(
                 expected_vault=trusted_vault,
                 expected_operation_id=spec["operation_id"],
             )
-            if review.status in {"missing", "reviewing"}:
+            operation = store.read(
+                spec["owner_id"], spec["operation_id"]
+            )
+            if operation.spec.contract_sha256 != lifecycle.definition_sha256:
+                summary_attention(
+                    "pipeline-contract-drift",
+                    AttentionReason.CONTRACT_DRIFT,
+                )
                 return
-            if review.status in {"attention", "stale"}:
+            review_observation = {
+                "missing": "pending",
+                "reviewing": "running",
+                "approved": "complete",
+                "skipped": "complete",
+                "attention": "attention",
+                "stale": "attention",
+            }[review.status]
+            progress = reconcile_pipeline(
+                lifecycle,
+                {
+                    "dispatch": "complete",
+                    "review": review_observation,
+                },
+            )
+            if progress.action == "start":
+                marker_path = spec_path.parent / "pipeline-review-start.json"
+                marker = None
+                if marker_path.is_file() and not marker_path.is_symlink():
+                    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+                if marker is not None:
+                    if (
+                        marker.get("schema_version") != 1
+                        or marker.get("operation_id") != spec["operation_id"]
+                        or marker.get("definition_sha256")
+                        != lifecycle.definition_sha256
+                        or marker.get("status") not in {"pending", "started"}
+                    ):
+                        raise RuntimeWorkerError(
+                            "pipeline review launch receipt is invalid"
+                        )
+                    if marker["status"] == "started":
+                        return
+                _atomic_json(
+                    marker_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": lifecycle.definition_sha256,
+                        "status": "pending",
+                    },
+                )
+                if review_launcher is not None:
+                    review_launcher(trusted_vault, spec["cwd"])
+                else:
+                    runner = trusted_vault / "scripts" / "task-review-runner.py"
+                    if not runner.is_file() or runner.is_symlink():
+                        raise RuntimeWorkerError(
+                            "trusted task review runner is unavailable"
+                        )
+                    try:
+                        launched = subprocess.run(
+                            [
+                                sys.executable,
+                                str(runner),
+                                "run",
+                                "--worktree",
+                                str(spec["cwd"]),
+                            ],
+                            cwd=trusted_vault,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            timeout=30,
+                        )
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        raise RuntimeWorkerError(
+                            "automatic task review launch failed"
+                        ) from exc
+                    if launched.returncode != 0:
+                        raise RuntimeWorkerError(
+                            "automatic task review launch failed"
+                        )
+                _atomic_json(
+                    marker_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": lifecycle.definition_sha256,
+                        "status": "started",
+                    },
+                )
+                return
+            if progress.action == "wait":
+                return
+            if progress.action == "attention":
                 summary_attention(f"review-finalization-{review.status}")
                 return
+            if progress.action != "reap-ready":
+                raise RuntimeWorkerError(
+                    "compiled lifecycle returned an invalid finalization action"
+                )
             callback_handled = True
             encoded = json.dumps(
                 summary, sort_keys=True, separators=(",", ":")

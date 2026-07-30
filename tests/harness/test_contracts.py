@@ -39,6 +39,19 @@ check("contracts are frozen", dataclasses.fields(spec) and spec.__dataclass_para
 for label, factory in (
     ("unknown runtime rejected", lambda: RuntimeRoute("other", "model", "high", "executor", digest)),
     ("path escape rejected", lambda: OperationSpec("op", "key", "task", "owner", route, "../manifest", "scoped")),
+    (
+        "invalid compiled contract binding rejected",
+        lambda: OperationSpec(
+            "op",
+            "key",
+            "task",
+            "owner",
+            route,
+            "manifest",
+            "scoped",
+            contract_sha256="not-a-digest",
+        ),
+    ),
     ("unknown schema rejected", lambda: OperationSpec("op", "key", "task", "owner", route, "manifest", "scoped", schema_version=2)),
 ):
     try:

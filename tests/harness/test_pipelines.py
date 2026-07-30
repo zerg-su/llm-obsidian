@@ -18,6 +18,7 @@ from harness.pipelines import (
     PrimitiveDefinition,
     PrimitiveRegistry,
     compile_pipeline,
+    reconcile_pipeline,
     render_contract,
 )
 
@@ -123,10 +124,84 @@ check(
     len(summary.encode()) < 2_000
     and "engineering/change@1.0.0" in summary
     and compiled.definition_sha256 in summary
-    and "harness 2.3 remains the execution engine" in summary
+    and "state-free reconciliation" in summary
     and "budget" not in summary.lower()
     and "sandbox-enforced" not in summary,
 )
+
+dispatch_wait = reconcile_pipeline(
+    compiled,
+    {
+        "implement": "running",
+        "verify": "pending",
+        "review": "pending",
+    },
+)
+check(
+    "compiled order derives one wait action without controller state",
+    dispatch_wait.action == "wait"
+    and dispatch_wait.step_id == "implement"
+    and dispatch_wait.completed_steps == (),
+)
+start_verify = reconcile_pipeline(
+    compiled,
+    {
+        "implement": "complete",
+        "verify": "pending",
+        "review": "pending",
+    },
+)
+check(
+    "completed records derive the next executable step",
+    start_verify.action == "start"
+    and start_verify.step_id == "verify"
+    and start_verify.completed_steps == ("implement",),
+)
+reap_ready = reconcile_pipeline(
+    compiled,
+    {
+        "implement": "complete",
+        "verify": "complete",
+        "review": "complete",
+    },
+)
+check(
+    "the compiled terminal prefix derives reap-ready",
+    reap_ready.action == "reap-ready"
+    and reap_ready.step_id == ""
+    and reap_ready.completed_steps == ("implement", "verify", "review"),
+)
+attention = reconcile_pipeline(
+    compiled,
+    {
+        "implement": "complete",
+        "verify": "attention",
+        "review": "pending",
+    },
+)
+check(
+    "typed attention stops before later steps",
+    attention.action == "attention"
+    and attention.step_id == "verify"
+    and attention.completed_steps == ("implement",),
+)
+
+try:
+    reconcile_pipeline(
+        compiled,
+        {
+            "implement": "pending",
+            "verify": "complete",
+            "review": "pending",
+        },
+    )
+except Exception as exc:
+    check(
+        "out-of-order durable evidence fails closed",
+        "ordered prefix" in str(exc),
+    )
+else:
+    check("out-of-order durable evidence fails closed", False)
 
 
 def expect_compile_error(
