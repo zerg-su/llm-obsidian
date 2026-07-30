@@ -141,8 +141,25 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         f"Task remains paused. Resolve with task_escalation.py resolve --worktree "
         f"{shlex.quote(str(worktree))}."
     )
+    wake = (
+        "Typed task escalation callback received. "
+        f"Category: {category}. "
+        f"Reason: {marker['reason'][:800]}. "
+        f"Requested decision: {marker['question'][:800]}. "
+        f"Inspect {marker_path} and resolve from this originating coordinator "
+        f"session with {Path(__file__).name} resolve --worktree "
+        f"{shlex.quote(str(worktree))} --decision <decision>. "
+        "The task remains paused until that decision is relayed."
+    )
+    if len(wake.encode()) > 4096:
+        die("task escalation callback exceeds the bounded cmux message size", 3)
+    toast_failed = False
     try:
         notify(coordinator, title, body)
+    except SystemExit:
+        toast_failed = True
+    try:
+        send(coordinator, wake)
     except SystemExit:
         marker["status"] = "delivery-failed"
         write_json(marker_path, marker)
@@ -158,7 +175,10 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
         worktree,
         "task-escalation",
         actor=f"raise:{category}",
-        counts={"raised": 1},
+        counts={
+            "raised": 1,
+            **({"toast_failures": 1} if toast_failed else {}),
+        },
     )
     print(f"escalation {marker['id']} sent to coordinator; task must remain paused")
     return 0

@@ -428,6 +428,8 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "  top) printf 'top\\n' >> \"$CMUX_TEST_LOG\"; cat \"$CMUX_TOP_FILE\"; exit 0 ;;\n"
         "  notify) if [ \"${CMUX_NOTIFY_FAIL:-0}\" = 1 ]; then echo 'notify failed' >&2; exit 2; fi; "
         "printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
+        "  send) if [ \"${CMUX_SEND_FAIL:-0}\" = 1 ]; then echo 'send failed' >&2; exit 2; fi; "
+        "printf '%s\\n' \"$*\" >> \"$CMUX_TEST_LOG\"; exit 0 ;;\n"
         "  rpc) if [ \"$2\" = system.tree ]; then "
         "python3 -c 'import json,os,pathlib; p=pathlib.Path(os.environ[\"CMUX_CLOSED_FILE\"]); "
         "closed=set(p.read_text().splitlines()) if p.exists() else set(); "
@@ -1298,6 +1300,13 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
     check("task escalation remains pending", attention["status"] == "pending")
     check("coordinator exact surface notified", f"notify --surface {meta['wiki_surface']}" in cmux_log.read_text())
+    check(
+        "task escalation wakes the exact coordinator",
+        f"send --surface {meta['wiki_surface']} Typed task escalation callback received."
+        in cmux_log.read_text()
+        and f"send-key --surface {meta['wiki_surface']} Enter"
+        in cmux_log.read_text(),
+    )
     result = run(LIFECYCLE, "request-exit", "--kind", "task", cwd=worktree, env=origin_env)
     check("pending escalation prevents task close", result.returncode == 3)
     result = run(CONTRACT, "check-handoff", "--current-session", "origin-1", cwd=worktree, env=env)
@@ -1355,12 +1364,34 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "--question", "Should the coordinator grant it?",
         cwd=worktree, env=failed_notify_env,
     )
-    check("failed escalation delivery is reported", result.returncode == 3)
+    check("toast failure falls back to coordinator callback", result.returncode == 0)
     failed_attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
-    check("failed escalation delivery stays explicit", failed_attention["status"] == "delivery-failed")
+    check("toast fallback keeps escalation pending", failed_attention["status"] == "pending")
     escalation_events = telemetry(worktree, "task-escalation")
     check(
-        "failed escalation delivery counted",
+        "toast fallback is counted",
+        escalation_events[-1]["status"] == "ok"
+        and escalation_events[-1]["counts"].get("raised") == 1
+        and escalation_events[-1]["counts"].get("toast_failures") == 1,
+    )
+    result = run(
+        ESCALATION, "resolve", "--decision", "Continue after coordinator inspection",
+        cwd=worktree, env=origin_env,
+    )
+    check("toast-fallback escalation can be resolved", result.returncode == 0, result.stderr)
+    failed_send_env = dict(env, CMUX_SEND_FAIL="1")
+    result = run(
+        ESCALATION, "raise", "--category", "permission",
+        "--reason", "The reviewer needs an unavailable permission",
+        "--question", "Should the coordinator grant it?",
+        cwd=worktree, env=failed_send_env,
+    )
+    check("failed callback delivery is reported", result.returncode == 3)
+    failed_attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    check("failed callback delivery stays explicit", failed_attention["status"] == "delivery-failed")
+    escalation_events = telemetry(worktree, "task-escalation")
+    check(
+        "failed callback delivery counted",
         escalation_events[-1]["status"] == "error"
         and escalation_events[-1]["counts"].get("raised") == 1
         and escalation_events[-1]["counts"].get("delivery_failures") == 1,
