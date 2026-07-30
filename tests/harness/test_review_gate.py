@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import tempfile
@@ -1043,5 +1044,157 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         and skip_state["status"] == "skipped"
         and skip_state["policy"]["enabled"] is False,
     )
+
+with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
+    base = Path(raw)
+    product = base / "current-checkout"
+    scratch = base / "external-scratch"
+    (product / "wiki").mkdir(parents=True)
+    (product / "skills/review").mkdir(parents=True)
+    (product / "scripts/harness").mkdir(parents=True)
+    (product / "config").mkdir()
+    (product / "skills/review/SKILL.md").write_text(
+        "# Review\n\nInspect the exact ContextPacket and product HEAD.\n",
+        encoding="utf-8",
+    )
+    (product / "scripts/harness/review_submit.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
+    (product / "config/model-routing.toml").write_bytes(
+        (ROOT / "config/model-routing.toml").read_bytes()
+    )
+    (product / "config/verification-profiles.toml").write_bytes(
+        (ROOT / "config/verification-profiles.toml").read_bytes()
+    )
+    (product / "AGENTS.md").write_text(
+        "# Product instructions\n", encoding="utf-8"
+    )
+    (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "review@example.invalid"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Review Gate Test"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    current_store = OperationStore(product / ".vault-meta/harness")
+    current_runtime = FakeRuntime(current_store)
+    old_environment = {
+        name: os.environ.get(name)
+        for name in (
+            "LLM_OBSIDIAN_SESSION_RUNTIME",
+            "LLM_OBSIDIAN_SESSION_MODEL",
+            "LLM_OBSIDIAN_SESSION_EFFORT",
+        )
+    }
+    os.environ["LLM_OBSIDIAN_SESSION_RUNTIME"] = "codex"
+    os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
+    os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
+    try:
+        started = task_review_runner.run_current_review(
+            product,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        current_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / started["task_id"]
+            / started["task_id"]
+        )
+        manifest = Path(started["context_manifest"])
+        check(
+            "current checkout review needs no dispatch metadata and keeps scratch external",
+            started["status"] == "reviewing"
+            and not (product / ".task-meta.json").exists()
+            and started["worktree"] == str(product.resolve())
+            and started["vault_root"] == str(product.resolve())
+            and len(current_runtime.started) == 1
+            and current_runtime.started[0].product_root == product.resolve()
+            and current_runtime.started[0].cwd != product.resolve()
+            and manifest.is_file()
+            and product.resolve() not in manifest.parents,
+        )
+        lane = started["lanes"][0]
+        active = task_review_runner.load_active_round(
+            current_gate_root,
+            current_store,
+            current_runtime,
+            axis="holistic",
+        )
+        callback = review_round_envelope(
+            active.round,
+            ReviewResult(
+                "holistic",
+                "changes-requested",
+                (
+                    ReviewFinding(
+                        "F-current-1",
+                        "holistic",
+                        "important",
+                        "fix the current checkout",
+                        "VALUE still equals one",
+                        file="product.py",
+                    ),
+                ),
+            ),
+        )
+        Path(lane["callback_path"]).write_text(
+            json.dumps(to_dict(callback), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        waiting = task_review_runner.run_current_review(
+            product,
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "resolve current review"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        verifying = task_review_runner.run_current_review(
+            product,
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "current checkout review reuses its durable gate and parent session",
+            waiting["status"] == "awaiting-resolution"
+            and verifying["status"] == "verifying"
+            and verifying["task_id"] == started["task_id"]
+            and len(current_runtime.started) == 1
+            and len(current_runtime.continued) == 1
+            and current_runtime.continued[0][1] == lane["operation_id"],
+        )
+    finally:
+        for name, value in old_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 print("\nAll review gate tests passed.")

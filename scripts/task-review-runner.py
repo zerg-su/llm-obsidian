@@ -10,6 +10,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Sequence
@@ -31,7 +32,12 @@ from harness.workflows.review_gate import (
     ReviewGateRun,
     ReviewPreset,
 )
-from model_routing import load_config, resolve, session_from_meta
+from model_routing import (
+    load_config,
+    resolve,
+    routing_from_environment,
+    session_from_meta,
+)
 from task_contract import normalize
 
 
@@ -215,6 +221,32 @@ def _runtime_root(vault: Path, task_id: str) -> Path:
     return root
 
 
+def _current_runtime_root(
+    worktree: Path,
+    task_id: str,
+    scratch_root: Path | None,
+) -> Path:
+    if scratch_root is None:
+        checkout_key = hashlib.sha256(
+            str(worktree).encode("utf-8")
+        ).hexdigest()[:16]
+        base = (
+            Path(tempfile.gettempdir())
+            / "llm-obsidian-current-review"
+            / checkout_key
+        )
+    else:
+        base = scratch_root.expanduser().resolve()
+    root = (base / task_id).resolve()
+    if root == worktree or worktree in root.parents:
+        raise TaskReviewError(
+            "current review scratch must stay outside the product checkout"
+        )
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    return root
+
+
 def _gate_root(vault: Path, task_id: str) -> Path:
     return (
         vault
@@ -249,8 +281,16 @@ def _context(
             pointer_root=runtime_root / "pointers",
         ),
         ContextInput(
-            "task-meta.json",
-            str(worktree / ".task-meta.json"),
+            (
+                "current-review.json"
+                if meta.get("lifecycle") == "current-checkout"
+                else "task-meta.json"
+            ),
+            (
+                str(runtime_root / "current-review.json")
+                if meta.get("lifecycle") == "current-checkout"
+                else str(worktree / ".task-meta.json")
+            ),
             (
                 json.dumps(meta, ensure_ascii=False, sort_keys=True) + "\n"
             ).encode(),
@@ -576,6 +616,7 @@ def _receipt(
     meta: Mapping[str, Any],
     vault: Path,
     worktree: Path,
+    runtime_root: Path,
     context_manifest: Path,
     run: ReviewGateRun | None = None,
 ) -> dict[str, Any]:
@@ -590,7 +631,7 @@ def _receipt(
                 "verification_iteration": lane.verification_iteration,
                 "callback_path": str(
                     _callback_path(
-                        _runtime_root(vault, str(meta["task_id"])),
+                        runtime_root,
                         lane.axis,
                     )
                 ),
@@ -608,19 +649,20 @@ def _receipt(
     }
 
 
-def run_task_review(
+def _run_review(
+    meta: Mapping[str, Any],
+    vault: Path,
     worktree: Path,
+    task_id: str,
+    runtime_root: Path,
     *,
     runtime_manager: object | None = None,
 ) -> dict[str, Any]:
-    worktree = worktree.expanduser().resolve()
-    meta, vault, task_id = _validate_task(worktree)
     store_root = vault / ".vault-meta" / "harness"
     store = OperationStore(store_root)
     runtime = runtime_manager or RuntimeSessionManager.for_root(
         vault, store_root=store_root
     )
-    runtime_root = _runtime_root(vault, task_id)
     gate_root = _gate_root(vault, task_id)
     context, context_manifest = _context(
         meta, vault, worktree, runtime_root, task_id
@@ -642,6 +684,7 @@ def run_task_review(
                 meta=meta,
                 vault=vault,
                 worktree=worktree,
+                runtime_root=runtime_root,
                 context_manifest=context_manifest,
             )
         if request is None:
@@ -690,6 +733,7 @@ def run_task_review(
             meta=meta,
             vault=vault,
             worktree=worktree,
+            runtime_root=runtime_root,
             context_manifest=context_manifest,
             run=run,
         )
@@ -713,6 +757,7 @@ def run_task_review(
             meta=meta,
             vault=vault,
             worktree=worktree,
+            runtime_root=runtime_root,
             context_manifest=context_manifest,
             run=None if status == "skipped" else gate.rehydrate(),
         )
@@ -737,6 +782,7 @@ def run_task_review(
                 meta=meta,
                 vault=vault,
                 worktree=worktree,
+                runtime_root=runtime_root,
                 context_manifest=context_manifest,
                 run=run,
             )
@@ -790,6 +836,7 @@ def run_task_review(
             meta=meta,
             vault=vault,
             worktree=worktree,
+            runtime_root=runtime_root,
             context_manifest=context_manifest,
             run=gate.rehydrate(),
         )
@@ -815,6 +862,7 @@ def run_task_review(
             meta=meta,
             vault=vault,
             worktree=worktree,
+            runtime_root=runtime_root,
             context_manifest=context_manifest,
             run=run,
         )
@@ -848,8 +896,279 @@ def run_task_review(
         meta=meta,
         vault=vault,
         worktree=worktree,
+        runtime_root=runtime_root,
         context_manifest=context_manifest,
         run=None if next_status == "skipped" else gate.rehydrate(),
+    )
+
+
+def run_task_review(
+    worktree: Path,
+    *,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    return _run_review(
+        meta,
+        vault,
+        worktree,
+        task_id,
+        _runtime_root(vault, task_id),
+        runtime_manager=runtime_manager,
+    )
+
+
+def _validate_current_checkout(worktree: Path) -> Path:
+    worktree = worktree.expanduser().resolve()
+    required = (
+        worktree / "wiki",
+        worktree / "scripts",
+        worktree / "skills/review/SKILL.md",
+        worktree / "config/model-routing.toml",
+        worktree / "config/verification-profiles.toml",
+    )
+    if (
+        not worktree.is_dir()
+        or any(not path.exists() for path in required)
+        or _git(worktree, "rev-parse", "--show-toplevel") != str(worktree)
+    ):
+        raise TaskReviewError(
+            "current review requires an exact llm-obsidian checkout root"
+        )
+    return worktree
+
+
+def _current_policy(
+    *,
+    deep: bool,
+    cross_model: bool,
+    runtime: str,
+    model: str,
+    effort: str,
+    no_review: bool,
+    profile_sha256: str,
+) -> dict[str, Any]:
+    preset = ReviewPreset.from_flags(
+        deep=deep,
+        cross_model=cross_model,
+        runtime=runtime,
+        model=model,
+        effort=effort,
+        no_review=no_review,
+    )
+    mode = preset.depth if preset.enabled else "skip"
+    return {
+        "mode": mode,
+        "cross_model": cross_model,
+        "runtime": runtime,
+        "model": model,
+        "effort": effort,
+        "max_verify_iterations": {
+            "simple": 1,
+            "deep": 2,
+            "skip": 0,
+        }[mode],
+        "verification_profile": "scoped",
+        "verification_profile_sha256": profile_sha256,
+        "auto_resolve_severities": ["warning", "nit"],
+        "escalate_severities": ["blocking"],
+    }
+
+
+def _same_requested_policy(
+    stored: Mapping[str, Any],
+    requested: Mapping[str, Any],
+) -> bool:
+    return all(
+        stored.get(name) == requested.get(name)
+        for name in (
+            "mode",
+            "cross_model",
+            "runtime",
+            "model",
+            "effort",
+            "max_verify_iterations",
+            "verification_profile",
+            "verification_profile_sha256",
+        )
+    )
+
+
+def run_current_review(
+    worktree: Path,
+    *,
+    deep: bool = False,
+    cross_model: bool = False,
+    runtime: str = "",
+    model: str = "",
+    effort: str = "",
+    no_review: bool = False,
+    plan_file: Path | None = None,
+    origin_surface: str = "",
+    scratch_root: Path | None = None,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    worktree = _validate_current_checkout(worktree)
+    vault = worktree
+    profiles = load_profiles(vault / "config/verification-profiles.toml")
+    profile = profiles.get("scoped")
+    if profile is None:
+        raise TaskReviewError("scoped verification profile is unavailable")
+    requested_policy = _current_policy(
+        deep=deep,
+        cross_model=cross_model,
+        runtime=runtime,
+        model=model,
+        effort=effort,
+        no_review=no_review,
+        profile_sha256=profile.sha256,
+    )
+    active_path = (
+        vault
+        / ".vault-meta"
+        / "harness"
+        / "current-review"
+        / "active.json"
+    )
+    meta: dict[str, Any] | None = None
+    if active_path.is_file() and not active_path.is_symlink():
+        candidate = _read_json(active_path, "current review state")
+        if (
+            candidate.get("lifecycle") != "current-checkout"
+            or candidate.get("worktree") != str(worktree)
+        ):
+            raise TaskReviewError("current review state belongs to another checkout")
+        try:
+            task_id = str(uuid.UUID(str(candidate.get("task_id") or "")))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise TaskReviewError("current review identity is invalid") from exc
+        gate_state_path = _gate_root(vault, task_id) / "review-gate.json"
+        stored_policy = candidate.get("review_policy")
+        same_policy = isinstance(stored_policy, dict) and _same_requested_policy(
+            stored_policy, requested_policy
+        )
+        terminal_stale = False
+        if gate_state_path.is_file() and not gate_state_path.is_symlink():
+            gate_state = _read_json(gate_state_path, "current review gate")
+            status = str(gate_state.get("status") or "")
+            bound = gate_state.get("context")
+            bound_head = (
+                str(bound.get("head_sha") or "")
+                if isinstance(bound, dict)
+                else ""
+            )
+            terminal_stale = (
+                status in {"approved", "skipped"}
+                and (
+                    bound_head != _git(worktree, "rev-parse", "HEAD")
+                    or not same_policy
+                )
+            )
+        elif gate_state_path.exists():
+            raise TaskReviewError("current review gate is not a regular file")
+        if not terminal_stale:
+            if not same_policy:
+                raise TaskReviewError(
+                    "an active current review uses another preset or override"
+                )
+            if plan_file is not None and (
+                Path(str(candidate.get("plan_file") or "")).resolve()
+                != plan_file.expanduser().resolve()
+            ):
+                raise TaskReviewError(
+                    "an active current review uses another plan"
+                )
+            meta = candidate
+
+    if meta is None:
+        task_id = str(uuid.uuid4())
+        runtime_root = _current_runtime_root(
+            worktree, task_id, scratch_root
+        )
+        surface = (
+            origin_surface.strip()
+            or str(os.environ.get("CMUX_SURFACE_ID") or "").strip()
+        )
+        if not surface:
+            raise TaskReviewError(
+                "current review requires an exact cmux origin surface"
+            )
+        config = load_config(vault)
+        session, source = routing_from_environment(config)
+        if source == "tracked-default":
+            raise TaskReviewError(
+                "current review requires a host-confirmed current session route"
+            )
+        session = {**session, "source": source}
+        if plan_file is None:
+            plan = runtime_root / "inputs/current-review-scope.md"
+            _atomic_text(
+                plan,
+                "\n".join(
+                    (
+                        "# Current checkout review scope",
+                        "",
+                        "Review the exact current checkout and HEAD against its "
+                        "repository instructions, tests, and public contract.",
+                        "",
+                    )
+                ),
+            )
+        else:
+            plan = plan_file.expanduser().resolve()
+            if not plan.is_file() or plan.is_symlink():
+                raise TaskReviewError("current review plan is unavailable")
+        meta = {
+            "version": 3,
+            "lifecycle": "current-checkout",
+            "task_id": task_id,
+            "task_name": "current checkout review",
+            "task_surface": surface,
+            "worktree": str(worktree),
+            "vault_root": str(vault),
+            "plan_file": str(plan),
+            "routing": {"session": session},
+            "review_policy": requested_policy,
+            "runtime_root": str(runtime_root),
+        }
+        _request(
+            meta,
+            vault,
+            task_id,
+            ReviewContext(
+                "pending/manifest.json",
+                _git(worktree, "rev-parse", "HEAD"),
+                "scoped",
+                profile.sha256,
+            ),
+        )
+        _atomic_json(runtime_root / "current-review.json", meta)
+        _atomic_json(active_path, meta)
+    else:
+        task_id = str(meta["task_id"])
+        runtime_root = Path(str(meta.get("runtime_root") or "")).resolve()
+        expected_root = _current_runtime_root(
+            worktree, task_id, scratch_root
+        )
+        if runtime_root != expected_root:
+            raise TaskReviewError(
+                "current review scratch root changed during an active gate"
+            )
+        if (
+            runtime_root == worktree
+            or worktree in runtime_root.parents
+            or not (runtime_root / "current-review.json").is_file()
+        ):
+            raise TaskReviewError("current review scratch is unavailable")
+
+    return _run_review(
+        meta,
+        vault,
+        worktree,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime_manager,
     )
 
 
@@ -858,6 +1177,16 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--worktree", type=Path, required=True)
+    current = sub.add_parser("current")
+    current.add_argument("--worktree", type=Path, required=True)
+    current.add_argument("--deep", action="store_true")
+    current.add_argument("--cross-model", action="store_true")
+    current.add_argument("--runtime", choices=("claude", "codex"), default="")
+    current.add_argument("--model", default="")
+    current.add_argument("--effort", default="")
+    current.add_argument("--no-review", action="store_true")
+    current.add_argument("--plan", type=Path)
+    current.add_argument("--origin-surface", default="")
     return result
 
 
@@ -868,9 +1197,23 @@ def main(
 ) -> int:
     args = parser().parse_args(argv)
     try:
-        result = run_task_review(
-            args.worktree, runtime_manager=runtime_manager
-        )
+        if args.command == "run":
+            result = run_task_review(
+                args.worktree, runtime_manager=runtime_manager
+            )
+        else:
+            result = run_current_review(
+                args.worktree,
+                deep=args.deep,
+                cross_model=args.cross_model,
+                runtime=args.runtime,
+                model=args.model,
+                effort=args.effort,
+                no_review=args.no_review,
+                plan_file=args.plan,
+                origin_surface=args.origin_surface,
+                runtime_manager=runtime_manager,
+            )
     except (OSError, TaskReviewError, ValueError, RuntimeError) as exc:
         print(f"task-review-runner: {exc}", file=sys.stderr)
         return 3

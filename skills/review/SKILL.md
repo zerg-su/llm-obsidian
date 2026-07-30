@@ -27,13 +27,18 @@ Deep mode uses `review_profiles.deep`. Model overrides accept only
 
 ## Flow
 
-1. For a dispatched v3 task, run the sole state-driven facade:
+1. Run the state-driven facade. For a dispatched v3 task:
    `python3 <vault-root>/scripts/task-review-runner.py run --worktree
-   <worktree>`. Do not ask the user before running it. The same idempotent
-   command starts missing review lanes, drives exact ready callbacks, continues
-   a resolved finding on the same session at the new HEAD, or returns the
-   terminal receipt. `review-runner.py` remains the explicit ad-hoc review
-   entrypoint outside a dispatch lifecycle.
+   <worktree>`. For the current checkout, including work that was not
+   dispatched:
+   `python3 <checkout>/scripts/task-review-runner.py current --worktree
+   <checkout>`, adding `--deep`, `--cross-model`, or an alias-backed
+   `--runtime`/`--model`/`--effort` override only when requested. Add
+   `--plan <path>` when an approved plan exists. Do not ask the user before
+   running it. The same idempotent command starts missing review lanes, drives
+   exact ready callbacks, continues a resolved finding on the same session at
+   the new HEAD, or returns the terminal receipt. `review-runner.py` is a
+   low-level harness primitive, not the user-facing ad-hoc workflow.
 2. The runner creates owner-only scratch outside the product and starts
    `reviewer-callback`: the ContextPacket and writable outbox remain in
    coordinator-owned scratch while the generic product worktree is read-only.
@@ -58,6 +63,9 @@ Deep mode uses `review_profiles.deep`. Model overrides accept only
 
 Do not edit product files from the reviewer, open a second verification
 surface, rerank one deep axis over another, push, publish, or broaden scope.
-Do not construct task review paths from the generic product root: v3
-`.task-meta.json` binds the coordinator `vault_root`, exact worktree, task UUID,
-review preset, verification profile, and origin surface.
+Do not construct dispatched-task review paths from the generic product root:
+v3 `.task-meta.json` binds the coordinator `vault_root`, exact worktree, task
+UUID, review preset, verification profile, and origin surface. Current-checkout
+review instead persists one derived active pointer under `.vault-meta/harness`
+and keeps its ContextPacket, prompts, and callbacks in owner-only scratch
+outside the checkout.

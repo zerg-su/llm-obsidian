@@ -28,7 +28,7 @@ The machine-readable allowlist is empty, and
 | `scripts/dispatch-runner.py` | calls `workflows.dispatch.start_dispatch` and `RuntimeSessionManager` |
 | `scripts/reap-runner.py` | calls `workflows.reap.run_reap` and exact runtime exit/cleanup |
 | `scripts/research-isolation.py` | thin `start`/`advance`/`status` facade over `workflows.research` and `RuntimeSessionManager`; all provider, callback, and cmux effects remain inside the generic harness |
-| `skills/review-dispatch/scripts/spawn_review.py` | removed; `scripts/review-runner.py` uses `workflows.review` |
+| `skills/review-dispatch/scripts/spawn_review.py` | removed; `scripts/task-review-runner.py` is the state-driven dispatched/current-checkout facade over `workflows.review`, while `review-runner.py` remains a low-level primitive |
 | `skills/reap-send/scripts/send_reap.py` | removed; `runtime_worker` relays typed Wiki Summary |
 | `skills/review-send/scripts/send_review.py` | removed; `harness/review_submit.py` owns typed review submission |
 | `skills/review-dispatch/scripts/archive_review.py` | removed; `harness/review_archive.py` owns archives |

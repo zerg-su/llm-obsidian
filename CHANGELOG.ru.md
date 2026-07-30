@@ -28,6 +28,9 @@
   `resolve-conflict`.
 - Добавлены unified simple/deep review contracts и четырёхъячеечный live
   acceptance driver, привязанный к точному SHA.
+- Добавлен единый state-driven review facade для dispatched tasks и текущего
+  checkout; ad-hoc review больше не требует ручной сборки harness pointers или
+  `.task-meta.json`.
 
 ### Изменено
 

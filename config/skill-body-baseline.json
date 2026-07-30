@@ -157,11 +157,11 @@
       "token_estimate": 185
     },
     "review": {
-      "body_bytes": 3300,
-      "body_lines": 58,
-      "closure_bytes": 3300,
-      "closure_token_estimate": 825,
-      "token_estimate": 825
+      "body_bytes": 3822,
+      "body_lines": 66,
+      "closure_bytes": 3822,
+      "closure_token_estimate": 956,
+      "token_estimate": 956
     },
     "save": {
       "body_bytes": 11970,

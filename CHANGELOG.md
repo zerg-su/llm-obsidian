@@ -23,6 +23,9 @@ packages were published for them.
 - Added unified simple/deep review contracts and a four-cell, exact-SHA live
   acceptance driver for Claude, Codex, cross-runtime composition, and deep
   review.
+- Added one state-driven review facade for both dispatched tasks and the
+  current checkout; ad-hoc review no longer requires hand-built harness
+  pointers or `.task-meta.json`.
 
 ### Changed
 
