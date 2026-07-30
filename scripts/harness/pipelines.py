@@ -14,6 +14,7 @@ IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 SCHEMA_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 ENFORCEMENT = {"policy-only", "sandbox-enforced"}
+COMPILER_VERSION = "1.0.0"
 
 
 def _identifier(value: str, label: str) -> str:
@@ -168,6 +169,8 @@ class PipelineDefinition:
     pipeline_id: str
     version: str
     profile: str
+    input_schema: str
+    output_schema: str
     steps: tuple[PipelineStep, ...]
     permission_ceiling: tuple[str, ...] = ()
     side_effect_ceiling: tuple[str, ...] = ()
@@ -179,6 +182,8 @@ class PipelineDefinition:
         _identifier(self.pipeline_id, "pipeline_id")
         _version(self.version, "pipeline version")
         _identifier(self.profile, "pipeline profile")
+        _schema_id(self.input_schema, "pipeline input_schema")
+        _schema_id(self.output_schema, "pipeline output_schema")
         if not isinstance(self.steps, tuple) or not self.steps:
             raise ContractError("pipeline must contain at least one step")
         if len({step.step_id for step in self.steps}) != len(self.steps):
@@ -234,6 +239,7 @@ class PrimitiveRegistry:
 @dataclass(frozen=True)
 class CompiledPipeline:
     definition: PipelineDefinition
+    compiler_version: str
     canonical_definition: str
     definition_sha256: str
     resolved_primitives: tuple[str, ...]
@@ -276,6 +282,14 @@ def compile_pipeline(
         side_effects.update(primitive.side_effects)
         previous = primitive
 
+    if resolved[0].input_schema != definition.input_schema:
+        raise ContractError(
+            "pipeline input schema does not match the first primitive"
+        )
+    if resolved[-1].output_schema != definition.output_schema:
+        raise ContractError(
+            "pipeline output schema does not match the terminal primitive"
+        )
     ordered_permissions = tuple(sorted(permissions))
     ordered_side_effects = tuple(sorted(side_effects))
     if not permissions.issubset(definition.permission_ceiling):
@@ -299,6 +313,7 @@ def compile_pipeline(
     )
     canonical = json.dumps(
         {
+            "compiler_version": COMPILER_VERSION,
             "definition": to_dict(definition),
             "resolved_primitives": [to_dict(primitive) for primitive in resolved],
             "bindings": [to_dict(binding) for binding in bindings],
@@ -308,6 +323,7 @@ def compile_pipeline(
     )
     return CompiledPipeline(
         definition=definition,
+        compiler_version=COMPILER_VERSION,
         canonical_definition=canonical,
         definition_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
         resolved_primitives=tuple(primitive.identity for primitive in resolved),

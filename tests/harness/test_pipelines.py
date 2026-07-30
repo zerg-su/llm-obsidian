@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -102,6 +103,8 @@ definition = PipelineDefinition(
     pipeline_id="engineering",
     version="1.0.0",
     profile="change",
+    input_schema="task-contract/v1",
+    output_schema="review-approved/v1",
     steps=(
         PipelineStep("approve", "human_gate", "1.0.0"),
         PipelineStep("implement", "model_step", "1.0.0"),
@@ -124,6 +127,7 @@ recompiled = compile_pipeline(
 )
 
 check("pipeline contracts are frozen", dataclasses.is_dataclass(compiled) and compiled.__dataclass_params__.frozen)
+check("compiled contract pins compiler compatibility", compiled.compiler_version == "1.0.0")
 check("canonical definition hash is stable", compiled.definition_sha256 == recompiled.definition_sha256 and len(compiled.definition_sha256) == 64)
 check(
     "compiler resolves exact primitive versions",
@@ -163,4 +167,29 @@ check(
     and compiled.definition_sha256 in summary
     and "model=1 review=1 verify=2" in summary
     and "product-write [sandbox-enforced:workspace-root]" in summary,
+)
+
+
+def expect_compile_error(label: str, value: PipelineDefinition, token: str) -> None:
+    try:
+        compile_pipeline(
+            value,
+            registry,
+            capabilities=("provider:authenticated",),
+        )
+    except Exception as exc:
+        check(label, token in str(exc))
+    else:
+        check(label, False)
+
+
+expect_compile_error(
+    "compiler rejects a mismatched pipeline input schema",
+    replace(definition, input_schema="wrong/v1"),
+    "pipeline input schema",
+)
+expect_compile_error(
+    "compiler rejects a mismatched pipeline output schema",
+    replace(definition, output_schema="wrong/v1"),
+    "pipeline output schema",
 )
