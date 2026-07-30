@@ -8,6 +8,7 @@
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
 	@python3 tests/harness/test_contracts.py
+	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
