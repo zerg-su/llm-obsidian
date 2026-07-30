@@ -35,14 +35,10 @@ registry = PrimitiveRegistry(
         PrimitiveDefinition(
             "human_gate",
             "1.0.0",
-            "task-contract/v1",
-            "approved-contract/v1",
         ),
         PrimitiveDefinition(
             "model_step",
             "1.0.0",
-            "approved-contract/v1",
-            "change/v1",
             budget=PipelineBudget(
                 model_calls=1,
                 token_limit=20_000,
@@ -56,8 +52,6 @@ registry = PrimitiveRegistry(
         PrimitiveDefinition(
             "verify",
             "1.0.0",
-            "change/v1",
-            "change/v1",
             budget=PipelineBudget(
                 verification_calls=2,
                 deadline_seconds=120,
@@ -67,8 +61,6 @@ registry = PrimitiveRegistry(
         PrimitiveDefinition(
             "review",
             "1.0.0",
-            "change/v1",
-            "review-approved/v1",
             budget=PipelineBudget(
                 review_calls=1,
                 token_limit=40_000,
@@ -106,10 +98,34 @@ definition = PipelineDefinition(
     input_schema="task-contract/v1",
     output_schema="review-approved/v1",
     steps=(
-        PipelineStep("approve", "human_gate", "1.0.0"),
-        PipelineStep("implement", "model_step", "1.0.0"),
-        PipelineStep("verify", "verify", "1.0.0"),
-        PipelineStep("review", "review", "1.0.0"),
+        PipelineStep(
+            "approve",
+            "human_gate",
+            "1.0.0",
+            "task-contract/v1",
+            "approved-contract/v1",
+        ),
+        PipelineStep(
+            "implement",
+            "model_step",
+            "1.0.0",
+            "approved-contract/v1",
+            "change/v1",
+        ),
+        PipelineStep(
+            "verify",
+            "verify",
+            "1.0.0",
+            "change/v1",
+            "change/v1",
+        ),
+        PipelineStep(
+            "review",
+            "review",
+            "1.0.0",
+            "change/v1",
+            "review-approved/v1",
+        ),
     ),
     permission_ceiling=("product-write",),
     side_effect_ceiling=("verification-process", "workspace-write"),

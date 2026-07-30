@@ -111,8 +111,6 @@ class PrimitiveDefinition:
 
     primitive_id: str
     version: str
-    input_schema: str
-    output_schema: str
     budget: PipelineBudget = field(default_factory=PipelineBudget)
     permissions: tuple[str, ...] = ()
     side_effects: tuple[str, ...] = ()
@@ -124,8 +122,6 @@ class PrimitiveDefinition:
             raise ContractError("unsupported PrimitiveDefinition schema")
         _identifier(self.primitive_id, "primitive_id")
         _version(self.version, "primitive version")
-        _schema_id(self.input_schema, "primitive input_schema")
-        _schema_id(self.output_schema, "primitive output_schema")
         object.__setattr__(
             self, "permissions", _identifiers(self.permissions, "primitive permission")
         )
@@ -152,6 +148,8 @@ class PipelineStep:
     step_id: str
     primitive_id: str
     primitive_version: str
+    input_schema: str
+    output_schema: str
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -160,6 +158,8 @@ class PipelineStep:
         _identifier(self.step_id, "step_id")
         _identifier(self.primitive_id, "step primitive_id")
         _version(self.primitive_version, "step primitive_version")
+        _schema_id(self.input_schema, "step input_schema")
+        _schema_id(self.output_schema, "step output_schema")
 
 
 @dataclass(frozen=True)
@@ -263,13 +263,13 @@ def compile_pipeline(
     budget = PipelineBudget()
     permissions: set[str] = set()
     side_effects: set[str] = set()
-    previous: PrimitiveDefinition | None = None
+    previous: PipelineStep | None = None
     for step in definition.steps:
         primitive = registry.resolve(step.primitive_id, step.primitive_version)
-        if previous and previous.output_schema != primitive.input_schema:
+        if previous and previous.output_schema != step.input_schema:
             raise ContractError(
                 f"schema mismatch before step {step.step_id}: "
-                f"{previous.output_schema} != {primitive.input_schema}"
+                f"{previous.output_schema} != {step.input_schema}"
             )
         missing = set(primitive.required_capabilities) - available
         if missing:
@@ -280,13 +280,13 @@ def compile_pipeline(
         budget = budget + primitive.budget
         permissions.update(primitive.permissions)
         side_effects.update(primitive.side_effects)
-        previous = primitive
+        previous = step
 
-    if resolved[0].input_schema != definition.input_schema:
+    if definition.steps[0].input_schema != definition.input_schema:
         raise ContractError(
             "pipeline input schema does not match the first primitive"
         )
-    if resolved[-1].output_schema != definition.output_schema:
+    if definition.steps[-1].output_schema != definition.output_schema:
         raise ContractError(
             "pipeline output schema does not match the terminal primitive"
         )
