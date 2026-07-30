@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import RuntimeRoute, to_dict
 from harness.pipeline_builtins import builtin_definitions, builtin_registry
-from harness.pipeline_shadow import shadow_lifecycle
+from harness.pipeline_shadow import shadow_lifecycle, shadow_staged_operations
 from harness.pipelines import compile_pipeline
 from harness.workflows.dispatch import DispatchRequest
 from harness.workflows.dispatch import operation_spec as dispatch_spec
@@ -24,6 +24,13 @@ from harness.workflows.review import (
     ReviewRequest,
 )
 from harness.workflows.review import operation_spec as review_spec
+from harness.workflows.research import (
+    ResearchContext,
+    ResearchOperationRequest,
+    ResearchRequest,
+    _stage_spec,
+)
+from harness.workflows.research import operation_spec as research_spec
 
 
 def check(label: str, value: bool) -> None:
@@ -101,4 +108,51 @@ check(
     not wrong.parity
     and wrong.mismatches == ("review: expected review session, observed dispatch",)
     and review.kind == "simple-review",
+)
+
+research_route = RuntimeRoute(
+    "codex",
+    "gpt-5.6-sol",
+    "high",
+    "research-safe",
+    "f" * 64,
+)
+research_request = ResearchOperationRequest(
+    ResearchRequest(
+        "research-1",
+        "packets/research/question.bin",
+        "packets/research/manifest.json",
+    ),
+    "owner-1",
+    research_route,
+    ResearchContext(
+        "packets/research/manifest.json",
+        "1" * 64,
+    ),
+)
+parent = research_spec(research_request)
+fetch = _stage_spec(research_request, "fetch")
+synth = _stage_spec(research_request, "synth")
+staged = shadow_staged_operations(
+    flow_id="research",
+    parent=parent,
+    stages=(fetch, synth),
+    expected_kinds=("research-fetch", "research-synth"),
+)
+check(
+    "research proves the staged one-operation-per-step pattern",
+    staged.parity
+    and staged.stage_kinds == ("research-fetch", "research-synth")
+    and staged.distinct_operations == 3,
+)
+duplicated = shadow_staged_operations(
+    flow_id="research",
+    parent=parent,
+    stages=(fetch, fetch),
+    expected_kinds=("research-fetch", "research-synth"),
+)
+check(
+    "staged shadow rejects reused operation identity",
+    not duplicated.parity
+    and "stage operation identities are not unique" in duplicated.mismatches,
 )

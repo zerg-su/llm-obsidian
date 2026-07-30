@@ -31,6 +31,25 @@ class PipelineShadowReport:
             raise ContractError("shadow parity must agree with its mismatches")
 
 
+@dataclass(frozen=True)
+class StagedOperationShadowReport:
+    flow_id: str
+    parent_kind: str
+    stage_kinds: tuple[str, ...]
+    distinct_operations: int
+    mismatches: tuple[str, ...]
+    parity: bool
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1 or self.distinct_operations < 0:
+            raise ContractError("invalid staged shadow metadata")
+        _identifier(self.flow_id, "staged shadow flow_id")
+        _identifier(self.parent_kind, "staged shadow parent_kind")
+        if self.parity != (not self.mismatches):
+            raise ContractError("staged shadow parity disagrees with mismatches")
+
+
 def shadow_lifecycle(
     compiled: CompiledPipeline,
     *,
@@ -82,6 +101,42 @@ def shadow_lifecycle(
         owner_id=dispatch.owner_id,
         expected_steps=expected,
         observed_steps=observed,
+        mismatches=tuple(mismatches),
+        parity=not mismatches,
+    )
+
+
+def shadow_staged_operations(
+    *,
+    flow_id: str,
+    parent: OperationSpec,
+    stages: tuple[OperationSpec, ...],
+    expected_kinds: tuple[str, ...],
+) -> StagedOperationShadowReport:
+    """Prove an existing workflow uses distinct owner-scoped stage operations."""
+
+    mismatches: list[str] = []
+    stage_kinds = tuple(stage.kind for stage in stages)
+    if stage_kinds != expected_kinds:
+        mismatches.append("stage operation kinds differ from the frozen pattern")
+    if any(stage.owner_id != parent.owner_id for stage in stages):
+        mismatches.append("stage operation owner differs from its parent")
+    operation_ids = (parent.operation_id,) + tuple(
+        stage.operation_id for stage in stages
+    )
+    idempotency_keys = (parent.idempotency_key,) + tuple(
+        stage.idempotency_key for stage in stages
+    )
+    distinct_operations = len(set(operation_ids))
+    if distinct_operations != len(operation_ids):
+        mismatches.append("stage operation identities are not unique")
+    if len(set(idempotency_keys)) != len(idempotency_keys):
+        mismatches.append("stage replay identities are not unique")
+    return StagedOperationShadowReport(
+        flow_id=flow_id,
+        parent_kind=parent.kind,
+        stage_kinds=stage_kinds,
+        distinct_operations=distinct_operations,
         mismatches=tuple(mismatches),
         parity=not mismatches,
     )
