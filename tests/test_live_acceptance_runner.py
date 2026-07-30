@@ -321,17 +321,18 @@ with tempfile.TemporaryDirectory(prefix="live-release-preflight.") as raw:
         and {
             (
                 route.runtime,
+                route.model,
                 route.effort,
                 route.profile,
             )
             for route, _callback_dir in checked_routes
         }
         == {
-            ("claude", "high", "executor"),
-            ("codex", "high", "executor"),
-            ("claude", "high", "reviewer-callback"),
-            ("claude", "xhigh", "reviewer-callback"),
-            ("codex", "xhigh", "reviewer-callback"),
+            ("claude", "claude-opus-5", "high", "executor"),
+            ("codex", "gpt-5.6-sol", "high", "executor"),
+            ("claude", "claude-opus-5", "high", "reviewer-callback"),
+            ("claude", "fable", "xhigh", "reviewer-callback"),
+            ("codex", "gpt-5.6-sol", "xhigh", "reviewer-callback"),
         },
     )
     check(

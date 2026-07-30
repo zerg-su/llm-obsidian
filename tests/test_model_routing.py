@@ -152,6 +152,29 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     routing.sync_native(config, apply=True)
     check("native drift repaired", routing.sync_native(config, apply=False) == [])
 
+    tracked_path = root / "config/model-routing.toml"
+    tracked = tracked_path.read_text(encoding="utf-8")
+    wrong_generation = tracked.replace(
+        'target = "claude-opus-5"\nexpected_generation = 5',
+        'target = "claude-opus-4-8"\nexpected_generation = 5',
+        1,
+    ).replace(
+        '"claude-opus-5" = "claude"',
+        '"claude-opus-5" = "claude"\n"claude-opus-4-8" = "claude"',
+        1,
+    )
+    tracked_path.write_text(wrong_generation, encoding="utf-8")
+    try:
+        routing.load_config(root)
+    except routing.RoutingError as exc:
+        check(
+            "versioned Claude alias generation drift fails closed",
+            "expected generation drift" in str(exc),
+        )
+    else:
+        check("versioned Claude alias generation drift fails closed", False)
+    tracked_path.write_text(tracked, encoding="utf-8")
+
     (root / "config/model-routing.local.toml").write_text(
         '[runtimes.claude]\nmodel = "sonnet"\n'
         '[model_aliases.sol]\ntarget = "codex-review"\n'

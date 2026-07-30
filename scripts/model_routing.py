@@ -120,6 +120,11 @@ def validate_effort(runtime: str, effort: Any) -> str:
     return effort
 
 
+def _versioned_claude_generation(target: str) -> int | None:
+    match = re.fullmatch(r"claude-[a-z0-9]+-(\d+)(?:-\d+)*", target)
+    return int(match.group(1)) if match else None
+
+
 def _validate(data: dict[str, Any]) -> None:
     if data.get("schema_version") != 1:
         raise RoutingError("model routing schema_version must be 1")
@@ -177,6 +182,13 @@ def _validate(data: dict[str, Any]) -> None:
             raise RoutingError(f"model_aliases.{alias} target/runtime mismatch")
         generation = item.get("expected_generation")
         if runtime == "claude" and generation != 5:
+            raise RoutingError(f"model_aliases.{alias} expected generation drift")
+        target_generation = (
+            _versioned_claude_generation(target)
+            if runtime == "claude"
+            else None
+        )
+        if target_generation is not None and target_generation != generation:
             raise RoutingError(f"model_aliases.{alias} expected generation drift")
         if runtime == "codex" and generation is not None:
             raise RoutingError(f"model_aliases.{alias} must not declare a Claude generation")

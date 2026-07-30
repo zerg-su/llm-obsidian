@@ -32,9 +32,22 @@ records remain readable. Concrete top-level model/effort fields in old metadata
 are treated as explicit historical overrides. New task metadata carries both
 `routing.session` and `routing.effective`.
 
-The tracked `opus` alias resolves to the versioned `claude-opus-5` target
-instead of the host's moving `opus` alias, so older Claude Code installations
-cannot silently route a 2.3 review to Opus 4.8.
+The tracked `opus` alias resolves to the user-selected, versioned
+`claude-opus-5` target instead of the host's moving `opus` alias. A host that
+cannot honor the exact target must fail the provider-backed release gate; it
+must not silently route a 2.3 review to Opus 4.8. For a versioned Claude target,
+`expected_generation` is checked against the generation encoded in the target.
+The `fable` profile remains a moving family alias by design; its generation
+declaration is routing intent, not a provider catalog probe, and therefore only
+the provider-backed release gate can validate what the host resolved.
+
+The hermetic capability handshake proves route shape, CLI flags,
+authentication/subscription, callback permissions, and the absence of a model
+process before launch. It deliberately does not claim that the provider accepts
+an exact model name: Claude exposes no required zero-effect catalog API. The
+mandatory `claude-lifecycle` and review cells in `make acceptance-live` launch
+the exact configured targets and are the provider-availability proof for the
+release SHA.
 
 ## Session snapshots
 
