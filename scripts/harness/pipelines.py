@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from .contracts import ContractError, to_dict
+from .contracts import ContractError, OperationSpec, RuntimeRoute, to_dict
 
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -32,6 +32,12 @@ def _version(value: str, label: str) -> str:
 def _schema_id(value: str, label: str) -> str:
     if not isinstance(value, str) or not SCHEMA_ID.fullmatch(value):
         raise ContractError(f"{label} must be a bounded schema identifier")
+    return value
+
+
+def _sha256(value: str, label: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ContractError(f"{label} must be a SHA-256 digest")
     return value
 
 
@@ -250,6 +256,30 @@ class CompiledPipeline:
     schema_version: int = 1
 
 
+@dataclass(frozen=True)
+class PipelineOperationBinding:
+    """Exact bridge from one compiled semantic step to the 2.3 kernel."""
+
+    definition_sha256: str
+    step_id: str
+    input_sha256: str
+    output_schema: str
+    replay_key: str
+    spec: OperationSpec
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported PipelineOperationBinding schema")
+        _sha256(self.definition_sha256, "pipeline definition")
+        _identifier(self.step_id, "pipeline step_id")
+        _sha256(self.input_sha256, "pipeline step input")
+        _schema_id(self.output_schema, "pipeline step output_schema")
+        _sha256(self.replay_key, "pipeline replay key")
+        if self.spec.idempotency_key != self.replay_key:
+            raise ContractError("pipeline operation must retain its replay identity")
+
+
 def compile_pipeline(
     definition: PipelineDefinition,
     registry: PrimitiveRegistry,
@@ -335,6 +365,61 @@ def compile_pipeline(
         permissions=ordered_permissions,
         side_effects=ordered_side_effects,
         bindings=bindings,
+    )
+
+
+def bind_step_operation(
+    compiled: CompiledPipeline,
+    *,
+    step_id: str,
+    operation_id: str,
+    owner_id: str,
+    route: RuntimeRoute,
+    context_manifest: str,
+    verification_profile: str,
+    input_sha256: str,
+) -> PipelineOperationBinding:
+    """Bind one semantic/effectful step to one existing OperationSpec."""
+
+    matches = tuple(
+        step for step in compiled.definition.steps if step.step_id == step_id
+    )
+    if len(matches) != 1:
+        raise ContractError(f"unknown pipeline step: {step_id}")
+    step = matches[0]
+    if step.primitive_id in {"human_gate", "bounded_loop"}:
+        raise ContractError(
+            f"{step.primitive_id} is a controller boundary, not an operation"
+        )
+    input_digest = _sha256(input_sha256, "pipeline step input")
+    replay_payload = json.dumps(
+        {
+            "compiler_version": compiled.compiler_version,
+            "definition_sha256": compiled.definition_sha256,
+            "input_sha256": input_digest,
+            "schema_version": 1,
+            "step_id": step.step_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    replay_key = hashlib.sha256(replay_payload).hexdigest()
+    spec = OperationSpec(
+        operation_id=operation_id,
+        idempotency_key=replay_key,
+        kind=f"pipeline-{step.primitive_id.replace('_', '-')}",
+        owner_id=owner_id,
+        route=route,
+        context_manifest=context_manifest,
+        verification_profile=verification_profile,
+    )
+    return PipelineOperationBinding(
+        definition_sha256=compiled.definition_sha256,
+        step_id=step.step_id,
+        input_sha256=input_digest,
+        output_schema=step.output_schema,
+        replay_key=replay_key,
+        spec=spec,
     )
 
 

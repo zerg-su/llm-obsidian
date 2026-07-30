@@ -15,13 +15,16 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.pipelines import (
     PipelineBudget,
     PipelineDefinition,
+    PipelineOperationBinding,
     PipelineStep,
     PolicyBinding,
     PrimitiveDefinition,
     PrimitiveRegistry,
+    bind_step_operation,
     compile_pipeline,
     render_contract,
 )
+from harness.contracts import RuntimeRoute
 
 
 def check(label: str, value: bool) -> None:
@@ -227,4 +230,51 @@ expect_compile_error(
         ),
     ),
     "bounded_loop requires",
+)
+
+route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
+operation = bind_step_operation(
+    compiled,
+    step_id="implement",
+    operation_id="pipeline-implement-1",
+    owner_id="owner-1",
+    route=route,
+    context_manifest="packets/one/manifest.json",
+    verification_profile="scoped",
+    input_sha256="b" * 64,
+)
+rebound = bind_step_operation(
+    compiled,
+    step_id="implement",
+    operation_id="pipeline-implement-1",
+    owner_id="owner-1",
+    route=route,
+    context_manifest="packets/one/manifest.json",
+    verification_profile="scoped",
+    input_sha256="b" * 64,
+)
+check(
+    "semantic step binds to one exact OperationSpec",
+    isinstance(operation, PipelineOperationBinding)
+    and operation == rebound
+    and operation.spec.operation_id == "pipeline-implement-1"
+    and operation.spec.kind == "pipeline-model-step"
+    and operation.spec.idempotency_key == operation.replay_key
+    and operation.definition_sha256 == compiled.definition_sha256
+    and operation.input_sha256 == "b" * 64
+    and operation.output_schema == "change/v1",
+)
+changed_input = bind_step_operation(
+    compiled,
+    step_id="implement",
+    operation_id="pipeline-implement-2",
+    owner_id="owner-1",
+    route=route,
+    context_manifest="packets/one/manifest.json",
+    verification_profile="scoped",
+    input_sha256="c" * 64,
+)
+check(
+    "replay identity changes with exact step input",
+    changed_input.replay_key != operation.replay_key,
 )
