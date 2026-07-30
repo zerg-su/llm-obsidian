@@ -510,6 +510,14 @@ def _prompt(
         if verification
         else f"review-{_axis_name(axis)}.md"
     )
+    callback_directory = _callback_path(runtime_root, axis).parent
+    if callback_directory.exists() and (
+        callback_directory.is_symlink()
+        or not callback_directory.is_dir()
+    ):
+        raise TaskReviewError("review callback directory is invalid")
+    callback_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    callback_directory.chmod(0o700)
     pointer = f"prompts/{name}"
     submit = shlex.join(
         (
@@ -669,7 +677,14 @@ def _run_review(
     )
     preset, request = _request(meta, vault, task_id, context)
     gate = ReviewGateController(gate_root, runtime, store)
-    if not gate.state_path.exists():
+    gate_exists = gate.state_path.exists()
+    pending_replay = False
+    if gate_exists:
+        initial_state = gate.read()
+        pending_replay = initial_state.get("status") == "pending"
+        if pending_replay and initial_state.get("lanes") != []:
+            raise TaskReviewError("pending review gate already owns lanes")
+    if not gate_exists or pending_replay:
         if not preset.enabled:
             ReviewGateController.skip(
                 gate_root,

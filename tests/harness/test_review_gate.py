@@ -1095,8 +1095,29 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         capture_output=True,
         text=True,
     )
+
+    class FailOnceCurrentRuntime(FakeRuntime):
+        def __init__(self, store: OperationStore) -> None:
+            super().__init__(store)
+            self.fail_once = True
+
+        def start(
+            self, request: object, *, on_surface_opened=None
+        ) -> FakeSessionResult:
+            callback = request.cwd / request.callback_pointer
+            if not callback.parent.is_dir():
+                raise AssertionError(
+                    "current review must prepare callback scratch before start"
+                )
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeError("simulated pre-launch interruption")
+            return super().start(
+                request, on_surface_opened=on_surface_opened
+            )
+
     current_store = OperationStore(product / ".vault-meta/harness")
-    current_runtime = FakeRuntime(current_store)
+    current_runtime = FailOnceCurrentRuntime(current_store)
     old_environment = {
         name: os.environ.get(name)
         for name in (
@@ -1109,9 +1130,21 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
     os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
     try:
+        try:
+            task_review_runner.run_current_review(
+                product,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError(
+                "current review interruption fixture did not fail"
+            )
         started = task_review_runner.run_current_review(
             product,
-            origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
@@ -1133,6 +1166,15 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and current_runtime.started[0].cwd != product.resolve()
             and manifest.is_file()
             and product.resolve() not in manifest.parents,
+        )
+        check(
+            "current checkout review resumes its initialized pre-launch gate",
+            json.loads(
+                (current_gate_root / "review-gate.json").read_text(
+                    encoding="utf-8"
+                )
+            )["status"]
+            == "reviewing",
         )
         lane = started["lanes"][0]
         active = task_review_runner.load_active_round(
