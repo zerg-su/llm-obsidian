@@ -30,6 +30,9 @@ import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
 from task_sessions import TaskSessionStore
+from harness.verification import load_profiles
+from harness.workflows.review import ReviewContext
+from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 
 
 def run(script: Path, *args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -177,28 +180,82 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     else:
         check("review archive tamper blocks finalization", False)
     archive_page.write_text("# Review fixture\n", encoding="utf-8")
-    broker_store = TaskSessionStore(worktree)
-    broker_project = str(uuid.uuid4())
     broker_task = str(uuid.uuid4())
-    broker_worktree = worktree / "broker-worktree"
-    broker_worktree.mkdir()
-    broker_store.create_task(broker_project, broker_task, worktree=broker_worktree)
-    failed_review = broker_store.enqueue_operation(
-        broker_project, broker_task, domain="review", runtime="claude", model="fable",
-        effort="high", operation_type="review", coordinator_surface="surface-failed",
+    broker_temp = tempfile.TemporaryDirectory(
+        prefix="task-lifecycle-broker."
     )
-    broker_store.claim_next(
-        broker_project, broker_task, failed_review["lane_id"], failed_review["operation_id"]
+    broker_worktree = Path(broker_temp.name)
+    for command in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "review-test@example.invalid"),
+        ("git", "config", "user.name", "Review Test"),
+    ):
+        subprocess.run(command, cwd=broker_worktree, check=True)
+    (broker_worktree / "review-product.txt").write_text(
+        "ready\n", encoding="utf-8"
     )
-    broker_store.transition_operation(
-        broker_project, broker_task, failed_review["lane_id"], failed_review["operation_id"],
-        "failed", degradation="reviewer-exit",
+    subprocess.run(
+        ["git", "add", "review-product.txt"],
+        cwd=broker_worktree,
+        check=True,
     )
+    subprocess.run(
+        ["git", "commit", "-qm", "ready"], cwd=broker_worktree, check=True
+    )
+    (worktree / ".vault-meta" / "harness").mkdir(parents=True)
+    (worktree / "config").mkdir()
+    shutil.copy2(
+        ROOT / "config" / "verification-profiles.toml",
+        worktree / "config" / "verification-profiles.toml",
+    )
+    profile = load_profiles(
+        worktree / "config" / "verification-profiles.toml"
+    )["scoped"]
+    broker_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=broker_worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
     broker_meta = {
-        "version": 3, "project_id": broker_project, "task_id": broker_task,
+        "version": 3,
+        "task_id": broker_task,
         "vault_root": str(worktree),
+        "worktree": str(broker_worktree),
+        "review_policy": {
+            "mode": "skip",
+            "cross_model": False,
+            "runtime": "",
+            "model": "",
+            "effort": "",
+            "max_verify_iterations": 0,
+            "verification_profile": profile.name,
+            "verification_profile_sha256": profile.sha256,
+        },
     }
     write_json(broker_worktree / ".task-meta.json", broker_meta)
+    gate = (
+        worktree
+        / ".vault-meta"
+        / "harness"
+        / "review-data"
+        / broker_task
+        / broker_task
+    )
+    ReviewGateController.skip(
+        gate,
+        dispatch_operation_id=broker_task,
+        owner_id=broker_task,
+        preset=ReviewPreset.from_flags(no_review=True),
+        context=ReviewContext(
+            "packets/task/manifest.json",
+            broker_head,
+            profile.name,
+            profile.sha256,
+        ),
+        product_root=broker_worktree,
+    )
     accounted = run(
         ROOT / "scripts" / "archive_task_reviews.py",
         "--worktree", str(broker_worktree), "--vault-root", str(worktree),
@@ -206,51 +263,22 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     accounted_value = json.loads(accounted.stdout)
     check(
-        "terminal failed review is accountably skippable by the archive pass",
+        "typed exact no-review gate is accountably archive-free",
         accounted.returncode == 0
-        and accounted_value["failed_operations"] == [failed_review["operation_id"]]
+        and accounted_value["failed_operations"] == []
         and accounted_value["markers"] == [],
         accounted.stderr,
     )
-    try:
-        lifecycle_module.validated_review_archives(broker_worktree, worktree, broker_meta)
-    except SystemExit as exc:
-        check("failed review alone never satisfies final approval", exc.code == 3)
-    else:
-        check("failed review alone never satisfies final approval", False)
-
-    approved_review = broker_store.enqueue_operation(
-        broker_project, broker_task, domain="review", runtime="claude", model="fable",
-        effort="high", operation_type="review", coordinator_surface="surface-approved",
-    )
-    broker_store.claim_next(
-        broker_project, broker_task, approved_review["lane_id"], approved_review["operation_id"]
-    )
-    broker_store.transition_operation(
-        broker_project, broker_task, approved_review["lane_id"], approved_review["operation_id"],
-        "complete",
-    )
-    approved_state_dir = Path(approved_review["operation_dir"])
-    approved_page = worktree / "wiki" / "meta" / "reviews" / "Approved replacement review.md"
-    approved_page.write_text("# Approved replacement review\n", encoding="utf-8")
-    write_json(approved_state_dir / ".review-meta.json", {"review_id": approved_review["operation_id"]})
-    write_json(approved_state_dir / ".review-archive.json", {
-        "schema_version": 1,
-        "status": "archived",
-        "review_id": approved_review["operation_id"],
-        "path": "wiki/meta/reviews/Approved replacement review.md",
-        "title": "Approved replacement review",
-        "wikilink": "[[Approved replacement review]]",
-        "verdict": "approve",
-        "content_sha256": hashlib.sha256(approved_page.read_bytes()).hexdigest(),
-    })
-    recovered_archives = lifecycle_module.validated_review_archives(
-        broker_worktree, worktree, broker_meta
-    )
     check(
-        "approved review unblocks failed-cycle accounting",
-        len(recovered_archives) == 1
-        and recovered_archives[0]["review_id"] == approved_review["operation_id"],
+        "typed skip produces no synthetic archive marker",
+        not (gate / ".review-archive.json").exists(),
+    )
+    # Legacy broker state remains covered below only for the still-supported
+    # reviewer surface lifecycle; v3 final review archival no longer reads it.
+    broker_store = TaskSessionStore(worktree)
+    broker_project = str(uuid.uuid4())
+    broker_store.create_task(
+        broker_project, broker_task, worktree=broker_worktree
     )
     meta = {
         "version": 2,
@@ -264,7 +292,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
         "review_policy": {
-            "mode": "light",
+            "mode": "simple",
             "max_verify_iterations": 2,
             "auto_resolve_severities": ["warning", "nit"],
             "escalate_severities": ["blocking"],
@@ -512,7 +540,18 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "supervisor grants only the task Git metadata root",
         agent_spec["argv"][add_dir_index + 1] == str((worktree / ".git").resolve()),
     )
-    v3_meta = dict(meta)
+    v3_meta = json.loads(json.dumps(meta))
+    v3_meta["review_policy"].update(
+        {
+            "cross_model": False,
+            "runtime": "",
+            "model": "",
+            "effort": "",
+            "max_verify_iterations": 1,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": "a" * 64,
+        }
+    )
     v3_meta.update({"version": 3, "project_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4())})
     (worktree / "config" / "dcg").mkdir(parents=True)
     shutil.copy2(ROOT / "config" / "dcg" / "task.toml", worktree / "config" / "dcg" / "task.toml")
@@ -714,25 +753,54 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "Accessing workspace:\nQuick safety check: Is this a project you created or one you trust?\n"
         "1. Yes, I trust this folder\nEnter to confirm\n"
     )
+    claude_trust_screen_with_cancel = (
+        "Accessing workspace:\nQuick safety check: Is this a project you created or one you trust?\n"
+        "1. Yes, I trust this folder\n2. No, exit\nEnter to confirm · Esc to cancel\n"
+    )
     wrapped_claude_trust_screen = (
         "Accessing workspace:\nQuick safety check: Is this a project you crea\n"
         "ted or one you trust?\n1. Yes, I trust this fol\nder\nEnter to confirm\n"
     )
+    current_claude_trust_screen = (
+        "Accessing workspace:\nQuick safety check: Is this a project you created or one you trust?\n"
+        "1. Yes,\nI\ntrust\nthis\n2. No, exit\nEnter to confirm\n"
+    )
     codex_trust_screen = (
         "Do you trust the contents of this directory?\n1. Yes, continue\n2. No, quit\nPress enter\n"
+    )
+    codex_trust_screen_to_continue = codex_trust_screen.replace(
+        "Press enter\n", "Press enter to continue\n"
+    )
+    trust_source_screen = (
+        'markers = ("Accessing workspace:",\n'
+        '  "Quick safety check: Is this a project you created or one you trust?",\n'
+        '  "Yes, I trust this",\n'
+        '  "Enter to confirm",\n'
+        ")\n"
     )
     check(
         "supervisor recognizes only complete native trust prompts",
         supervisor_module.workspace_trust_prompt_visible("claude", claude_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible(
+            "claude", claude_trust_screen_with_cancel
+        )
         and supervisor_module.workspace_trust_prompt_visible("claude", wrapped_claude_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible("claude", current_claude_trust_screen)
         and supervisor_module.workspace_trust_prompt_visible("codex", codex_trust_screen)
+        and supervisor_module.workspace_trust_prompt_visible(
+            "codex", codex_trust_screen_to_continue
+        )
         and supervisor_module.workspace_trust_prompt_visible(
             "codex",
             "Do you trust the contents of this direc\ntory?\n1. Yes, conti\nnue\n"
             "2. No, q\nuit\nPress ent\ner\n",
         )
         and not supervisor_module.workspace_trust_prompt_visible("claude", codex_trust_screen)
-        and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue"),
+        and not supervisor_module.workspace_trust_prompt_visible("codex", "1. Yes, continue")
+        and not supervisor_module.workspace_trust_prompt_visible("claude", trust_source_screen)
+        and not supervisor_module.workspace_trust_prompt_visible(
+            "claude", claude_trust_screen + "\n› Find and fix a bug\nstatus: active\n"
+        ),
     )
     check(
         "supervisor gives slow trust bootstrap a bounded thirty-minute window",
@@ -791,12 +859,28 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "3. Continue without using this MCP server\n"
         "Enter to confirm\n"
     )
+    claude_mcp_screen_with_cancel = claude_mcp_screen.replace(
+        "Enter to confirm\n", "Enter to confirm · Esc to cancel\n"
+    )
+    mcp_source_screen = (
+        'markers = ("New MCP server found in this project:",\n'
+        '  "MCP servers may execute code or access system resources.",\n'
+        '  "Use this MCP server",\n'
+        '  "Use this and all future MCP servers in this project",\n'
+        '  "Continue without using this MCP server",\n'
+        '  "Enter to confirm",\n'
+        ")\n"
+    )
     check(
         "supervisor recognizes only the complete Claude MCP trust prompt",
         supervisor_module.claude_mcp_trust_prompt_visible(claude_mcp_screen)
+        and supervisor_module.claude_mcp_trust_prompt_visible(
+            claude_mcp_screen_with_cancel
+        )
         and not supervisor_module.claude_mcp_trust_prompt_visible(
             "New MCP server found in this project: context7\n1. Use this MCP server\n"
-        ),
+        )
+        and not supervisor_module.claude_mcp_trust_prompt_visible(mcp_source_screen),
     )
     mcp_commands: list[list[str]] = []
 
@@ -859,7 +943,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     check(
         "automatic trust requires an unattended approved task",
-        supervisor_module.automatic_workspace_trust_allowed(worktree),
+        supervisor_module.automatic_workspace_trust_allowed(worktree, worktree, "task"),
     )
     write_json(worktree / ".task-meta.json", meta)
     write_json(worktree / ".task-agent-command.json", safe_agent_spec)
@@ -1062,10 +1146,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "reviewer_runtime": "claude",
         "executor_surface": meta["task_surface"],
     })
-    write_json(worktree / ".task-meta.json", {
-        "task_name": "root coordinator review",
-        "executor_runtime": "codex",
-    })
+    (worktree / ".task-meta.json").unlink()
     cmux_log.write_text("", encoding="utf-8")
     result = run(
         LIFECYCLE, "request-exit", "--worktree", str(worktree),
@@ -1114,8 +1195,20 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "running", surface=retry_surface,
     )
     retry_state_dir = Path(retry_review["operation_dir"])
+    retry_meta = json.loads(json.dumps(meta))
+    retry_meta["review_policy"].update(
+        {
+            "cross_model": False,
+            "runtime": "",
+            "model": "",
+            "effort": "",
+            "max_verify_iterations": 1,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": "a" * 64,
+        }
+    )
     write_json(broker_worktree / ".task-meta.json", {
-        **meta,
+        **retry_meta,
         "version": 3,
         "project_id": broker_project,
         "task_id": broker_task,

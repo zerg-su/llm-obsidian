@@ -27,5 +27,6 @@ send `/exit` to the agent only through the lifecycle wrapper, wait for process
 exit, then close only the recorded task surface. Preserve dirty worktrees and
 report them; never delete branches/worktrees automatically.
 
-Executable truth is `scripts/reap-runner.py`, `scripts/reap-send-runner.py`,
-`scripts/cmux_surface_lifecycle.py`, `scripts/vault-write.py`, and their tests.
+Executable truth is `scripts/reap-runner.py`, the harness Wiki Summary callback
+broker, `scripts/cmux_surface_lifecycle.py`, `scripts/vault-write.py`, and their
+tests.

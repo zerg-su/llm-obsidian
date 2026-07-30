@@ -8,7 +8,7 @@ DragonScale Memory — опциональное расширение `llm-obsidi
 
 ### Scope и opt-in статус
 
-DragonScale — memory-layer расширение для вики. Покрывает rollups, deterministic page-IDs, duplicate-detection, и один opt-in topic-selection путь для `/autoresearch`. Не требуется для базового вольта.
+DragonScale — memory-layer расширение для вики. Покрывает rollups, deterministic page-IDs, duplicate-detection, и один opt-in topic-selection путь для `/research`. Не требуется для базового вольта.
 
 Если вы никогда не запускали `bash bin/setup-dragonscale.sh`, base-инсталл и оригинальное skill-поведение остаются нетронутыми. Репо использует feature-detection чтобы DragonScale оставался опциональным вместо hard-dependency.
 
@@ -21,7 +21,7 @@ DragonScale — memory-layer расширение для вики. Покрыв�
 - Mechanism 1, Fold Operator: `skills/wiki-fold/`
 - Mechanism 2, Deterministic Page Addresses: `scripts/allocate-address.sh` плюс `wiki-ingest` и `wiki-lint` интеграция
 - Mechanism 3, Semantic Tiling Lint: `scripts/tiling-check.py` плюс `wiki-lint` интеграция
-- Mechanism 4, Boundary-First Autoresearch: `scripts/boundary-score.py` плюс `skills/autoresearch/SKILL.md` Topic Selection логика
+- Mechanism 4, Boundary-First Research: `scripts/boundary-score.py` плюс `skills/research/SKILL.md` Topic Selection логика
 
 Используйте `CHANGELOG.md` для release-trail, [docs/install-guide.md](./install-guide.md) для quick-start view, [wiki/concepts/DragonScale Memory.md](../wiki/concepts/DragonScale%20Memory.md) для полного design-контекста.
 
@@ -86,7 +86,7 @@ DragonScale задизайнен fail-closed или no-op cleanly.
 
 Если ollama unreachable, `scripts/tiling-check.py` exits `10`. Если ollama reachable но `bge-m3` не установлена, exits `11`. `wiki-lint` ожидаемо трактует это как skip-conditions для semantic-tiling, не как причину сломать остальной lint-flow.
 
-Если boundary-helper падает, `/autoresearch` fallback'ит к нормальному ask-the-user topic-пути. Не форсит candidate-list и не improvise topic.
+Если boundary-helper падает, `/research` fallback'ит к нормальному ask-the-user topic-пути. Не форсит candidate-list и не improvise topic.
 
 Если DragonScale-setup никогда не запускался, `wiki-ingest` и `wiki-lint` сохраняют их non-DragonScale поведение.
 
@@ -392,9 +392,9 @@ python3 ./scripts/tiling-check.py --report wiki/meta/tiling-report-YYYY-MM-DD.md
 2. перестать использовать semantic-tiling путь в `wiki-lint`
 3. не provision'ить ollama или модель если не нужны
 
-Заметьте что `.vault-meta/` shared-gate для Mechanisms 2, 3, 4. Не удаляйте чтобы отключить Mechanism 3 alone — также turn off address-allocation и boundary-first autoresearch. Tiling-cache живёт под `.vault-meta/` но inert когда helper не invoked.
+Заметьте что `.vault-meta/` shared-gate для Mechanisms 2, 3, 4. Не удаляйте чтобы отключить Mechanism 3 alone — также turn off address-allocation и boundary-first research. Tiling-cache живёт под `.vault-meta/` но inert когда helper не invoked.
 
-## Mechanism 4: Boundary-First Autoresearch
+## Mechanism 4: Boundary-First Research
 
 ### Что делает
 
@@ -414,7 +414,7 @@ Helper читает `wiki/**/*.md`, строит wikilink-граф, эмитит
 python3 ./scripts/boundary-score.py --json --top 5
 ```
 
-Это exact-команда которую autoresearch-скилл использует для candidate-generation.
+Это exact-команда которую research-скилл использует для candidate-generation.
 
 ### Agenda-control caveat
 
@@ -424,11 +424,11 @@ python3 ./scripts/boundary-score.py --json --top 5
 
 Mechanism 4 не просто описывает вольт. Влияет на то что агент likely исследует следующим. Это пересекает memory- и planning-границу.
 
-Проект держит это opt-in и labels honestly. Если хотите strict memory-layer subset only, omit этот путь. Не используйте `/autoresearch` без topic, или не setup и не invoke boundary-scorer.
+Проект держит это opt-in и labels honestly. Если хотите strict memory-layer subset only, omit этот путь. Не используйте `/research` без topic, или не setup и не invoke boundary-scorer.
 
-### Как /autoresearch ведёт себя с и без
+### Как /research ведёт себя с и без
 
-С Mechanism 4 available, и только когда `/autoresearch` invoked без topic, скилл:
+С Mechanism 4 available, и только когда `/research` invoked без topic, скилл:
 
 1. checks для `scripts/boundary-score.py`
 2. checks для `./.vault-meta`
@@ -439,7 +439,7 @@ Mechanism 4 не просто описывает вольт. Влияет на �
 
 Если helper exits non-zero, returns invalid JSON, или returns empty `results`-array, скилл falls back.
 
-Без Mechanism 4, или после fallback, `/autoresearch` просто спрашивает:
+Без Mechanism 4, или после fallback, `/research` просто спрашивает:
 
 ```text
 What topic should I research?
@@ -450,8 +450,8 @@ Helper suggests. Пользователь всё ещё decides.
 Чтобы отключить Mechanism 4 без uninstall:
 
 1. перестать запускать `python3 ./scripts/boundary-score.py`
-2. использовать `/autoresearch [topic]` с explicit-topic
-3. избегать no-topic `/autoresearch` пути если не хотите frontier-suggestions
+2. использовать `/research [topic]` с explicit-topic
+3. избегать no-topic `/research` пути если не хотите frontier-suggestions
 
 Заметьте что `.vault-meta/` shared-gate для Mechanisms 2, 3, 4. Не удаляйте чтобы отключить Mechanism 4 alone. Scorer сам по себе read-only и не использует shared-state; disabling = просто не invoke.
 
@@ -478,7 +478,7 @@ DragonScale задизайнен feature-detected, не assumed.
 `wiki-ingest` only assigns addresses когда allocator executable и `.vault-meta/` существует.
 `wiki-lint` only validates addresses когда allocator существует и `.vault-meta/address-counter.txt` существует.
 `wiki-lint` only runs semantic-tiling когда helper существует и `python3` available, потом интерпретирует readiness из `--peek`.
-`autoresearch` only uses boundary-first selection когда helper существует, `.vault-meta/` существует, и `python3` присутствует.
+`research` only uses boundary-first selection когда helper существует, `.vault-meta/` существует, и `python3` присутствует.
 
 Когда эти conditions не met, репо falls back к earlier-поведению. Это intended operational-posture.
 
@@ -518,7 +518,7 @@ ollama pull bge-m3
 python3 ./scripts/tiling-check.py --peek
 ```
 
-Помните что Mechanism 4 не нуждается в ollama. Если хотите только boundary-first autoresearch, `python3` достаточно.
+Помните что Mechanism 4 не нуждается в ollama. Если хотите только boundary-first research, `python3` достаточно.
 
 ### Safe rollback / disable path
 
@@ -527,7 +527,7 @@ python3 ./scripts/tiling-check.py --peek
 - Mechanism 1: перестать invoke `wiki-fold`. Не использует shared-state.
 - Mechanism 2: перестать использовать `./scripts/allocate-address.sh`. Существующие `address:` frontmatter-поля остаются как plain-content.
 - Mechanism 3: перестать запускать `python3 ./scripts/tiling-check.py` и перестать invoke semantic-tiling путь в `wiki-lint`. Cache под `.vault-meta/` inert когда не used.
-- Mechanism 4: перестать запускать `python3 ./scripts/boundary-score.py` и избегать no-topic `/autoresearch` пути. Scorer read-only; disabling = не invoke.
+- Mechanism 4: перестать запускать `python3 ./scripts/boundary-score.py` и избегать no-topic `/research` пути. Scorer read-only; disabling = не invoke.
 
 `.vault-meta/` — shared-gate для Mechanisms 2, 3, 4. Removing disables все три вместе, не только один.
 

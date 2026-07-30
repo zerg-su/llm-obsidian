@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, NoReturn
+from harness.adapters.cmux import run_cmux
 
 
 SCHEMA_VERSION = 1
@@ -700,13 +701,13 @@ def validate_checkpoint(value: dict[str, Any], runtime: str) -> dict[str, str]:
 def cmux_capabilities(runner: Any = subprocess.run) -> dict[str, Any]:
     checks: dict[str, bool] = {}
     commands = {
-        "anchored_split": ["cmux", "new-split", "--help"],
-        "typed_resume": ["cmux", "surface", "resume", "--help"],
+        "anchored_split": ["new-split", "--help"],
+        "typed_resume": ["surface", "resume", "--help"],
     }
     outputs: dict[str, str] = {}
     for name, command in commands.items():
         try:
-            result = runner(command, text=True, capture_output=True, check=False)
+            result = run_cmux(command, runner=runner)
         except OSError:
             checks[name] = False
             continue
@@ -749,18 +750,13 @@ def parse_workspace(output: str) -> tuple[str, str]:
 
 def cmux_tree(runner: Any = subprocess.run) -> dict[str, Any]:
     commands = (
-        ["cmux", "--id-format", "both", "rpc", "system.tree", '{"all":true}'],
+        ["--id-format", "both", "rpc", "system.tree", '{"all":true}'],
         # Compatibility with older cmux releases and test doubles that predate
         # the explicit output-format switch.
-        ["cmux", "rpc", "system.tree", '{"all":true}'],
+        ["rpc", "system.tree", '{"all":true}'],
     )
     for index, command in enumerate(commands):
-        result = runner(
-            command,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        result = run_cmux(command, runner=runner)
         if result.returncode != 0:
             continue
         try:
@@ -922,10 +918,10 @@ def close_replacement_shell(
     if not replacement_target:
         raise TaskSessionError("cmux replacement surface identity is incomplete")
     for args in (
-        ["cmux", "send", "--surface", replacement_target, "--workspace", workspace, "--window", window, "exit"],
-        ["cmux", "send-key", "--surface", replacement_target, "--workspace", workspace, "--window", window, "Enter"],
+        ["send", "--surface", replacement_target, "--workspace", workspace, "--window", window, "exit"],
+        ["send-key", "--surface", replacement_target, "--workspace", workspace, "--window", window, "Enter"],
     ):
-        result = runner(args, text=True, capture_output=True, check=False)
+        result = run_cmux(args, runner=runner)
         if result.returncode != 0:
             raise TaskSessionError("cmux replacement shell could not be exited")
     for _attempt in range(8):
@@ -948,14 +944,12 @@ def close_surface_exact(surface: str, runner: Any = subprocess.run) -> str:
         window = context["window_ref"] or context["window"]
         if not target or not workspace or not window:
             raise TaskSessionError("cmux surface close context is incomplete")
-        runner(
+        run_cmux(
             [
-                "cmux", "close-surface", "--surface", target,
+                "close-surface", "--surface", target,
                 "--workspace", workspace, "--window", window,
             ],
-            text=True,
-            capture_output=True,
-            check=False,
+            runner=runner,
         )
         if surface_context(surface, runner, missing_ok=True) is None:
             close_replacement_shell(context, runner)
@@ -968,23 +962,19 @@ def spawn_right(origin_surface: str, runner: Any = subprocess.run) -> dict[str, 
     caps = cmux_capabilities(runner)
     if not caps["anchored_split"]:
         raise TaskSessionError("cmux lacks anchored new-split --surface support")
-    result = runner(
-        ["cmux", "--id-format", "both", "new-split", "right", "--surface", origin_surface, "--focus", "false"],
-        text=True,
-        capture_output=True,
-        check=False,
+    result = run_cmux(
+        ["--id-format", "both", "new-split", "right", "--surface", origin_surface, "--focus", "false"],
+        runner=runner,
     )
     if result.returncode != 0:
         workspace = surface_workspace(origin_surface, runner)
-        result = runner(
+        result = run_cmux(
             [
-                "cmux", "--id-format", "both", "new-split", "right",
+                "--id-format", "both", "new-split", "right",
                 "--workspace", workspace, "--surface", origin_surface,
                 "--focus", "false",
             ],
-            text=True,
-            capture_output=True,
-            check=False,
+            runner=runner,
         )
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
@@ -1009,15 +999,13 @@ def spawn_workspace(
     window = str(context.get("window_ref") or context.get("window") or "")
     if not window:
         raise TaskSessionError("origin surface has no exact cmux window")
-    result = runner(
+    result = run_cmux(
         [
-            "cmux", "--id-format", "both", "new-workspace",
+            "--id-format", "both", "new-workspace",
             "--name", title.strip(), "--cwd", str(cwd),
             "--window", window, "--focus", "false",
         ],
-        text=True,
-        capture_output=True,
-        check=False,
+        runner=runner,
     )
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
@@ -1044,11 +1032,9 @@ def capture_resume(surface: str, runtime: str, runner: Any = subprocess.run) -> 
     if runtime not in RUNTIMES:
         raise TaskSessionError("runtime is invalid")
     surface = require_token(surface, "surface")
-    result = runner(
-        ["cmux", "surface", "resume", "get", "--json", "--surface", surface],
-        text=True,
-        capture_output=True,
-        check=False,
+    result = run_cmux(
+        ["surface", "resume", "get", "--json", "--surface", surface],
+        runner=runner,
     )
     if result.returncode != 0:
         raise TaskSessionError("cmux resume binding is unavailable")

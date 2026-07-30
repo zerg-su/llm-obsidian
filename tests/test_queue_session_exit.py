@@ -50,7 +50,16 @@ with tempfile.TemporaryDirectory(prefix="queue-session-exit-test.") as raw:
     result = subprocess.run([sys.executable, str(SCRIPT)], text=True, capture_output=True, env=codex_env, check=False)
     payload = json.loads(result.stdout)
     calls = log.read_text().splitlines()
-    check("Codex uses bounded clear and Tab queue", len(calls) == 42 and calls[-2:] == [f"send --surface {SURFACE} /exit", f"send-key --surface {SURFACE} tab"])
+    check(
+        "Codex uses bounded clear and Tab queue",
+        len(calls) == 42
+        and calls[:40] == [f"send-key --surface {SURFACE} Backspace"] * 40
+        and calls[-2:]
+        == [
+            f"send --surface {SURFACE} /exit",
+            f"send-key --surface {SURFACE} Tab",
+        ],
+    )
     check("Codex retains manual fallback", payload["manual_fallback"] is True)
 
     missing_env = dict(claude_env)

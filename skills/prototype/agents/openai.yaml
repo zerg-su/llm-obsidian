@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prototype"
+  short_description: "Answer one question in a disposable worktree"
+  default_prompt: "Use $prototype to test this one technical question in isolation."

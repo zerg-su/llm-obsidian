@@ -1,89 +1,50 @@
 # Release acceptance architecture
 
-Release acceptance is a 58-cell live matrix: every installed skill runs once
-through Claude and once through Codex. The release gate is macOS + cmux; Linux
-retains basic script support and Windows is not a target.
+Version 2.3.0 replaces the historical skill-by-runtime matrix with four
+provider-backed harness cells on one frozen Git SHA:
 
-## Behavioral boundary
+1. Claude: open → callback → same-session continue → exit → exact close.
+2. Codex: the same lifecycle.
+3. Cross-runtime dispatch → simple review → reap composition.
+4. Deep review: independent spec and correctness/architecture/security
+   sessions → bounded callbacks → terminal cleanup.
 
-`scripts/live-acceptance-runner.py` is a compatibility wrapper. The
-implementation lives in `scripts/acceptance/`:
+`config/acceptance-cells.toml` is the reviewed contract.
+`scripts/release-acceptance.py check` validates the exact cell set, public
+clean cut, safe dependency paths, and per-cell dependency hashes without
+starting a model.
 
-- `contracts.py` validates typed requests, outboxes, and content-free heartbeat
-  records;
-- `sandbox.py` creates a clone of the pinned source commit, replaces `wiki/`
-  and `.vault-meta/` with `evals/acceptance/seed/`, and commits that seed with a
-  fixed identity and timestamp;
-- `launchers.py` owns runtime argv/env, visible cmux surfaces, inactivity
-  detection, and exact cleanup;
-- `prompting.py` is the versioned common prompt renderer;
-- `skill_adapters.py` and `scenario_adapters.py` own scoped fixture, proof, and
-  cleanup behavior;
-- `runner.py` composes those pieces and retains the public CLI.
+`scripts/live-acceptance-runner.py run` imports the repository-owned,
+in-process cell driver only after binding execution to the exact clean checkout.
+External shell or environment-selected drivers are not accepted. Each result
+must contain the unique operation ID, exact runtime/role assignment, complete
+ordered lifecycle observations, current dependency fingerprint, and zero
+remaining owned resources. The runner rechecks the clean SHA and dependency
+closure before persisting each atomic checkpoint. Global route/capability
+preflight completes before the first cell creates an operation or external
+effect. Its content-free capability artifact is retained in the exact-SHA
+schema-v3 state and report instead of being discarded; individual cell evidence
+remains schema v2.
 
-`evals/acceptance/prompt-baseline-v2.1.3.json` hashes all rendered prompts on
-fixed placeholders. Unit tests require all 58 hashes to remain identical. A
-real prompt correction therefore needs an explicit reviewed baseline change.
+A green cell is reused only when the source SHA and its dependency fingerprint
+still match. The runner persists at most one content-free failure classified as
+`runtime-contract` or `mechanism-failure`. The next resume invocation executes
+only that classified cell; after it recovers, a later invocation may continue
+the remaining cells. Green cells are not rerun unless their dependency
+fingerprint changes. Reports are accepted only when all four cells pass on the
+current exact SHA and the failure list is empty.
 
-`reap` and `reap-send` use a runner-prepared v3 task with one exact product
-commit, canonical typed summary, and separate coordinator/task surfaces. The
-coordinator first publishes a code-owned readiness claim; only then does the
-runner launch the task agent. The agents still exercise real review,
-duplicate-safe reap-send, final reap, and graceful exit, while the outer runner
-independently proves every durable artifact.
+The composition cell calls the production
+`workflows.dispatch.start_dispatch`, automatic simple `ReviewGateController`,
+task-finalization authorization, and `workflows.reap.run_reap` facades in that
+order. Reap finalizes the original dispatch ledger record, so the report has
+two provider operations (`dispatch` and `simple-review`) plus the required
+three-step lifecycle trace (`dispatch`, `simple-review`, `reap`), rather than a
+fabricated third provider session.
 
-## Dependency lock and fingerprints
-
-`config/acceptance-cells.toml` is the reviewed source of truth.
-`scripts/acceptance_dependencies.py --write` produces
-`config/acceptance-dependencies.lock.json` without importing or executing
-product code. The checker follows static Python imports, constant repo-relative
-code/data paths, shell and registration references, and exact declarations for
-dynamic `ROOT / ...` prefixes. Any graph drift blocks before a model is opened.
-
-A cell fingerprint includes its exact skill and scenario registry fragments,
-skill files, scoped scenario dependencies, registration surfaces, canonical
-seed, behavioral ABI, semantic adapter fragments, compatible runtime versions,
-and the major generation of the model actually selected after acceptance
-overrides. It excludes `wiki/`, `.vault-meta/`, test files, reviewed packaging
-metadata, retry/checkpoint scheduling, effort, and aliases inside one registered
-model generation. Reports still retain the exact launch model and provenance.
-
-Evidence epoch 3 has no migration path from v2.1.1. A row is reused only when
-its typed integrity proof and current semantic fingerprint match. Unknown files
-do not trigger a global rerun; a missing runtime edge instead makes the
-dependency-lock check fail closed.
-
-## Execution and recovery
-
-`make acceptance-live` resumes in two owned cmux workspaces with five active
-cells per workspace. `make acceptance-live-restart` explicitly discards prior
-evidence. Limits are five cells per workspace and ten workspaces only via an
-explicit override.
-
-Each final row is checkpointed immediately. A cell retries at most twice after
-the first attempt, and only for the closed set of explicit cmux launch/surface
-allocation or agent capacity/rate-limit transients. Product assertions,
-permission failures, contract failures, and unknown errors are durable
-`fail`/`blocked` results.
-
-Screen changes and lifecycle files update a content-free heartbeat containing
-only stage, status, counters, and numeric time. Active work has no wall-clock
-cutoff. Unchanged work receives a visible status probe after 15 minutes and is
-stopped at the configured inactivity boundary (20 minutes by default). Cleanup
-uses stored UUIDs, closes only owned surfaces/workspaces, and fails the release
-gate if reconciliation finds an orphan.
-
-For the v2.1.3 release gate, use Sonnet and `gpt-5.6-terra` at medium effort:
-
-```bash
-LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL=sonnet \
-LLM_OBSIDIAN_ACCEPTANCE_CODEX_MODEL=gpt-5.6-terra \
-LLM_OBSIDIAN_ACCEPTANCE_EFFORT=medium \
-make acceptance-live-restart
-```
-
-Both live-acceptance entrypoints run the fail-closed Claude subscription check
-once before allocating workspaces. Cells inherit that harness proof, so the
-model does not run a credential-status probe. Normal Claude daily sessions
-still run the same preflight directly.
+The live driver must use Swarm's harness adapters and operation ledger. It may
+not invoke a second dispatch/worktree/hook system, infer ownership from focus or
+titles, or close an unrecorded process/surface. Prompts, transcripts, screen
+text, commands, queries, and page bodies are excluded from acceptance state.
+The coordinator-only `.task-origin-session` marker is likewise excluded from
+the clean-bootstrap behavioral dirt check.

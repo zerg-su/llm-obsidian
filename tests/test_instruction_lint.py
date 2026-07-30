@@ -17,8 +17,8 @@ spec.loader.exec_module(module)
 
 assert module.check_repo(ROOT) == []
 print("OK   repository instructions align")
-bad = "---\nname: autoresearch\nallowed-tools: Read WebSearch WebFetch\n---\n"
-assert module.protected_tool_issues("autoresearch", bad)
+bad = "---\nname: research\nallowed-tools: Read WebSearch WebFetch\n---\n"
+assert module.protected_tool_issues("research", bad)
 print("OK   protected web-tool regression detected")
 
 bad_writer = "---\nname: daily\nallowed-tools: Read Write Edit Bash\n---\nmkdir -p \"$DIR\"\nwrite lines under `## Сделано`\n"
@@ -58,7 +58,8 @@ dispatch = (ROOT / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8
 dispatch_runner = (ROOT / "scripts" / "dispatch-runner.py").read_text(encoding="utf-8")
 assert "dispatch-runner.py start --spec" in dispatch
 assert "CMUX_SURFACE_ID" in dispatch
-assert "identify-caller" in dispatch_runner
+assert "materialize_current_context" in dispatch_runner
+assert 'origin_surface=request["origin_surface"]' in dispatch_runner
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
 assert "awk '/^\\*/" not in dispatch
@@ -67,10 +68,10 @@ assert '"sync-config", "--apply"' in dispatch_runner
 assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch delegates anchored mechanics to typed runner")
 
-reap_send = (ROOT / "skills" / "reap-send" / "SKILL.md").read_text(encoding="utf-8")
-assert "send_reap.py --worktree" in reap_send
-assert "Do not send a separate `/reap`" in reap_send
-assert (ROOT / "skills/reap-send/scripts/send_reap.py").is_file()
-print("OK   reap-send delegates exact unattended callback to code")
+task_prompt = (ROOT / "skills/dispatch/references/task-prompt-template.md").read_text(encoding="utf-8")
+assert ".task-summary.json" in task_prompt
+assert "internal callback broker" in task_prompt
+assert not (ROOT / "skills/reap-send").exists()
+print("OK   task summary delegates to the internal callback broker")
 
 print("\nAll instruction lint tests passed.")

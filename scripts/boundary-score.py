@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""boundary-score.py — DragonScale Mechanism 4: boundary-first autoresearch scorer.
+"""boundary-score.py — DragonScale Mechanism 4: boundary-first research scorer.
 
 Reads `wiki/**/*.md`, builds a wikilink graph, and emits per-page boundary
 scores to stdout (text) or as JSON for tooling.
@@ -17,7 +17,7 @@ High score = the page points at many things, is pointed at by few, and
 has been touched recently. That is a vault frontier page. Low or
 negative score = hub / integrated page.
 
-Feature-gated opt-in: autoresearch only invokes this when DragonScale
+Feature-gated opt-in: research only invokes this when DragonScale
 setup is detected. Safe to run standalone even without DragonScale set
 up (reads wiki/ only; never writes).
 

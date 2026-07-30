@@ -1,0 +1,1 @@
+{"case":"codex-trust-footer-drift","initial":{"runtime":"codex","prompt":"near-match"},"event":"observe","expected":{"effect":"none","state":"attention-required"}}

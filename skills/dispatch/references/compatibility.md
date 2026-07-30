@@ -32,6 +32,6 @@ review/reap, and forbidden-action boundaries as v3.
 - A failed runner may close only a blank exact child created by that operation.
 
 The executable compatibility contract lives in `scripts/dispatch-runner.py`,
-`scripts/task_sessions.py`, `scripts/cmux_agent_supervisor.py`,
-`docs/task-sessions.md`, and their tests. Treat those as authoritative over
-historical hand-written command sequences.
+`scripts/harness/`, `scripts/task_sessions.py`, `docs/task-sessions.md`, and
+their tests. Treat those as authoritative over historical hand-written command
+sequences.

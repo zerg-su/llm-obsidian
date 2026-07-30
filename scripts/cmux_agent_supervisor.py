@@ -38,8 +38,10 @@ from cmux_agent_support import (
 )
 from cmux_trust_prompt import (
     claude_background_exit_prompt_visible,
+    native_dialog_region,
     workspace_trust_prompt_visible,
 )
+from harness.adapters.cmux import run_cmux
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -691,7 +693,20 @@ def validated_review_runtime(worktree: Path, meta: dict[str, Any]) -> Path:
 def validate_routing(
     worktree: Path, state_dir: Path, kind: str, surface: str, spec: dict[str, Any]
 ) -> None:
-    task_meta = read_task_json(worktree / ".task-meta.json")
+    source_meta = (
+        read_json(state_dir / ".review-meta.json")
+        if kind == "reviewer"
+        else read_task_json(worktree / ".task-meta.json")
+    )
+    coordinator_review = (
+        kind == "reviewer"
+        and primary_coordinator_review(worktree, state_dir, source_meta)
+    )
+    task_meta = (
+        {"version": 1, "vault_root": str(worktree)}
+        if coordinator_review
+        else read_task_json(worktree / ".task-meta.json")
+    )
     try:
         task_policy = normalize(task_meta)
     except ContractError as exc:
@@ -701,7 +716,6 @@ def validate_routing(
         expected_surface = str(task_meta.get("task_surface") or "")
         expected_runtime = str(task_meta.get("executor_runtime") or task_meta.get("runtime") or "")
     else:
-        source_meta = read_json(state_dir / ".review-meta.json")
         expected_surface = str(source_meta.get("review_surface") or "")
         expected_runtime = str(source_meta.get("reviewer_runtime") or "")
     if surface != expected_surface or not surface:
@@ -901,8 +915,7 @@ def relay_review_outbox_once(
     state["last_payload_sha256"] = digest
     command = [
         sys.executable,
-        str(SCRIPT_DIR.parent / "skills" / "review-send" / "scripts" / "send_review.py"),
-        "submit",
+        str(SCRIPT_DIR / "harness" / "review_submit.py"),
         "--worktree",
         str(worktree),
         "--state-dir",
@@ -975,7 +988,14 @@ def claude_mcp_trust_prompt_visible(screen: str) -> bool:
         "Continue without using this MCP server",
         "Enter to confirm",
     )
-    compact_screen = re.sub(r"\s+", "", screen)
+    region = native_dialog_region(
+        screen,
+        "Enter to confirm",
+        footer_variants=("Enter to confirm · Esc to cancel",),
+    )
+    if not region:
+        return False
+    compact_screen = re.sub(r"\s+", "", region)
     return all(re.sub(r"\s+", "", marker) in compact_screen for marker in markers)
 
 
@@ -1000,12 +1020,9 @@ def auto_confirm_armed_claude_exit(
         if not marker.is_file():
             continue
         try:
-            result = runner(
-                ["cmux", "read-screen", "--surface", surface, "--lines", "40"],
-                text=True,
-                capture_output=True,
-                timeout=2,
-                check=False,
+            result = run_cmux(
+                ["read-screen", "--surface", surface, "--lines", "40"],
+                runner=runner, timeout=2,
             )
         except (OSError, subprocess.TimeoutExpired):
             state["read_failures"] = state.get("read_failures", 0) + 1
@@ -1016,12 +1033,8 @@ def auto_confirm_armed_claude_exit(
         if not claude_background_exit_prompt_visible(result.stdout):
             continue
         try:
-            confirmed = runner(
-                ["cmux", "send-key", "--surface", surface, "Enter"],
-                text=True,
-                capture_output=True,
-                timeout=2,
-                check=False,
+            confirmed = run_cmux(
+                ["send-key", "--surface", surface, "Enter"], runner=runner, timeout=2,
             )
         except (OSError, subprocess.TimeoutExpired):
             state["send_failures"] = state.get("send_failures", 0) + 1
@@ -1033,8 +1046,37 @@ def auto_confirm_armed_claude_exit(
         return
 
 
-def automatic_workspace_trust_allowed(worktree: Path) -> bool:
-    """Allow bootstrap only for a plan-bound unattended dispatch task."""
+def primary_coordinator_review(
+    worktree: Path, state_dir: Path, review_meta: dict[str, Any]
+) -> bool:
+    """Recognize one explicit root review without relying on task metadata."""
+
+    root = worktree.resolve()
+    declared = [
+        str(review_meta.get(field) or "").strip()
+        for field in ("worktree", "vault_root", "operation_dir")
+    ]
+    return (
+        review_meta.get("archive_mode") == "coordinator"
+        and all(declared)
+        and state_dir.resolve() == root
+        and all(Path(value).expanduser().resolve() == root for value in declared)
+        and (root / ".git").is_dir()
+    )
+
+
+def automatic_workspace_trust_allowed(
+    worktree: Path, state_dir: Path, kind: str
+) -> bool:
+    """Allow bootstrap for an approved task or one explicit root review."""
+
+    if kind == "reviewer":
+        try:
+            review_meta = read_json(state_dir / ".review-meta.json")
+        except (OSError, SupervisorError):
+            review_meta = {}
+        if primary_coordinator_review(worktree, state_dir, review_meta):
+            return True
     try:
         meta = read_task_json(worktree / ".task-meta.json")
         policy = normalize(meta)
@@ -1065,12 +1107,9 @@ def auto_accept_workspace_trust(
         and not stop.wait(max(0.001, poll_seconds))
     ):
         try:
-            result = runner(
-                ["cmux", "read-screen", "--surface", surface, "--lines", "80"],
-                text=True,
-                capture_output=True,
-                timeout=2,
-                check=False,
+            result = run_cmux(
+                ["read-screen", "--surface", surface, "--lines", "80"],
+                runner=runner, timeout=2,
             )
         except (OSError, subprocess.TimeoutExpired):
             state["read_failures"] = state.get("read_failures", 0) + 1
@@ -1080,15 +1119,13 @@ def auto_accept_workspace_trust(
             continue
         if runtime == "claude" and claude_mcp_trust_prompt_visible(result.stdout):
             commands = [
-                ["cmux", "send-key", "--surface", surface, "down"],
-                ["cmux", "send-key", "--surface", surface, "down"],
-                ["cmux", "send-key", "--surface", surface, "Enter"],
+                ["send-key", "--surface", surface, "down"],
+                ["send-key", "--surface", surface, "down"],
+                ["send-key", "--surface", surface, "Enter"],
             ]
             for command in commands:
                 try:
-                    declined = runner(
-                        command, text=True, capture_output=True, timeout=2, check=False,
-                    )
+                    declined = run_cmux(command, runner=runner, timeout=2)
                 except (OSError, subprocess.TimeoutExpired):
                     state["send_failures"] = state.get("send_failures", 0) + 1
                     return
@@ -1100,12 +1137,8 @@ def auto_accept_workspace_trust(
         if workspace_handled or not workspace_trust_prompt_visible(runtime, result.stdout):
             continue
         try:
-            accepted = runner(
-                ["cmux", "send-key", "--surface", surface, "Enter"],
-                text=True,
-                capture_output=True,
-                timeout=2,
-                check=False,
+            accepted = run_cmux(
+                ["send-key", "--surface", surface, "Enter"], runner=runner, timeout=2,
             )
         except (OSError, subprocess.TimeoutExpired):
             state["send_failures"] = state.get("send_failures", 0) + 1
@@ -1176,7 +1209,7 @@ def run_agent(
         if sys.stdout.isatty():
             sys.stdout.write("\033[2J\033[H")
             sys.stdout.flush()
-        if automatic_workspace_trust_allowed(worktree):
+        if automatic_workspace_trust_allowed(worktree, state_dir, kind):
             trust_stop = threading.Event()
             trust_thread = threading.Thread(
                 target=auto_accept_workspace_trust,

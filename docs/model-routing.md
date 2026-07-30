@@ -1,10 +1,10 @@
 # Model routing
 
-`config/model-routing.toml` is the single tracked source of concrete runtime
-and role-specific model/effort defaults. General Claude work defaults to Opus;
-Fable is reserved for the Claude cross-model reviewer role. A user may add the gitignored
-`config/model-routing.local.toml`; the SessionStart preflight makes that override
-visible. Native Codex configs are derived copies checked by
+`config/model-routing.toml` is the single tracked source of concrete runtime,
+model-alias, and role-specific model/effort defaults. Simple profiles use
+Sol/high and Opus/high; deep profiles use Sol/xhigh and Fable/xhigh. A user may
+add the gitignored `config/model-routing.local.toml`; the SessionStart preflight
+makes that override visible. Native Codex configs are derived copies checked by
 `scripts/model_routing.py check`.
 
 ## Resolution contract
@@ -19,14 +19,17 @@ runtime fails closed. There is no silent alias substitution or effort coercion.
 | --- | --- |
 | Dispatch | Inherit the exact current runtime/model/effort. |
 | Daily | Inherit current runtime/model; use the configured daily effort. |
-| Review | Use the opposite runtime and its central reviewer-role default. The Claude reviewer is Fable/high while ordinary Claude sessions default to Opus/high. `--same-model` inherits the exact current model; `--effort` may override only effort. |
+| Simple review | The public `review` runner requests same-model and inherits the exact current route by default; `--cross-model` selects the opposite runtime's simple profile. The lower-level resolver keeps its explicit `--same-model` switch. |
+| Deep review | The public runner uses the current runtime's deep profile by default; `--cross-model` selects the opposite runtime's deep profile. The lower-level resolver behaves analogously through `--same-model`. Spec and standards/correctness/architecture/security remain independent axes. |
 | Protected research | Stay Codex-isolated. From Codex inherit current model/effort; from Claude use the central Codex route. |
 | Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |
-| Deep | Inherit runtime/model and use the configured deep effort. |
+| Other deep work | Inherit runtime/model and use the configured deep effort. |
 
-Legacy task/review records remain readable. Concrete top-level model/effort
-fields in old metadata are treated as explicit historical overrides. New task
-metadata carries both `routing.session` and `routing.effective`.
+Review model overrides accept only the registered aliases `sol`, `terra`,
+`opus`, and `fable`; runtime/alias mismatches fail closed. Legacy task/review
+records remain readable. Concrete top-level model/effort fields in old metadata
+are treated as explicit historical overrides. New task metadata carries both
+`routing.session` and `routing.effective`.
 
 ## Session snapshots
 
@@ -74,18 +77,19 @@ into native host defaults:
 python3 scripts/model_routing.py sync-native --apply
 ```
 
-Overlay the v2.1.0 files while no agent sessions are running, then run the new
-gate before starting a replacement session:
+Before a 2.3.0 overlay, finish or cancel every active task, review, research, or
+harness operation with the installed version. Run the gate before mutation and
+again after the overlay, before starting a replacement session:
 
 ```bash
 python3 scripts/upgrade-preflight.py
 ```
 
-The upgrade gate refuses active task/reviewer sessions and unfinished protected
-research runs. Restart them after the overlay. Stock v2.0.8 reviewer defaults
-need no migration. A customized legacy `.codex/dispatch-env.toml` reviewer route
-is migrated into the matching reviewer-role override only after explicit
-confirmation; it never changes the ordinary runtime default:
+The gate refuses every active harness kind, unreaped worktree, unfinished
+legacy review/research run, and non-archived broker task. A customized legacy
+`.codex/dispatch-env.toml` reviewer route is migrated into the matching
+reviewer-profile override only after explicit confirmation; it never changes
+the ordinary runtime default:
 
 ```bash
 python3 scripts/upgrade-preflight.py \
@@ -102,7 +106,6 @@ are not rewritten when defaults change.
 python3 tests/test_model_routing.py
 python3 tests/test_session_preflight.py
 python3 tests/test_upgrade_preflight.py
-bash tests/test_review_dispatch.sh
-python3 tests/test_task_lifecycle.py
-make test
+python3 tests/harness/test_review_vertical.py
+make test-model-routing test-session-preflight test-upgrade-preflight test-harness
 ```

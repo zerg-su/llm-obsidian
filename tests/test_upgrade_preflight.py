@@ -72,6 +72,32 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check("invalid migration fails before install", result.returncode == 3)
     check("invalid migration leaves no local override", not (root / "config/model-routing.local.toml").exists())
 
+    harness_ops = root / ".vault-meta/harness/owners/upgrade-test/operations"
+    harness_ops.mkdir(parents=True)
+    for kind in ("dispatch", "review", "research", "reap", "prototype", "resolve-conflict"):
+        (harness_ops / f"{kind}.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "state": "running",
+                "spec": {"operation_id": kind, "kind": kind},
+            }),
+            encoding="utf-8",
+        )
+    result = run(root)
+    check(
+        "every active harness operation kind blocks upgrade",
+        result.returncode == 4
+        and all(f"harness:{kind}:{kind}" in result.stderr for kind in (
+            "dispatch", "review", "research", "reap", "prototype", "resolve-conflict"
+        )),
+    )
+    check(
+        "active-operation rejection has one recovery instruction",
+        result.stderr.count("Recovery:") == 1
+        and "finish or cancel every listed operation" in result.stderr,
+    )
+    shutil.rmtree(root / ".vault-meta")
+
     (root / ".vault-meta/research-runs/11111111-1111-1111-1111-111111111111").mkdir(parents=True)
     (root / ".vault-meta/research-runs/11111111-1111-1111-1111-111111111111/state.json").write_text(
         json.dumps({"schema_version": 1, "status": "fetch_ready"}), encoding="utf-8"

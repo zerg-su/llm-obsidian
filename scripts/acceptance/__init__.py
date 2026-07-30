@@ -1,1 +1,0 @@
-"""Release-acceptance runtime package."""

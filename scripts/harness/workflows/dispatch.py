@@ -1,0 +1,282 @@
+"""Dispatch policy facade over OperationSpec and automatic simple review."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Mapping, TypeVar
+
+from ..contracts import (
+    EffectOutcome,
+    OperationRecord,
+    OperationSpec,
+    OwnedResources,
+    RuntimeRoute,
+)
+from ..state_machine import TERMINAL
+from ..store import OperationStore
+from ..supervisor import OperationSupervisor, SupervisorError
+from ..runtime_sessions import (
+    RuntimeSessionManager,
+    RuntimeSessionRequest,
+    RuntimeSessionResult,
+)
+
+
+T = TypeVar("T", bound=Mapping[str, object])
+
+
+def _store(value: OperationStore | Path) -> OperationStore:
+    return value if isinstance(value, OperationStore) else OperationStore(value)
+
+
+@dataclass(frozen=True)
+class ReviewPolicy:
+    depth: str = "simple"
+    cross_model: bool = False
+    enabled: bool = True
+    runtime: str = ""
+    model: str = ""
+    effort: str = ""
+    verification_profile: str = ""
+    verification_profile_sha256: str = ""
+
+    def __post_init__(self) -> None:
+        if self.depth not in {"simple", "deep"}:
+            raise ValueError("review depth must be simple or deep")
+        if self.runtime and self.runtime not in {"claude", "codex"}:
+            raise ValueError("review runtime must be claude or codex")
+        if self.model and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", self.model
+        ):
+            raise ValueError("review model must be a bounded alias")
+        if self.effort and self.effort not in {
+            "minimal", "low", "medium", "high", "xhigh", "max"
+        }:
+            raise ValueError("review effort is invalid")
+        if bool(self.verification_profile) != bool(
+            self.verification_profile_sha256
+        ):
+            raise ValueError(
+                "review verification profile and digest must be bound together"
+            )
+        if self.verification_profile and (
+            not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                self.verification_profile,
+            )
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", self.verification_profile_sha256
+            )
+        ):
+            raise ValueError("review verification profile binding is invalid")
+        if not self.enabled and any(
+            (
+                self.depth != "simple",
+                self.cross_model,
+                self.runtime,
+                self.model,
+                self.effort,
+            )
+        ):
+            raise ValueError("disabled review cannot carry review overrides")
+
+    @property
+    def mode(self) -> str:
+        return self.depth if self.enabled else "skip"
+
+    @property
+    def max_verify_iterations(self) -> int:
+        return {"simple": 1, "deep": 2, "skip": 0}[self.mode]
+
+
+@dataclass(frozen=True)
+class DispatchRequest:
+    task_id: str
+    owner_id: str
+    plan_sha256: str
+    context_manifest: str
+    route: RuntimeRoute
+    placement: str = "split"
+    review: ReviewPolicy = ReviewPolicy()
+
+    def __post_init__(self) -> None:
+        if self.placement not in {"split", "workspace"}:
+            raise ValueError("dispatch placement must be split or workspace")
+        if len(self.plan_sha256) != 64:
+            raise ValueError("dispatch requires an approved plan sha256")
+
+
+def operation_spec(request: DispatchRequest) -> OperationSpec:
+    identity = json.dumps(
+        {
+            "task_id": request.task_id,
+            "owner_id": request.owner_id,
+            "plan_sha256": request.plan_sha256,
+            "context_manifest": request.context_manifest,
+            "route": {
+                "runtime": request.route.runtime,
+                "model": request.route.model,
+                "effort": request.route.effort,
+                "profile": request.route.profile,
+                "routing_sha256": request.route.routing_sha256,
+            },
+            "placement": request.placement,
+            "review": {
+                "mode": request.review.mode,
+                "cross_model": request.review.cross_model,
+                "runtime": request.review.runtime,
+                "model": request.review.model,
+                "effort": request.review.effort,
+                "max_verify_iterations": (
+                    request.review.max_verify_iterations
+                ),
+                "verification_profile": (
+                    request.review.verification_profile
+                ),
+                "verification_profile_sha256": (
+                    request.review.verification_profile_sha256
+                ),
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return OperationSpec(
+        operation_id=request.task_id,
+        idempotency_key=hashlib.sha256(identity.encode()).hexdigest(),
+        kind="dispatch",
+        owner_id=request.owner_id,
+        route=request.route,
+        context_manifest=request.context_manifest,
+        verification_profile=(
+            request.review.verification_profile or "full"
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class DispatchRun:
+    record: OperationRecord
+    result: Mapping[str, object] | None
+
+
+def _assignment(spec: OperationSpec, role: str) -> str:
+    try:
+        namespace = uuid.UUID(spec.operation_id)
+    except ValueError:
+        namespace = uuid.NAMESPACE_URL
+    return str(uuid.uuid5(namespace, f"{role}:{spec.idempotency_key}"))
+
+
+def start_dispatch(
+    request: DispatchRequest,
+    runtime: RuntimeSessionManager,
+    *,
+    origin_surface: str,
+    cwd: Path,
+    prompt_pointer: str = ".task-prompt.md",
+    summary_pointer: str = ".task-summary.json",
+    on_surface_opened: Callable[[RuntimeSessionResult], None] | None = None,
+) -> RuntimeSessionResult:
+    """Start one dispatch through the generic provider runtime.
+
+    The provider worker validates and relays the canonical task summary; the
+    executor model never owns coordinator wake-up or cmux lifecycle mechanics.
+    """
+
+    spec = operation_spec(request)
+    return runtime.start(
+        RuntimeSessionRequest(
+            spec=spec,
+            lane_id=_assignment(spec, "dispatch-lane"),
+            run_id=_assignment(spec, "dispatch-run"),
+            origin_surface=origin_surface,
+            cwd=cwd,
+            prompt_pointer=prompt_pointer,
+            callback_pointer=summary_pointer,
+            placement=request.placement,
+            callback_mode="task-summary",
+            task_summary_pointer=summary_pointer,
+        ),
+        on_surface_opened=on_surface_opened,
+    )
+
+
+def run_dispatch(
+    request: DispatchRequest,
+    store: OperationStore | Path,
+    *,
+    launch: Callable[[OperationRecord], T],
+    persist_result: Callable[[OperationRecord, T], None],
+) -> DispatchRun:
+    """Persist and launch one dispatch through the restartable harness seam."""
+
+    store = _store(store)
+    spec = operation_spec(request)
+    record = store.create(
+        spec,
+        lane_id=_assignment(spec, "dispatch-lane"),
+        run_id=_assignment(spec, "dispatch-run"),
+    )
+    supervisor = OperationSupervisor(
+        store, request.owner_id, request.task_id
+    )
+    if record.state in TERMINAL or record.state == "awaiting-callback":
+        return DispatchRun(record, None)
+    if record.state == "created":
+        record = supervisor.transition("preflight")
+    if record.state == "preflight":
+        record = supervisor.transition("starting")
+    if record.state != "starting":
+        raise SupervisorError(
+            f"dispatch operation cannot launch from {record.state}"
+        )
+    effected = supervisor.effect(
+        "dispatch-launch",
+        launch,
+        persist_result=persist_result,
+    )
+    result = effected.value
+    if result is not None:
+        surface_id = str(result.get("task_surface") or "")
+        if surface_id:
+            supervisor.bind_resources(OwnedResources(surface_id=surface_id))
+    record = supervisor.transition("running")
+    record = supervisor.transition("awaiting-callback")
+    return DispatchRun(record, result)
+
+
+def recover_launched(
+    store: OperationStore | Path,
+    *,
+    owner_id: str,
+    operation_id: str,
+    run_id: str,
+) -> OperationRecord:
+    """Commit a launch whose exact result cache survived an interrupted return."""
+
+    store = _store(store)
+    supervisor = OperationSupervisor(store, owner_id, operation_id)
+    record = supervisor.read()
+    if record.run_id != run_id:
+        raise SupervisorError("cached launch belongs to a different harness run")
+    if record.state == "awaiting-callback" or record.state in TERMINAL:
+        return record
+    if record.state != "starting":
+        raise SupervisorError(
+            f"cached launch cannot reconcile operation from {record.state}"
+        )
+    if record.pending_effect == "dispatch-launch":
+        store.resolve_effect(owner_id, operation_id, EffectOutcome.SUCCEEDED)
+    elif not (
+        record.effect_id == "dispatch-launch"
+        and record.effect_outcome == EffectOutcome.SUCCEEDED
+    ):
+        raise SupervisorError("cached launch has no matching effect intent")
+    supervisor.transition("running")
+    return supervisor.transition("awaiting-callback")

@@ -1,0 +1,1 @@
+{"case":"upgrade-active-operation","initial":{"schema":1,"state":"running"},"event":"upgrade","expected":{"effect":"none","state":"attention-required"}}

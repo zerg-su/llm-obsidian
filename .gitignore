@@ -105,6 +105,9 @@ Excalidraw/
 Claude SEO*.gif
 Claude SEO*.png
 
+# Private Skool Hub assets — not for public repos
+_attachments/images/skool-hub/
+
 # Archive of old versions (cosmic-brain, GIF assets)
 claude-obsidian-archive/
 
@@ -149,7 +152,7 @@ _attachments/
 .vault-meta/skill-nudge-day.txt
 .vault-meta/evals/
 .vault-meta/acceptance/
-/.acceptance-sandbox.json
+.vault-meta/harness/
 .vault-meta/turn-markers/
 .vault-meta/research-runs/
 .vault-meta/session-routing/
@@ -159,12 +162,14 @@ _attachments/
 .vault-meta/review-runtimes/
 .vault-meta/task-sessions/
 .vault-meta/document-cache/
+.vault-meta/upgrade-backup-*/
 .vault-meta/retrieval-quality.pending.json
 .vault-meta/retrieval-experiment.json
 .vault-meta/memory-backup.json
 .task-session-binding.json
+/.acceptance-sandbox.json
 
-# Infrastructure secret containers (defense-in-depth for a public template)
+# DevOps-specific secret containers (defense-in-depth for MG vault)
 # Terraform state can hold plaintext secrets even if the .tf files don't
 *.tfstate
 *.tfstate.*

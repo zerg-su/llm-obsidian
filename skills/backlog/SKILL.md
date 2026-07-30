@@ -105,7 +105,7 @@ Table format (markdown):
 Anti-rot: mark items with `age > 60d` with a `⚠` suffix + footer:
 
 ```
-⚠ 1 item > 60 days. Consider: /backlog promote <slug> OR /backlog drop <slug>.
+⚠ 1 item > 60 days. Consider: /backlog promote <slug> and choose a wiki target or Drop.
 ```
 
 NEVER auto-drop. The user decides explicitly.

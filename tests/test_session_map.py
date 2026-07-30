@@ -39,8 +39,8 @@ module = load_module()
 date = "2026-07-10"
 mtime = datetime.datetime(2026, 7, 10, 12, 0).timestamp()
 claude_id = "45deeb96-5035-4bca-9dee-2033c84ce911"
-codex_id = "019f0000-0000-7000-8000-000000000001"
-fallback_id = "019f0000-0000-7000-8000-000000000002"
+codex_id = "019f4818-de94-79a0-ba09-4d8d34f93690"
+fallback_id = "019f48e4-c890-7a10-a55e-62880ecae752"
 
 with tempfile.TemporaryDirectory(prefix="session-map-test.") as raw:
     root = Path(raw) / "repo"
@@ -128,6 +128,6 @@ with tempfile.TemporaryDirectory(prefix="session-map-test.") as raw:
     check("Claude heading rendered", "### Claude\n\n- Claude Page" in rendered)
     check("Codex heading rendered", "### Codex\n\n- Codex Page" in rendered)
     check("runtime groups deterministic", rendered.index("### Claude") < rendered.index("### Codex"))
-    check("other repository excluded", "019f0000-0000-7000-8000-000000000000" not in rendered)
+    check("other repository excluded", "019f0000-0000" not in rendered)
 
 print("\nAll session map tests passed.")

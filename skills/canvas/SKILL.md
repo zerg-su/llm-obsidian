@@ -3,6 +3,7 @@ name: canvas
 metadata:
   version: 1.0.0
 description: "Visual layer of the wiki. Add images, text cards, PDFs, and wiki pages to Obsidian canvas files with auto-positioning inside zones. Manual-only: never auto-invoke; run only when the user explicitly requests /canvas."
+disable-model-invocation: true
 allowed-tools: Read Write Edit Glob Grep AskUserQuestion
 ---
 
@@ -10,7 +11,7 @@ allowed-tools: Read Write Edit Glob Grep AskUserQuestion
 
 The three knowledge capture layers:
 - `/save` → text synthesis (wiki/questions/, wiki/concepts/)
-- `/autoresearch` → structured knowledge (wiki/sources/, wiki/concepts/)
+- `/research` → structured knowledge (wiki/sources/, wiki/concepts/)
 - `/canvas` → visual references (wiki/canvases/)
 
 A canvas is a JSON file Obsidian renders as an infinite visual board. This skill reads and writes canvas JSON directly. Read `references/canvas-spec.md` for the full format reference before making any edits. This spec aligns with the [JSON Canvas open standard](https://jsoncanvas.org/). If the kepano/obsidian-skills plugin is installed, its json-canvas skill is the authoritative canvas spec reference. Otherwise, use the guidance below.
@@ -281,7 +282,7 @@ When `/banana` finishes generating images, suggest:
 1. Read canvas-spec.md before editing any canvas JSON.
 2. Always read the canvas file before writing. Parse existing nodes to avoid ID collisions and calculate auto-positions.
 3. Create `_attachments/images/canvas/` for downloaded/copied images.
-4. Update `wiki/index.md` when creating new canvases.
+4. Update `wiki/overview.md` when creating new canvases.
 5. Report position and zone after every add operation.
 
 ## Scope

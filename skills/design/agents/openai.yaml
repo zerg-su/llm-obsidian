@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design"
+  short_description: "Shape architecture and material design choices"
+  default_prompt: "Use $design to shape this system design before implementation."

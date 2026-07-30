@@ -1,0 +1,19 @@
+schema_version = 1
+
+[profiles.baseline]
+commands = ["make test-harness", "python3 scripts/runtime-harness-lint.py"]
+
+[profiles.scoped]
+commands = ["make test-harness", "make test-model-routing", "git diff --check"]
+
+[profiles.full]
+commands = ["make test", "make acceptance-check", "python3 scripts/validate-vault.py --summary", "python3 scripts/codex-adapter.py --check", "scripts/mcp-gateway/mcp-gateway.sh codex-sync --check", "git diff --check"]
+
+[profiles.conflict]
+commands = ["git diff --check", "git diff --name-only --diff-filter=U"]
+
+[profiles.vault]
+commands = ["python3 scripts/validate-vault.py --summary"]
+
+[profiles.research-cited-artifact]
+commands = ["python3 tests/harness/test_research_vertical.py"]

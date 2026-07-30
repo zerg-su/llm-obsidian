@@ -3,7 +3,7 @@
 Этот репозиторий — одновременно Claude Code/Codex plugin и Obsidian-вольт. Открой каталог как вольт в Obsidian, работай с ним из Claude Code или Codex CLI, и вики будет расти по мере того как ты с чем-то сталкиваешься, что-то узнаёшь или планируешь.
 
 **Plugin name:** `llm-obsidian`
-**Skills:** `/wiki`, `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/save-plan`, `/close`, `/autoresearch`, `/unsafe-research` (explicit request only), `/canvas`, `/daily`, `/journal`, `/agenda`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/learn`, `/defuddle`, `/clarify`, `/dispatch`, `/review-dispatch`, `/review-send`, `/reap`, `/reap-send` (+ reference: obsidian-markdown, obsidian-bases)
+**Skills:** `/wiki`, `/wiki-ingest`, `/wiki-query`, `/wiki-lint`, `/wiki-fold`, `/save`, `/save-plan`, `/close`, `/research`, `/unsafe-research` (explicit request only), `/canvas`, `/daily`, `/journal`, `/agenda`, `/backlog`, `/find-session`, `/draft`, `/distill-runbook`, `/learn`, `/defuddle`, `/clarify`, `/improve-skills` (explicit request only), `/dispatch`, `/review`, `/reap`, `/debug`, `/tdd`, `/design`, `/prototype`, `/resolve-conflict` (+ reference: obsidian-markdown, obsidian-bases)
 **Vault path:** этот каталог (открывать в Obsidian напрямую)
 
 > Этот файл — шаблон. После установки перепиши разделы «Назначение» и «Источники» под себя: чем конкретнее описан твой use case, тем лучше ассистент работает с вольтом.
@@ -76,7 +76,7 @@ skills/, scripts/, bin/, tests/, hooks/   # код плагина (вендор�
 1. **Fold operator** (M1): rollup лога в фолд-страницы (`wiki/folds/`), нудж каждые 64 записи.
 2. **Deterministic addresses** (M2): `c-NNNNNN` на каждой странице, счётчик в `.vault-meta/address-counter.txt`.
 3. **Semantic tiling lint** (M3): через bge-m3 находит candidate-дубли. Требует `ollama serve`. Пороги: `.vault-meta/tiling-thresholds.json` (перекалибруй на своём вольте).
-4. **Boundary-first autoresearch** (M4): `/autoresearch` без темы предлагает frontier-кандидатов из самой вики.
+4. **Boundary-first research** (M4): `/research` без темы предлагает frontier-кандидатов из самой вики.
 
 Подробности: `[[DragonScale Memory]]` и `docs/dragonscale-guide.md`.
 
@@ -90,7 +90,7 @@ MCP-серверы ходят через локальный HTTP-гейтвей 
 - Установка: `codex plugin marketplace add "$(pwd)"`, затем `codex plugin add llm-obsidian@llm-obsidian-codex`.
 - Явный вызов скиллов в Codex: `$llm-obsidian:save`, `$llm-obsidian:wiki-query`, `$llm-obsidian:close`; Claude-style `/save` остаётся триггером в описании, но не является Codex slash command.
 - Provenance писать через `./scripts/current-session-id.sh` (`CLAUDE_CODE_SESSION_ID` → `CODEX_THREAD_ID` → `unknown`).
-- Limit helpers: `.codex/codex-limits-status.py` для compact/cmux status, `.codex/update-cmux-limits.sh` для Codex hooks, `scripts/codex-limit-monitor.py` для CLI/TUI monitor (`--install` ставит `codex-limit-status`).
+- Limit helper: `scripts/codex-limit-monitor.py` остаётся отдельным CLI/TUI monitor (`--install` ставит `codex-limit-status`); rate-limit metadata не выводится в cmux sidebar, где она может быть stale или относиться к другой сессии.
 
 ## DCG
 
@@ -113,7 +113,7 @@ entry в `~/.codex/hooks.json` и `~/.claude/settings.json`, делая backups
 
 ## Claude reviewer sessions
 
-Для Claude-review, `/review-dispatch`, `/dispatch` и любых task-split'ов не использовать `claude -p` / `claude --print`. Нужна интерактивная Claude Code-сессия в cmux split. Task executor запускается с выбранным рабочим permission mode; read-only reviewer — с locked-down `dontAsk` и точным tool allow-list. После утверждённого unattended-плана routine review/reap не спрашивают повторных подтверждений; blocking/scope drift эскалируются. Observer-only watchdog уведомляет после 15/20 минут без видимого прогресса, но не отправляет input и не останавливает агента. Завершённые фоновые процессы закрывают только собственный armed cmux surface; coordinator/workspace не закрываются.
+Для Claude-review, `/review`, `/dispatch` и любых task-split'ов не использовать `claude -p` / `claude --print`. Нужна интерактивная Claude Code-сессия в cmux split. Task executor запускается с выбранным рабочим permission mode; read-only reviewer — с locked-down `dontAsk` и точным tool allow-list. После утверждённого unattended-плана routine review/reap не спрашивают повторных подтверждений; blocking/scope drift эскалируются. Observer-only watchdog уведомляет после 15/20 минут без видимого прогресса, но не отправляет input и не останавливает агента. Завершённые фоновые процессы закрывают только собственный armed cmux surface; coordinator/workspace не закрываются.
 
 Не прерывать интерактивный Claude-review, если видно, что он работает: spinner, меняются token counters, идут tool calls или обновляется экран. Ждать минимум 15 минут без видимого прогресса перед вмешательством. Через 20 минут без прогресса можно диагностировать состояние и попросить краткий статус/итог, но не делать ранний interrupt только потому, что review думает несколько минут.
 
@@ -126,4 +126,4 @@ entry в `~/.codex/hooks.json` и `~/.claude/settings.json`, делая backups
 
 ## Как пользоваться
 
-Ядро: `ingest <путь|URL>` (источник → страницы в wiki/), `что ты знаешь про X?` (поиск с цитатами), `/save` (зафиксировать разговор), `/journal` (план на дату), `/agenda` (собрать незавершённые планы и напоминания), `/backlog add` (не забыть), `lint the wiki`, `update hot cache`. Параллельные задачи: `/dispatch` + `/review-dispatch` + `/reap-send` (требует cmux). Полный каталог скиллов: [[getting-started]].
+Ядро: `ingest <путь|URL>` (источник → страницы в wiki/), `что ты знаешь про X?` (поиск с цитатами), `/save` (зафиксировать разговор), `/journal` (план на дату), `/agenda` (собрать незавершённые планы и напоминания), `/backlog add` (не забыть), `lint the wiki`, `update hot cache`. Параллельные задачи: `/dispatch` + `/review` + `/reap` (требует cmux). Полный каталог скиллов: [[getting-started]].

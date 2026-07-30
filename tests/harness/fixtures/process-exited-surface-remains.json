@@ -1,0 +1,1 @@
+{"case":"process-exited-surface-remains","initial":{"process":"dead","surface":"owned"},"event":"reconcile","expected":{"effect":"close-exact","state":"complete"}}

@@ -119,7 +119,7 @@ def main(argv: list[str]) -> int:
     idx = raw.rfind(MARKER)
     if idx == -1:
         return fail(2, f"no '{MARKER}' block found — ask the task-split to emit one "
-                       "(/reap-send or print it in chat)")
+                       "(internal callback broker or print it in chat)")
     block = raw[idx + len(MARKER):]
     m = re.search(r"^## ", block, flags=re.M)
     if m:

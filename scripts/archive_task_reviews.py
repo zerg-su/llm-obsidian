@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Archive every exact review operation associated with one dispatch task."""
+"""Archive the exact harness review gate associated with one dispatch task."""
 
 from __future__ import annotations
 
@@ -9,12 +9,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-from task_sessions import TaskSessionError, TaskSessionStore, read_object
+from harness.review_finalization import require_task_review, review_gate_root
 
 
 def fail(message: str) -> int:
     print(f"archive-task-reviews: {message}", file=sys.stderr)
     return 3
+
+
+def read_object(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain an object")
+    return value
 
 
 def main() -> int:
@@ -30,28 +40,25 @@ def main() -> int:
         if meta.get("version") != 3:
             print(json.dumps({"schema_version": 1, "status": "legacy", "markers": []}))
             return 0
-        store = TaskSessionStore(vault)
-        operations = store.list_operations(
-            str(meta["project_id"]), str(meta["task_id"]), domain="review"
+        task_id = str(meta.get("task_id") or "")
+        authorization = require_task_review(
+            meta,
+            worktree,
+            expected_vault=vault,
+            expected_operation_id=task_id,
+        )
+        operation = review_gate_root(
+            meta,
+            worktree,
+            expected_vault=vault,
+            expected_operation_id=task_id,
         )
         markers: list[str] = []
-        failed_operations: list[str] = []
-        for operation in operations:
-            state_dir = Path(str(operation["operation_dir"])).resolve()
-            if operation.get("status") == "failed":
-                failed_operations.append(str(operation["operation_id"]))
-                continue
-            review_meta = state_dir / ".review-meta.json"
-            if not review_meta.is_file():
-                if operation.get("status") in {"queued", "starting", "running", "callback-ready"}:
-                    return fail(f"review operation {operation['operation_id']} is unfinished")
-                continue
-            if operation.get("status") != "complete":
-                return fail(f"review operation {operation['operation_id']} is not complete")
+        if authorization.approved:
             command = [
                 sys.executable,
-                str(vault / "skills" / "review-dispatch" / "scripts" / "archive_review.py"),
-                "--worktree", str(worktree), "--operation-dir", str(state_dir),
+                str(vault / "scripts" / "harness" / "review_archive.py"),
+                "--worktree", str(worktree), "--operation-dir", str(operation),
                 "--vault-root", str(vault), "--json",
             ]
             if args.dry_run:
@@ -61,17 +68,20 @@ def main() -> int:
                 return fail((result.stderr or result.stdout).strip() or "review archive failed")
             value = json.loads(result.stdout)
             if value.get("status") not in ({"dry-run"} if args.dry_run else {"archived", "already-current"}):
-                return fail(f"review operation {operation['operation_id']} did not archive")
+                return fail("exact review gate did not archive")
             if not args.dry_run:
-                markers.append(str(state_dir / ".review-archive.json"))
+                marker = operation / ".review-archive.json"
+                if not marker.is_file():
+                    return fail("exact review archive marker is missing")
+                markers.append(str(marker))
         print(json.dumps({
             "schema_version": 1,
             "status": "dry-run" if args.dry_run else "archived",
             "markers": markers,
-            "failed_operations": failed_operations,
+            "failed_operations": [],
         }, ensure_ascii=False, sort_keys=True))
         return 0
-    except (KeyError, OSError, json.JSONDecodeError, TaskSessionError) as exc:
+    except (KeyError, OSError, json.JSONDecodeError, ValueError) as exc:
         return fail(str(exc))
 
 

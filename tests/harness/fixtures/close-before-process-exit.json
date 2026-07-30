@@ -1,0 +1,1 @@
+{"case":"close-before-process-exit","initial":{"process":"alive","surface":"owned"},"event":"close","expected":{"effect":"request-exit","surface_close":false}}

@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""Workflow policy and clean composition tests."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from harness.contracts import RuntimeRoute
+from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor, SupervisorError
+from harness.workflows.dispatch import (
+    DispatchRequest,
+    ReviewPolicy,
+    operation_spec,
+    run_dispatch,
+)
+from harness.workflows.reap import run_reap, summary_callback
+from harness.workflows.review import (
+    ReviewFinding,
+    ReviewRequest,
+    ReviewResult,
+    aggregate,
+    resolution_required,
+    verify_lane,
+)
+from harness.workflows.research import ResearchRequest
+
+
+def check(label: str, value: bool) -> None:
+    if not value:
+        raise AssertionError(label)
+    print(f"OK   {label}")
+
+
+route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
+request = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route)
+spec = operation_spec(request)
+check("dispatch emits stable OperationSpec", spec.kind == "dispatch" and len(spec.idempotency_key) == 64)
+check("dispatch defaults to automatic simple review", request.review == ReviewPolicy())
+workspace = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route, placement="workspace")
+check("workspace is a dispatch placement", workspace.placement == "workspace")
+
+simple = ReviewRequest("review-1")
+deep = ReviewRequest("review-2", depth="deep", cross_model=True, max_verify_iterations=2)
+check("simple review is one holistic session", simple.axes == ("holistic",))
+check("deep review preserves two independent axes", deep.axes == ("spec", "standards-correctness-architecture-security"))
+try:
+    ReviewRequest("review-3", depth="simple", max_verify_iterations=2)
+except ValueError:
+    check("simple review verify is bounded", True)
+else:
+    check("simple review verify is bounded", False)
+spec_result = ReviewResult(
+    "spec",
+    "changes-requested",
+    (ReviewFinding("F-1", "spec", "important", "contract gap", "tests fail"),),
+)
+standards_result = ReviewResult("standards-correctness-architecture-security", "approve")
+aggregate_result = aggregate(deep, {"spec": spec_result, "standards-correctness-architecture-security": standards_result})
+check("deep aggregation preserves axes and material verdict", aggregate_result["verdict"] == "changes-requested" and len(aggregate_result["axes"]) == 2)
+check("important findings require same-session resolution", resolution_required(spec_result))
+try:
+    verify_lane("surface-1", "surface-2")
+except ValueError:
+    check("verification cannot open a second surface", True)
+else:
+    check("verification cannot open a second surface", False)
+
+safe = ResearchRequest(
+    "research-1",
+    "packets/research/question.md",
+    "packets/research/manifest.json",
+)
+check("safe research is minimal-context", not safe.unsafe and safe.context_scope == "minimal")
+for label, call in (
+    (
+        "safe research rejects full context",
+        lambda: ResearchRequest(
+            "r",
+            "packets/research/question.md",
+            "packets/research/manifest.json",
+            context_scope="full-explicit",
+        ),
+    ),
+    (
+        "unsafe research is never implicit",
+        lambda: ResearchRequest(
+            "r",
+            "packets/research/question.md",
+            "packets/research/manifest.json",
+            unsafe=True,
+        ),
+    ),
+):
+    try:
+        call()
+    except ValueError:
+        check(label, True)
+    else:
+        check(label, False)
+
+summary = {"type": "repo-touch", "title": "Result", "body": "Done"}
+callback = summary_callback(callback_id="cb-1", operation_id="op-1", run_id="run-1", summary=summary)
+check("Wiki Summary uses internal callback transport", callback.kind == "wiki-summary" and callback.payload["title"] == "Result")
+
+with tempfile.TemporaryDirectory(prefix="harness-lifecycle.") as raw:
+    store = OperationStore(Path(raw) / "store")
+    lifecycle_request = DispatchRequest(
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+        "b" * 64,
+        "packets/one/manifest.json",
+        route,
+    )
+    dispatch_calls: list[str] = []
+    persisted: list[dict[str, object]] = []
+
+    def launch(record):
+        dispatch_calls.append(record.run_id)
+        return {"status": "launched", "task_surface": "surface-1"}
+
+    dispatched = run_dispatch(
+        lifecycle_request,
+        store,
+        launch=launch,
+        persist_result=lambda record, result: persisted.append(
+            {"run_id": record.run_id, **result}
+        ),
+    )
+    durable = store.read(
+        lifecycle_request.owner_id, lifecycle_request.task_id
+    )
+    check(
+        "dispatch public seam persists and awaits one typed callback",
+        dispatched.record == durable
+        and durable.state == "awaiting-callback"
+        and dispatch_calls == [durable.run_id]
+        and persisted == [
+            {
+                "run_id": durable.run_id,
+                "status": "launched",
+                "task_surface": "surface-1",
+            }
+        ],
+    )
+    replay = run_dispatch(
+        lifecycle_request,
+        store,
+        launch=lambda _record: (_ for _ in ()).throw(
+            AssertionError("completed launch effect repeated")
+        ),
+        persist_result=lambda _record, _result: (_ for _ in ()).throw(
+            AssertionError("completed launch result repeated")
+        ),
+    )
+    check(
+        "dispatch restart does not repeat a completed external effect",
+        replay.record.state == "awaiting-callback" and replay.result is None,
+    )
+
+    failing_request = DispatchRequest(
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444",
+        "c" * 64,
+        "packets/two/manifest.json",
+        route,
+    )
+    failed_attempts: list[str] = []
+
+    def uncertain_launch(record):
+        failed_attempts.append(record.run_id)
+        raise RuntimeError("surface result was not observed")
+
+    try:
+        run_dispatch(
+            failing_request,
+            store,
+            launch=uncertain_launch,
+            persist_result=lambda _record, _result: None,
+        )
+    except RuntimeError:
+        pass
+    else:
+        check("uncertain dispatch fixture fails", False)
+    try:
+        run_dispatch(
+            failing_request,
+            store,
+            launch=uncertain_launch,
+            persist_result=lambda _record, _result: None,
+        )
+    except SupervisorError:
+        check(
+            "uncertain dispatch effect reconciles instead of spawning again",
+            len(failed_attempts) == 1,
+        )
+    else:
+        check("uncertain dispatch effect reconciles instead of spawning again", False)
+
+    reap_attempts: list[str] = []
+
+    def interrupted_reap(record):
+        reap_attempts.append(record.run_id)
+        if len(reap_attempts) == 1:
+            raise RuntimeError("vault transaction result was not observed")
+        return {"status": "complete", "result_link": "[[Result]]"}
+
+    try:
+        run_reap(
+            store,
+            owner_id=lifecycle_request.owner_id,
+            operation_id=lifecycle_request.task_id,
+            summary=summary,
+            finalize=interrupted_reap,
+        )
+    except RuntimeError:
+        pass
+    else:
+        check("interrupted reap fixture fails", False)
+    pending_reap = store.read(
+        lifecycle_request.owner_id, lifecycle_request.task_id
+    )
+    check(
+        "reap keeps an interrupted recoverable finalization durable",
+        pending_reap.state == "finalizing"
+        and pending_reap.pending_effect == "reap-finalize",
+    )
+    reaped = run_reap(
+        store,
+        owner_id=lifecycle_request.owner_id,
+        operation_id=lifecycle_request.task_id,
+        summary=summary,
+        finalize=interrupted_reap,
+    )
+    check(
+        "reap retries only its recovery-safe finalization before runtime cleanup",
+        reaped.record.state == "finalizing"
+        and reaped.result == {"status": "complete", "result_link": "[[Result]]"}
+        and len(reap_attempts) == 2,
+    )
+    reap_supervisor = OperationSupervisor(
+        store, lifecycle_request.owner_id, lifecycle_request.task_id
+    )
+    reap_supervisor.transition("exiting")
+    reap_supervisor.transition("complete")
+    final_replay = run_reap(
+        store,
+        owner_id=lifecycle_request.owner_id,
+        operation_id=lifecycle_request.task_id,
+        summary=summary,
+        finalize=lambda _record: (_ for _ in ()).throw(
+            AssertionError("terminal reap effect repeated")
+        ),
+    )
+    check(
+        "terminal reap replay is a no-op",
+        final_replay.record.state == "complete" and final_replay.result is None,
+    )

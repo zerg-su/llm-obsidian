@@ -1,0 +1,1 @@
+{"case":"interrupted-write-ahead-transition","initial":{"intent":"open-surface","effect":"unknown"},"event":"resume","expected":{"effect":"reconcile","state":"attention-required"}}

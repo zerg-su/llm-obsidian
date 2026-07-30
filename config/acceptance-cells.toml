@@ -1,204 +1,97 @@
-schema_version = 1
-runner_contract_version = 3
-orchestration_contract_version = 2
-environment_scope_version = 2
-evidence_epoch = 3
-
-# Exact release-packaging files that cannot change a live cell's behavior.
-# No globs: every path must be reviewed and listed separately.
-non_behavioral_paths = [
-  ".claude-plugin/marketplace.json",
-  ".claude-plugin/plugin.json",
-  ".codex-plugin/plugin.json",
-  "CHANGELOG.md",
+schema_version = 2
+required_cells = [
+  "claude-lifecycle",
+  "codex-lifecycle",
+  "cross-runtime-composition",
+  "deep-review",
 ]
 
-# Test-only changes never alter installed product behavior. Prefix handling is
-# code-restricted to tests/; arbitrary directories cannot be configured here.
-non_behavioral_prefixes = ["tests/"]
-
-# These files own evidence selection/checkpointing, not live cell behavior.
-# Incompatible changes require an explicit orchestration_contract_version bump.
-orchestration_dependencies = [
+[release]
+driver = "scripts/live_acceptance_driver.py"
+dependencies = [
   "config/acceptance-cells.toml",
-  "config/acceptance-dependencies.lock.json",
-  "scripts/acceptance_dependencies.py",
-  "scripts/acceptance_fingerprints.py",
-  "scripts/acceptance-workspace-supervisor.py",
   "scripts/release-acceptance.py",
-]
-
-# Shared code which directly shapes the sandbox, model invocation, prompt and
-# typed outbox contract.  Scheduler/checkpoint/retry code is intentionally not
-# listed here and is guarded by the exact orchestration allowlist above.
-behavioral_abi_dependencies = [
+  "scripts/release_acceptance_support.py",
   "scripts/live-acceptance-runner.py",
-  "scripts/acceptance/__init__.py",
-  "scripts/acceptance/adapters.py",
-  "scripts/acceptance/contracts.py",
-  "scripts/acceptance/launchers.py",
-  "scripts/acceptance/prompting.py",
-  "scripts/acceptance/runner.py",
-  "scripts/acceptance/sandbox.py",
+  "scripts/live_acceptance_driver.py",
+  "Makefile",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "docs/runtime-capabilities.md",
+  "docs/task-sessions.md",
+]
+dependency_roots = [
+  "scripts",
+  "skills",
+  "hooks",
+  "schemas",
+  "config",
+  ".claude",
+  ".codex",
+  ".agents",
+  ".codex-plugin",
+  ".claude-plugin",
+  "docs/skill-references",
 ]
 
-# Registration surfaces loaded by every synthetic live sandbox.  The generated
-# lock follows their transitive code/data references.  Manifest packaging fields
-# are normalized by the fingerprint layer, so release version bumps stay data-only.
-registration_dependencies = [
-  "hooks/hooks.json",
-  ".claude/skill-rules.json",
-  ".claude-plugin/plugin.json",
-  ".codex-plugin/plugin.json",
-  ".codex/config.toml",
-  ".codex/dispatch-env.toml",
-  ".codex/profiles/deep.toml",
-  ".codex/profiles/default.toml",
-  ".codex/profiles/reviewer-readonly.toml",
-  ".codex/profiles/wiki-write.toml",
-]
+[environment]
+requires = ["git", "cmux", "claude", "codex"]
+report = ".vault-meta/acceptance/latest-live.json"
+state = ".vault-meta/acceptance/live-state.json"
+report_schema = 3
+state_schema = 3
+preflight_schema = 1
+failed_cell_classifications = ["runtime-contract", "mechanism-failure"]
 
-# Function roots are adapter-owned semantic units.  The fingerprint code walks
-# their same-module call graph without importing or executing the module.
-behavioral_abi_fragments = [
-  "scripts/acceptance/scenario_adapters.py#sandbox_cleanup_proof",
-]
-
-global_dependencies = [
-  ".gitignore",
+[cells.claude-lifecycle]
+kind = "runtime-lifecycle"
+runtimes = ["claude"]
+route = "simple"
+expected = ["open", "callback", "same-run-continue", "exit", "close"]
+dependencies = [
   "config/model-routing.toml",
-  "evals/acceptance/scenarios.json",
-  "evals/acceptance/skills.json",
-  "scripts/cmux_agent_support.py",
-  "scripts/lifecycle_telemetry.py",
-  "scripts/model_routing.py",
-  "scripts/pipeline_events.py",
-  "scripts/task_contract.py",
-  "scripts/task_sessions.py",
-  "scripts/turn_telemetry.py",
+  "scripts/harness/adapters/cmux.py",
+  "scripts/harness/adapters/claude.py",
+  "scripts/harness/callbacks.py",
+  "scripts/harness/reconciliation.py",
 ]
 
-[dynamic_dependency_prefixes]
-"scripts/acceptance/contracts.py" = ["skills/"]
-
-[model_generations]
-"gpt-5.6-sol" = "codex:5.6"
-"gpt-5.6-terra" = "codex:5.6"
-opus = "claude:opus-4.8"
-fable = "claude:fable"
-sonnet = "claude:sonnet"
-
-[generation_routes]
-include = ["runtimes.codex", "runtimes.claude"]
-
-[scenarios.agenda-carry]
-dependencies = ["scripts/agenda.py", "scripts/vault-write.py"]
-
-[scenarios.protected-web]
-dependencies = ["scripts/research-isolation.py", "scripts/research_contract.py", "scripts/vault-write.py"]
-
-[scenarios.vault-capture]
-dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
-
-[scenarios.obsidian-authoring]
-dependencies = ["scripts/vault-write.py", "scripts/validate-vault.py"]
-
-[scenarios.conversation-readonly]
+[cells.codex-lifecycle]
+kind = "runtime-lifecycle"
+runtimes = ["codex"]
+route = "simple"
+expected = ["open", "callback", "same-run-continue", "exit", "close"]
 dependencies = [
-  "hooks/run-hook.py",
-  ".claude/hooks/skill-router.py",
-  "scripts/lifecycle_telemetry.py",
-  "scripts/turn_telemetry.py",
+  "config/model-routing.toml",
+  "scripts/harness/adapters/cmux.py",
+  "scripts/harness/adapters/codex.py",
+  "scripts/harness/callbacks.py",
+  "scripts/harness/reconciliation.py",
 ]
 
-[scenarios.cmux-lifecycle]
-dependencies = ["scripts/cmux_surface_lifecycle.py", "scripts/cmux_agent_supervisor.py", "scripts/cmux_trust_prompt.py", "scripts/queue-session-exit.py"]
-
-[scenarios.daily-summary]
+[cells.cross-runtime-composition]
+kind = "workflow-composition"
+runtimes = ["codex", "claude"]
+route = "simple"
+expected = ["dispatch", "simple-review", "reap"]
 dependencies = [
-  ".claude-plugin/plugin.json",
-  ".codex/agents/daily-summarizer.toml",
-  "agents/daily-summarizer.md",
-  "scripts/daily-collect.py",
-  "scripts/daily-apply.py",
-  "scripts/daily-summary-save.py",
-]
-
-[scenarios.dispatch-review-reap]
-runtime_tools = ["claude", "codex"]
-dependencies = [
-  "scripts/cmux_workspace_lifecycle.py",
-  "scripts/cmux_agent_supervisor.py",
-  "scripts/cmux_surface_lifecycle.py",
-  "scripts/cmux_trust_prompt.py",
   "scripts/dispatch-runner.py",
+  "scripts/review-runner.py",
   "scripts/reap-runner.py",
-  "scripts/task_contract.py",
-  "skills/review-dispatch/scripts/spawn_review.py",
-  "skills/reap-send/scripts/send_reap.py",
-]
-behavior_fragments = [
-  "scripts/acceptance/scenario_adapters.py#lifecycle_acceptance_cleanup_proof",
+  "scripts/harness/workflows/dispatch.py",
+  "scripts/harness/workflows/review.py",
+  "scripts/harness/workflows/reap.py",
 ]
 
-[scenarios.retrieval]
-dependencies = ["scripts/retrieve.py", "scripts/bm25-index.py", "scripts/dense-refresh-worker.py"]
-
-[scenarios.unsafe-web]
-dependencies = ["scripts/current-session-id.sh", "scripts/research-isolation.py", "scripts/research_contract.py", "hooks/run-hook.py"]
-
-[scenarios.vault-maintenance]
-dependencies = ["scripts/validate-vault.py", "scripts/vault-write.py"]
-
-[scenarios.ingest]
-dependencies = ["scripts/document-normalize.py", "scripts/research-isolation.py", "scripts/research_contract.py", "scripts/vault-write.py"]
-
-[skills.journal]
-dependencies = ["scripts/journal-write.py"]
-
-[skills.dispatch]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#dispatch_fixture_prompt",
-  "scripts/acceptance/skill_adapters.py#write_dispatch_acceptance_request",
-  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_proof",
-]
-
-[skills.dispatch-workspace]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#dispatch_fixture_prompt",
-  "scripts/acceptance/skill_adapters.py#write_dispatch_acceptance_request",
-  "scripts/acceptance/skill_adapters.py#dispatch_acceptance_proof",
-]
-
-[skills.review-dispatch]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#review_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#bind_review_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#review_fixture_prompt",
-]
-
-[skills.review-send]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#review_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#bind_review_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#review_fixture_prompt",
-]
-
-[skills.close]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#close_acceptance_fixture",
-  "scripts/acceptance/skill_adapters.py#close_fixture_prompt",
-  "scripts/acceptance/skill_adapters.py#close_acceptance_proof",
-]
-
-[skills.autoresearch]
-behavior_fragments = [
-  "scripts/acceptance/skill_adapters.py#autoresearch_acceptance_cleanup",
-]
-
-[skills.daily]
-behavior_fragments = [
-  "scripts/acceptance/scenario_adapters.py#daily_acceptance_cleanup",
+[cells.deep-review]
+kind = "deep-review"
+runtimes = ["claude", "codex"]
+route = "deep"
+expected = ["spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"]
+dependencies = [
+  "config/model-routing.toml",
+  "scripts/review-runner.py",
+  "scripts/harness/workflows/review.py",
+  "scripts/harness/review_submit.py",
+  "scripts/harness/review_archive.py",
 ]

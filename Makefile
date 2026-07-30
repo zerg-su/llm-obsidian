@@ -3,13 +3,35 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+.PHONY: test-harness test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+
+test-harness:
+	@echo "=== harness contracts and replay regressions ==="
+	@python3 tests/harness/test_contracts.py
+	@python3 tests/harness/test_regressions.py
+	@python3 tests/harness/test_store.py
+	@python3 tests/harness/test_adapters.py
+	@python3 tests/harness/test_callbacks.py
+	@python3 tests/harness/test_context_verification.py
+	@python3 tests/harness/test_workflows.py
+	@python3 tests/harness/test_research_vertical.py
+	@python3 tests/harness/test_research_notifier.py
+	@python3 tests/harness/test_engineering_skills.py
+	@python3 tests/harness/test_review_transport.py
+	@python3 tests/harness/test_review_vertical.py
+	@python3 tests/harness/test_review_gate.py
+	@python3 tests/harness/test_runtime_sessions.py
+	@python3 tests/harness/test_runtime_task_summary.py
+	@python3 tests/harness/test_runtime_research.py
+	@python3 tests/harness/test_review_finalization.py
+	@python3 tests/harness/test_dispatch_runtime.py
+	@python3 tests/harness/test_runtime_inventory.py
+	@python3 tests/harness/test_release_blocker_runtime.py
+	@python3 tests/harness/test_status_segment.py
 
 test-task-sessions:
 	@echo "=== test_task_sessions.py ==="
 	@python3 tests/test_task_sessions.py
-	@echo "=== test_review_operation_namespacing.py ==="
-	@python3 tests/test_review_operation_namespacing.py
 
 test-model-routing:
 	@echo "=== test_model_routing.py ==="
@@ -27,7 +49,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -35,9 +57,9 @@ help:
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"
-	@echo "  make acceptance-check  Validate dynamic release skill/runtime coverage"
-	@echo "  make acceptance-live   Run/resume the repo-shipped interactive Claude/Codex acceptance matrix"
-	@echo "  make acceptance-live-restart  Discard matching checkpoint and rerun the full matrix"
+	@echo "  make acceptance-check  Validate the bounded four-cell harness release contract"
+	@echo "  make acceptance-live   Run/resume exactly four provider-backed harness cells"
+	@echo "  make acceptance-live-restart  Discard the matching four-cell checkpoint"
 	@echo "  make retrieval-experiment compare contextual/reranker flags without enabling"
 	@echo "  make test-research-isolation protected fetch/synthesis boundary tests"
 	@echo "  make test-document-normalize hermetic document routing/cache/fallback tests"
@@ -67,8 +89,6 @@ help:
 	@echo "  make test-bench       retrieval-bench metrics/degradation tests (python, no ollama)"
 	@echo "  make test-fold        deterministic counter-free log fold tests"
 	@echo "  make test-router      skill-router prompt matching suite (shell)"
-	@echo "  make test-review-dispatch review-dispatch mode plumbing tests"
-	@echo "  make test-review-archive durable cross-model review history tests"
 	@echo "  make test-gateway     MCP gateway config invariants (shell, offline)"
 	@echo "  make test-codex-adapter Codex plugin packaging generator tests"
 	@echo "  make test-dcg-assets  dcg config/hooks and Codex limit helper checks"
@@ -77,7 +97,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-review-dispatch test-review-archive test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -95,11 +115,11 @@ acceptance-check:
 
 acceptance-live:
 	@python3 scripts/claude-subscription-check.py
-	@python3 scripts/acceptance-workspace-supervisor.py run --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --cell-timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --workspaces "$${ACCEPTANCE_WORKSPACES:-2}" --jobs-per-workspace "$${ACCEPTANCE_JOBS_PER_WORKSPACE:-5}" --report .vault-meta/acceptance/latest-live.json
+	@python3 scripts/live-acceptance-runner.py run --timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --report .vault-meta/acceptance/latest-live.json
 
 acceptance-live-restart:
 	@python3 scripts/claude-subscription-check.py
-	@python3 scripts/acceptance-workspace-supervisor.py run --restart --phase "$${ACCEPTANCE_PHASE:-final}" --runner "python3 scripts/live-acceptance-runner.py" --cell-timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --workspaces "$${ACCEPTANCE_WORKSPACES:-2}" --jobs-per-workspace "$${ACCEPTANCE_JOBS_PER_WORKSPACE:-5}" --report .vault-meta/acceptance/latest-live.json
+	@python3 scripts/live-acceptance-runner.py run --restart --timeout "$${ACCEPTANCE_CELL_TIMEOUT:-1200}" --report .vault-meta/acceptance/latest-live.json
 
 test-release-acceptance:
 	@echo "=== test_release_acceptance.py ==="
@@ -114,7 +134,6 @@ test-pipeline-runners:
 	@python3 tests/test_dispatch_resolver.py
 	@python3 tests/test_dispatch_runner.py
 	@python3 tests/test_reap_runner.py
-	@python3 tests/test_reap_send_runner.py
 	@python3 tests/test_queue_session_exit.py
 
 retrieval-experiment:
@@ -171,6 +190,10 @@ test-runtime-detection:
 test-skill-budget:
 	@echo "=== test_skill_budget.py ==="
 	@python3 tests/test_skill_budget.py
+
+test-improve-skills:
+	@echo "=== test_improve_skills.py ==="
+	@python3 tests/test_improve_skills.py
 
 test-contract-schemas:
 	@echo "=== test_contract_schemas.py ==="
@@ -255,14 +278,6 @@ test-fold:
 test-router:
 	@echo "=== test_skill_router.sh ==="
 	@bash tests/test_skill_router.sh
-
-test-review-dispatch:
-	@echo "=== test_review_dispatch.sh ==="
-	@bash tests/test_review_dispatch.sh
-
-test-review-archive:
-	@echo "=== test_review_archive.py ==="
-	@python3 tests/test_review_archive.py
 
 test-gateway:
 	@echo "=== test_mcp_gateway.sh ==="

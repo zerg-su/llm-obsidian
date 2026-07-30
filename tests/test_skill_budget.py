@@ -20,7 +20,7 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
 
 result = run()
 assert result.returncode == 0, result.stderr
-assert "29 skills" in result.stdout and "skill bodies:" in result.stdout
+assert "32 skills" in result.stdout and "skill bodies:" in result.stdout
 print("OK   repository description and body budgets")
 
 with tempfile.TemporaryDirectory(prefix="skill-budget-test.") as raw:

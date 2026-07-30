@@ -33,16 +33,17 @@ keep the skill registry they were started with.
 
 Explicit Codex skill invocation uses `$plugin:skill`, for example
 `$llm-obsidian:save`, `$llm-obsidian:wiki-query`,
-`$llm-obsidian:review-dispatch`, or `$llm-obsidian:reap`.
+`$llm-obsidian:review`, or `$llm-obsidian:reap`.
 Claude-style `/save` and `/wiki` phrases remain in skill descriptions, but
 Codex CLI slash commands are a separate UI namespace.
 
 Do not add a legacy Codex skill symlink to `~/.codex/skills/llm-obsidian`
 unless you intentionally want duplicate discovery during debugging.
 
-Codex limit helpers are repo-shipped: `.codex/codex-limits-status.py` prints a
-compact status/cmux segment; `scripts/codex-limit-monitor.py --install` installs
-`codex-limit-status`.
+The optional Codex limit helper remains terminal-only:
+`scripts/codex-limit-monitor.py --install` installs `codex-limit-status`.
+Rate-limit metadata is not mirrored into the cmux sidebar because it can be
+stale or belong to a different live thread.
 
 ## Core rules
 

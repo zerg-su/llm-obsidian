@@ -16,6 +16,45 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.3.0] — 2026-07-30
+
+### Добавлено
+
+- Добавлено restartable owner-scoped harness-ядро с typed operation specs,
+  atomic state, write-ahead effects, exact callbacks, reconciliation и
+  командами `status`/`inspect`/`resume`/`cancel`/`close`/`doctor`.
+- Добавлены публичные workflows `review` и защищённый `research`, а также
+  инженерные скиллы `debug`, `tdd`, `design`, `prototype` и
+  `resolve-conflict`.
+- Добавлены unified simple/deep review contracts и четырёхъячеечный live
+  acceptance driver, привязанный к точному SHA.
+
+### Изменено
+
+- Механика cmux, provider process, worktree, context, callback, verification,
+  retry и cleanup перенесена в code-owned harness modules.
+- Aliases Sol, Terra, Opus и Fable и review-профили централизованы в
+  `config/model-routing.toml`.
+- Защищённый research теперь использует vaultless fetch, networkless synthesis,
+  hashed pointer artifacts и запись в vault только координатором.
+- Версия 2.3.0 является чистым runtime baseline; pre-harness operation state не
+  мигрируется.
+
+### Удалено
+
+- Без compatibility aliases удалены `dispatch-workspace`, `review-dispatch`,
+  `review-send`, `reap-send` и `autoresearch`. Используются `dispatch`,
+  `review`, `reap` и `research`.
+- Legacy skill-by-runtime acceptance и prompt baselines заменены hermetic replay
+  покрытием и четырьмя ограниченными live-cell.
+
+### Безопасность
+
+- Wrong-run, late, terminal, mutated и duplicate callbacks теперь fail closed
+  либо становятся idempotent no-op в соответствии с точным operation state.
+- Review approval публикуется только после выхода provider и точного cleanup
+  принадлежащих операции ресурсов.
+
 ## [2.1.3] — 2026-07-29
 
 ### Исправлено

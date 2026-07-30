@@ -447,12 +447,12 @@ mkdir -p "$SANDBOX/fork-repo/.codex" "$SANDBOX/fork-repo/.mcp-profiles" "$SANDBO
 cp "$SANDBOX/codex-repo/.mcp.json.example" "$SANDBOX/fork-repo/.mcp.json.example"
 cp "$SANDBOX/codex-repo/.mcp-profiles/research.json" "$SANDBOX/fork-repo/.mcp-profiles/research.json"
 cat > "$SANDBOX/fork-repo/.claude-plugin/plugin.json" <<'EOF'
-{"name": "llm-obsidian-custom", "version": "1.0.0", "description": "test fork"}
+{"name": "llm-obsidian-fork", "version": "1.0.0", "description": "test fork"}
 EOF
 python3 "$GW/codex-sync.py" --repo-root "$SANDBOX/fork-repo" --codex-home "$SANDBOX/fork-home" --apply >"$OUT" 2>&1
 expect_exit "H14 fork apply exits 0" "$?" 0
-expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-custom-mcp.config.toml" "context7/mcp"
-expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-custom-research.config.toml" "paper-search/mcp"
+expect_grep "H15 fork default profile name" "$SANDBOX/fork-home/llm-obsidian-fork-mcp.config.toml" "context7/mcp"
+expect_grep "H16 fork extra profile name" "$SANDBOX/fork-home/llm-obsidian-fork-research.config.toml" "paper-search/mcp"
 
 # ---------- I. clean-machine dry run ----------
 echo "I. clean-machine dry run"

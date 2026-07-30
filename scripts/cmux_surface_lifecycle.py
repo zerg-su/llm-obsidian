@@ -34,6 +34,7 @@ from task_sessions import (
     validate_checkpoint,
 )
 from cmux_workspace_lifecycle import close_task_container
+from harness.adapters.cmux import run_cmux
 
 
 HANDOFF_PREFIXES = (".task-", ".review-", ".wiki-")
@@ -134,6 +135,10 @@ def run(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess
     return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=False)
 
 
+def cmux(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return run_cmux(args, runner=lambda argv, **_kwargs: run(argv))
+
+
 def names(kind: str) -> tuple[str, str, str]:
     if kind == "reviewer":
         return ".review-close-armed.json", "review_surface", "reviewer_runtime"
@@ -162,8 +167,9 @@ def telemetry_surface_context(worktree: Path, kind: str) -> tuple[str, int]:
 
 
 def surface_and_runtime(worktree: Path, kind: str) -> tuple[str, str]:
-    task_meta = read_json(worktree / ".task-meta.json")
-    if not root_coordinator_reviewer(worktree, kind):
+    coordinator_review = root_coordinator_reviewer(worktree, kind)
+    task_meta = {} if coordinator_review else read_json(worktree / ".task-meta.json")
+    if not coordinator_review:
         try:
             # A task plan is intentionally executed before its final /exit.  Only
             # the exact coordinator-prepared close is valid during that phase.
@@ -269,25 +275,25 @@ def request_exit(worktree: Path, kind: str) -> int:
         require_origin_session(worktree)
     sentinel, surface, runtime = arm(worktree, kind)
     if runtime == "claude":
-        cleared = run(["cmux", "send-key", "--surface", surface, "ctrl+u"])
+        cleared = cmux(["send-key", "--surface", surface, "ctrl+u"])
         if cleared.returncode != 0:
             sentinel.unlink(missing_ok=True)
             die((cleared.stdout + cleared.stderr).strip() or "cmux composer clear failed")
     else:
         for _ in range(40):
-            run(["cmux", "send-key", "--surface", surface, "backspace"])
-    sent = run(["cmux", "send", "--surface", surface, "/exit"])
+            cmux(["send-key", "--surface", surface, "backspace"])
+    sent = cmux(["send", "--surface", surface, "/exit"])
     if sent.returncode != 0:
         sentinel.unlink(missing_ok=True)
         die((sent.stdout + sent.stderr).strip() or "cmux send failed")
     time.sleep(0.2)
     if runtime == "codex":
-        accepted = run(["cmux", "send-key", "--surface", surface, "tab"])
+        accepted = cmux(["send-key", "--surface", surface, "tab"])
         if accepted.returncode != 0:
             sentinel.unlink(missing_ok=True)
             die((accepted.stdout + accepted.stderr).strip() or "cmux send-key tab failed")
         time.sleep(0.1)
-    entered = run(["cmux", "send-key", "--surface", surface, "Enter"])
+    entered = cmux(["send-key", "--surface", surface, "Enter"])
     if entered.returncode != 0:
         sentinel.unlink(missing_ok=True)
         die((entered.stdout + entered.stderr).strip() or "cmux send-key failed")
@@ -468,12 +474,10 @@ def start_next_broker_review(worktree: Path) -> None:
         ) / "operations" / next_id
         launch = read_json(operation_dir / "launch.json")
         argv = launch.get("argv")
-        expected_script = str(
-            SCRIPT_DIR.parent / "skills" / "review-dispatch" / "scripts" / "spawn_review.py"
-        )
+        expected_script = str(SCRIPT_DIR / "review-runner.py")
         if (
             not isinstance(argv, list) or len(argv) > 32
-            or argv[:3] != ["python3", expected_script, "start"]
+            or argv[:2] != ["python3", expected_script]
             or "--operation-id" not in argv
             or argv[argv.index("--operation-id") + 1] != next_id
             or any(not isinstance(item, str) or not item or "\0" in item for item in argv)

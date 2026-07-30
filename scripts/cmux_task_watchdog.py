@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from task_contract import ContractError, normalize, normalize_for_runtime
+from harness.adapters.cmux import run_cmux
 
 
 STATE_FILES = {"task": ".task-watchdog.json", "reviewer": ".review-watchdog.json"}
@@ -88,6 +89,10 @@ def iso_time(epoch: float) -> str:
 
 def run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, capture_output=True, check=False)
+
+
+def cmux(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return run_cmux(args, runner=lambda argv, **_kwargs: run(argv))
 
 
 def recover_gone_reviewer_surface(worktree: Path, route: Route) -> None:
@@ -167,7 +172,7 @@ def screen_hash(text: str) -> str:
 
 
 def read_screen(surface: str) -> tuple[str, bool]:
-    result = run(["cmux", "read-screen", "--surface", surface])
+    result = cmux(["read-screen", "--surface", surface])
     if result.returncode == 0:
         return result.stdout, True
     error = (result.stdout + result.stderr).lower()
@@ -192,7 +197,7 @@ def walk_processes(processes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def agent_cpu_percent(surface: str, runtime: str) -> float | None:
     """Return advisory CPU only; CPU never suppresses a stale-screen alert."""
-    result = run(["cmux", "top", "--all", "--processes", "--json"])
+    result = cmux(["top", "--all", "--processes", "--json"])
     if result.returncode != 0:
         return None
     try:
@@ -246,9 +251,9 @@ def notify(route: Route, stage: str, idle_seconds: int) -> bool:
     else:
         title = f"{label} watchdog degraded"
         body = "Screen sampling failed repeatedly. The agent was not interrupted or closed."
-    result = run(
+    result = cmux(
         [
-            "cmux", "notify", "--surface", route.coordinator_surface,
+            "notify", "--surface", route.coordinator_surface,
             "--title", title, "--body", body,
         ]
     )

@@ -2,9 +2,9 @@
 """Deterministic post-approval runner for one dispatch task split.
 
 The coordinator still owns natural-language parsing, context selection, and the
-single user approval.  This runner owns the repetitive stateful mechanics after
-that approval: route capture, worktree creation, prompt/metadata rendering,
-anchored cmux spawn, supervisor launch, and the dispatch log entry.
+single user approval. This runner owns route capture, worktree creation,
+prompt/metadata rendering, and the dispatch log entry. The generic provider
+runtime owns cmux and provider lifecycle mechanics.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -38,19 +37,26 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
-from task_sessions import (  # noqa: E402
-    TaskSessionError,
-    close_surface_exact,
-    spawn_right,
-    spawn_workspace,
-)
-from cmux_workspace_lifecycle import bind_workspace_identity  # noqa: E402
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
+from harness.contracts import RuntimeRoute  # noqa: E402
+from harness.git_ops import GitAdapter, GitError  # noqa: E402
+from harness.verification import load_profiles  # noqa: E402
+from harness.runtime_sessions import (  # noqa: E402
+    RuntimeSessionError,
+    RuntimeSessionManager,
+    RuntimeSessionResult,
+)
+from harness.store import OperationStore  # noqa: E402
+from harness.workflows.dispatch import (  # noqa: E402
+    DispatchRequest as HarnessDispatchRequest,
+    ReviewPolicy,
+    start_dispatch,
+)
 
 
 TASK_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 RUNTIMES = {"claude", "codex"}
-REVIEW_MODES = {"light", "full", "skip"}
+REVIEW_MODES = {"simple", "deep", "skip"}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
@@ -58,11 +64,9 @@ DEFAULT_DISPATCH = {
     "codex_home": "",
     "profile": "",
     "reap_skill": "$llm-obsidian:reap",
-    "reap_send_skill": "$llm-obsidian:reap-send",
-    "review_skill": "$llm-obsidian:review-dispatch",
-    "review_send_skill": "$llm-obsidian:review-send",
+    "review_skill": "$llm-obsidian:review",
     "interaction_policy": "unattended",
-    "review_mode": "light",
+    "review_mode": "simple",
     "max_verify_iterations": 2,
     "auto_close_surfaces": True,
     "default_reap_type": "session",
@@ -277,6 +281,46 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         raise DispatchError("executor.runtime must be claude or codex")
     if any("\0" in value or len(value) > 200 for value in (explicit_model, explicit_effort)):
         raise DispatchError("executor model/effort override is invalid")
+    legacy_review_mode = str(raw.get("review_mode") or "").strip()
+    raw_review = raw.get("review")
+    if raw_review is not None and legacy_review_mode:
+        raise DispatchError(
+            "review and review_mode cannot both be present"
+        )
+    if raw_review is None:
+        raw_review = {"mode": legacy_review_mode}
+    if not isinstance(raw_review, dict):
+        raise DispatchError("review must be an object")
+    unknown_review = set(raw_review) - {
+        "mode", "cross_model", "runtime", "model", "effort"
+    }
+    if unknown_review:
+        raise DispatchError(
+            "unknown review keys: " + ", ".join(sorted(unknown_review))
+        )
+    review_mode = str(raw_review.get("mode") or "").strip()
+    if review_mode and review_mode not in REVIEW_MODES:
+        raise DispatchError("review.mode must be simple, deep, or skip")
+    cross_model = raw_review.get("cross_model", False)
+    if not isinstance(cross_model, bool):
+        raise DispatchError("review.cross_model must be boolean")
+    review_runtime = str(raw_review.get("runtime") or "").strip()
+    review_model = str(raw_review.get("model") or "").strip()
+    review_effort = str(raw_review.get("effort") or "").strip()
+    if review_runtime and review_runtime not in RUNTIMES:
+        raise DispatchError("review.runtime must be claude or codex")
+    if any(
+        "\0" in value or len(value) > maximum
+        for value, maximum in (
+            (review_model, 128),
+            (review_effort, 20),
+        )
+    ):
+        raise DispatchError("review model/effort override is invalid")
+    if review_mode == "skip" and any(
+        (cross_model, review_runtime, review_model, review_effort)
+    ):
+        raise DispatchError("skip review cannot carry expert overrides")
     context = raw.get("wiki_context") or []
     if not isinstance(context, list) or len(context) > 5:
         raise DispatchError("wiki_context must contain at most five entries")
@@ -336,7 +380,13 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "wiki_context": normalized_context,
         "suggested_agents": normalized_agents,
         "reap": {"type": reap_type, "title": reap_title},
-        "review_mode": str(raw.get("review_mode") or "").strip(),
+        "review": {
+            "mode": review_mode,
+            "cross_model": cross_model,
+            "runtime": review_runtime,
+            "model": review_model,
+            "effort": review_effort,
+        },
     }
 
 
@@ -360,7 +410,7 @@ def load_dispatch_config(vault_root: Path, target_repo: Path) -> dict[str, Any]:
     if values["interaction_policy"] != "unattended":
         raise DispatchError("dispatch-runner supports approved unattended plans only")
     if values["review_mode"] not in REVIEW_MODES:
-        raise DispatchError("dispatch review_mode must be light, full, or skip")
+        raise DispatchError("dispatch review_mode must be simple, deep, or skip")
     bounds = {
         "max_verify_iterations": (0, 5),
         "watchdog_poll_seconds": (5, 300),
@@ -375,7 +425,7 @@ def load_dispatch_config(vault_root: Path, target_repo: Path) -> dict[str, Any]:
     for key in ("auto_close_surfaces", "watchdog_enabled"):
         if not isinstance(values[key], bool):
             raise DispatchError(f"dispatch config {key} must be boolean")
-    for key in ("reap_skill", "reap_send_skill", "review_skill", "review_send_skill"):
+    for key in ("reap_skill", "review_skill"):
         values[key] = require_string(values[key], f"dispatch config {key}", maximum=300)
     codex_home = str(values.get("codex_home") or "").strip()
     if codex_home:
@@ -455,8 +505,10 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<codex-home/profile or inherited>": codex_env,
         "<wiki-reap-command>": config["reap_skill"],
         "<review-skill>": config["review_skill"],
-        "<review-send-skill>": config["review_send_skill"],
-        "<reap-send-skill>": config["reap_send_skill"],
+        "<task-review-command>": (
+            f"python3 {request['vault_root']}/scripts/task-review-runner.py "
+            f"run --worktree {request['worktree']}"
+        ),
         "<absolute path to wiki/plans/<file>.md>": str(request["plan_file"]),
     }
     for old, new in replacements.items():
@@ -466,6 +518,53 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     if "<!-- BRANCH" in body or "<description from user" in body:
         raise DispatchError("dispatch prompt rendering left control placeholders")
     return body.rstrip() + "\n"
+
+
+def review_policy(
+    request: dict[str, Any], config: dict[str, Any]
+) -> ReviewPolicy:
+    """Resolve and freeze the deterministic task-side review preset."""
+
+    raw = request["review"]
+    mode = raw["mode"] or config["review_mode"]
+    if mode not in REVIEW_MODES:
+        raise DispatchError("review mode must be simple, deep, or skip")
+    overrides = (
+        raw["cross_model"],
+        raw["runtime"],
+        raw["model"],
+        raw["effort"],
+    )
+    if mode == "skip" and any(overrides):
+        raise DispatchError("skip review cannot carry expert overrides")
+    verification = load_profiles(
+        request["vault_root"] / "config" / "verification-profiles.toml"
+    )["scoped"]
+    if mode != "skip":
+        routing = load_config(request["vault_root"])
+        try:
+            resolve(
+                routing,
+                "review",
+                session=request["session_route"],
+                explicit_runtime=raw["runtime"],
+                explicit_model=raw["model"],
+                explicit_effort=raw["effort"],
+                same_model=not raw["cross_model"],
+                review_profile=mode,
+            )
+        except RoutingError as exc:
+            raise DispatchError(f"invalid review override: {exc}") from exc
+    return ReviewPolicy(
+        depth="deep" if mode == "deep" else "simple",
+        cross_model=raw["cross_model"],
+        enabled=mode != "skip",
+        runtime=raw["runtime"],
+        model=raw["model"],
+        effort=raw["effort"],
+        verification_profile=verification.name,
+        verification_profile_sha256=verification.sha256,
+    )
 
 
 def resolved_routes(request: dict[str, Any], *, persist: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -520,39 +619,15 @@ def run_command(
     return result
 
 
-def identify_origin(vault_root: Path, surface: str) -> dict[str, str]:
-    result = run_command(
-        [sys.executable, str(vault_root / "scripts" / "cmux_agent_supervisor.py"), "identify-caller", "--surface", surface],
-        label="cmux caller identity",
-    )
-    try:
-        value = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise DispatchError("cmux caller identity returned invalid JSON") from exc
-    if value.get("surface_id") != surface:
-        raise DispatchError("cmux caller identity does not match origin_surface")
-    return {"surface_id": surface, "surface_ref": str(value.get("surface_ref") or "")}
-
-
 def create_worktree(request: dict[str, Any]) -> None:
-    request["worktree"].parent.mkdir(parents=True, exist_ok=True)
-    run_command(
-        ["git", "check-ref-format", "--branch", request["branch"]],
-        label="branch validation",
-    )
-    existing = run_command(
-        ["git", "-C", str(request["target_repo"]), "branch", "--list", request["branch"]],
-        label="branch lookup",
-    )
-    if existing.stdout.strip():
-        raise DispatchError(f"dispatch branch already exists: {request['branch']}")
-    run_command(
-        [
-            "git", "-C", str(request["target_repo"]), "worktree", "add", "-b",
-            request["branch"], str(request["worktree"]), request["base_branch"],
-        ],
-        label="worktree creation",
-    )
+    try:
+        GitAdapter(request["target_repo"]).create_worktree(
+            request["worktree"],
+            request["branch"],
+            request["base_branch"],
+        )
+    except GitError as exc:
+        raise DispatchError(f"worktree creation failed: {exc}") from exc
 
 
 def initialize_task(request: dict[str, Any]) -> dict[str, str]:
@@ -604,20 +679,17 @@ def write_task_files(
     worktree = request["worktree"]
     handoffs = {
         ".task-cmux-surface": child["surface"],
+        ".task-origin-session": request["origin_session"],
         ".wiki-cmux-surface": origin["surface_id"],
         ".wiki-agent-runtime": request["session_route"]["runtime"],
         ".wiki-reap-command": config["reap_skill"],
-        ".task-reap-send-skill": config["reap_send_skill"],
         ".task-review-skill": config["review_skill"],
-        ".task-review-send-skill": config["review_send_skill"],
     }
     for name, value in handoffs.items():
         atomic_text(worktree / name, value + "\n")
     atomic_text(worktree / ".task-prompt.md", render_task_prompt(request, config))
     plan_hash = sha256_file(request["plan_file"])
-    review_mode = request["review_mode"] or config["review_mode"]
-    if review_mode not in REVIEW_MODES:
-        raise DispatchError("review_mode must be light, full, or skip")
+    review = review_policy(request, config)
     meta: dict[str, Any] = {
         "version": 3,
         "project_id": identity["project_id"],
@@ -636,6 +708,7 @@ def write_task_files(
         "task_workspace_ref": child.get("workspace_ref", ""),
         "task_window": child.get("window", ""),
         "task_window_ref": child.get("window_ref", ""),
+        "worktree": str(worktree),
         "target_repo": str(request["target_repo"]),
         "vault_root": str(request["vault_root"]),
         "branch": request["branch"],
@@ -643,9 +716,7 @@ def write_task_files(
         "codex_home": config.get("codex_home") or None,
         "codex_profile": config.get("profile") or None,
         "wiki_reap_command": config["reap_skill"],
-        "reap_send_skill": config["reap_send_skill"],
         "review_skill": config["review_skill"],
-        "review_send_skill": config["review_send_skill"],
         "routing": {
             "schema_version": 1,
             "session": {
@@ -660,8 +731,16 @@ def write_task_files(
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
         "review_policy": {
-            "mode": review_mode,
-            "max_verify_iterations": config["max_verify_iterations"],
+            "mode": review.mode,
+            "cross_model": review.cross_model,
+            "runtime": review.runtime,
+            "model": review.model,
+            "effort": review.effort,
+            "max_verify_iterations": review.max_verify_iterations,
+            "verification_profile": review.verification_profile,
+            "verification_profile_sha256": (
+                review.verification_profile_sha256
+            ),
             "auto_resolve_severities": ["warning", "nit"],
             "escalate_severities": ["blocking"],
         },
@@ -698,29 +777,6 @@ def write_task_files(
     return meta
 
 
-def launch_task(request: dict[str, Any], child: dict[str, str]) -> None:
-    supervisor = request["vault_root"] / "scripts" / "cmux_agent_supervisor.py"
-    run_command(
-        [sys.executable, str(supervisor), "prepare-task", "--worktree", str(request["worktree"]), "--surface", child["surface"]],
-        label="task agent preparation",
-    )
-    command = shlex.join([
-        sys.executable,
-        str(supervisor),
-        "run",
-        "--worktree",
-        str(request["worktree"]),
-        "--kind",
-        "task",
-        "--surface",
-        child["surface"],
-    ])
-    run_command(["cmux", "send", "--surface", child["surface"], command], label="task supervisor handoff")
-    run_command(["cmux", "send-key", "--surface", child["surface"], "Enter"], label="task supervisor submit")
-    time.sleep(0.2)
-    run_command(["cmux", "read-screen", "--surface", child["surface"], "--lines", "1"], label="task surface verification")
-
-
 def dispatch_log(request: dict[str, Any], effective: dict[str, Any], child: dict[str, str]) -> None:
     links = ", ".join(f"[[{item['title']}]]" for item in request["wiki_context"]) or "none"
     entry = (
@@ -741,6 +797,36 @@ def dispatch_log(request: dict[str, Any], effective: dict[str, Any], child: dict
 
 def run_state_path(vault_root: Path, request_id: str) -> Path:
     return vault_root / ".vault-meta" / "dispatch-runs" / f"{request_id}.json"
+
+
+def harness_request(
+    request: dict[str, Any],
+    config: dict[str, Any],
+    effective: dict[str, Any],
+) -> HarnessDispatchRequest:
+    try:
+        context_manifest = request["plan_file"].relative_to(
+            request["vault_root"]
+        ).as_posix()
+    except ValueError as exc:
+        raise DispatchError("approved plan escaped the coordinator vault") from exc
+    route = RuntimeRoute(
+        effective["runtime"],
+        effective["model"],
+        effective["effort"],
+        "executor",
+        effective["config_sha256"],
+    )
+    review = review_policy(request, config)
+    return HarnessDispatchRequest(
+        task_id=request["request_id"],
+        owner_id=request["request_id"],
+        plan_sha256=sha256_file(request["plan_file"]),
+        context_manifest=context_manifest,
+        route=route,
+        placement=request["placement"],
+        review=review,
+    )
 
 
 def completed_replay(raw: dict[str, Any], spec_sha256: str) -> dict[str, Any] | None:
@@ -767,7 +853,29 @@ def completed_replay(raw: dict[str, Any], spec_sha256: str) -> dict[str, Any] | 
     if state.get("request_sha256") != spec_sha256:
         raise DispatchError(f"dispatch request {request_id} was reused with different bytes")
     if state.get("status") == "launched" and isinstance(state.get("result"), dict):
-        return {**state["result"], "idempotent": True}
+        result = state["result"]
+        identity = result.get("harness")
+        if (
+            not isinstance(identity, dict)
+            or identity.get("owner_id") != request_id
+            or identity.get("operation_id") != request_id
+            or not isinstance(identity.get("run_id"), str)
+        ):
+            raise DispatchError("launched dispatch result lacks exact harness identity")
+        try:
+            record = OperationStore(
+                vault.resolve() / ".vault-meta" / "harness"
+            ).read(request_id, request_id)
+        except (RuntimeError, ValueError) as exc:
+            raise DispatchError(
+                f"launched dispatch identity is unavailable: {exc}"
+            ) from exc
+        if (
+            record.run_id != identity["run_id"]
+            or record.lane_id != identity.get("lane_id")
+        ):
+            raise DispatchError("launched dispatch harness identity drifted")
+        return {**result, "idempotent": True}
     return None
 
 
@@ -804,74 +912,133 @@ def mark_failed(path: Path, stage: str, message: str) -> None:
     atomic_json(path, current)
 
 
-def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
-    state_path, prior = begin_run(request, spec_sha256)
-    if prior is not None:
-        return {**prior, "idempotent": True}
-    stage = "preflight"
+def _child_identity(result: RuntimeSessionResult) -> dict[str, str]:
+    surface = result.record.resources.surface_id
+    if not surface:
+        raise DispatchError("provider runtime returned no exact task surface")
+    return {
+        "surface": surface,
+        "surface_ref": result.surface_ref,
+        "workspace": result.workspace_id,
+        "workspace_ref": result.workspace_ref,
+        "window": result.window_id,
+        "window_ref": result.window_ref,
+    }
+
+
+def start(
+    request: dict[str, Any],
+    spec_sha256: str,
+    *,
+    runtime_manager: RuntimeSessionManager | None = None,
+) -> dict[str, Any]:
+    state_path = run_state_path(request["vault_root"], request["request_id"])
+    stage = "harness-preflight"
     stage_started = time.monotonic()
     run_started = stage_started
-    child: dict[str, str] | None = None
-    launched = False
     try:
+        state_path, prior = begin_run(request, spec_sha256)
+        if prior is not None:
+            return prior
         config = load_dispatch_config(request["vault_root"], request["target_repo"])
+        session_preview, effective_preview = resolved_routes(request, persist=False)
         session, effective = resolved_routes(request)
-        origin = identify_origin(request["vault_root"], request["origin_surface"])
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
+        for field in ("runtime", "model", "effort", "config_sha256"):
+            if session.get(field) != session_preview.get(field):
+                raise DispatchError(f"captured session route drifted at {field}")
+            if effective.get(field) != effective_preview.get(field):
+                raise DispatchError(f"effective route drifted at {field}")
+        lifecycle_request = harness_request(request, config, effective)
+
         stage = "worktree"
         stage_started = time.monotonic()
         create_worktree(request)
         identity = initialize_task(request)
-        atomic_text(request["worktree"] / ".task-prompt.md", render_task_prompt(request, config))
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
+        atomic_text(
+            request["worktree"] / ".task-prompt.md",
+            render_task_prompt(request, config),
+        )
+        emit_lifecycle_event(
+            request["worktree"],
+            "dispatch-runner-stage",
+            actor=stage,
+            counts={
+                "duration_ms": round(
+                    (time.monotonic() - stage_started) * 1000
+                )
+            },
+            vault_root=request["vault_root"],
+        )
+
         stage = "runtime-sync"
         stage_started = time.monotonic()
         sync_codex_profile(request, config, effective)
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
-        stage = "surface"
-        stage_started = time.monotonic()
-        child = (
-            spawn_workspace(
-                request["origin_surface"], request["worktree"],
-                f"Task · {request['task_name']}",
-            )
-            if request["placement"] == "workspace"
-            else spawn_right(request["origin_surface"])
+        emit_lifecycle_event(
+            request["worktree"],
+            "dispatch-runner-stage",
+            actor=stage,
+            counts={
+                "duration_ms": round(
+                    (time.monotonic() - stage_started) * 1000
+                )
+            },
+            vault_root=request["vault_root"],
         )
-        if request["placement"] == "workspace":
-            child = bind_workspace_identity(child)
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
-        stage = "task-contract"
+
+        runtime = runtime_manager or RuntimeSessionManager.for_root(
+            request["vault_root"],
+            store_root=request["vault_root"] / ".vault-meta" / "harness",
+        )
+        prepared: dict[str, str] = {}
+
+        def prepare_surface(opened: RuntimeSessionResult) -> None:
+            child = _child_identity(opened)
+            write_task_files(
+                request,
+                config,
+                session,
+                effective,
+                identity,
+                {
+                    "surface_id": request["origin_surface"],
+                    "surface_ref": "",
+                },
+                child,
+            )
+            prepared.update(child)
+
+        stage = "provider-runtime"
         stage_started = time.monotonic()
-        write_task_files(request, config, session, effective, identity, origin, child)
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
-        stage = "launch"
-        stage_started = time.monotonic()
-        launch_task(request, child)
-        launched = True
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             vault_root=request["vault_root"])
+        launched = start_dispatch(
+            lifecycle_request,
+            runtime,
+            origin_surface=request["origin_surface"],
+            cwd=request["worktree"],
+            on_surface_opened=prepare_surface,
+        )
+        if not prepared:
+            raise DispatchError(
+                "provider runtime started without preparing the task contract"
+            )
+        emit_lifecycle_event(
+            request["worktree"],
+            "dispatch-runner-stage",
+            actor=stage,
+            counts={
+                "duration_ms": round(
+                    (time.monotonic() - stage_started) * 1000
+                )
+            },
+            vault_root=request["vault_root"],
+        )
+
         stage = "log"
         stage_started = time.monotonic()
         log_status = "ok"
         try:
-            dispatch_log(request, effective, child)
+            dispatch_log(request, effective, prepared)
         except DispatchError:
             log_status = "degraded"
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             status=log_status, vault_root=request["vault_root"])
         result = {
             "schema_version": 1,
             "status": "launched",
@@ -884,40 +1051,81 @@ def start(request: dict[str, Any], spec_sha256: str) -> dict[str, Any]:
             "effort": effective["effort"],
             "worktree": str(request["worktree"]),
             "branch": request["branch"],
-            "task_surface": child["surface"],
-            "task_surface_ref": child["surface_ref"],
-            "origin_surface": origin["surface_id"],
+            "task_surface": prepared["surface"],
+            "task_surface_ref": prepared["surface_ref"],
+            "origin_surface": request["origin_surface"],
             "placement": request["placement"],
-            "task_workspace": child.get("workspace", ""),
-            "task_workspace_ref": child.get("workspace_ref", ""),
+            "task_workspace": prepared["workspace"],
+            "task_workspace_ref": prepared["workspace_ref"],
+            "task_window": prepared["window"],
+            "task_window_ref": prepared["window_ref"],
             "log_status": log_status,
             "coordinator_action": COORDINATOR_ACTION,
-            "setup_duration_ms": round((time.monotonic() - run_started) * 1000),
+            "setup_duration_ms": round(
+                (time.monotonic() - run_started) * 1000
+            ),
             "idempotent": False,
+            "harness": {
+                "owner_id": launched.record.spec.owner_id,
+                "operation_id": launched.record.spec.operation_id,
+                "lane_id": launched.record.lane_id,
+                "run_id": launched.record.run_id,
+            },
         }
-        atomic_json(state_path, {
-            "schema_version": 1,
-            "request_id": request["request_id"],
-            "request_sha256": spec_sha256,
-            "task_name": request["task_name"],
-            "status": "launched",
-            "worktree": str(request["worktree"]),
-            "result": result,
-            "updated_at": utc_now(),
-        })
+        atomic_json(
+            state_path,
+            {
+                "schema_version": 1,
+                "request_id": request["request_id"],
+                "request_sha256": spec_sha256,
+                "task_name": request["task_name"],
+                "status": "launched",
+                "worktree": str(request["worktree"]),
+                "result": result,
+                "updated_at": utc_now(),
+            },
+        )
+        emit_lifecycle_event(
+            request["worktree"],
+            "dispatch-runner-stage",
+            actor=stage,
+            counts={
+                "duration_ms": round(
+                    (time.monotonic() - stage_started) * 1000
+                )
+            },
+            status=log_status,
+            vault_root=request["vault_root"],
+        )
         return result
-    except (DispatchError, RoutingError, TaskSessionError, OSError, ValueError) as exc:
-        emit_lifecycle_event(request["worktree"], "dispatch-runner-stage", actor=stage,
-                             counts={"duration_ms": round((time.monotonic() - stage_started) * 1000)},
-                             status="error", vault_root=request["vault_root"])
-        if child is not None and not launched:
-            try:
-                close_surface_exact(child["surface"])
-            except (TaskSessionError, OSError):
-                pass
-        mark_failed(state_path, stage, str(exc))
+    except (
+        DispatchError,
+        RoutingError,
+        RuntimeSessionError,
+        RuntimeError,
+        OSError,
+        ValueError,
+    ) as exc:
+        if state_path.is_file():
+            current = read_object(state_path)
+            if current.get("status") == "preparing":
+                mark_failed(state_path, stage, str(exc))
+        if request["worktree"].is_dir():
+            emit_lifecycle_event(
+                request["worktree"],
+                "dispatch-runner-stage",
+                actor=stage,
+                counts={
+                    "duration_ms": round(
+                        (time.monotonic() - stage_started) * 1000
+                    )
+                },
+                status="error",
+                vault_root=request["vault_root"],
+            )
         raise DispatchError(
-            f"{stage} failed for request {request['request_id']}; no retry was attempted: {exc}"
+            f"{stage} failed for request {request['request_id']}; "
+            f"no retry was attempted: {exc}"
         ) from exc
 
 
@@ -942,6 +1150,7 @@ def main() -> int:
         if args.command == "validate":
             config = load_dispatch_config(request["vault_root"], request["target_repo"])
             session, effective = resolved_routes(request, persist=False)
+            review = review_policy(request, config)
             prompt = render_task_prompt(request, config)
             print(json.dumps({
                 "schema_version": 1,
@@ -954,11 +1163,35 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
+                "review": {
+                    "mode": review.mode,
+                    "cross_model": review.cross_model,
+                    "runtime": review.runtime,
+                    "model": review.model,
+                    "effort": review.effort,
+                    "max_verify_iterations": (
+                        review.max_verify_iterations
+                    ),
+                    "verification_profile": (
+                        review.verification_profile
+                    ),
+                    "verification_profile_sha256": (
+                        review.verification_profile_sha256
+                    ),
+                },
             }, sort_keys=True))
             return 0
         print(json.dumps(start(request, spec_sha256), ensure_ascii=False, sort_keys=True))
         return 0
-    except (DispatchError, RoutingError, TaskSessionError, ContractError, OSError, ValueError) as exc:
+    except (
+        DispatchError,
+        RoutingError,
+        ContractError,
+        RuntimeSessionError,
+        RuntimeError,
+        OSError,
+        ValueError,
+    ) as exc:
         die(str(exc))
 
 

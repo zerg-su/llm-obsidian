@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SESSION = "019f0000-0000-7000-8000-000000000003"
+SESSION = "019f4818-de94-79a0-ba09-4d8d34f93690"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from daily_contract import parse_daily_task, task_open_line  # noqa: E402

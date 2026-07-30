@@ -37,3 +37,7 @@ implementation, summarize the agreed requirements, constraints, edge cases,
 acceptance criteria, and approach. If they confirmed alignment without
 authorizing a next action, ask which handoff they want. If they already
 authorized planning or implementation, do not ask for redundant confirmation.
+
+When architecture or domain boundaries are the unresolved subject, hand the
+agreed facts to `design`; keep this interview focused on user choices rather
+than drafting alternatives here.

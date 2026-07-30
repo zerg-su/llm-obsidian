@@ -194,70 +194,21 @@ LIST FROM "wiki/questions" WHERE answer_quality = "draft" SORT created DESC
 
 Opt-in (детект: `./scripts/allocate-address.sh` исполняемый + `.vault-meta/address-counter.txt` существует; иначе скип целиком). Полная спецификация — **Read** `references/address-validation.md`: классификация страниц (meta/fold excluded, post-rollout >= 2026-04-23 must-have, legacy backfill-eligible по манифесту `.vault-meta/legacy-pages.txt`), 6 проверок (формат `c-/l-NNNNNN`, уникальность, counter peek, post-rollout enforcement = error, legacy = informational, `.raw/.manifest.json` consistency) и формат секции отчёта. Lint только наблюдает — НЕ присваивает адреса.
 
-## Skill Size & Frontmatter Discipline (iter-2 Step 9)
+## Skill size and quality
 
-Anthropic Agent Skills spec и community guidance ставят жёсткий потолок 500 строк на SKILL.md (reliability регрессирует выше) и ~15 000 char бюджет на сумму descriptions всех skills (это часть system prompt'а каждой сессии). Lint их валидирует.
-
-### Scope
-
-Scan the single `skills/` root of this repo. **Note**: the system prompt of every session loads the descriptions of ALL installed skills, so the aggregate budget below is computed across everything found under `skills/`.
+Use the repo-owned checks as the single source of truth:
 
 ```bash
-find skills -name SKILL.md -not -path '*/node_modules/*'
+python3 scripts/check-skill-budget.py
+python3 skills/improve-skills/scripts/audit_skills.py --strict
 ```
 
-### Checks (per SKILL.md)
-
-| Severity | Condition | Suggested action |
-|---|---|---|
-| 🔴 FAIL | `wc -l SKILL.md > 500` | Split: process в SKILL.md, context в `references/*.md`. См. memory rule про size discipline. |
-| 🟡 WARN | `wc -l SKILL.md > 400` | Приближается к лимиту — пора выносить tables / templates в `references/`. |
-| 🟡 WARN | Missing `version:` in frontmatter | Add `version: 1.0.0` (semver: PATCH desc tweak, MINOR new mode/ref, MAJOR breaking pre-flight changes). |
-| 🟡 WARN | Frontmatter `description` > 800 chars | Description — trigger, не документация. Перенести длинную часть в body. |
-| 🟡 WARN | Skill has Write/Edit/Bash в `allowed-tools` AND **no** `AskUserQuestion` AND no `read-only`/`reference` marker in body | Probably needs pre-flight clarification (`feedback_skill_preflight_clarification`). Confirm by reading skill purpose. |
-
-### Aggregate checks (across all SKILL.md)
-
-```bash
-# Sum char count of all frontmatter descriptions
-total_chars=$(python3 - <<'PY'
-import re, sys
-from pathlib import Path
-total = 0
-roots = [Path("skills")]
-for p in [q for r in roots for q in r.rglob("SKILL.md")]:
-    text = p.read_text(encoding="utf-8")
-    m = re.match(r"---\n(.*?)\n---", text, re.S)
-    if m:
-        desc = re.search(r"^description:\s*[|>]?\s*\n?(.*?)(?=^[a-z_-]+:|^\Z)", m.group(1), re.S | re.M)
-        if desc:
-            total += len(desc.group(1).strip())
-print(total)
-PY
-)
-```
-
-| Severity | Condition | Action |
-|---|---|---|
-| 🔴 FAIL | `total_chars > 15000` | Hard Anthropic limit. Сократить descriptions начиная с самых раздутых. |
-| 🟡 WARN | `total_chars > 8000` | Половина бюджета. Оставить запас под user-global и плагинные skills. |
-
-### Report section
-
-```markdown
-## Skill Size & Frontmatter Discipline
-
-- Total SKILL.md files scanned: N
-- Total description chars (all skills): M / 15000
-
-### 🔴 Errors
-- skills/foo/SKILL.md: 542 lines (> 500). Suggest split: ...
-
-### 🟡 Warnings
-- skills/bar/SKILL.md: 428 lines (> 400). Consider extracting <section> to references/.
-- skills/baz/SKILL.md: missing `version:` field.
-- skills/qux/SKILL.md: has Write/Edit/Bash but no AskUserQuestion (likely needs pre-flight per feedback_skill_preflight_clarification).
-```
+`check-skill-budget.py` enforces the current aggregate description limit of
+7500 bytes and rejects growth beyond the reviewed body/reference baseline.
+`audit_skills.py` verifies inventory, frontmatter identity, cross-runtime
+explicit-only parity, local context pointers, placeholders, and the 500-line
+disclosure ceiling. Put their output in `## Skill Size & Quality`; do not
+reimplement or override their thresholds in the lint report.
 
 ---
 
@@ -271,10 +222,10 @@ Always show the lint report first. Ask: "Should I fix these automatically, or do
 
 Safe to auto-fix:
 - Adding missing frontmatter fields with placeholder values
-- Creating stub pages for missing entities
 - Adding wikilinks for unlinked mentions
 
 Needs review before fixing:
+- Creating pages for repeatedly mentioned entities
 - Deleting orphan pages (they might be intentionally isolated)
 - Resolving contradictions (requires human judgment)
 - Merging duplicate pages

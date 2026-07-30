@@ -41,7 +41,9 @@ explicitly asks for a visible persistent session.
    `.vault-meta/dispatch-requests/<request-id>.json` containing schema version,
    canonical UUID, task/description, absolute vault/repo/worktree, branch/base,
    absolute pending `plan_file`, optional executor override, verified context,
-   reap type/title, and review mode. Omit caller identity fields normally: the
+   reap type/title, and a review object (`mode`, `cross_model`, and optional
+   expert `runtime`/`model`/`effort`). `skip` cannot carry review overrides.
+   Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
 6. Show the typed route/hash and one echo-confirm block:
@@ -66,15 +68,21 @@ explicitly asks for a visible persistent session.
 ## Runner contract
 
 `dispatch-runner.py` owns worktree creation, route sync, prompt rendering,
-v3 `.task-meta.json`, exact task identity, an anchored right split, supervisor
-launch, verification, and one `vault-write.py` log transaction. A UUID is
+v3 `.task-meta.json`, exact task identity, and one `vault-write.py` log
+transaction. The generic provider runtime owns the anchored split/workspace,
+provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
-failed requests fail closed. A pre-launch blank child may close only by its
-exact surface UUID.
+failed requests fail closed.
 
 The metadata retains `interaction_policy`, `approved_plan_sha256`,
-`forbidden_actions`, and `watchdog_policy`. `cmux_agent_supervisor.py` owns
-runtime argv, trust prompts, process lifecycle, watchdog, and close-after-exit.
+`forbidden_actions`, and `watchdog_policy`. It also freezes the exact review
+preset, its deterministic simple/deep/skip budget (1/2/0), and the coordinator
+verification profile digest. The task invokes
+`python3 <vault-root>/scripts/task-review-runner.py run --worktree <worktree>`
+before writing its summary; generic target repositories do not need to ship
+swarm scripts or routing/verification configuration. The code-owned provider runtime
+owns runtime argv, trust prompts, process lifecycle, watchdog, and
+close-after-exit.
 Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
 write roots, `DCG_CONFIG`, localhost-only loopback policy, and trusted `PATH`.
 Never weaken those controls or reproduce their shell commands manually.

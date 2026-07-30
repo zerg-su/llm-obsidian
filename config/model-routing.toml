@@ -14,13 +14,57 @@ effort = "high"
 effort = "medium"
 
 [roles.deep]
-effort = "max"
+effort = "xhigh"
 
 [roles.review.codex]
 model = "gpt-5.6-sol"
 effort = "high"
 
 [roles.review.claude]
+model = "opus"
+effort = "high"
+
+[model_aliases.sol]
+runtime = "codex"
+target = "gpt-5.6-sol"
+
+[model_aliases.terra]
+runtime = "codex"
+target = "gpt-5.6-terra"
+
+[model_aliases.opus]
+runtime = "claude"
+target = "opus"
+expected_generation = 5
+
+[model_aliases.fable]
+runtime = "claude"
+target = "fable"
+expected_generation = 5
+
+[review_profiles.simple.codex]
+model = "sol"
+effort = "high"
+
+[review_profiles.simple.claude]
+model = "opus"
+effort = "high"
+
+[review_profiles.deep.codex]
+model = "sol"
+effort = "xhigh"
+
+[review_profiles.deep.claude]
+model = "fable"
+effort = "xhigh"
+
+# Historical stock values accepted by the clean-cut upgrade gate without
+# creating a local override.
+[legacy_review_defaults.codex]
+model = "gpt-5.6-sol"
+effort = "high"
+
+[legacy_review_defaults.claude]
 model = "fable"
 effort = "high"
 

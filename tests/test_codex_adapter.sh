@@ -41,12 +41,41 @@ EOF
 
 echo "A. syntax/session helper"
 python3 -m py_compile "$FIX/scripts/codex-adapter.py" 2>"$OUT"; expect_exit "A1 codex-adapter.py compiles" "$?" 0
-CLAUDE_CODE_SESSION_ID=claude-session CODEX_THREAD_ID=codex-thread "$FIX/scripts/current-session-id.sh" >"$OUT" 2>&1
+(
+  cd "$FIX" &&
+    CLAUDE_CODE_SESSION_ID=claude-session CODEX_THREAD_ID=codex-thread \
+      "$FIX/scripts/current-session-id.sh"
+) >"$OUT" 2>&1
 expect_grep "A2 helper prefers Claude" "$OUT" "claude-session"
-env -u CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID=codex-thread "$FIX/scripts/current-session-id.sh" >"$OUT" 2>&1
+(
+  cd "$FIX" &&
+    env -u CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID=codex-thread \
+      "$FIX/scripts/current-session-id.sh"
+) >"$OUT" 2>&1
 expect_grep "A3 helper falls back to Codex" "$OUT" "codex-thread"
-env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID "$FIX/scripts/current-session-id.sh" >"$OUT" 2>&1
+(
+  cd "$FIX" &&
+    env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID \
+      "$FIX/scripts/current-session-id.sh"
+) >"$OUT" 2>&1
 expect_grep "A4 helper unknown fallback" "$OUT" "unknown"
+TASK_FIX="$SANDBOX/task-worktree"
+mkdir -p "$TASK_FIX"
+git -C "$TASK_FIX" init -q
+printf '%s\n' "origin-session" > "$TASK_FIX/.task-origin-session"
+(
+  cd "$TASK_FIX" &&
+    CLAUDE_CODE_SESSION_ID=task-claude-session CODEX_THREAD_ID=task-codex-thread \
+      "$FIX/scripts/current-session-id.sh"
+) >"$OUT" 2>&1
+expect_grep "A5 task helper preserves exact origin binding" "$OUT" "origin-session"
+printf '%s\n' "invalid session" > "$TASK_FIX/.task-origin-session"
+(
+  cd "$TASK_FIX" &&
+    env -u CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID=task-codex-thread \
+      "$FIX/scripts/current-session-id.sh"
+) >"$OUT" 2>&1
+expect_grep "A6 invalid task binding falls back safely" "$OUT" "task-codex-thread"
 
 python3 - "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
 import json, pathlib, sys
@@ -68,7 +97,7 @@ assert entry["source"] == {
 }
 print("CLAUDE_PACKAGE_OK")
 PYEOF
-expect_grep "A5 public Claude package metadata is aligned" "$OUT" "CLAUDE_PACKAGE_OK"
+expect_grep "A7 public Claude package metadata is aligned" "$OUT" "CLAUDE_PACKAGE_OK"
 python3 - "$REPO_ROOT" >"$OUT" 2>&1 <<'PYEOF'
 import pathlib, sys, tomllib
 root = pathlib.Path(sys.argv[1])
@@ -93,7 +122,7 @@ assert "_review_model" not in dispatch
 assert "_review_effort" not in dispatch
 print("MODEL_DEFAULTS_OK")
 PYEOF
-expect_grep "A6 repo model defaults are aligned" "$OUT" "MODEL_DEFAULTS_OK"
+expect_grep "A8 repo model defaults are aligned" "$OUT" "MODEL_DEFAULTS_OK"
 
 echo "B. check/apply"
 python3 "$FIX/scripts/codex-adapter.py" --repo-root "$FIX" --check >"$OUT" 2>&1

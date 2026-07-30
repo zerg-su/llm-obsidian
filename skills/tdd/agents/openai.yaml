@@ -1,0 +1,4 @@
+interface:
+  display_name: "TDD"
+  short_description: "Build approved seams through red-green tests"
+  default_prompt: "Use $tdd to implement this change with a focused red-green loop."

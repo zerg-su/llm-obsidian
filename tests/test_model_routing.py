@@ -41,8 +41,13 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     claude = {"runtime": "claude", "model": "opus", "effort": "high"}
 
     check("Claude runtime default is Opus", config.runtime_default("claude")["model"] == "opus")
-    check("Claude reviewer default is Fable", config.reviewer_default("claude")["model"] == "fable")
+    check("Claude simple reviewer default is Opus", config.reviewer_default("claude")["model"] == "opus")
+    check("Claude deep reviewer default is Fable", config.reviewer_default("claude", "deep")["model"] == "fable")
+    check("historical reviewer defaults are centrally tracked", config.legacy_reviewer_default("claude") == {
+        "runtime": "claude", "model": "fable", "effort": "high"
+    })
     check("all concrete defaults are discoverable", config.default_models() == {"gpt-5.6-sol", "opus", "fable"})
+    check("Sol alias resolves to concrete Codex target", config.resolve_alias("sol") == {"runtime": "codex", "model": "gpt-5.6-sol"})
 
     route = routing.resolve(config, "dispatch", session=codex)
     check("dispatch inherits exact session", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "high"))
@@ -50,11 +55,32 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("daily inherits runtime and model", (route["runtime"], route["model"]) == ("claude", "opus"))
     check("daily uses medium effort", route["effort"] == "medium")
     route = routing.resolve(config, "review", session=codex)
-    check("review defaults opposite", (route["runtime"], route["model"], route["effort"]) == ("claude", "fable", "high"))
+    check("simple review defaults opposite", (route["runtime"], route["model"], route["effort"]) == ("claude", "opus", "high"))
+    route = routing.resolve(config, "review", session=codex, review_profile="deep")
+    check(
+        "deep review uses the opposite runtime deep profile",
+        (route["runtime"], route["model"], route["effort"])
+        == ("claude", "fable", "xhigh"),
+    )
     route = routing.resolve(config, "review", session=codex, explicit_runtime="codex")
     check("explicit review runtime uses its role default", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-sol"))
     route = routing.resolve(config, "review", session=codex, same_model=True, explicit_effort="xhigh")
     check("same-model review inherits with effort override", (route["runtime"], route["model"], route["effort"]) == ("codex", "gpt-5.6-sol", "xhigh"))
+    route = routing.resolve(
+        config, "review", session=claude, same_model=True, review_profile="deep"
+    )
+    check(
+        "same-runtime deep review still uses its deep profile",
+        (route["runtime"], route["model"], route["effort"])
+        == ("claude", "fable", "xhigh"),
+    )
+    route = routing.resolve(
+        config, "review", session=claude, explicit_model="terra"
+    )
+    check(
+        "review model alias selects its registered runtime",
+        (route["runtime"], route["model"]) == ("codex", "gpt-5.6-terra"),
+    )
     route = routing.resolve(config, "dispatch", session=codex, explicit_model="sonnet")
     check("registered Sonnet override infers Claude runtime", (route["runtime"], route["model"]) == ("claude", "sonnet"))
     route = routing.resolve(config, "dispatch", session=claude, explicit_model="gpt-5.6-terra")
@@ -65,10 +91,13 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
     check("protected research from Codex inherits", route["source"][0] == "session")
     route = routing.resolve(config, "unsafe-research", session=claude)
     check("unsafe research inherits full session", (route["runtime"], route["model"], route["effort"]) == ("claude", "opus", "high"))
+    route = routing.resolve(config, "dispatch", session=claude, explicit_model="terra")
+    check("registered alias override infers runtime", (route["runtime"], route["model"]) == ("codex", "gpt-5.6-terra"))
 
     for name, call in (
         ("session-required roles fail closed", lambda: routing.resolve(config, "dispatch")),
         ("unknown model without runtime fails closed", lambda: routing.resolve(config, "dispatch", session=codex, explicit_model="unknown")),
+        ("review concrete model override fails closed", lambda: routing.resolve(config, "review", session=codex, explicit_runtime="codex", explicit_model="gpt-5.6-sol")),
         ("invalid effort fails closed", lambda: routing.resolve(config, "dispatch", session=codex, explicit_effort="ultra")),
     ):
         try:
@@ -99,14 +128,13 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
 
     (root / "config/model-routing.local.toml").write_text(
         '[runtimes.claude]\nmodel = "sonnet"\n'
-        '[roles.review.codex]\nmodel = "codex-review"\n'
-        '[roles.review.claude]\nmodel = "opus"\n'
+        '[model_aliases.sol]\ntarget = "codex-review"\n'
         '[model_registry]\nsonnet = "claude"\ncodex-review = "codex"\n',
         encoding="utf-8",
     )
     local = routing.load_config(root)
     check("local runtime override is visible", local.local_override and local.runtime_default("claude")["model"] == "sonnet")
-    check("local reviewer override is independent", local.reviewer_default("claude")["model"] == "opus")
+    check("local reviewer override is independent", local.reviewer_default("codex")["model"] == "codex-review")
     route = routing.resolve(local, "review", session=codex)
     check("review uses local role default", route["model"] == "opus")
     reviewer_profile = local.root / ".codex/profiles/reviewer-readonly.toml"

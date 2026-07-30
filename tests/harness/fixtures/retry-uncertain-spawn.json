@@ -1,0 +1,1 @@
+{"case":"retry-uncertain-spawn","initial":{"intent":"spawn","effect":"unknown"},"event":"retry","expected":{"effect":"reconcile","spawn_count":0}}

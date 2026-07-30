@@ -106,7 +106,8 @@ sources:
 ```
 
 Rules:
-- Flat YAML only. Never nest objects.
+- Follow the target vault's schema. LLM Obsidian uses flat scalar properties
+  plus structured provenance such as the required `sessions:` list.
 - Dates as `YYYY-MM-DD`, not `2026-04-08T00:00:00`.
 - Lists as `- item`, not inline `[a, b, c]`.
 - Wikilinks in YAML must be quoted: `"[[Page]]"`.

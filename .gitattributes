@@ -1,0 +1,5 @@
+# Vendored upstream snapshots are retained byte-for-byte and verified by
+# references/upstream-skills/verify_snapshots.py. Do not rewrite upstream
+# whitespace merely to satisfy repository-owned diff checks.
+references/upstream-skills/mattpocock-skills/** -whitespace
+references/upstream-skills/obra-superpowers/** -whitespace

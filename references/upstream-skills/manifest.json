@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-29",
+  "sources": {
+    "mattpocock-skills": {
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
+      "upstream_committed_at": "2026-07-28T10:18:17+01:00",
+      "version": "1.2.0",
+      "license": "MIT",
+      "local_path": "references/upstream-skills/mattpocock-skills",
+      "included_paths": [
+        "skills/",
+        "docs/",
+        "README.md",
+        "CHANGELOG.md",
+        "CONTEXT.md",
+        "LICENSE",
+        "package.json",
+        ".claude-plugin/plugin.json"
+      ],
+      "files": 141,
+      "bytes": 397020,
+      "tree_sha256": "ee4511e5d2659c3ba9a4348828f65591f9be91c0de694f7790fc33827e94aa2d"
+    },
+    "obra-superpowers": {
+      "repository": "https://github.com/obra/superpowers",
+      "commit": "44c9b2d6e889982ac18c27d05a19fefe335194e1",
+      "upstream_committed_at": "2026-07-28T12:25:36-07:00",
+      "version": "6.2.0",
+      "license": "MIT",
+      "local_path": "references/upstream-skills/obra-superpowers",
+      "included_paths": [
+        "skills/",
+        "docs/",
+        "README.md",
+        "RELEASE-NOTES.md",
+        "LICENSE",
+        "package.json",
+        ".claude-plugin/plugin.json",
+        ".codex-plugin/plugin.json"
+      ],
+      "files": 95,
+      "bytes": 1174353,
+      "tree_sha256": "1db2d4218fbbcaa660a56617ff1e6940c4638c1c6b6b721a57de379f5b5d54d5"
+    }
+  }
+}

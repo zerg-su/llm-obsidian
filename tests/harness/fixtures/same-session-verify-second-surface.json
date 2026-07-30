@@ -1,0 +1,1 @@
+{"case":"same-session-verify-second-surface","initial":{"lane":"review-1","surface":"owned-1"},"event":"verify","expected":{"effect":"send","surface":"owned-1"}}

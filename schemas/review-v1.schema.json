@@ -1,32 +1,256 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://llm-obsidian.local/schemas/review-v1.schema.json",
-  "title": "Cross-model review v1",
+  "title": "Harness review v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "run_id", "mode", "verdict", "findings", "verification_gaps", "notes_for_executor", "residual_risks"],
+  "required": [
+    "schema_version",
+    "operation_id",
+    "run_id",
+    "mode",
+    "head_sha",
+    "verification_profile",
+    "verdict",
+    "axes",
+    "verification_gaps",
+    "notes_for_executor",
+    "residual_risks"
+  ],
   "properties": {
     "schema_version": {"const": 1},
-    "run_id": {"type": "string", "minLength": 1, "maxLength": 100},
-    "mode": {"enum": ["full", "light"]},
+    "operation_id": {
+      "type": "string",
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "run_id": {
+      "type": "string",
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "mode": {"enum": ["deep", "simple"]},
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "verification_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
     "verdict": {"enum": ["approve", "changes-requested", "blocked"]},
-    "findings": {
-      "type": "array", "maxItems": 50,
-      "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["severity", "file", "title", "evidence", "recommendation"],
+    "axes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/axis"}
+    },
+    "verification_gaps": {"$ref": "#/$defs/boundedStrings"},
+    "notes_for_executor": {"$ref": "#/$defs/boundedStrings"},
+    "residual_risks": {"$ref": "#/$defs/boundedStrings"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "simple"}}},
+      "then": {
         "properties": {
-          "severity": {"enum": ["blocking", "warning", "nit"]},
-          "file": {"type": "string", "minLength": 1},
-          "line": {"type": ["integer", "null"], "minimum": 1},
-          "title": {"type": "string", "minLength": 1},
-          "evidence": {"type": "string", "minLength": 1},
-          "recommendation": {"type": "string", "minLength": 1}
+          "axes": {
+            "minItems": 1,
+            "maxItems": 1,
+            "prefixItems": [
+              {
+                "allOf": [
+                  {"$ref": "#/$defs/axis"},
+                  {
+                    "properties": {
+                      "axis": {"const": "holistic"},
+                      "verification_iteration": {"maximum": 1}
+                    }
+                  }
+                ]
+              }
+            ]
+          }
         }
       }
     },
-    "verification_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
-    "notes_for_executor": {"type": "array", "items": {"type": "string"}, "maxItems": 50},
-    "residual_risks": {"type": "array", "items": {"type": "string"}, "maxItems": 50}
+    {
+      "if": {"properties": {"mode": {"const": "deep"}}},
+      "then": {
+        "properties": {
+          "axes": {
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {
+                "allOf": [
+                  {"$ref": "#/$defs/axis"},
+                  {
+                    "properties": {
+                      "axis": {"const": "spec"},
+                      "verification_iteration": {"maximum": 2}
+                    }
+                  }
+                ]
+              },
+              {
+                "allOf": [
+                  {"$ref": "#/$defs/axis"},
+                  {
+                    "properties": {
+                      "axis": {
+                        "const": "standards-correctness-architecture-security"
+                      },
+                      "verification_iteration": {"maximum": 2}
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "approve"}}},
+      "then": {
+        "properties": {
+          "axes": {
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/axis"},
+                {"properties": {"verdict": {"const": "approve"}}}
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "blocked"}}},
+      "then": {
+        "properties": {
+          "axes": {
+            "contains": {
+              "allOf": [
+                {"$ref": "#/$defs/axis"},
+                {"properties": {"verdict": {"const": "blocked"}}}
+              ]
+            },
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"verdict": {"const": "changes-requested"}}},
+      "then": {
+        "properties": {
+          "axes": {
+            "contains": {
+              "allOf": [
+                {"$ref": "#/$defs/axis"},
+                {"properties": {"verdict": {"const": "changes-requested"}}}
+              ]
+            },
+            "minContains": 1,
+            "not": {
+              "contains": {
+                "allOf": [
+                  {"$ref": "#/$defs/axis"},
+                  {"properties": {"verdict": {"const": "blocked"}}}
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "boundedStrings": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {"type": "string", "minLength": 1, "maxLength": 2000}
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "severity",
+        "file",
+        "line",
+        "summary",
+        "evidence",
+        "recommendation"
+      ],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "severity": {"enum": ["critical", "important", "minor"]},
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "pattern": "^(?!/)(?!.*\\\\)(?!\\.{1,2}$)(?!\\.\\./)(?!.*\\/\\.\\.(\\/|$)).+$"
+        },
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 300},
+        "evidence": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "recommendation": {"type": "string", "minLength": 1, "maxLength": 4000}
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["axis", "verdict", "verification_iteration", "findings"],
+      "properties": {
+        "axis": {
+          "enum": [
+            "holistic",
+            "spec",
+            "standards-correctness-architecture-security"
+          ]
+        },
+        "verdict": {"enum": ["approve", "changes-requested", "blocked"]},
+        "verification_iteration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {"$ref": "#/$defs/finding"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"verdict": {"const": "approve"}}},
+          "then": {
+            "properties": {
+              "findings": {
+                "items": {
+                  "allOf": [
+                    {"$ref": "#/$defs/finding"},
+                    {"properties": {"severity": {"const": "minor"}}}
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
   }
 }

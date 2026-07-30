@@ -68,21 +68,20 @@ Steps:
 
    ```bash
    python3 scripts/research-isolation.py start --flow deep-query \
-     --task-id '<exact current task UUID>' --topic '<approved question/gap>'
+     --owner "$(./scripts/current-session-id.sh)" --topic '<approved gap>'
    ```
 
-   Take the exact v3 `task_id` from `.task-meta.json`; in a primary session,
-   lazily create/read it with `scripts/task_sessions.py ensure-session-task`
-   as documented by `autoresearch`. Never select a task by name or recency.
+   Keep the operation ID and run each exact `advance` callback unchanged.
+   `status --owner <owner> --operation-id <id>` is read-only recovery.
 
    Do not call WebSearch/WebFetch in this context. The protected synthesizer
-   writes `answer.md` in its isolated workspace, remains visible while active,
-   and closes after final marker-backed `status` cleanup.
+   returns a cited `answer.md` pointer without mounting the vault, remains
+   visible while active, and closes during harness-owned final cleanup.
 5. Without web supplementation, synthesize from wiki citations normally. With
    supplementation, report the protected surface/run ID; do not paste untrusted
    source bodies back into this coordinator context.
-6. File a deep answer only through the networkless synthesizer or a later
-   explicit save after the user has reviewed it.
+6. File only through an explicit coordinator save after artifact/citation
+   validation and user review.
 
 ---
 

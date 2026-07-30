@@ -25,7 +25,7 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 - **Долгая работа остаётся видимой.** cmux открывает task/reviewer рядом с координатором, сохраняет интерактивный контекст, наблюдает активность и закрывает только точную surface после выхода процесса.
 - **Повторяемой механикой владеет код.** Роутинг, candidate discovery, fingerprints, validation, retries, cleanup, telemetry, индексы и транзакции выполняют скрипты. Токены модели остаются на понимание и решения.
 - **Вики — data layer, а не побочный эффект агента.** `wiki/` и производные `.vault-meta/` отделены от поведенческого кода, поэтому обычное изменение заметки не инвалидирует pipeline.
-- **Качество измеряется.** Механика покрыта герметичными тестами, retrieval — RU/EN goldset'ом, релиз — live-матрицей 29 скиллов × 2 runtime с семантическим переиспользованием evidence.
+- **Качество измеряется.** Механика покрыта герметичными тестами, retrieval — RU/EN goldset'ом, а релиз использует четыре ограниченные provider-backed lifecycle-ячейки на одном frozen Git SHA.
 
 Главное правило: если детерминированная программа может выполнить шаг без потери качества результата, этим шагом должна владеть программа. Модель должна решать, **что означает** действие, а не каждый раз заново вспоминать, **как технически его выполнить**.
 
@@ -62,15 +62,15 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 ┌──────────────────── сессия-координатор ─────────────────────┐
 │ Claude Code или Codex CLI                                   │
 │   │                                                         │
-│   ├── repo skills ──► детерминированные Python/Bash runners │
+│   ├── repo skills ──► intent + reasoning discipline         │
 │   ├── retrieval ────► Obsidian Markdown + локальные индексы │
-│   └── cmux broker ──► task/reviewer справа от координатора  │
+│   └── harness ──────► operation ledger + typed workflows    │
 └──────────────────────────┬───────────────────────────────────┘
-                           │ typed ID, hashes, callbacks
+                           │ adapters: Git, cmux, models, checks
                  ┌─────────┴─────────┐
                  ▼                   ▼
-        изолированный worktree   reviewer другой модели
-        Claude или Codex         Codex или Claude
+        изолированный worktree   simple/deep reviewer lanes
+        Claude или Codex         тот же или другой runtime
                  │                   │
                  └── исправления ◄───┘
                            │
@@ -87,9 +87,9 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 
 1. **Понять.** `clarify` — встроенный аналог “grill me”: сначала смотрит факты репозитория, затем задаёт по одному действительно важному вопросу до кода или плана.
 2. **Спланировать.** Решения становятся сохранённым планом с provenance и стабильным DragonScale-адресом.
-3. **Dispatch.** Code-owned runner фиксирует project/task/session ID, точный model route, hash утверждённого плана, permission domain, worktree и cmux surface вызывающего координатора. Окно открывается справа от правильной сессии, а не рядом со случайно выбранной позже вкладкой.
+3. **Dispatch.** Restartable harness фиксирует project/task/session ID, точный model route, hash утверждённого плана, permission domain, worktree и cmux surface вызывающего координатора. Окно открывается справа от правильной сессии, а не рядом со случайно выбранной позже вкладкой.
 4. **Выполнить.** Claude или Codex работает в отдельном Git worktree. Ограниченную работу той же моделью по умолчанию берёт внутренний агент; явный запрос отдельного окна создаёт долговременную видимую lane.
-5. **Review.** Противоположный runtime получает read-only запрос, привязанный к точному baseline. Findings возвращаются в typed-формате; verify возобновляет ту же task/model/domain lane, не оплачивая повторную передачу всего контекста.
+5. **Review.** Simple review использует одну read-only holistic lane. Deep review сохраняет независимые spec и standards/correctness/architecture/security lanes. По умолчанию остаёмся на той же модели; cross-model route выбирается явно. Verify возобновляет точную lane и surface.
 6. **Reap.** Проверяются typed summary, approved review archive, hash плана, result path и session provenance. Одна vault-транзакция пишет результат и закрывает plan.
 7. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Supervisor закрывает точную surface после выхода процесса и никогда не угадывает соседнюю вкладку.
 
@@ -101,21 +101,24 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 |---|---|---|
 | Готовность сессии | `session-preflight.py`, config/dependency checks | Один быстрый локальный проход заменяет повторный осмотр моделью. Для optional-компонентов печатаются точные repair commands. |
 | Выбор модели | `config/model-routing.toml` + `model_routing.py` | Конкретные defaults лежат в одном месте; resolved route сохраняется в task metadata. Нет хардкода имени модели в десятках файлов. |
-| Repo/plan/context candidates | dispatch resolver + task registry | Проверенные ID и пути заменяют токены на угадывание проекта, плана, окна и прошлой сессии. |
+| Repo/plan/context candidates | harness context + Git modules | Проверенные ID, manifests и пути заменяют токены на угадывание проекта, плана, окна и прошлой сессии. |
 | Изменение вольта | `vault-write.py` | Одна optimistic journaled-транзакция вместо серии хрупких edits страницы, log, hot, plan и manifest. |
 | Поиск | section BM25 + optional local embeddings | Модель получает лучшие ограниченные секции, а не целые папки и повторяющиеся страницы. |
 | Очистка web | `defuddle` до synthesis | Навигация, реклама и boilerplate не занимают контекст. |
 | Документы | cached stdlib/Docling pipeline | OCR и parsing переиспользуются по hash источника; неизменный PDF не читается заново моделью. |
-| Review transport | operation-scoped JSON outbox + deterministic `drive` | Не нужно копировать длинные пути и свободный текст между терминалами. |
-| Acceptance | semantic per-cell fingerprints | Docs/data-only изменение переиспользует evidence; модель вызывается только для поведенчески затронутых ячеек. |
+| Review transport | typed internal callback broker | Не нужно копировать длинные пути и свободный текст между терминалами. |
+| Acceptance | exact SHA + per-cell dependency fingerprints | Зелёные lifecycle-ячейки переиспользуются только при неизменной code-owned dependency closure. |
 | Наблюдение | content-free heartbeat + numeric telemetry | Можно отличить активную работу от зависания, не сохраняя prompt, response или текст экрана. |
-| Финализация | `reap-runner.py` | Review archive, result routing, plan close, reindex, validation и exact exit проходят по одному fail-closed контракту. |
+| Финализация | harness reap workflow | Review archive, result routing, plan close, reindex, validation и exact exit проходят по одному fail-closed контракту. |
 
 Требования, интерпретация, synthesis, code review и оценка рисков остаются моделям и людям. Hashing, routing, schemas, filesystem bookkeeping и retry policy остаются коду.
 
-## Кросс-модельное ревью
+## Единое ревью
 
-Claude может реализовать, а Codex — ревьюить; Codex может реализовать, а Claude — ревьюить. По умолчанию выбирается противоположный runtime. Явный override фиксируется, а не превращается в silent fallback.
+`review` запускает одну same-model holistic session. `review --deep` сохраняет
+две независимые оси. `--cross-model` явно выбирает другой runtime;
+зарегистрированный model alias может переопределить профиль. Resolved route
+всегда фиксируется, а unknown alias или provider mismatch останавливает запуск.
 
 Review operation хранит:
 
@@ -123,7 +126,7 @@ Review operation хранит:
 - ветку и стабильный baseline;
 - product-read-only mandate и единственный isolated outbox;
 - typed severity, evidence, recommendation, verification gaps и residual risks;
-- безопасные переходы через `review-dispatch drive --apply-action`;
+- безопасные переходы через harness operation engine;
 - same-session verification после исправлений executor'а;
 - долговременный review archive, связанный с итогом задачи.
 
@@ -182,11 +185,15 @@ Docling работает **до** LLM. Bootstrap заранее получает
 Networked research разделён на два контекста:
 
 1. web-enabled fetcher без доступа к вольту;
-2. networkless synthesizer, который получает только validated artifact и пишет через vault contract.
+2. networkless synthesizer, который получает только validated artifact и явно выбранный контекст.
 
-Persistent task lanes сохраняют provider context только внутри точной task/isolation domain, поэтому follow-up research не стартует с нуля. У каждой операции свежий scratch. `unsafe-research` — отдельный явно разрешаемый single-context escape hatch; он не является fallback защищённого режима.
+Координатор валидирует результат с citations и выполняет единственную vault
+write. Persistent task lanes сохраняют provider context только внутри точной
+task/isolation domain, поэтому follow-up research не стартует с нуля. У каждой
+операции свежий scratch. `unsafe-research` — отдельный явно разрешаемый
+single-context escape hatch; он не является fallback защищённого режима.
 
-## 29 скиллов из коробки
+## 32 скилла из коробки
 
 Claude вызывает их через plugin UI (`/skill`), Codex — через repo-local marketplace (`$llm-obsidian:skill`). Механика лежит в `skills/<name>/SKILL.md`, поэтому другой coding agent может следовать ей вручную.
 
@@ -195,10 +202,12 @@ Claude вызывает их через plugin UI (`/skill`), Codex — чере
 | **Ориентация и согласование** | `wiki` знакомит с вольтом; `clarify` проводит одно-вопросное интервью по требованиям и дизайну до реализации. |
 | **Capture и запись** | `save`, `save-plan`, `journal`, `backlog`, `daily`, `agenda` превращают разговоры и датированные дела в канонические данные. |
 | **Доступ к знаниям** | `wiki-query`, `find-session`, `wiki-lint`, `wiki-fold` ищут, проверяют и компактно сворачивают историю. |
-| **Документы и web** | `wiki-ingest`, `defuddle`, `autoresearch`, `unsafe-research` нормализуют источники и явно разделяют trust domains. |
+| **Документы и web** | `wiki-ingest`, `defuddle`, `research`, `unsafe-research` нормализуют источники и явно разделяют trust domains. |
+| **Инженерия** | `debug`, `tdd`, `design`, `prototype`, `resolve-conflict` дисциплинируют reasoning, а lifecycle остаётся у harness. |
 | **Мышление и коммуникация** | `draft` предлагает redacted-ответы; `learn` учит по заметкам; `distill-runbook` превращает sanitized shell history в исполняемую человеком процедуру. |
+| **Качество скиллов** | `improve-skills` явно проверяет invocation, information hierarchy, completion criteria и pruning, сохраняя поведение. |
 | **Obsidian-native output** | `obsidian-markdown`, `obsidian-bases`, `canvas` создают корректные links/properties, database views и визуальные canvases. |
-| **Task orchestration** | `dispatch`, `dispatch-workspace`, `review-dispatch`, `review-send`, `reap-send`, `reap`, `close` реализуют видимый multi-session lifecycle. |
+| **Task orchestration** | `dispatch`, `review`, `reap`, `close` дают публичный harness-owned multi-session lifecycle. |
 
 Router даёт soft hints для “clarify before code”, “grill me” и русских формулировок, но ничего не навязывает. Session-start nudge один раз сообщает о missing optional dependencies, stale indexes и due folds, а не повторяет предупреждение на каждом запросе.
 
@@ -307,18 +316,21 @@ dispatch утверждённого плана
 покажи результат другой модели на review
 ```
 
-В Codex используйте явные имена: `$llm-obsidian:wiki-query`, `$llm-obsidian:clarify`, `$llm-obsidian:review-dispatch` и т.д.
+В Codex используйте явные имена: `$llm-obsidian:wiki-query`, `$llm-obsidian:clarify`, `$llm-obsidian:review` и т.д.
 
 ## Тестирование и release evidence
 
 ```bash
 make test                 # полный hermetic suite; без сети и Ollama
 make bench-retrieval      # measured ranking gate
-make acceptance-check     # model-free matrix/dependency contract
-make acceptance-live      # только поведенчески затронутые live cells
+make acceptance-check     # model-free four-cell harness contract
+make acceptance-live      # resume только затронутых provider-backed cells
 ```
 
-Release-матрица содержит 29 skills × 2 runtimes = 58 cells. В v2.1.2 используются минимальный committed seed vault, deterministic synthetic commits, точные runtime registrations, semantic fingerprints, atomic checkpoints и integrity-protected reuse. Изменение README или release notes не запускает 58 платных model sessions; необъявленная behavioral dependency остановит check до открытия модели.
+Release gate содержит ровно четыре live cells: Claude lifecycle, Codex
+lifecycle, cross-runtime dispatch/review/reap composition и двухосевое deep
+review. Каждая ячейка привязана к точному release SHA и scoped dependency
+fingerprint; зелёный результат переиспользуется только пока оба совпадают.
 
 Acceptance heartbeat хранит только stage/status/counters/timestamps. Telemetry schema отвергает prompts, responses, commands, snippets, page bodies, queries и error text. См. [acceptance architecture](docs/acceptance-architecture.md) и [pipeline observability](docs/pipeline-observability.md).
 
@@ -355,7 +367,9 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Различия Claude/Codex | [Runtime capability matrix](docs/runtime-capabilities.md) |
 | Dispatch, review, watchdog, close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
+| Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| Install, upgrade, rollback и release-команды 2.3.0 | [Release notes 2.3.0](docs/releases/v2.3.0.md) |
 | Numeric content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |
 | PDF/Office/OCR | [Document ingestion](docs/document-ingestion.md) |
 | MCP service operations | [MCP gateway](docs/mcp-gateway.md) |

@@ -1,0 +1,1 @@
+{"case":"surface-vanished-process-remains","initial":{"process":"alive","surface":"missing"},"event":"reconcile","expected":{"effect":"terminate-exact","state":"attention-required"}}

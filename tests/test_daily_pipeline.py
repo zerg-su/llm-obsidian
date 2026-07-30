@@ -45,7 +45,7 @@ def fixture_payloads(date: str = "2026-07-10") -> tuple[dict, dict]:
                 "runtime": "claude",
             },
             {
-                "session_id": "019f0000-0000-7000-8000-000000000001",
+                "session_id": "019f4818-de94-79a0-ba09-4d8d34f93690",
                 "label": "Wiki pipeline",
                 "runtime": "codex",
             },
@@ -88,7 +88,7 @@ def copy_runtime(root: Path) -> None:
 
 
 def run(root: Path, script: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, LLM_OBSIDIAN_ROOT=str(root), CODEX_THREAD_ID="019f0000-0000-7000-8000-000000000001")
+    env = dict(os.environ, LLM_OBSIDIAN_ROOT=str(root), CODEX_THREAD_ID="019f4818-de94-79a0-ba09-4d8d34f93690")
     return subprocess.run([sys.executable, str(root / "scripts" / script), *args], cwd=root, env=env, text=True, input=stdin, capture_output=True)
 
 
@@ -163,7 +163,7 @@ with tempfile.TemporaryDirectory(prefix="daily-pipeline-test.") as raw:
     (root / "scripts/session-map.py").write_text(
         "import json\n"
         "print(json.dumps({'date': '2026-07-10', 'sessions': ["
-        "{'session': '019f0000-0000-7000-8000-000000000001', "
+        "{'session': '019f4818-de94-79a0-ba09-4d8d34f93690', "
         "'label': 'Fixture session', 'runtime': 'codex'}]}))\n",
         encoding="utf-8",
     )
@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory(prefix="daily-pipeline-test.") as raw:
     check("status log created", status_log.is_file())
     check("full bullets written", "укрепил атомарную" in daily.read_text(encoding="utf-8"))
     daily_text = daily.read_text(encoding="utf-8")
-    check("session map written", "019f0000-0000" in daily_text)
+    check("session map written", "019f4818-de94" in daily_text)
     check(
         "session map grouped by runtime",
         "### Claude\n\n- Claude research" in daily_text

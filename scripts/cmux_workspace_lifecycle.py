@@ -16,6 +16,7 @@ from task_sessions import (
     surface_context,
     workspace_layout,
 )
+from harness.adapters.cmux import run_cmux
 
 
 def bind_workspace_identity(
@@ -61,12 +62,7 @@ def close_workspace_exact(
         layout = workspace_layout(cmux_tree(runner), window, workspace, missing_ok=True)
         if layout is None:
             return "already-gone"
-        result = runner(
-            ["cmux", "workspace", "close", workspace],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        result = run_cmux(["workspace", "close", workspace], runner=runner)
         if result.returncode == 0 and workspace_layout(
             cmux_tree(runner), window, workspace, missing_ok=True
         ) is None:

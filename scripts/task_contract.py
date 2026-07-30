@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -13,7 +14,60 @@ from typing import Any, NoReturn
 
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
-REVIEW_MODES = {"light", "full", "skip"}
+REVIEW_MODES = {"simple", "deep", "skip"}
+REVIEW_VERIFY_BUDGETS = {"simple": 1, "deep": 2, "skip": 0}
+REVIEW_POLICY_FIELDS = {
+    "mode",
+    "cross_model",
+    "runtime",
+    "model",
+    "effort",
+    "max_verify_iterations",
+    "verification_profile",
+    "verification_profile_sha256",
+    "auto_resolve_severities",
+    "escalate_severities",
+}
+V3_META_FIELDS = {
+    "version",
+    "project_id",
+    "task_id",
+    "task_name",
+    "wiki_runtime",
+    "executor_runtime",
+    "runtime",
+    "origin_session",
+    "spawned_at",
+    "wiki_surface",
+    "wiki_surface_ref",
+    "task_surface",
+    "task_surface_ref",
+    "task_workspace",
+    "task_workspace_ref",
+    "task_window",
+    "task_window_ref",
+    "worktree",
+    "target_repo",
+    "vault_root",
+    "branch",
+    "base_branch",
+    "codex_home",
+    "codex_profile",
+    "wiki_reap_command",
+    "review_skill",
+    "routing",
+    "plan_file",
+    "approved_plan_sha256",
+    "interaction_policy",
+    "review_policy",
+    "reap_policy",
+    "surface_policy",
+    "watchdog_policy",
+    "forbidden_actions",
+    "suggested_agents",
+    "model",
+    "effort",
+}
 FORBIDDEN_ACTIONS = [
     "push",
     "deploy",
@@ -89,7 +143,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             "version": 1,
             "interaction_policy": "interactive",
             "review_policy": {
-                "mode": "full",
+                "mode": "deep",
                 "max_verify_iterations": 0,
                 "auto_resolve_severities": [],
                 "escalate_severities": ["blocking"],
@@ -107,6 +161,12 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         raise ContractError(f"unsupported task metadata version: {version!r}")
 
     if version == 3:
+        unknown = set(meta) - V3_META_FIELDS
+        if unknown:
+            raise ContractError(
+                "v3 task metadata has unknown fields: "
+                + ", ".join(sorted(unknown))
+            )
         for field in ("project_id", "task_id"):
             value = meta.get(field)
             try:
@@ -155,10 +215,71 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
 
     review = meta.get("review_policy")
     if not isinstance(review, dict) or review.get("mode") not in REVIEW_MODES:
-        raise ContractError("review_policy.mode must be light, full, or skip")
+        raise ContractError("review_policy.mode must be simple, deep, or skip")
+    if version == 3 and set(review) != REVIEW_POLICY_FIELDS:
+        raise ContractError(
+            "v3 review_policy must contain the complete deterministic preset"
+        )
+    mode = review["mode"]
     max_verify = review.get("max_verify_iterations")
     if isinstance(max_verify, bool) or not isinstance(max_verify, int) or not 0 <= max_verify <= 5:
         raise ContractError("review_policy.max_verify_iterations must be 0..5")
+    if version == 3:
+        expected_budget = REVIEW_VERIFY_BUDGETS[mode]
+        if max_verify != expected_budget:
+            raise ContractError(
+                f"v3 {mode} review requires exactly {expected_budget} "
+                "verification iteration(s)"
+            )
+        cross_model = review.get("cross_model")
+        runtime = review.get("runtime")
+        model = review.get("model")
+        effort = review.get("effort")
+        if not isinstance(cross_model, bool):
+            raise ContractError("review_policy.cross_model must be boolean")
+        if runtime not in {"", "claude", "codex"}:
+            raise ContractError(
+                "review_policy.runtime must be empty, claude, or codex"
+            )
+        if not isinstance(model, str) or (
+            model
+            and not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model
+            )
+        ):
+            raise ContractError(
+                "review_policy.model must be empty or a bounded alias"
+            )
+        if effort not in {
+            "",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        }:
+            raise ContractError("review_policy.effort is invalid")
+        if mode == "skip" and any(
+            (cross_model, runtime, model, effort)
+        ):
+            raise ContractError(
+                "skip review cannot carry expert overrides"
+            )
+        profile = review.get("verification_profile")
+        digest = review.get("verification_profile_sha256")
+        if not isinstance(profile, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", profile
+        ):
+            raise ContractError(
+                "review_policy.verification_profile is invalid"
+            )
+        if not isinstance(digest, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", digest
+        ):
+            raise ContractError(
+                "review_policy.verification_profile_sha256 must be a sha256"
+            )
     auto = review.get("auto_resolve_severities")
     escalate = review.get("escalate_severities")
     if not isinstance(auto, list) or any(x not in {"warning", "nit"} for x in auto):

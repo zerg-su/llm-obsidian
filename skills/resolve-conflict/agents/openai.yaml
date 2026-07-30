@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resolve Conflict"
+  short_description: "Resolve exact Git conflicts with intent evidence"
+  default_prompt: "Use $resolve-conflict to resolve this conflicted worktree safely."

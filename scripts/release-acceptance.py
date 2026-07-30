@@ -1,697 +1,340 @@
 #!/usr/bin/env python3
-"""Dynamic, sanitized cross-runtime release acceptance matrix."""
+"""Validate the bounded four-cell harness release acceptance contract."""
 
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import hashlib
 import json
-import os
 import re
-import shlex
-import signal
 import subprocess
 import sys
-import tempfile
-import threading
-import time
-from datetime import datetime, timezone
+import tomllib
 from pathlib import Path
 from typing import Any
 
-from acceptance.contracts import TRANSIENT_FAILURE_KINDS
-
-from lib_sanitize import residual_credential_kinds, sanitize
-from acceptance_fingerprints import (
-    FingerprintError,
-    cell_metadata,
-    dirty_paths,
-    environment_contract,
-    generation_snapshot,
-    is_non_behavioral_path,
-    launch_generations,
-    non_behavioral_paths,
-    non_behavioral_prefixes,
-    read_manifest,
-    verify_dependency_lock,
-)
-
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SPEC = ROOT / "evals" / "acceptance" / "skills.json"
-DEFAULT_SCENARIOS = ROOT / "evals" / "acceptance" / "scenarios.json"
-RUNTIMES = ("claude", "codex")
-PHASES = ("baseline", "final")
-VERDICTS = {"pass", "fail", "blocked", "n-a"}
-SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]*")
+SCRIPT_DIR = Path(__file__).resolve().parent
+CELL_IDS = (
+    "claude-lifecycle",
+    "codex-lifecycle",
+    "cross-runtime-composition",
+    "deep-review",
+)
+RUNTIMES = {"claude", "codex"}
+KINDS = {"runtime-lifecycle", "workflow-composition", "deep-review"}
+LEGACY_SKILLS = {
+    "autoresearch",
+    "dispatch-workspace",
+    "reap-send",
+    "review-dispatch",
+    "review-send",
+}
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+NON_BEHAVIORAL_ROOTS = frozenset({"docs", "references", "wiki"})
+NON_BEHAVIORAL_RUNTIME_PATHS = frozenset({".task-origin-session"})
+BEHAVIORAL_DOCUMENTS = frozenset(
+    {
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/runtime-capabilities.md",
+        "docs/task-sessions.md",
+    }
+)
+BEHAVIORAL_DOCUMENT_ROOTS = ("docs/skill-references/",)
+LIVE_DRIVER = "scripts/live_acceptance_driver.py"
+RELEASE_DEPENDENCIES = (
+    "config/acceptance-cells.toml",
+    "scripts/release-acceptance.py",
+    "scripts/release_acceptance_support.py",
+    "scripts/live-acceptance-runner.py",
+    LIVE_DRIVER,
+    "Makefile",
+    *sorted(BEHAVIORAL_DOCUMENTS),
+)
+DEPENDENCY_ROOTS = (
+    "scripts",
+    "skills",
+    "hooks",
+    "schemas",
+    "config",
+    ".claude",
+    ".codex",
+    ".agents",
+    ".codex-plugin",
+    ".claude-plugin",
+    "docs/skill-references",
+)
+REQUIRED_TRACES = {
+    "claude-lifecycle": ("open", "callback", "same-run-continue", "exit", "close"),
+    "codex-lifecycle": ("open", "callback", "same-run-continue", "exit", "close"),
+    "cross-runtime-composition": ("dispatch", "simple-review", "reap"),
+    "deep-review": ("spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"),
+}
 
 
 class AcceptanceError(ValueError):
     pass
 
 
-def read_object(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise AcceptanceError(f"cannot read {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise AcceptanceError(f"{path} must contain an object")
-    return value
-
-
-def discovered_skills(root: Path) -> list[str]:
-    return sorted(path.parent.name for path in (root / "skills").glob("*/SKILL.md"))
-
-
-def load_spec(path: Path, root: Path) -> dict[str, dict[str, str]]:
-    raw = read_object(path)
-    if raw.get("schema_version") != 1 or not isinstance(raw.get("skills"), dict):
-        raise AcceptanceError("acceptance spec must use schema_version 1 and contain skills")
-    skills: dict[str, dict[str, str]] = {}
-    for name, item in raw["skills"].items():
-        if not isinstance(name, str) or not SAFE_ID.fullmatch(name) or not isinstance(item, dict):
-            raise AcceptanceError(f"invalid skill entry: {name!r}")
-        scenario = item.get("scenario")
-        expected = item.get("expected")
-        fixture = item.get("fixture")
-        if not isinstance(scenario, str) or not SAFE_ID.fullmatch(scenario):
-            raise AcceptanceError(f"{name}: invalid scenario")
-        if not isinstance(expected, str) or not expected.strip() or len(expected) > 300:
-            raise AcceptanceError(f"{name}: invalid expected result")
-        if not isinstance(fixture, str) or not fixture.strip() or len(fixture) > 1000:
-            raise AcceptanceError(f"{name}: invalid live fixture")
-        skills[name] = {
-            "scenario": scenario,
-            "expected": expected.strip(),
-            "fixture": fixture.strip(),
-        }
-    discovered = set(discovered_skills(root))
-    declared = set(skills)
-    if discovered != declared:
-        missing = ", ".join(sorted(discovered - declared)) or "none"
-        stale = ", ".join(sorted(declared - discovered)) or "none"
-        raise AcceptanceError(f"skill coverage mismatch; missing={missing}; stale={stale}")
-    return skills
-
-
-def validate_scenario_coverage(path: Path, skills: dict[str, dict[str, str]]) -> None:
-    raw = read_object(path)
-    scenarios = raw.get("scenarios")
-    if raw.get("schema_version") != 1 or not isinstance(scenarios, dict):
-        raise AcceptanceError("acceptance scenarios must use schema_version 1")
-    declared = set(scenarios)
-    used = {item["scenario"] for item in skills.values()}
-    if declared != used:
-        missing = ", ".join(sorted(used - declared)) or "none"
-        stale = ", ".join(sorted(declared - used)) or "none"
-        raise AcceptanceError(f"scenario coverage mismatch; missing={missing}; stale={stale}")
-
-
-def matrix_rows(skills: dict[str, dict[str, str]], phase: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "schema_version": 1,
-            "phase": phase,
-            "skill": name,
-            "runtime": runtime,
-            "scenario": item["scenario"],
-            "expected": item["expected"],
-        }
-        for name, item in sorted(skills.items())
-        for runtime in RUNTIMES
-    ]
-
-
-def validate_result(row: dict[str, Any], result: Any) -> dict[str, Any]:
-    if not isinstance(result, dict) or result.get("schema_version") != 1:
-        raise AcceptanceError("runner result must be a schema_version 1 object")
-    for field in ("phase", "skill", "runtime", "scenario"):
-        if result.get(field) != row[field]:
-            raise AcceptanceError(f"runner result {field} does not match request")
-    verdict = result.get("verdict")
-    if verdict not in VERDICTS:
-        raise AcceptanceError(f"invalid verdict: {verdict!r}")
-    bounded: dict[str, Any] = {key: result.get(key) for key in (
-        "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
-        "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
-        "duration_seconds", "failure_kind", "attempts", "retry_count",
-    )}
-    bounded["expected"] = row["expected"]
-    for field in ("model", "effort", "actual", "cleanup", "defect", "decision", "evidence"):
-        value = bounded.get(field)
-        if value is not None and (not isinstance(value, str) or len(value) > 600):
-            raise AcceptanceError(f"result field {field} must be a bounded string")
-        if isinstance(value, str):
-            clean, _ = sanitize(value)
-            residual = residual_credential_kinds(clean)
-            if residual:
-                raise AcceptanceError(f"result field {field} contains residual credential patterns")
-            bounded[field] = clean
-    duration = bounded.get("duration_seconds")
-    if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0):
-        raise AcceptanceError("duration_seconds must be non-negative")
-    failure_kind = str(bounded.get("failure_kind") or "")
-    if failure_kind and failure_kind not in TRANSIENT_FAILURE_KINDS:
-        raise AcceptanceError("runner result has an unsupported failure_kind")
-    if failure_kind and verdict != "blocked":
-        raise AcceptanceError("failure_kind is valid only for blocked results")
-    for field in ("attempts", "retry_count"):
-        number = bounded.get(field)
-        if number is not None and (
-            isinstance(number, bool) or not isinstance(number, int) or number < 0 or number > 3
-        ):
-            raise AcceptanceError(f"{field} must be a bounded integer")
-    required = ("model", "effort", "actual", "cleanup", "evidence")
-    if verdict in {"pass", "fail"} and any(not str(bounded.get(field) or "").strip() for field in required):
-        raise AcceptanceError(f"{verdict} requires model, effort, actual, cleanup, and evidence")
-    if verdict in {"fail", "blocked"} and not str(bounded.get("defect") or "").strip():
-        raise AcceptanceError(f"{verdict} requires a defect")
-    if verdict == "n-a" and not str(bounded.get("decision") or "").strip():
-        raise AcceptanceError("n-a requires an explicit decision")
-    return bounded
-
-
-def row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    return tuple(str(row[key]) for key in ("phase", "skill", "runtime", "scenario", "expected"))
-
-
-def source_commit(root: Path) -> str:
+def git_paths(root: Path, *args: str) -> tuple[str, ...]:
     result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=False
+        ["git", "-C", str(root), *args],
+        text=False,
+        capture_output=True,
+        check=False,
     )
-    commit = result.stdout.strip()
-    if result.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise AcceptanceError("cannot resolve the acceptance source commit")
-    return commit
-
-
-def matrix_fingerprint(rows: list[dict[str, Any]]) -> str:
-    payload = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-RESULT_FIELDS = (
-    "schema_version", "phase", "skill", "runtime", "scenario", "expected", "verdict",
-    "model", "effort", "actual", "cleanup", "defect", "decision", "evidence",
-    "duration_seconds", "failure_kind", "attempts", "retry_count",
-)
-
-
-def integrity_sha256(result: dict[str, Any], fingerprint: str, provenance: dict[str, Any]) -> str:
-    payload = {
-        "typed_result": {key: result.get(key) for key in RESULT_FIELDS},
-        "cell_fingerprint": fingerprint,
-        "provenance": provenance,
-    }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def evidence_age_seconds(provenance: dict[str, Any]) -> int:
+    if result.returncode:
+        raise AcceptanceError("cannot inspect release worktree")
     try:
-        recorded = datetime.fromisoformat(str(provenance["recorded_at"]).replace("Z", "+00:00"))
-    except (KeyError, TypeError, ValueError):
-        return 0
-    if recorded.tzinfo is None:
-        recorded = recorded.replace(tzinfo=timezone.utc)
-    return max(0, round((datetime.now(timezone.utc) - recorded.astimezone(timezone.utc)).total_seconds()))
+        return tuple(
+            raw.decode("utf-8", "surrogateescape")
+            for raw in result.stdout.split(b"\0")
+            if raw
+        )
+    except UnicodeError as exc:
+        raise AcceptanceError("release worktree contains an undecodable path") from exc
 
 
-def decorate_result(
-    result: dict[str, Any], metadata: dict[str, Any], *, commit: str,
-    reason: str = "executed", provenance: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    proof = provenance or {
-        "source_commit": commit,
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
-        "actual_model": str(result.get("model") or "unknown"),
-        "environment_sha256": metadata["environment_sha256"],
-    }
-    value = {
-        **result,
-        **metadata,
-        "provenance": proof,
-        "reason": reason,
-        "evidence_age_seconds": evidence_age_seconds(proof),
-    }
-    value["row_integrity_sha256"] = integrity_sha256(value, metadata["cell_fingerprint"], proof)
+def behavioral_path(relative: str) -> bool:
+    path = Path(relative)
+    if not path.parts:
+        return False
+    normalized = path.as_posix()
+    if normalized in NON_BEHAVIORAL_RUNTIME_PATHS:
+        return False
+    if (
+        normalized in BEHAVIORAL_DOCUMENTS
+        or any(normalized.startswith(prefix) for prefix in BEHAVIORAL_DOCUMENT_ROOTS)
+    ):
+        return True
+    if path.parts[0] in NON_BEHAVIORAL_ROOTS:
+        return False
+    return not (len(path.parts) == 1 and path.suffix.casefold() == ".md")
+
+
+def require_clean_head(root: Path) -> None:
+    changed = set(git_paths(root, "diff", "--name-only", "-z", "HEAD", "--"))
+    changed.update(git_paths(root, "ls-files", "--others", "--exclude-standard", "-z"))
+    behavioral = sorted(path for path in changed if behavioral_path(path))
+    if behavioral:
+        preview = ", ".join(behavioral[:5])
+        if len(behavioral) > 5:
+            preview += f", +{len(behavioral) - 5} more"
+        raise AcceptanceError(f"release evidence requires a clean HEAD; behavioral dirt: {preview}")
+
+
+def load_manifest(root: Path) -> dict[str, Any]:
+    path = root / "config/acceptance-cells.toml"
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise AcceptanceError(f"cannot read acceptance manifest: {exc}") from exc
+    if value.get("schema_version") != 2:
+        raise AcceptanceError("acceptance manifest must use schema_version 2")
+    release = value.get("release")
+    if not isinstance(release, dict) or release.get("driver") != LIVE_DRIVER:
+        raise AcceptanceError("acceptance manifest must select the repo-owned live driver")
+    common = release.get("dependencies")
+    roots = release.get("dependency_roots")
+    if (
+        not isinstance(common, list)
+        or not all(isinstance(relative, str) for relative in common)
+        or len(common) != len(set(common))
+        or not set(RELEASE_DEPENDENCIES) <= set(common)
+        or roots != list(DEPENDENCY_ROOTS)
+    ):
+        raise AcceptanceError("acceptance manifest has an incomplete release dependency closure")
+    expanded_common = set(common)
+    for relative in common:
+        candidate = Path(str(relative))
+        target = root / candidate
+        if (
+            candidate.is_absolute()
+            or ".." in candidate.parts
+            or target.is_symlink()
+            or not target.is_file()
+        ):
+            raise AcceptanceError(f"missing or unsafe release dependency {relative!r}")
+    for relative in git_paths(root, "ls-files", "-z", "--", *DEPENDENCY_ROOTS):
+        candidate = root / relative
+        if candidate.is_symlink() or not candidate.is_file():
+            raise AcceptanceError(f"missing or unsafe behavioral dependency {relative!r}")
+        expanded_common.add(relative)
+    if not any(relative.startswith("scripts/harness/") for relative in expanded_common):
+        raise AcceptanceError("acceptance manifest resolves no tracked harness dependencies")
+    environment = value.get("environment")
+    if (
+        not isinstance(environment, dict)
+        or environment.get("report_schema") != 3
+        or environment.get("state_schema") != 3
+        or environment.get("preflight_schema") != 1
+        or environment.get("failed_cell_classifications")
+        != ["runtime-contract", "mechanism-failure"]
+    ):
+        raise AcceptanceError("acceptance manifest has an invalid live evidence schema")
+    required = value.get("required_cells")
+    cells = value.get("cells")
+    if required != list(CELL_IDS) or not isinstance(cells, dict) or tuple(cells) != CELL_IDS:
+        raise AcceptanceError("acceptance manifest must declare exactly the four release cells")
+    for cell_id, cell in cells.items():
+        if not isinstance(cell, dict) or cell.get("kind") not in KINDS:
+            raise AcceptanceError(f"{cell_id}: invalid cell kind")
+        runtimes = cell.get("runtimes")
+        expected = cell.get("expected")
+        dependencies = cell.get("dependencies")
+        if not isinstance(runtimes, list) or not runtimes or not set(runtimes) <= RUNTIMES:
+            raise AcceptanceError(f"{cell_id}: invalid runtimes")
+        if expected != list(REQUIRED_TRACES[cell_id]):
+            raise AcceptanceError(f"{cell_id}: required trace contract changed")
+        if not isinstance(dependencies, list) or not dependencies:
+            raise AcceptanceError(f"{cell_id}: dependencies are required")
+        for relative in dependencies:
+            candidate = Path(str(relative))
+            if (
+                candidate.is_absolute()
+                or ".." in candidate.parts
+                or (root / candidate).is_symlink()
+                or not (root / candidate).is_file()
+            ):
+                raise AcceptanceError(f"{cell_id}: missing or unsafe dependency {relative!r}")
+        cell["_expanded_dependencies"] = sorted(
+            expanded_common | {str(relative) for relative in dependencies}
+        )
+    exposed = {path.parent.name for path in (root / "skills").glob("*/SKILL.md")}
+    stale = sorted(exposed & LEGACY_SKILLS)
+    if stale:
+        raise AcceptanceError("legacy public skills remain: " + ", ".join(stale))
     return value
 
 
-def load_resume_results(
-    path: Path,
-    rows: list[dict[str, Any]],
-    *,
-    phase: str,
-    commit: str,
-    metadata: dict[tuple[str, str, str, str, str], dict[str, Any]],
-    evidence_epoch: int,
-) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    report = read_object(path)
-    if (
-        report.get("schema_version") != 3
-        or report.get("evidence_epoch") != evidence_epoch
-        or report.get("phase") != phase
-        or not isinstance(report.get("rows"), list)
-    ):
-        raise AcceptanceError(
-            "existing acceptance report uses another evidence epoch or matrix; use --restart"
-        )
-    expected = {row_key(row): row for row in rows}
-    resumed: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
-    for raw in report["rows"]:
-        if not isinstance(raw, dict):
-            raise AcceptanceError("existing acceptance report contains a malformed row")
-        try:
-            key = row_key(raw)
-        except KeyError as exc:
-            raise AcceptanceError("existing acceptance report contains a malformed row") from exc
-        if key in seen or key not in expected:
-            raise AcceptanceError("existing acceptance report contains duplicate or stale rows")
-        result = validate_result(expected[key], raw)
-        seen.add(key)
-        if result.get("verdict") not in {"pass", "n-a"}:
-            continue
-        current = metadata[key]
-        provenance = raw.get("provenance")
-        raw_fingerprint = str(raw.get("cell_fingerprint") or "")
-        raw_dependencies = raw.get("dependencies")
-        raw_live_behavior = raw.get("live_runner_behavior_sha256")
-        if (
-            not re.fullmatch(r"[0-9a-f]{64}", raw_fingerprint)
-            or not isinstance(raw_dependencies, list)
-            or any(not isinstance(item, str) for item in raw_dependencies)
-            or (
-                raw_live_behavior is not None
-                and not re.fullmatch(r"[0-9a-f]{64}", str(raw_live_behavior))
-            )
-            or raw.get("evidence_epoch") != evidence_epoch
-            or raw.get("generation") != current["generation"]
-            or not isinstance(provenance, dict)
-            or raw.get("row_integrity_sha256")
-            != integrity_sha256(result, raw_fingerprint, provenance)
-        ):
-            continue
-        if not (
-            raw_fingerprint == current["cell_fingerprint"]
-            and raw_dependencies == current["dependencies"]
-            and raw_live_behavior == current["live_runner_behavior_sha256"]
-            and raw.get("environment_sha256") == current["environment_sha256"]
-            and provenance.get("environment_sha256") == current["environment_sha256"]
-        ):
-            continue
-        resumed.append(
-            decorate_result(
-                result,
-                current,
-                commit=commit,
-                reason="reused-identical",
-                provenance=provenance,
-            )
-        )
-    return resumed
-
-
-def run_matrix(
-    rows: list[dict[str, Any]],
-    command: list[str],
-    timeout: float,
-    *,
-    prior: list[dict[str, Any]] | None = None,
-    checkpoint: Any = None,
-    metadata: dict[tuple[str, str, str, str, str], dict[str, Any]] | None = None,
-    commit: str = "",
-    selected_skills: set[str] | None = None,
-    jobs: int = 1,
-) -> list[dict[str, Any]]:
-    if not 1 <= jobs <= 5:
-        raise AcceptanceError("acceptance jobs must be between 1 and 5 per cmux workspace")
-    completed = {row_key(item): item for item in (prior or [])}
-    row_order = {row_key(row): index for index, row in enumerate(rows)}
-    active: set[subprocess.Popen[str]] = set()
-    active_lock = threading.Lock()
-
-    def completed_rows() -> list[dict[str, Any]]:
-        """Render every durable row in canonical matrix order for checkpoints."""
-        return [completed[row_key(row)] for row in rows if row_key(row) in completed]
-
-    pending = []
-    for row in rows:
-        key = row_key(row)
-        if key in completed:
-            continue
-        if selected_skills is not None and row["skill"] not in selected_skills:
-            continue
-        pending.append(row)
-
-    def signal_runner(proc: subprocess.Popen[str]) -> None:
-        if proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
-
-    def execute(row: dict[str, Any]) -> tuple[tuple[str, str, str, str, str], dict[str, Any]]:
-        key = row_key(row)
-        started = datetime.now(timezone.utc)
-        result: dict[str, Any] = {}
-        attempts = 0
-        while attempts < 3:
-            attempts += 1
-            proc: subprocess.Popen[str] | None = None
-            heartbeat_parent = str(
-                os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT_ROOT") or ""
-            ).strip()
-            if heartbeat_parent:
-                parent = Path(heartbeat_parent).resolve()
-                parent.mkdir(parents=True, exist_ok=True)
-                heartbeat_dir = Path(tempfile.mkdtemp(prefix="cell-", dir=parent))
-            else:
-                heartbeat_dir = Path(tempfile.mkdtemp(prefix="acceptance-heartbeat-"))
-            heartbeat_path = heartbeat_dir / "heartbeat.json"
-            try:
-                env = dict(os.environ)
-                env["LLM_OBSIDIAN_ACCEPTANCE_HEARTBEAT"] = str(heartbeat_path)
-                proc = subprocess.Popen(
-                    command,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                    env=env,
-                )
-                with active_lock:
-                    active.add(proc)
-                assert proc.stdin is not None
-                proc.stdin.write(json.dumps(row, ensure_ascii=False) + "\n")
-                proc.stdin.close()
-                last_activity = time.monotonic()
-                heartbeat_signature: tuple[int, int] | None = None
-                timed_out = False
-                while proc.poll() is None:
-                    try:
-                        stat_value = heartbeat_path.stat()
-                        signature = (stat_value.st_mtime_ns, stat_value.st_size)
-                    except OSError:
-                        signature = None
-                    if signature is not None and signature != heartbeat_signature:
-                        heartbeat_signature = signature
-                        last_activity = time.monotonic()
-                    if time.monotonic() - last_activity >= timeout:
-                        timed_out = True
-                        signal_runner(proc)
-                        break
-                    time.sleep(0.1)
-                if timed_out and proc.poll() is None:
-                    try:
-                        proc.wait(timeout=45)
-                    except subprocess.TimeoutExpired:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait()
-                assert proc.stdout is not None and proc.stderr is not None
-                stdout = proc.stdout.read()
-                _stderr = proc.stderr.read()
-                if timed_out:
-                    raise subprocess.TimeoutExpired(command, timeout)
-                if proc.returncode != 0:
-                    raise AcceptanceError(f"runner exit {proc.returncode}")
-                result = validate_result(row, json.loads(stdout))
-            except (AcceptanceError, json.JSONDecodeError, subprocess.TimeoutExpired, OSError) as exc:
-                if isinstance(exc, subprocess.TimeoutExpired):
-                    defect = "acceptance runner exceeded its inactivity timeout"
-                elif isinstance(exc, OSError):
-                    defect = "acceptance runner is unavailable or not executable"
-                else:
-                    defect, _ = sanitize(str(exc)[:300])
-                result = {
-                    **row,
-                    "verdict": "blocked",
-                    "actual": "Acceptance runner did not return a valid bounded result.",
-                    "defect": defect,
-                }
-            finally:
-                if proc is not None:
-                    with active_lock:
-                        active.discard(proc)
-                for child in heartbeat_dir.iterdir():
-                    child.unlink(missing_ok=True)
-                heartbeat_dir.rmdir()
-            if result.get("failure_kind") not in TRANSIENT_FAILURE_KINDS:
-                break
-        result["attempts"] = attempts
-        result["retry_count"] = attempts - 1
-        if result.get("duration_seconds") is None:
-            result["duration_seconds"] = (datetime.now(timezone.utc) - started).total_seconds()
-        if metadata is not None:
-            result = decorate_result(result, metadata[key], commit=commit)
-        return key, result
-
-    executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=jobs, thread_name_prefix="acceptance-cell"
+def git_blob_ids(root: Path, commit_sha: str) -> dict[str, str]:
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "--full-tree", commit_sha],
+        capture_output=True,
+        check=False,
     )
-    inflight: dict[concurrent.futures.Future[Any], dict[str, Any]] = {}
-    next_row = 0
+    if result.returncode:
+        raise AcceptanceError("cannot resolve release dependency objects")
+    objects: dict[str, str] = {}
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            metadata, encoded_path = raw.split(b"\t", 1)
+            _mode, kind, object_id = metadata.split(b" ", 2)
+            relative = encoded_path.decode("utf-8", "surrogateescape")
+        except (ValueError, UnicodeError) as exc:
+            raise AcceptanceError("cannot parse release dependency objects") from exc
+        if kind == b"blob":
+            objects[relative] = object_id.decode("ascii")
+    return objects
 
-    def fill_slots() -> None:
-        nonlocal next_row
-        while next_row < len(pending) and len(inflight) < jobs:
-            row = pending[next_row]
-            next_row += 1
-            inflight[executor.submit(execute, row)] = row
+
+def dependency_fingerprint(
+    manifest: dict[str, Any],
+    cell_id: str,
+    *,
+    blob_ids: dict[str, str],
+) -> str:
+    cell = manifest["cells"][cell_id]
+    digest = hashlib.sha256()
+    for relative in cell["_expanded_dependencies"]:
+        object_id = blob_ids.get(relative)
+        if object_id is None:
+            raise AcceptanceError(f"{cell_id}: dependency is not bound to HEAD: {relative}")
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(object_id.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def source_sha(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    value = result.stdout.strip()
+    if result.returncode or not SHA.fullmatch(value):
+        raise AcceptanceError("cannot resolve exact source SHA")
+    return value
+
+
+def contract(root: Path) -> dict[str, Any]:
+    require_clean_head(root)
+    commit_sha = source_sha(root)
+    manifest = load_manifest(root)
+    blob_ids = git_blob_ids(root, commit_sha)
+    value = {
+        "schema_version": 2,
+        "commit_sha": commit_sha,
+        "cells": [
+            {
+                "cell_id": cell_id,
+                "kind": manifest["cells"][cell_id]["kind"],
+                "runtimes": manifest["cells"][cell_id]["runtimes"],
+                "route": manifest["cells"][cell_id]["route"],
+                "required_trace": manifest["cells"][cell_id]["expected"],
+                "dependencies": manifest["cells"][cell_id]["_expanded_dependencies"],
+                "dependency_fingerprint": dependency_fingerprint(
+                    manifest,
+                    cell_id,
+                    blob_ids=blob_ids,
+                ),
+            }
+            for cell_id in CELL_IDS
+        ],
+    }
+    require_clean_head(root)
+    if source_sha(root) != commit_sha:
+        raise AcceptanceError("release HEAD changed while binding acceptance evidence")
+    return value
+
+
+def validate_report(root: Path, report_path: Path) -> dict[str, Any]:
+    expected = contract(root)
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AcceptanceError(f"cannot read live report: {exc}") from exc
+    if str(SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPT_DIR))
+    from live_acceptance_driver import LiveDriverError, validate_release_evidence
 
     try:
-        fill_slots()
-        while inflight:
-            done, _ = concurrent.futures.wait(
-                inflight, return_when=concurrent.futures.FIRST_COMPLETED
-            )
-            for future in sorted(done, key=lambda item: row_order[row_key(inflight[item])]):
-                inflight.pop(future)
-                key, result = future.result()
-                completed[key] = result
-                if checkpoint is not None:
-                    checkpoint(completed_rows())
-            fill_slots()
-    except BaseException:
-        with active_lock:
-            running = list(active)
-        for proc in running:
-            signal_runner(proc)
-        for future in inflight:
-            future.cancel()
-        executor.shutdown(wait=True, cancel_futures=True)
-        raise
-    else:
-        executor.shutdown(wait=True)
-    return completed_rows()
-
-
-def report_payload(
-    phase: str,
-    rows: list[dict[str, Any]],
-    *,
-    planned_total: int | None = None,
-    commit: str = "",
-    fingerprint: str = "",
-    orchestration_contract_version: int = 1,
-    evidence_epoch: int = 3,
-    environment_scope_version: int = 1,
-    environment: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    planned = len(rows) if planned_total is None else planned_total
-    counts = {verdict: 0 for verdict in sorted(VERDICTS)}
-    for row in rows:
-        counts[str(row.get("verdict") or "blocked")] += 1
-    passed = counts["pass"]
-    accepted = passed + counts["n-a"]
-    return {
-        "schema_version": 3,
-        "evidence_epoch": evidence_epoch,
-        "orchestration_contract_version": orchestration_contract_version,
-        "environment_scope_version": environment_scope_version,
-        "environment": environment,
-        "phase": phase,
-        "source_commit": commit,
-        "matrix_fingerprint": fingerprint,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "summary": {
-            "total": planned, "completed": len(rows), "pending": planned - len(rows),
-            "complete": len(rows) == planned,
-            "passed": passed, "accepted": accepted,
-            "failed": len(rows) - accepted, "verdicts": counts,
-        },
-        "rows": rows,
-    }
-
-
-def write_json(value: Any, path: Path | None, *, announce: bool = True) -> None:
-    text = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-    if path is None:
-        sys.stdout.write(text)
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
-        try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
-        if announce:
-            print(path)
+        validate_release_evidence(expected, report)
+    except LiveDriverError as exc:
+        raise AcceptanceError(str(exc)) from exc
+    return report
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("check", "contract", "verify-report"))
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
-    parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
-    parser.add_argument("--manifest", type=Path)
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("check")
-    matrix = sub.add_parser("matrix")
-    matrix.add_argument("--phase", choices=PHASES, required=True)
-    matrix.add_argument("--output", type=Path)
-    run = sub.add_parser("run")
-    run.add_argument("--phase", choices=PHASES, required=True)
-    run.add_argument("--runner", required=True)
-    run.add_argument(
-        "--timeout", type=float, default=1200.0,
-        help="runner inactivity timeout in seconds (active heartbeats reset it; default: 1200)",
-    )
-    run.add_argument(
-        "--jobs", type=int, default=1,
-        help="maximum concurrent acceptance cells in one cmux workspace (1..5; default: 1)",
-    )
-    run.add_argument("--report", type=Path, required=True)
-    run.add_argument("--restart", action="store_true", help="ignore a matching partial/completed report")
-    run.add_argument(
-        "--skill", action="append", default=[],
-        help="execute only this skill's runtime cells and leave the report partial; repeatable",
-    )
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    root = args.root.expanduser().resolve()
     try:
-        skills = load_spec(args.spec, args.root.resolve())
-        validate_scenario_coverage(args.scenarios, skills)
-        manifest = read_manifest(args.root.resolve(), args.manifest)
-        verify_dependency_lock(args.root.resolve(), manifest)
-        orchestration_version = int(manifest["orchestration_contract_version"])
-        evidence_epoch = int(manifest["evidence_epoch"])
-        generations = launch_generations(args.root.resolve(), manifest)
+        if root != ROOT:
+            raise AcceptanceError("release code and --root must resolve to the same checkout")
+        if args.command == "verify-report":
+            path = args.report or root / ".vault-meta/acceptance/latest-live.json"
+            value = validate_report(root, path)
+        else:
+            value = contract(root)
         if args.command == "check":
-            print(f"release-acceptance: {len(skills)} skills x {len(RUNTIMES)} runtimes")
-            return 0
-        rows = matrix_rows(skills, args.phase)
-        environment = environment_contract()
-        environment_scope_version = int(manifest.get("environment_scope_version", 1))
-        metadata = {
-            row_key(row): cell_metadata(
-                args.root.resolve(), manifest, row,
-                environment=environment, generations=generations,
-            )
-            for row in rows
-        }
-        if args.command == "matrix":
-            write_json(
-                {
-                    "schema_version": 3,
-                    "evidence_epoch": evidence_epoch,
-                    "orchestration_contract_version": orchestration_version,
-                    "phase": args.phase,
-                    "rows": [{**row, **metadata[row_key(row)]} for row in rows],
-                },
-                args.output,
-            )
-            return 0
-        commit = source_commit(args.root.resolve())
-        allowed_dirty = non_behavioral_paths(manifest)
-        allowed_dirty_prefixes = non_behavioral_prefixes(manifest)
-        canonical_acceptance_root = args.root.resolve() / ".vault-meta" / "acceptance"
-        try:
-            args.report.resolve().relative_to(canonical_acceptance_root)
-            canonical_report = True
-        except ValueError:
-            canonical_report = False
-        if canonical_report:
-            dirty = dirty_paths(args.root.resolve())
-            if dirty is None:
-                raise AcceptanceError("cannot inspect acceptance worktree state")
-            behavioral_dirty = sorted(
-                path for path in dirty
-                if not is_non_behavioral_path(path, allowed_dirty, allowed_dirty_prefixes)
-            )
-            if behavioral_dirty:
-                preview = ", ".join(behavioral_dirty[:8])
-                suffix = " …" if len(behavioral_dirty) > 8 else ""
-                raise AcceptanceError(
-                    "acceptance requires committed behavioral state; dirty paths: "
-                    + preview + suffix
-                )
-        selected_skills = set(args.skill)
-        unknown_skills = selected_skills - set(skills)
-        if unknown_skills:
-            raise AcceptanceError("unknown selected skill(s): " + ", ".join(sorted(unknown_skills)))
-        if args.restart and selected_skills:
-            raise AcceptanceError("--restart always means the full matrix and cannot combine with --skill")
-        fingerprint = matrix_fingerprint(
-            [{**row, "cell_fingerprint": metadata[row_key(row)]["cell_fingerprint"]} for row in rows]
-        )
-        prior = [] if args.restart else load_resume_results(
-            args.report, rows, phase=args.phase, commit=commit,
-            metadata=metadata, evidence_epoch=evidence_epoch,
-        )
-
-        def checkpoint(completed: list[dict[str, Any]]) -> None:
-            write_json(
-                report_payload(
-                    args.phase, completed, planned_total=len(rows),
-                    commit=commit, fingerprint=fingerprint,
-                    orchestration_contract_version=orchestration_version,
-                    evidence_epoch=evidence_epoch,
-                    environment_scope_version=environment_scope_version,
-                    environment=environment,
-                ),
-                args.report,
-                announce=False,
-            )
-
-        checkpoint(prior)
-        results = run_matrix(
-            rows, shlex.split(args.runner), args.timeout,
-            prior=prior, checkpoint=checkpoint, metadata=metadata, commit=commit,
-            selected_skills=selected_skills or None,
-            jobs=args.jobs,
-        )
-        report = report_payload(
-            args.phase, results, planned_total=len(rows), commit=commit, fingerprint=fingerprint,
-            orchestration_contract_version=orchestration_version,
-            evidence_epoch=evidence_epoch,
-            environment_scope_version=environment_scope_version,
-            environment=environment,
-        )
-        write_json(report, args.report)
-        if canonical_report and report["summary"]["failed"] == 0 and report["summary"]["complete"]:
-            write_json(
-                generation_snapshot(args.root.resolve(), manifest),
-                args.root.resolve() / ".vault-meta" / "acceptance" / "model-generations.json",
-                announce=False,
-            )
-        return 0 if report["summary"]["failed"] == 0 else 1
-    except (AcceptanceError, FingerprintError) as exc:
+            print(f"release-acceptance: 4 harness cells valid at {value['commit_sha']}")
+        else:
+            print(json.dumps(value, ensure_ascii=False, sort_keys=True))
+        return 0
+    except AcceptanceError as exc:
         print(f"release-acceptance: {exc}", file=sys.stderr)
         return 3
-    except KeyboardInterrupt:
-        print("release-acceptance: interrupted after active runner cleanup", file=sys.stderr)
-        return 130
 
 
 if __name__ == "__main__":

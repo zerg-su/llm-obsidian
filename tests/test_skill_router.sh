@@ -8,6 +8,7 @@ set -uo pipefail
 export LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export LLM_OBSIDIAN_PROJECT_ROOT="$REPO_ROOT"
 cd "$REPO_ROOT"
 
 ROUTER="./.claude/hooks/skill-router.sh"
@@ -53,10 +54,16 @@ run_case "save-RU"          'сохрани в вики этот ответ'    
 run_case "save-EN"          'save this to the wiki please'                            'Skill("save")'
 run_case "close-RU"         'сохрани и закрой сессию'                                 'Skill("close")'
 run_case "dispatch-RU"      'запусти параллельную задачу на новый worktree'           'Skill("dispatch")'
-run_case "review-dispatch-EN" 'run light cross-model review before reap-send'         'Skill("review-dispatch")'
-run_case "review-dispatch-RU" 'сделай лёгкое ревью другой моделью'                    'Skill("review-dispatch")'
-run_case "review-send-EN"   'send review back to executor'                            'Skill("review-send")'
-run_case "review-send-RU"   'отправь ревью обратно исполнителю'                       'Skill("review-send")'
+run_case "review-cross-EN"  'run a cross-model review of this implementation'          'Skill("review")'
+run_case "review-deep-RU"   'сделай глубокое ревью другой моделью'                    'Skill("review")'
+run_case "research-EN"      '/research current harness providers'                      'Skill("research")'
+run_case "research-RU"      'исследуй источники в интернете по этой теме'             'Skill("research")'
+run_case "debug-EN"         'debug this flaky callback and find the root cause'        'Skill("debug")'
+run_case "debug-RU"         'диагностируй и найди причину падения'                     'Skill("debug")'
+run_case "tdd-EN"           'implement this with TDD'                                  'Skill("tdd")'
+run_case "design-EN"        'produce a system design for the callback broker'          'Skill("design")'
+run_case "prototype-EN"     'build a disposable prototype for this parser question'    'Skill("prototype")'
+run_case "conflict-EN"      'resolve the rebase conflict in this worktree'              'Skill("resolve-conflict")'
 run_case "wiki-query-RU"    'что ты знаешь про гибридный поиск'                       'Skill("wiki-query")'
 run_case "wiki-query-search" 'поищи в вики страницу про embeddings'                   'Skill("wiki-query")'
 run_case "find-session-RU"  'найди похожую сессию про переезд заметок'                'Skill("find-session")'
@@ -92,6 +99,12 @@ run_case "fp-save-word"     'какие сейвы есть в этой игре
 run_case "fp-v-wiki"        'у нас в вики есть страница про это?'                     'EMPTY'
 run_case "fp-learn-word"    'я узнал много нового сегодня'                            'EMPTY'
 run_case "fp-grill-food"    'положи овощи на гриль перед ужином'                      'EMPTY'
+run_case "fp-book-review"   'write a review of this science fiction book'              'EMPTY'
+run_case "fp-research-paper" 'format the references in my research paper'              'EMPTY'
+run_case "fp-debug-symbols" 'what are debug symbols in this compiler manual?'          'EMPTY'
+run_case "fp-design-color"  'I like the design color of this chair'                    'EMPTY'
+run_case "fp-tdd-definition" 'what does TDD stand for?'                                'EMPTY'
+run_case "fp-prototype-car" 'show me a prototype car design'                           'EMPTY'
 
 echo "== mute env-var =="
 run_case "mute-dispatch"    'запусти параллельную задачу'                             'EMPTY' 'SKILL_ROUTER_MUTE=1 '

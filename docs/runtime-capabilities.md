@@ -19,9 +19,10 @@ must not be inferred from another runtime.
 | `PostToolUse[Bash]` command capture | Shared runtime adapter, sanitized | Shared runtime adapter for supported Bash events | Manual |
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
+| Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
-| Durable review history | v3 operation-scoped cycles archive at reap; legacy primary reviews archive on finish | Same | Explicit exact-operation archive from the coordinator vault |
-| Persistent task lanes | Exact task/model/domain cmux resume with anchored right splits | Same broker and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
+| Durable review history | Unified simple/deep operation archives exact HEAD/profile evidence at reap | Same | Explicit exact-operation archive from the coordinator vault |
+| Persistent task lanes | Exact owner/task/model/domain cmux resume with anchored right splits | Same harness and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
 | Router/operation telemetry | Runtime-tagged, content-free hook/script events | Runtime-tagged, content-free hook/script events | Limited to explicit scripts |
 
 `pipeline-events.jsonl` is local and gitignored. Its schema accepts only
@@ -58,29 +59,42 @@ unified/streaming shell calls and does not intercept native WebSearch, so hooks
 remain observability/guardrails rather than a security boundary. `ExitPlanMode`
 capture remains Claude-only because Codex exposes no equivalent tool event.
 
-Protected web flows (`autoresearch`, URL ingest, and deep-query supplements)
-use separate persistent task lanes: a web-enabled fetch context without vault
-access, then a networkless vault synthesizer. Each operation gets fresh scratch,
-while provider context is retained only within the exact task and isolation
-domain until reap. They require cmux and fail closed outside it. On macOS both
+Protected web flows (`research`, URL ingest, and deep-query supplements)
+use one owner-scoped root operation with separate fetch and synth child
+operations. Fetch has web access without vault access; synthesis is networkless
+and receives only the validated artifact, copied source files, and the explicit
+minimal ContextPacket. The coordinator owns the only vault transaction. Each
+root operation gets fresh private scratch and per-stage `CODEX_HOME` directories.
+Research providers receive a fresh fixed environment: `HOME` and `CODEX_HOME`
+point to that stage directory, temporary files stay below it, and only fixed
+locale, shell, terminal, timezone, and system `PATH` values are present.
+Coordinator credentials, proxy variables, plugin variables, and every `CMUX_*`
+variable are excluded; authentication remains available only through the exact
+stage-local auth link. The flows require an exact originating cmux surface and
+fail closed outside it. On macOS both
 profiles expose `/opt/homebrew` and Xcode Command Line Tools
 as runtime roots so the selected Python and its dynamic libraries work inside
 the sandbox; narrower filesystem rules keep those tool roots read-only. The
-network proxy runs in limited mode with no external-domain allowlist and one
-explicit Unix-socket exception for cmux callbacks. Per the official
+network proxy runs in limited mode with no external-domain allowlist and no
+terminal-control socket. A code-owned watcher outside the provider sandbox
+validates each typed artifact, accepts a content-free callback in the operation
+ledger, records the exact checkpoint, and sends the exact bounded `advance`
+command through the generic runtime adapter. Per the official
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference#configtoml),
 an omitted domain map denies every external destination until an allow rule is
 added. The generated profiles also explicitly disable upstream-proxy chaining,
 broad local binding, non-loopback listeners, arbitrary Unix sockets, and
 SOCKS5/UDP. Hermetic tests parse and assert this configuration contract; they do
-not depend on a live Internet endpoint. Completion markers make
-callback delivery recoverable rather than a single point of failure. They also
-authorize idempotent cleanup of only the recorded fetch/synthesis surface UUID:
-fetch closes during `receive` (including rejected artifacts), synthesis during
-final `status`; the coordinator surface is never a valid cleanup target. Pass
-`start --keep-surfaces` only for deliberate debugging. A failed synthesis can
-be resumed from its already validated artifact with
-`research-isolation.py restart-synthesis`; see `scripts/research-isolation.py`.
+not depend on a live Internet endpoint. The worker writes a completion marker
+only after successful callback delivery, so replay never duplicates the origin
+wake. Before synthesis starts, `advance` also records a content-free SHA-256 pin
+for the validated fetch artifact in the harness runtime state. The worker
+rechecks it after provider execution, and finalization checks it once more
+before cleanup, so a coordinated source/manifest rewrite cannot change synth
+provenance. `research-isolation.py advance` delegates exact provider exit and
+cleanup to `RuntimeSessionManager` before starting the next stage or returning
+the validated cited artifact. `status` is read-only. The coordinator surface
+is never a cleanup target.
 
 Unattended Codex task splits use `workspace-write` with `-a never`. The only
 additional writable root is the validated Git common directory needed by the
@@ -104,23 +118,26 @@ deletion, repository-wide rewriting, and infrastructure destructive actions
 blocked. Tests compare the task/base policies and exercise both allowed and
 denied commands.
 
-Dispatch and cross-model review resolve the current repository defaults from
-`config/model-routing.toml`. Explicit task metadata and CLI
-overrides win over those defaults and remain recorded in handoff metadata. The
-Codex deep profile intentionally keeps `max` effort. The bounded daily
-summarizer inherits the current session's exact model and changes only effort
-to the centrally configured daily value.
+Dispatch and unified review resolve the current repository defaults from
+`config/model-routing.toml`. Simple review stays on the exact current route by
+default; cross-model mode selects the opposite runtime's simple profile. Deep
+mode selects the current runtime's deep profile, or the opposite deep profile
+when cross-model is explicit. Review model overrides accept registered aliases
+only. Every resolved route remains recorded in operation metadata. The bounded
+daily summarizer inherits the current session's exact model and changes only
+effort to the centrally configured daily value.
 
-Reviewers remain product-read-only but are no longer toolchain-starved. v3
-review metadata, callbacks, baselines, watchdog state, and results live in exact
-broker operation directories, so several sessions in one project do not share
-singleton `.review-*` files. Claude
+Reviewers remain product-read-only but are no longer toolchain-starved. Review
+specs, callbacks, baselines, watchdog state, and results live under exact
+owner/operation/run identity, so several sessions in one project do not share
+singleton files. Simple review uses one holistic lane; deep review preserves
+independent spec and standards/correctness/architecture/security lanes. Claude
 gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG
 smoke `bash scripts/dcg-test-suite.sh`; Codex gets a
 private scratch directory, exact loopback access/binding, disabled web search,
 and no product writable root. `tests/test_task_lifecycle.py` and
-`tests/test_review_dispatch.sh` reject command, environment, writable-root,
-domain, and socket drift.
+the harness adapter and task lifecycle suites reject command, environment,
+writable-root, domain, and socket drift.
 
 The DCG suite resolves an explicit `DCG_BIN`, then `PATH`, then the portable
 user/Homebrew install locations. A GUI-launched reviewer can therefore test the

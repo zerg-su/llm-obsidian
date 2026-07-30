@@ -48,25 +48,75 @@
       "hint": "Short resolve only, deep work — в task-split'е"
     },
     {
-      "skill": "review-dispatch",
+      "skill": "review",
       "patterns": [
-        "(?i)\\b/?review[- ]?dispatch\\b",
+        "(?i)(?:^|\\s)/review(?:\\s|$)",
+        "(?i)\\b(review|audit)\\b.{0,30}\\b(code|implementation|diff|architecture|security|spec)\\b",
         "(?i)\\bcross[- ]?model review\\b",
-        "(?i)\\blight cross[- ]?model review\\b",
+        "(?i)\\bdeep (code )?review\\b",
         "(?i)\\bревью другой моделью\\b",
         "(?i)\\bл[её]гк\\w* ревью\\b"
       ],
-      "hint": "Cross-model review gate for dispatch task-splits; light by default, full on high-risk changes"
+      "hint": "Harness-owned simple/deep review; same-model default, cross-model only when requested"
     },
     {
-      "skill": "review-send",
+      "skill": "research",
       "patterns": [
-        "(?i)\\b/?review[- ]?send\\b",
-        "(?i)\\bsend review back\\b",
-        "(?i)\\breturn review to executor\\b",
-        "(?i)\\bотправь ревью\\b"
+        "(?i)(?:^|\\s)/research(?:\\s|$)",
+        "(?i)\\bresearch\\b.{0,30}\\b(web|sources?|current|latest|market|topic)\\b",
+        "(?i)\\b(web|multi[- ]source) research\\b",
+        "(?i)\\bисследуй\\b.{0,40}\\b(источник|веб|интернет)",
+        "(?i)\\bпроведи исследование\\b"
       ],
-      "hint": "Reviewer-side callback to executor; validates that only review handoff files changed"
+      "hint": "Protected minimal-context research; unsafe full-context route remains explicit"
+    },
+    {
+      "skill": "debug",
+      "patterns": [
+        "(?i)(?:^|\\s)/debug(?:\\s|$)",
+        "(?i)\\bdebug\\b.{0,30}\\b(bug|failure|crash|flaky|regression|callback|behavior)\\b",
+        "(?i)\\broot cause\\b",
+        "(?i)\\b(диагностируй|найди причину)\\b"
+      ],
+      "hint": "Reproduce and diagnose first; fix only when authorized"
+    },
+    {
+      "skill": "tdd",
+      "patterns": [
+        "(?i)(?:^|\\s)/tdd(?:\\s|$)",
+        "(?i)\\b(implement|build|fix|develop|code|use)\\b.{0,30}\\b(with |using )?TDD\\b",
+        "(?i)\\bred[- ]green[- ]refactor\\b",
+        "(?i)\\bсначала (напиши )?тест\\b"
+      ],
+      "hint": "Approved public seam, focused red-green vertical slices"
+    },
+    {
+      "skill": "design",
+      "patterns": [
+        "(?i)\\bsystem design\\b",
+        "(?i)\\bdomain model(?:ing)?\\b",
+        "(?i)\\b(спроектируй|архитектурн\\w* дизайн)\\b"
+      ],
+      "hint": "Read-only alternatives and invariants before implementation"
+    },
+    {
+      "skill": "prototype",
+      "patterns": [
+        "(?i)(?:^|\\s)/prototype(?:\\s|$)",
+        "(?i)\\b(build|create|make|test|try)\\b.{0,30}\\b(prototype|proof of concept)\\b",
+        "(?i)\\b(сделай|создай|проверь)\\b.{0,30}\\bпрототип\\b",
+        "(?i)\\bтехнический спайк\\b"
+      ],
+      "hint": "One question in a disposable harness-owned worktree"
+    },
+    {
+      "skill": "resolve-conflict",
+      "patterns": [
+        "(?i)\\bresolve (the )?(merge|rebase|git) conflict",
+        "(?i)\\bконфликт\\w* (merge|rebase|git|слияни)",
+        "(?i)\\b/?resolve[- ]?conflict\\b"
+      ],
+      "hint": "Exact conflicted worktree; no stage/continue/abort without authorization"
     },
     {
       "skill": "wiki-query",
@@ -181,7 +231,7 @@
         "(?i)\\bstudy module\\b",
         "(?i)\\bмодул[ьея] [AB]\\d\\b"
       ],
-      "hint": "Интерактивный тьютор по любым заметкам в wiki/learning/: study/quiz/practice/progress"
+      "hint": "Интерактивный тьютор AI Architect Curriculum (wiki/learning/): study/quiz/practice/progress"
     },
     {
       "skill": "distill-runbook",

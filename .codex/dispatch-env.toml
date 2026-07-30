@@ -2,12 +2,10 @@
 codex_home = "~/.codex"
 profile = "llm-obsidian-mcp"
 reap_skill = "$llm-obsidian:reap"
-reap_send_skill = "$llm-obsidian:reap-send"
-review_skill = "$llm-obsidian:review-dispatch"
-review_send_skill = "$llm-obsidian:review-send"
+review_skill = "$llm-obsidian:review"
 # Review model/effort defaults come from config/model-routing.toml.
 interaction_policy = "unattended"
-review_mode = "light"
+review_mode = "simple"
 max_verify_iterations = 2
 auto_close_surfaces = true
 default_reap_type = "session"

@@ -10,6 +10,46 @@ Only public releases are listed. Versions 2.0.5 and 2.1.1 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.3.0] - 2026-07-30
+
+### Added
+
+- Added a restartable owner-scoped harness kernel with typed operation specs,
+  atomic state, write-ahead effects, exact callbacks, reconciliation, and
+  `status`/`inspect`/`resume`/`cancel`/`close`/`doctor` commands.
+- Added the public `review` and protected `research` workflows plus the
+  `debug`, `tdd`, `design`, `prototype`, and `resolve-conflict` engineering
+  skills.
+- Added unified simple/deep review contracts and a four-cell, exact-SHA live
+  acceptance driver for Claude, Codex, cross-runtime composition, and deep
+  review.
+
+### Changed
+
+- Moved cmux, provider process, worktree, context, callback, verification,
+  retry, and cleanup mechanics behind code-owned harness modules.
+- Centralized Sol, Terra, Opus, and Fable aliases and review profiles in
+  `config/model-routing.toml`.
+- Protected research now uses vaultless fetch, networkless synthesis, hashed
+  pointer artifacts, and coordinator-owned vault writes.
+- Version 2.3.0 is a clean runtime baseline; pre-harness operation state is not
+  migrated.
+
+### Removed
+
+- Removed `dispatch-workspace`, `review-dispatch`, `review-send`, `reap-send`,
+  and `autoresearch` without compatibility aliases. Use `dispatch`, `review`,
+  `reap`, and `research`.
+- Removed the legacy skill-by-runtime acceptance implementation and prompt
+  baselines in favor of hermetic replay coverage and four bounded live cells.
+
+### Security
+
+- Wrong-run, late, terminal, mutated, and duplicate callbacks now fail closed
+  or become an idempotent no-op according to exact operation state.
+- Review approval is published only after provider exit and exact owned-resource
+  cleanup.
+
 ## [2.1.3] - 2026-07-29
 
 ### Fixed

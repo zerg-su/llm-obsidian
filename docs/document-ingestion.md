@@ -9,7 +9,9 @@ avoids spending model context on PDF internals or repeated OCR.
 ```text
 read-only source
   -> extension/size policy
-  -> stdlib fast path OR isolated Docling
+  -> stdlib fast path OR isolated Docling API adapter
+  -> PDF native text first; selective OCR only for scan-like pages
+  -> deterministic punctuation/layout cleanup
   -> quality and limit checks
   -> content-addressed derived cache
   -> wiki-ingest synthesis
@@ -82,15 +84,25 @@ engine-specific language contract:
 - <https://docling-project.github.io/docling/reference/pipeline_options/>
 - <https://docling-project.github.io/docling/reference/cli/>
 
-The normalizer uses accurate table mode and referenced image artifacts. It does
-not force OCR over a usable digital text layer, avoiding needless recognition
-errors in ordinary PDFs.
+The normalizer uses accurate table mode and referenced image artifacts. PDFs
+run once with OCR disabled. Pages with fewer than 40 native non-space
+characters are selectively OCR'd only when picture union covers at least 50%
+of the page or the rendered page proves that it is a non-blank scan. Contiguous
+candidate pages share one OCR converter. Ordinary digital PDFs therefore run
+one local pass; mixed and scanned PDFs may run a second local pass only for the
+candidate ranges.
+
+Profile v4 keeps raw and deterministically cleaned Markdown separately. The
+cleanup removes extraction-only punctuation spaces, repairs safe lowercase
+paragraph continuations and soft hyphenation, and restores clear sequential
+lists. It never guesses ambiguous uppercase headings.
 
 ## Trust boundary and fallback
 
-The source is local and read-only. The Docling command is invoked with remote
-services and external plugins disabled, remote HTML image fetching disabled,
-and Hugging Face/Transformers offline flags enabled. Required models are
+The source is local and read-only. The isolated Python adapter constructs
+Docling pipeline options with remote services and external plugins disabled,
+remote HTML image fetching disabled, EasyOCR downloads disabled, and Hugging
+Face/Transformers offline flags enabled before importing Docling. Required models are
 prefetched during setup; ingestion never enables an on-demand network fallback.
 
 If Docling or its model manifest is absent, binary normalization returns
@@ -100,10 +112,13 @@ of waiting in a hidden terminal. Direct model-native reading of a binary file is
 allowed only after the user explicitly approves that degraded fallback for the
 specific source.
 
-`low_quality` keeps its derived artifact for inspection but blocks automatic
-vault writes. `unsupported` and `conversion_failed` preserve the source and
-report the reason. No result silently bypasses the normal transactional
-`vault-write.py` page/manifest/log/hot path.
+`needs_semantic_cleanup` (exit 5) carries only bounded, typed fragments for the
+already-active Claude/Codex ingest turn; it never starts a second model. The
+model may repair their structure while drafting but cannot rewrite the cached
+source. More than 20 fragments, 2,000 characters per fragment, 20,000 total,
+or 15% of the document becomes `needs_user_action` (exit 6). `low_quality`
+(exit 3) keeps its artifact but blocks writes. Unsupported/conversion failures
+use exit 4. No result bypasses the transactional vault writer.
 
 ## Validation
 

@@ -2,7 +2,15 @@
 # Print the current agent session/thread id in a cross-runtime way.
 set -u
 
-if [ "${LLM_OBSIDIAN_ACCEPTANCE:-}" = "1" ] &&
+task_root=$(git -C "${PWD:-.}" rev-parse --show-toplevel 2>/dev/null || true)
+task_session=""
+if [ -n "$task_root" ] && [ -f "$task_root/.task-origin-session" ]; then
+  IFS= read -r task_session < "$task_root/.task-origin-session" || true
+fi
+
+if [[ "$task_session" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+  printf '%s\n' "$task_session"
+elif [ "${LLM_OBSIDIAN_ACCEPTANCE:-}" = "1" ] &&
    [[ "${LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID:-}" =~ ^[A-Za-z0-9._:-]+$ ]]; then
   printf '%s\n' "$LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID"
 else

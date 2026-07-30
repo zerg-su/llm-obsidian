@@ -1,0 +1,30 @@
+schema_version = 1
+prompt_contract_version = 1
+callback_max_bytes = 65536
+read_probe_attempts = 3
+model_restart_limit = 1
+
+[profiles.executor]
+network = true
+product_write = true
+approval = "task-contract"
+
+[profiles.reviewer-readonly]
+network = false
+product_write = false
+approval = "never"
+
+[profiles.research-safe]
+network = true
+product_write = false
+approval = "never"
+
+[profiles.research-unsafe]
+network = true
+product_write = false
+approval = "explicit"
+
+[profiles.prototype]
+network = false
+product_write = true
+approval = "task-contract"

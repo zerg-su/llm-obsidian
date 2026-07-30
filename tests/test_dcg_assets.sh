@@ -22,9 +22,9 @@ expect_no_grep() {
 }
 
 echo "A. syntax"
-bash -n "$REPO_ROOT/bin/setup-dcg.sh" "$REPO_ROOT/scripts/dcg-test-suite.sh" "$REPO_ROOT/.codex/update-cmux-limits.sh" 2>"$OUT"
+bash -n "$REPO_ROOT/bin/setup-dcg.sh" "$REPO_ROOT/scripts/dcg-test-suite.sh" 2>"$OUT"
 expect_exit "A1 shell scripts parse" "$?" 0
-python3 -m py_compile "$REPO_ROOT/.codex/codex-limits-status.py" "$REPO_ROOT/scripts/codex-limit-monitor.py" 2>"$OUT"
+python3 -m py_compile "$REPO_ROOT/scripts/codex-limit-monitor.py" 2>"$OUT"
 expect_exit "A2 python scripts compile" "$?" 0
 
 echo "B. JSON/TOML shape"
@@ -95,45 +95,45 @@ PY
 expect_grep "B1 hook/config shape" "$OUT" "SHAPE_OK"
 
 echo "C. helper behavior"
-"$REPO_ROOT/.codex/codex-limits-status.py" --with-pct --compact >"$OUT" 2>&1
-rc=$?
-if [ "$rc" = "0" ] || [ "$rc" = "1" ]; then ok "C1 status helper exits 0/1"; else bad "C1 status helper exits 0/1" "exit $rc"; fi
-expect_grep "C2 status helper prints limit labels" "$OUT" "5h"
 "$REPO_ROOT/scripts/codex-limit-monitor.py" --help >"$OUT" 2>&1
-expect_exit "C3 monitor help exits 0" "$?" 0
-expect_grep "C4 monitor help names install command" "$OUT" "codex-limit-status"
+expect_exit "C1 monitor help exits 0" "$?" 0
+expect_grep "C2 monitor help names install command" "$OUT" "codex-limit-status"
 "$REPO_ROOT/bin/setup-dcg.sh" --help >"$OUT" 2>&1
-expect_exit "C5 setup help exits 0" "$?" 0
-expect_grep "C6 setup help mentions --check" "$OUT" "--check"
+expect_exit "C3 setup help exits 0" "$?" 0
+expect_grep "C4 setup help mentions --check" "$OUT" "--check"
 mkdir -p "$TMP_DIR/home/.local/bin"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP_DIR/home/.local/bin/dcg"
 chmod 755 "$TMP_DIR/home/.local/bin/dcg"
 env HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
   bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
-expect_exit "C7 dcg resolver exits 0 without PATH entry" "$?" 0
-expect_grep "C8 dcg resolver finds user install" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
+expect_exit "C5 dcg resolver exits 0 without PATH entry" "$?" 0
+expect_grep "C6 dcg resolver finds user install" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
 (cd "$TMP_DIR/home/.local/bin" && \
   env DCG_BIN=./dcg HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
   bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin) >"$OUT" 2>&1
-expect_exit "C9 explicit relative DCG_BIN exits 0" "$?" 0
-expect_grep "C10 explicit relative DCG_BIN is absolute" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
+expect_exit "C7 explicit relative DCG_BIN exits 0" "$?" 0
+expect_grep "C8 explicit relative DCG_BIN is absolute" "$OUT" "$TMP_DIR/home/.local/bin/dcg"
 env DCG_BIN="$TMP_DIR/missing-dcg" HOME="$TMP_DIR/home" PATH="/usr/bin:/bin" \
   bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
-expect_exit "C11 invalid explicit DCG_BIN fails closed" "$?" 127
-expect_grep "C12 invalid explicit DCG_BIN explains failure" "$OUT" "DCG_BIN не указывает на исполняемый файл"
+expect_exit "C9 invalid explicit DCG_BIN fails closed" "$?" 127
+expect_grep "C10 invalid explicit DCG_BIN explains failure" "$OUT" "DCG_BIN не указывает на исполняемый файл"
 env -u HOME PATH="/usr/bin:/bin" \
   bash "$REPO_ROOT/scripts/dcg-test-suite.sh" --print-dcg-bin >"$OUT" 2>&1
 home_rc=$?
 if [ "$home_rc" = "0" ] || [ "$home_rc" = "127" ]; then
-  ok "C13 missing HOME degrades without shell crash"
+  ok "C11 missing HOME degrades without shell crash"
 else
-  bad "C13 missing HOME degrades without shell crash" "exit $home_rc (want 0 or 127)"
+  bad "C11 missing HOME degrades without shell crash" "exit $home_rc (want 0 or 127)"
 fi
-expect_no_grep "C14 missing HOME is not an unbound variable" "$OUT" "HOME: unbound variable"
+expect_no_grep "C12 missing HOME is not an unbound variable" "$OUT" "HOME: unbound variable"
 
 echo "D. portability"
 expect_no_grep "D1 installer has no user-specific path" "$REPO_ROOT/bin/setup-dcg.sh" "/Users/"
-expect_no_grep "D2 cmux updater has no old repo path" "$REPO_ROOT/.codex/update-cmux-limits.sh" "claude-obsidian"
+if [ -e "$REPO_ROOT/.codex/update-cmux-limits.sh" ] || [ -e "$REPO_ROOT/.codex/codex-limits-status.py" ]; then
+  bad "D2 stale cmux limit sidebar helpers were removed" "obsolete helper still exists"
+else
+  ok "D2 stale cmux limit sidebar helpers were removed"
+fi
 expect_no_grep "D3 dcg hook has no absolute user path" "$REPO_ROOT/.github/hooks/dcg.json" "/Users/"
 expect_grep "D4 smoke clears inherited task policy" "$REPO_ROOT/scripts/dcg-test-suite.sh" "unset DCG_CONFIG"
 

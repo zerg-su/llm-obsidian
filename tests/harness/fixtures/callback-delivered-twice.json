@@ -1,0 +1,1 @@
+{"case":"callback-delivered-twice","initial":{"callback":"accepted"},"event":"same-callback","expected":{"effect":"none","state":"unchanged"}}

@@ -85,8 +85,8 @@ def codex_plugin_text(repo_root: Path) -> str:
             "shortDescription": "Obsidian LLM wiki workflows for Codex",
             "longDescription": (
                 "A self-organizing Obsidian vault companion for Codex: ingest "
-                "sources, query accumulated knowledge, file session notes, lint "
-                "wiki health, and maintain DragonScale-style long-term memory."
+                "sources, run protected research, query and file durable "
+                "knowledge, and coordinate restartable task and review workflows."
             ),
             "developerName": "zerg-su",
             "category": "Productivity",
@@ -95,6 +95,7 @@ def codex_plugin_text(repo_root: Path) -> str:
                 "Ingest this source into the wiki",
                 "What do we know about this topic?",
                 "Save this session into the vault",
+                "Review this change through the harness",
             ],
             "brandColor": "#5B6CFF",
             "screenshots": [],

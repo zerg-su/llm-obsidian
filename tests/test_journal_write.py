@@ -24,7 +24,7 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 
 def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, LLM_OBSIDIAN_ROOT=str(root), CODEX_THREAD_ID="019f0000-0000-7000-8000-000000000001")
+    env = dict(os.environ, LLM_OBSIDIAN_ROOT=str(root), CODEX_THREAD_ID="019f4818-de94-79a0-ba09-4d8d34f93690")
     return subprocess.run([sys.executable, str(root / "scripts/journal-write.py"), *args], cwd=root, env=env, text=True, capture_output=True)
 
 
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix="journal-write-test.") as raw:
     helper.chmod(0o755)
     session_map = root / "scripts/session-map.py"
     session_map.write_text(
-        "print('### Codex\\n\\n- Wiki work · `019f0000-0000-7000-8000-000000000001`')\n",
+        "print('### Codex\\n\\n- Wiki work · `019f4818-de94-79a0-ba09-4d8d34f93690`')\n",
         encoding="utf-8",
     )
 

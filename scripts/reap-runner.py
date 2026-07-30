@@ -21,6 +21,16 @@ from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from task_contract import ContractError, validate_handoff  # noqa: E402
 from vault_schema import unresolved_wikilinks  # noqa: E402
 from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
+from harness.contracts import OwnedResources  # noqa: E402
+from harness.runtime_sessions import (  # noqa: E402
+    RuntimeSessionError,
+    RuntimeSessionManager,
+)
+from harness.review_finalization import (  # noqa: E402
+    require_task_review,
+    review_gate_root,
+)
+from harness.workflows.reap import run_reap  # noqa: E402
 
 
 TYPE_FOLDER = {
@@ -87,9 +97,39 @@ def proposed_path(vault: Path, summary: dict[str, Any]) -> Path:
     return (vault / "wiki" / folder / filename).resolve()
 
 
-def archive_reviews(vault: Path, worktree: Path) -> list[str]:
+def archive_reviews(
+    vault: Path, worktree: Path, meta: dict[str, Any]
+) -> list[str]:
+    task_id = str(meta.get("task_id") or "")
+    try:
+        authorization = require_task_review(
+            meta,
+            worktree,
+            expected_vault=vault,
+            expected_operation_id=task_id,
+        )
+        operation = review_gate_root(
+            meta,
+            worktree,
+            expected_vault=vault,
+            expected_operation_id=task_id,
+        )
+    except ValueError as exc:
+        raise ReapError(f"review archive authorization failed: {exc}") from exc
+    if authorization.skipped:
+        return []
     raw = run(
-        [sys.executable, str(vault / "scripts/archive_task_reviews.py"), "--worktree", str(worktree), "--vault-root", str(vault)],
+        [
+            sys.executable,
+            str(vault / "scripts/harness/review_archive.py"),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--json",
+        ],
         cwd=vault,
         label="review archive",
     )
@@ -97,10 +137,12 @@ def archive_reviews(vault: Path, worktree: Path) -> list[str]:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ReapError("review archive returned invalid JSON") from exc
-    markers = value.get("markers")
-    if not isinstance(markers, list) or not markers:
-        raise ReapError("final unattended reap requires an approved review archive")
-    return [str(Path(item).resolve()) for item in markers]
+    if value.get("status") not in {"archived", "already-current"}:
+        raise ReapError("approved review did not produce an archive")
+    marker = (operation / ".review-archive.json").resolve()
+    if not marker.is_file():
+        raise ReapError("approved review archive marker is missing")
+    return [str(marker)]
 
 
 def summary_with_reviews(vault: Path, worktree: Path, markers: list[str]) -> dict[str, Any]:
@@ -192,9 +234,25 @@ def validate_summary_wikilinks(vault: Path, summary: dict[str, Any]) -> None:
         )
 
 
-def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
+def authorize_review(
+    vault: Path, worktree: Path, meta: dict[str, Any]
+) -> None:
+    task_id = str(meta.get("task_id") or "")
+    try:
+        require_task_review(
+            meta,
+            worktree,
+            expected_vault=vault,
+            expected_operation_id=task_id,
+        )
+    except ValueError as exc:
+        raise ReapError(f"review gate blocked finalization: {exc}") from exc
+
+
+def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     started = time.monotonic()
     meta = read_json(worktree / ".task-meta.json")
+    authorize_review(vault, worktree, meta)
     raw_summary = validate_summary(read_json(worktree / ".task-summary.json"), allow_missing_session=True)
     if meta.get("version") != 3 or meta.get("interaction_policy") != "unattended":
         raise ReapError("reap-runner supports v3 unattended final tasks only")
@@ -205,7 +263,7 @@ def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     validate_summary_wikilinks(vault, raw_summary)
     plan_before, plan_state = approved_plan_state(meta)
     validated_at = time.monotonic()
-    markers = archive_reviews(vault, worktree)
+    markers = archive_reviews(vault, worktree, meta)
     summary = summary_with_reviews(vault, worktree, markers)
     archived_at = time.monotonic()
     proposed = proposed_path(vault, summary)
@@ -271,11 +329,6 @@ def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         cwd=vault,
         label="reap completion",
     )
-    run(
-        [sys.executable, str(vault / "scripts/cmux_surface_lifecycle.py"), "request-exit", "--worktree", str(worktree), "--kind", "task"],
-        cwd=vault,
-        label="task exit arming",
-    )
     ended = time.monotonic()
     duration = round((ended - started) * 1000)
     emit_lifecycle_event(worktree, "reap-runner", actor="final", counts={
@@ -287,6 +340,90 @@ def apply_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
         "duration_ms": duration,
     }, vault_root=vault)
     return {"schema_version": 1, "status": "complete", "result_path": str(result), "result_link": link, "duration_ms": duration}
+
+
+def _finish_provider_runtime(
+    runtime: RuntimeSessionManager,
+    task_id: str,
+    *,
+    timeout_seconds: float = 8.0,
+) -> None:
+    """Exit the provider, then close only its exact owned surface."""
+
+    requested = runtime.request_exit(task_id, task_id)
+    if requested.action == "attention-required":
+        raise ReapError("provider exit requires attention")
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        cleaned = runtime.cleanup(task_id, task_id)
+        if cleaned.action in {"cleaned", "terminal"}:
+            if cleaned.record.resources != OwnedResources():
+                raise ReapError(
+                    "completed reap retained provider-owned resources"
+                )
+            return
+        if cleaned.action in {"attention-required", "keep-open"}:
+            raise ReapError(
+                f"provider cleanup stopped at {cleaned.action}"
+            )
+        if time.monotonic() >= deadline:
+            raise ReapError("provider cleanup timed out before exact close")
+        time.sleep(0.05)
+
+
+def apply_reap(
+    vault: Path,
+    worktree: Path,
+    current: str,
+    *,
+    runtime_manager: RuntimeSessionManager | None = None,
+) -> dict[str, Any]:
+    """Route one typed task summary through the durable harness callback seam."""
+
+    meta = read_json(worktree / ".task-meta.json")
+    summary = validate_summary(
+        read_json(worktree / ".task-summary.json"),
+        allow_missing_session=True,
+    )
+    if meta.get("version") != 3 or meta.get("interaction_policy") != "unattended":
+        raise ReapError("reap-runner supports v3 unattended final tasks only")
+    try:
+        validate_handoff(meta, summary, current, verify_plan_hash=False)
+    except ContractError as exc:
+        raise ReapError(str(exc)) from exc
+    validate_summary_wikilinks(vault, summary)
+    approved_plan_state(meta)
+    task_id = str(meta.get("task_id") or "")
+    authorize_review(vault, worktree, meta)
+    try:
+        lifecycle = run_reap(
+            vault / ".vault-meta" / "harness",
+            owner_id=task_id,
+            operation_id=task_id,
+            summary=summary,
+            finalize=lambda _record: _finalize_reap(vault, worktree, current),
+        )
+    except RuntimeError as exc:
+        raise ReapError(f"harness reap failed: {exc}") from exc
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault,
+        store_root=vault / ".vault-meta" / "harness",
+    )
+    try:
+        _finish_provider_runtime(runtime, task_id)
+    except RuntimeSessionError as exc:
+        raise ReapError(f"provider cleanup failed: {exc}") from exc
+    if lifecycle.result is not None:
+        return dict(lifecycle.result)
+    prepared = read_json(worktree / ".task-reap-prepared.json")
+    return {
+        "schema_version": 1,
+        "status": "complete",
+        "result_path": str(prepared.get("result_path") or ""),
+        "result_link": str(prepared.get("result_link") or ""),
+        "duration_ms": 0,
+        "idempotent": True,
+    }
 
 
 def main() -> int:

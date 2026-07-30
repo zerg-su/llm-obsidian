@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROTECTED_WEB_SKILLS = ("autoresearch", "wiki-ingest", "wiki-query")
+PROTECTED_WEB_SKILLS = ("research", "wiki-ingest", "wiki-query")
 WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
 
 
@@ -162,20 +162,24 @@ def check_repo(root: Path) -> list[str]:
     for required in (
         "scripts/document-normalize.py normalize",
         "needs_user_action",
+        "needs_semantic_cleanup",
         "explicit user confirmation",
-        "--no-enable-remote-services",
+        "enable_remote_services=False",
     ):
         if required not in ingest and required not in normalization_ref:
             issues.append(f"wiki-ingest document normalization missing invariant {required!r}")
 
     normalizer = (root / "scripts" / "document-normalize.py").read_text(encoding="utf-8")
+    adapter = (root / "scripts" / "docling-adapter.py").read_text(encoding="utf-8")
+    document_contract = normalizer + "\n" + adapter
     for required in (
-        '"--no-enable-remote-services"',
-        '"--no-allow-external-plugins"',
+        "enable_remote_services=False",
+        "allow_external_plugins=False",
         '"HF_HUB_OFFLINE": "1"',
-        '",".join(OCR_LANGUAGES)',
+        "download_enabled=False",
+        "page_range=(start, end)",
     ):
-        if required not in normalizer:
+        if required not in document_contract:
             issues.append(f"document normalizer missing isolation invariant {required!r}")
     document_tools = json.loads((root / "config" / "document-tools.json").read_text(encoding="utf-8"))
     if document_tools.get("docling", {}).get("ocr_languages") != ["ru", "en"]:
@@ -190,25 +194,29 @@ def check_repo(root: Path) -> list[str]:
     if re.search(r"\| `SessionStart`[^\n]*\| Not provided by this plugin \|", runtime_doc):
         issues.append("runtime capabilities still claim Codex hooks are unavailable")
     # Personal vaults may keep an additional provider comparison, but the
-    # public template intentionally does not ship private learning notes.
+    # public template intentionally does not require private learning notes.
     comparison_path = root / "wiki" / "learning" / "Anthropic vs OpenAI.md"
     if comparison_path.is_file():
         comparison = comparison_path.read_text(encoding="utf-8")
         if "hooks-аналога нет" in comparison:
             issues.append("learning comparison still says Codex has no hooks")
 
-    research = (root / "scripts" / "research-isolation.py").read_text(encoding="utf-8")
-    for required in ('stage == "fetch" else "disabled"', "UNTRUSTED DATA", "codex-home-"):
+    research = (
+        root / "scripts" / "harness" / "workflows" / "research.py"
+    ).read_text(encoding="utf-8")
+    for required in ("stage == 'fetch' else 'disabled'", "UNTRUSTED DATA", "codex-home-"):
         if required not in research:
             issues.append(f"research isolation missing invariant {required!r}")
-    review = (root / "skills" / "review-dispatch" / "scripts" / "spawn_review.py").read_text(encoding="utf-8")
+    review = (root / "scripts" / "review-runner.py").read_text(encoding="utf-8")
+    review += "\n" + (root / "scripts" / "harness" / "adapters" / "claude.py").read_text(encoding="utf-8")
+    review += "\n" + (root / "scripts" / "harness" / "adapters" / "codex.py").read_text(encoding="utf-8")
     supervisor = (root / "scripts" / "cmux_agent_supervisor.py").read_text(encoding="utf-8")
     review_contract = review + "\n" + supervisor
     if "--permission-mode auto" in review:
         issues.append("review launcher regressed to Claude auto permissions")
     for required in (
         '"workspace-write"', "review_runtime_dir", "review-outbox-relay",
-        '"--disable",\n            "hooks"',
+        'require_option(argv, "--disable", "hooks")',
         "reviewer_codex_config_values", "trusted_runtime_path",
         "Codex reviewer command must not request additional writable roots",
     ):
@@ -217,7 +225,7 @@ def check_repo(root: Path) -> list[str]:
     for required in (
         '"--permission-mode", "dontAsk"', 'CLAUDE_REVIEW_TOOL_SURFACE = "Read,Glob,Grep,Write,Bash"',
         "Edit(./.review-outbox.json)", "Write(./.review-outbox.json)",
-        "run_review_relay", "cmux_agent_supervisor.py",
+        "run_review_relay", "reviewer_uses_supervised_relay",
     ):
         if required not in review_contract:
             issues.append(f"Claude reviewer missing unattended read-only invariant {required!r}")
@@ -234,18 +242,19 @@ def check_repo(root: Path) -> list[str]:
     ):
         if required not in supervisor:
             issues.append(f"Claude reviewer missing bounded diagnostic {required!r}")
-    if "claude-subscription-check.py" not in review:
-        issues.append("Claude reviewer missing subscription-only preflight")
-    if ".task-summary.json" not in (root / "skills" / "reap-send" / "SKILL.md").read_text(encoding="utf-8"):
-        issues.append("reap-send must use canonical .task-summary.json")
     dispatch_text = (root / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8")
-    reap_send_text = (root / "skills" / "reap-send" / "SKILL.md").read_text(encoding="utf-8")
     reap_text = (root / "skills" / "reap" / "SKILL.md").read_text(encoding="utf-8")
-    for required in ("interaction_policy", "approved_plan_sha256", "forbidden_actions", "watchdog_policy", "cmux_agent_supervisor.py"):
+    for required in (
+        "interaction_policy",
+        "approved_plan_sha256",
+        "forbidden_actions",
+        "watchdog_policy",
+        "generic provider runtime",
+    ):
         if required not in dispatch_text:
             issues.append(f"dispatch missing unattended contract invariant {required!r}")
     for required in (
-        "-a never", "workspace-write", "cmux_agent_supervisor.py",
+        "-a never", "workspace-write", "code-owned provider runtime",
         "DCG_CONFIG", "localhost", "trusted `PATH`",
     ):
         if required not in dispatch_text:
@@ -263,11 +272,10 @@ def check_repo(root: Path) -> list[str]:
         if required not in task_prompt:
             issues.append(f"dispatch task prompt missing safety invariant {required!r}")
     for required in (
-        "interaction_policy=unattended", "task_contract.py", "final",
-        "send_reap.py", "reap-runner.py", "Do not send a separate `/reap`",
+        ".task-summary.json", "internal callback broker", "coordinator owns",
     ):
-        if required not in reap_send_text:
-            issues.append(f"reap-send missing unattended handoff invariant {required!r}")
+        if required not in task_prompt:
+            issues.append(f"dispatch task prompt missing internal handoff invariant {required!r}")
     for required in (
         "check-handoff", "prepare-reap", "expected_sha256",
         "validate-vault.py --summary", "request-exit",

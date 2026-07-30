@@ -1,0 +1,15 @@
+{
+  "callback-delivered-twice": "duplicate callback advanced the legacy lifecycle twice",
+  "claude-trust-footer-drift": "legacy prompt matcher accepted a drifted Claude footer",
+  "close-before-process-exit": "legacy cleanup closed a live provider surface",
+  "codex-trust-footer-drift": "legacy prompt matcher accepted a drifted Codex footer",
+  "duplicate-review-surfaces": "repeated start opened another reviewer surface",
+  "interrupted-write-ahead-transition": "legacy replay repeated an uncertain effect",
+  "process-exited-surface-remains": "dead provider left its exact surface open",
+  "recycled-process-group": "stale numeric PGID ownership could signal an unrelated process group",
+  "retry-uncertain-spawn": "retry created a second provider process",
+  "same-session-verify-second-surface": "verification opened a fresh reviewer session",
+  "surface-vanished-process-remains": "missing surface left its exact process group alive",
+  "unknown-choice-prompt": "legacy fallback sent Enter to an unknown prompt",
+  "upgrade-active-operation": "upgrade crossed a live legacy operation boundary"
+}

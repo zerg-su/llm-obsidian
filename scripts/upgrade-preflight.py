@@ -62,6 +62,20 @@ def active_sessions(root: Path) -> list[str]:
             if not task or task.get("status") == "archived":
                 continue
             active.append(f"broker-task:{task.get('task_id') or task_path.parent.name}")
+    harness_root = root / ".vault-meta/harness/owners"
+    if harness_root.is_dir():
+        for operation_path in sorted(harness_root.glob("*/operations/*.json")):
+            operation = read_object(operation_path)
+            if operation.get("state") in {"complete", "failed", "cancelled"}:
+                continue
+            spec = operation.get("spec")
+            kind = str(spec.get("kind") or "unknown") if isinstance(spec, dict) else "unknown"
+            operation_id = (
+                str(spec.get("operation_id") or operation_path.stem)
+                if isinstance(spec, dict)
+                else operation_path.stem
+            )
+            active.append(f"harness:{kind}:{operation_id}")
     return sorted(set(active))
 
 
@@ -82,7 +96,11 @@ def legacy_routing(root: Path) -> dict[str, dict[str, str]]:
         if isinstance(effort, str):
             present["effort"] = effort
         defaults = tracked.reviewer_default(runtime)
-        customized = any(value != defaults[key] for key, value in present.items())
+        legacy_defaults = tracked.legacy_reviewer_default(runtime)
+        customized = not (
+            all(value == defaults[key] for key, value in present.items())
+            or all(value == legacy_defaults[key] for key, value in present.items())
+        )
         if present and customized:
             result[runtime] = {}
             if isinstance(model, str):
@@ -98,7 +116,7 @@ def render_local(values: dict[str, dict[str, str]]) -> str:
     for runtime in ("codex", "claude"):
         if runtime not in values:
             continue
-        lines.extend([f"[roles.review.{runtime}]"])
+        lines.extend([f"[review_profiles.simple.{runtime}]"])
         for key in ("model", "effort"):
             if key in values[runtime]:
                 lines.append(f'{key} = {json.dumps(values[runtime][key])}')
@@ -123,7 +141,16 @@ def main() -> int:
     try:
         running = active_sessions(root)
         if running:
-            print("upgrade-preflight: active sessions require restart: " + ", ".join(running), file=sys.stderr)
+            print(
+                "upgrade-preflight: active operations block clean-cut upgrade: "
+                + ", ".join(running),
+                file=sys.stderr,
+            )
+            print(
+                "Recovery: finish or cancel every listed operation with the installed "
+                "runtime, then rerun upgrade-preflight.",
+                file=sys.stderr,
+            )
             return 4
         legacy = legacy_routing(root)
         if legacy:

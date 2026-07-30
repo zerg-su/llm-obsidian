@@ -25,7 +25,7 @@ Most agent setups optimize one prompt or one coding session. LLM Obsidian optimi
 - **Long work stays visible.** cmux opens task and reviewer sessions beside the coordinator, preserves interactive context, watches activity, and closes only the exact surface whose process has exited.
 - **Code handles repeatable mechanics.** Routing, candidate discovery, fingerprints, validation, retries, cleanup, telemetry, indexing, and transactional writes are scripts. Models spend tokens on interpretation and judgment.
 - **The wiki is a data layer, not an agent side effect.** `wiki/` and its derived `.vault-meta/` indexes are intentionally separated from behavioral code, so ordinary note changes do not invalidate the pipeline.
-- **Quality is measured.** Hermetic tests cover the mechanics; retrieval has a RU/EN goldset; releases have a 58-cell Claude × Codex live acceptance matrix with semantic evidence reuse.
+- **Quality is measured.** Hermetic tests cover the mechanics; retrieval has a RU/EN goldset; releases use four bounded provider-backed lifecycle cells on one frozen Git SHA.
 
 The guiding rule is simple: if a deterministic program can perform a step without reducing result quality, the program should own it. The model should decide what the step means, not repeatedly reconstruct how to execute it.
 
@@ -50,15 +50,15 @@ keyboard / optional VoiceInk
 ┌──────────────────── coordinator session ────────────────────┐
 │ Claude Code or Codex CLI                                    │
 │   │                                                         │
-│   ├── repo skills ──► deterministic Python/Bash runners     │
+│   ├── repo skills ──► intent + reasoning discipline         │
 │   ├── retrieval ────► Obsidian Markdown + local indexes     │
-│   └── cmux broker ──► task/reviewer sessions on the right   │
+│   └── harness ──────► operation ledger + typed workflows    │
 └──────────────────────────┬───────────────────────────────────┘
-                           │ typed IDs, hashes, callbacks
+                           │ adapters: Git, cmux, models, checks
                  ┌─────────┴─────────┐
                  ▼                   ▼
-        isolated task worktree   opposite-model reviewer
-        Claude or Codex          Codex or Claude
+        isolated task worktree   simple/deep reviewer lanes
+        Claude or Codex          same or opposite runtime
                  │                   │
                  └──── fixes ◄───────┘
                            │
@@ -75,9 +75,9 @@ The canonical state is ordinary Markdown, JSON/TOML contracts, Git history, and 
 
 1. **Understand.** `clarify` (the built-in “grill me” workflow) inspects repository facts and asks one material question at a time before code or a plan.
 2. **Plan.** Important decisions become a saved plan with provenance and a stable DragonScale address.
-3. **Dispatch.** A code-owned runner captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
+3. **Dispatch.** The restartable harness captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
 4. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
-5. **Review.** The opposite runtime receives a read-only request bound to the exact baseline. It returns typed findings; a verification round resumes the same model/task/domain lane so context is not paid for twice.
+5. **Review.** Simple review uses one read-only holistic lane. Deep review keeps independent spec and standards/correctness/architecture/security lanes. Same-model is the default; cross-model routing is explicit. Verification resumes the exact lane and surface.
 6. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
 7. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The supervisor closes that exact surface after the agent process exits; it never guesses another tab.
 
@@ -89,21 +89,24 @@ Review approval finishes a **round**, not the whole task. The task remains resum
 |---|---|---|
 | Session readiness | `session-preflight.py`, generated-config checks, dependency detection | One fast local check replaces repeated model inspection. Missing optional components produce exact repair commands. |
 | Model selection | `config/model-routing.toml` + `model_routing.py` | Concrete defaults live in one place; task metadata records the resolved route. No model-name hardcoding across dozens of skills. |
-| Repository/context candidates | dispatch resolver and task registry | IDs and validated paths replace token-heavy guessing about repo, plan, window, or prior session. |
+| Repository/context candidates | harness context and Git modules | IDs, manifests, and validated paths replace token-heavy guessing about repo, plan, window, or prior session. |
 | Vault mutation | `vault-write.py` | One optimistic, journaled transaction replaces many fragile edits to pages, log, hot list, plan, and manifest. |
 | Search | section BM25 + optional local embeddings | The model sees the best bounded sections, not whole folders or repeated page bodies. |
 | Web cleanup | `defuddle` before synthesis | Navigation, ads, and boilerplate are removed before they consume context. |
 | Document conversion | cached stdlib/Docling pipeline | OCR and parsing are reused by source hash instead of spending model tokens rereading unchanged binaries. |
-| Review transport | operation-scoped JSON outbox and deterministic `drive` | No long callback paths or free-form findings need to be copied between terminal windows. |
-| Acceptance reruns | semantic per-cell fingerprints | A docs or data-only change reuses valid evidence; only behaviorally affected cells call a model again. |
+| Review transport | typed internal callback broker | No long callback paths or free-form findings need to be copied between terminal windows. |
+| Acceptance reruns | exact SHA + per-cell dependency fingerprints | Green lifecycle cells are reused only while their code-owned dependency closure is unchanged. |
 | Monitoring | content-free heartbeat and numeric telemetry | The pipeline can distinguish active work from a stall without storing prompts, responses, or screen text. |
-| Finalization | `reap-runner.py` | Review archival, result routing, plan close, reindex, validation, and exact exit happen through one fail-closed contract. |
+| Finalization | harness reap workflow | Review archival, result routing, plan close, reindex, validation, and exact exit happen through one fail-closed contract. |
 
 This division is deliberate. Requirements, interpretation, synthesis, code review, and risk judgment stay with models and people. Hashing, routing, schema checks, filesystem bookkeeping, and retry policy stay in code.
 
-## Cross-model review
+## Unified review
 
-Claude can implement while Codex reviews; Codex can implement while Claude reviews. The default reviewer route is the opposite runtime, and explicit overrides are recorded rather than silently substituted.
+`review` starts one same-model holistic session. `review --deep` keeps two
+independent axes. Add `--cross-model` when another runtime should review; a
+registered model alias may override the selected profile. Every resolved route
+is recorded, and an unknown alias or provider mismatch fails closed.
 
 A review operation contains:
 
@@ -111,7 +114,7 @@ A review operation contains:
 - the reviewed branch and stable baseline;
 - a product-read-only mandate and a single isolated outbox write path;
 - typed severity, evidence, recommendation, verification gaps, and residual risks;
-- bounded safe transitions owned by `review-dispatch drive --apply-action`;
+- bounded safe transitions owned by the harness operation engine;
 - same-session verification after executor fixes;
 - a durable archive linked from the final task result.
 
@@ -172,11 +175,16 @@ See [document ingestion](docs/document-ingestion.md) for limits, cache layout, a
 Networked research uses two isolated contexts:
 
 1. a web-enabled fetcher that cannot read the vault;
-2. a networkless synthesizer that receives only the validated artifact and can write through the vault contract.
+2. a networkless synthesizer that receives only the validated artifact and explicitly selected context.
 
-Persistent task lanes retain provider context only inside the exact task and isolation domain, so follow-up research does not start from zero. Every operation gets fresh scratch. `unsafe-research` is a separate, explicitly authorized escape hatch for a single-context scenario; it never becomes a silent fallback from protected research.
+The coordinator validates the cited result and performs the only vault write.
+Persistent task lanes retain provider context only inside the exact task and
+isolation domain, so follow-up research does not start from zero. Every
+operation gets fresh scratch. `unsafe-research` is a separate, explicitly
+authorized single-context escape hatch; it never becomes a silent fallback from
+protected research.
 
-## The 29 shipped skills
+## The 32 shipped skills
 
 Claude invokes them through its plugin UI (`/skill`). Codex uses the generated repo-local marketplace (`$llm-obsidian:skill`). The mechanics live in `skills/<name>/SKILL.md`, so another coding agent can follow them manually even without plugin support.
 
@@ -185,10 +193,12 @@ Claude invokes them through its plugin UI (`/skill`). Codex uses the generated r
 | **Orientation and alignment** | `wiki` bootstraps the vault; `clarify` performs one-question-at-a-time requirements/design alignment before implementation. |
 | **Capture and writing** | `save`, `save-plan`, `journal`, `backlog`, `daily`, and `agenda` turn conversations and dated work into canonical vault data. |
 | **Knowledge access** | `wiki-query`, `find-session`, `wiki-lint`, and `wiki-fold` retrieve, audit, and compact durable knowledge. |
-| **Documents and web** | `wiki-ingest`, `defuddle`, `autoresearch`, and `unsafe-research` normalize sources and keep trust domains explicit. |
+| **Documents and web** | `wiki-ingest`, `defuddle`, `research`, and `unsafe-research` normalize sources and keep trust domains explicit. |
+| **Engineering** | `debug`, `tdd`, `design`, `prototype`, and `resolve-conflict` keep reasoning disciplined while the harness owns lifecycle mechanics. |
 | **Thinking and communication** | `draft` proposes redacted external replies; `learn` tutors from your notes; `distill-runbook` turns sanitized shell history into human-executable procedures. |
+| **Skill quality** | `improve-skills` explicitly audits invocation, information hierarchy, completion criteria, and pruning while preserving behavior. |
 | **Obsidian-native output** | `obsidian-markdown`, `obsidian-bases`, and `canvas` produce correct links, properties, database views, and visual canvases. |
-| **Task orchestration** | `dispatch`, `dispatch-workspace`, `review-dispatch`, `review-send`, `reap-send`, `reap`, and `close` implement the visible multi-session lifecycle. |
+| **Task orchestration** | `dispatch`, `review`, `reap`, and `close` expose the visible harness-owned multi-session lifecycle. |
 
 The router provides soft hints for phrases such as “clarify before code” and “grill me”; it never forces a skill. Session-start nudges report missing optional dependencies, stale indexes, due folds, and other actionable degradation once per session rather than on every command.
 
@@ -297,18 +307,21 @@ dispatch this approved plan       # isolated visible task (cmux)
 review with the other model       # typed cross-model gate
 ```
 
-In Codex, use explicit names such as `$llm-obsidian:wiki-query`, `$llm-obsidian:clarify`, and `$llm-obsidian:review-dispatch`.
+In Codex, use explicit names such as `$llm-obsidian:wiki-query`, `$llm-obsidian:clarify`, and `$llm-obsidian:review`.
 
 ## Testing and release evidence
 
 ```bash
 make test                 # full hermetic suite; no network or Ollama
 make bench-retrieval      # measured ranking gate
-make acceptance-check     # model-free matrix/dependency contract
-make acceptance-live      # resume only behaviorally affected live cells
+make acceptance-check     # model-free four-cell harness contract
+make acceptance-live      # resume only affected provider-backed cells
 ```
 
-The release matrix contains 29 skills × 2 runtimes = 58 cells. v2.1.2 uses a minimal committed seed vault, deterministic synthetic commits, exact runtime registrations, semantic fingerprints, atomic checkpoints, and integrity-protected reuse. A Markdown-only release-note change does not trigger 58 paid model sessions; an undeclared behavioral dependency fails closed before any model starts.
+The release gate contains exactly four live cells: Claude lifecycle, Codex
+lifecycle, cross-runtime dispatch/review/reap composition, and two-axis deep
+review. Each cell binds the exact release SHA and a scoped dependency
+fingerprint; green cells are reused only while both remain unchanged.
 
 Acceptance heartbeat records only stage/status/counters/timestamps. Prompts, responses, commands, snippets, page bodies, queries, and error text are rejected from the telemetry schema. See [acceptance architecture](docs/acceptance-architecture.md) and [pipeline observability](docs/pipeline-observability.md).
 
@@ -345,7 +358,9 @@ There is no speculative roadmap in this README. The repository describes what is
 | Claude/Codex capability differences | [Runtime capability matrix](docs/runtime-capabilities.md) |
 | Dispatch, review, watchdog, and close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
+| v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| v2.3.0 install, upgrade, rollback, and release commands | [v2.3.0 release notes](docs/releases/v2.3.0.md) |
 | Numeric, content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |
 | Local PDF/Office/OCR path | [Document ingestion](docs/document-ingestion.md) |
 | MCP service operations | [MCP gateway](docs/mcp-gateway.md) |

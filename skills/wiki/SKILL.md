@@ -6,6 +6,7 @@ description: >
   Claude + Obsidian knowledge companion router: bootstraps a vault (SCAFFOLD)
   and routes operations to sub-skills. Manual-only: never auto-invoke; run only
   when the user explicitly requests /wiki because scaffold is a one-time operation.
+disable-model-invocation: true
 allowed-tools: Read Write Edit Glob Grep Bash
 ---
 
@@ -28,7 +29,7 @@ For day-to-day operations see [[daily-pipeline-guide]] (`wiki/meta/daily-pipelin
 | «что ты знаешь про X», «query:» | `wiki-query` |
 | «lint», «health check», «wiki audit» | `wiki-lint` |
 | «сохрани это», «save this», «file this» | `save` |
-| «/autoresearch <topic>», «research X» | `autoresearch` |
+| «/research <topic>», «research X» | `research` |
 | «/canvas», «add to canvas» | `canvas` |
 | «fold log», «log rollup» | `wiki-fold` |
 | «scaffold», «set up vault», «create knowledge base» | this skill (SCAFFOLD below) |

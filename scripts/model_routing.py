@@ -41,14 +41,37 @@ class RoutingConfig:
         value = self.data["runtimes"][runtime]
         return {"runtime": runtime, "model": value["model"], "effort": value["effort"]}
 
-    def reviewer_default(self, runtime: str) -> dict[str, str]:
-        value = self.data["roles"]["review"][runtime]
+    def resolve_alias(self, name: str, runtime: str = "") -> dict[str, str]:
+        aliases = self.data["model_aliases"]
+        if name in aliases:
+            value = aliases[name]
+            if runtime and value["runtime"] != runtime:
+                raise RoutingError(
+                    f"model alias {name!r} belongs to {value['runtime']}, not {runtime}"
+                )
+            return {"runtime": value["runtime"], "model": value["target"]}
+        registered = self.data["model_registry"].get(name)
+        if registered:
+            if runtime and registered != runtime:
+                raise RoutingError(f"model {name!r} is registered for {registered}, not {runtime}")
+            return {"runtime": registered, "model": name}
+        if not runtime:
+            raise RoutingError("an unregistered explicit model requires --runtime")
+        return {"runtime": runtime, "model": name}
+
+    def reviewer_default(self, runtime: str, profile: str = "simple") -> dict[str, str]:
+        value = self.data["review_profiles"][profile][runtime]
+        target = self.resolve_alias(value["model"], runtime)
+        return {"runtime": runtime, "model": target["model"], "effort": value["effort"]}
+
+    def legacy_reviewer_default(self, runtime: str) -> dict[str, str]:
+        value = self.data["legacy_review_defaults"][runtime]
         return {"runtime": runtime, "model": value["model"], "effort": value["effort"]}
 
     def default_models(self) -> set[str]:
         return {
             *(self.runtime_default(runtime)["model"] for runtime in RUNTIMES),
-            *(self.reviewer_default(runtime)["model"] for runtime in RUNTIMES),
+            *(self.reviewer_default(runtime, profile)["model"] for runtime in RUNTIMES for profile in ("simple", "deep")),
         }
 
 
@@ -77,7 +100,7 @@ def _merge(base: dict[str, Any], overlay: dict[str, Any], prefix: str = "") -> d
                 raise RoutingError("local routing override cannot change schema_version")
             continue
         if key not in base:
-            if prefix == "model_registry." and isinstance(value, str):
+            if prefix in {"model_registry.", "model_aliases."} and isinstance(value, (str, dict)):
                 result[key] = value
                 continue
             raise RoutingError(f"unknown local routing key: {prefix}{key}")
@@ -140,6 +163,53 @@ def _validate(data: dict[str, Any]) -> None:
     for model, runtime in registry.items():
         if not isinstance(model, str) or not model.strip() or runtime not in RUNTIMES:
             raise RoutingError("model_registry entries must map non-empty model names to codex or claude")
+    aliases = data.get("model_aliases")
+    if not isinstance(aliases, dict) or len(aliases) != 4:
+        raise RoutingError("model_aliases must define exactly four release aliases")
+    for alias, item in aliases.items():
+        if not isinstance(item, dict):
+            raise RoutingError(f"model_aliases.{alias} must be a table")
+        required = {"runtime", "target"}
+        if not required.issubset(item) or set(item) - required - {"expected_generation"}:
+            raise RoutingError(f"model_aliases.{alias} has an invalid shape")
+        runtime, target = item["runtime"], item["target"]
+        if runtime not in RUNTIMES or registry.get(target) != runtime:
+            raise RoutingError(f"model_aliases.{alias} target/runtime mismatch")
+        generation = item.get("expected_generation")
+        if runtime == "claude" and generation != 5:
+            raise RoutingError(f"model_aliases.{alias} expected generation drift")
+        if runtime == "codex" and generation is not None:
+            raise RoutingError(f"model_aliases.{alias} must not declare a Claude generation")
+    if {runtime: sum(item["runtime"] == runtime for item in aliases.values()) for runtime in RUNTIMES} != {
+        runtime: 2 for runtime in RUNTIMES
+    }:
+        raise RoutingError("model_aliases must define two targets per runtime")
+    profiles = data.get("review_profiles")
+    if not isinstance(profiles, dict) or set(profiles) != {"simple", "deep"}:
+        raise RoutingError("review_profiles must define simple and deep")
+    for profile, by_runtime in profiles.items():
+        if not isinstance(by_runtime, dict) or set(by_runtime) != RUNTIMES:
+            raise RoutingError(f"review_profiles.{profile} must define both runtimes")
+        for runtime, item in by_runtime.items():
+            if not isinstance(item, dict) or set(item) != {"model", "effort"}:
+                raise RoutingError(f"review_profiles.{profile}.{runtime} has an invalid shape")
+            model = item["model"]
+            registered_runtime = (
+                aliases[model]["runtime"] if model in aliases else registry.get(model)
+            )
+            if registered_runtime != runtime:
+                raise RoutingError(f"review profile alias/runtime mismatch: {profile}.{runtime}")
+            validate_effort(runtime, item["effort"])
+    legacy_defaults = data.get("legacy_review_defaults")
+    if not isinstance(legacy_defaults, dict) or set(legacy_defaults) != RUNTIMES:
+        raise RoutingError("legacy_review_defaults must define both runtimes")
+    for runtime, item in legacy_defaults.items():
+        if not isinstance(item, dict) or set(item) != {"model", "effort"}:
+            raise RoutingError(f"legacy_review_defaults.{runtime} has an invalid shape")
+        model = item["model"]
+        if registry.get(model) != runtime:
+            raise RoutingError(f"legacy review model {model!r} is not registered for {runtime}")
+        validate_effort(runtime, item["effort"])
 
 
 def load_config(root: Path | str = ROOT) -> RoutingConfig:
@@ -210,6 +280,7 @@ def resolve(
     explicit_model: str = "",
     explicit_effort: str = "",
     same_model: bool = False,
+    review_profile: str = "simple",
 ) -> dict[str, Any]:
     if role not in ROLES:
         raise RoutingError(f"unknown routing role: {role}")
@@ -220,6 +291,16 @@ def resolve(
         validate_effort(runtime, session["effort"])
     if explicit_runtime and explicit_runtime not in RUNTIMES:
         raise RoutingError("explicit runtime must be codex or claude")
+    if review_profile not in {"simple", "deep"}:
+        raise RoutingError("review profile must be simple or deep")
+    if role != "review" and review_profile != "simple":
+        raise RoutingError("review profile is valid only for the review role")
+    if (
+        role == "review"
+        and explicit_model
+        and explicit_model not in config.data["model_aliases"]
+    ):
+        raise RoutingError("review model override must be a registered alias")
 
     source: list[str] = []
     session_source = str(session.get("source") or "") if session else ""
@@ -235,10 +316,18 @@ def resolve(
         source.append(f"session:{session_source}" if session_source else "session")
         return dict(session)
 
-    if role == "review" and not same_model:
-        base_runtime = "claude" if session and session["runtime"] == "codex" else "codex"
-        base = config.reviewer_default(base_runtime)
-        source.append("opposite-runtime-default")
+    if role == "review" and (not same_model or review_profile == "deep"):
+        base_runtime = (
+            session["runtime"]
+            if same_model and session
+            else "claude"
+            if session and session["runtime"] == "codex"
+            else "codex"
+        )
+        base = config.reviewer_default(base_runtime, review_profile)
+        source.append(
+            f"{'same-runtime' if same_model else 'opposite-runtime'}-{review_profile}-profile"
+        )
     elif role == "protected-research":
         if session and session["runtime"] == "codex":
             base = inherit_session()
@@ -257,21 +346,16 @@ def resolve(
         source.append("explicit-runtime")
         if explicit_runtime != base["runtime"] and not explicit_model:
             base = (
-                config.reviewer_default(explicit_runtime)
-                if role == "review" and not same_model
+                config.reviewer_default(explicit_runtime, review_profile)
+                if role == "review" and (not same_model or review_profile == "deep")
                 else config.runtime_default(explicit_runtime)
             )
             source.append("runtime-default")
     model = explicit_model or base["model"]
     if explicit_model:
         source.append("explicit-model")
-        registered = config.data["model_registry"].get(explicit_model)
-        if not explicit_runtime:
-            if registered is None:
-                raise RoutingError("an unregistered explicit model requires --runtime")
-            runtime = registered
-        elif registered and registered != runtime:
-            raise RoutingError(f"model {explicit_model!r} is registered for {registered}, not {runtime}")
+        resolved = config.resolve_alias(explicit_model, explicit_runtime)
+        runtime, model = resolved["runtime"], resolved["model"]
 
     effort = explicit_effort or base["effort"]
     if role == "daily" and not explicit_effort:
@@ -344,7 +428,7 @@ def load_session(config: RoutingConfig, session_id: str) -> dict[str, Any]:
 
 def native_targets(config: RoutingConfig) -> dict[Path, dict[str, str | None]]:
     default = config.runtime_default("codex")
-    reviewer = config.reviewer_default("codex")
+    reviewer = config.reviewer_default("codex", "simple")
     return {
         config.root / ".codex/config.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
         config.root / ".codex/profiles/default.toml": {"model": default["model"], "model_reasoning_effort": default["effort"]},
@@ -449,6 +533,7 @@ def main() -> int:
     res.add_argument("--model", default="")
     res.add_argument("--effort", default="")
     res.add_argument("--same-model", action="store_true")
+    res.add_argument("--review-profile", choices=("simple", "deep"), default="simple")
     args = parser.parse_args()
     try:
         config = load_config(args.root)
@@ -467,7 +552,7 @@ def main() -> int:
             print(json.dumps(capture_session(config, args.session_id, **route, source=source), sort_keys=True))
         else:
             session = load_session(config, args.session_id) if args.session_id else None
-            print(json.dumps(resolve(config, args.role, session=session, explicit_runtime=args.runtime, explicit_model=args.model, explicit_effort=args.effort, same_model=args.same_model), sort_keys=True))
+            print(json.dumps(resolve(config, args.role, session=session, explicit_runtime=args.runtime, explicit_model=args.model, explicit_effort=args.effort, same_model=args.same_model, review_profile=args.review_profile), sort_keys=True))
         return 0
     except RoutingError as exc:
         die(str(exc), 3)

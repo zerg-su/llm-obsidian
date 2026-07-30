@@ -1,1614 +1,1356 @@
 #!/usr/bin/env python3
-"""Hermetic contract tests for the repo-shipped live acceptance runner."""
+"""Hermetic checks for the fixed four-cell live acceptance port."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import importlib.util
-import inspect
-import os
+import json
 import shutil
 import subprocess
 import sys
 import tempfile
-import uuid
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "scripts" / "acceptance" / "runner.py"
-RELEASE = ROOT / "scripts" / "release-acceptance.py"
+SCRIPT = ROOT / "scripts/live-acceptance-runner.py"
 sys.path.insert(0, str(ROOT / "scripts"))
-from acceptance import launchers as acceptance_launchers  # noqa: E402
-from acceptance import sandbox as acceptance_sandbox  # noqa: E402
-from acceptance import skill_adapters as acceptance_skill_adapters  # noqa: E402
-failures: list[str] = []
+import live_acceptance_driver as driver
+from harness.contracts import (
+    AttentionReason,
+    CallbackEnvelope,
+    CapabilityReport,
+    EffectOutcome,
+    OperationRecord,
+    OwnedResources,
+    to_dict,
+)
+from harness.callbacks import CallbackBroker
+from harness.store import OperationStore
+import harness.workflows.dispatch as dispatch_workflow
+import harness.workflows.reap as reap_workflow
+import harness.workflows.review_gate as review_gate_workflow
+
+SPEC = importlib.util.spec_from_file_location("live_acceptance_runner_test", SCRIPT)
+assert SPEC and SPEC.loader
+runner = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(runner)
 
 
-def check(label: str, condition: bool, detail: str = "") -> None:
-    if condition:
-        print(f"OK   {label}")
-    else:
-        failures.append(label)
-        print(f"FAIL {label}: {detail}")
+def check(name: str, condition: bool) -> None:
+    if not condition:
+        raise AssertionError(name)
+    print(f"OK   {name}")
 
 
-def row(**updates: object) -> dict[str, object]:
-    value: dict[str, object] = {
-        "schema_version": 1,
-        "phase": "final",
-        "skill": "clarify",
-        "runtime": "codex",
-        "scenario": "conversation-readonly",
-        "expected": "Ask one material question at a time and make no repository mutation.",
+COMMIT = "a" * 40
+FINGERPRINT = "b" * 64
+NOW = datetime.now(timezone.utc).isoformat()
+SURFACE = "11111111-1111-4111-8111-111111111111"
+CONTRACT_CELLS = [
+    {
+        "cell_id": cell_id,
+        "kind": kind,
+        "runtimes": runtimes,
+        "required_trace": list(required_trace),
+        "dependency_fingerprint": FINGERPRINT,
+        "dependencies": ["scripts/live_acceptance_driver.py"],
     }
-    value.update(updates)
-    return value
-
-
-def run(*args: str, payload: dict[str, object], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(RUNNER), *args],
-        input=json.dumps(payload) + "\n",
-        text=True,
-        capture_output=True,
-        env=env,
-        check=False,
-    )
-
-
-with tempfile.TemporaryDirectory(prefix="live-acceptance-runner-test.") as raw:
-    tmp = Path(raw)
-    backend = tmp / "backend.py"
-    backend.write_text(
-        "import json,sys\n"
-        "r=json.load(sys.stdin)\n"
-        "print(json.dumps({**r,'verdict':'pass','model':'fixture-model','effort':'high',"
-        "'actual':'asked one bounded question','cleanup':'no files changed',"
-        "'evidence':'clean git status'}))\n",
-        encoding="utf-8",
-    )
-    result = run("--backend-command", sys.executable, str(backend), payload=row())
-    payload = json.loads(result.stdout)
-    check("backend pass exits zero", result.returncode == 0, result.stderr)
-    check("backend row identity preserved", payload["skill"] == "clarify" and payload["runtime"] == "codex")
-    check("backend evidence preserved", payload["verdict"] == "pass" and payload["evidence"] == "clean git status")
-
-    mismatch = tmp / "mismatch.py"
-    mismatch.write_text(
-        "import json,sys\n"
-        "r=json.load(sys.stdin); r['skill']='daily'; r.update(verdict='pass',model='x',effort='high',actual='x',cleanup='x',evidence='x')\n"
-        "print(json.dumps(r))\n",
-        encoding="utf-8",
-    )
-    result = run("--backend-command", sys.executable, str(mismatch), payload=row())
-    blocked = json.loads(result.stdout)
-    check("mismatched backend is bounded data", result.returncode == 0 and blocked["verdict"] == "blocked", result.stderr)
-    check("mismatched backend names identity defect", "does not match" in blocked["defect"])
-
-    secret = tmp / "secret.py"
-    secret.write_text(
-        "import json,sys\n"
-        "r=json.load(sys.stdin); r.update(verdict='pass',model='x',effort='high',actual='token=abcdefghijk',cleanup='x',evidence='x')\n"
-        "print(json.dumps(r))\n",
-        encoding="utf-8",
-    )
-    result = run("--backend-command", sys.executable, str(secret), payload=row())
-    blocked = json.loads(result.stdout)
-    check("credential-like backend result is sanitized", blocked["verdict"] == "pass")
-    check("credential value omitted", "abcdefghijk" not in result.stdout)
-
-    env = os.environ.copy()
-    env.pop("CMUX_SURFACE_ID", None)
-    result = run(payload=row(), env=env)
-    blocked = json.loads(result.stdout)
-    check("missing cmux is a valid blocked cell", result.returncode == 0 and blocked["verdict"] == "blocked")
-    check("missing cmux is actionable", "CMUX_SURFACE_ID" in blocked["defect"])
-
-    result = run(payload=row(scenario="unregistered"))
-    check("unknown scenario fails before operation", result.returncode == 3 and not result.stdout, result.stderr)
-
-    result = run(payload=row(expected="substituted expectation"))
-    check("substituted fixture contract is rejected", result.returncode == 3 and not result.stdout, result.stderr)
-
-    fixture_registry = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
-    check(
-        "daily fixture preserves one independently provable evidence commit",
-        "exactly one local commit" in fixture_registry["skills"]["daily"]["fixture"]
-        and "Acceptance Daily Fixture.md" in fixture_registry["skills"]["daily"]["fixture"]
-        and "writer-owned wiki/log.md update" in fixture_registry["skills"]["daily"]["fixture"]
-        and "exact one-step .vault-meta/address-counter.txt allocation"
-        in fixture_registry["skills"]["daily"]["fixture"]
-        and "without committing that deletion" in fixture_registry["skills"]["daily"]["fixture"]
-        and "Do not create a cleanup commit" in fixture_registry["skills"]["daily"]["fixture"],
-    )
-    check(
-        "backlog fixture restores the canonical inbox exactly",
-        "Snapshot the exact original bytes" in fixture_registry["skills"]["backlog"]["fixture"]
-        and "vault-write.py update" in fixture_registry["skills"]["backlog"]["fixture"]
-        and "current expected_sha256" in fixture_registry["skills"]["backlog"]["fixture"],
-    )
-    check(
-        "wiki-lint fixture stays inside canonical writer schema",
-        "complete required frontmatter" in fixture_registry["skills"]["wiki-lint"]["fixture"]
-        and "Do not create an invalid-frontmatter page" in fixture_registry["skills"]["wiki-lint"]["fixture"]
-        and "dead wikilink" in fixture_registry["skills"]["wiki-lint"]["fixture"],
-    )
-    check(
-        "wiki-query fixture has deterministic sparse evidence",
-        "ACCEPTANCEQUARTZ731" in fixture_registry["skills"]["wiki-query"]["fixture"]
-        and "neither distractor may contain" in fixture_registry["skills"]["wiki-query"]["fixture"]
-        and "OLLAMA_URL=http://127.0.0.1:1" in fixture_registry["skills"]["wiki-query"]["fixture"]
-        and "unconditional visible degraded=true" in fixture_registry["skills"]["wiki-query"]["fixture"]
-        and "answer note ranks first" in fixture_registry["skills"]["wiki-query"]["fixture"],
-    )
-    check(
-        "wiki-query fixture provisions the normal dense path before degradation",
-        "retrieve.py refresh-dense --quiet" in fixture_registry["skills"]["wiki-query"]["fixture"],
-    )
-    check(
-        "distill-runbook fixture satisfies the skill's meaningful-history floor",
-        "six distinct" in fixture_registry["skills"]["distill-runbook"]["fixture"],
-    )
-    check(
-        "learn fixture refreshes derived state before whole-vault validation",
-        "scripts/reindex.py" in fixture_registry["skills"]["learn"]["fixture"],
-    )
-    check(
-        "unsafe research fixture pins one stable official read",
-        "https://peps.python.org/pep-0008/"
-        in fixture_registry["skills"]["unsafe-research"]["fixture"]
-        and "PEP 8 — Style Guide for Python Code"
-        in fixture_registry["skills"]["unsafe-research"]["fixture"]
-        and "--fail --location --max-time 15"
-        in fixture_registry["skills"]["unsafe-research"]["fixture"]
-        and "same URL" in fixture_registry["skills"]["unsafe-research"]["fixture"],
-    )
-    check(
-        "reap fixtures use runner-prepared lifecycle infrastructure",
-        all(
-            "runner-prepared approved task" in fixture_registry["skills"][skill]["fixture"]
-            and "separate bound task surface" in fixture_registry["skills"][skill]["fixture"]
-            and "do not create or rewrite fixture infrastructure"
-            in fixture_registry["skills"][skill]["fixture"]
-            for skill in ("reap", "reap-send")
+    for cell_id, kind, runtimes, required_trace in (
+        (
+            "claude-lifecycle",
+            "runtime-lifecycle",
+            ["claude"],
+            ("open", "callback", "same-run-continue", "exit", "close"),
+        ),
+        (
+            "codex-lifecycle",
+            "runtime-lifecycle",
+            ["codex"],
+            ("open", "callback", "same-run-continue", "exit", "close"),
+        ),
+        (
+            "cross-runtime-composition",
+            "workflow-composition",
+            ["codex", "claude"],
+            ("dispatch", "simple-review", "reap"),
+        ),
+        (
+            "deep-review",
+            "deep-review",
+            ["claude", "codex"],
+            ("spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"),
         ),
     )
-    missing_fixture = tmp / "missing-fixture.json"
-    missing_fixture_data = json.loads(json.dumps(fixture_registry))
-    missing_fixture_data["skills"]["clarify"].pop("fixture")
-    missing_fixture.write_text(json.dumps(missing_fixture_data), encoding="utf-8")
-    result = run("--skills", str(missing_fixture), payload=row())
-    check("missing skill fixture is rejected", result.returncode == 3 and not result.stdout, result.stderr)
+]
+RELEASE = {"schema_version": 2, "commit_sha": COMMIT, "cells": CONTRACT_CELLS}
 
-    release = subprocess.run(
-        [sys.executable, str(RELEASE), "check"], cwd=ROOT,
-        text=True, capture_output=True, check=False,
-    )
-    check("release check validates scenario parity", release.returncode == 0 and "skills x 2 runtimes" in release.stdout, release.stderr)
 
-    spec = importlib.util.spec_from_file_location("live_acceptance_runner_test", RUNNER)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    prompt_baseline = json.loads(
-        (ROOT / "evals/acceptance/prompt-baseline-v2.1.3.json").read_text(encoding="utf-8")
-    )
-    prompt_scenarios = module.load_scenarios()
-    prompt_fixtures = module.load_skill_fixtures()
-    rendered_hashes: dict[str, str] = {}
-    for skill, fixture_item in sorted(prompt_fixtures.items()):
-        for runtime in ("claude", "codex"):
-            prompt_row = {
-                "schema_version": 1,
-                "phase": "final",
-                "skill": skill,
-                "runtime": runtime,
-                "scenario": fixture_item["scenario"],
-                "expected": fixture_item["expected"],
-            }
-            runner_fixture = None
-            if skill in {"review-dispatch", "review-send"}:
-                runner_fixture = {"fixture_kind": "review", "nested_worktree": "/acceptance/task"}
-            elif skill in {"dispatch", "dispatch-workspace"}:
-                runner_fixture = {"fixture_kind": "dispatch", "nested_worktree": "/acceptance/task"}
-            elif skill in {"reap", "reap-send"}:
-                runner_fixture = {"fixture_kind": "reap", "nested_worktree": "/acceptance/task"}
-            rendered = module.prompt_text(
-                prompt_row,
-                prompt_scenarios[fixture_item["scenario"]],
-                Path(prompt_baseline["placeholders"]["sandbox"]),
-                Path(prompt_baseline["placeholders"]["outbox"]),
-                prompt_baseline["placeholders"]["model"],
-                prompt_baseline["placeholders"]["effort"],
-                prompt_baseline["placeholders"]["commit"],
-                fixture_item["fixture"],
-                runner_fixture,
-            )
-            key = "|".join(
-                str(prompt_row[name])
-                for name in ("phase", "skill", "runtime", "scenario", "expected")
-            )
-            rendered_hashes[key] = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
-    check(
-        "all 58 refactored prompts match the reviewed v2.1.3 baseline",
-        rendered_hashes == prompt_baseline["prompts"] and len(rendered_hashes) == 58,
-    )
-    check(
-        "live runner uses the canonical trust prompt matcher",
-        module.workspace_trust_prompt_visible.__module__ == "cmux_trust_prompt",
-    )
-    override_repo = tmp / "override-repo"
-    (override_repo / "config").mkdir(parents=True)
-    module.install_acceptance_model_overrides(override_repo, {"claude": "sonnet"})
-    override_text = (override_repo / "config/model-routing.local.toml").read_text(encoding="utf-8")
-    from model_routing import validate_local_config
-    from acceptance_fingerprints import canonical_generation, read_manifest
-
-    manifest = read_manifest(ROOT)
-    check(
-        "Codex Sol and Terra share one major generation",
-        canonical_generation("gpt-5.6-sol", manifest)
-        == canonical_generation("gpt-5.6-terra", manifest)
-        == "codex:5.6",
-    )
-
-    validated_override = validate_local_config(ROOT, override_text)
-    check(
-        "live acceptance supports sandbox-only cheaper model aliases",
-        '[runtimes.claude]' in override_text
-        and '[roles.review.claude]' in override_text
-        and 'model = "sonnet"' in override_text
-        and '"sonnet" = "claude"' in override_text
-        and validated_override.runtime_default("claude")["model"] == "sonnet",
-    )
-    effort_repo = tmp / "effort-override-repo"
-    (effort_repo / "config").mkdir(parents=True)
-    module.install_acceptance_model_overrides(
-        effort_repo, {"claude": "sonnet", "codex": "gpt-5.6-terra"}, "medium"
-    )
-    effort_text = (effort_repo / "config/model-routing.local.toml").read_text(
-        encoding="utf-8"
-    )
-    check(
-        "live acceptance effort override is code-owned",
-        effort_text.count('effort = "medium"') == 4,
-    )
-    module.disable_acceptance_autocommit(override_repo)
-    autocommit_guard = json.loads(
-        (override_repo / ".vault-meta/auto-commit.disabled").read_text(encoding="utf-8")
-    )
-    check(
-        "live clone disables host turn-end auto-commit",
-        autocommit_guard == {"schema_version": 1, "reason": "live-acceptance"}
-        and (override_repo / ".vault-meta/auto-commit.disabled").stat().st_mode & 0o777 == 0o600,
-    )
-    seed_repo = tmp / "seed-repo"
-    (seed_repo / "wiki").mkdir(parents=True)
-    (seed_repo / ".vault-meta").mkdir()
-    (seed_repo / "wiki/user-data.md").write_text("must disappear\n", encoding="utf-8")
-    (seed_repo / ".vault-meta/user-data.json").write_text("{}\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=seed_repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=seed_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=seed_repo, check=True)
-    subprocess.run(["git", "add", "-f", "wiki", ".vault-meta"], cwd=seed_repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "source data"], cwd=seed_repo, check=True)
-    seed_commit = acceptance_sandbox.materialize_seed_commit(seed_repo)
-    seed_status = subprocess.run(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=seed_repo,
-        text=True, capture_output=True, check=True,
-    ).stdout
-    check(
-        "sandbox data layer is replaced by one clean canonical seed commit",
-        not seed_status
-        and not (seed_repo / "wiki/user-data.md").exists()
-        and not (seed_repo / ".vault-meta/user-data.json").exists()
-        and (seed_repo / "wiki/backlog.md").is_file()
-        and len(seed_commit) == 40,
-    )
-    check(
-        "acceptance seed hash is deterministic and independent of the working vault",
-        acceptance_sandbox.acceptance_seed_sha256()
-        == acceptance_sandbox.acceptance_seed_sha256()
-        and len(acceptance_sandbox.acceptance_seed_sha256()) == 64,
-    )
-    previous_claude_override = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL")
-    os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = "sonnet"
-    try:
-        blocked_override = module.blocked(
-            row(runtime="claude"), "bounded fixture timeout"
-        )
-    finally:
-        if previous_claude_override is None:
-            os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL", None)
-        else:
-            os.environ["LLM_OBSIDIAN_ACCEPTANCE_CLAUDE_MODEL"] = previous_claude_override
-    check(
-        "blocked live evidence records the actual test model override",
-        blocked_override["model"] == "sonnet",
-    )
-    repo = tmp / "cleanup-repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=repo, check=True)
-    (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
-    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
-    ).stdout.strip()
-    original_root = acceptance_sandbox.ROOT
-    original_pin = os.environ.get("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT")
-    acceptance_sandbox.ROOT = repo
-    (repo / "tracked.txt").write_text("dirty but uncommitted\n", encoding="utf-8")
-    os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = commit
-    try:
-        check("pinned source commit ignores later worktree drift", module.git_head() == commit)
-        os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = "not-a-commit"
-        try:
-            module.git_head()
-        except module.AcceptanceRunnerError as exc:
-            check("invalid source pin fails closed", "invalid pinned" in str(exc), str(exc))
-        else:
-            check("invalid source pin fails closed", False)
-    finally:
-        acceptance_sandbox.ROOT = original_root
-        if original_pin is None:
-            os.environ.pop("LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT", None)
-        else:
-            os.environ["LLM_OBSIDIAN_ACCEPTANCE_SOURCE_COMMIT"] = original_pin
-        (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
-    (repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
-    clean, _ = module.sandbox_cleanup_proof(repo, commit)
-    check("runner-owned marker is cleanup-neutral", clean)
-    (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
-    clean, reason = module.sandbox_cleanup_proof(repo, commit)
-    check("independent cleanup proof catches product drift", not clean and "changes" in reason)
-    (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
-    (repo / ".vault-meta").mkdir()
-    (repo / "wiki" / "sources").mkdir(parents=True)
-    (repo / ".vault-meta" / "address-counter.txt").write_text("1\n", encoding="utf-8")
-    (repo / "wiki" / "sources" / "_index.md").write_text("# Sources\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", ".vault-meta/address-counter.txt", "wiki/sources/_index.md"],
-        cwd=repo,
-        check=True,
-    )
-    subprocess.run(["git", "commit", "-qm", "bookkeeping fixture"], cwd=repo, check=True)
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, text=True, capture_output=True, check=True
-    ).stdout.strip()
-    (repo / ".vault-meta" / "address-counter.txt").write_text("2\n", encoding="utf-8")
-    (repo / "wiki" / "sources" / "_index.md").write_text(
-        "# Sources\n- disposable\n", encoding="utf-8"
-    )
-    clean, reason = module.sandbox_cleanup_proof(repo, commit)
-    check("runner accepts disposable vault bookkeeping", clean and "bookkeeping" in reason, reason)
-    (repo / "unexpected.md").write_text("product residue\n", encoding="utf-8")
-    clean, reason = module.sandbox_cleanup_proof(repo, commit)
-    check("runner rejects untracked product output", not clean and "changes" in reason, reason)
-    (repo / "unexpected.md").unlink()
-    (repo / ".raw").mkdir()
-    (repo / ".raw" / ".manifest.json").write_text(
-        '{"sources":{},"address_map":{}}\n', encoding="utf-8"
-    )
-    clean, reason = module.sandbox_cleanup_proof(repo, commit)
-    check(
-        "runner accepts an exact untracked disposable ingest manifest",
-        clean and "bookkeeping" in reason,
-        reason,
-    )
-    (repo / ".raw" / ".manifest.json").unlink()
-    (repo / ".raw").rmdir()
-
-    claude_argv, _ = module.agent_argv("claude", repo, "fixture-model", "high", "prompt")
-    check("Claude acceptance runs outside project hooks", "--add-dir" in claude_argv and str(repo) in claude_argv)
-    check(
-        "Claude acceptance loads the repo-local plugin",
-        claude_argv[claude_argv.index("--plugin-dir") + 1] == str(repo),
-    )
-    check(
-        "Claude acceptance cannot block on interactive questions",
-        claude_argv[claude_argv.index("--disallowedTools") + 1] == "AskUserQuestion",
-    )
-    acceptance_launchers.validated_cmux_socket_path = lambda: Path("/tmp/fixture-cmux.sock")
-    codex_argv, _ = module.agent_argv("codex", repo, "fixture-model", "high", "prompt")
-    check("Codex acceptance disables hooks", "--disable" in codex_argv and "hooks" in codex_argv)
-    check("Codex acceptance keeps Fast user-only", 'service_tier="default"' in codex_argv)
-    check(
-        "Codex acceptance grants only disposable Git metadata",
-        codex_argv[codex_argv.index("--add-dir") + 1] == str(module.resolved_git_common_dir(repo)),
-    )
-    unsafe_row = row(
-        skill="unsafe-research",
-        runtime="codex",
-        scenario="unsafe-web",
-        expected=(
-            "After one warning, run one bounded single-context web scenario on the "
-            "exact current session route without a second model run."
-        ),
-    )
-    unsafe_domains = module.acceptance_network_domains(unsafe_row)
-    unsafe_argv, _ = module.agent_argv(
-        "codex",
-        repo,
-        "fixture-model",
-        "high",
-        "prompt",
-        network_domains=unsafe_domains,
-    )
-    network_configs = [
-        unsafe_argv[index + 1]
-        for index, value in enumerate(unsafe_argv[:-1])
-        if value == "-c" and unsafe_argv[index + 1].startswith(
-            "features.network_proxy.domains="
-        )
-    ]
-    check(
-        "unsafe Codex acceptance grants only its pinned public host",
-        unsafe_domains == ("peps.python.org",)
-        and "peps.python.org" not in " ".join(codex_argv)
-        and len(network_configs) == 2
-        and "peps.python.org" in network_configs[-1]
-        and "localhost" in network_configs[-1]
-        and "python.org" not in network_configs[-1].replace("peps.python.org", ""),
-    )
-    try:
-        module.agent_argv(
-            "codex",
-            repo,
-            "fixture-model",
-            "high",
-            "prompt",
-            network_domains=("example.com",),
-        )
-    except module.AcceptanceRunnerError:
-        check("acceptance rejects unregistered public hosts", True)
-    else:
-        check("acceptance rejects unregistered public hosts", False)
-    scratch = tmp / "scratch"
-    scratch.mkdir()
-    _argv, scratch_env = module.agent_argv(
-        "claude", repo, "fixture-model", "high", "prompt", scratch_root=scratch,
-        surface="00000000-0000-0000-0000-000000000003",
-    )
-    check("acceptance temp files are operation-scoped", all(scratch_env[name] == str(scratch) for name in ("TMPDIR", "TMP", "TEMP")))
-    check(
-        "acceptance agent is anchored to its exact surface",
-        scratch_env["CMUX_SURFACE_ID"] == "00000000-0000-0000-0000-000000000003",
-    )
-    acceptance_session = "acceptance-00000000-0000-0000-0000-000000000004"
-    _argv, session_env = module.agent_argv(
-        "codex", repo, "fixture-model", "high", "prompt",
-        session_id=acceptance_session,
-    )
-    detected_session = subprocess.run(
-        [str(ROOT / "scripts/current-session-id.sh")],
-        text=True,
-        capture_output=True,
-        env=session_env,
-        check=False,
-    )
-    check(
-        "acceptance runner supplies its captured route identity",
-        detected_session.returncode == 0
-        and detected_session.stdout.strip() == acceptance_session,
-        detected_session.stderr,
-    )
-    acceptance_repo = tmp / "acceptance-session-repo"
-    (acceptance_repo / "scripts").mkdir(parents=True)
-    shutil.copy2(
-        ROOT / "scripts" / "current-session-id.sh",
-        acceptance_repo / "scripts" / "current-session-id.sh",
-    )
-    (acceptance_repo / ".acceptance-sandbox.json").write_text(
-        '{"schema_version":1}\n', encoding="utf-8"
-    )
-    persisted = module.persist_acceptance_session(
-        acceptance_repo, acceptance_session
-    )
-    fallback_env = os.environ.copy()
-    fallback_env.pop("LLM_OBSIDIAN_ACCEPTANCE", None)
-    fallback_env.pop("LLM_OBSIDIAN_ACCEPTANCE_SESSION_ID", None)
-    fallback_env.pop("CLAUDE_CODE_SESSION_ID", None)
-    fallback_env["CODEX_THREAD_ID"] = "actual-codex-thread"
-    detected_fallback = subprocess.run(
-        [str(acceptance_repo / "scripts" / "current-session-id.sh")],
-        text=True,
-        capture_output=True,
-        env=fallback_env,
-        check=False,
-    )
-    check(
-        "acceptance session survives Codex command environment filtering",
-        persisted.stat().st_mode & 0o777 == 0o600
-        and detected_fallback.returncode == 0
-        and detected_fallback.stdout.strip() == acceptance_session,
-        detected_fallback.stderr,
-    )
-    try:
-        module.agent_argv(
-            "codex", repo, "fixture-model", "high", "prompt",
-            session_id="../invalid",
-        )
-    except module.AcceptanceRunnerError:
-        check("acceptance route identity rejects path syntax", True)
-    else:
-        check("acceptance route identity rejects path syntax", False)
-
-    settling = tmp / "settling-outbox.json"
-    state: dict[str, object] = {}
-    settling.write_text('{"schema_version":', encoding="utf-8")
-    check("partial outbox waits during grace", module.settled_outbox(settling, state, 10.0) is None)
-    settling.write_text('{"schema_version": 1}', encoding="utf-8")
-    check("first valid outbox sample waits for stability", module.settled_outbox(settling, state, 10.2) is None)
-    check("stable valid outbox is accepted", module.settled_outbox(settling, state, 11.3) == {"schema_version": 1})
-
-    invalid = tmp / "invalid-outbox.json"
-    invalid.write_text("{", encoding="utf-8")
-    invalid_state: dict[str, object] = {}
-    module.settled_outbox(invalid, invalid_state, 20.0)
-    try:
-        module.settled_outbox(invalid, invalid_state, 25.1)
-    except module.AcceptanceRunnerError as exc:
-        check("persistently invalid outbox fails after bounded grace", "grace period" in str(exc))
-    else:
-        check("persistently invalid outbox fails after bounded grace", False, "no error")
-
-    symlink = tmp / "symlink-outbox.json"
-    symlink.symlink_to(settling)
-    try:
-        module.settled_outbox(symlink, {}, 30.0)
-    except module.AcceptanceRunnerError as exc:
-        check("outbox symlink is rejected", "non-symlink" in str(exc))
-    else:
-        check("outbox symlink is rejected", False, "no error")
-
-    oversized = tmp / "oversized-outbox.json"
-    oversized.write_bytes(b"x" * (module.OUTBOX_MAX_BYTES + 1))
-    try:
-        module.settled_outbox(oversized, {}, 40.0)
-    except module.AcceptanceRunnerError as exc:
-        check("oversized outbox is rejected", "size limit" in str(exc))
-    else:
-        check("oversized outbox is rejected", False, "no error")
-
-    exited = tmp / "agent-exit.json"
-    exited.write_text('{"schema_version": 1}\n', encoding="utf-8")
-    close_calls: list[list[str]] = []
-    original_run = acceptance_launchers.subprocess.run
-    original_send_surface = acceptance_launchers.send_surface
-    original_close_exact = acceptance_launchers.close_surface_exact
-    acceptance_launchers.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("already-exited agent must not receive /exit")
-    )
-    acceptance_launchers.close_surface_exact = lambda surface, _runner: close_calls.append([surface]) or "closed"
-    try:
-        close_result = module.close_surface("00000000-0000-0000-0000-000000000001", "codex", exited)
-    finally:
-        acceptance_launchers.subprocess.run = original_run
-        acceptance_launchers.send_surface = original_send_surface
-        acceptance_launchers.close_surface_exact = original_close_exact
-    check("interrupted exited agent closes without a second command", close_result == "exact surface closed")
-    check("interrupted cleanup targets exact surface once", close_calls == [[
-        "00000000-0000-0000-0000-000000000001"
-    ]])
-
-    forced_exit = tmp / "forced-agent-exit.json"
-    force_calls: list[list[str]] = []
-    acceptance_launchers.send_surface = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("forced interrupt cleanup must not wait for agent commands")
-    )
-    acceptance_launchers.close_surface_exact = lambda surface, _runner: force_calls.append([surface]) or "closed"
-    try:
-        forced_result = module.close_surface(
-            "00000000-0000-0000-0000-000000000007",
-            "codex",
-            forced_exit,
-            force=True,
-        )
-    finally:
-        acceptance_launchers.send_surface = original_send_surface
-        acceptance_launchers.close_surface_exact = original_close_exact
-    check("forced interrupt closes without an exit-marker wait", forced_result == "exact surface closed")
-    check("forced interrupt targets the exact surface once", force_calls == [[
-        "00000000-0000-0000-0000-000000000007"
-    ]])
-
-    confirming_exit = tmp / "confirming-agent-exit.json"
-    confirm_calls: list[list[str]] = []
-    acceptance_launchers.send_surface = lambda *_args, **_kwargs: None
-    def confirm_run(argv, **_kwargs):
-        confirm_calls.append(list(argv))
-        if argv[1] == "read-screen":
-            return subprocess.CompletedProcess(
-                argv,
-                0,
-                stdout=(
-                    "Background work is run\nning\n"
-                    "The following will stop when you ex\nit:\n"
-                    "1. Exit any\nway\n2. Move to background and ex\nit\n"
-                    "3. St\nay\nEnter to con\nfirm\n"
-                ),
-                stderr="",
-            )
-        if argv[1] == "send-key":
-            confirming_exit.write_text('{"schema_version": 1}\n', encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, stdout="OK", stderr="")
-    acceptance_launchers.subprocess.run = confirm_run
-    acceptance_launchers.close_surface_exact = lambda surface, _runner: confirm_calls.append(
-        ["close-exact", surface]
-    ) or "closed"
-    try:
-        close_result = module.close_surface("00000000-0000-0000-0000-000000000002", "claude", confirming_exit)
-    finally:
-        acceptance_launchers.subprocess.run = original_run
-        acceptance_launchers.send_surface = original_send_surface
-        acceptance_launchers.close_surface_exact = original_close_exact
-    check("Claude background-task exit confirmation is handled", close_result == "exact surface closed")
-    check("Claude exact exit confirmation is submitted", any(call[1:3] == ["send-key", "--surface"] for call in confirm_calls))
-    check("agent exit grace covers slow interactive shutdown", module.AGENT_EXIT_GRACE_SECONDS >= 300)
-
-    prompt = module.prompt_text(
-        row(), module.load_scenarios()["conversation-readonly"], repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model", "high", commit, "Ask the exact fixture question and finish.",
-    )
-    check("prompt embeds exact per-skill fixture", "Ask the exact fixture question and finish." in prompt)
-    check("conversation fixture forbids human wait", "instead of waiting for another human message" in prompt)
-    check(
-        "read-only fixtures omit vault reindex instructions",
-        "run `python3 scripts/reindex.py`" not in prompt,
-    )
-    check(
-        "conversation scenario requires plain output instead of interactive UI",
-        "Do not invoke an interactive question tool" in prompt,
-    )
-    check("prompt delegates runner-owned cleanup", "Do not run `git restore`" in prompt and "run-scoped temporary directory" in prompt)
-    check("prompt forbids temp-root drift", "pass `--tmp-root`/`--state-root`" in prompt and "`TMPDIR`/`TMP`/`TEMP`" in prompt)
-    check("prompt forbids duplicate dry-run", "Do not precede it with a `--no-spawn`" in prompt)
-    check(
-        "acceptance prompt delegates product repair to the outer coordinator",
-        "must not repair or edit product scripts" in prompt
-        and "outer coordinator owns any fix and rerun" in prompt,
-    )
-    check("prompt pins runner-owned nested worktrees", "Use `LLM_OBSIDIAN_WORKTREES`" in prompt)
-    check("prompt validates before disposable cleanup", "Validate product output before removing" in prompt)
-    check(
-        "prompt keeps append-only cleanup bookkeeping writer-owned",
-        "Never put\n  `wiki/log.md` or `wiki/hot.md` in cleanup `pages` operations" in prompt
-        and "instead of requiring a second whole-vault validation" in prompt,
-    )
-    check(
-        "prompt permits native subscription without exposing credentials",
-        "already authenticated" in prompt and "Never read, copy, print, export" in prompt,
-    )
-
-    autoresearch_prompt = module.prompt_text(
-        row(
-            skill="autoresearch",
-            scenario="protected-web",
-            expected="Complete one bounded read-only protected web research flow and file validated output.",
-        ),
-        module.load_scenarios()["protected-web"],
-        repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model",
-        "high",
-        commit,
-        "Research one bounded public URL.",
-    )
-    check(
-        "autoresearch prompt delegates exact output cleanup to runner",
-        "Leave the exact filed output pages" in autoresearch_prompt
-        and "runner-owned cleanup begins afterward" in autoresearch_prompt
-        and "Do not poll marker/state files" in autoresearch_prompt,
-    )
-
-    autoresearch_repo = tmp / "autoresearch-cleanup-repo"
-    (autoresearch_repo / "wiki" / "sources").mkdir(parents=True)
-    (autoresearch_repo / "wiki" / "questions").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q"], cwd=autoresearch_repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=autoresearch_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=autoresearch_repo, check=True)
-    index_page = autoresearch_repo / "wiki" / "sources" / "_index.md"
-    index_page.write_text("# Sources\n", encoding="utf-8")
-    merged_page = autoresearch_repo / "wiki" / "questions" / "Existing Research.md"
-    merged_page.write_text("---\ntype: question\n---\n\nOriginal.\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "wiki/sources/_index.md", "wiki/questions/Existing Research.md"],
-        cwd=autoresearch_repo,
-        check=True,
-    )
-    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=autoresearch_repo, check=True)
-    autoresearch_commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=autoresearch_repo,
-        text=True, capture_output=True, check=True,
-    ).stdout.strip()
-    output_page = autoresearch_repo / "wiki" / "sources" / "Acceptance Result.md"
-    output_page.write_text("---\ntype: source\n---\n\nValidated output.\n", encoding="utf-8")
-    merged_page.write_text("---\ntype: question\n---\n\nOriginal plus accepted research.\n", encoding="utf-8")
-    index_page.write_text("# Sources\n- [[Acceptance Result]]\n", encoding="utf-8")
-    research_run_id = "11111111-2222-4333-8444-555555555555"
-    coordinator_surface = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-    operation_dir = (
-        autoresearch_repo / ".vault-meta" / "task-sessions" / "projects" / "project"
-        / "tasks" / "task" / "lanes" / "lane" / "operations" / research_run_id
-    )
-    operation_dir.mkdir(parents=True)
-    locator_dir = autoresearch_repo / ".vault-meta" / "research-runs" / research_run_id
-    locator_dir.mkdir(parents=True)
-    (locator_dir / "locator.json").write_text(json.dumps({
+def preflight_evidence() -> dict[str, object]:
+    return {
         "schema_version": 1,
-        "run_id": research_run_id,
-        "vault": str(autoresearch_repo),
-        "operation_dir": str(operation_dir),
-    }), encoding="utf-8")
-    (operation_dir / "state.json").write_text(json.dumps({
-        "schema_version": 1,
-        "run_id": research_run_id,
-        "vault": str(autoresearch_repo),
-        "operation_dir": str(operation_dir),
-        "status": "complete",
-        "fetch_artifact_status": "accepted",
-        "coordinator_surface": coordinator_surface,
-        "outputs": [
-            "wiki/sources/Acceptance Result.md",
-            "wiki/questions/Existing Research.md",
-        ],
-    }), encoding="utf-8")
-    cleanup_calls: list[list[str]] = []
-    cleanup_payloads: list[dict[str, object]] = []
-    original_run_checked = acceptance_skill_adapters.run_checked
-    def fake_run_checked(argv, *, cwd, input_text=None, **_kwargs):
-        cleanup_calls.append(list(argv))
-        if input_text is not None:
-            payload = json.loads(input_text)
-            cleanup_payloads.append(payload)
-            for page in payload["pages"]:
-                target = Path(cwd) / page["path"]
-                if page["op"] == "delete":
-                    target.unlink()
-                else:
-                    target.write_text(page["content"], encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
-    acceptance_skill_adapters.run_checked = fake_run_checked
-    try:
-        clean, reason = module.autoresearch_acceptance_cleanup(
-            autoresearch_repo, autoresearch_commit, coordinator_surface
-        )
-        check(
-            "runner transactionally deletes bound autoresearch output",
-            clean and not output_page.exists() and "transactionally restored" in reason,
-            reason,
-        )
-        check(
-            "runner restores tracked product index in the same transaction",
-            index_page.read_text(encoding="utf-8") == "# Sources\n"
-            and len(cleanup_payloads) == 1
-            and {page["op"] for page in cleanup_payloads[0]["pages"]} == {"delete", "update"},
-        )
-        check(
-            "runner restores a tracked deduplicated autoresearch page",
-            merged_page.read_text(encoding="utf-8")
-            == "---\ntype: question\n---\n\nOriginal.\n",
-        )
-        locator = json.loads((locator_dir / "locator.json").read_text(encoding="utf-8"))
-        locator["operation_dir"] = str(tmp / "escaped-operation")
-        (locator_dir / "locator.json").write_text(json.dumps(locator), encoding="utf-8")
-        escaped, escaped_reason = module.autoresearch_acceptance_cleanup(
-            autoresearch_repo, autoresearch_commit, coordinator_surface
-        )
-        check(
-            "runner rejects autoresearch locator escape",
-            not escaped and "escapes task sessions" in escaped_reason,
-            escaped_reason,
-        )
-    finally:
-        acceptance_skill_adapters.run_checked = original_run_checked
-
-    close_fixture = module.close_acceptance_fixture("abcdef12-0000-0000-0000-000000000000")
-    close_prompt = module.prompt_text(
-        row(
-            skill="close",
-            scenario="cmux-lifecycle",
-            expected="Save and terminate the agent process without closing its cmux surface.",
-        ),
-        module.load_scenarios()["cmux-lifecycle"],
-        repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model",
-        "high",
-        commit,
-        module.close_fixture_prompt(close_fixture),
-    )
-    check(
-        "close fixture reuses the runner-created surface",
-        "do not create another cmux surface" in close_prompt
-        and "do not create another surface"
-        in module.load_skill_fixtures()["close"]["fixture"].lower(),
-    )
-    check(
-        "close fixture refreshes derived indexes before validation",
-        "run scripts/reindex.py before full-vault validation" in close_prompt,
-    )
-    check(
-        "all vault-writing fixtures refresh derived indexes before validation",
-        "run `python3 scripts/reindex.py`" in close_prompt
-        and "normal fixture procedure, not a\n  product repair" in close_prompt,
-    )
-    check(
-        "backlog fixture carries its explicit promotion target",
-        "already selected Wiki decision" in module.load_skill_fixtures()["backlog"]["fixture"]
-        and "do not invoke AskUserQuestion" in module.load_skill_fixtures()["backlog"]["fixture"],
-    )
-    check(
-        "close outbox precedes one final graceful exit",
-        "typed outbox is the penultimate action" in close_prompt
-        and "python3 scripts/queue-session-exit.py" in close_prompt,
-    )
-
-    close_repo = tmp / "close-proof"
-    close_page = close_repo / close_fixture["page_rel"]
-    close_page.parent.mkdir(parents=True)
-    close_page.write_text(
-        f"---\ntype: session\ntitle: \"{close_fixture['title']}\"\n"
-        "sessions:\n  - fixture-session\n---\n",
-        encoding="utf-8",
-    )
-    missing_address_clean, _ = module.close_acceptance_proof(close_repo, close_fixture)
-    check(
-        "close proof enforces the save contract address",
-        not missing_address_clean and close_page.exists(),
-    )
-    close_page.write_text(
-        f"---\ntype: session\ntitle: \"{close_fixture['title']}\"\n"
-        "address: c-000001\nsessions:\n  - fixture-session\n---\n\n"
-        "Disposable local acceptance record for exact-surface graceful exit.\n",
-        encoding="utf-8",
-    )
-    original_checked = acceptance_skill_adapters.run_checked
-    original_run = acceptance_skill_adapters.subprocess.run
-    delete_payloads: list[dict[str, object]] = []
-    acceptance_skill_adapters.subprocess.run = lambda argv, **_kwargs: subprocess.CompletedProcess(
-        argv, 0, stdout="OK", stderr=""
-    )
-
-    def fake_checked(_argv, *, cwd, input_text=None):
-        delete_payloads.append(json.loads(input_text or "{}"))
-        close_page.unlink()
-        return "{}"
-
-    acceptance_skill_adapters.run_checked = fake_checked
-    try:
-        close_clean, close_proof = module.close_acceptance_proof(close_repo, close_fixture)
-    finally:
-        acceptance_skill_adapters.run_checked = original_checked
-        acceptance_skill_adapters.subprocess.run = original_run
-    check(
-        "runner proves and transactionally deletes the close fixture",
-        close_clean
-        and "transactionally removed" in close_proof
-        and delete_payloads[0]["pages"][0]["op"] == "delete",
-    )
-
-    dispatch_fixture = module.load_skill_fixtures()["dispatch"]["fixture"]
-    check(
-        "dispatch fixture delegates deterministic proof and cleanup to the runner",
-        "runner-prepared approved plan" in dispatch_fixture
-        and "typed approve review" in dispatch_fixture
-        and "independent runner proof" in dispatch_fixture
-        and "substitute narrative evidence" in dispatch_fixture,
-    )
-    check(
-        "Codex dispatch fixture provisions ignored runtime config only",
-        "runtime.env.example" in inspect.getsource(module.dispatch_acceptance_fixture)
-        and "codex-sync" not in inspect.getsource(module.dispatch_acceptance_fixture),
-    )
-    runtime_fixture = tmp / "runtime-fixture"
-    (runtime_fixture / "scripts/mcp-gateway").mkdir(parents=True)
-    (runtime_fixture / "scripts/mcp-gateway/runtime.env.example").write_text(
-        "LLM_OBSIDIAN_TEST=1\n", encoding="utf-8"
-    )
-    module.install_acceptance_runtime_fixture(runtime_fixture)
-    module.install_acceptance_runtime_fixture(runtime_fixture)
-    check(
-        "lifecycle acceptance provisions one idempotent local runtime fixture",
-        (runtime_fixture / "scripts/mcp-gateway/runtime.env").read_text(encoding="utf-8")
-        == "LLM_OBSIDIAN_TEST=1\n"
-        and "dispatch-review-reap" in inspect.getsource(module.run_live),
-    )
-
-    lifecycle_repo = tmp / "lifecycle-cleanup-proof"
-    lifecycle_repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=lifecycle_repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=lifecycle_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=lifecycle_repo, check=True)
-    (lifecycle_repo / ".gitignore").write_text(".vault-meta/\n", encoding="utf-8")
-    subprocess.run(["git", "add", ".gitignore"], cwd=lifecycle_repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "release"], cwd=lifecycle_repo, check=True)
-    lifecycle_commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=lifecycle_repo,
-        text=True, capture_output=True, check=True,
-    ).stdout.strip()
-    lifecycle_worktree = lifecycle_repo / ".vault-meta/acceptance-worktrees/task"
-    lifecycle_worktree.mkdir(parents=True)
-    plan = lifecycle_repo / "wiki/plans/Acceptance lifecycle.md"
-    archive = lifecycle_repo / "wiki/meta/reviews/Acceptance lifecycle review.md"
-    plan.parent.mkdir(parents=True)
-    archive.parent.mkdir(parents=True)
-    plan.write_text("# Plan\n", encoding="utf-8")
-    archive.write_text("# Review\n", encoding="utf-8")
-    project_id = "11111111-1111-4111-8111-111111111111"
-    task_id = "22222222-2222-4222-8222-222222222222"
-    module.atomic_json(lifecycle_worktree / ".task-meta.json", {
-        "version": 3,
-        "vault_root": str(lifecycle_repo),
-        "plan_file": str(plan),
-        "project_id": project_id,
-        "task_id": task_id,
-    })
-    task_root = (
-        lifecycle_repo / ".vault-meta/task-sessions/projects" / project_id
-        / "tasks" / task_id
-    )
-    marker = task_root / "lanes/lane/operations/operation/.review-archive.json"
-    module.atomic_json(marker, {
-        "path": archive.relative_to(lifecycle_repo).as_posix(),
-        "content_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-    })
-    (lifecycle_repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
-    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
-        lifecycle_repo, lifecycle_commit
-    )
-    check(
-        "runner owns exact lifecycle page cleanup",
-        lifecycle_clean and "2 bound page(s)" in lifecycle_proof,
-        lifecycle_proof,
-    )
-    lifecycle_meta = module.read_json(lifecycle_worktree / ".task-meta.json")
-    lifecycle_meta["target_repo"] = str(tmp / "other-repo")
-    module.atomic_json(lifecycle_worktree / ".task-meta.json", lifecycle_meta)
-    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
-        lifecycle_repo, lifecycle_commit
-    )
-    check(
-        "lifecycle cleanup rejects an explicitly foreign target repo",
-        not lifecycle_clean and "not bound to this clone" in lifecycle_proof,
-        lifecycle_proof,
-    )
-    lifecycle_meta.pop("target_repo")
-    module.atomic_json(lifecycle_worktree / ".task-meta.json", lifecycle_meta)
-    (lifecycle_repo / "unexpected.md").write_text("residue\n", encoding="utf-8")
-    lifecycle_clean, lifecycle_proof = module.lifecycle_acceptance_cleanup_proof(
-        lifecycle_repo, lifecycle_commit
-    )
-    check(
-        "lifecycle cleanup still rejects unbound product residue",
-        not lifecycle_clean and "unexpected.md" in lifecycle_proof,
-        lifecycle_proof,
-    )
-
-    daily_repo = tmp / "daily-cleanup-proof"
-    daily_repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=daily_repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=daily_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=daily_repo, check=True)
-    (daily_repo / "tracked.txt").write_text("release\n", encoding="utf-8")
-    (daily_repo / ".vault-meta").mkdir()
-    (daily_repo / ".vault-meta/address-counter.txt").write_text("7\n", encoding="utf-8")
-    (daily_repo / "wiki").mkdir()
-    (daily_repo / "wiki/log.md").write_text("release log\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "tracked.txt", ".vault-meta/address-counter.txt", "wiki/log.md"],
-        cwd=daily_repo, check=True,
-    )
-    subprocess.run(["git", "commit", "-qm", "release"], cwd=daily_repo, check=True)
-    daily_commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=daily_repo,
-        text=True, capture_output=True, check=True,
-    ).stdout.strip()
-    daily_page = daily_repo / "wiki/meta/sessions/Acceptance daily fixture.md"
-    daily_page.parent.mkdir(parents=True)
-    daily_page.write_text(
-        "---\ntype: session\naddress: c-000007\n---\n", encoding="utf-8"
-    )
-    (daily_repo / ".vault-meta/address-counter.txt").write_text("8\n", encoding="utf-8")
-    (daily_repo / "wiki/log.md").write_text("daily evidence log\n", encoding="utf-8")
-    subprocess.run(
-        [
-            "git", "add", str(daily_page.relative_to(daily_repo)),
-            ".vault-meta/address-counter.txt", "wiki/log.md",
-        ],
-        cwd=daily_repo,
-        check=True,
-    )
-    subprocess.run(["git", "commit", "-qm", "daily evidence"], cwd=daily_repo, check=True)
-    daily_page.unlink()
-    (daily_repo / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
-    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
-    check(
-        "daily cleanup accepts one exact removed evidence commit",
-        daily_clean and "bounded daily evidence" in daily_proof,
-        daily_proof,
-    )
-    (daily_repo / "unexpected.md").write_text("residue\n", encoding="utf-8")
-    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
-    check(
-        "daily cleanup still rejects unrelated residue",
-        not daily_clean and "retained" in daily_proof,
-        daily_proof,
-    )
-    (daily_repo / "unexpected.md").unlink()
-    (daily_repo / ".vault-meta/address-counter.txt").write_text("9\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", ".vault-meta/address-counter.txt"], cwd=daily_repo, check=True
-    )
-    subprocess.run(
-        ["git", "commit", "--amend", "--no-edit", "-q"], cwd=daily_repo, check=True
-    )
-    daily_clean, daily_proof = module.daily_acceptance_cleanup(daily_repo, daily_commit)
-    check(
-        "daily cleanup rejects a multi-step address allocation",
-        not daily_clean and "did not advance exactly once" in daily_proof,
-        daily_proof,
-    )
-
-    prepared = {
-        "task_name": "acceptance-dispatch-deadbeef",
-        "branch": "task/acceptance-dispatch-deadbeef",
-        "plan_path": str(repo / "wiki/plans/acceptance.md"),
-        "fixture_rel": "acceptance-dispatch-deadbeef.txt",
-        "fixture_text": "dispatch acceptance deadbeef\n",
-        "result_title": "Acceptance dispatch deadbeef result",
-        "nested_worktree": str(repo / ".vault-meta/acceptance-worktrees/sandbox-acceptance-dispatch-deadbeef"),
-        "dispatch_spec": str(repo / ".vault-meta/acceptance/dispatch-request.json"),
-        "request_id": "11111111-1111-4111-8111-111111111111",
-        "coordinator_runtime": "codex",
-    }
-    exact_dispatch = module.dispatch_fixture_prompt(prepared)
-    dispatch_prompt = module.prompt_text(
-        row(skill="dispatch", scenario="dispatch-review-reap",
-            expected="Start one isolated task worktree and deliver its approved plan exactly once."),
-        module.load_scenarios()["dispatch-review-reap"], repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model", "high", commit, exact_dispatch, prepared,
-    )
-    check(
-        "dispatch prompt pins one exact runner-prepared operation",
-        all(value in dispatch_prompt for value in (
-            prepared["task_name"], prepared["branch"], prepared["plan_path"],
-            prepared["nested_worktree"], prepared["result_title"], prepared["dispatch_spec"],
-        )),
-    )
-    review_send_prompt = module.prompt_text(
-        row(skill="review-send", scenario="dispatch-review-reap",
-            expected="Submit one typed product-read-only reviewer result exactly once."),
-        module.load_scenarios()["dispatch-review-reap"], repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model", "high", commit,
-        fixture_registry["skills"]["review-send"]["fixture"],
-    )
-    check(
-        "review rows preserve runner-owned nested lifecycle state",
-        "do not\n  manually remove, prune" in review_send_prompt
-        and "leave the runner-owned nested lane" in review_send_prompt
-        and "Leave the exact task-bound plan, reap result, and review archive pages" in review_send_prompt
-        and "Clean every disposable page, branch, worktree" not in review_send_prompt,
-        review_send_prompt,
-    )
-    check(
-        "review-send fixture separates product scope from lifecycle review",
-        "description and approved plan both say exactly"
-        in fixture_registry["skills"]["review-send"]["fixture"]
-        and "outside that product scope"
-        in fixture_registry["skills"]["review-send"]["fixture"]
-        and "Do not pass same-model review flags"
-        in fixture_registry["skills"]["review-send"]["fixture"],
-    )
-    prepared_review = {
-        "fixture_kind": "review",
-        "nested_worktree": str(repo / ".vault-meta/acceptance-worktrees/review"),
-        "fixture_commit": "a" * 40,
-        "review_script": str(repo / "skills/review-dispatch/scripts/spawn_review.py"),
-    }
-    review_fixture_text = module.review_fixture_prompt(prepared_review, "review-send")
-    check(
-        "review acceptance uses a runner-prepared approved task",
-        "runner-prepared approved task" in review_fixture_text
-        and "do not enter Plan Mode" in review_fixture_text
-        and "do not pass same-model" in review_fixture_text
-        and "Return idle after each launch" in review_fixture_text,
-    )
-    check(
-        "review acceptance publishes immediately after durable finish",
-        "reports exit 0 with `applied=true`" in review_fixture_text
-        and "publish the acceptance outbox immediately" in review_fixture_text
-        and "do not wait for, inspect, or poll" in review_fixture_text,
-    )
-    check(
-        "review acceptance preserves the real nondeterministic verdict",
-        "never fabricate a finding" in review_fixture_text
-        and "On approve, make no product change" in review_fixture_text
-        and "On a warning or nit" in review_fixture_text
-        and "Either validated path is a pass" in review_fixture_text,
-    )
-    review_cleanup_prompt = module.prompt_text(
-        row(skill="review-send", scenario="dispatch-review-reap",
-            expected="Submit one typed product-read-only reviewer result exactly once."),
-        module.load_scenarios()["dispatch-review-reap"], repo,
-        repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model", "high", commit, review_fixture_text, prepared_review,
-    )
-    check(
-        "review acceptance forbids model-owned task setup",
-        "never enter Plan Mode" in review_cleanup_prompt
-        and "After starting review, return idle without polling" in review_cleanup_prompt,
-    )
-    prepared_repo = tmp / "prepared-review-repo"
-    cloned = subprocess.run(
-        ["git", "clone", "--shared", "--quiet", str(ROOT), str(prepared_repo)],
-        text=True, capture_output=True, check=False,
-    )
-    prepared_source = subprocess.run(
-        ["git", "-C", str(prepared_repo), "rev-parse", "HEAD"],
-        text=True, capture_output=True, check=True,
-    ).stdout.strip()
-    prepared_id = str(uuid.uuid4())
-    prepared_session = f"acceptance-{prepared_id}"
-    provisioned = module.review_acceptance_fixture(
-        prepared_repo, prepared_id, "claude", prepared_source, prepared_session
-    )
-    prepared_config = module.load_config(prepared_repo)
-    prepared_route = prepared_config.runtime_default("claude")
-    module.bind_review_acceptance_fixture(
-        prepared_repo,
-        provisioned,
-        "11111111-1111-4111-8111-111111111111",
-        prepared_route,
-        prepared_config,
-    )
-    provisioned_meta = json.loads(
-        (Path(provisioned["nested_worktree"]) / ".task-meta.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    changed = subprocess.run(
-        [
-            "git", "-C", provisioned["nested_worktree"], "diff", "--name-only",
-            f"{prepared_source}..HEAD",
-        ],
-        text=True, capture_output=True, check=True,
-    ).stdout.splitlines()
-    check(
-        "review fixture provisioner creates one valid approved task",
-        cloned.returncode == 0
-        and changed == [provisioned["fixture_rel"]]
-        and provisioned_meta["base_branch"] == prepared_source
-        and provisioned_meta["approved_plan_sha256"] == provisioned["plan_sha256"]
-        and provisioned_meta["task_surface"]
-        == "11111111-1111-4111-8111-111111111111",
-        cloned.stderr,
-    )
-    check(
-        "review fixture finding is behavior-preserving and non-blocking",
-        provisioned["fixture_text"]
-        == (
-            "def render(ready: bool) -> str:\n"
-            "    status = \"ready\" if ready else \"not ready\"\n"
-            "    return f\"{status}\"\n"
-        )
-        and "redundant-f-string warning"
-        in module.review_fixture_prompt(provisioned, "review-dispatch"),
-    )
-    reap_id = str(uuid.uuid4())
-    reap_fixture = module.review_acceptance_fixture(
-        prepared_repo,
-        reap_id,
-        "codex",
-        prepared_source,
-        f"acceptance-{reap_id}",
-        fixture_kind="reap",
-        cell_skill="reap-send",
-    )
-    coordinator_surface = "22222222-2222-4222-8222-222222222222"
-    task_surface = "33333333-3333-4333-8333-333333333333"
-    module.bind_review_acceptance_fixture(
-        prepared_repo,
-        reap_fixture,
-        coordinator_surface,
-        prepared_config.runtime_default("codex"),
-        prepared_config,
-        task_surface=task_surface,
-        task_surface_ref="surface:fixture",
-    )
-    reap_worktree = Path(reap_fixture["nested_worktree"])
-    reap_meta = json.loads((reap_worktree / ".task-meta.json").read_text(encoding="utf-8"))
-    reap_summary = json.loads(
-        (reap_worktree / ".task-summary.json").read_text(encoding="utf-8")
-    )
-    reap_changed = subprocess.run(
-        [
-            "git", "-C", str(reap_worktree), "diff", "--name-only",
-            f"{prepared_source}..HEAD",
-        ],
-        text=True, capture_output=True, check=True,
-    ).stdout.splitlines()
-    check(
-        "reap fixture provisioner owns infrastructure but preserves real lifecycle",
-        reap_fixture["plan_rel"].startswith("wiki/plans/")
-        and reap_changed == [reap_fixture["fixture_rel"]]
-        and reap_summary["title"] == reap_fixture["result_title"]
-        and reap_meta["wiki_surface"] == coordinator_surface
-        and reap_meta["task_surface"] == task_surface
-        and reap_meta["task_surface_ref"] == "surface:fixture"
-        and "send_reap.py" in (reap_worktree / ".task-prompt.md").read_text(encoding="utf-8")
-        and "already-delivered" in (reap_worktree / ".task-prompt.md").read_text(
-            encoding="utf-8"
-        ),
-    )
-    ready_spec = tmp / "reap-ready-operation.json"
-    reap_fixture["ready_command"] = (
-        f"python3 scripts/acceptance/runner.py coordinator-ready --spec {ready_spec}"
-    )
-    ready_spec.write_text(
-        json.dumps(
+        "commit_sha": COMMIT,
+        "origin_surface": SURFACE,
+        "routes": [
             {
-                "schema_version": 1,
-                "status": "running",
-                "surface": coordinator_surface,
-                "sandbox": str(prepared_repo),
-                "reap_fixture": reap_fixture,
+                "runtime": "claude",
+                "model": "opus-5",
+                "effort": "high",
+                "profile": "executor",
+                "capabilities": [
+                    "binary:claude",
+                    "provider:authenticated",
+                    "cmux:origin-alive",
+                ],
             }
-        )
-        + "\n",
-        encoding="utf-8",
+        ],
+        "status": "compatible",
+    }
+
+
+def operation(
+    operation_id: str,
+    kind: str,
+    runtime: str,
+    lane_id: str,
+    run_id: str,
+) -> dict[str, object]:
+    return {
+        "operation_id": operation_id,
+        "kind": kind,
+        "runtime": runtime,
+        "lane_id": lane_id,
+        "run_id": run_id,
+        "terminal_state": "complete",
+        "effect_outcome": "succeeded",
+        "callback_count": 1,
+        "owned_resources_remaining": 0,
+    }
+
+
+def evidence(row: dict[str, object]) -> dict[str, object]:
+    cell_id = str(row["cell_id"])
+    if cell_id == "claude-lifecycle":
+        operations = [operation("claude-op", "runtime-lifecycle", "claude", "claude-lane", "claude-run")]
+    elif cell_id == "codex-lifecycle":
+        operations = [operation("codex-op", "runtime-lifecycle", "codex", "codex-lane", "codex-run")]
+    elif cell_id == "cross-runtime-composition":
+        operations = [
+            operation("dispatch-op", "dispatch", "codex", "composition-lane", "dispatch-run"),
+            operation("review-op", "simple-review", "claude", "composition-lane", "review-run"),
+        ]
+    else:
+        operations = [
+            operation("spec-op", "deep-review-spec", "claude", "spec-lane", "spec-run"),
+            operation(
+                "correctness-op",
+                "deep-review-correctness",
+                "codex",
+                "correctness-lane",
+                "correctness-run",
+            ),
+        ]
+    return {
+        "schema_version": 2,
+        "cell_id": cell_id,
+        "commit_sha": COMMIT,
+        "dependency_fingerprint": FINGERPRINT,
+        "started_at": NOW,
+        "finished_at": NOW,
+        "operations": operations,
+        "trace": list(row["required_trace"]),
+        "status": "passed",
+    }
+
+
+for contract_cell in CONTRACT_CELLS:
+    driver.validate_cell_evidence(contract_cell, evidence(contract_cell), commit_sha=COMMIT)
+check("all four typed cell contracts validate", True)
+
+complete_report = {
+    "schema_version": 3,
+    "commit_sha": COMMIT,
+    "preflight": preflight_evidence(),
+    "cells": [evidence(row) for row in CONTRACT_CELLS],
+    "failures": [],
+}
+complete_report["cells"][1]["operations"][0]["operation_id"] = "claude-op"
+try:
+    driver.validate_release_evidence(RELEASE, complete_report)
+except driver.LiveDriverError:
+    check("operation identities are unique across live cells", True)
+else:
+    raise AssertionError("operation identities are unique across live cells")
+
+bad_sha = evidence(CONTRACT_CELLS[0])
+bad_sha["commit_sha"] = "c" * 40
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[0], bad_sha, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("cell evidence is bound to the exact commit", True)
+else:
+    raise AssertionError("cell evidence is bound to the exact commit")
+
+missing_trace = evidence(CONTRACT_CELLS[0])
+missing_trace["trace"] = ["open", "callback", "exit", "close"]
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[0], missing_trace, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("incomplete lifecycle trace is rejected", True)
+else:
+    raise AssertionError("incomplete lifecycle trace is rejected")
+
+leaked = evidence(CONTRACT_CELLS[1])
+leaked["operations"][0]["owned_resources_remaining"] = 1
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[1], leaked, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("owned resource leak is rejected", True)
+else:
+    raise AssertionError("owned resource leak is rejected")
+
+wrong_callback = evidence(CONTRACT_CELLS[2])
+wrong_callback["operations"][1]["callback_count"] = 0
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[2], wrong_callback, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("composition requires exact callbacks", True)
+else:
+    raise AssertionError("composition requires exact callbacks")
+
+swapped_composition = evidence(CONTRACT_CELLS[2])
+swapped_composition["operations"][0]["runtime"] = "claude"
+swapped_composition["operations"][1]["runtime"] = "codex"
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[2], swapped_composition, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("composition runtime assignments are exact", True)
+else:
+    raise AssertionError("composition runtime assignments are exact")
+
+boolean_callback = evidence(CONTRACT_CELLS[0])
+boolean_callback["operations"][0]["callback_count"] = True
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[0], boolean_callback, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("typed callback count rejects booleans", True)
+else:
+    raise AssertionError("typed callback count rejects booleans")
+
+unfinished = evidence(CONTRACT_CELLS[0])
+unfinished["operations"][0]["terminal_state"] = "failed"
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[0], unfinished, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("non-complete terminal state is rejected", True)
+else:
+    raise AssertionError("non-complete terminal state is rejected")
+
+unresolved_effect = evidence(CONTRACT_CELLS[0])
+unresolved_effect["operations"][0]["effect_outcome"] = "pending"
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[0], unresolved_effect, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("unresolved operation effect is rejected", True)
+else:
+    raise AssertionError("unresolved operation effect is rejected")
+
+shared_deep_lane = evidence(CONTRACT_CELLS[3])
+shared_deep_lane["operations"][1]["lane_id"] = "spec-lane"
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[3], shared_deep_lane, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("deep review requires independent lanes and runs", True)
+else:
+    raise AssertionError("deep review requires independent lanes and runs")
+
+swapped_deep_runtimes = evidence(CONTRACT_CELLS[3])
+swapped_deep_runtimes["operations"][0]["runtime"] = "codex"
+swapped_deep_runtimes["operations"][1]["runtime"] = "claude"
+try:
+    driver.validate_cell_evidence(CONTRACT_CELLS[3], swapped_deep_runtimes, commit_sha=COMMIT)
+except driver.LiveDriverError:
+    check("deep review runtime assignments are exact", True)
+else:
+    raise AssertionError("deep review runtime assignments are exact")
+
+with tempfile.TemporaryDirectory(prefix="live-release-preflight.") as raw:
+    preflight_root = Path(raw)
+    (preflight_root / "config").mkdir()
+    shutil.copy2(
+        ROOT / "config/model-routing.toml",
+        preflight_root / "config/model-routing.toml",
     )
-    prior_surface = os.environ.get("CMUX_SURFACE_ID")
-    os.environ["CMUX_SURFACE_ID"] = coordinator_surface
-    try:
-        ready = module.mark_reap_coordinator_ready(ready_spec)
-    finally:
-        if prior_surface is None:
-            os.environ.pop("CMUX_SURFACE_ID", None)
-        else:
-            os.environ["CMUX_SURFACE_ID"] = prior_surface
+    checked_routes: list[tuple[object, Path]] = []
+    checked_surfaces: list[str] = []
+
+    def fake_route_preflight(
+        requests: tuple[tuple[object, Path, str], ...],
+    ) -> tuple[CapabilityReport, ...]:
+        reports: list[CapabilityReport] = []
+        for route, callback_dir, surface_id in requests:
+            checked_routes.append((route, callback_dir))
+            checked_surfaces.append(surface_id)
+            reports.append(
+                CapabilityReport(
+                    route,
+                    True,
+                    ("provider:profile-valid", "cmux:origin-alive"),
+                )
+            )
+        return tuple(reports)
+
+    preflight_report = driver.preflight_release(
+        preflight_root,
+        RELEASE,
+        timeout=17,
+        origin_surface=SURFACE,
+        route_preflight=fake_route_preflight,
+    )
     check(
-        "reap coordinator readiness is exact and code-owned",
-        ready == {
-            "schema_version": 1,
-            "surface": coordinator_surface,
-            "task_id": reap_fixture["task_id"],
-            "status": "idle",
+        "release preflight validates exact origin before provider routes",
+        checked_surfaces == [SURFACE] * 5
+        and preflight_report["origin_surface"] == SURFACE,
+    )
+    check(
+        "release preflight covers every unique provider profile",
+        len(checked_routes) == 5
+        and {
+            (
+                route.runtime,
+                route.effort,
+                route.profile,
+            )
+            for route, _callback_dir in checked_routes
         }
-        and json.loads(Path(reap_fixture["ready_path"]).read_text(encoding="utf-8"))
-        == ready,
+        == {
+            ("claude", "high", "executor"),
+            ("codex", "high", "executor"),
+            ("claude", "high", "reviewer-callback"),
+            ("claude", "xhigh", "reviewer-callback"),
+            ("codex", "xhigh", "reviewer-callback"),
+        },
     )
-    reap_fixture_text = module.reap_fixture_prompt(reap_fixture, "reap-send")
-    reap_cleanup_prompt = module.prompt_text(
-        row(
-            skill="reap-send",
-            scenario="dispatch-review-reap",
-            expected="Validate and deliver one typed task summary callback exactly once.",
+    check(
+        "release preflight creates only owner-private callback directories",
+        all(
+            callback_dir.is_dir()
+            and callback_dir.stat().st_mode & 0o077 == 0
+            for _route, callback_dir in checked_routes
         ),
-        module.load_scenarios()["dispatch-review-reap"],
-        prepared_repo,
-        prepared_repo / ".vault-meta" / "acceptance" / "agent-outbox.json",
-        "fixture-model",
-        "high",
-        prepared_source,
-        reap_fixture_text,
-        reap_fixture,
     )
     check(
-        "reap coordinator prompt waits for callbacks without recreating infrastructure",
-        reap_fixture["ready_command"] in reap_cleanup_prompt
-        and "immediately return idle without polling" in reap_cleanup_prompt
-        and "runner launches\n  the exact bound task agent" in reap_cleanup_prompt
-        and "Do not run `dispatch-runner.py`" in reap_cleanup_prompt
-        and "publish the acceptance outbox only after final reap" in reap_cleanup_prompt,
-    )
-    check(
-        "review-dispatch fixture exercises a resolvable warning",
-        "non-blocking maintainability warning"
-        in fixture_registry["skills"]["review-dispatch"]["fixture"]
-        and "blocking finding exceeds this fixture"
-        in fixture_registry["skills"]["review-dispatch"]["fixture"],
-    )
-    check(
-        "dispatch prompt uses mechanical runner once",
-        "dispatch-runner.py start --spec" in dispatch_prompt
-        and "do not reproduce its setup commands manually" in dispatch_prompt,
-    )
-    check(
-        "dispatch acceptance forbids invented summary links",
-        "typed summary body free of invented" in dispatch_prompt
-        and "attaches the validated review archive link itself" in dispatch_prompt,
-    )
-    check(
-        "dispatch coordinator returns idle for typed callbacks",
-        "finish the coordinator turn and return" in dispatch_prompt
-        and "Do not shell-poll task files" in dispatch_prompt
-        and "agent wait tools" in dispatch_prompt,
-    )
-    check(
-        "dispatch launch turn cannot publish final acceptance",
-        "Do not publish the acceptance agent outbox in that launch turn" in dispatch_prompt
-        and "returning idle without an outbox keeps this cell running" in dispatch_prompt,
-    )
-    check(
-        "dispatch start failure has a bounded immediate outbox path",
-        "start` invocation exits non-zero" in dispatch_prompt
-        and "not retry it, perform open-ended diagnosis" in dispatch_prompt
-        and "Publish the typed fail/blocked outbox immediately" in dispatch_prompt,
-    )
-    check(
-        "dispatch successful reap avoids duplicate model-side proof",
-        "final reap runner returns `status: complete`" in dispatch_prompt
-        and "publish the\n  typed pass outbox immediately" in dispatch_prompt
-        and "Do not enumerate proof files" in dispatch_prompt
-        and "outer acceptance runner performs" in dispatch_prompt,
-    )
-    module.write_dispatch_acceptance_request(
-        repo,
-        prepared,
-        source_commit=commit,
-        coordinator_surface="22222222-2222-4222-8222-222222222222",
-        coordinator_model="gpt-5.6-sol",
-        coordinator_effort="high",
-    )
-    prepared_request = json.loads(Path(prepared["dispatch_spec"]).read_text(encoding="utf-8"))
-    check(
-        "acceptance request delegates current session route to runner",
-        "origin_session" not in prepared_request
-        and prepared_request["session_route"]["source"] == "acceptance-runner",
-    )
-    check(
-        "acceptance request binds exact coordinator surface",
-        prepared_request["origin_surface"] == "22222222-2222-4222-8222-222222222222",
-    )
-    module.write_dispatch_acceptance_request(
-        repo,
-        prepared,
-        source_commit=commit,
-        coordinator_surface="22222222-2222-4222-8222-222222222222",
-        coordinator_model="gpt-5.6-sol",
-        coordinator_effort="high",
-        placement="workspace",
-    )
-    workspace_request = json.loads(Path(prepared["dispatch_spec"]).read_text(encoding="utf-8"))
-    check(
-        "workspace dispatch acceptance is explicit",
-        workspace_request["placement"] == "workspace",
-    )
-    Path(prepared["dispatch_spec"]).unlink()
-    check(
-        "dispatch prompt preserves durable proof artifacts",
-        "Leave them in place" in dispatch_prompt and "independently proves the exact commit" in dispatch_prompt,
+        "review preflight remains outside the product checkout",
+        all(
+            callback_dir != preflight_root
+            and preflight_root not in callback_dir.parents
+            for route, callback_dir in checked_routes
+            if route.profile == "reviewer-callback"
+        ),
     )
 
-    cleanup_run = tmp / "cleanup-run"
-    cleanup_sandbox = cleanup_run / "sandbox"
-    system_tmp = tmp / "system-tmp"
-    system_tmp.mkdir()
-    original_gettempdir = acceptance_sandbox.tempfile.gettempdir
-    acceptance_sandbox.tempfile.gettempdir = lambda: str(system_tmp)
-    cleanup_scratch = module.scratch_root_for(cleanup_run)
-    cleanup_sandbox.mkdir(parents=True)
-    cleanup_scratch.mkdir()
-    (cleanup_sandbox / ".acceptance-sandbox.json").write_text("{}\n", encoding="utf-8")
-    (cleanup_scratch / ".acceptance-scratch.json").write_text(
-        json.dumps({"schema_version": 1, "run_dir": str(cleanup_run)}) + "\n",
+
+class FakeRuntimeSessions:
+    """External runtime double; live-cell orchestration remains production code."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.store = OperationStore(root / ".vault-meta/acceptance/fake-store")
+        self.calls: list[tuple[str, str, str]] = []
+        self.records: dict[tuple[str, str], OperationRecord] = {}
+        self.checkpoints: dict[tuple[str, str], str] = {}
+        self.cleanup_attempts: dict[tuple[str, str], int] = {}
+        self.cwds: dict[tuple[str, str], Path] = {}
+        self.callback_targets: dict[
+            tuple[str, str], tuple[str, str, str]
+        ] = {}
+
+    def start(
+        self,
+        request: object,
+        *,
+        on_surface_opened: object | None = None,
+    ) -> object:
+        spec = request.spec
+        lane_id = request.lane_id
+        run_id = request.run_id
+        key = (spec.owner_id, spec.operation_id)
+        if key in self.records:
+            current = self.records[key]
+            self.calls.append(("start-replay", spec.operation_id, lane_id))
+            return SimpleNamespace(
+                record=current,
+                checkpoint=self.checkpoints[key],
+                callback_pointer=request.callback_pointer,
+            )
+        record = OperationRecord(
+            spec,
+            "awaiting-callback",
+            4,
+            lane_id,
+            run_id,
+            OwnedResources(
+                surface_id="22222222-2222-4222-8222-222222222222",
+                process_group=2222,
+                supervisor_pid=3333,
+            ),
+            effect_id="runtime-start",
+            effect_outcome=EffectOutcome.SUCCEEDED,
+        )
+        if spec.kind == "dispatch":
+            stored = self.store.create(
+                spec, lane_id=lane_id, run_id=run_id
+            )
+            if stored.state == "created":
+                for state in (
+                    "preflight",
+                    "starting",
+                    "running",
+                    "awaiting-callback",
+                ):
+                    self.store.transition(
+                        spec.owner_id, spec.operation_id, state
+                    )
+                stored = self.store.read(
+                    spec.owner_id, spec.operation_id
+                )
+                stored = replace(
+                    stored,
+                    resources=record.resources,
+                    revision=stored.revision + 1,
+                    effect_id="runtime-start",
+                    effect_outcome=EffectOutcome.SUCCEEDED,
+                )
+                self.store.save(
+                    stored, expected_revision=stored.revision - 1
+                )
+            record = stored
+        self.records[key] = record
+        self.cwds[key] = request.cwd
+        checkpoint = f"checkpoint-{spec.operation_id}"
+        self.checkpoints[key] = checkpoint
+        self.calls.append(("start", spec.operation_id, lane_id))
+        result = SimpleNamespace(
+            record=record,
+            checkpoint=checkpoint,
+            callback_pointer=request.callback_pointer,
+        )
+        if on_surface_opened is not None:
+            on_surface_opened(result)
+        if spec.route.profile == "reviewer-callback":
+            prompt = (
+                request.cwd / request.prompt_pointer
+            ).read_text(encoding="utf-8")
+            callback_root = (
+                request.cwd / request.callback_pointer
+            ).resolve().parents[1]
+            declared_root = next(
+                (
+                    line.partition(": ")[2]
+                    for line in prompt.splitlines()
+                    if line.startswith("Callback scratch root: ")
+                ),
+                "",
+            )
+            check(
+                "review probe names its absolute callback scratch root",
+                Path(declared_root).is_absolute()
+                and Path(declared_root) == callback_root,
+            )
+        target = self.callback_targets.get(key)
+        if target is None:
+            if spec.kind == "dispatch":
+                (request.cwd / ".live-dispatch-ack.json").write_text(
+                    json.dumps(driver._dispatch_ack(spec.operation_id)),
+                    encoding="utf-8",
+                )
+            else:
+                callback_pointer = request.cwd / request.callback_pointer
+                envelope = driver._callback_template(spec.operation_id, run_id, spec.kind)
+                callback_pointer.parent.mkdir(parents=True, exist_ok=True)
+                callback_pointer.write_text(
+                    json.dumps(to_dict(envelope)), encoding="utf-8"
+                )
+        else:
+            _child_id, _child_run, pointer = target
+            callback_pointer = request.cwd / pointer
+            expected = callback_pointer.with_name("expected.json")
+            callback_pointer.write_bytes(expected.read_bytes())
+        return result
+
+    def register_callback_target(
+        self,
+        owner_id: str,
+        parent_operation_id: str,
+        child_operation_id: str,
+        child_run_id: str,
+        callback_pointer: str,
+    ) -> object:
+        key = (owner_id, parent_operation_id)
+        parent = self.records[key]
+        child = self.store.read(owner_id, child_operation_id)
+        check(
+            "review callback child reuses its exact parent lane",
+            child.run_id == child_run_id and child.lane_id == parent.lane_id,
+        )
+        self.callback_targets[key] = (
+            child_operation_id,
+            child_run_id,
+            callback_pointer,
+        )
+        self.calls.append(
+            ("register-review-callback", parent_operation_id, parent.lane_id)
+        )
+        return SimpleNamespace(record=parent, callback_pointer=callback_pointer)
+
+    def accept_callback(self, envelope: CallbackEnvelope) -> object:
+        child_matches = [
+            record
+            for record in self.store.list("live-" + COMMIT[:16])
+            if record.spec.operation_id == envelope.operation_id
+        ]
+        if child_matches:
+            child = child_matches[0]
+            acceptance = CallbackBroker(
+                self.store, child.spec.owner_id
+            ).accept(envelope)
+            current = self.store.read(
+                child.spec.owner_id, child.spec.operation_id
+            )
+            if not acceptance.duplicate:
+                self.calls.append(
+                    ("callback", envelope.operation_id, current.lane_id)
+                )
+            return SimpleNamespace(
+                record=current,
+                action=(
+                    "callback-duplicate"
+                    if acceptance.duplicate
+                    else "callback-accepted"
+                ),
+            )
+        key = next(
+            key
+            for key, record in self.records.items()
+            if record.spec.operation_id == envelope.operation_id
+        )
+        current = self.records[key]
+        updated = replace(
+            current,
+            state="verifying",
+            revision=current.revision + 1,
+            accepted_callback_id=envelope.callback_id,
+            accepted_callback_kind=envelope.kind,
+            accepted_callback_sha256=envelope.payload_sha256,
+        )
+        self.records[key] = updated
+        self.calls.append(("callback", envelope.operation_id, current.lane_id))
+        return SimpleNamespace(record=updated)
+
+    def continue_session(
+        self,
+        owner_id: str,
+        operation_id: str,
+        checkpoint: str,
+        prompt_pointer: str,
+    ) -> object:
+        key = (owner_id, operation_id)
+        current = self.records[key]
+        check(
+            "continue uses captured provider checkpoint",
+            checkpoint == self.checkpoints[key],
+        )
+        check(
+            "continue prompt is an owner-relative pointer",
+            not Path(prompt_pointer).is_absolute()
+            and (self.cwds[key] / prompt_pointer).is_file(),
+        )
+        updated = replace(current, state="running", revision=current.revision + 1)
+        self.records[key] = updated
+        self.calls.append(("continue", operation_id, current.lane_id))
+        return SimpleNamespace(record=updated, checkpoint=checkpoint)
+
+    def request_exit(self, owner_id: str, operation_id: str) -> object:
+        key = (owner_id, operation_id)
+        current = self.records[key]
+        if current.spec.kind == "dispatch":
+            current = self.store.read(owner_id, operation_id)
+            if current.state != "exiting":
+                self.store.transition(owner_id, operation_id, "exiting")
+            current = self.store.read(owner_id, operation_id)
+        updated = replace(current, state="exiting", revision=current.revision + 1)
+        self.records[key] = (
+            current if current.spec.kind == "dispatch" else updated
+        )
+        self.calls.append(("exit", operation_id, current.lane_id))
+        return SimpleNamespace(record=self.records[key])
+
+    def cleanup(self, owner_id: str, operation_id: str) -> object:
+        key = (owner_id, operation_id)
+        current = self.records[key]
+        if current.spec.kind == "dispatch":
+            current = self.store.read(owner_id, operation_id)
+        attempt = self.cleanup_attempts.get(key, 0) + 1
+        self.cleanup_attempts[key] = attempt
+        if attempt == 1:
+            self.calls.append(("cleanup-wait", operation_id, current.lane_id))
+            return SimpleNamespace(
+                record=current,
+                action=(
+                    "wait-for-supervisor"
+                    if current.spec.route.runtime == "codex"
+                    else "wait-for-ownership"
+                ),
+            )
+        if current.spec.kind == "dispatch":
+            self.store.transition(owner_id, operation_id, "complete")
+            current = self.store.read(owner_id, operation_id)
+            updated = replace(
+                current,
+                resources=OwnedResources(),
+                revision=current.revision + 1,
+            )
+            self.store.save(
+                updated, expected_revision=current.revision
+            )
+        else:
+            updated = replace(
+                current,
+                state="complete",
+                revision=current.revision + 1,
+                resources=OwnedResources(),
+            )
+        self.records[key] = updated
+        self.calls.append(("cleanup", operation_id, current.lane_id))
+        return SimpleNamespace(record=updated)
+
+    def status(self, owner_id: str, operation_id: str) -> object:
+        record = self.records.get((owner_id, operation_id))
+        if record is not None and record.spec.kind == "dispatch":
+            record = self.store.read(owner_id, operation_id)
+        if record is None:
+            record = self.store.read(owner_id, operation_id)
+        return SimpleNamespace(record=record)
+
+
+with tempfile.TemporaryDirectory(prefix="live-cell-driver.") as raw:
+    live_root = Path(raw)
+    (live_root / "config").mkdir()
+    shutil.copy2(
+        ROOT / "config/model-routing.toml",
+        live_root / "config/model-routing.toml",
+    )
+    for contract_cell in CONTRACT_CELLS:
+        manager = FakeRuntimeSessions(live_root)
+        facade_calls: list[str] = []
+        original_dispatch = dispatch_workflow.start_dispatch
+        original_begin = review_gate_workflow.ReviewGateController.begin
+        original_authorize = review_gate_workflow.authorize_task_finalization
+        original_reap = reap_workflow.run_reap
+        if contract_cell["cell_id"] == "cross-runtime-composition":
+            def traced_dispatch(*args: object, **kwargs: object) -> object:
+                facade_calls.append("dispatch.start_dispatch")
+                return original_dispatch(*args, **kwargs)
+
+            def traced_begin(self: object, *args: object, **kwargs: object) -> object:
+                facade_calls.append("review_gate.begin")
+                return original_begin(self, *args, **kwargs)
+
+            def traced_authorize(*args: object, **kwargs: object) -> object:
+                facade_calls.append("review_gate.authorize")
+                return original_authorize(*args, **kwargs)
+
+            def traced_reap(*args: object, **kwargs: object) -> object:
+                facade_calls.append("reap.run_reap")
+                return original_reap(*args, **kwargs)
+
+            dispatch_workflow.start_dispatch = traced_dispatch
+            review_gate_workflow.ReviewGateController.begin = traced_begin
+            review_gate_workflow.authorize_task_finalization = traced_authorize
+            reap_workflow.run_reap = traced_reap
+        try:
+            actual = driver.run_cell(
+                live_root,
+                {**contract_cell, "commit_sha": COMMIT},
+                timeout=17,
+                session_manager=manager,
+                origin_surface=SURFACE,
+                sleep=lambda _seconds: None,
+            )
+        finally:
+            dispatch_workflow.start_dispatch = original_dispatch
+            review_gate_workflow.ReviewGateController.begin = original_begin
+            review_gate_workflow.authorize_task_finalization = original_authorize
+            reap_workflow.run_reap = original_reap
+        driver.validate_cell_evidence(contract_cell, actual, commit_sha=COMMIT)
+        if contract_cell["cell_id"] == "cross-runtime-composition":
+            check(
+                "composition calls production dispatch review gate and reap facades",
+                facade_calls
+                == [
+                    "dispatch.start_dispatch",
+                    "review_gate.begin",
+                    "review_gate.authorize",
+                    "reap.run_reap",
+                ],
+            )
+        check(
+            f"{contract_cell['cell_id']} starts every declared operation through runtime sessions",
+            len([call for call in manager.calls if call[0] == "start"])
+            == len(actual["operations"]),
+        )
+        check(
+            f"{contract_cell['cell_id']} proves callback and cleanup for every operation",
+            len([call for call in manager.calls if call[0] == "callback"])
+            == (
+                len(actual["operations"]) - 1
+                if contract_cell["cell_id"]
+                == "cross-runtime-composition"
+                else len(actual["operations"])
+            )
+            and len([call for call in manager.calls if call[0] == "cleanup"])
+            == len(actual["operations"]),
+        )
+        check(
+            f"{contract_cell['cell_id']} waits for provider exit before exact cleanup",
+            len([call for call in manager.calls if call[0] == "cleanup-wait"])
+            == len(actual["operations"]),
+        )
+        expected_review_lanes = (
+            1
+            if contract_cell["cell_id"] == "cross-runtime-composition"
+            else 2
+            if contract_cell["cell_id"] == "deep-review"
+            else 0
+        )
+        check(
+            f"{contract_cell['cell_id']} routes reviews through child callback receipts",
+            len(
+                [
+                    call
+                    for call in manager.calls
+                    if call[0] == "register-review-callback"
+                ]
+            )
+            == expected_review_lanes,
+        )
+        review_records = [
+            record
+            for record in manager.records.values()
+            if "review" in record.spec.kind
+        ]
+        check(
+            f"{contract_cell['cell_id']} keeps product read-only with owner scratch",
+            len(review_records) == expected_review_lanes
+            and all(
+                record.spec.route.profile == "reviewer-callback"
+                and manager.cwds[
+                    (record.spec.owner_id, record.spec.operation_id)
+                ]
+                != live_root
+                and (
+                    manager.cwds[
+                        (record.spec.owner_id, record.spec.operation_id)
+                    ].stat().st_mode
+                    & 0o077
+                )
+                == 0
+                for record in review_records
+            ),
+        )
+        if contract_cell["cell_id"] in {"claude-lifecycle", "codex-lifecycle"}:
+            check(
+                f"{contract_cell['cell_id']} continues the exact opened operation",
+                [call[1:] for call in manager.calls if call[0] == "continue"]
+                == [manager.calls[0][1:]],
+            )
+
+    replay_manager = FakeRuntimeSessions(live_root)
+    replay_request = {**CONTRACT_CELLS[0], "commit_sha": COMMIT}
+    first_replay = driver.run_cell(
+        live_root,
+        replay_request,
+        timeout=17,
+        session_manager=replay_manager,
+        origin_surface=SURFACE,
+        sleep=lambda _seconds: None,
+    )
+    second_replay = driver.run_cell(
+        live_root,
+        replay_request,
+        timeout=17,
+        session_manager=replay_manager,
+        origin_surface=SURFACE,
+        sleep=lambda _seconds: None,
+    )
+    check(
+        "terminal lifecycle replay performs no duplicate provider effects",
+        first_replay["operations"] == second_replay["operations"]
+        and len(
+            [
+                call
+                for call in replay_manager.calls
+                if call[0] in {"callback", "continue", "exit", "cleanup"}
+            ]
+        )
+        == 4
+        and len(
+            [
+                call
+                for call in replay_manager.calls
+                if call[0] == "start-replay"
+            ]
+        )
+        == 1,
+    )
+
+    class InterruptedCleanupSessions(FakeRuntimeSessions):
+        def __init__(self, root: Path):
+            super().__init__(root)
+            self.interrupt_once = True
+
+        def cleanup(self, owner_id: str, operation_id: str) -> object:
+            if self.interrupt_once:
+                self.interrupt_once = False
+                self.calls.append(("cleanup-interrupted", operation_id, ""))
+                raise RuntimeError("simulated coordinator interruption")
+            return super().cleanup(owner_id, operation_id)
+
+    interrupted_manager = InterruptedCleanupSessions(live_root)
+    try:
+        driver.run_cell(
+            live_root,
+            replay_request,
+            timeout=17,
+            session_manager=interrupted_manager,
+            origin_surface=SURFACE,
+            sleep=lambda _seconds: None,
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("interrupted lifecycle leaves a resumable exit boundary")
+    resumed = driver.run_cell(
+        live_root,
+        replay_request,
+        timeout=17,
+        session_manager=interrupted_manager,
+        origin_surface=SURFACE,
+        sleep=lambda _seconds: None,
+    )
+    check(
+        "interrupted exiting lifecycle resumes cleanup without duplicate model work",
+        resumed["status"] == "passed"
+        and len(
+            [
+                call
+                for call in interrupted_manager.calls
+                if call[0] in {"callback", "continue", "exit"}
+            ]
+        )
+        == 3,
+    )
+
+    class TransientExitOwnershipSessions(FakeRuntimeSessions):
+        def __init__(self, root: Path):
+            super().__init__(root)
+            self.ambiguous_once = True
+
+        def request_exit(self, owner_id: str, operation_id: str) -> object:
+            if self.ambiguous_once:
+                self.ambiguous_once = False
+                key = (owner_id, operation_id)
+                current = self.records[key]
+                updated = replace(
+                    current,
+                    state="attention-required",
+                    revision=current.revision + 1,
+                    attention_reason=AttentionReason.CLEANUP_INCOMPLETE,
+                )
+                self.records[key] = updated
+                self.calls.append(("exit-ambiguous", operation_id, current.lane_id))
+                return SimpleNamespace(
+                    record=updated,
+                    action="attention-required",
+                )
+            return super().request_exit(owner_id, operation_id)
+
+    transient_exit_manager = TransientExitOwnershipSessions(live_root)
+    recovered = driver.run_cell(
+        live_root,
+        replay_request,
+        timeout=17,
+        session_manager=transient_exit_manager,
+        origin_surface=SURFACE,
+        sleep=lambda _seconds: None,
+    )
+    check(
+        "transient exit ownership is re-probed before cleanup",
+        recovered["status"] == "passed"
+        and len(
+            [
+                call
+                for call in transient_exit_manager.calls
+                if call[0] == "exit-ambiguous"
+            ]
+        )
+        == 1
+        and len(
+            [
+                call
+                for call in transient_exit_manager.calls
+                if call[0] == "exit"
+            ]
+        )
+        == 1,
+    )
+
+    class CleanupAttentionRaceSessions(FakeRuntimeSessions):
+        def __init__(self, root: Path):
+            super().__init__(root)
+            self.raced_once = False
+
+        def cleanup(self, owner_id: str, operation_id: str) -> object:
+            key = (owner_id, operation_id)
+            if (
+                not self.raced_once
+                and self.cleanup_attempts.get(key, 0) == 1
+            ):
+                self.raced_once = True
+                current = self.records[key]
+                updated = replace(
+                    current,
+                    state="attention-required",
+                    revision=current.revision + 1,
+                    attention_reason=AttentionReason.CLEANUP_INCOMPLETE,
+                )
+                self.records[key] = updated
+                self.calls.append(
+                    ("cleanup-attention-race", operation_id, current.lane_id)
+                )
+                return SimpleNamespace(
+                    record=updated,
+                    action="attention-required",
+                )
+            return super().cleanup(owner_id, operation_id)
+
+    cleanup_race_manager = CleanupAttentionRaceSessions(live_root)
+    cleanup_race_recovered = driver.run_cell(
+        live_root,
+        replay_request,
+        timeout=17,
+        session_manager=cleanup_race_manager,
+        origin_surface=SURFACE,
+        sleep=lambda _seconds: None,
+    )
+    check(
+        "cleanup attention race returns to the bounded exit probe",
+        cleanup_race_recovered["status"] == "passed"
+        and len(
+            [
+                call
+                for call in cleanup_race_manager.calls
+                if call[0] == "cleanup-attention-race"
+            ]
+        )
+        == 1
+        and len(
+            [
+                call
+                for call in cleanup_race_manager.calls
+                if call[0] == "exit"
+            ]
+        )
+        == 2,
+    )
+
+    class NonCleanupAttentionSessions(FakeRuntimeSessions):
+        def cleanup(self, owner_id: str, operation_id: str) -> object:
+            key = (owner_id, operation_id)
+            current = self.records[key]
+            updated = replace(
+                current,
+                state="attention-required",
+                revision=current.revision + 1,
+                attention_reason=AttentionReason.CALLBACK_INVALID,
+            )
+            self.records[key] = updated
+            self.calls.append(
+                ("cleanup-invalid-attention", operation_id, current.lane_id)
+            )
+            return SimpleNamespace(
+                record=updated,
+                action="attention-required",
+            )
+
+    invalid_attention_manager = NonCleanupAttentionSessions(live_root)
+    try:
+        driver.run_cell(
+            live_root,
+            replay_request,
+            timeout=17,
+            session_manager=invalid_attention_manager,
+            origin_surface=SURFACE,
+            sleep=lambda _seconds: None,
+        )
+    except driver.LiveDriverError:
+        pass
+    else:
+        raise AssertionError(
+            "non-cleanup attention must remain a fail-closed boundary"
+        )
+    check(
+        "cleanup recovery preserves unrelated attention reasons",
+        len(
+            [
+                call
+                for call in invalid_attention_manager.calls
+                if call[0] == "cleanup-invalid-attention"
+            ]
+        )
+        == 1
+        and len(
+            [
+                call
+                for call in invalid_attention_manager.calls
+                if call[0] == "exit"
+            ]
+        )
+        == 1,
+    )
+
+    class PersistentExitAmbiguitySessions(FakeRuntimeSessions):
+        def request_exit(self, owner_id: str, operation_id: str) -> object:
+            key = (owner_id, operation_id)
+            current = self.records[key]
+            updated = replace(
+                current,
+                state="attention-required",
+                revision=current.revision + 1,
+                attention_reason=AttentionReason.ATTENTION_REQUIRED,
+            )
+            self.records[key] = updated
+            self.calls.append(("exit-ambiguous", operation_id, current.lane_id))
+            return SimpleNamespace(
+                record=updated,
+                action="attention-required",
+            )
+
+    persistent_exit_manager = PersistentExitAmbiguitySessions(live_root)
+    try:
+        driver.run_cell(
+            live_root,
+            replay_request,
+            timeout=17,
+            session_manager=persistent_exit_manager,
+            origin_surface=SURFACE,
+            sleep=lambda _seconds: None,
+        )
+    except driver.LiveDriverError:
+        pass
+    else:
+        raise AssertionError("persistent exit ambiguity must exhaust its probe budget")
+    check(
+        "persistent exit ownership stops after three total probes",
+        len(
+            [
+                call
+                for call in persistent_exit_manager.calls
+                if call[0] == "exit-ambiguous"
+            ]
+        )
+        == 3
+        and not persistent_exit_manager.cleanup_attempts,
+    )
+
+with tempfile.TemporaryDirectory(prefix="live-acceptance-test.") as raw:
+    tmp = Path(raw)
+    state = tmp / "state.json"
+    report = tmp / "report.json"
+    calls: list[str] = []
+    preflight = {"calls": 0}
+
+    def fake_preflight(
+        _root: Path,
+        release: dict[str, object],
+        *,
+        timeout: int,
+    ) -> dict[str, object]:
+        preflight["calls"] += 1
+        check(
+            "global route preflight sees exact release before model cells",
+            release["commit_sha"] == COMMIT and timeout == 17,
+        )
+        return preflight_evidence()
+
+    def fake_cell(
+        _root: Path,
+        row: dict[str, object],
+        *,
+        timeout: int,
+    ) -> dict[str, object]:
+        check(
+            "global route preflight completed before first cell",
+            preflight["calls"] >= 1,
+        )
+        check("timeout reaches the in-process driver port", timeout == 17)
+        calls.append(str(row["cell_id"]))
+        return evidence(row)
+
+    first = runner.execute_release(
+        ROOT,
+        RELEASE,
+        state_path=state,
+        report_path=report,
+        selected=set(runner.CELL_IDS),
+        restart=False,
+        timeout=17,
+        cell_driver=fake_cell,
+        release_preflight=fake_preflight,
+    )
+    check("four-cell in-process run succeeds", len(first["cells"]) == 4)
+    check(
+        "exact-SHA report persists global capability preflight",
+        first["schema_version"] == 3
+        and first["preflight"] == preflight_evidence()
+        and first["failures"] == []
+        and json.loads(report.read_text())["preflight"] == preflight_evidence(),
+    )
+    check("each cell ran once", calls == list(runner.CELL_IDS))
+    second = runner.execute_release(
+        ROOT,
+        RELEASE,
+        state_path=state,
+        report_path=report,
+        selected=set(runner.CELL_IDS),
+        restart=False,
+        timeout=17,
+        cell_driver=fake_cell,
+        release_preflight=fake_preflight,
+    )
+    check("green typed cells resume without rerun", len(second["cells"]) == 4 and len(calls) == 4)
+    check("green resume still performs zero-effect route preflight", preflight["calls"] == 2)
+    check("checkpoint uses typed commit binding", json.loads(state.read_text())["commit_sha"] == COMMIT)
+
+    failed_state = tmp / "failed-state.json"
+    failed_report = tmp / "failed-report.json"
+    failed_calls: list[str] = []
+    fail_once = {"armed": True}
+
+    def classified_cell(
+        _root: Path,
+        row: dict[str, object],
+        *,
+        timeout: int,
+    ) -> dict[str, object]:
+        del timeout
+        cell_id = str(row["cell_id"])
+        failed_calls.append(cell_id)
+        if cell_id == "codex-lifecycle" and fail_once["armed"]:
+            fail_once["armed"] = False
+            raise driver.LiveDriverError("bounded provider callback failed")
+        return evidence(row)
+
+    try:
+        runner.execute_release(
+            ROOT,
+            RELEASE,
+            state_path=failed_state,
+            report_path=failed_report,
+            selected=set(runner.CELL_IDS),
+            restart=False,
+            timeout=17,
+            cell_driver=classified_cell,
+            release_preflight=fake_preflight,
+        )
+    except driver.LiveDriverError:
+        pass
+    else:
+        raise AssertionError("failed live cell must remain a typed failure")
+    failed_value = json.loads(failed_report.read_text(encoding="utf-8"))
+    check(
+        "failed cell classification is persisted without error content",
+        failed_value["failures"]
+        == [
+            {
+                "cell_id": "codex-lifecycle",
+                "status": "failed",
+                "classification": "runtime-contract",
+                "attempt": 1,
+            }
+        ]
+        and failed_value["cells"][0]["cell_id"] == "claude-lifecycle",
+    )
+    resumed_failed = runner.execute_release(
+        ROOT,
+        RELEASE,
+        state_path=failed_state,
+        report_path=failed_report,
+        selected=set(runner.CELL_IDS),
+        restart=False,
+        timeout=17,
+        cell_driver=classified_cell,
+        release_preflight=fake_preflight,
+    )
+    check(
+        "resume executes only the explicitly classified failed cell",
+        failed_calls
+        == ["claude-lifecycle", "codex-lifecycle", "codex-lifecycle"]
+        and [row["cell_id"] for row in resumed_failed["cells"]]
+        == ["claude-lifecycle", "codex-lifecycle"]
+        and resumed_failed["failures"] == [],
+    )
+    completed_after_failure = runner.execute_release(
+        ROOT,
+        RELEASE,
+        state_path=failed_state,
+        report_path=failed_report,
+        selected=set(runner.CELL_IDS),
+        restart=False,
+        timeout=17,
+        cell_driver=classified_cell,
+        release_preflight=fake_preflight,
+    )
+    check(
+        "later invocation may run remaining cells after classified recovery",
+        [row["cell_id"] for row in completed_after_failure["cells"]]
+        == list(runner.CELL_IDS),
+    )
+
+    mutation_state = tmp / "mutation-state.json"
+    mutation_report = tmp / "mutation-report.json"
+    mutation = {"driver_ran": False}
+
+    def mutation_driver(
+        root: Path,
+        row: dict[str, object],
+        *,
+        timeout: int,
+    ) -> dict[str, object]:
+        result = fake_cell(root, row, timeout=timeout)
+        mutation["driver_ran"] = True
+        return result
+
+    try:
+        runner.execute_release(
+            ROOT,
+            RELEASE,
+            state_path=mutation_state,
+            report_path=mutation_report,
+            selected={"claude-lifecycle"},
+            restart=False,
+            timeout=17,
+            cell_driver=mutation_driver,
+            verify_clean_head=True,
+            contract_loader=lambda _root: (
+                {**RELEASE, "commit_sha": "c" * 40}
+                if mutation["driver_ran"]
+                else RELEASE
+            ),
+        )
+    except runner.AcceptanceError:
+        check(
+            "release mutation during driver call is rejected before persistence",
+            not mutation_state.exists() and not mutation_report.exists(),
+        )
+    else:
+        raise AssertionError("release mutation during driver call is rejected before persistence")
+
+    malicious = tmp / "malicious-driver.py"
+    marker = tmp / "fabricated"
+    malicious.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('pass')\n",
         encoding="utf-8",
     )
-    (cleanup_scratch / "nested").mkdir()
-    (cleanup_scratch / "nested" / "artifact.json").write_text("{}\n", encoding="utf-8")
-    module.safe_cleanup(cleanup_run)
-    acceptance_sandbox.tempfile.gettempdir = original_gettempdir
-    check("runner removes exact sandbox and scratch roots", not cleanup_sandbox.exists() and not cleanup_scratch.exists())
-
-    proof_repo = tmp / "dispatch-proof"
-    proof_repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=proof_repo, check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=proof_repo, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=proof_repo, check=True)
-    (proof_repo / ".gitignore").write_text(
-        ".vault-meta/task-sessions/\n", encoding="utf-8",
-    )
-    (proof_repo / "base.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "add", ".gitignore", "base.txt"], cwd=proof_repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "base"], cwd=proof_repo, check=True)
-    source = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=proof_repo, text=True, capture_output=True, check=True,
-    ).stdout.strip()
-    nested = proof_repo / ".vault-meta/acceptance-worktrees/sandbox-acceptance-dispatch-proof"
-    nested.parent.mkdir(parents=True)
-    subprocess.run(["git", "clone", "-q", str(proof_repo), str(nested)], check=True)
-    subprocess.run(["git", "config", "user.email", "acceptance@example.invalid"], cwd=nested, check=True)
-    subprocess.run(["git", "config", "user.name", "Acceptance Test"], cwd=nested, check=True)
-    fixture_text = "dispatch acceptance proof\n"
-    (nested / "acceptance-dispatch-proof.txt").write_text(fixture_text, encoding="utf-8")
-    subprocess.run(["git", "add", "acceptance-dispatch-proof.txt"], cwd=nested, check=True)
-    subprocess.run(["git", "commit", "-qm", "add exact acceptance fixture"], cwd=nested, check=True)
-    plan = proof_repo / "wiki/plans/acceptance-dispatch-proof.md"
-    plan.parent.mkdir(parents=True)
-    plan.write_text(
-        "---\ntype: plan\nstatus: executed\n---\n# Proof plan\n\nРезультат: [[Acceptance dispatch proof result]]\n",
-        encoding="utf-8",
-    )
-    result_page = proof_repo / "wiki/meta/sessions/Acceptance dispatch proof result.md"
-    result_page.parent.mkdir(parents=True)
-    result_page.write_text("# Acceptance dispatch proof result\n", encoding="utf-8")
-    project_id = "11111111-1111-4111-8111-111111111111"
-    task_id = "22222222-2222-4222-8222-222222222222"
-    meta = {
-        "version": 3,
-        "project_id": project_id,
-        "task_id": task_id,
-        "task_name": "acceptance-dispatch-proof",
-        "branch": "task/acceptance-dispatch-proof",
-        "plan_file": str(plan),
-        "review_policy": {"mode": "light"},
-        "reap_policy": {"mode": "final", "title": "Acceptance dispatch proof result"},
-    }
-    (nested / ".task-meta.json").write_text(json.dumps(meta) + "\n", encoding="utf-8")
-    task_root = proof_repo / ".vault-meta/task-sessions/projects" / project_id / "tasks" / task_id
-    operation = task_root / "lanes/review/operations/one"
-    operation.mkdir(parents=True)
-    (task_root / "task.json").write_text(json.dumps({
-        "project_id": project_id, "task_id": task_id,
-        "status": "archived", "worktrees": [str(nested.resolve())],
-    }) + "\n", encoding="utf-8")
-    review = operation / ".task-review.json"
-    review.write_text(json.dumps({
-        "schema_version": 1, "mode": "light", "verdict": "approve",
-    }) + "\n", encoding="utf-8")
-    review_page = proof_repo / "wiki/meta/reviews/Acceptance dispatch proof review.md"
-    review_page.parent.mkdir(parents=True)
-    review_page.write_text("# Acceptance dispatch proof review\n", encoding="utf-8")
-    (operation / ".review-archive.json").write_text(json.dumps({
-        "schema_version": 1,
-        "status": "already-current",
-        "path": "wiki/meta/reviews/Acceptance dispatch proof review.md",
-        "content_sha256": module.hashlib.sha256(review_page.read_bytes()).hexdigest(),
-    }) + "\n", encoding="utf-8")
-    (nested / ".task-reap-complete.json").write_text(json.dumps({
-        "validated": True,
-        "task_session_status": "archived",
-        "plan_path": str(plan),
-        "result_path": str(result_page),
-        "result_sha256": module.hashlib.sha256(result_page.read_bytes()).hexdigest(),
-    }) + "\n", encoding="utf-8")
-    proof_fixture = {
-        "task_name": "acceptance-dispatch-proof",
-        "branch": "task/acceptance-dispatch-proof",
-        "plan_rel": "wiki/plans/acceptance-dispatch-proof.md",
-        "plan_path": str(plan.resolve()),
-        "fixture_rel": "acceptance-dispatch-proof.txt",
-        "fixture_text": fixture_text,
-        "result_title": "Acceptance dispatch proof result",
-        "nested_worktree": str(nested.resolve()),
-    }
-    proved, reason = module.dispatch_acceptance_proof(proof_repo, source, proof_fixture)
-    check("dispatch proof accepts the complete durable lifecycle", proved, reason)
-    review.unlink()
-    proved, reason = module.dispatch_acceptance_proof(proof_repo, source, proof_fixture)
-    check("dispatch proof rejects a narrative-only pass without typed review", not proved and "typed approve" in reason, reason)
-
-    owned_nested = repo / ".vault-meta" / "acceptance-worktrees" / "task-one"
-    owned_nested.mkdir(parents=True)
-    (owned_nested / "fixture.txt").write_text("runner owned\n", encoding="utf-8")
-    clean, reason = module.sandbox_cleanup_proof(repo, commit)
-    check("runner contains its exact nested worktree root", clean, reason)
-
-    child_root = tmp / "child-sandbox"
-    child_state = child_root / ".vault-meta/task-sessions/projects/p/tasks/t/lanes/l/operations/o/state.json"
-    child_state.parent.mkdir(parents=True)
-    child_state.write_text(json.dumps({
-        "coordinator_surface": "00000000-0000-0000-0000-000000000003",
-        "fetch_surface": "00000000-0000-0000-0000-000000000004",
-    }), encoding="utf-8")
-    standalone_state = child_root / ".vault-meta/research-runs/r/state.json"
-    standalone_state.parent.mkdir(parents=True)
-    standalone_state.write_text(json.dumps({
-        "coordinator_surface": "00000000-0000-0000-0000-000000000003",
-        "synth_surface": "00000000-0000-0000-0000-000000000005",
-    }), encoding="utf-8")
-    dispatched_meta = child_root / ".vault-meta/acceptance-worktrees/task-one/.task-meta.json"
-    dispatched_meta.parent.mkdir(parents=True)
-    dispatched_meta.write_text(json.dumps({
-        "wiki_surface": "00000000-0000-0000-0000-000000000003",
-        "task_surface": "00000000-0000-0000-0000-000000000006",
-    }), encoding="utf-8")
-    child_calls: list[list[str]] = []
-    acceptance_launchers.close_surface_exact = lambda surface, _runner: child_calls.append([surface]) or "closed"
-    try:
-        child_closed, child_failures = module.close_operation_children(
-            child_root, "00000000-0000-0000-0000-000000000003"
-        )
-    finally:
-        acceptance_launchers.close_surface_exact = original_close_exact
-    check("interrupted operation closes exact registered children", child_closed == 3 and not child_failures)
-    check("registered child close never targets coordinator", {call[0] for call in child_calls} == {
-        "00000000-0000-0000-0000-000000000004",
-        "00000000-0000-0000-0000-000000000005",
-        "00000000-0000-0000-0000-000000000006",
-    })
-    surface_order: list[str] = []
-    original_close_surface = acceptance_launchers.close_surface
-    original_close_children = acceptance_launchers.close_operation_children
-    original_wait_children = acceptance_launchers.wait_for_operation_children
-    acceptance_launchers.close_surface = lambda *_args, **_kwargs: surface_order.append("coordinator") or "exact surface closed"
-    acceptance_launchers.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
-    acceptance_launchers.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
-    try:
-        settled = module.settle_operation_surfaces(
-            child_root,
-            "00000000-0000-0000-0000-000000000003",
-            "codex",
-            child_root / "agent-exit.json",
-        )
-    finally:
-        acceptance_launchers.close_surface = original_close_surface
-        acceptance_launchers.wait_for_operation_children = original_wait_children
-        acceptance_launchers.close_operation_children = original_close_children
-    check(
-        "cleanup stops coordinator and gives children an auto-close grace",
-        surface_order == ["coordinator", "wait", "children"]
-        and settled == ("exact surface closed", 2, [])
-        and module.CHILD_SURFACE_SETTLE_SECONDS >= 30,
-    )
-    surface_order = []
-    acceptance_launchers.close_surface = lambda *_args, **kwargs: surface_order.append(
-        f"coordinator-force={kwargs.get('force')}"
-    ) or "exact surface closed"
-    acceptance_launchers.wait_for_operation_children = lambda *_args, **_kwargs: surface_order.append("wait")
-    acceptance_launchers.close_operation_children = lambda *_args, **_kwargs: (surface_order.append("children") or (2, []))
-    try:
-        forced_settled = module.settle_operation_surfaces(
-            child_root,
-            "00000000-0000-0000-0000-000000000003",
-            "codex",
-            child_root / "agent-exit.json",
-            force=True,
-        )
-    finally:
-        acceptance_launchers.close_surface = original_close_surface
-        acceptance_launchers.wait_for_operation_children = original_wait_children
-        acceptance_launchers.close_operation_children = original_close_children
-    check(
-        "forced interrupt skips grace and closes exact children immediately",
-        surface_order == ["coordinator-force=True", "children"]
-        and forced_settled == ("exact surface closed", 2, []),
-    )
-
-registry = json.loads((ROOT / "evals/acceptance/scenarios.json").read_text(encoding="utf-8"))
-skills = json.loads((ROOT / "evals/acceptance/skills.json").read_text(encoding="utf-8"))
-check("acceptance runtime is gitignored", ".vault-meta/acceptance/" in (ROOT / ".gitignore").read_text(encoding="utf-8"))
-check(
-    "turn markers are gitignored",
-    subprocess.run(
-        ["git", "check-ignore", "-q", ".vault-meta/turn-markers/session.json"],
-        cwd=ROOT,
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "run",
+            "--root",
+            str(ROOT),
+            "--driver",
+            f"{sys.executable} {malicious}",
+            "--state",
+            str(state),
+            "--report",
+            str(report),
+        ],
+        text=True,
+        capture_output=True,
         check=False,
-    ).returncode == 0,
-)
-check(
-    "scenario registry exactly covers matrix",
-    set(registry["scenarios"]) == {item["scenario"] for item in skills["skills"].values()},
-)
-check(
-    "every skill has one bounded live fixture",
-    all(isinstance(item.get("fixture"), str) and item["fixture"].strip() for item in skills["skills"].values()),
-)
-check(
-    "autoresearch fixture pins its bounded URL and topic boundary",
-    "https://docs.python.org/3/library/functions.html#len" in skills["skills"]["autoresearch"]["fixture"]
-    and "only the research request" in skills["skills"]["autoresearch"]["fixture"],
-)
+    )
+    check("external live driver selector is rejected", rejected.returncode == 2 and not marker.exists())
 
-if failures:
-    print(f"\n{len(failures)} live acceptance runner test(s) failed")
-    raise SystemExit(1)
-print("\nAll live acceptance runner tests passed.")
+    alternate = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "run",
+            "--root",
+            str(tmp),
+            "--state",
+            str(state),
+            "--report",
+            str(report),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "live runner rejects an alternate code checkout",
+        alternate.returncode == 3 and "same checkout" in alternate.stderr,
+    )
+
+    bootstrap_root = tmp / "bootstrap-checkout"
+    bootstrap_scripts = bootstrap_root / "scripts"
+    bootstrap_scripts.mkdir(parents=True)
+    shutil.copy2(SCRIPT, bootstrap_scripts / SCRIPT.name)
+    import_marker = tmp / "driver-imported-before-clean-check"
+    (bootstrap_scripts / "live_acceptance_driver.py").write_text(
+        f"from pathlib import Path\nPath({str(import_marker)!r}).write_text('imported')\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q", str(bootstrap_root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(bootstrap_root), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(bootstrap_root), "config", "user.name", "Test"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(bootstrap_root), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(bootstrap_root), "commit", "-qm", "seed"], check=True)
+    (bootstrap_root / ".task-origin-session").write_text(
+        "runtime-only coordinator identity\n", encoding="utf-8"
+    )
+    check(
+        "bootstrap clean-head ignores the task origin runtime marker",
+        runner.bootstrap_clean_head(bootstrap_root)
+        == runner.bootstrap_head(bootstrap_root),
+    )
+    (bootstrap_root / "config").mkdir()
+    (bootstrap_root / "config/dirty.toml").write_text("dirty = true\n", encoding="utf-8")
+    dirty_bootstrap = subprocess.run(
+        [
+            sys.executable,
+            str(bootstrap_scripts / SCRIPT.name),
+            "run",
+            "--root",
+            str(bootstrap_root),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "dirty checkout is rejected before importing repo-owned driver code",
+        dirty_bootstrap.returncode == 3 and not import_marker.exists(),
+    )
+
+print("live acceptance runner tests passed")

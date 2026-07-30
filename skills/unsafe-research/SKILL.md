@@ -11,7 +11,7 @@ allowed-tools: Read Glob Grep Bash WebSearch WebFetch
 
 # unsafe-research: explicit single-context route
 
-This is an intentional escape hatch, not a degraded `autoresearch` mode. Use it
+This is an intentional escape hatch, not a degraded `research` mode. Use it
 only when the user explicitly asks for unsafe/single-context research. That
 request is the authorization: show one concise warning, then proceed without a
 second confirmation.

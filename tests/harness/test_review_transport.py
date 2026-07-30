@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""Public-seam checks for internal review callback transport and archive proof."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SUBMIT = ROOT / "scripts/harness/review_submit.py"
+ARCHIVE = ROOT / "scripts/harness/review_archive.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from review_contract import ReviewContractError, validate_review
+from harness.review_archive import render_page
+from harness.review_submit import ReviewCallbackPort, submit_review
+from harness.verification import load_profiles
+
+
+def check(label: str, value: bool) -> None:
+    if not value:
+        raise AssertionError(label)
+    print(f"OK   {label}")
+
+
+review = {
+    "schema_version": 1,
+    "operation_id": "operation-1",
+    "run_id": "run-1",
+    "mode": "simple",
+    "head_sha": "a" * 40,
+    "verification_profile": {"name": "scoped", "sha256": "b" * 64},
+    "verdict": "approve",
+    "axes": [
+        {
+            "axis": "holistic",
+            "verdict": "approve",
+            "verification_iteration": 0,
+            "findings": [],
+        }
+    ],
+    "verification_gaps": [],
+    "notes_for_executor": [],
+    "residual_risks": [],
+}
+check("simple review contract accepted", validate_review(review)["mode"] == "simple")
+try:
+    validate_review({**review, "mode": "light"})
+except ReviewContractError:
+    check("legacy review mode rejected", True)
+else:
+    check("legacy review mode rejected", False)
+
+with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
+    root = Path(raw)
+    worktree = root / "worktree"
+    operation = root / "operation"
+    vault = root / "vault"
+    worktree.mkdir()
+    operation.mkdir()
+    vault.mkdir()
+    (worktree / "config").mkdir()
+    (vault / "config").mkdir()
+    shutil.copy2(
+        ROOT / "config/verification-profiles.toml",
+        worktree / "config/verification-profiles.toml",
+    )
+    shutil.copy2(
+        ROOT / "config/verification-profiles.toml",
+        vault / "config/verification-profiles.toml",
+    )
+    (worktree / "tracked.txt").write_text("initial\n", encoding="utf-8")
+    for command in (
+        ("git", "init", "-q"),
+        ("git", "config", "user.email", "review-test@example.invalid"),
+        ("git", "config", "user.name", "Review Test"),
+        ("git", "add", "tracked.txt", "config/verification-profiles.toml"),
+        ("git", "commit", "-qm", "initial"),
+    ):
+        subprocess.run(command, cwd=worktree, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    profile = load_profiles(worktree / "config/verification-profiles.toml")[
+        "scoped"
+    ]
+    review = {
+        **review,
+        "head_sha": head,
+        "verification_profile": {"name": profile.name, "sha256": profile.sha256},
+    }
+    meta = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "review_id": "operation-1",
+        "operation_id": "operation-1",
+        "review_mode": "simple",
+        "head_sha": head,
+        "verification_profile": {"name": profile.name, "sha256": profile.sha256},
+        "worktree": str(worktree),
+        "task_name": "transport-test",
+    }
+    (operation / ".review-meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    class CapturePort:
+        def __init__(self) -> None:
+            self.envelope: Any = None
+
+        def publish(self, envelope: Any) -> None:
+            self.envelope = envelope
+
+    port: ReviewCallbackPort = CapturePort()
+    envelope = submit_review(json.dumps(review), meta=meta, worktree=worktree, port=port)
+    check(
+        "callback publisher is an explicit narrow port",
+        port.envelope == envelope
+        and envelope.operation_id == "operation-1"
+        and envelope.payload["head_sha"] == head,
+    )
+    round_meta = {
+        **meta,
+        "transport": "review-round",
+        "operation_id": "operation-1-round-1",
+        "run_id": "run-round-1",
+        "review_id": "operation-1",
+        "parent_session_operation_id": "operation-1",
+        "axis": "holistic",
+        "verification_iteration": 0,
+    }
+    round_result = {
+        "schema_version": 1,
+        "axis": "holistic",
+        "verdict": "changes-requested",
+        "verification_iteration": 0,
+        "findings": [
+            {
+                "finding_id": "F-round-1",
+                "severity": "important",
+                "file": "scripts/review_contract.py",
+                "line": 1,
+                "summary": "one bounded issue",
+                "evidence": "the exact path is reachable",
+                "recommendation": "resolve and verify in this session",
+            }
+        ],
+    }
+    round_port: ReviewCallbackPort = CapturePort()
+    round_envelope = submit_review(
+        json.dumps(round_result),
+        meta=round_meta,
+        worktree=worktree,
+        port=round_port,
+    )
+    check(
+        "internal review round publishes the exact child receipt identity",
+        round_port.envelope == round_envelope
+        and round_envelope.operation_id == "operation-1-round-1"
+        and round_envelope.run_id == "run-round-1"
+        and round_envelope.payload["parent_session_operation_id"]
+        == "operation-1"
+        and round_envelope.payload["axis"] == "holistic",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SUBMIT),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(operation),
+        ],
+        input=json.dumps(review),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check("typed reviewer outbox accepted", result.returncode == 0)
+    callback = json.loads((operation / ".review-callback.json").read_text(encoding="utf-8"))
+    check(
+        "callback binds exact operation and payload",
+        callback["operation_id"] == "operation-1"
+        and callback["payload"]["run_id"] == "run-1"
+        and len(callback["payload_sha256"]) == 64,
+    )
+    (worktree / "config" / "verification-profiles.toml").unlink()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    archive = json.loads(result.stdout)
+    check(
+        "approved callback produces bounded dry-run archive proof",
+        result.returncode == 0
+        and archive["status"] == "dry-run"
+        and archive["review_id"] == "operation-1"
+        and archive["verdict"] == "approve",
+    )
+    check(
+        "archive validates coordinator config for a generic product root",
+        not (worktree / "config" / "verification-profiles.toml").exists(),
+    )
+    scripts = vault / "scripts"
+    scripts.mkdir()
+    allocator = scripts / "allocate-address.sh"
+    allocator.write_text("#!/bin/sh\nprintf 'c-000123\\n'\n", encoding="utf-8")
+    allocator.chmod(0o755)
+    writer = scripts / "vault-write.py"
+    writer.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+vault = Path(__file__).resolve().parents[1]
+payload = json.load(sys.stdin)
+page = payload["pages"][0]
+target = vault / page["path"]
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(page["content"], encoding="utf-8")
+count = vault / ".writer-count"
+calls = int(count.read_text(encoding="utf-8")) + 1 if count.exists() else 1
+count.write_text(str(calls), encoding="utf-8")
+raise SystemExit(9 if calls == 1 else 0)
+""",
+        encoding="utf-8",
+    )
+    writer.chmod(0o755)
+    interrupted = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    archived_page = vault / archive["path"]
+    check(
+        "archive contains a post-commit pre-marker interruption",
+        interrupted.returncode == 3
+        and archived_page.is_file()
+        and (operation / ".review-archive-intent.json").is_file()
+        and not (operation / ".review-archive.json").exists(),
+    )
+    recovered = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "archive reconstructs its marker after the committed crash window",
+        recovered.returncode == 0
+        and json.loads(recovered.stdout)["status"] == "archived"
+        and json.loads((vault / ".writer-count").read_text(encoding="utf-8")) == 1
+        and (operation / ".review-archive.json").is_file()
+        and not (operation / ".review-archive-intent.json").exists(),
+    )
+    current = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "current exact archive is replay-safe without another vault write",
+        current.returncode == 0
+        and json.loads(current.stdout)["status"] == "already-current",
+    )
+    (operation / ".review-meta.json").write_text(
+        json.dumps({**meta, "review_id": "different-review"}), encoding="utf-8"
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check("archive rejects split review/operation identity", rejected.returncode == 3)
+    (operation / ".review-meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    original_callback = callback
+    for label, field, value in (
+        ("archive rejects mismatched operation identity", "operation_id", "other-op"),
+        ("archive rejects mismatched review schema", "schema_version", 2),
+        ("archive rejects mismatched reviewed HEAD", "head_sha", "c" * 40),
+        ("archive rejects mismatched run identity", "run_id", "run-other"),
+        (
+            "archive rejects mismatched verification profile evidence",
+            "verification_profile",
+            {"name": "full", "sha256": "d" * 64},
+        ),
+    ):
+        tampered = json.loads(json.dumps(original_callback))
+        tampered["payload"][field] = value
+        canonical = json.dumps(
+            tampered["payload"], sort_keys=True, separators=(",", ":")
+        ).encode()
+        tampered["payload_sha256"] = hashlib.sha256(canonical).hexdigest()
+        (operation / ".review-callback.json").write_text(
+            json.dumps(tampered), encoding="utf-8"
+        )
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                str(ARCHIVE),
+                "--worktree",
+                str(worktree),
+                "--operation-dir",
+                str(operation),
+                "--vault-root",
+                str(vault),
+                "--dry-run",
+                "--json",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        check(label, rejected.returncode == 3)
+    bad_digest = json.loads(json.dumps(original_callback))
+    bad_digest["payload_sha256"] = "0" * 64
+    (operation / ".review-callback.json").write_text(
+        json.dumps(bad_digest), encoding="utf-8"
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check("archive rejects callback digest mismatch", rejected.returncode == 3)
+    (operation / ".review-callback.json").write_text(
+        json.dumps(original_callback), encoding="utf-8"
+    )
+    profile_path = vault / "config/verification-profiles.toml"
+    profile_path.write_text(
+        profile_path.read_text(encoding="utf-8").replace(
+            '"make test-model-routing"', '"python3 -V"', 1
+        ),
+        encoding="utf-8",
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "archive rejects evidence for a stale verification profile",
+        rejected.returncode == 3,
+    )
+    shutil.copy2(ROOT / "config/verification-profiles.toml", profile_path)
+    (worktree / "tracked.txt").write_text("new HEAD\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "advance HEAD"], cwd=worktree, check=True
+    )
+    rejected = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check("archive rejects evidence for a stale worktree HEAD", rejected.returncode == 3)
+
+print("review transport tests passed")

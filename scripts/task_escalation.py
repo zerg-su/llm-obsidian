@@ -17,6 +17,7 @@ from typing import Any, NoReturn
 
 from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event
 from task_contract import ContractError, normalize_for_runtime
+from harness.adapters.cmux import run_cmux
 
 
 CATEGORIES = {
@@ -77,24 +78,12 @@ def read_surface(worktree: Path, meta: dict[str, Any], key: str, fallback: str) 
 def send(surface: str, message: str, *, clear_codex: bool = False) -> None:
     if clear_codex:
         for _ in range(40):
-            subprocess.run(
-                ["cmux", "send-key", "--surface", surface, "backspace"],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-    sent = subprocess.run(
-        ["cmux", "send", "--surface", surface, message], text=True, capture_output=True, check=False
-    )
+            run_cmux(["send-key", "--surface", surface, "backspace"])
+    sent = run_cmux(["send", "--surface", surface, message])
     if sent.returncode != 0:
         die((sent.stdout + sent.stderr).strip() or "cmux send failed", 3)
     time.sleep(0.2)
-    entered = subprocess.run(
-        ["cmux", "send-key", "--surface", surface, "Enter"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    entered = run_cmux(["send-key", "--surface", surface, "Enter"])
     if entered.returncode != 0:
         die((entered.stdout + entered.stderr).strip() or "cmux send-key failed", 3)
 
@@ -111,12 +100,7 @@ def load_unattended(worktree: Path) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def notify(surface: str, title: str, body: str) -> None:
-    result = subprocess.run(
-        ["cmux", "notify", "--surface", surface, "--title", title, "--body", body],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    result = run_cmux(["notify", "--surface", surface, "--title", title, "--body", body])
     if result.returncode != 0:
         die((result.stdout + result.stderr).strip() or "cmux notify failed", 3)
 

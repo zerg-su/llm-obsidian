@@ -18,6 +18,11 @@ spec = importlib.util.spec_from_file_location("dispatch_runner", SCRIPT)
 assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+from harness.contracts import OwnedResources
+from harness.runtime_sessions import RuntimeSessionResult
+from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor
+from harness.workflows.dispatch import operation_spec
 
 failures: list[str] = []
 
@@ -63,11 +68,16 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (vault / "skills" / "dispatch" / "references").mkdir(parents=True)
     (vault / "config").mkdir(parents=True)
     (vault / "scripts").mkdir(parents=True)
+    shutil.copytree(ROOT / "scripts" / "harness", vault / "scripts" / "harness")
     shutil.copyfile(
         ROOT / "skills" / "dispatch" / "references" / "task-prompt-template.md",
         vault / "skills" / "dispatch" / "references" / "task-prompt-template.md",
     )
     shutil.copyfile(ROOT / "config" / "model-routing.toml", vault / "config" / "model-routing.toml")
+    shutil.copyfile(
+        ROOT / "config" / "verification-profiles.toml",
+        vault / "config" / "verification-profiles.toml",
+    )
     shutil.copyfile(ROOT / "scripts" / "task_sessions.py", vault / "scripts" / "task_sessions.py")
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
@@ -134,10 +144,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     workspace_request = runner.validate_request(workspace_raw)
     workspace_prompt = runner.render_task_prompt(workspace_request, config)
     check(
-        "workspace dispatch is explicit and rewrites coordinator navigation",
+        "workspace dispatch remains an explicit placement",
         workspace_request["placement"] == "workspace"
-        and "the coordinator workspace" in workspace_prompt
-        and "the left wiki split" not in workspace_prompt,
+        and "scripts/harness-cli.py" in workspace_prompt,
     )
     invalid_placement = json.loads(json.dumps(raw_request))
     invalid_placement["placement"] = "focused"
@@ -147,16 +156,76 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "split or workspace",
     )
     check(
-        "unattended finalization uses the code-owned reap sender",
-        "do not depend on runtime skill discovery" in prompt
-        and "skills/reap-send/scripts/send_reap.py --worktree ." in prompt,
+        "unattended finalization uses the internal callback broker",
+        "internal callback broker" in prompt,
     )
     check(
-        "prompt trusts one successful supervised review transition",
-        "drive ... --apply-action" in prompt
-        and "run that command exactly" in prompt
-        and "do not\n   re-read operation/review artifacts" in prompt
-        and "call a separate `finish`" in prompt,
+        "prompt delegates lifecycle mechanics to harness",
+        "scripts/harness-cli.py" in prompt
+        and "do not orchestrate cmux/model commands manually" in prompt,
+    )
+    check(
+        "default dispatch requires automatic simple review",
+        "automatic review gate" in prompt
+        and runner.harness_request(request, config, effective).review.mode
+        == "simple",
+        prompt,
+    )
+    check(
+        "task prompt invokes one coordinator-owned automatic review command",
+        (
+            f"python3 {request['vault_root']}/scripts/task-review-runner.py run "
+            f"--worktree {request['worktree']}"
+        )
+        in prompt
+        and str(request["worktree"] / "scripts" / "task-review-runner.py")
+        not in prompt,
+        prompt,
+    )
+
+    expert_raw = json.loads(json.dumps(raw_request))
+    expert_raw["review"] = {
+        "mode": "deep",
+        "cross_model": True,
+        "runtime": "claude",
+        "model": "fable",
+        "effort": "xhigh",
+    }
+    expert = runner.validate_request(expert_raw)
+    expert_policy = runner.review_policy(expert, config)
+    check(
+        "dispatch accepts the complete expert review override",
+        expert_policy
+        == runner.ReviewPolicy(
+            depth="deep",
+            cross_model=True,
+            enabled=True,
+            runtime="claude",
+            model="fable",
+            effort="xhigh",
+            verification_profile="scoped",
+            verification_profile_sha256=runner.load_profiles(
+                vault / "config" / "verification-profiles.toml"
+            )["scoped"].sha256,
+        ),
+    )
+    base_spec = operation_spec(runner.harness_request(request, config, effective))
+    expert_spec = operation_spec(runner.harness_request(expert, config, effective))
+    check(
+        "expert review override participates in operation identity",
+        base_spec.idempotency_key != expert_spec.idempotency_key,
+    )
+    no_review_conflict = json.loads(json.dumps(raw_request))
+    no_review_conflict["review"] = {
+        "mode": "skip",
+        "cross_model": True,
+    }
+    expect_error(
+        "no-review conflicts fail closed",
+        lambda: runner.review_policy(
+            runner.validate_request(no_review_conflict), config
+        ),
+        "skip review cannot carry",
     )
 
     tracked = json.loads(json.dumps(raw_request))
@@ -192,8 +261,148 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
         {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
     )
-    check("runner writes v3 metadata", meta["version"] == 3 and meta["task_id"] == request_id)
+    check(
+        "runner writes v3 metadata",
+        meta["version"] == 3
+        and meta["task_id"] == request_id
+        and meta["worktree"] == str(request["worktree"]),
+    )
+    check(
+        "runner binds automatic review to an exact verification profile",
+        meta["review_policy"]["verification_profile"] == "scoped"
+        and len(meta["review_policy"]["verification_profile_sha256"]) == 64
+        and meta["review_policy"]["max_verify_iterations"] == 1,
+    )
+    check(
+        "runner writes the deterministic simple review preset",
+        meta["review_policy"]["mode"] == "simple"
+        and meta["review_policy"]["cross_model"] is False
+        and meta["review_policy"]["runtime"] == ""
+        and meta["review_policy"]["model"] == ""
+        and meta["review_policy"]["effort"] == "",
+    )
+    v3_schema = json.loads(
+        (ROOT / "schemas" / "task-meta-v3.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "writer output has exact strict v3 schema parity",
+        set(meta) == set(v3_schema["required"])
+        and set(meta) <= set(v3_schema["properties"])
+        and v3_schema["additionalProperties"] is False,
+    )
+    expert_meta = runner.write_task_files(
+        expert,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
+    )
+    check(
+        "runner persists exact expert review preset and deep budget",
+        expert_meta["review_policy"]
+        == {
+            "mode": "deep",
+            "cross_model": True,
+            "runtime": "claude",
+            "model": "fable",
+            "effort": "xhigh",
+            "max_verify_iterations": 2,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": (
+                meta["review_policy"]["verification_profile_sha256"]
+            ),
+            "auto_resolve_severities": ["warning", "nit"],
+            "escalate_severities": ["blocking"],
+        },
+    )
+    invalid_budget = json.loads(json.dumps(expert_meta))
+    invalid_budget["review_policy"]["max_verify_iterations"] = 1
+    try:
+        runner.normalize_task_contract(invalid_budget)
+    except runner.ContractError as exc:
+        check(
+            "v3 deep review budget fails closed",
+            "exactly 2" in str(exc),
+            str(exc),
+        )
+    else:
+        check("v3 deep review budget fails closed", False)
+    invalid_skip = json.loads(json.dumps(meta))
+    invalid_skip["review_policy"].update(
+        {"mode": "skip", "cross_model": True, "max_verify_iterations": 0}
+    )
+    try:
+        runner.normalize_task_contract(invalid_skip)
+    except runner.ContractError as exc:
+        check(
+            "v3 skip metadata rejects review overrides",
+            "cannot carry" in str(exc),
+            str(exc),
+        )
+    else:
+        check("v3 skip metadata rejects review overrides", False)
+    invalid_extra = json.loads(json.dumps(meta))
+    invalid_extra["unowned_extension"] = True
+    try:
+        runner.normalize_task_contract(invalid_extra)
+    except runner.ContractError as exc:
+        check(
+            "v3 executable contract rejects schema extensions",
+            "unknown fields" in str(exc),
+            str(exc),
+        )
+    else:
+        check("v3 executable contract rejects schema extensions", False)
     check("runner writes exact task handoff", (worktree / ".task-cmux-surface").read_text().strip() == meta["task_surface"])
+    check(
+        "runner binds task commands to the exact origin session",
+        (worktree / ".task-origin-session").read_text().strip() == meta["origin_session"],
+    )
+    detected = subprocess.run(
+        [str(ROOT / "scripts" / "current-session-id.sh")],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "CLAUDE_CODE_SESSION_ID": "native-task-session",
+            "CODEX_THREAD_ID": "native-task-thread",
+        },
+        check=False,
+    )
+    summary = worktree / ".task-summary.json"
+    summary.write_text(
+        json.dumps({"type": "session", "title": "Fast dispatch result"}) + "\n",
+        encoding="utf-8",
+    )
+    handoff = subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts" / "task_contract.py"),
+            "check-handoff",
+            "--meta",
+            str(worktree / ".task-meta.json"),
+            "--summary",
+            str(summary),
+            "--current-session",
+            detected.stdout.strip(),
+        ],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "native task thread completes the exact v3 handoff",
+        detected.returncode == 0
+        and detected.stdout.strip() == "unit-session"
+        and handoff.returncode == 0,
+        detected.stderr + handoff.stderr,
+    )
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")
     check("runner metadata records split placement", meta["surface_policy"]["placement"] == "split")
@@ -233,6 +442,86 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     second_raw["branch"] = "task/state-only"
     second_raw["worktree"] = str(tmp / "worktrees" / "state-only")
     second = runner.validate_request(second_raw)
+    harness_raw = json.loads(json.dumps(raw_request))
+    harness_raw["request_id"] = str(uuid.uuid4())
+    harness_raw["task_name"] = "harness-start"
+    harness_raw["branch"] = "task/harness-start"
+    harness_raw["worktree"] = str(tmp / "worktrees" / "harness-start")
+    harness_request = runner.validate_request(harness_raw)
+    class FakeRuntime:
+        def __init__(self, root: Path) -> None:
+            self.store = OperationStore(root)
+            self.requests: list[object] = []
+
+        def start(self, runtime_request, *, on_surface_opened=None):
+            self.requests.append(runtime_request)
+            record = self.store.create(
+                runtime_request.spec,
+                lane_id=runtime_request.lane_id,
+                run_id=runtime_request.run_id,
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "preflight"
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "starting"
+            )
+            supervisor = OperationSupervisor(
+                self.store, record.spec.owner_id, record.spec.operation_id
+            )
+            supervisor.bind_resources(
+                OwnedResources(
+                    "33333333-3333-4333-8333-333333333333"
+                )
+            )
+            opened = RuntimeSessionResult(
+                supervisor.read(),
+                "surface-opened",
+                surface_ref="surface:3",
+                workspace_id="44444444-4444-4444-8444-444444444444",
+                workspace_ref="workspace:4",
+                window_id="55555555-5555-4555-8555-555555555555",
+                window_ref="window:5",
+            )
+            if on_surface_opened is not None:
+                on_surface_opened(opened)
+            supervisor.transition("running")
+            final = supervisor.transition("awaiting-callback")
+            return RuntimeSessionResult(
+                final,
+                "started",
+                surface_ref=opened.surface_ref,
+                workspace_id=opened.workspace_id,
+                workspace_ref=opened.workspace_ref,
+                window_id=opened.window_id,
+                window_ref=opened.window_ref,
+            )
+
+    fake_runtime = FakeRuntime(vault / ".vault-meta" / "harness")
+    original_sync = runner.sync_codex_profile
+    original_log = runner.dispatch_log
+    runner.sync_codex_profile = lambda *_args, **_kwargs: None
+    runner.dispatch_log = lambda *_args, **_kwargs: None
+    try:
+        harness_result = runner.start(
+            harness_request, "c" * 64, runtime_manager=fake_runtime
+        )
+        harness_replay = runner.start(
+            harness_request, "c" * 64, runtime_manager=fake_runtime
+        )
+    finally:
+        runner.sync_codex_profile = original_sync
+        runner.dispatch_log = original_log
+    harness_record = OperationStore(vault / ".vault-meta/harness").read(
+        harness_request["request_id"], harness_request["request_id"]
+    )
+    check(
+        "public start executes one durable harness launch",
+        len(fake_runtime.requests) == 1
+        and harness_result["harness"]["run_id"] == harness_record.run_id
+        and harness_replay == harness_result
+        and harness_record.state == "awaiting-callback",
+    )
     spec_hash = "a" * 64
     state_path, prior = runner.begin_run(second, spec_hash)
     check("new run claims exact request once", prior is None and json.loads(state_path.read_text())["status"] == "preparing")
@@ -241,7 +530,23 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         lambda: runner.begin_run(second, spec_hash),
         "already preparing",
     )
-    result = {"schema_version": 1, "status": "launched", "task_surface": "exact"}
+    result = {
+        "schema_version": 1,
+        "status": "launched",
+        "task_surface": "exact",
+        "harness": {
+            "owner_id": second["request_id"],
+            "operation_id": second["request_id"],
+            "lane_id": "state-only-lane",
+            "run_id": "state-only-run",
+        },
+    }
+    state_lifecycle = runner.harness_request(second, config, effective)
+    OperationStore(vault / ".vault-meta/harness").create(
+        operation_spec(state_lifecycle),
+        lane_id=result["harness"]["lane_id"],
+        run_id=result["harness"]["run_id"],
+    )
     runner.atomic_json(state_path, {
         "schema_version": 1,
         "request_id": second["request_id"],

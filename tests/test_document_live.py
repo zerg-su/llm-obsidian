@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import zlib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +58,60 @@ def write_pdf(path: Path, pages: int) -> None:
         f"trailer\n<< /Size {max_id + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     )
     path.write_bytes(bytes(output))
+
+
+def write_digital_pdf_with_text_image(path: Path) -> None:
+    raw_image = path.with_suffix(".rgb")
+    code = """from PIL import Image, ImageDraw, ImageFont
+import sys
+image = Image.new('RGB', (600, 200), 'white')
+draw = ImageDraw.Draw(image)
+font = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 52)
+draw.text((20, 60), 'NEXT HILES 55 MPH', fill='black', font=font)
+open(sys.argv[1], 'wb').write(image.tobytes())
+"""
+    subprocess.run(
+        [str(docling_home() / "venv" / "bin" / "python"), "-c", code, str(raw_image)],
+        check=True,
+    )
+    image_stream = zlib.compress(raw_image.read_bytes())
+    raw_image.unlink()
+    message = "Native digital body text stays authoritative and contains more than forty characters."
+    content = (
+        f"BT /F1 16 Tf 72 720 Td ({message}) Tj ET\n"
+        "q 360 0 0 120 72 500 cm /Im1 Do Q"
+    ).encode()
+    objects: dict[int, bytes] = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+        3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        4: (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 3 0 R >> /XObject << /Im1 6 0 R >> >> "
+            b"/Contents 5 0 R >>"
+        ),
+        5: b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
+        6: (
+            b"<< /Type /XObject /Subtype /Image /Width 600 /Height 200 "
+            b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode "
+            + b"/Length %d >>\nstream\n" % len(image_stream)
+            + image_stream
+            + b"\nendstream"
+        ),
+    }
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for object_id in range(1, 7):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode())
+        output.extend(objects[object_id])
+        output.extend(b"\nendobj\n")
+    xref = len(output)
+    output.extend(b"xref\n0 7\n0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    path.write_bytes(output)
 
 
 def write_docx(path: Path) -> None:
@@ -146,6 +201,20 @@ image.save(sys.argv[1])
         raise RuntimeError("could not generate the ru/en scan fixture")
 
 
+def image_to_pdf(image: Path, pdf: Path) -> None:
+    code = """from PIL import Image
+import sys
+with Image.open(sys.argv[1]) as image:
+    image.convert('RGB').save(sys.argv[2], 'PDF', resolution=150)
+"""
+    result = subprocess.run(
+        [str(docling_home() / "venv" / "bin" / "python"), "-c", code, str(image), str(pdf)],
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("could not generate the scanned PDF fixture")
+
+
 def normalize(source: Path, cache: Path) -> tuple[dict[str, object], float]:
     started = time.monotonic()
     result = subprocess.run(
@@ -198,16 +267,22 @@ def main() -> int:
         docx = root / "bilingual-table.docx"
         pptx = root / "bilingual-slide.pptx"
         scan = root / "bilingual-scan.png"
+        scan_pdf = root / "bilingual-scan.pdf"
+        digital_with_image = root / "digital-with-text-image.pdf"
         write_pdf(pdf, 24)
         write_docx(docx)
         write_pptx(pptx)
         write_scan(scan)
+        image_to_pdf(scan, scan_pdf)
+        write_digital_pdf_with_text_image(digital_with_image)
 
         checks = [
             (pdf, ["Docling English PDF acceptance page"]),
             (docx, ["Русский DOCX", "language", "ru,en"]),
             (pptx, ["Русский PPTX"]),
             (scan, ["English OCR document"]),
+            (scan_pdf, ["English OCR document"]),
+            (digital_with_image, ["Native digital body text"]),
         ]
         payloads: dict[str, dict[str, object]] = {}
         for source, expected_values in checks:
@@ -227,12 +302,66 @@ def main() -> int:
         if pages != 24:
             raise RuntimeError(f"PDF page provenance mismatch: expected 24, got {pages}")
 
+        scan_pdf_artifacts = payloads[scan_pdf.name].get("artifacts")
+        if not isinstance(scan_pdf_artifacts, dict):
+            raise RuntimeError("scanned PDF adapter metadata is missing")
+        scan_pdf_meta = json.loads(
+            Path(str(scan_pdf_artifacts["adapter_metadata"])).read_text(encoding="utf-8")
+        )
+        if scan_pdf_meta.get("ocr_pages") != [1] or scan_pdf_meta.get("ocr_ranges") != [[1, 1]]:
+            raise RuntimeError(f"scanned PDF did not use selective OCR: {scan_pdf_meta}")
+
+        image_pdf_text = artifact_text(payloads[digital_with_image.name])
+        image_pdf_artifacts = payloads[digital_with_image.name].get("artifacts")
+        if not isinstance(image_pdf_artifacts, dict):
+            raise RuntimeError("digital image PDF metadata is missing")
+        image_pdf_meta = json.loads(
+            Path(str(image_pdf_artifacts["adapter_metadata"])).read_text(encoding="utf-8")
+        )
+        if image_pdf_meta.get("ocr_pages") or re.search(r"NEXT|HILES|MPH", image_pdf_text):
+            raise RuntimeError("text inside a digital PDF picture contaminated the body")
+
         repeated, elapsed = normalize(pdf, cache)
         if repeated.get("status") != "cached":
             raise RuntimeError("repeat conversion did not hit the content-addressed cache")
         print(f"OK cached repeat: {elapsed:.3f}s")
 
-    print("Live Docling acceptance passed: PDF, DOCX/table, PPTX, ru/en OCR, offline profile, cache.")
+    real_document = os.environ.get("LLM_OBSIDIAN_REAL_DOCUMENT", "").strip()
+    if real_document:
+        real_source = Path(real_document).expanduser().resolve()
+        with tempfile.TemporaryDirectory(prefix="docling-real-") as raw:
+            cache = Path(raw) / "cache"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(NORMALIZER),
+                    "normalize",
+                    str(real_source),
+                    "--cache-root",
+                    str(cache),
+                    "--json",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            payload = json.loads(result.stdout)
+            if result.returncode not in {0, 5}:
+                raise RuntimeError(f"real document failed: {payload}")
+            text = artifact_text(payload)
+            if payload.get("quality", {}).get("pages") != 68:  # type: ignore[union-attr]
+                raise RuntimeError("real document page count changed")
+            if re.search(r"NEXT|HILES|M:₽H", text, flags=re.IGNORECASE):
+                raise RuntimeError("real document contains picture OCR contamination")
+            if re.search(r"[ \t][,.;:!?]", text):
+                raise RuntimeError("real document still contains punctuation-spacing defects")
+            visible_text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+            visible_text = re.sub(r"\s+", " ", visible_text)
+            if "с высокой скорости." not in visible_text:
+                raise RuntimeError("real document still contains the known false page break")
+            print(f"OK real document: {len(text)} chars, status={payload.get('status')}")
+
+    print("Live Docling acceptance passed: PDF, selective scan OCR, Office, ru/en OCR, offline profile, cache.")
     return 0
 
 
