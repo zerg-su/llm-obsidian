@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_WEB_SKILLS = ("research", "wiki-ingest", "wiki-query")
 WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
+LEGACY_PUBLIC_SKILLS = ("reap-send",)
 
 
 def frontmatter(text: str) -> str:
@@ -68,6 +69,26 @@ def daily_runtime_repo_issues(root: Path) -> list[str]:
     issues = daily_runtime_issues(path.read_text(encoding="utf-8"))
     if not (root / "agents" / "daily-summarizer.md").is_file():
         issues.append("missing agents/daily-summarizer.md")
+    return issues
+
+
+def legacy_skill_issues(root: Path) -> list[str]:
+    issues: list[str] = []
+    for name in LEGACY_PUBLIC_SKILLS:
+        skill_root = root / "skills" / name
+        if not skill_root.is_dir():
+            continue
+        for path in sorted(skill_root.rglob("*")):
+            relative = path.relative_to(skill_root)
+            if (
+                not path.is_file()
+                or path.suffix == ".pyc"
+                or "__pycache__" in relative.parts
+            ):
+                continue
+            issues.append(
+                f"legacy public skill file remains: {path.relative_to(root)}"
+            )
     return issues
 
 
@@ -146,6 +167,7 @@ def check_repo(root: Path) -> list[str]:
         issues.extend(writer_path_issues(name, path.read_text(encoding="utf-8")))
 
     issues.extend(daily_runtime_repo_issues(root))
+    issues.extend(legacy_skill_issues(root))
 
     ingest = (root / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
     for forbidden in ("Use PATCH", "Save to `.raw", "Write the updated manifest back"):

@@ -40,6 +40,19 @@ with tempfile.TemporaryDirectory(prefix="instruction-lint-test.") as raw:
     assert module.daily_runtime_repo_issues(Path(raw)) == []
 print("OK   missing daily skill handled without traceback")
 
+with tempfile.TemporaryDirectory(prefix="instruction-lint-test.") as raw:
+    root = Path(raw)
+    cache = root / "skills" / "reap-send" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "send_reap.cpython-313.pyc").write_bytes(b"legacy bytecode")
+    assert module.legacy_skill_issues(root) == []
+    (root / "skills" / "reap-send" / "send_reap.py").write_text(
+        "raise SystemExit('legacy source')\n",
+        encoding="utf-8",
+    )
+    assert module.legacy_skill_issues(root)
+print("OK   legacy skill lint ignores bytecode cache but rejects source")
+
 issues = module.failure_repair_issues("", "", "", "", "")
 assert any("CLAUDE.md" in issue for issue in issues)
 assert any("AGENTS.md" in issue for issue in issues)
@@ -71,7 +84,7 @@ print("OK   dispatch delegates anchored mechanics to typed runner")
 task_prompt = (ROOT / "skills/dispatch/references/task-prompt-template.md").read_text(encoding="utf-8")
 assert ".task-summary.json" in task_prompt
 assert "internal callback broker" in task_prompt
-assert not (ROOT / "skills/reap-send").exists()
+assert module.legacy_skill_issues(ROOT) == []
 print("OK   task summary delegates to the internal callback broker")
 
 print("\nAll instruction lint tests passed.")
