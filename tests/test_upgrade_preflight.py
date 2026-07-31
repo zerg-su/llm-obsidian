@@ -30,6 +30,19 @@ def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(SCRIPT), "--root", str(root), *args], text=True, capture_output=True, check=False)
 
 
+def diagnostic(root: Path) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    result = run(root, "--diagnose-identities")
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"diagnostic did not emit JSON: stdout={result.stdout!r} stderr={result.stderr!r}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise AssertionError("diagnostic must emit one JSON object")
+    return result, value
+
+
 def check(name: str, condition: bool) -> None:
     if not condition:
         raise AssertionError(name)
@@ -326,3 +339,172 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     broker_path.write_text(json.dumps(broker_task), encoding="utf-8")
 
 print("upgrade preflight tests passed")
+
+
+with tempfile.TemporaryDirectory(prefix="upgrade-identity-diagnostic.") as raw:
+    root = Path(raw)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    resolved_root = root.resolve()
+    task_id = "55555555-5555-4555-8555-555555555555"
+    operation_path = (
+        root / ".vault-meta/harness/owners" / task_id
+        / "operations" / f"{task_id}.json"
+    )
+    operation_path.parent.mkdir(parents=True)
+    task_path = root / ".task-meta.json"
+    task_path.write_text(json.dumps({
+        "version": 3,
+        "task_id": task_id,
+        "task_name": "identity-diagnostic",
+        "worktree": str(root),
+    }), encoding="utf-8")
+
+    operation_path.write_text(json.dumps(harness_record(
+        task_id,
+        "dispatch",
+        owner_id=task_id,
+        state="running",
+    )), encoding="utf-8")
+    before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+    result, packet = diagnostic(root)
+    rows = packet.get("diagnostics", [])
+    check(
+        "identity diagnostic classifies the exact live operation and worktree as active",
+        result.returncode == 4
+        and packet.get("status") == "attention-required"
+        and packet.get("read_only") is True
+        and packet.get("counts", {}).get("active") == 2
+        and {
+            (row.get("resource"), row.get("classification"))
+            for row in rows
+        } == {("operation", "active"), ("worktree", "active")},
+    )
+    active_operation = next(
+        row for row in rows if row.get("resource") == "operation"
+    )
+    check(
+        "active recovery binds the exact operation identity",
+        active_operation.get("identity") == {
+            "operation_id": task_id,
+            "owner_id": task_id,
+        }
+        and active_operation.get("recovery", {}).get("action")
+        == "finish-or-cancel-exact-operation"
+        and active_operation.get("recovery", {}).get("inspect_command", [])[-2:]
+        == ["inspect", task_id],
+    )
+
+    operation_path.write_text(json.dumps(harness_record(
+        task_id,
+        "dispatch",
+        owner_id=task_id,
+        state="complete",
+    )), encoding="utf-8")
+    result, packet = diagnostic(root)
+    rows = packet.get("diagnostics", [])
+    stale_worktree = next(
+        row for row in rows if row.get("resource") == "worktree"
+    )
+    check(
+        "identity diagnostic proves only an exact terminal resource-free pair stale",
+        result.returncode == 0
+        and packet.get("status") == "stale"
+        and packet.get("counts", {}).get("proven-stale") == 2
+        and all(row.get("classification") == "proven-stale" for row in rows)
+        and stale_worktree.get("identity", {}).get("task_id") == task_id,
+    )
+    check(
+        "proven-stale guidance inspects before naming the exact Git removal",
+        stale_worktree.get("recovery", {}).get("action")
+        == "inspect-then-remove-exact-worktree"
+        and stale_worktree.get("recovery", {}).get("inspect_command")
+        == ["git", "-C", str(resolved_root), "status", "--short"]
+        and stale_worktree.get("recovery", {}).get("recovery_command")
+        == [
+            "git", "-C", str(resolved_root), "worktree", "remove",
+            str(resolved_root),
+        ],
+    )
+
+    owned = OwnedResources(
+        surface_id="owned-surface",
+        process_group=12345,
+        process_identity="b" * 64,
+        supervisor_pid=12344,
+        supervisor_identity="c" * 64,
+    )
+    operation_path.write_text(json.dumps(harness_record(
+        task_id,
+        "dispatch",
+        owner_id=task_id,
+        state="cancelled",
+        resources=owned,
+        pending_effect="request-exit",
+    )), encoding="utf-8")
+    result, packet = diagnostic(root)
+    rows = packet.get("diagnostics", [])
+    check(
+        "terminal unsettled ownership remains ambiguous and fail-closed",
+        result.returncode == 4
+        and packet.get("counts", {}).get("ambiguous") == 2
+        and all(row.get("classification") == "ambiguous" for row in rows)
+        and all(
+            row.get("recovery", {}).get("action")
+            == "inspect-and-reconcile-exact-ownership"
+            for row in rows
+        )
+        and "worktree remove"
+        not in json.dumps(packet, sort_keys=True),
+    )
+
+    recorded_owner = "66666666-6666-4666-8666-666666666666"
+    operation_path.write_text(json.dumps(harness_record(
+        task_id,
+        "dispatch",
+        owner_id=recorded_owner,
+        state="complete",
+    )), encoding="utf-8")
+    result, packet = diagnostic(root)
+    rows = packet.get("diagnostics", [])
+    mismatched_operation = next(
+        row for row in rows if row.get("resource") == "operation"
+    )
+    check(
+        "path and recorded owners are reported as mismatched without guessing",
+        result.returncode == 4
+        and packet.get("counts", {}).get("mismatched") == 2
+        and all(row.get("classification") == "mismatched" for row in rows)
+        and mismatched_operation.get("identity") == {
+            "operation_id": task_id,
+            "owner_id": recorded_owner,
+            "path_operation_id": task_id,
+            "path_owner_id": task_id,
+        }
+        and all(
+            row.get("recovery", {}).get("action")
+            == "resolve-identity-mismatch"
+            for row in rows
+        )
+        and "worktree remove"
+        not in json.dumps(packet, sort_keys=True),
+    )
+    after = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+    check(
+        "identity diagnostic never mutates repository or harness state",
+        before.keys() == after.keys()
+        and all(
+            before[path] == after[path]
+            for path in before
+            if path != operation_path.relative_to(root).as_posix()
+        ),
+    )
+
+print("upgrade identity diagnostic tests passed")
