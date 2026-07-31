@@ -37,7 +37,10 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
-from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
+from lifecycle_telemetry import (  # noqa: E402
+    emit_compiled_pipeline_event,
+    emit_lifecycle_event,
+)
 from harness.contracts import RuntimeRoute  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
@@ -1120,6 +1123,22 @@ def start(
             raise DispatchError(
                 "provider runtime started without preparing the task contract"
             )
+        compiled_pipeline = compiled_builtin(request["pipeline"])
+        emit_compiled_pipeline_event(
+            request["worktree"],
+            event="dispatch",
+            pipeline_id=compiled_pipeline.definition.pipeline_id,
+            pipeline_version=compiled_pipeline.definition.version,
+            profile=compiled_pipeline.definition.profile,
+            compiler_outcome="compiled",
+            definition_sha=compiled_pipeline.definition_sha256,
+            primitive_count=(
+                len(compiled_pipeline.definition.steps)
+                + len(compiled_pipeline.definition.control_primitives)
+            ),
+            loop_iteration=0,
+            vault_root=request["vault_root"],
+        )
         emit_lifecycle_event(
             request["worktree"],
             "dispatch-runner-stage",

@@ -649,6 +649,28 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and fix_child.state == "awaiting-callback",
         (fix_phase_request, fix_parent, fix_child),
     )
+    pipeline_events = [
+        json.loads(line)
+        for line in (
+            vault / ".vault-meta" / "pipeline-events.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    check(
+        "dispatch emits one content-free compiled pipeline identity",
+        any(
+            event.get("op") == "compiled-pipeline"
+            and event.get("actor") == "dispatch"
+            and event.get("identifiers", {}).get("pipeline_id")
+            == "engineering"
+            and event.get("identifiers", {}).get("profile") == "fix"
+            and event.get("identifiers", {}).get("definition_sha")
+            == fix_parent.spec.contract_sha256
+            and event.get("counts", {}).get("bounded_loop_iteration")
+            == 0
+            for event in pipeline_events
+        ),
+        pipeline_events,
+    )
     spec_hash = "a" * 64
     state_path, prior = runner.begin_run(second, spec_hash)
     check("new run claims exact request once", prior is None and json.loads(state_path.read_text())["status"] == "preparing")
