@@ -140,7 +140,13 @@ def evidence(row: dict[str, object]) -> dict[str, object]:
     elif cell_id == "cross-runtime-composition":
         operations = [
             operation("dispatch-op", "dispatch", "codex", "composition-lane", "dispatch-run"),
-            operation("review-op", "simple-review", "claude", "composition-lane", "review-run"),
+            operation(
+                "review-op",
+                "simple-review-holistic",
+                "claude",
+                "composition-lane",
+                "review-run",
+            ),
         ]
     else:
         operations = [

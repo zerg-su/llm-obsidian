@@ -181,7 +181,7 @@ def _validate_cell_shape(cell_id: str, operations: list[dict[str, Any]]) -> None
         valid = len(operations) == 1 and kinds == ["runtime-lifecycle"] and runtimes == ["codex"]
     elif cell_id == "cross-runtime-composition":
         valid = (
-            kinds == ["dispatch", "simple-review"]
+            kinds == ["dispatch", "simple-review-holistic"]
             and runtimes == ["codex", "claude"]
             and len(set(lanes)) == 1
             and len(set(runs)) == 2
