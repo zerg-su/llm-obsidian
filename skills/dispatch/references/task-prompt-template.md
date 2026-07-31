@@ -29,8 +29,8 @@ under `<vault-root>` from this task worktree.
 
 ## Working rules
 
-- CWD: <worktree-path>
-- Target repo: <repo-path>
+- Writable task worktree (the only product checkout you may edit): <worktree-path>
+- Source repository (read-only reference; never cd, edit, stage, or commit here): <repo-path>
 - Base branch: <base-branch>; task branch: task/<task_name>
 - Codex environment: <codex-home/profile or inherited>
 - Review workflow: <review-skill>
@@ -38,6 +38,8 @@ under `<vault-root>` from this task worktree.
 - Review/model defaults come from `<vault-root>/config/model-routing.toml`.
 - Commit explicit files as you go. Never push, deploy, publish, delete the
   worktree/branch, or expand scope.
+- Before every Git write, confirm that `pwd` is the writable task worktree and
+  the current branch is the task branch. Stop and escalate on any mismatch.
 - Preserve unrelated dirty work and `.obsidian` user state.
 
 <!-- BRANCH A: rendered ONLY in plan-mode (instead of branch B) -->

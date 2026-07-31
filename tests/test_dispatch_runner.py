@@ -155,6 +155,31 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("prompt omits empty agents", "## Suggested sub-agents" not in prompt)
     check("prompt has no branch control markers", "<!-- BRANCH" not in prompt)
     check("prompt binds reap skill", "$llm-obsidian:reap" in prompt)
+    writable_line = (
+        "Writable task worktree (the only product checkout you may edit): "
+        f"{request['worktree']}"
+    )
+    source_line = (
+        "Source repository (read-only reference; never cd, edit, stage, or commit here): "
+        f"{request['target_repo']}"
+    )
+    git_guard = "Before every Git write, confirm that `pwd` is the writable task worktree"
+    check(
+        "prompt makes the isolated task worktree the only writable checkout",
+        writable_line in prompt and source_line in prompt and git_guard in prompt,
+        repr(
+            {
+                "writable_line": writable_line in prompt,
+                "source_line": source_line in prompt,
+                "git_guard": git_guard in prompt,
+                "rendered": [
+                    line
+                    for line in prompt.splitlines()
+                    if "worktree" in line.lower() or "repository" in line.lower()
+                ],
+            }
+        ),
+    )
     check("classic dispatch defaults to split placement", request["placement"] == "split")
     workspace_raw = json.loads(json.dumps(raw_request))
     workspace_raw["placement"] = "workspace"
