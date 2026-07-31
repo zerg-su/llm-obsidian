@@ -29,6 +29,7 @@ CATEGORIES = {
     "external-effect",
     "contract-drift",
     "mechanism-failure",
+    "pipeline-decision",
     "permission",
 }
 

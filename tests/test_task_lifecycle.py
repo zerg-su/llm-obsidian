@@ -31,6 +31,7 @@ import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
 from task_sessions import TaskSessionStore
 from harness.verification import load_profiles
+from harness.pipeline_builtins import compiled_builtin
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 
@@ -555,6 +556,14 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         }
     )
     v3_meta.update({"version": 3, "project_id": str(uuid.uuid4()), "task_id": str(uuid.uuid4())})
+    v3_meta["pipeline_policy"] = {
+        "name": "lifecycle/default",
+        "definition_sha256": compiled_builtin(
+            "lifecycle/default"
+        ).definition_sha256,
+        "completion_policy": "attention",
+        "total_pass_limit": 2,
+    }
     (worktree / "config" / "dcg").mkdir(parents=True)
     shutil.copy2(ROOT / "config" / "dcg" / "task.toml", worktree / "config" / "dcg" / "task.toml")
     task_registry = (
@@ -1219,6 +1228,14 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "task_surface": "surface-retry-executor",
         "wiki_surface": "surface-retry-executor",
         "vault_root": str(worktree),
+        "pipeline_policy": {
+            "name": "lifecycle/default",
+            "definition_sha256": compiled_builtin(
+                "lifecycle/default"
+            ).definition_sha256,
+            "completion_policy": "attention",
+            "total_pass_limit": 2,
+        },
     })
     write_json(retry_state_dir / ".review-meta.json", {
         "project_id": broker_project,
@@ -1357,6 +1374,26 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=origin_env,
     )
     check("coordinator resolves eligible mechanism repair", result.returncode == 0, result.stderr)
+    result = run(
+        ESCALATION, "raise", "--category", "pipeline-decision",
+        "--reason", "The approved fix pipeline cannot reproduce the reported defect",
+        "--question", "Choose stop or retry-with-fixture",
+        cwd=worktree, env=env,
+    )
+    check("pipeline decision reaches coordinator", result.returncode == 0, result.stderr)
+    pipeline_attention = json.loads(
+        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
+    )
+    check(
+        "pipeline decision remains a typed human gate",
+        pipeline_attention["status"] == "pending"
+        and pipeline_attention["category"] == "pipeline-decision",
+    )
+    result = run(
+        ESCALATION, "resolve", "--decision", "stop",
+        cwd=worktree, env=origin_env,
+    )
+    check("coordinator resolves pipeline decision", result.returncode == 0, result.stderr)
     failed_notify_env = dict(env, CMUX_NOTIFY_FAIL="1")
     result = run(
         ESCALATION, "raise", "--category", "permission",
