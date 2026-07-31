@@ -1299,6 +1299,10 @@ def start(
                 raise DispatchError(f"effective route drifted at {field}")
         lifecycle_request = harness_request(request, config, effective)
 
+        stage = "runtime-sync"
+        stage_started = time.monotonic()
+        sync_codex_profile(request, config, effective)
+
         stage = "worktree"
         stage_started = time.monotonic()
         create_worktree(request)
@@ -1307,21 +1311,6 @@ def start(
             request["worktree"] / ".task-prompt.md",
             render_task_prompt(request, config),
         )
-        emit_lifecycle_event(
-            request["worktree"],
-            "dispatch-runner-stage",
-            actor=stage,
-            counts={
-                "duration_ms": round(
-                    (time.monotonic() - stage_started) * 1000
-                )
-            },
-            vault_root=request["vault_root"],
-        )
-
-        stage = "runtime-sync"
-        stage_started = time.monotonic()
-        sync_codex_profile(request, config, effective)
         emit_lifecycle_event(
             request["worktree"],
             "dispatch-runner-stage",

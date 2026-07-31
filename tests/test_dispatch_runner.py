@@ -770,6 +770,27 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     fake_runtime = FakeRuntime(vault / ".vault-meta" / "harness")
     original_sync = runner.sync_codex_profile
     original_log = runner.dispatch_log
+    sync_failure_raw = json.loads(json.dumps(raw_request))
+    sync_failure_raw["request_id"] = str(uuid.uuid4())
+    sync_failure_raw["task_name"] = "runtime-sync-failure"
+    sync_failure_raw["branch"] = "task/runtime-sync-failure"
+    sync_failure_raw["worktree"] = str(
+        tmp / "worktrees" / "runtime-sync-failure"
+    )
+    sync_failure_request = runner.validate_request(sync_failure_raw)
+    runner.sync_codex_profile = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        runner.DispatchError("fixture runtime sync failed")
+    )
+    expect_error(
+        "runtime sync failure is contained before worktree creation",
+        lambda: runner.start(sync_failure_request, "e" * 64),
+        "runtime-sync failed",
+    )
+    check(
+        "runtime sync failure leaves no orphan task worktree",
+        not Path(sync_failure_request["worktree"]).exists(),
+        sync_failure_request["worktree"],
+    )
     runner.sync_codex_profile = lambda *_args, **_kwargs: None
     runner.dispatch_log = lambda *_args, **_kwargs: None
     try:
