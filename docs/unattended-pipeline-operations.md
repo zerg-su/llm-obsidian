@@ -48,3 +48,26 @@ effect.
 legacy task/review/research state before mutation. Finish or cancel the listed
 operations with the installed runtime, then rerun the preflight. Live 2.2.x
 state is never silently adopted.
+
+## Protected research shadow parity
+
+Protected research is the shadow-validation example for staged compiled
+operations; it is not a second pipeline language or controller. Its parent,
+isolated fetch, and networkless synthesis are immutable `OperationSpec`
+instances with deterministic derived operation/lane/run identities under one
+owner. All three records live in the same `OperationStore` and use the same
+state machine and `OperationSupervisor` as dispatch and review.
+
+Fetch and synthesis enter the generic provider runtime through
+`RuntimeSessionRequest`. Their exact `research-fetch` and `research-synth`
+callback modes deliver schema-validated typed artifacts (`artifact.json` and
+`complete.json`) through the harness-owned callback boundary. The accepted
+fetch digest and content-free synthesis provenance bind the second stage; source
+or artifact drift fails closed.
+
+Restart derives progress from those same records and typed artifacts. Once the
+fetch is complete, replay validates the pinned receipt and reuses the exact
+synthesis identity without opening another fetch or provider session. There is
+no research-specific progress database, orchestration FSM, dynamic DSL, or
+second durable truth. The public-seam evidence is
+`tests/harness/test_research_vertical.py`.

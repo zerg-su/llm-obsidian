@@ -14,8 +14,10 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.contracts import RuntimeRoute
+from harness.contracts import OperationSpec, RuntimeRoute
+from harness.runtime_sessions import RuntimeSessionRequest
 from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from harness.workflows.research import (
     ResearchContext,
@@ -248,6 +250,8 @@ class FakeResearchRuntime:
         self, session_request: object, *, on_surface_opened: object = None
     ) -> object:
         del on_surface_opened
+        if not isinstance(session_request, RuntimeSessionRequest):
+            raise TypeError("research must use the generic runtime request")
         self.starts.append(session_request)
         spec = session_request.spec
         record = self.store.create(
@@ -255,25 +259,30 @@ class FakeResearchRuntime:
             lane_id=session_request.lane_id,
             run_id=session_request.run_id,
         )
+        supervisor = OperationSupervisor(
+            self.store, spec.owner_id, spec.operation_id
+        )
         for state in ("preflight", "starting", "running", "awaiting-callback"):
-            self.store.transition(spec.owner_id, spec.operation_id, state)
+            supervisor.transition(state)
         return SimpleNamespace(
-            record=self.store.read(spec.owner_id, spec.operation_id),
+            record=supervisor.read(),
             checkpoint="",
         )
 
     def request_exit(self, owner_id: str, operation_id: str) -> object:
         self.exits.append(operation_id)
-        record = self.store.read(owner_id, operation_id)
+        supervisor = OperationSupervisor(self.store, owner_id, operation_id)
+        record = supervisor.read()
         if record.state != "finalizing":
-            self.store.transition(owner_id, operation_id, "finalizing")
-        self.store.transition(owner_id, operation_id, "exiting")
-        return SimpleNamespace(record=self.store.read(owner_id, operation_id))
+            supervisor.transition("finalizing")
+        supervisor.transition("exiting")
+        return SimpleNamespace(record=supervisor.read())
 
     def cleanup(self, owner_id: str, operation_id: str) -> object:
         self.cleanups.append(operation_id)
-        self.store.transition(owner_id, operation_id, "complete")
-        return SimpleNamespace(record=self.store.read(owner_id, operation_id))
+        supervisor = OperationSupervisor(self.store, owner_id, operation_id)
+        supervisor.transition("complete")
+        return SimpleNamespace(record=supervisor.read())
 
 
 with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
@@ -328,6 +337,32 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and runtime.starts[0].callback_mode == "research-fetch"
         and runtime.starts[0].runtime_home == fetch_home.resolve(),
     )
+    expected_fetch_id = (
+        "research-pipeline-1-fetch-"
+        + hashlib.sha256(b"fetch").hexdigest()[:8]
+    )
+    fetch_request = runtime.starts[0]
+    check(
+        "research fetch has one derived generic operation identity",
+        isinstance(execution.parent.spec, OperationSpec)
+        and isinstance(execution.fetch.spec, OperationSpec)
+        and execution.fetch.spec.operation_id == expected_fetch_id
+        and fetch_request.spec == execution.fetch.spec
+        and fetch_request.lane_id == execution.fetch.lane_id
+        and fetch_request.run_id == execution.fetch.run_id
+        and execution.parent.spec.owner_id == execution.fetch.spec.owner_id
+        and len(store.list(pipeline_request.owner_id)) == 2,
+    )
+    check(
+        "research fetch uses the generic typed callback seam",
+        isinstance(fetch_request, RuntimeSessionRequest)
+        and fetch_request.callback_mode == "research-fetch"
+        and fetch_request.callback_pointer == "artifact.json"
+        and fetch_request.research_request_sha256
+        == pipeline_request.context.request_sha256
+        and fetch_request.origin_surface
+        == "11111111-1111-4111-8111-111111111111",
+    )
 
     source_body = "# Source\n\nBounded source text.\n"
     sources = fetch / "sources"
@@ -375,6 +410,24 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and (synth / "artifact.json").is_file()
         and (synth / "context" / "packet" / "manifest.json").is_file(),
     )
+    expected_synth_id = (
+        "research-pipeline-1-synth-"
+        + hashlib.sha256(b"synth").hexdigest()[:8]
+    )
+    synth_request = runtime.starts[1]
+    check(
+        "research synthesis shares the store FSM and callback seam",
+        isinstance(synth_request, RuntimeSessionRequest)
+        and execution.synth is not None
+        and execution.synth.spec.operation_id == expected_synth_id
+        and synth_request.spec == execution.synth.spec
+        and synth_request.lane_id == execution.synth.lane_id
+        and synth_request.run_id == execution.synth.run_id
+        and synth_request.callback_mode == "research-synth"
+        and synth_request.callback_pointer == "complete.json"
+        and synth_request.research_request_sha256 == ""
+        and len(store.list(pipeline_request.owner_id)) == 3,
+    )
     provenance_path = (
         store.root
         / "owners"
@@ -398,6 +451,28 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and provenance["fetch_run_id"] == execution.fetch.run_id
         and provenance["artifact_sha256"]
         == hashlib.sha256((synth / "artifact.json").read_bytes()).hexdigest(),
+    )
+    replay_runtime = FakeResearchRuntime(store)
+    replayed = advance_research(
+        pipeline_request,
+        replay_runtime,
+        store,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        fetch_cwd=fetch,
+        synth_cwd=synth,
+        synth_runtime_home=synth_home,
+        callback_wake="finalize exact research pipeline",
+    )
+    check(
+        "restart replay does not repeat the accepted fetch or synth start",
+        replayed.stage == "synth"
+        and replayed.fetch.state == "complete"
+        and replayed.synth is not None
+        and replayed.synth.spec == execution.synth.spec
+        and replay_runtime.starts == []
+        and replay_runtime.exits == []
+        and replay_runtime.cleanups == []
+        and len(store.list(pipeline_request.owner_id)) == 3,
     )
 
     answer = "# Answer\n\nSupported. [Primary](https://example.com/primary)\n"
