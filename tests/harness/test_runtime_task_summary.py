@@ -185,6 +185,8 @@ def run_case(
     pipeline_name: str = "lifecycle/default",
     fix_outcome: str = "complete",
     fix_retry_passes: int = 0,
+    fix_restart_after: str = "",
+    model_restart_limit: int | None = None,
     completion_policy: str = "attention",
     total_pass_limit: int = 2,
     verification_runner: Callable[..., subprocess.CompletedProcess[str]]
@@ -253,6 +255,15 @@ def run_case(
         bind_contract=bind_contract,
         pipeline_name=pipeline_name,
     )
+    if model_restart_limit is not None:
+        OperationSupervisor(
+            store, "owner-1", operation_id
+        ).configure_budget(
+            attempt_limit=3,
+            model_restart_limit=model_restart_limit,
+            time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+            token_limit=DEFAULT_TOKEN_LIMIT,
+        )
     profile_sha = load_profiles(
         vault / "config" / "verification-profiles.toml"
     )["scoped"].sha256
@@ -311,7 +322,56 @@ def run_case(
         and not hasattr(request, "wake_message"),
     )
     provider = root / f"provider-{operation_id}.py"
-    if pipeline_name == "engineering/fix" and fix_retry_passes:
+    if pipeline_name == "engineering/fix" and fix_restart_after:
+        provider.write_text(
+            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            "root=pathlib.Path.cwd()\n"
+            "summary=pathlib.Path(sys.argv[1])\n"
+            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "state=pathlib.Path(sys.argv[4])\n"
+            "restart_after=sys.argv[5]\n"
+            "request=root/'.task-pipeline-step-request.json'\n"
+            "outbox=root/'.task-pipeline-step-callback.json'\n"
+            "log=root/'.provider-step-log.json'\n"
+            "crashed=root/'.provider-crashed.json'\n"
+            "seen=json.loads(log.read_text(encoding='utf-8')) if log.is_file() else []\n"
+            "for _ in range(1000):\n"
+            "  if request.is_file():\n"
+            "    row=json.loads(request.read_text(encoding='utf-8'))\n"
+            "  else: row={}\n"
+            "  if row.get('operation_id') and row['operation_id'] not in [item['operation_id'] for item in seen]:\n"
+            "    output=root/row['output_pointer']\n"
+            "    output.parent.mkdir(parents=True,exist_ok=True)\n"
+            "    output.write_text(row['step_id']+' evidence\\n',encoding='utf-8')\n"
+            "    head=subprocess.run(['git','rev-parse','HEAD'],cwd=root,text=True,capture_output=True,check=True).stdout.strip()\n"
+            "    payload={key:row[key] for key in ('schema_version','parent_operation_id','definition_sha256','step_id','iteration','input_schema','input_sha256','input_head_sha','prior_receipt_sha256','verification_sha256','output_schema')}\n"
+            "    payload.update({'output_pointer':row['output_pointer'],'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'head_sha':head,'status':'complete'})\n"
+            "    encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
+            "    digest=hashlib.sha256(encoded).hexdigest()\n"
+            "    callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
+            "    outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "    for _ in range(500):\n"
+            "      if not outbox.exists(): break\n"
+            "      time.sleep(0.01)\n"
+            "    else: raise SystemExit(4)\n"
+            "    seen.append({'operation_id':row['operation_id'],'step_id':row['step_id']})\n"
+            "    log.write_text(json.dumps(seen,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "    if row['step_id']==restart_after and not crashed.is_file():\n"
+            "      crashed.write_text(json.dumps({'status':'exited-after-acceptance'})+'\\n',encoding='utf-8')\n"
+            "      raise SystemExit(17)\n"
+            "    if row['step_id']=='minimal-fix':\n"
+            "      for _ in range(500):\n"
+            "        if (state/'pipeline-fix'/'finalization-notify.json').is_file(): break\n"
+            "        time.sleep(0.01)\n"
+            "      else: raise SystemExit(5)\n"
+            "      summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "      time.sleep(0.3)\n"
+            "      raise SystemExit(0)\n"
+            "  time.sleep(0.01)\n"
+            "raise SystemExit(3)\n",
+            encoding="utf-8",
+        )
+    elif pipeline_name == "engineering/fix" and fix_retry_passes:
         provider.write_text(
             "import hashlib,json,pathlib,subprocess,sys,time\n"
             "root=pathlib.Path.cwd()\n"
@@ -428,6 +488,12 @@ def run_case(
                 (str(fix_retry_passes),)
                 if pipeline_name == "engineering/fix"
                 and fix_retry_passes
+                else ()
+            ),
+            *(
+                (fix_restart_after,)
+                if pipeline_name == "engineering/fix"
+                and fix_restart_after
                 else ()
             ),
         ),
@@ -689,6 +755,106 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             fix_target,
             fix_cmux.sent,
         ),
+    )
+
+    restart_task = "eadeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    (
+        restart_store,
+        restart_cmux,
+        restart_state,
+        restart_rc,
+    ) = run_case(
+        root,
+        restart_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_restart_after="root-cause",
+        model_restart_limit=1,
+        verification_runner=pass_verification,
+    )
+    restart_parent = restart_store.read("owner-1", restart_task)
+    restart_receipt = json.loads(
+        (
+            restart_state
+            / "pipeline-fix"
+            / "provider-restart-1.json"
+        ).read_text(encoding="utf-8")
+    )
+    restart_steps = json.loads(
+        (
+            root
+            / f"worktree-{restart_task}"
+            / ".provider-step-log.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "engineering fix restarts one provider without replaying an accepted phase",
+        restart_rc == 0
+        and restart_parent.state == "finalizing"
+        and restart_parent.model_restarts == 1
+        and restart_parent.resources.surface_id == CHILD
+        and restart_parent.resources.process_group
+        == restart_receipt["new_process_group"]
+        and restart_receipt["status"] == "restarted"
+        and restart_receipt["old_process_group"]
+        != restart_receipt["new_process_group"]
+        and [item["step_id"] for item in restart_steps]
+        == [
+            "reproduce",
+            "root-cause",
+            "regression-test",
+            "minimal-fix",
+        ]
+        and len(
+            [
+                item
+                for item in restart_cmux.sent
+                if "phase root-cause" in item[1]
+            ]
+        )
+        == 1,
+        (
+            restart_parent,
+            restart_receipt,
+            restart_steps,
+            restart_cmux.sent,
+        ),
+    )
+
+    restart_exhausted_task = "eacdeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    (
+        restart_exhausted_store,
+        _restart_exhausted_cmux,
+        restart_exhausted_state,
+        restart_exhausted_rc,
+    ) = run_case(
+        root,
+        restart_exhausted_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_restart_after="root-cause",
+        model_restart_limit=0,
+        verification_runner=pass_verification,
+    )
+    restart_exhausted_parent = restart_exhausted_store.read(
+        "owner-1", restart_exhausted_task
+    )
+    restart_exhausted = json.loads(
+        (
+            restart_exhausted_state
+            / "pipeline-fix"
+            / "provider-restart-exhausted.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "engineering fix stops when provider restart budget is exhausted",
+        restart_exhausted_rc == 17
+        and restart_exhausted_parent.state == "attention-required"
+        and restart_exhausted_parent.attention_reason
+        == AttentionReason.RETRY_EXHAUSTED
+        and restart_exhausted_parent.model_restarts == 0
+        and restart_exhausted["status"] == "retry-exhausted",
+        (restart_exhausted_parent, restart_exhausted),
     )
 
     retry_task = "edeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"

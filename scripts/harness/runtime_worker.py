@@ -26,10 +26,12 @@ from .callbacks import (
 from .contracts import (
     AttentionReason,
     CallbackEnvelope,
+    ContractError as HarnessContractError,
     DEFAULT_TIME_BUDGET_SECONDS,
     DEFAULT_TOKEN_LIMIT,
     EffectOutcome,
     OperationSpec,
+    OwnedResources,
     to_dict,
 )
 from .prompts import PromptDecision, classify
@@ -37,7 +39,7 @@ from .pipeline_builtins import compiled_executable_for_contract
 from .pipelines import reconcile_pipeline
 from .review_finalization import task_review_status
 from .state_machine import TERMINAL
-from .store import OperationStore
+from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor, SupervisorError
 from .verification import (
     VerificationError,
@@ -696,9 +698,10 @@ def run(
             )
             return 2
     try:
+        provider_command = provider_argv(spec)
         provider_env = provider_environment(spec)
         handle = process.start(
-            provider_argv(spec),
+            provider_command,
             cwd=spec["cwd"],
             env=provider_env,
         )
@@ -3833,6 +3836,159 @@ def run(
                     continue
                 exit_code = os.waitstatus_to_exitcode(status)
                 provider_exited = True
+        if (
+            provider_exited
+            and _pipeline_name == "engineering/fix"
+            and not fix_transport_complete
+            and not callback_handled
+        ):
+            parent_record = store.read(
+                spec["owner_id"], spec["operation_id"]
+            )
+            if (
+                parent_record.state not in TERMINAL
+                and parent_record.state != "attention-required"
+            ):
+                restart_supervisor = OperationSupervisor(
+                    store, spec["owner_id"], spec["operation_id"]
+                )
+                old_handle = handle
+                try:
+                    budgeted = restart_supervisor.consume_model_restart(
+                        explicitly_permitted=True
+                    )
+                except SupervisorError:
+                    write_immutable_json(
+                        spec_path.parent
+                        / "pipeline-fix"
+                        / "provider-restart-exhausted.json",
+                        {
+                            "schema_version": 1,
+                            "operation_id": spec["operation_id"],
+                            "model_restarts": parent_record.model_restarts,
+                            "model_restart_limit": (
+                                parent_record.model_restart_limit
+                            ),
+                            "status": "retry-exhausted",
+                        },
+                    )
+                    summary_attention(
+                        "pipeline-fix-provider-restart-exhausted",
+                        AttentionReason.RETRY_EXHAUSTED,
+                    )
+                else:
+                    restarted_handle: ProcessHandle | None = None
+                    try:
+                        restarted_handle = process.start(
+                            provider_command,
+                            cwd=spec["cwd"],
+                            env=provider_env,
+                        )
+                        previous_resources = budgeted.resources
+                        restart_supervisor.bind_resources(
+                            OwnedResources(
+                                surface_id=(
+                                    previous_resources.surface_id
+                                    or spec["surface_id"]
+                                ),
+                                process_group=(
+                                    restarted_handle.process_group
+                                ),
+                                supervisor_pid=(
+                                    previous_resources.supervisor_pid
+                                    or os.getpid()
+                                ),
+                                process_identity=(
+                                    restarted_handle.process_identity
+                                ),
+                                supervisor_identity=(
+                                    previous_resources.supervisor_identity
+                                    or supervisor_identity
+                                ),
+                            )
+                        )
+                        handle = restarted_handle
+                        provider_exited = False
+                        exit_code = 0
+                        exit_containment_failed = False
+                        _atomic_json(
+                            ready,
+                            {
+                                "schema_version": 1,
+                                "status": "ready",
+                                "pid": handle.pid,
+                                "process_group": handle.process_group,
+                                "supervisor_pid": os.getpid(),
+                                "process_identity": (
+                                    handle.process_identity
+                                ),
+                                "supervisor_identity": (
+                                    supervisor_identity
+                                ),
+                            },
+                        )
+                        command_sha256 = hashlib.sha256(
+                            json.dumps(
+                                provider_command,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest()
+                        environment_sha256 = hashlib.sha256(
+                            json.dumps(
+                                sorted(provider_env.items()),
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest()
+                        write_immutable_json(
+                            spec_path.parent
+                            / "pipeline-fix"
+                            / (
+                                "provider-restart-"
+                                f"{budgeted.model_restarts}.json"
+                            ),
+                            {
+                                "schema_version": 1,
+                                "operation_id": spec["operation_id"],
+                                "model_restarts": (
+                                    budgeted.model_restarts
+                                ),
+                                "old_process_group": (
+                                    old_handle.process_group
+                                ),
+                                "old_process_identity": (
+                                    old_handle.process_identity
+                                ),
+                                "new_process_group": (
+                                    handle.process_group
+                                ),
+                                "new_process_identity": (
+                                    handle.process_identity
+                                ),
+                                "provider_argv_sha256": (
+                                    command_sha256
+                                ),
+                                "provider_environment_sha256": (
+                                    environment_sha256
+                                ),
+                                "status": "restarted",
+                            },
+                        )
+                    except (
+                        ContractError,
+                        HarnessContractError,
+                        OSError,
+                        ProcessError,
+                        StoreError,
+                        SupervisorError,
+                    ):
+                        if restarted_handle is not None:
+                            _contain_provider_start_failure(
+                                process, restarted_handle
+                            )
+                        summary_attention(
+                            "pipeline-fix-provider-restart-failed",
+                            AttentionReason.ATTENTION_REQUIRED,
+                        )
         try:
             operation_record = store.read(
                 spec["owner_id"], spec["operation_id"]
