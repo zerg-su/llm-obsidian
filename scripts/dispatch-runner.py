@@ -740,6 +740,9 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
                 "Stop after submission. The harness owns transitions, bounded loops,",
                 "accepted receipts, verification, review, recovery, and the next",
                 "prompt in this same session. Never repeat an accepted visit.",
+                "Treat `.task-*`, `.wiki-*`, and `.task-pipeline/**` as runtime",
+                "transport: never stage or commit them. Commit only exact product",
+                "files required by the approved plan.",
                 "",
                 "Approved custom definition: "
                 f"`{custom.definition_sha256}`.",
@@ -783,6 +786,9 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
                 "`cannot-reproduce`, publish that typed outcome and remain paused.",
                 "After a restart, obey the first missing phase from the current",
                 "request; never repeat an accepted phase.",
+                "Treat `.task-*`, `.wiki-*`, and `.task-pipeline/**` as runtime",
+                "transport: never stage or commit them. Commit only exact product",
+                "files required by the approved plan.",
                 "",
                 f"Selected completion_policy={policy}; "
                 f"total_pass_limit={COMPLETION_PASS_LIMITS[policy]}.",

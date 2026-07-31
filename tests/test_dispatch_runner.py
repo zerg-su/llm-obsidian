@@ -330,6 +330,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         config,
         effective,
     )
+    custom_prompt = runner.render_task_prompt(custom_request, config)
     check(
         "dispatch validates and binds one explicitly approved custom contract",
         custom_request["pipeline"] == "custom"
@@ -338,6 +339,13 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and custom_harness.custom_pipeline is not None
         and operation_spec(custom_harness).contract_sha256
         == custom_contract["definition_sha256"],
+    )
+    check(
+        "custom prompt keeps runtime transport out of product commits",
+        "`.task-*`, `.wiki-*`, and `.task-pipeline/**` as runtime"
+        in custom_prompt
+        and "never stage or commit them" in custom_prompt,
+        custom_prompt,
     )
     custom_policy = runner.task_pipeline_policy(custom_request)
     check(
@@ -428,6 +436,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and '"output_sha256":"<sha256-of-output-file>"' in fix_prompt
         and "Only `reproduce` may use" in fix_prompt
         and "Stop after submission" in fix_prompt
+        and "`.task-*`, `.wiki-*`, and `.task-pipeline/**` as runtime"
+        in fix_prompt
+        and "never stage or commit them" in fix_prompt
         and "completion_policy=autonomous" in fix_prompt
         and "total_pass_limit=3" in fix_prompt,
         fix_prompt,
