@@ -16,6 +16,7 @@ test-harness:
 	@python3 tests/harness/test_callbacks.py
 	@python3 tests/harness/test_context_verification.py
 	@python3 tests/harness/test_workflows.py
+	@python3 tests/harness/test_engineering_fix_workflow.py
 	@python3 tests/harness/test_research_vertical.py
 	@python3 tests/harness/test_research_notifier.py
 	@python3 tests/harness/test_engineering_skills.py
@@ -136,6 +137,7 @@ test-pipeline-runners:
 	@echo "=== deterministic dispatch/reap runners ==="
 	@python3 tests/test_dispatch_resolver.py
 	@python3 tests/test_dispatch_runner.py
+	@python3 tests/test_pipeline_step_submit.py
 	@python3 tests/test_reap_runner.py
 	@python3 tests/test_queue_session_exit.py
 

@@ -1,7 +1,7 @@
 ---
 name: dispatch
 metadata:
-  version: 1.4.0
+  version: 1.5.0
 description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
@@ -43,6 +43,10 @@ explicitly asks for a visible persistent session.
    absolute pending `plan_file`, optional executor override, verified context,
    reap type/title, and a review object (`mode`, `cross_model`, and optional
    expert `runtime`/`model`/`effort`). `skip` cannot carry review overrides.
+   Freeze one code-owned pipeline selected during clarification:
+   `lifecycle/default`, `engineering/change`, or `engineering/fix`. A fix also
+   freezes `completion_policy=attention|autonomous`; other pipelines use
+   `attention`. Never infer autonomous mode after approval.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
@@ -77,7 +81,14 @@ failed requests fail closed.
 The metadata retains `interaction_policy`, `approved_plan_sha256`,
 `forbidden_actions`, and `watchdog_policy`. It also freezes the exact review
 preset, its deterministic simple/deep/skip budget (1/2/0), and the coordinator
-verification profile digest. After committing and verifying, the task writes
+verification profile digest. `engineering/fix` runs one persistent executor
+session through exact harness prompts for `reproduce`, `root-cause`,
+`regression-test`, and `minimal-fix`. The model submits a bounded result through
+`pipeline-step-submit.py`; the coordinator owns immutable receipts and never
+replays an accepted phase. `attention` allows two total fix passes and returns a
+typed decision when exhausted; explicitly approved `autonomous` allows three
+and then fails terminally. Mechanism/security failures always return attention.
+After the semantic pipeline and verification finish, the task writes
 `.task-summary.json` and remains available. The harness then drives
 `task-review-runner.py` idempotently through callback consumption, executor
 resolution, same-session verification, and terminal authorization. Material
