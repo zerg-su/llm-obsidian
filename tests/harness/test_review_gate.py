@@ -32,6 +32,7 @@ from harness.contracts import (
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
+from harness.pipeline_builtins import compiled_builtin
 from harness.workflows.review import (
     ReviewContext,
     ReviewFinding,
@@ -852,6 +853,14 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         "plan_file": str(plan),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
         "interaction_policy": "unattended",
+        "pipeline_policy": {
+            "name": "lifecycle/default",
+            "definition_sha256": compiled_builtin(
+                "lifecycle/default"
+            ).definition_sha256,
+            "completion_policy": "attention",
+            "total_pass_limit": 2,
+        },
         "routing": {
             "session": {
                 "runtime": "codex",
