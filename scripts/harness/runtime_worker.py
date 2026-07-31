@@ -66,6 +66,15 @@ from .workflows.engineering_fix import (
     reconcile_fix,
     reconcile_retry_fix,
 )
+from .workflows.custom_sequence import (
+    CustomSequenceError,
+    CustomStepReceipt,
+    accept_custom_step,
+    custom_step_request,
+    load_custom_receipt,
+    prepare_custom_step,
+    reconcile_custom_sequence,
+)
 from research_contract import (
     ResearchContractError,
     load_artifact,
@@ -777,9 +786,15 @@ def run(
             operation_contract
         )
         pipeline_extra_commands: tuple[str, ...] = ()
+        custom_pipeline_spec = None
     except ValueError:
         try:
-            _pipeline_name, pipeline, pipeline_extra_commands = (
+            (
+                _pipeline_name,
+                pipeline,
+                pipeline_extra_commands,
+                custom_pipeline_spec,
+            ) = (
                 resolve_custom_executable(
                 store_root=spec_path.parent.parent,
                 operation_id=spec["operation_id"],
@@ -791,6 +806,8 @@ def run(
             )
         except (ContractError, OSError, ValueError):
             _pipeline_name, pipeline, pipeline_extra_commands = "", None, ()
+            custom_pipeline_spec = None
+    is_custom_pipeline = custom_pipeline_spec is not None
     last_prompt_digest = ""
     latest_screen_digest = ""
     latest_prompt_state = "unknown"
@@ -802,7 +819,18 @@ def run(
     invalid_control_digest = ""
     fix_callback_digest = ""
     fix_callback_stable_reads = 0
-    fix_transport_complete = _pipeline_name != "engineering/fix"
+    fix_result_digest = ""
+    fix_result_stable_reads = 0
+    fix_submit_attempt_digest = ""
+    fix_transport_complete = (
+        _pipeline_name != "engineering/fix" or is_custom_pipeline
+    )
+    custom_transport_complete = not is_custom_pipeline
+    custom_callback_digest = ""
+    custom_callback_stable_reads = 0
+    custom_result_digest = ""
+    custom_result_stable_reads = 0
+    custom_submit_attempt_digest = ""
 
     def inspect_control() -> None:
         nonlocal handled_control_id, invalid_control_digest
@@ -1337,6 +1365,8 @@ def run(
 
     def drive_fix_transport() -> None:
         nonlocal fix_callback_digest, fix_callback_stable_reads
+        nonlocal fix_result_digest, fix_result_stable_reads
+        nonlocal fix_submit_attempt_digest
         nonlocal fix_transport_complete
         if (
             _pipeline_name != "engineering/fix"
@@ -1416,12 +1446,27 @@ def run(
                         "engineering/fix controller receipt changed"
                     )
             else:
+                try:
+                    initial_request = json.loads(
+                        (spec["cwd"] / ".task-pipeline-step-request.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    initial_head_sha = str(
+                        initial_request.get("input_head_sha")
+                        if isinstance(initial_request, dict)
+                        else ""
+                    )
+                except (OSError, json.JSONDecodeError):
+                    initial_head_sha = git_head()
+                if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
+                    raise RuntimeWorkerError("pipeline initial HEAD is unavailable")
                 controller = {
                     "schema_version": 1,
                     "operation_id": spec["operation_id"],
                     "definition_sha256": pipeline.definition_sha256,
                     "approved_plan_sha256": approved_plan_sha256,
-                    "initial_head_sha": git_head(),
+                    "initial_head_sha": initial_head_sha,
                     "iteration": 0,
                 }
                 write_immutable_json(controller_path, controller)
@@ -1740,6 +1785,31 @@ def run(
             try:
                 raw = callback_path.read_bytes()
             except FileNotFoundError:
+                result_path = spec["cwd"] / result_pointer
+                result_digest = _bounded_file_sha256(result_path)
+                if result_digest:
+                    if result_digest != fix_result_digest:
+                        fix_result_digest = result_digest
+                        fix_result_stable_reads = 1
+                    else:
+                        fix_result_stable_reads += 1
+                    if (
+                        fix_result_stable_reads >= 2
+                        and fix_submit_attempt_digest != result_digest
+                    ):
+                        fix_submit_attempt_digest = result_digest
+                        subprocess.run(
+                            [
+                                sys.executable,
+                                str(trusted_vault / "scripts" / "pipeline-step-submit.py"),
+                                "--worktree",
+                                str(spec["cwd"]),
+                            ],
+                            cwd=spec["cwd"],
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
                 return
             if not raw or len(raw) > MAX_OUTBOX_BYTES:
                 raise RuntimeWorkerError(
@@ -1781,6 +1851,9 @@ def run(
             )
             fix_callback_digest = ""
             fix_callback_stable_reads = 0
+            fix_result_digest = ""
+            fix_result_stable_reads = 0
+            fix_submit_attempt_digest = ""
         except (
             FixWorkflowError,
             RuntimeWorkerError,
@@ -1790,6 +1863,319 @@ def run(
             json.JSONDecodeError,
         ):
             summary_attention("pipeline-fix-callback-invalid")
+
+    def notify_custom_step(request: dict[str, object]) -> None:
+        operation_id = str(request["operation_id"])
+        notify_path = (
+            spec_path.parent
+            / "pipeline-custom"
+            / "notifications"
+            / f"{operation_id}.json"
+        )
+        marker = {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "step_id": str(request["step_id"]),
+            "visit": int(request["visit"]),
+            "status": "sent",
+        }
+        if notify_path.is_file() and not notify_path.is_symlink():
+            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
+                raise RuntimeWorkerError("custom step notification changed")
+            return
+        allowed = request["allowed_outcomes"]
+        if not isinstance(allowed, list):
+            raise RuntimeWorkerError("custom step outcomes are unavailable")
+        message = (
+            f"Typed custom step {request['step_id']} visit {request['visit']} "
+            "is ready in .task-pipeline-step-request.json. Complete only this "
+            "registered step, write its exact evidence/result, choose one of "
+            f"these outcomes: {', '.join(str(item) for item in allowed)}; then "
+            "publish with pipeline-step-submit.py. Remain in this same session "
+            "for the next harness-owned transition."
+        )
+        if len(message.encode()) > 4096:
+            raise RuntimeWorkerError("custom step notification exceeds its bound")
+        cmux_adapter.send(spec["surface_id"], message)
+        cmux_adapter.send_key(spec["surface_id"], "Enter")
+        write_immutable_json(notify_path, marker)
+
+    def notify_custom_finalization(receipt_count: int) -> None:
+        notify_path = spec_path.parent / "pipeline-custom" / "finalization-notify.json"
+        marker = {
+            "schema_version": 1,
+            "operation_id": spec["operation_id"],
+            "receipt_count": receipt_count,
+            "status": "sent",
+        }
+        if notify_path.is_file() and not notify_path.is_symlink():
+            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
+                raise RuntimeWorkerError("custom finalization notification changed")
+            return
+        message = (
+            f"All {receipt_count} custom model-step receipts are accepted. "
+            "Finish the task in this same session, commit the approved result, "
+            "run only task-specific checks not already owned by the harness, "
+            "and write the canonical .task-summary.json. The harness now owns "
+            "configured verification and review."
+        )
+        cmux_adapter.send(spec["surface_id"], message)
+        cmux_adapter.send_key(spec["surface_id"], "Enter")
+        write_immutable_json(notify_path, marker)
+
+    def notify_custom_attention(
+        outcome: str,
+        receipt: CustomStepReceipt | None,
+    ) -> None:
+        receipt_sha256 = receipt.receipt_sha256 if receipt is not None else ""
+        path = spec["cwd"] / ".task-needs-attention.json"
+        packet = {
+            "version": 1,
+            "id": f"custom-decision-{(receipt_sha256 or pipeline.definition_sha256)[:24]}",
+            "status": "pending",
+            "task_name": "custom pipeline decision",
+            "category": "pipeline-decision",
+            "reason": "The approved custom pipeline reached a declared terminal outcome",
+            "question": f"Resolve declared outcome: {outcome}",
+            "worktree": str(spec["cwd"]),
+            "task_surface": spec["surface_id"],
+            "raised_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "receipt_operation_id": receipt.operation_id if receipt is not None else "",
+            "receipt_sha256": receipt_sha256,
+            "allowed_decisions": ["stop", "resume"],
+        }
+        if path.is_file() and not path.is_symlink():
+            if json.loads(path.read_text(encoding="utf-8")) != packet:
+                raise RuntimeWorkerError("custom decision packet changed")
+        else:
+            _atomic_json(path, packet)
+        notify_path = spec_path.parent / "pipeline-custom" / "attention-notify.json"
+        if notify_path.is_file() and not notify_path.is_symlink():
+            return
+        cmux_adapter.send(
+            spec["origin_surface"],
+            "Typed custom pipeline escalation received. Inspect "
+            f"{path} and resolve from the originating coordinator.",
+        )
+        cmux_adapter.send_key(spec["origin_surface"], "Enter")
+        write_immutable_json(
+            notify_path,
+            {
+                "schema_version": 1,
+                "operation_id": spec["operation_id"],
+                "receipt_sha256": receipt_sha256,
+                "status": "sent",
+            },
+        )
+
+    def drive_custom_transport() -> None:
+        nonlocal custom_callback_digest, custom_callback_stable_reads
+        nonlocal custom_result_digest, custom_result_stable_reads
+        nonlocal custom_submit_attempt_digest, custom_transport_complete
+        if (
+            not is_custom_pipeline
+            or custom_pipeline_spec is None
+            or pipeline is None
+            or callback_handled
+            or custom_transport_complete
+        ):
+            return
+        try:
+            meta = json.loads(
+                (spec["cwd"] / ".task-meta.json").read_text(encoding="utf-8")
+            )
+            policy = meta.get("pipeline_policy") if isinstance(meta, dict) else None
+            if (
+                not isinstance(policy, dict)
+                or policy.get("definition_sha256") != pipeline.definition_sha256
+            ):
+                raise RuntimeWorkerError("custom metadata mismatches its compiled contract")
+            approved_plan_sha256 = str(meta.get("approved_plan_sha256") or "")
+            controller_path = spec_path.parent / "pipeline-custom" / "controller.json"
+            if controller_path.is_symlink():
+                raise RuntimeWorkerError("custom controller must not be a symlink")
+            if controller_path.is_file():
+                controller = json.loads(controller_path.read_text(encoding="utf-8"))
+                if (
+                    not isinstance(controller, dict)
+                    or set(controller)
+                    != {
+                        "schema_version",
+                        "operation_id",
+                        "definition_sha256",
+                        "approved_plan_sha256",
+                        "initial_head_sha",
+                    }
+                    or controller.get("schema_version") != 1
+                    or controller.get("operation_id") != spec["operation_id"]
+                    or controller.get("definition_sha256") != pipeline.definition_sha256
+                    or controller.get("approved_plan_sha256") != approved_plan_sha256
+                ):
+                    raise RuntimeWorkerError("custom controller receipt changed")
+            else:
+                initial_request = json.loads(
+                    (spec["cwd"] / ".task-pipeline-step-request.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                initial_head_sha = str(
+                    initial_request.get("input_head_sha")
+                    if isinstance(initial_request, dict)
+                    else ""
+                )
+                if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
+                    raise RuntimeWorkerError("custom initial HEAD is unavailable")
+                controller = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "definition_sha256": pipeline.definition_sha256,
+                    "approved_plan_sha256": approved_plan_sha256,
+                    "initial_head_sha": initial_head_sha,
+                }
+                write_immutable_json(controller_path, controller)
+            receipt_root = spec_path.parent / "pipeline-custom" / "receipts"
+            receipts: list[CustomStepReceipt] = []
+            if receipt_root.is_dir():
+                paths = sorted(receipt_root.glob("*.json"))
+                expected_names = [f"{index:03d}.json" for index in range(len(paths))]
+                if [path.name for path in paths] != expected_names:
+                    raise RuntimeWorkerError("custom receipts are not a contiguous prefix")
+                receipts = [load_custom_receipt(path) for path in paths]
+            parent = store.read(spec["owner_id"], spec["operation_id"])
+            progress = reconcile_custom_sequence(
+                parent,
+                custom_pipeline_spec,
+                definition_sha256=pipeline.definition_sha256,
+                approved_plan_sha256=approved_plan_sha256,
+                initial_head_sha=str(controller["initial_head_sha"]),
+                receipts=tuple(receipts),
+            )
+            if progress.action == "attention":
+                notify_custom_attention(progress.terminal_outcome, progress.prior_receipt)
+                summary_attention(
+                    f"pipeline-custom-{progress.terminal_outcome}",
+                    AttentionReason.ATTENTION_REQUIRED,
+                )
+                return
+            if progress.action == "complete":
+                custom_transport_complete = True
+                notify_custom_finalization(len(receipts))
+                emit_compiled_pipeline_event(
+                    spec["cwd"],
+                    event="custom-model-steps-complete",
+                    pipeline_id=pipeline.definition.pipeline_id,
+                    pipeline_version=pipeline.definition.version,
+                    profile=pipeline.definition.profile,
+                    compiler_outcome="custom-resolved",
+                    definition_sha=pipeline.definition_sha256,
+                    primitive_count=len(pipeline.definition.steps),
+                    loop_iteration=max(0, len(receipts) - 1),
+                    terminal_category="model-steps-complete",
+                )
+                return
+            if spec["task_summary_pointer"].is_file():
+                _atomic_json(
+                    spec_path.parent / "pipeline-custom" / "early-summary.json",
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "status": "ignored-until-model-steps-complete",
+                    },
+                )
+            round_ = prepare_custom_step(
+                store,
+                parent,
+                custom_pipeline_spec,
+                definition_sha256=pipeline.definition_sha256,
+                approved_plan_sha256=approved_plan_sha256,
+                initial_head_sha=str(controller["initial_head_sha"]),
+                receipts=tuple(receipts),
+            )
+            request = custom_step_request(round_)
+            _atomic_json(spec["cwd"] / ".task-pipeline-step-request.json", request)
+            retarget_fix_callback(
+                operation_id=round_.spec.operation_id,
+                run_id=round_.run_id,
+                callback_pointer=".task-pipeline-step-callback.json",
+            )
+            notify_custom_step(request)
+            _generation, operation_id, run_id, callback_path = _callback_target(spec)
+            if operation_id != round_.spec.operation_id or run_id != round_.run_id:
+                raise RuntimeWorkerError("custom callback target changed")
+
+            if not callback_path.exists():
+                result_path = spec["cwd"] / str(request["result_pointer"])
+                result_digest = _bounded_file_sha256(result_path)
+                if result_digest:
+                    if result_digest != custom_result_digest:
+                        custom_result_digest = result_digest
+                        custom_result_stable_reads = 1
+                    else:
+                        custom_result_stable_reads += 1
+                    if (
+                        custom_result_stable_reads >= 2
+                        and custom_submit_attempt_digest != result_digest
+                    ):
+                        custom_submit_attempt_digest = result_digest
+                        subprocess.run(
+                            [
+                                sys.executable,
+                                str(trusted_vault / "scripts" / "pipeline-step-submit.py"),
+                                "--worktree",
+                                str(spec["cwd"]),
+                            ],
+                            cwd=spec["cwd"],
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
+                return
+            raw = callback_path.read_bytes()
+            if not raw or len(raw) > MAX_OUTBOX_BYTES:
+                raise RuntimeWorkerError("custom callback is invalid")
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != custom_callback_digest:
+                custom_callback_digest = digest
+                custom_callback_stable_reads = 1
+                return
+            custom_callback_stable_reads += 1
+            if custom_callback_stable_reads < 2:
+                return
+            envelope = _envelope(json.loads(raw))
+            accepted = accept_custom_step(
+                store,
+                round_,
+                envelope,
+                current_head_sha=git_head(),
+                receipt_path=receipt_root / f"{round_.visit:03d}.json",
+            )
+            callback_path.unlink()
+            emit_compiled_pipeline_event(
+                spec["cwd"],
+                event="custom-step-accepted",
+                pipeline_id=pipeline.definition.pipeline_id,
+                pipeline_version=pipeline.definition.version,
+                profile=pipeline.definition.profile,
+                compiler_outcome="custom-resolved",
+                definition_sha=pipeline.definition_sha256,
+                primitive_count=len(pipeline.definition.steps),
+                loop_iteration=accepted.visit,
+                terminal_category=accepted.step_id,
+            )
+            custom_callback_digest = ""
+            custom_callback_stable_reads = 0
+            custom_result_digest = ""
+            custom_result_stable_reads = 0
+            custom_submit_attempt_digest = ""
+        except (
+            CustomSequenceError,
+            RuntimeWorkerError,
+            OSError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            summary_attention("pipeline-custom-callback-invalid")
 
     def recover_task_summary_attention() -> None:
         nonlocal callback_handled, summary_digest, summary_stable_reads
@@ -1830,7 +2216,12 @@ def run(
         nonlocal callback_handled, summary_digest, summary_stable_reads
         if callback_handled:
             return
-        if _pipeline_name == "engineering/fix" and not fix_transport_complete:
+        if (
+            _pipeline_name == "engineering/fix"
+            and not fix_transport_complete
+            or is_custom_pipeline
+            and not custom_transport_complete
+        ):
             return
         summary_path: Path = spec["task_summary_pointer"]
         try:
@@ -2367,7 +2758,7 @@ def run(
             primitive_shape = tuple(
                 step.primitive_id for step in steps
             )
-            if primitive_shape not in {
+            if not is_custom_pipeline and primitive_shape not in {
                 ("model_step", "review"),
                 ("model_step", "verify", "review"),
                 (
@@ -3890,15 +4281,40 @@ def run(
                     handle.process_identity,
                 )
             )
-            typed_result_sha256 = (
-                _bounded_file_sha256(
-                    spec["cwd"] / spec["task_summary_pointer"]
+            typed_result_path = spec["cwd"] / spec["task_summary_pointer"]
+            if (
+                spec["callback_mode"] == "task-summary"
+                and (
+                    _pipeline_name == "engineering/fix"
+                    and not fix_transport_complete
+                    or is_custom_pipeline
+                    and not custom_transport_complete
                 )
+            ):
+                try:
+                    step_request = json.loads(
+                        (spec["cwd"] / ".task-pipeline-step-request.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    typed_result_path = spec["cwd"] / str(
+                        step_request.get("result_pointer") or ""
+                    )
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    pass
+            typed_result_sha256 = (
+                _bounded_file_sha256(typed_result_path)
                 if spec["callback_mode"] == "task-summary"
                 else ""
             )
             callback_sha256 = ""
-            if spec["callback_mode"] != "task-summary":
+            if (
+                spec["callback_mode"] != "task-summary"
+                or _pipeline_name == "engineering/fix"
+                and not fix_transport_complete
+                or is_custom_pipeline
+                and not custom_transport_complete
+            ):
                 try:
                     callback_sha256 = _bounded_file_sha256(
                         _callback_target(spec)[3]
@@ -3925,6 +4341,7 @@ def run(
                 if spec["callback_mode"] == "task-summary":
                     recover_task_summary_attention()
                     drive_fix_transport()
+                    drive_custom_transport()
                     inspect_task_summary()
                 elif spec["callback_mode"] in {
                     "research-fetch",
@@ -3966,6 +4383,7 @@ def run(
         if spec["callback_mode"] == "task-summary":
             recover_task_summary_attention()
             drive_fix_transport()
+            drive_custom_transport()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",
@@ -4066,10 +4484,16 @@ def run(
                 provider_exited = True
         if (
             provider_exited
-            and _pipeline_name == "engineering/fix"
-            and not fix_transport_complete
+            and (
+                _pipeline_name == "engineering/fix"
+                and not fix_transport_complete
+                or is_custom_pipeline
+                and not custom_transport_complete
+            )
             and not callback_handled
         ):
+            recovery_kind = "custom" if is_custom_pipeline else "fix"
+            recovery_root = spec_path.parent / f"pipeline-{recovery_kind}"
             parent_record = store.read(
                 spec["owner_id"], spec["operation_id"]
             )
@@ -4087,9 +4511,7 @@ def run(
                     )
                 except SupervisorError:
                     write_immutable_json(
-                        spec_path.parent
-                        / "pipeline-fix"
-                        / "provider-restart-exhausted.json",
+                        recovery_root / "provider-restart-exhausted.json",
                         {
                             "schema_version": 1,
                             "operation_id": spec["operation_id"],
@@ -4101,7 +4523,7 @@ def run(
                         },
                     )
                     summary_attention(
-                        "pipeline-fix-provider-restart-exhausted",
+                        f"pipeline-{recovery_kind}-provider-restart-exhausted",
                         AttentionReason.RETRY_EXHAUSTED,
                     )
                 else:
@@ -4168,8 +4590,7 @@ def run(
                             ).encode()
                         ).hexdigest()
                         write_immutable_json(
-                            spec_path.parent
-                            / "pipeline-fix"
+                            recovery_root
                             / (
                                 "provider-restart-"
                                 f"{budgeted.model_restarts}.json"
@@ -4214,7 +4635,7 @@ def run(
                                 process, restarted_handle
                             )
                         summary_attention(
-                            "pipeline-fix-provider-restart-failed",
+                            f"pipeline-{recovery_kind}-provider-restart-failed",
                             AttentionReason.ATTENTION_REQUIRED,
                         )
         try:
@@ -4242,6 +4663,7 @@ def run(
         if spec["callback_mode"] == "task-summary":
             recover_task_summary_attention()
             drive_fix_transport()
+            drive_custom_transport()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",

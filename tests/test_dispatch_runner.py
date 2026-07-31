@@ -287,6 +287,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                         "semantic_skills": ["review"],
                     },
                 ],
+                "transitions": [
+                    {"from_step": "tdd-slices", "outcome": "complete", "target": "verify", "max_traversals": 1},
+                    {"from_step": "verify", "outcome": "complete", "target": "review", "max_traversals": 1},
+                    {"from_step": "review", "outcome": "complete", "target": "terminal:completed", "max_traversals": 1},
+                ],
                 "controls": [],
                 "budget": {
                     "attempt_limit": 2,

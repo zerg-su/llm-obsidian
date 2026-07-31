@@ -28,6 +28,11 @@ from ..runtime_sessions import (
     RuntimeSessionResult,
 )
 from .engineering_fix import FixPhaseRound, prepare_next_phase
+from .custom_sequence import (
+    CustomStepRound,
+    custom_step_request,
+    prepare_custom_step,
+)
 
 
 T = TypeVar("T", bound=Mapping[str, object])
@@ -121,18 +126,6 @@ class DispatchRequest:
             baseline = self.custom_pipeline.spec.baseline_pipeline
             if baseline not in EXECUTABLE_BUILTINS:
                 raise ValueError("custom pipeline baseline is not executable")
-            baseline_shape = tuple(
-                step.primitive_id
-                for step in compiled_builtin(baseline).definition.steps
-            )
-            custom_shape = tuple(
-                step.primitive_id
-                for step in self.custom_pipeline.compiled.definition.steps
-            )
-            if custom_shape != baseline_shape:
-                raise ValueError(
-                    "custom pipeline shape is not executable by its baseline"
-                )
             if self.review.mode != self.custom_pipeline.spec.review_mode:
                 raise ValueError("custom review policy differs from approval")
             if self.completion_policy != self.custom_pipeline.spec.completion_policy:
@@ -143,14 +136,16 @@ class DispatchRequest:
             raise ValueError("built-in dispatch cannot carry a custom pipeline")
         if self.completion_policy not in {"attention", "autonomous"}:
             raise ValueError("dispatch completion policy is invalid")
+        custom_has_loop = (
+            self.custom_pipeline is not None
+            and any(
+                item.primitive_id == "bounded_loop"
+                for item in self.custom_pipeline.spec.controls
+            )
+        )
         if (
             self.pipeline_name != "engineering/fix"
-            and not (
-                self.pipeline_name == "custom"
-                and self.custom_pipeline is not None
-                and self.custom_pipeline.spec.baseline_pipeline
-                == "engineering/fix"
-            )
+            and not custom_has_loop
             and self.completion_policy != "attention"
         ):
             raise ValueError(
@@ -257,11 +252,19 @@ def _fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
     }
 
 
-def _write_fix_phase_request(cwd: Path, round_: FixPhaseRound) -> None:
+def _write_pipeline_step_request(
+    cwd: Path,
+    round_: FixPhaseRound | CustomStepRound,
+) -> None:
     path = cwd / ".task-pipeline-step-request.json"
+    request = (
+        custom_step_request(round_)
+        if isinstance(round_, CustomStepRound)
+        else _fix_phase_request(round_)
+    )
     payload = (
         json.dumps(
-            _fix_phase_request(round_),
+            request,
             sort_keys=True,
             indent=2,
         )
@@ -303,7 +306,7 @@ def start_dispatch(
         if request.custom_pipeline is not None
         else request.pipeline_name
     )
-    if baseline_name == "engineering/fix":
+    if baseline_name == "engineering/fix" and request.custom_pipeline is None:
         total_pass_limit = {
             item.policy: item.total_pass_limit
             for item in contract.definition.completion_policies
@@ -314,7 +317,19 @@ def start_dispatch(
     callback_pointer = summary_pointer
     initial_callback_operation_id = ""
     initial_callback_run_id = ""
-    if baseline_name == "engineering/fix":
+    if request.custom_pipeline is not None:
+        FrozenPipelineStore(
+            runtime.store.root
+            / "owners"
+            / request.owner_id
+            / "runtime"
+        ).save(
+            operation_id=request.task_id,
+            spec=request.custom_pipeline.spec,
+            frozen=request.custom_pipeline,
+            approval=request.custom_pipeline.approval,
+        )
+    if baseline_name == "engineering/fix" and request.custom_pipeline is None:
         if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
             raise ValueError("engineering/fix requires the initial Git HEAD")
         parent = runtime.store.create(
@@ -331,22 +346,27 @@ def start_dispatch(
             receipts=(),
             iteration=0,
         )
-        _write_fix_phase_request(cwd, round_)
+        _write_pipeline_step_request(cwd, round_)
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
         initial_callback_run_id = round_.run_id
-    if request.custom_pipeline is not None:
-        FrozenPipelineStore(
-            runtime.store.root
-            / "owners"
-            / request.owner_id
-            / "runtime"
-        ).save(
-            operation_id=request.task_id,
-            spec=request.custom_pipeline.spec,
-            frozen=request.custom_pipeline,
-            approval=request.custom_pipeline.approval,
+    elif request.custom_pipeline is not None:
+        if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
+            raise ValueError("custom pipeline requires the initial Git HEAD")
+        parent = runtime.store.create(spec, lane_id=lane_id, run_id=run_id)
+        round_ = prepare_custom_step(
+            runtime.store,
+            parent,
+            request.custom_pipeline.spec,
+            definition_sha256=spec.contract_sha256,
+            approved_plan_sha256=request.plan_sha256,
+            initial_head_sha=initial_head_sha,
+            receipts=(),
         )
+        _write_pipeline_step_request(cwd, round_)
+        callback_pointer = ".task-pipeline-step-callback.json"
+        initial_callback_operation_id = round_.spec.operation_id
+        initial_callback_run_id = round_.run_id
     return runtime.start(
         RuntimeSessionRequest(
             spec=spec,

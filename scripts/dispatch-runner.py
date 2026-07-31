@@ -305,6 +305,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     if pipeline not in {*EXECUTABLE_BUILTINS, "custom"}:
         raise DispatchError("pipeline must name an executable pipeline")
     custom_pipeline_spec: Path | None = None
+    parsed_custom: PipelineSpec | None = None
     if pipeline == "custom":
         if not custom_authoring_enabled(vault_root):
             raise DispatchError("custom pipeline authoring is disabled")
@@ -348,9 +349,20 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         if custom_pipeline_spec is not None
         else pipeline
     )
-    if execution_pipeline != "engineering/fix" and completion_policy != "attention":
+    custom_has_loop = (
+        parsed_custom is not None
+        and any(
+            item.primitive_id == "bounded_loop"
+            for item in parsed_custom.controls
+        )
+    )
+    if (
+        execution_pipeline != "engineering/fix"
+        and not custom_has_loop
+        and completion_policy != "attention"
+    ):
         raise DispatchError(
-            "autonomous completion_policy requires engineering/fix"
+            "autonomous completion_policy requires a code-bounded loop"
         )
     if (
         custom_pipeline_spec is not None
@@ -658,7 +670,49 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         body = body.replace(old, new)
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
-    if execution_pipeline_for_request(request) == "engineering/fix":
+    if request["pipeline"] == "custom":
+        custom = custom_pipeline_for_request(request)
+        if custom is None:
+            raise DispatchError("custom pipeline contract is unavailable")
+        phase_contract = "\n".join(
+            (
+                "## Typed custom pipeline steps",
+                "",
+                "This is one persistent executor session controlled by the harness.",
+                "For this prompt, execute only the exact registered model step in",
+                "`.task-pipeline-step-request.json`. Use the declared semantic skills,",
+                "write evidence and the bounded result to the exact output/result",
+                "pointers, and choose only an `outcome` listed by the request:",
+                "",
+                "```json",
+                '{"schema_version":1,"status":"complete",',
+                '"outcome":"<allowed-outcome>",',
+                '"output_sha256":"<sha256-of-output-file>",',
+                '"head_sha":"<current-git-head>"}',
+                "```",
+                "",
+                "Publish the request-bound callback through:",
+                "",
+                f"`python3 {request['vault_root']}/scripts/"
+                "pipeline-step-submit.py "
+                f"--worktree {request['worktree']}`",
+                "",
+                "Stop after submission. The harness owns transitions, bounded loops,",
+                "accepted receipts, verification, review, recovery, and the next",
+                "prompt in this same session. Never repeat an accepted visit.",
+                "",
+                "Approved custom definition: "
+                f"`{custom.definition_sha256}`.",
+                "",
+            )
+        )
+        marker = "## Harness completion"
+        if marker not in body:
+            raise DispatchError(
+                "dispatch prompt completion marker is unavailable"
+            )
+        body = body.replace(marker, phase_contract + "\n" + marker, 1)
+    elif execution_pipeline_for_request(request) == "engineering/fix":
         policy = request["completion_policy"]
         phase_contract = "\n".join(
             (
@@ -1274,11 +1328,14 @@ def start(
         stage = "provider-runtime"
         stage_started = time.monotonic()
         initial_head_sha = ""
-        if execution_pipeline_for_request(request) == "engineering/fix":
+        if (
+            execution_pipeline_for_request(request) == "engineering/fix"
+            or request["pipeline"] == "custom"
+        ):
             initial_head_sha = run_command(
                 ["git", "rev-parse", "HEAD"],
                 cwd=request["worktree"],
-                label="engineering/fix initial HEAD",
+                label="pipeline initial HEAD",
             ).stdout.strip()
         launched = start_dispatch(
             lifecycle_request,

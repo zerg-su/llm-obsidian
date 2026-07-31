@@ -79,6 +79,11 @@ VALID = {
             "semantic_skills": ["review"],
         },
     ],
+    "transitions": [
+        {"from_step": "implement", "outcome": "complete", "target": "verify", "max_traversals": 1},
+        {"from_step": "verify", "outcome": "complete", "target": "review", "max_traversals": 1},
+        {"from_step": "review", "outcome": "complete", "target": "terminal:completed", "max_traversals": 1},
+    ],
     "controls": [],
     "budget": {
         "attempt_limit": 2,
@@ -131,6 +136,8 @@ check(
     "approval renders baseline delta and absolute ceiling",
     "Baseline: engineering/change" in approval
     and "Absolute ceiling:" in approval
+    and "model-calls<=" in approval
+    and "Loop bounds:" in approval
     and "Requested permissions:" in approval
     and "Explicit user approval required" in approval,
 )
@@ -172,6 +179,65 @@ check(
     "approved custom contract binds the existing dispatch operation",
     operation_spec(custom_dispatch).contract_sha256 == frozen.definition_sha256,
 )
+
+multi = deepcopy(VALID)
+multi["spec_id"] = "change-with-design-step"
+multi["steps"].insert(
+    0,
+    {
+        "step_id": "design",
+        "primitive_id": "model_step",
+        "primitive_version": "1.0.0",
+        "input_schema": "approved-plan/v1",
+        "output_schema": "approved-plan/v1",
+        "session_mode": "worktree",
+        "semantic_skills": ["dispatch"],
+    },
+)
+multi["transitions"].insert(
+    0,
+    {
+        "from_step": "design",
+        "outcome": "complete",
+        "target": "implement",
+        "max_traversals": 1,
+    },
+)
+multi_spec = parse_pipeline_spec(multi)
+multi_compiled = compile_custom_spec(
+    multi_spec,
+    builtin_registry(),
+    policy=policy,
+    capabilities=("route:resolved",),
+)
+multi_card = render_custom_approval(multi_spec, multi_compiled, policy=policy)
+multi_frozen = freeze_custom_pipeline(
+    multi_spec,
+    multi_compiled,
+    ExplicitPipelineApproval.for_card(
+        definition_sha256=multi_compiled.definition_sha256,
+        approval_card=multi_card,
+        actor="user",
+        decision="approve",
+    ),
+    multi_card,
+)
+multi_dispatch = DispatchRequest(
+    task_id="custom-dispatch-multi",
+    owner_id="owner-1",
+    plan_sha256="1" * 64,
+    context_manifest="context.json",
+    route=route,
+    review=ReviewPolicy(depth="simple"),
+    pipeline_name="custom",
+    completion_policy="attention",
+    custom_pipeline=multi_frozen,
+)
+check(
+    "approved custom composition may add registered sequential model steps",
+    operation_spec(multi_dispatch).contract_sha256
+    == multi_frozen.definition_sha256,
+)
 try:
     DispatchRequest(
         task_id="custom-dispatch-unapproved",
@@ -205,7 +271,7 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
         and stored.stat().st_mode & 0o077 == 0
         and stored.parent.stat().st_mode & 0o077 == 0,
     )
-    baseline_name, executable, extra_commands = resolve_custom_executable(
+    baseline_name, executable, extra_commands, executable_spec = resolve_custom_executable(
         store_root=Path(raw) / "runtime",
         operation_id="custom-operation-1",
         definition_sha256=frozen.definition_sha256,
@@ -217,7 +283,8 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
         "runtime resolves custom execution through the existing baseline",
         baseline_name == "engineering/change"
         and executable.definition_sha256 == frozen.definition_sha256
-        and extra_commands == ("make test-harness", "git diff --check"),
+        and extra_commands == ("make test-harness", "git diff --check")
+        and executable_spec == spec,
     )
     tampered = json.loads(stored.read_text(encoding="utf-8"))
     tampered["definition_sha256"] = "f" * 64
@@ -251,6 +318,19 @@ def expect_rejection(label: str, mutation, token: str) -> None:
         check(label, token in str(exc))
     else:
         check(label, False)
+
+
+def add_uncontrolled_loop(value: dict[str, object]) -> None:
+    value["steps"][0]["output_schema"] = "approved-plan/v1"
+    value["steps"][1]["input_schema"] = "approved-plan/v1"
+    value["transitions"].append(
+        {
+            "from_step": "implement",
+            "outcome": "retry",
+            "target": "implement",
+            "max_traversals": 2,
+        }
+    )
 
 
 expect_rejection(
@@ -340,6 +420,16 @@ expect_rejection(
     "graph bombs fail closed",
     lambda value: value.__setitem__("steps", value["steps"] * 10),
     "step limit",
+)
+expect_rejection(
+    "backward transitions require an explicit bounded-loop control",
+    add_uncontrolled_loop,
+    "bounded_loop",
+)
+expect_rejection(
+    "transition traversal bombs fail closed",
+    lambda value: value["transitions"][0].__setitem__("max_traversals", 99),
+    "traversal limit",
 )
 expect_rejection(
     "filesystem paths cannot hide in context pointers",

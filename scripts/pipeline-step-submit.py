@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate one engineering/fix result and create its fixed callback outbox."""
+"""Validate one typed pipeline-step result and create its callback outbox."""
 
 from __future__ import annotations
 
@@ -24,9 +24,10 @@ MAX_REQUEST_BYTES = 65_536
 MAX_RESULT_BYTES = 8_192
 MAX_OUTPUT_BYTES = 65_536
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+SCHEMA_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 GIT_OID_RE = re.compile(r"[0-9a-f]{40,64}\Z")
-REQUEST_FIELDS = {
+FIX_REQUEST_FIELDS = {
     "schema_version",
     "operation_id",
     "run_id",
@@ -44,12 +45,32 @@ REQUEST_FIELDS = {
     "result_pointer",
     "output_pointer",
 }
-RESULT_FIELDS = {
+CUSTOM_REQUEST_FIELDS = {
+    "schema_version",
+    "workflow_kind",
+    "operation_id",
+    "run_id",
+    "parent_operation_id",
+    "lane_id",
+    "definition_sha256",
+    "step_id",
+    "visit",
+    "input_schema",
+    "input_sha256",
+    "input_head_sha",
+    "prior_receipt_sha256",
+    "output_schema",
+    "allowed_outcomes",
+    "result_pointer",
+    "output_pointer",
+}
+FIX_RESULT_FIELDS = {
     "schema_version",
     "status",
     "output_sha256",
     "head_sha",
 }
+CUSTOM_RESULT_FIELDS = FIX_RESULT_FIELDS | {"outcome"}
 
 
 class SubmitError(RuntimeError):
@@ -154,10 +175,10 @@ def _head(worktree: Path) -> str:
     return value
 
 
-def _validate_request(
+def _validate_fix_request(
     worktree: Path, request: dict[str, object]
 ) -> tuple[dict[str, object], Path, str, Path]:
-    if set(request) != REQUEST_FIELDS:
+    if set(request) != FIX_REQUEST_FIELDS:
         raise SubmitError("request keys changed")
     if request.get("schema_version") != 1:
         raise SubmitError("request schema is unsupported")
@@ -229,6 +250,7 @@ def _validate_request(
         raise SubmitError("result and output pointers must be distinct")
     normalized = {
         **request,
+        "workflow_kind": "fix",
         "definition_sha256": definition,
         "step_id": step_id,
         "iteration": iteration,
@@ -244,6 +266,87 @@ def _validate_request(
     return normalized, result_path, output_pointer, output_path
 
 
+def _validate_custom_request(
+    worktree: Path, request: dict[str, object]
+) -> tuple[dict[str, object], Path, str, Path]:
+    if set(request) != CUSTOM_REQUEST_FIELDS:
+        raise SubmitError("custom request keys changed")
+    if request.get("schema_version") != 1 or request.get("workflow_kind") != "custom":
+        raise SubmitError("custom request schema is unsupported")
+    for field in ("operation_id", "run_id", "parent_operation_id", "lane_id"):
+        _identifier(request.get(field), field)
+    definition = _sha256(request.get("definition_sha256"), "definition_sha256")
+    step_id = _identifier(request.get("step_id"), "step_id")
+    visit = request.get("visit")
+    if type(visit) is not int or visit < 0:
+        raise SubmitError("visit must be non-negative")
+    input_schema = request.get("input_schema")
+    output_schema = request.get("output_schema")
+    if not isinstance(input_schema, str) or not SCHEMA_RE.fullmatch(input_schema):
+        raise SubmitError("input_schema must be a bounded schema identifier")
+    if not isinstance(output_schema, str) or not SCHEMA_RE.fullmatch(output_schema):
+        raise SubmitError("output_schema must be a bounded schema identifier")
+    input_sha256 = _sha256(request.get("input_sha256"), "input_sha256")
+    input_head_sha = _git_oid(request.get("input_head_sha"), "input_head_sha")
+    prior = _sha256(
+        request.get("prior_receipt_sha256"),
+        "prior_receipt_sha256",
+        optional=True,
+    )
+    if (visit == 0) != (prior == ""):
+        raise SubmitError("prior receipt binding does not match the visit")
+    allowed = request.get("allowed_outcomes")
+    if (
+        not isinstance(allowed, list)
+        or not allowed
+        or len(allowed) > 8
+        or any(not isinstance(item, str) or not IDENTIFIER_RE.fullmatch(item) for item in allowed)
+        or len(set(allowed)) != len(allowed)
+        or allowed != sorted(allowed)
+    ):
+        raise SubmitError("allowed_outcomes must be a bounded sorted set")
+    result_pointer, result_path = _pointer(
+        worktree, request.get("result_pointer"), "result_pointer"
+    )
+    output_pointer, output_path = _pointer(
+        worktree, request.get("output_pointer"), "output_pointer"
+    )
+    reserved = {REQUEST_NAME, OUTBOX_NAME}
+    if (
+        result_pointer in reserved
+        or output_pointer in reserved
+        or result_path == output_path
+    ):
+        raise SubmitError("result and output pointers must be distinct")
+    return (
+        {
+            **request,
+            "definition_sha256": definition,
+            "step_id": step_id,
+            "visit": visit,
+            "input_schema": input_schema,
+            "input_sha256": input_sha256,
+            "input_head_sha": input_head_sha,
+            "prior_receipt_sha256": prior,
+            "output_schema": output_schema,
+            "allowed_outcomes": allowed,
+            "result_pointer": result_pointer,
+            "output_pointer": output_pointer,
+        },
+        result_path,
+        output_pointer,
+        output_path,
+    )
+
+
+def _validate_request(
+    worktree: Path, request: dict[str, object]
+) -> tuple[dict[str, object], Path, str, Path]:
+    if request.get("workflow_kind") == "custom":
+        return _validate_custom_request(worktree, request)
+    return _validate_fix_request(worktree, request)
+
+
 def _envelope(
     worktree: Path,
     request: dict[str, object],
@@ -254,14 +357,18 @@ def _envelope(
     result = _read_json(
         result_path, limit=MAX_RESULT_BYTES, label="result file"
     )
-    if set(result) != RESULT_FIELDS:
+    custom = request.get("workflow_kind") == "custom"
+    expected_result_fields = CUSTOM_RESULT_FIELDS if custom else FIX_RESULT_FIELDS
+    if set(result) != expected_result_fields:
         raise SubmitError("result keys changed")
     if result.get("schema_version") != 1:
         raise SubmitError("result schema is unsupported")
     status = str(result.get("status") or "")
-    if status not in {"complete", "cannot-reproduce"}:
+    if status not in ({"complete"} if custom else {"complete", "cannot-reproduce"}):
         raise SubmitError("result status is invalid")
     if (
+        not custom
+        and
         status == "cannot-reproduce"
         and request["step_id"] != "reproduce"
     ):
@@ -281,23 +388,44 @@ def _envelope(
     declared_head = _git_oid(result.get("head_sha"), "result HEAD")
     if declared_head != observed_head:
         raise SubmitError("result HEAD does not match the current Git HEAD")
-    payload = {
-        "schema_version": 1,
-        "parent_operation_id": request["parent_operation_id"],
-        "definition_sha256": request["definition_sha256"],
-        "step_id": request["step_id"],
-        "iteration": request["iteration"],
-        "input_schema": request["input_schema"],
-        "input_sha256": request["input_sha256"],
-        "input_head_sha": request["input_head_sha"],
-        "prior_receipt_sha256": request["prior_receipt_sha256"],
-        "verification_sha256": request["verification_sha256"],
-        "output_schema": request["output_schema"],
-        "output_pointer": output_pointer,
-        "output_sha256": observed_output_sha256,
-        "head_sha": observed_head,
-        "status": status,
-    }
+    if custom:
+        outcome = _identifier(result.get("outcome"), "result outcome")
+        if outcome not in request["allowed_outcomes"]:
+            raise SubmitError("result outcome is not allowed by the request")
+        payload = {
+            "schema_version": 1,
+            "parent_operation_id": request["parent_operation_id"],
+            "definition_sha256": request["definition_sha256"],
+            "step_id": request["step_id"],
+            "visit": request["visit"],
+            "input_schema": request["input_schema"],
+            "input_sha256": request["input_sha256"],
+            "input_head_sha": request["input_head_sha"],
+            "prior_receipt_sha256": request["prior_receipt_sha256"],
+            "output_schema": request["output_schema"],
+            "output_pointer": output_pointer,
+            "output_sha256": observed_output_sha256,
+            "head_sha": observed_head,
+            "outcome": outcome,
+        }
+    else:
+        payload = {
+            "schema_version": 1,
+            "parent_operation_id": request["parent_operation_id"],
+            "definition_sha256": request["definition_sha256"],
+            "step_id": request["step_id"],
+            "iteration": request["iteration"],
+            "input_schema": request["input_schema"],
+            "input_sha256": request["input_sha256"],
+            "input_head_sha": request["input_head_sha"],
+            "prior_receipt_sha256": request["prior_receipt_sha256"],
+            "verification_sha256": request["verification_sha256"],
+            "output_schema": request["output_schema"],
+            "output_pointer": output_pointer,
+            "output_sha256": observed_output_sha256,
+            "head_sha": observed_head,
+            "status": status,
+        }
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":")
     ).encode()

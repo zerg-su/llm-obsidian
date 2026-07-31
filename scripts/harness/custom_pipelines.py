@@ -102,6 +102,25 @@ class ContextPointer:
 
 
 @dataclass(frozen=True)
+class PipelineTransition:
+    from_step: str
+    outcome: str
+    target: str
+    max_traversals: int
+
+    def __post_init__(self) -> None:
+        _identifier(self.from_step, "transition from_step")
+        _identifier(self.outcome, "transition outcome")
+        if not isinstance(self.target, str) or not (
+            ID_RE.fullmatch(self.target)
+            or self.target.startswith("terminal:")
+            and ID_RE.fullmatch(self.target.removeprefix("terminal:"))
+        ):
+            raise ContractError("transition target must name a step or terminal")
+        _integer(self.max_traversals, "transition max_traversals", minimum=1)
+
+
+@dataclass(frozen=True)
 class PipelineSpec:
     spec_id: str
     version: str
@@ -111,6 +130,7 @@ class PipelineSpec:
     input_schema: str
     output_schema: str
     steps: tuple[PipelineStep, ...]
+    transitions: tuple[PipelineTransition, ...]
     controls: tuple[PrimitiveReference, ...]
     budget: PipelineBudget
     completion_policy: str
@@ -145,6 +165,8 @@ class PipelineSpec:
             raise ContractError("completion_policy is invalid")
         if not self.steps:
             raise ContractError("PipelineSpec requires at least one step")
+        if not self.transitions:
+            raise ContractError("PipelineSpec requires typed transitions")
         if not self.human_gates or "initial-approval" not in self.human_gates:
             raise ContractError("PipelineSpec requires an initial-approval gate")
         if not self.terminal_outcomes:
@@ -160,10 +182,30 @@ class CustomPipelinePolicy:
     max_context_pointers: int
     max_context_bytes: int
     max_verification_checks: int
+    max_transitions: int
+    max_loop_traversals: int
+    max_model_calls: int
     permission_ceiling: tuple[str, ...]
     side_effect_ceiling: tuple[str, ...]
     worst_case_budget: PipelineBudget
     schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported custom pipeline policy schema")
+        for value, label in (
+            (self.max_steps, "max_steps"),
+            (self.max_controls, "max_controls"),
+            (self.max_context_pointers, "max_context_pointers"),
+            (self.max_context_bytes, "max_context_bytes"),
+            (self.max_verification_checks, "max_verification_checks"),
+            (self.max_transitions, "max_transitions"),
+            (self.max_loop_traversals, "max_loop_traversals"),
+            (self.max_model_calls, "max_model_calls"),
+        ):
+            _integer(value, f"custom policy {label}", minimum=1)
+        if not isinstance(self.worst_case_budget, PipelineBudget):
+            raise ContractError("custom policy budget is invalid")
 
     @classmethod
     def default(cls) -> "CustomPipelinePolicy":
@@ -173,6 +215,9 @@ class CustomPipelinePolicy:
             max_context_pointers=8,
             max_context_bytes=1_048_576,
             max_verification_checks=8,
+            max_transitions=16,
+            max_loop_traversals=3,
+            max_model_calls=8,
             permission_ceiling=DEFAULT_PERMISSION_CEILING,
             side_effect_ceiling=DEFAULT_SIDE_EFFECTS,
             worst_case_budget=PipelineBudget().scaled(3),
@@ -236,6 +281,8 @@ def pipeline_spec_payload(spec: PipelineSpec) -> dict[str, Any]:
 
     value = to_dict(spec)
     for item in value["steps"]:
+        item.pop("schema_version", None)
+    for item in value["transitions"]:
         item.pop("schema_version", None)
     for item in value["controls"]:
         item.pop("schema_version", None)
@@ -386,10 +433,10 @@ def resolve_custom_executable(
     registry: PrimitiveRegistry,
     policy: CustomPipelinePolicy,
     capabilities: tuple[str, ...] = (),
-) -> tuple[str, CompiledPipeline, tuple[str, ...]]:
+) -> tuple[str, CompiledPipeline, tuple[str, ...], PipelineSpec]:
     """Resolve an approved custom contract onto an existing runtime executor."""
 
-    from .pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
+    from .pipeline_builtins import EXECUTABLE_BUILTINS
 
     frozen = FrozenPipelineStore(store_root).load(
         operation_id=operation_id,
@@ -402,19 +449,11 @@ def resolve_custom_executable(
     baseline = frozen.spec.baseline_pipeline
     if baseline not in EXECUTABLE_BUILTINS:
         raise ContractError("custom executable baseline is unavailable")
-    baseline_shape = tuple(
-        step.primitive_id for step in compiled_builtin(baseline).definition.steps
-    )
-    custom_shape = tuple(
-        step.primitive_id for step in frozen.compiled.definition.steps
-    )
-    if custom_shape != baseline_shape:
-        raise ContractError("custom executable shape differs from its baseline")
     commands = tuple(
         VERIFICATION_CHECKS[check]
         for check in frozen.spec.verification_checks
     )
-    return baseline, frozen.compiled, commands
+    return baseline, frozen.compiled, commands, frozen.spec
 
 
 TOP_FIELDS = frozenset(
@@ -428,6 +467,7 @@ TOP_FIELDS = frozenset(
         "input_schema",
         "output_schema",
         "steps",
+        "transitions",
         "controls",
         "budget",
         "completion_policy",
@@ -450,6 +490,9 @@ STEP_FIELDS = frozenset(
         "session_mode",
         "semantic_skills",
     }
+)
+TRANSITION_FIELDS = frozenset(
+    {"from_step", "outcome", "target", "max_traversals"}
 )
 CONTROL_FIELDS = frozenset({"primitive_id", "version"})
 BUDGET_FIELDS = frozenset(
@@ -495,6 +538,22 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
             )
         )
 
+    raw_transitions = value["transitions"]
+    if not isinstance(raw_transitions, list):
+        raise ContractError("transitions must be an array")
+    transitions: list[PipelineTransition] = []
+    for raw_transition in raw_transitions:
+        item = _object(raw_transition, "transition")
+        _exact_fields(item, TRANSITION_FIELDS, "transition")
+        transitions.append(
+            PipelineTransition(
+                item["from_step"],
+                item["outcome"],
+                item["target"],
+                item["max_traversals"],
+            )
+        )
+
     raw_controls = value["controls"]
     if not isinstance(raw_controls, list):
         raise ContractError("controls must be an array")
@@ -535,6 +594,7 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
         input_schema=value["input_schema"],
         output_schema=value["output_schema"],
         steps=tuple(steps),
+        transitions=tuple(transitions),
         controls=tuple(controls),
         budget=budget,
         completion_policy=value["completion_policy"],
@@ -609,6 +669,108 @@ def _budget_within(value: PipelineBudget, ceiling: PipelineBudget) -> bool:
     )
 
 
+def _flow_bounds(spec: PipelineSpec) -> tuple[int, int]:
+    """Return conservative static bounds without exploring task-authored graphs."""
+
+    step_by_id = {step.step_id: step for step in spec.steps}
+    maximum_nodes = 1 + sum(
+        item.max_traversals
+        for item in spec.transitions
+        if not item.target.startswith("terminal:")
+    )
+    maximum_models = int(spec.steps[0].primitive_id == "model_step") + sum(
+        item.max_traversals
+        for item in spec.transitions
+        if not item.target.startswith("terminal:")
+        and step_by_id[item.target].primitive_id == "model_step"
+    )
+    return maximum_nodes, maximum_models
+
+
+def _validate_custom_flow(spec: PipelineSpec, policy: CustomPipelinePolicy) -> None:
+    """Validate the deliberately small sequential/decision grammar for v2.5."""
+
+    steps = spec.steps
+    step_by_id = {step.step_id: step for step in steps}
+    positions = {step.step_id: index for index, step in enumerate(steps)}
+    primitives = tuple(step.primitive_id for step in steps)
+    model_count = sum(item == "model_step" for item in primitives)
+    if (
+        model_count < 1
+        or primitives[-1] != "review"
+        or primitives.count("review") != 1
+        or primitives.count("verify") > 1
+        or any(
+            primitive not in {"model_step", "verify", "review"}
+            for primitive in primitives
+        )
+        or any(
+            primitive != "model_step"
+            for primitive in primitives[:model_count]
+        )
+        or tuple(primitives[model_count:])
+        not in {("review",), ("verify", "review")}
+    ):
+        raise ContractError(
+            "custom execution requires model steps followed by optional verify and final review"
+        )
+    if model_count > policy.max_model_calls:
+        raise ContractError("PipelineSpec exceeds the model-call limit")
+    if len(spec.transitions) > policy.max_transitions:
+        raise ContractError("PipelineSpec exceeds the transition limit")
+
+    keyed: dict[tuple[str, str], PipelineTransition] = {}
+    has_loop = False
+    for transition in spec.transitions:
+        key = (transition.from_step, transition.outcome)
+        if key in keyed:
+            raise ContractError("transition outcomes must be unique per step")
+        keyed[key] = transition
+        source = step_by_id.get(transition.from_step)
+        if source is None:
+            raise ContractError("transition source step is unknown")
+        if transition.max_traversals > policy.max_loop_traversals:
+            raise ContractError("transition exceeds the traversal limit")
+        if transition.target.startswith("terminal:"):
+            terminal = transition.target.removeprefix("terminal:")
+            if terminal not in spec.terminal_outcomes:
+                raise ContractError("transition terminal outcome is undeclared")
+            if terminal == "completed" and source is not steps[-1]:
+                raise ContractError("completed terminal is valid only after review")
+            continue
+        target = step_by_id.get(transition.target)
+        if target is None:
+            raise ContractError("transition target step is unknown")
+        if source.output_schema != target.input_schema:
+            raise ContractError("transition schemas are incompatible")
+        if positions[target.step_id] <= positions[source.step_id]:
+            has_loop = True
+            if transition.max_traversals < 2:
+                raise ContractError("backward transitions require a bounded retry")
+
+    for index, step in enumerate(steps):
+        complete = keyed.get((step.step_id, "complete"))
+        expected = (
+            f"terminal:completed"
+            if index == len(steps) - 1
+            else steps[index + 1].step_id
+        )
+        if complete is None or complete.target != expected:
+            raise ContractError(
+                "every step requires the exact linear complete transition"
+            )
+    control_ids = {item.primitive_id for item in spec.controls}
+    if has_loop and "bounded_loop" not in control_ids:
+        raise ContractError("backward transitions require bounded_loop control")
+    if not has_loop and "bounded_loop" in control_ids:
+        raise ContractError("bounded_loop control requires a backward transition")
+    maximum_nodes, maximum_models = _flow_bounds(spec)
+    if maximum_nodes > policy.max_steps * policy.max_loop_traversals:
+        raise ContractError("PipelineSpec exceeds the bounded node-visit limit")
+    if maximum_models > policy.max_model_calls:
+        raise ContractError("PipelineSpec exceeds the worst-case model-call limit")
+
+
 def compile_custom_spec(
     spec: PipelineSpec,
     registry: PrimitiveRegistry,
@@ -642,6 +804,7 @@ def compile_custom_spec(
             "PipelineSpec uses an unregistered verification check: "
             + ",".join(sorted(unknown_checks))
         )
+    _validate_custom_flow(spec, policy)
     if not set(spec.requested_permissions).issubset(policy.permission_ceiling):
         raise ContractError("PipelineSpec exceeds the code-owned permission ceiling")
     if not set(spec.requested_side_effects).issubset(policy.side_effect_ceiling):
@@ -724,12 +887,39 @@ def render_custom_approval(
 
     budget = compiled.worst_case_budget
     ceiling = policy.worst_case_budget
+    maximum_nodes, maximum_models = _flow_bounds(spec)
+    loop_edges = tuple(
+        item
+        for item in spec.transitions
+        if not item.target.startswith("terminal:")
+        and next(
+            index
+            for index, step in enumerate(spec.steps)
+            if step.step_id == item.target
+        )
+        <= next(
+            index
+            for index, step in enumerate(spec.steps)
+            if step.step_id == item.from_step
+        )
+    )
     rendered = "\n".join(
         (
             f"Custom pipeline: {spec.spec_id}@{spec.version}",
             f"Definition: {compiled.definition_sha256}",
             f"Baseline: {spec.baseline_pipeline}",
             "Delta: " + " -> ".join(step.step_id for step in spec.steps),
+            "Control flow: "
+            f"transitions={len(spec.transitions)}, loops={len(loop_edges)}, "
+            f"node-visits<={maximum_nodes}, model-calls<={maximum_models}",
+            "Loop bounds: "
+            + (
+                ", ".join(
+                    f"{item.from_step}:{item.outcome}->{item.target} x{item.max_traversals}"
+                    for item in loop_edges
+                )
+                or "none"
+            ),
             "Worst case: "
             f"attempts={budget.attempt_limit}, restarts={budget.model_restart_limit}, "
             f"deadline={budget.time_budget_seconds}s, tokens={budget.token_limit}",

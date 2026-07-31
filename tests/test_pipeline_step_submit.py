@@ -372,6 +372,69 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         unknown_result.stderr,
     )
 
+    reset_transport(worktree)
+    custom_output = b"custom evidence\n"
+    custom_request = {
+        "schema_version": 1,
+        "workflow_kind": "custom",
+        "operation_id": "custom-step-0",
+        "run_id": sha("custom-run")[:32],
+        "parent_operation_id": "custom-parent",
+        "lane_id": "custom-lane",
+        "definition_sha256": sha("custom-definition"),
+        "step_id": "design",
+        "visit": 0,
+        "input_schema": "approved-plan/v1",
+        "input_sha256": sha("custom-input"),
+        "input_head_sha": git(worktree, "rev-parse", "HEAD"),
+        "prior_receipt_sha256": "",
+        "output_schema": "approved-plan/v1",
+        "allowed_outcomes": ["complete", "revise"],
+        "result_pointer": ".task-pipeline/custom/00-design-result.json",
+        "output_pointer": ".task-pipeline/custom/00-design-output.md",
+    }
+    custom_output_path = worktree / str(custom_request["output_pointer"])
+    custom_result_path = worktree / str(custom_request["result_pointer"])
+    custom_output_path.parent.mkdir(parents=True, exist_ok=True)
+    custom_output_path.write_bytes(custom_output)
+    write_json(
+        custom_result_path,
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "outcome": "revise",
+            "output_sha256": sha_bytes(custom_output),
+            "head_sha": git(worktree, "rev-parse", "HEAD"),
+        },
+    )
+    write_json(worktree / REQUEST, custom_request)
+    custom_result = run(worktree)
+    custom_callback = json.loads((worktree / OUTBOX).read_text(encoding="utf-8"))
+    check(
+        "custom request publishes only a declared typed decision",
+        custom_result.returncode == 0
+        and custom_callback["payload"]["step_id"] == "design"
+        and custom_callback["payload"]["visit"] == 0
+        and custom_callback["payload"]["outcome"] == "revise"
+        and "status" not in custom_callback["payload"],
+        (custom_result.stderr, custom_callback),
+    )
+
+    (worktree / OUTBOX).unlink()
+    invalid_custom = dict(custom_request)
+    write_json(worktree / REQUEST, invalid_custom)
+    invalid_result_payload = json.loads(custom_result_path.read_text(encoding="utf-8"))
+    invalid_result_payload["outcome"] = "invented"
+    write_json(custom_result_path, invalid_result_payload)
+    invalid_custom_result = run(worktree)
+    check(
+        "custom outcome outside the frozen request fails closed",
+        invalid_custom_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "not allowed" in invalid_custom_result.stderr,
+        invalid_custom_result.stderr,
+    )
+
 
 if failures:
     raise SystemExit(f"{len(failures)} pipeline submit test(s) failed")

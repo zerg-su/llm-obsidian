@@ -10,6 +10,7 @@ test-harness:
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_custom_pipelines.py
+	@python3 tests/harness/test_custom_sequence.py
 	@python3 tests/harness/test_liveness.py
 	@python3 tests/harness/test_pipeline_builtins.py
 	@python3 tests/harness/test_regressions.py
