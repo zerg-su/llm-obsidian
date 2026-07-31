@@ -198,19 +198,38 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worktree", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--input-file", type=Path)
     args = parser.parse_args()
     worktree = args.worktree.expanduser().resolve()
     state_dir = args.state_dir.expanduser().resolve()
+    input_file: Path | None = None
     try:
+        if args.input_file is not None:
+            input_file = args.input_file.expanduser()
+            expected_input = state_dir / ".review-input.json"
+            if (
+                input_file.is_symlink()
+                or input_file.resolve() != expected_input
+                or not input_file.is_file()
+                or input_file.stat().st_size > 1_000_000
+            ):
+                raise ReviewSubmitError(
+                    "review input must be the exact bounded scratch file"
+                )
+            raw = input_file.read_text(encoding="utf-8")
+        else:
+            raw = sys.stdin.read()
         meta = json.loads(
             (state_dir / ".review-meta.json").read_text(encoding="utf-8")
         )
         envelope = submit_review(
-            sys.stdin.read(),
+            raw,
             meta=meta,
             worktree=worktree,
             port=FileCallbackPort(state_dir / ".review-callback.json"),
         )
+        if input_file is not None:
+            input_file.unlink()
     except (
         OSError,
         json.JSONDecodeError,

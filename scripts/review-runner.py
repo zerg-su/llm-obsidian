@@ -228,6 +228,7 @@ def _materialize_prompts(
             else axis
         )
         state_dir = runtime_root / callback_root / axis_name
+        review_input = state_dir / ".review-input.json"
         command = shlex.join(
             (
                 str(Path(sys.executable).resolve()),
@@ -236,6 +237,8 @@ def _materialize_prompts(
                 str(product_root),
                 "--state-dir",
                 str(state_dir),
+                "--input-file",
+                str(review_input),
             )
         )
         pointer = f"prompts/{axis_name}.md"
@@ -255,7 +258,8 @@ def _materialize_prompts(
                 "Each finding has `finding_id`, `severity`, `file`, `line`, `summary`,",
                 "`evidence`, and `recommendation`.",
                 "",
-                "Submit the JSON on stdin through this exact scratch-only command:",
+                f"Write the JSON to this exact scratch file: `{review_input}`.",
+                "Then run this exact scratch-only command:",
                 "",
                 f"`{command}`",
                 "",

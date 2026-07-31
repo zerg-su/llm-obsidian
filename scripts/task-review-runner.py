@@ -539,6 +539,7 @@ def _prompt(
         raise TaskReviewError("review callback directory is invalid")
     callback_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     callback_directory.chmod(0o700)
+    review_input = callback_directory / ".review-input.json"
     pointer = f"prompts/{name}"
     submit = shlex.join(
         (
@@ -548,6 +549,8 @@ def _prompt(
             str(worktree),
             "--state-dir",
             str(_callback_path(runtime_root, axis).parent),
+            "--input-file",
+            str(review_input),
         )
     )
     _atomic_text(
@@ -565,7 +568,8 @@ def _prompt(
                 "The review standard and approved plan are inside the ContextPacket.",
                 "",
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
-                "Submit exactly one review-round JSON through:",
+                f"Write exactly one review-round JSON to `{review_input}`.",
+                "Then submit it through this exact command:",
                 "",
                 f"`{submit}`",
                 "",

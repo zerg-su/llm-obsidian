@@ -192,6 +192,48 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         and callback["payload"]["run_id"] == "run-1"
         and len(callback["payload_sha256"]) == 64,
     )
+    review_input = operation / ".review-input.json"
+    review_input.write_text(json.dumps(review), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SUBMIT),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(operation),
+            "--input-file",
+            str(review_input),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "review submit accepts one exact scratch input without shell redirection",
+        result.returncode == 0 and not review_input.exists(),
+    )
+    unexpected_input = operation / "review.json"
+    unexpected_input.write_text(json.dumps(review), encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SUBMIT),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(operation),
+            "--input-file",
+            str(unexpected_input),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "review submit rejects every non-canonical input file",
+        result.returncode != 0 and unexpected_input.exists(),
+    )
     (worktree / "config" / "verification-profiles.toml").unlink()
     result = subprocess.run(
         [

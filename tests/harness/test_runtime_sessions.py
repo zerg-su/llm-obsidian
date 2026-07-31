@@ -1407,6 +1407,7 @@ check(
 scratch = Path("/tmp/owned-review-scratch")
 product = Path("/tmp/product-worktree")
 callback = scratch / "callback.json"
+review_input = scratch / ".review-input.json"
 callback_route = RuntimeRoute(
     "claude", "fable", "high", "reviewer-callback", "c" * 64
 )
@@ -1424,6 +1425,8 @@ review_submit = shlex.join(
         str(product),
         "--state-dir",
         str(callback.parent),
+        "--input-file",
+        str(review_input),
     )
 )
 quoted_product = shlex.quote(str(product))
@@ -1459,8 +1462,12 @@ check(
     "review callback profile edits and writes only isolated scratch transport",
     f"Write({callback})" in claude_callback
     and f"Edit({callback})" in claude_callback
+    and f"Write({review_input})" in claude_callback
+    and f"Edit({review_input})" in claude_callback
     and "Write(owned-review-scratch/callback.json)" in claude_callback
     and "Edit(owned-review-scratch/callback.json)" in claude_callback
+    and "Write(owned-review-scratch/.review-input.json)" in claude_callback
+    and "Edit(owned-review-scratch/.review-input.json)" in claude_callback
     and str(callback) in callback_instruction
     and "absolute path verbatim" in callback_instruction
     and f"Bash({review_submit})" in claude_callback
@@ -1480,8 +1487,12 @@ check(
         not in {
             f"Edit({callback})",
             f"Write({callback})",
+            f"Edit({review_input})",
+            f"Write({review_input})",
             "Edit(owned-review-scratch/callback.json)",
             "Write(owned-review-scratch/callback.json)",
+            "Edit(owned-review-scratch/.review-input.json)",
+            "Write(owned-review-scratch/.review-input.json)",
         }
         for item in claude_callback
     )

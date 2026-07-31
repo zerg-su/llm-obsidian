@@ -948,6 +948,8 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             str(product.resolve()),
             "--state-dir",
             str(callback_path.parent),
+            "--input-file",
+            str(callback_path.with_name(".review-input.json")),
         )
     )
     initial_request = task_runtime.started[0]

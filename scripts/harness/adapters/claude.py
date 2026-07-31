@@ -57,11 +57,16 @@ class ClaudeDriver:
         ]
         if route.profile == "reviewer-callback":
             relative_callback = ""
+            relative_input = ""
+            input_pointer: Path | None = None
             if callback_pointer is not None:
                 if not callback_pointer.is_absolute():
                     raise ClaudeDriverError(
                         "review callback pointer must be absolute"
                     )
+                input_pointer = callback_pointer.with_name(
+                    ".review-input.json"
+                )
                 if session_root is not None:
                     if not session_root.is_absolute():
                         raise ClaudeDriverError(
@@ -69,6 +74,9 @@ class ClaudeDriver:
                         )
                     try:
                         relative_callback = callback_pointer.relative_to(
+                            session_root
+                        ).as_posix()
+                        relative_input = input_pointer.relative_to(
                             session_root
                         ).as_posix()
                     except ValueError as exc:
@@ -79,13 +87,15 @@ class ClaudeDriver:
                     (
                         "--append-system-prompt",
                         (
-                            "Write the final reviewer callback only to this "
-                            f"exact file: {callback_pointer}. Pass this "
-                            "absolute path verbatim to Edit or Write"
+                            "Write the final review-round JSON only to this "
+                            f"exact input file: {input_pointer}. Pass this "
+                            "absolute path verbatim to Edit or Write, then "
+                            "run the exact review_submit.py command. Never "
+                            f"hand-write the generated callback: {callback_pointer}"
                             + (
                                 "; its exact session-relative alias is "
-                                f"{relative_callback}"
-                                if relative_callback
+                                f"{relative_input}"
+                                if relative_input
                                 else ""
                             )
                             + "; no other write location is allowed."
@@ -101,6 +111,8 @@ class ClaudeDriver:
                     (
                         f"Edit({callback_pointer})",
                         f"Write({callback_pointer})",
+                        f"Edit({input_pointer})",
+                        f"Write({input_pointer})",
                     )
                 )
                 if relative_callback:
@@ -108,6 +120,8 @@ class ClaudeDriver:
                         (
                             f"Edit({relative_callback})",
                             f"Write({relative_callback})",
+                            f"Edit({relative_input})",
+                            f"Write({relative_input})",
                         )
                     )
             if product_root is not None:
@@ -154,6 +168,8 @@ class ClaudeDriver:
                             str(product_root),
                             "--state-dir",
                             str(callback_pointer.parent),
+                            "--input-file",
+                            str(input_pointer),
                         )
                     )
                     args.append(f"Bash({submit})")
