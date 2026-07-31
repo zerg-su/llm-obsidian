@@ -30,6 +30,18 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 ## [2026-07-31] release | LLM Obsidian 2.5.0 implementation
 - Custom PipelineSpec/compiler/runtime, liveness recovery и live Claude/Codex dogfood завершены; финальный Fable + Sol review остаётся release gate. ([[LLM Obsidian 2.5.0 implementation]])
 
+## [2026-07-31] plan-close | LLM Obsidian 2.4 typed pipeline composition
+
+`c-000037` [[LLM Obsidian 2.4 typed pipeline composition result]]. Functional 2.4 scope completed; the user explicitly waived ten real-product tasks for transitional v2.4.1 while retaining eleven-task mechanism dogfood as release evidence.
+
+## [2026-07-31 02:00] dispatch | dogfood-2-4-engineering-change-profile
+
+Spawned an approved unattended task session (cmux `10C4E8D6-6508-428C-902D-B09CE2C147DA`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-dogfood-2-4-engineering-change-profile`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/dogfood-2-4-engineering-change-profile` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md`. Pre-loaded context: [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
+## [2026-07-31 00:34] dispatch | dogfood-2-4-fix-stale-reap-cache
+
+Spawned an approved unattended task session (cmux `D294279A-94FB-4C89-B39A-2F4F5286340E`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-dogfood-2-4-fix-stale-reap-cache`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/dogfood-2-4-fix-stale-reap-cache` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-07-29] review | LLM Obsidian v2.1.3 final release
 
 `c-000033` [[Cross-model review — LLM Obsidian v2.1.3 final release — b5385c24fe5b]]. 2 round(s), final verdict `approve`; reviewer claude/fable.

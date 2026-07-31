@@ -6,10 +6,12 @@ session_id: 019fab00-3160-7380-8920-4b20183afb76
 sessions:
   - id: 019fab00-3160-7380-8920-4b20183afb76
     date: 2026-07-30
+  - id: 019fab00-3160-7380-8920-4b20183afb76
+    date: 2026-07-31
 source_cwd: "/Users/zak/Projects/llm-obsidian"
-status: pending
+status: executed
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 tags:
   - plan
   - manual-save
@@ -405,3 +407,5 @@ Rollback отключает compiled dispatch path и возвращает вс�
 2.5 не начинается, пока compiler не прошёл release gate 2.4 и dogfood window.
 Следующий этап описан в
 [[2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines]].
+
+Результат: [[LLM Obsidian 2.4 typed pipeline composition result]] (reaped 2026-07-31)

@@ -1,7 +1,7 @@
 ---
 type: session
 title: "LLM Obsidian 2.5.0 implementation"
-address: c-000036
+address: c-000038
 status: completed
 created: 2026-07-31
 updated: 2026-07-31
