@@ -568,6 +568,8 @@ def _prompt(
                 "The review standard and approved plan are inside the ContextPacket.",
                 "",
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
+                "Use Read, Glob, and Grep with absolute paths for inspection.",
+                "Do not run cd or copy packet files; they are readable in place.",
                 f"Write exactly one review-round JSON to `{review_input}`.",
                 "Then submit it through this exact command:",
                 "",

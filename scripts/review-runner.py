@@ -254,6 +254,8 @@ def _materialize_prompts(
                 f"Review instructions: `{product_root / 'skills/review/SKILL.md'}`.",
                 "",
                 "Read those pointers, inspect the exact product HEAD, and do not edit it.",
+                "Use Read, Glob, and Grep with absolute paths for inspection.",
+                "Do not run cd or copy packet files; they are readable in place.",
                 "Return exactly one review-round JSON object with fields:",
                 "`schema_version`, `axis`, `verdict`, `verification_iteration`, `findings`.",
                 "Each finding has `finding_id`, `severity`, `file`, `line`, `summary`,",

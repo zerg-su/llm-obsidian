@@ -982,7 +982,10 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     )
     check(
         "review prompt submit command has one exact Claude Bash permission",
-        f"`{submit}`" in prompt_text and f"Bash({submit})" in claude_command,
+        f"`{submit}`" in prompt_text
+        and f"Bash({submit})" in claude_command
+        and "Read, Glob, and Grep with absolute paths" in prompt_text
+        and "Do not run cd or copy packet files" in prompt_text,
     )
     round_ = task_review_runner.load_active_round(
         gate_root,
