@@ -77,6 +77,7 @@ assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
 assert "awk '/^\\*/" not in dispatch
 assert "verify that its exact target exists under `wiki/`" in dispatch
+assert "reap type/title/`plan_mode`" in dispatch
 assert '"sync-config", "--apply"' in dispatch_runner
 assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch delegates anchored mechanics to typed runner")

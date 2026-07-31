@@ -486,6 +486,11 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     reap = raw.get("reap")
     if not isinstance(reap, dict):
         raise DispatchError("reap must be an object")
+    unknown_reap = set(reap) - {"type", "title", "plan_mode"}
+    if unknown_reap:
+        raise DispatchError(
+            "unknown reap keys: " + ", ".join(sorted(unknown_reap))
+        )
     reap_type = require_string(reap.get("type"), "reap.type", maximum=50)
     if reap_type not in SUMMARY_TYPES:
         raise DispatchError("reap.type is not supported")

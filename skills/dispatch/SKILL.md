@@ -39,7 +39,7 @@ internal agent unless the user requests a persistent session.
    `.vault-meta/dispatch-requests/<request-id>.json` containing schema version,
    canonical UUID, task/description, absolute vault/repo/worktree, branch/base,
    absolute pending `plan_file`, optional executor override, verified context,
-   reap type/title/mode, and a review object (`mode`, `cross_model`, and optional
+   reap type/title/`plan_mode`, and a review object (`mode`, `cross_model`, and optional
    expert `runtime`/`model`/`effort`). `skip` cannot carry review overrides.
    Freeze one code-owned pipeline selected during clarification:
    `lifecycle/default`, `engineering/change`, or `engineering/fix`. A fix also

@@ -36,7 +36,8 @@ focused cmux state. The runner performs these fail-closed stages:
    review links; do not invent or duplicate them.
 3. Call `cmux_surface_lifecycle.py prepare-reap`, binding the exact result path,
    plan, task, session, and recovery marker.
-4. Apply one `vault-write.py` transaction: `final` closes its plan; `shared` retains the unchanged pending plan.
+4. Apply one `vault-write.py` transaction: `final` closes its plan; `shared`
+   retains the unchanged master plan.
    Updates use `expected_sha256`; new pages receive a real DragonScale address.
 5. Reindex, run `validate-vault.py --summary`, then call `complete-reap`.
 6. Call `request-exit` for the exact task. The lifecycle wrapper sends graceful
@@ -60,8 +61,7 @@ vault write, review archive, `/reap`, or close command.
   closed plan.
 - Mechanism failures follow the central repair contract. Do not turn a product
   validation rejection into an auto-repair.
-- Push, publish, deploy, task worktree deletion, and branch deletion are never
-  part of reap.
+- Push, publish, deploy, task worktree deletion, and branch deletion are never part of reap.
 
 ## Interactive/legacy compatibility
 

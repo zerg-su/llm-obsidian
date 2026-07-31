@@ -197,6 +197,13 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         workspace_request["placement"] == "workspace"
         and "scripts/harness-cli.py" in workspace_prompt,
     )
+    unknown_reap = json.loads(json.dumps(raw_request))
+    unknown_reap["reap"]["mode"] = "shared"
+    expect_error(
+        "dispatch rejects unknown reap keys",
+        lambda: runner.validate_request(unknown_reap),
+        "unknown reap keys: mode",
+    )
     invalid_placement = json.loads(json.dumps(raw_request))
     invalid_placement["placement"] = "focused"
     expect_error(
