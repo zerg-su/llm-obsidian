@@ -85,6 +85,44 @@ check(
     and not codex_driver.authenticated_subscription("future output", "", 0),
 )
 check(
+    "provider restart resumes the exact Claude or Codex session",
+    runtime_worker.provider_resume_argv(
+        ("claude", "--model", "opus-5", "--", "continue"),
+        "claude",
+        "session-1",
+    )
+    == (
+        "claude",
+        "--model",
+        "opus-5",
+        "--resume",
+        "session-1",
+        "--",
+        "continue",
+    )
+    and runtime_worker.provider_resume_argv(
+        ("codex", "--model", "gpt-5.6-sol", "continue"),
+        "codex",
+        "thread-1",
+    )
+    == (
+        "codex",
+        "--model",
+        "gpt-5.6-sol",
+        "resume",
+        "thread-1",
+        "continue",
+    ),
+)
+try:
+    runtime_worker.provider_resume_argv(
+        ("codex", "continue"), "codex", ""
+    )
+except runtime_worker.RuntimeWorkerError as exc:
+    check("provider restart fails closed without a checkpoint", "checkpoint" in str(exc))
+else:
+    check("provider restart fails closed without a checkpoint", False)
+check(
     "durable harness state is repository-ignored",
     ".vault-meta/harness/" in (ROOT / ".gitignore").read_text(encoding="utf-8"),
 )

@@ -261,6 +261,35 @@ def provider_argv(
     return (str(candidate), *argv[1:])
 
 
+def provider_resume_argv(
+    argv: tuple[str, ...], runtime: str, checkpoint: str
+) -> tuple[str, ...]:
+    """Bind one provider restart to the exact previously captured session."""
+
+    if not argv or runtime not in {"claude", "codex"}:
+        raise RuntimeWorkerError("provider resume runtime is invalid")
+    if not IDENTIFIER.fullmatch(checkpoint):
+        raise RuntimeWorkerError("provider restart requires an exact checkpoint")
+    if runtime == "claude":
+        try:
+            separator = len(argv) - 1 - tuple(reversed(argv)).index("--")
+        except ValueError as exc:
+            raise RuntimeWorkerError(
+                "Claude provider command lacks the prompt separator"
+            ) from exc
+        if separator == len(argv) - 1:
+            raise RuntimeWorkerError("Claude provider command lacks its prompt")
+        return (
+            *argv[:separator],
+            "--resume",
+            checkpoint,
+            *argv[separator:],
+        )
+    if len(argv) < 2:
+        raise RuntimeWorkerError("Codex provider command lacks its prompt")
+    return (*argv[:-1], "resume", checkpoint, argv[-1])
+
+
 def provider_environment(
     spec: dict[str, Any],
     *,
@@ -4304,8 +4333,13 @@ def run(
                         signal.SIGKILL,
                     )
                     os.waitpid(old_handle.pid, 0)
-            restarted = process.start(
+            resume_command = provider_resume_argv(
                 provider_command,
+                str(spec["runtime"]),
+                checkpoint,
+            )
+            restarted = process.start(
+                resume_command,
                 cwd=spec["cwd"],
                 env=provider_env,
             )
@@ -4335,6 +4369,13 @@ def run(
                     "operation_id": spec["operation_id"],
                     "run_id": spec["run_id"],
                     "model_restarts": budgeted.model_restarts,
+                    "checkpoint": checkpoint,
+                    "provider_argv_sha256": hashlib.sha256(
+                        json.dumps(
+                            resume_command,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest(),
                     "old_process_identity": old_handle.process_identity,
                     "new_process_identity": restarted.process_identity,
                     "status": "restarted",
@@ -4344,6 +4385,7 @@ def run(
             HarnessContractError,
             OSError,
             ProcessError,
+            RuntimeWorkerError,
             StoreError,
             SupervisorError,
         ):
@@ -4650,8 +4692,13 @@ def run(
                 else:
                     restarted_handle: ProcessHandle | None = None
                     try:
-                        restarted_handle = process.start(
+                        resume_command = provider_resume_argv(
                             provider_command,
+                            str(spec["runtime"]),
+                            checkpoint,
+                        )
+                        restarted_handle = process.start(
+                            resume_command,
                             cwd=spec["cwd"],
                             env=provider_env,
                         )
@@ -4700,7 +4747,7 @@ def run(
                         )
                         command_sha256 = hashlib.sha256(
                             json.dumps(
-                                provider_command,
+                                resume_command,
                                 separators=(",", ":"),
                             ).encode()
                         ).hexdigest()
@@ -4722,6 +4769,7 @@ def run(
                                 "model_restarts": (
                                     budgeted.model_restarts
                                 ),
+                                "checkpoint": checkpoint,
                                 "old_process_group": (
                                     old_handle.process_group
                                 ),
@@ -4748,6 +4796,7 @@ def run(
                         HarnessContractError,
                         OSError,
                         ProcessError,
+                        RuntimeWorkerError,
                         StoreError,
                         SupervisorError,
                     ):
