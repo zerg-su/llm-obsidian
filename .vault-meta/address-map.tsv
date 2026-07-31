@@ -37,3 +37,15 @@ c-000036	wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md
 c-000037	wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md
 c-000038	wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md
 c-000039	wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md
+c-000040	wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md
+c-000041	wiki/repos/2.5 real dogfood RT03 review delta prototype.md
+c-000042	wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md
+c-000043	wiki/repos/2.5 real dogfood RT02 exact cmux cleanup.md
+c-000044	wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md
+c-000045	wiki/repos/2.5 real dogfood RT01 stale operation reconciliation.md
+c-000046	wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md
+c-000047	wiki/repos/2.5 real dogfood RT05 auto-close ownership.md
+c-000048	wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md
+c-000049	wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md
+c-000050	wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md
+c-000051	wiki/repos/2.5 real dogfood RT04 invalid review callbacks.md

@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-31
+updated: 2026-08-01
 tags:
   - meta
   - log
@@ -26,6 +26,95 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-08-01] reap | df250-real-rt04-invalid-review-callbacks
+
+`c-000051` [[2.5 real dogfood RT04 invalid review callbacks]]. ## RT04 — four invalid review callbacks: classified, one cause class repaired
+
+Final HEAD `300250e305a2ad9325668ddd661164e32f3907f1`. Three commits: `d670419` (regression coverage), `0c2566f` (minimal fix),
+`300250e` (all five review findings resolved).
+
+### Forensic classification (durable content-free evidence only)
+
+The four callbacks live in exactly one channel: `.vault-meta/pipeline-events.jsonl`, as `op=review-round`
+events whose `counts.invalid_callbacks` sum to exactly 4 (vs 115 valid).
+
+## [2026-08-01] reap | df250-real-rt06-runtime-neutral-telemetry
+
+`c-000049` [[2.5 real dogfood RT06 runtime-neutral telemetry]]. ## RT06 — runtime-neutral / evidence-bounded skill telemetry
+
+Final HEAD `54bfac8` (initial `b6c60a4` + review resolutions). All five review
+findings applied, none rejected, no escalation required.
+
+**Defect.** `scripts/pipeline-stats.py` counts skill invocations from Claude-only
+sources (`~/.claude/history.jsonl`, Claude transcripts), then printed an
+unconditional `## Dead-weight candidates (N of M installed, 0 invocations ...)`
+over every installed skill. Codex is skill-capable but leaves no t
+
+## [2026-08-01] reap | df250-real-rt05-auto-close-ownership
+
+`c-000047` [[2.5 real dogfood RT05 auto-close ownership]]. ## Outcome
+
+RT05 reproduced the observed `auto_close_expected=1,left_open=1` record and proved it was a pre-v2.3 telemetry false positive, not a current cmux leak or duplicate RT02 cleanup exposure. A resumable provider return was labeled from static unattended policy; the same task later completed and closed its exact surface. Current v3 dispatch keeps surface ownership on the parent operation while typed child phases own no surface.
+
+## Scoped changes
+
+- `a3d55a8` adds a deterministic ownershi
+
+## [2026-08-01 01:39] dispatch | df250-real-rt04-invalid-review-callbacks
+
+Spawned an approved unattended task session (cmux `13549CD9-F554-4520-B6B3-F2FCD69F5087`, runtime claude, model claude-opus-5) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt04-invalid-review-callbacks`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt04-invalid-review-callbacks` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
+## [2026-08-01 01:39] dispatch | df250-real-rt06-runtime-neutral-telemetry
+
+Spawned an approved unattended task session (cmux `D875A819-4554-4344-8A87-A327912C26FD`, runtime claude, model claude-opus-5) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt06-runtime-neutral-telemetry`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt06-runtime-neutral-telemetry` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[daily-pipeline-guide]]. Awaiting typed review and final reap.
+
+## [2026-08-01 01:39] dispatch | df250-real-rt05-auto-close-ownership
+
+Spawned an approved unattended task session (cmux `00EE3DD5-A274-4307-AEF2-3D9FABE537B3`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt05-auto-close-ownership`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt05-auto-close-ownership` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[2.5 real dogfood RT02 exact cmux cleanup]], [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
+## [2026-08-01] reap | df250-real-rt01-stale-operations
+
+`c-000045` [[2.5 real dogfood RT01 stale operation reconciliation]]. ## Outcome
+
+Committed `530f020c427ea330ae6bc025fd008b629bf638cb` (`fix: classify terminal legacy operations as stale`). Upgrade preflight now uses exact authoritative harness identity to exclude only same-ID legacy worktree and broker mirrors proven terminal, effect-settled, resource-free, and lane-free. It performs no lifecycle mutation.
+
+## Diagnosis
+
+Cancellation correctly terminalized the two old dispatches and cleared their owned provider, supervisor, and cmux resources, but successful reap
+
+## [2026-08-01] reap | df250-real-rt02-cmux-cleanup
+
+`c-000043` [[2.5 real dogfood RT02 exact cmux cleanup]]. # RT02 — exact cmux surface cleanup miss (backlog `cmux-acceptance-surface-cleanup`)
+
+Reproduced, diagnosed, regression-covered and repaired the backlog miss where the live acceptance run abandoned its exactly-owned cmux surface. Three commits on `task/df250-real-rt02-cmux-cleanup`; final HEAD `46f9738`.
+
+## Root cause
+
+`runtime_sessions.start` binds one owned surface per operation before the provider launches, but release was wired **only** to the success path (`_await_cleanup`). The per-operat
+
+## [2026-07-31] reap | df250-real-rt03-review-delta-prototype
+
+`c-000041` [[2.5 real dogfood RT03 review delta prototype]]. ## Outcome
+
+Tested whether same-session review verification can replace its rebuilt packet with a machine-built delta packet. The bounded prototype proved structural completeness and deterministic identity, but not live-model review-quality equivalence. Production review behavior therefore remains unchanged.
+
+## Evidence
+
+- Added `prototypes/rt03-review-delta-packet.py` and ADR `docs/decisions/rt03-same-session-review-delta-packet.md` in commit `99d56159ab66ed8b07e141ac8b42e26e0a8f7270`.
+- All s
+
+## [2026-07-31 22:35] dispatch | df250-real-rt02-cmux-cleanup
+
+Spawned an approved unattended task session (cmux `92800B96-B764-453D-8C8C-C5A78399B911`, runtime claude, model claude-opus-5) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt02-cmux-cleanup`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt02-cmux-cleanup` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
+## [2026-07-31 22:35] dispatch | df250-real-rt01-stale-operations
+
+Spawned an approved unattended task session (cmux `1BF629C4-5312-4FA2-9C6E-43227EA40095`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt01-stale-operations`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt01-stale-operations` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
+## [2026-07-31 22:35] dispatch | df250-real-rt03-review-delta-prototype
+
+Spawned an approved unattended task session (cmux `723DFC04-256C-46B7-9D0D-27A887F815C5`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt03-review-delta-prototype`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt03-review-delta-prototype` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[Unattended Pipeline]]. Awaiting typed review and final reap.
 
 ## [2026-07-31] release | LLM Obsidian 2.5.0 implementation
 - Custom PipelineSpec/compiler/runtime, liveness recovery и live Claude/Codex dogfood завершены; финальный Fable + Sol review остаётся release gate. ([[LLM Obsidian 2.5.0 implementation]])

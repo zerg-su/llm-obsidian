@@ -96,6 +96,12 @@
     "wiki/meta/daily-pipeline-guide.md"
   ],
   "harness": [
+    "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
+    "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
+    "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
+    "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
+    "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
+    "wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md",
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
@@ -201,7 +207,13 @@
     "wiki/concepts/Query-Time Retrieval.md"
   ],
   "reap": [
-    "wiki/meta/sessions/LLM Obsidian v2.1.2 semantic acceptance refactor.md"
+    "wiki/meta/sessions/LLM Obsidian v2.1.2 semantic acceptance refactor.md",
+    "wiki/repos/2.5 real dogfood RT01 stale operation reconciliation.md",
+    "wiki/repos/2.5 real dogfood RT02 exact cmux cleanup.md",
+    "wiki/repos/2.5 real dogfood RT03 review delta prototype.md",
+    "wiki/repos/2.5 real dogfood RT04 invalid review callbacks.md",
+    "wiki/repos/2.5 real dogfood RT05 auto-close ownership.md",
+    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -212,14 +224,28 @@
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md"
   ],
+  "repo": [
+    "wiki/repos/2.5 real dogfood RT01 stale operation reconciliation.md",
+    "wiki/repos/2.5 real dogfood RT02 exact cmux cleanup.md",
+    "wiki/repos/2.5 real dogfood RT03 review delta prototype.md",
+    "wiki/repos/2.5 real dogfood RT04 invalid review callbacks.md",
+    "wiki/repos/2.5 real dogfood RT05 auto-close ownership.md",
+    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md"
+  ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
     "wiki/concepts/Query-Time Retrieval.md"
   ],
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
+    "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
+    "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
+    "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
+    "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
+    "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
     "wiki/meta/reviews/Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718.md",
     "wiki/meta/reviews/Cross-model review — LLM Obsidian v2.1.3 final release — b5385c24fe5b.md",
+    "wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 18cb05f65030.md",
     "wiki/meta/reviews/Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465.md",

@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-07-31
+updated: 2026-08-01
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,12 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: [[2.5 real dogfood RT04 invalid review callbacks]] — finalized task result (`c-000051`)
+- 2026-08-01: [[2.5 real dogfood RT06 runtime-neutral telemetry]] — finalized task result (`c-000049`)
+- 2026-08-01: [[2.5 real dogfood RT05 auto-close ownership]] — finalized task result (`c-000047`)
+- 2026-08-01: [[2.5 real dogfood RT01 stale operation reconciliation]] — finalized task result (`c-000045`)
+- 2026-08-01: [[2.5 real dogfood RT02 exact cmux cleanup]] — finalized task result (`c-000043`)
+- 2026-07-31: [[2.5 real dogfood RT03 review delta prototype]] — finalized task result (`c-000041`)
 - 2026-07-31: [[LLM Obsidian 2.5.0 implementation]] — custom PipelineSpec, bounded runtime и live dogfood завершены (`c-000038`)
 - 2026-07-31: [[LLM Obsidian 2.4 typed pipeline composition result]] — 2.4 closed with explicit transitional real-task dogfood waiver (`c-000037`)
 - 2026-07-21: [[LLM Obsidian v2.1.2 semantic acceptance refactor]] — finalized task result (`c-000030`)
