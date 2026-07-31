@@ -242,6 +242,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "pipeline-step-submit.py" in fix_prompt
         and ".task-pipeline-step-request.json" in fix_prompt
         and "execute only the exact phase" in fix_prompt
+        and '"output_sha256":"<sha256-of-output-file>"' in fix_prompt
+        and "Only `reproduce` may use" in fix_prompt
         and "Stop after submission" in fix_prompt
         and "completion_policy=autonomous" in fix_prompt
         and "total_pass_limit=3" in fix_prompt,

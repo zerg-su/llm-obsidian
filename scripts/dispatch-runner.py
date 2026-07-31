@@ -546,6 +546,15 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
                 "For this prompt, execute only the exact phase in",
                 "`.task-pipeline-step-request.json`. Write its evidence and bounded",
                 "result to the request's exact `output_pointer` and `result_pointer`,",
+                "using this exact result shape:",
+                "",
+                "```json",
+                '{"schema_version":1,"status":"complete",'
+                '"output_sha256":"<sha256-of-output-file>",'
+                '"head_sha":"<current-git-head>"}',
+                "```",
+                "",
+                "Only `reproduce` may use `status=cannot-reproduce`.",
                 "then publish one callback through:",
                 "",
                 f"`python3 {request['vault_root']}/scripts/"
