@@ -104,6 +104,23 @@ class DispatchError(ValueError):
     pass
 
 
+def custom_authoring_enabled(vault_root: Path) -> bool:
+    path = vault_root / "config" / "harness.toml"
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise DispatchError("custom pipeline policy is unavailable") from exc
+    features = value.get("features")
+    enabled = (
+        features.get("custom_pipeline_authoring")
+        if isinstance(features, dict)
+        else None
+    )
+    if not isinstance(enabled, bool):
+        raise DispatchError("custom pipeline authoring switch is invalid")
+    return enabled
+
+
 def die(message: str, code: int = 3) -> NoReturn:
     print(f"dispatch-runner: {message}", file=sys.stderr)
     raise SystemExit(code)
@@ -289,6 +306,8 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         raise DispatchError("pipeline must name an executable pipeline")
     custom_pipeline_spec: Path | None = None
     if pipeline == "custom":
+        if not custom_authoring_enabled(vault_root):
+            raise DispatchError("custom pipeline authoring is disabled")
         custom_pipeline_spec = absolute_file(
             raw.get("custom_pipeline_spec"),
             "custom_pipeline_spec",

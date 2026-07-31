@@ -4,6 +4,9 @@ callback_max_bytes = 65536
 read_probe_attempts = 3
 model_restart_limit = 1
 
+[features]
+custom_pipeline_authoring = true
+
 [profiles.executor]
 network = true
 product_write = true

@@ -78,6 +78,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         ROOT / "config" / "verification-profiles.toml",
         vault / "config" / "verification-profiles.toml",
     )
+    shutil.copyfile(
+        ROOT / "config" / "harness.toml",
+        vault / "config" / "harness.toml",
+    )
     shutil.copyfile(ROOT / "scripts" / "task_sessions.py", vault / "scripts" / "task_sessions.py")
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
@@ -335,6 +339,25 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         lambda: runner.validate_request(escaped_custom),
         "request scratch",
     )
+    harness_config = vault / "config" / "harness.toml"
+    enabled_config = harness_config.read_text(encoding="utf-8")
+    harness_config.write_text(
+        enabled_config.replace(
+            "custom_pipeline_authoring = true",
+            "custom_pipeline_authoring = false",
+        ),
+        encoding="utf-8",
+    )
+    expect_error(
+        "rollback switch disables new custom authoring without touching built-ins",
+        lambda: runner.validate_request(custom_raw),
+        "disabled",
+    )
+    check(
+        "rollback switch keeps built-in dispatch available",
+        runner.validate_request(change_raw)["pipeline"] == "engineering/change",
+    )
+    harness_config.write_text(enabled_config, encoding="utf-8")
     fix_raw = json.loads(json.dumps(raw_request))
     fix_raw["pipeline"] = "engineering/fix"
     fix_raw["completion_policy"] = "autonomous"
