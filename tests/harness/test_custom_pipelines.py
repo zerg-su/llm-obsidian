@@ -23,9 +23,16 @@ from harness.custom_pipelines import (  # noqa: E402
     parse_pipeline_spec,
     render_authoring_contract,
     render_custom_approval,
+    resolve_custom_executable,
     select_builtin_baseline,
 )
 from harness.pipeline_builtins import builtin_registry  # noqa: E402
+from harness.contracts import RuntimeRoute  # noqa: E402
+from harness.workflows.dispatch import (  # noqa: E402
+    DispatchRequest,
+    ReviewPolicy,
+    operation_spec,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -72,17 +79,14 @@ VALID = {
             "semantic_skills": ["review"],
         },
     ],
-    "controls": [
-        {"primitive_id": "bounded_loop", "version": "1.0.0"},
-        {"primitive_id": "human_gate", "version": "1.0.0"},
-    ],
+    "controls": [],
     "budget": {
         "attempt_limit": 2,
         "model_restart_limit": 1,
         "time_budget_seconds": 900,
         "token_limit": 50000,
     },
-    "completion_policy": "autonomous",
+    "completion_policy": "attention",
     "requested_permissions": ["git-write", "product-worktree"],
     "requested_side_effects": ["git-write", "worktree"],
     "context_pointers": [
@@ -152,6 +156,35 @@ check(
     frozen.definition_sha256 == compiled.definition_sha256
     and frozen.approval_sha256 == approval_receipt.approval_card_sha256,
 )
+route = RuntimeRoute("codex", "sol", "high", "default", "c" * 64)
+custom_dispatch = DispatchRequest(
+    task_id="custom-dispatch-1",
+    owner_id="owner-1",
+    plan_sha256="d" * 64,
+    context_manifest="context.json",
+    route=route,
+    review=ReviewPolicy(depth="simple"),
+    pipeline_name="custom",
+    completion_policy="attention",
+    custom_pipeline=frozen,
+)
+check(
+    "approved custom contract binds the existing dispatch operation",
+    operation_spec(custom_dispatch).contract_sha256 == frozen.definition_sha256,
+)
+try:
+    DispatchRequest(
+        task_id="custom-dispatch-unapproved",
+        owner_id="owner-1",
+        plan_sha256="e" * 64,
+        context_manifest="context.json",
+        route=route,
+        pipeline_name="custom",
+    )
+except Exception as exc:
+    check("custom dispatch cannot exist before approval", "approved" in str(exc))
+else:
+    check("custom dispatch cannot exist before approval", False)
 with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
     store = FrozenPipelineStore(Path(raw) / "runtime")
     stored = store.save(
@@ -171,6 +204,19 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
         loaded.definition_sha256 == frozen.definition_sha256
         and stored.stat().st_mode & 0o077 == 0
         and stored.parent.stat().st_mode & 0o077 == 0,
+    )
+    baseline_name, executable = resolve_custom_executable(
+        store_root=Path(raw) / "runtime",
+        operation_id="custom-operation-1",
+        definition_sha256=frozen.definition_sha256,
+        registry=builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+    check(
+        "runtime resolves custom execution through the existing baseline",
+        baseline_name == "engineering/change"
+        and executable.definition_sha256 == frozen.definition_sha256,
     )
     tampered = json.loads(stored.read_text(encoding="utf-8"))
     tampered["definition_sha256"] = "f" * 64
@@ -228,8 +274,6 @@ else:
 
 equivalent = deepcopy(VALID)
 equivalent["steps"][0]["step_id"] = "tdd-slices"
-equivalent["controls"] = []
-equivalent["completion_policy"] = "attention"
 equivalent["verification_checks"] = []
 try:
     compile_custom_spec(

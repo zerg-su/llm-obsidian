@@ -17,6 +17,7 @@ from ..contracts import (
     OwnedResources,
     RuntimeRoute,
 )
+from ..custom_pipelines import FrozenCustomPipeline, FrozenPipelineStore
 from ..pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
 from ..state_machine import TERMINAL
 from ..store import OperationStore
@@ -107,18 +108,49 @@ class DispatchRequest:
     review: ReviewPolicy = ReviewPolicy()
     pipeline_name: str = "lifecycle/default"
     completion_policy: str = "attention"
+    custom_pipeline: FrozenCustomPipeline | None = None
 
     def __post_init__(self) -> None:
         if self.placement not in {"split", "workspace"}:
             raise ValueError("dispatch placement must be split or workspace")
         if len(self.plan_sha256) != 64:
             raise ValueError("dispatch requires an approved plan sha256")
-        if self.pipeline_name not in EXECUTABLE_BUILTINS:
+        if self.pipeline_name == "custom":
+            if self.custom_pipeline is None:
+                raise ValueError("custom dispatch requires an approved pipeline")
+            baseline = self.custom_pipeline.spec.baseline_pipeline
+            if baseline not in EXECUTABLE_BUILTINS:
+                raise ValueError("custom pipeline baseline is not executable")
+            baseline_shape = tuple(
+                step.primitive_id
+                for step in compiled_builtin(baseline).definition.steps
+            )
+            custom_shape = tuple(
+                step.primitive_id
+                for step in self.custom_pipeline.compiled.definition.steps
+            )
+            if custom_shape != baseline_shape:
+                raise ValueError(
+                    "custom pipeline shape is not executable by its baseline"
+                )
+            if self.review.mode != self.custom_pipeline.spec.review_mode:
+                raise ValueError("custom review policy differs from approval")
+            if self.completion_policy != self.custom_pipeline.spec.completion_policy:
+                raise ValueError("custom completion policy differs from approval")
+        elif self.pipeline_name not in EXECUTABLE_BUILTINS:
             raise ValueError("dispatch requires an executable pipeline")
+        elif self.custom_pipeline is not None:
+            raise ValueError("built-in dispatch cannot carry a custom pipeline")
         if self.completion_policy not in {"attention", "autonomous"}:
             raise ValueError("dispatch completion policy is invalid")
         if (
             self.pipeline_name != "engineering/fix"
+            and not (
+                self.pipeline_name == "custom"
+                and self.custom_pipeline is not None
+                and self.custom_pipeline.spec.baseline_pipeline
+                == "engineering/fix"
+            )
             and self.completion_policy != "attention"
         ):
             raise ValueError(
@@ -126,8 +158,14 @@ class DispatchRequest:
             )
 
 
+def _compiled_contract(request: DispatchRequest):
+    if request.custom_pipeline is not None:
+        return request.custom_pipeline.compiled
+    return compiled_builtin(request.pipeline_name)
+
+
 def operation_spec(request: DispatchRequest) -> OperationSpec:
-    contract = compiled_builtin(request.pipeline_name)
+    contract = _compiled_contract(request)
     identity = json.dumps(
         {
             "task_id": request.task_id,
@@ -143,6 +181,11 @@ def operation_spec(request: DispatchRequest) -> OperationSpec:
             },
             "placement": request.placement,
             "contract_sha256": contract.definition_sha256,
+            "custom_spec_sha256": (
+                request.custom_pipeline.spec_sha256
+                if request.custom_pipeline is not None
+                else ""
+            ),
             "completion_policy": request.completion_policy,
             "review": {
                 "mode": request.review.mode,
@@ -253,9 +296,14 @@ def start_dispatch(
     """
 
     spec = operation_spec(request)
-    contract = compiled_builtin(request.pipeline_name)
+    contract = _compiled_contract(request)
     budget = contract.worst_case_budget
-    if request.pipeline_name == "engineering/fix":
+    baseline_name = (
+        request.custom_pipeline.spec.baseline_pipeline
+        if request.custom_pipeline is not None
+        else request.pipeline_name
+    )
+    if baseline_name == "engineering/fix":
         total_pass_limit = {
             item.policy: item.total_pass_limit
             for item in contract.definition.completion_policies
@@ -266,7 +314,7 @@ def start_dispatch(
     callback_pointer = summary_pointer
     initial_callback_operation_id = ""
     initial_callback_run_id = ""
-    if request.pipeline_name == "engineering/fix":
+    if baseline_name == "engineering/fix":
         if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
             raise ValueError("engineering/fix requires the initial Git HEAD")
         parent = runtime.store.create(
@@ -287,6 +335,18 @@ def start_dispatch(
         callback_pointer = ".task-pipeline-step-callback.json"
         initial_callback_operation_id = round_.spec.operation_id
         initial_callback_run_id = round_.run_id
+    if request.custom_pipeline is not None:
+        FrozenPipelineStore(
+            runtime.store.root
+            / "owners"
+            / request.owner_id
+            / "runtime"
+        ).save(
+            operation_id=request.task_id,
+            spec=request.custom_pipeline.spec,
+            frozen=request.custom_pipeline,
+            approval=request.custom_pipeline.approval,
+        )
     return runtime.start(
         RuntimeSessionRequest(
             spec=spec,

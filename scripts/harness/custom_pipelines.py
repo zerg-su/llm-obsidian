@@ -212,7 +212,9 @@ class ExplicitPipelineApproval:
 
 @dataclass(frozen=True)
 class FrozenCustomPipeline:
+    spec: PipelineSpec
     compiled: CompiledPipeline
+    approval: ExplicitPipelineApproval
     spec_sha256: str
     approval_sha256: str
     schema_version: int = 1
@@ -254,6 +256,8 @@ class FrozenPipelineStore:
         frozen: FrozenCustomPipeline,
         approval: ExplicitPipelineApproval,
     ) -> Path:
+        if spec != frozen.spec or approval != frozen.approval:
+            raise ContractError("frozen custom pipeline inputs do not match")
         path = self._path(operation_id)
         payload = {
             "schema_version": 1,
@@ -365,6 +369,41 @@ class FrozenPipelineStore:
         ):
             raise ContractError("frozen custom pipeline definition changed")
         return frozen
+
+
+def resolve_custom_executable(
+    *,
+    store_root: Path | str,
+    operation_id: str,
+    definition_sha256: str,
+    registry: PrimitiveRegistry,
+    policy: CustomPipelinePolicy,
+    capabilities: tuple[str, ...] = (),
+) -> tuple[str, CompiledPipeline]:
+    """Resolve an approved custom contract onto an existing runtime executor."""
+
+    from .pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
+
+    frozen = FrozenPipelineStore(store_root).load(
+        operation_id=operation_id,
+        registry=registry,
+        policy=policy,
+        capabilities=capabilities,
+    )
+    if frozen.definition_sha256 != definition_sha256:
+        raise ContractError("custom executable definition does not match operation")
+    baseline = frozen.spec.baseline_pipeline
+    if baseline not in EXECUTABLE_BUILTINS:
+        raise ContractError("custom executable baseline is unavailable")
+    baseline_shape = tuple(
+        step.primitive_id for step in compiled_builtin(baseline).definition.steps
+    )
+    custom_shape = tuple(
+        step.primitive_id for step in frozen.compiled.definition.steps
+    )
+    if custom_shape != baseline_shape:
+        raise ContractError("custom executable shape differs from its baseline")
+    return baseline, frozen.compiled
 
 
 TOP_FIELDS = frozenset(
@@ -650,7 +689,9 @@ def freeze_custom_pipeline(
         ).encode()
     ).hexdigest()
     return FrozenCustomPipeline(
+        spec=spec,
         compiled=compiled,
+        approval=approval,
         spec_sha256=spec_sha256,
         approval_sha256=approval.approval_card_sha256,
     )

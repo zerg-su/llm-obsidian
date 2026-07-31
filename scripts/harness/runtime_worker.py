@@ -36,6 +36,11 @@ from .contracts import (
 )
 from .prompts import PromptDecision, classify
 from .pipeline_builtins import compiled_executable_for_contract
+from .pipeline_builtins import builtin_registry
+from .custom_pipelines import (
+    CustomPipelinePolicy,
+    resolve_custom_executable,
+)
 from .pipelines import reconcile_pipeline
 from .review_finalization import task_review_status
 from .state_machine import TERMINAL
@@ -753,7 +758,17 @@ def run(
             operation_contract
         )
     except ValueError:
-        _pipeline_name, pipeline = "", None
+        try:
+            _pipeline_name, pipeline = resolve_custom_executable(
+                store_root=spec_path.parent.parent,
+                operation_id=spec["operation_id"],
+                definition_sha256=operation_contract,
+                registry=builtin_registry(),
+                policy=CustomPipelinePolicy.default(),
+                capabilities=("route:resolved",),
+            )
+        except (ContractError, OSError, ValueError):
+            _pipeline_name, pipeline = "", None
     last_prompt_digest = ""
     next_prompt_probe = 0.0
     handled_control_id = ""
