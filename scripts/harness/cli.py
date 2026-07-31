@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 from pathlib import Path
+from time import time
 from typing import Sequence
 
 from .adapters.cmux import CmuxAdapter
@@ -295,8 +296,12 @@ def _resume(
         if not initial.resume_state:
             return store.transition(owner, operation_id, initial.state)
         store.transition(owner, operation_id, initial.resume_state)
-        if initial.attention_reason == AttentionReason.CALLBACK_TIMEOUT:
-            current = store.read(owner, operation_id)
+        current = store.read(owner, operation_id)
+        if (
+            current.state in {"running", "awaiting-callback", "verifying"}
+            and current.deadline_at
+            and current.deadline_at <= time()
+        ):
             time_budget_seconds = _continuation_time_budget(store, current)
             if time_budget_seconds is None:
                 return _attention(

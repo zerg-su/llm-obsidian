@@ -535,14 +535,14 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "owner-cli",
         "op-resume-timeout-cli",
         "attention-required",
-        reason=AttentionReason.CALLBACK_TIMEOUT,
+        reason=AttentionReason.CALLBACK_INVALID,
     )
     resumed_timeout = run_cli("resume", "op-resume-timeout-cli")
     timeout_after_resume = store.read(
         "owner-cli", "op-resume-timeout-cli"
     )
     check(
-        "CLI resume rearms one bounded callback window after explicit timeout recovery",
+        "CLI resume rearms one expired callback window after explicit recovery",
         resumed_timeout.returncode == 0
         and timeout_after_resume.state == "awaiting-callback"
         and timeout_after_resume.attempt == 2
