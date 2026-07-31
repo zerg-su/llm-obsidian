@@ -100,6 +100,16 @@ def run_unit(stats) -> None:
         "Codex counts as a skill-capable runtime",
         {"claude", "codex"} <= set(stats.SKILL_CAPABLE_RUNTIMES),
     )
+    check(
+        "an unrecognized runtime tag is clamped, not invented",
+        stats.normalize_runtime("wat") == "unknown"
+        and stats.normalize_runtime("codex") == "codex"
+        and stats.normalize_runtime("") == "unknown",
+    )
+    check(
+        "orchestration ops are recognized as model-driven",
+        {"agent-run", "review-round", "surface-lifecycle"} <= set(stats.AGENT_DRIVEN_OPS),
+    )
 
     bounded = stats.classify_zero_usage(
         ["alpha", "beta", "gamma"],
@@ -133,6 +143,25 @@ def run_unit(stats) -> None:
         "no uncovered runtime keeps the verdict complete",
         complete["uncovered_runtimes"] == [] and complete["dead"] == ["alpha"],
         repr(complete),
+    )
+
+    # 'unknown' means the runtime was never recorded, not that no model was
+    # involved. An unattributed record carrying an orchestration op proves some
+    # agent session ran, so its skill usage cannot be ruled out.
+    unattributed = stats.classify_zero_usage(
+        ["alpha"], {}, {"claude": 9, "unknown": 40}, unattributed_agent_activity=6
+    )
+    check(
+        "unattributed agent activity blocks a complete verdict",
+        unattributed["uncovered_runtimes"] == ["unattributed"],
+        repr(unattributed),
+    )
+    check(
+        "unattributed activity without an agent op stays out of the verdict",
+        stats.classify_zero_usage(
+            ["alpha"], {}, {"claude": 9, "unknown": 40}, unattributed_agent_activity=0
+        )["uncovered_runtimes"]
+        == [],
     )
 
 
@@ -193,6 +222,16 @@ def run_report_with_codex(tmp: Path) -> None:
         tail,
     )
     check(
+        "a router hint is not rendered as proof of invocation",
+        "in use" not in tail and "unverified" in tail.split("Dead-weight candidates")[0],
+        tail,
+    )
+    check(
+        "the coverage counts are not presented as comparable across runtimes",
+        "not comparable across runtimes" in out,
+        out,
+    )
+    check(
         "unhinted skills stay listed as removal candidates",
         "/gamma" in tail.split("Dead-weight candidates")[1],
         tail,
@@ -228,6 +267,100 @@ def run_report_claude_only(tmp: Path) -> None:
         tail,
     )
     check("the skill that was actually used is not a candidate", "/alpha" not in tail, tail)
+    check(
+        "the report never claims a runtime tag means 'no model'",
+        "cannot invoke skills" not in out,
+        out,
+    )
+
+
+def run_report_unattributed_agent(tmp: Path) -> None:
+    """Orchestration tagged 'unknown' is unattributed, not proof of no model."""
+    now = int(time.time())
+    vault = build_vault(
+        tmp,
+        router=[
+            {
+                "ts": now - 3600,
+                # An unrecognized tag must be clamped, not shown as its own runtime.
+                "runtime": "some-future-agent",
+                "session": "s",
+                "skill_matches": [{"name": "beta", "hits": 1}],
+                "agent_matches": [],
+            }
+        ],
+        events=[
+            {
+                "schema": 1,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now - 1800)),
+                "runtime": "unknown",
+                "session": "s",
+                "actor": "task",
+                "op": "agent-run",
+                "status": "ok",
+                "paths": [],
+                "counts": {},
+            }
+        ],
+        typed=["alpha"],
+    )
+    out = run_stats(vault)
+    check(
+        "unattributed orchestration blocks the complete dead-weight verdict",
+        "## Dead-weight candidates" not in out and "## Claude-zero skills" in out,
+        out,
+    )
+    check(
+        "the unattributed boundary is named in the zero section",
+        "unattributed" in out.split("## Claude-zero skills")[1],
+        out,
+    )
+    check(
+        "an unrecognized router tag does not become its own coverage row",
+        "some-future-agent" not in out,
+        out,
+    )
+    check(
+        "the unattributed row states missing attribution, not missing capability",
+        "| unattributed |" in out and "runtime not recorded" in out,
+        out,
+    )
+
+
+def run_report_healthy_but_empty(tmp: Path) -> None:
+    """Claude records present but no skill call: the sources are fine, the window is small."""
+    now = int(time.time())
+    vault = build_vault(
+        tmp,
+        router=[
+            {
+                "ts": now - 600,
+                "runtime": "claude",
+                "session": "s",
+                "skill_matches": [],
+                "agent_matches": [],
+            }
+        ],
+        events=[],
+    )
+    # A typed prompt that is not a skill call: evidence exists, usage does not.
+    project = str(vault.resolve())
+    (vault / "home" / ".claude" / "history.jsonl").write_text(
+        json.dumps({"project": project, "timestamp": int(time.time() * 1000), "display": "hello"})
+        + "\n",
+        encoding="utf-8",
+    )
+    out = run_stats(vault)
+    check(
+        "a healthy but empty window still makes no dead-weight claim",
+        "## Skill usage evidence unavailable" in out,
+        out,
+    )
+    check(
+        "healthy Claude sources are not blamed for the empty window",
+        "Check that Claude history/transcripts cover" not in out,
+        out,
+    )
 
 
 def run_report_no_evidence(tmp: Path) -> None:
@@ -258,8 +391,12 @@ def main() -> int:
         run_report_with_codex(Path(raw))
     with tempfile.TemporaryDirectory(prefix="pipeline-stats-claude.") as raw:
         run_report_claude_only(Path(raw))
+    with tempfile.TemporaryDirectory(prefix="pipeline-stats-unattributed.") as raw:
+        run_report_unattributed_agent(Path(raw))
     with tempfile.TemporaryDirectory(prefix="pipeline-stats-empty.") as raw:
         run_report_no_evidence(Path(raw))
+    with tempfile.TemporaryDirectory(prefix="pipeline-stats-small.") as raw:
+        run_report_healthy_but_empty(Path(raw))
     print("\nAll pipeline stats tests passed.")
     return 0
 

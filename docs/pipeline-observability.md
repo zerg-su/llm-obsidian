@@ -29,21 +29,33 @@ that boundary explicit.
 ## Skill usage is bounded evidence, not a verdict
 
 Only Claude history and transcripts record skill invocations. Codex is
-skill-capable but leaves no invocation trace, and a plain shell run has no model
-and cannot invoke a skill at all. A zero is therefore reported with its evidence
-boundary attached, and the heading states which case applies:
+skill-capable but leaves no invocation trace. A zero is therefore reported with
+its evidence boundary attached, and the heading states which case applies:
 
 | Heading | Meaning | Safe action |
 |---|---|---|
-| `Dead-weight candidates` | Skill usage was observed, and no skill-capable runtime without invocation telemetry was active | Complete verdict for this window; still confirm before removing |
-| `Claude-zero skills` | Codex was active in the window, so a zero only proves absent Claude evidence | Not a removal list; the report separates skills the router matched inside the uncovered runtime, which are in use |
-| `Skill usage evidence unavailable` | No invocation of any kind was observed | Make no claim; check that history/transcripts cover this project path and window |
+| `Dead-weight candidates` | Skill usage was observed, and nothing that could have invoked a skill unobserved was active | Complete verdict for this window; still confirm before removing |
+| `Claude-zero skills` | Codex, or orchestration under no recorded runtime, was active, so a zero only proves absent Claude evidence | Not a removal list; the report separates the skills the router matched inside that uncovered activity |
+| `Skill usage evidence unavailable` | No invocation of any kind was observed | Make no claim; widen the window, and check source coverage when no Claude record exists either |
 
-`Skill telemetry coverage` above them reports, per runtime, how many records were
-observed and whether its skill invocations are observable at all. Runtime
-attribution comes from the fields the existing seams already carry: `runtime` on
-`pipeline-events.jsonl` and on `router-hits.jsonl`. No new telemetry source,
-file, or emission point is involved.
+A router hint is a prompt-pattern match, not a recorded invocation — the report
+labels those skills unverified rather than proven in use, but they must not be
+offered for removal.
+
+`Skill telemetry coverage` above them reports per runtime how many evidence
+records were seen and whether its skill invocations are observable at all. Those
+counts are per-source presence markers: Claude accrues from four sources and the
+others from fewer, so they are not comparable across runtimes.
+
+Runtime attribution comes from the field the existing seams already carry:
+`runtime` on `pipeline-events.jsonl` and on `router-hits.jsonl`. No new telemetry
+source, file, or emission point is involved. Both seams are clamped to the same
+vocabulary, and `unknown` is rendered as **unattributed** — it means the emitting
+process carried no runtime marker, not that no model was involved. Agent-driven
+orchestration frequently lands there, so an unattributed record carrying an
+`agent-run`, `review-round`, `surface-lifecycle`, `task-complete`,
+`task-escalation` or `model-turn` op counts as uncovered and blocks the complete
+verdict.
 
 ## What the lifecycle section measures
 

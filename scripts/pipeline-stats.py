@@ -19,11 +19,12 @@ Task-tool agent usage (custom 9 + built-ins).
 
 Skill invocations are observable in Claude sources only. Codex runs the same
 skills without writing history/transcripts, so a zero is bounded evidence, not
-a verdict: while a skill-capable runtime with no invocation telemetry is
-observed active in the window (runtime-tagged router hits or pipeline events),
-zeros are reported as "Claude-zero", and skills hinted by the router in that
-uncovered runtime are held back from the removal list. Only when nothing but
-Claude was observed does the report call the remainder dead-weight candidates
+a verdict. While the window shows activity that could have invoked a skill
+unobserved — Codex, or orchestration under no recorded runtime — zeros are
+reported as "Claude-zero", and skills the router matched in that uncovered
+activity are held back from the removal list (a prompt match is intent, not a
+recorded invocation, but it is enough to keep the skill). Only when nothing of
+the sort was observed does the report call the remainder dead-weight candidates
 (their descriptions cost system-prompt budget every session — see Size
 discipline in CLAUDE.md).
 
@@ -78,8 +79,25 @@ SKILL_ROOTS = [VAULT_ROOT / "skills"]
 # Custom Claude sub-agents shipped with this repo.
 CUSTOM_AGENTS: set[str] = {"daily-summarizer"}
 
-# Runtimes that can invoke a skill at all — a plain shell/cron script run
-# ("unknown") has no model and therefore never invokes one.
+# The only runtime tags the shared seams emit. "unknown" does NOT mean "a plain
+# shell run with no model" — it means the emitting process carried no runtime
+# marker, so attribution is simply missing. Agent-driven orchestration routinely
+# lands there (in the live vault most agent-run/review-round records are
+# unattributed), which is why an unattributed record carrying an agent-driven op
+# still counts as uncovered below.
+KNOWN_RUNTIMES = frozenset({"claude", "codex", "unknown"})
+# Operations only a model-driven session performs. One of these on an
+# unattributed record proves some agent runtime was active but unrecorded.
+LIFECYCLE_OPS = frozenset({
+    "agent-run",
+    "review-round-start",
+    "review-round",
+    "task-escalation",
+    "surface-lifecycle",
+    "task-complete",
+})
+AGENT_DRIVEN_OPS = LIFECYCLE_OPS | {"model-turn", "model-turn-incomplete"}
+# Runtimes named in the seams that can invoke a skill.
 SKILL_CAPABLE_RUNTIMES = frozenset({"claude", "codex"})
 # ...of those, the ones whose skill invocations this report can actually see.
 # history.jsonl and the transcripts are Claude-only; router hits and pipeline
@@ -193,18 +211,31 @@ def seconds(value: float | None) -> str:
     return "-" if value is None else f"{value / 1000:.1f}"
 
 
+def normalize_runtime(value: object) -> str:
+    """Clamp a seam's runtime tag to the known vocabulary.
+
+    Both cross-runtime seams are normalized through here so an unexpected tag
+    never reaches the verdict logic or becomes its own coverage row.
+    """
+    runtime = str(value or "unknown")
+    return runtime if runtime in KNOWN_RUNTIMES else "unknown"
+
+
 def classify_zero_usage(
     zero_skills: list[str],
     hint_runtimes: dict[str, set[str]],
     runtime_activity: dict[str, int],
+    unattributed_agent_activity: int = 0,
 ) -> dict:
     """Split zero-invocation skills by how far the available evidence reaches.
 
     A skill with no Claude invocation is only a removal candidate when nothing
-    else could have invoked it. `uncovered_runtimes` names the skill-capable
-    runtimes observed active without invocation telemetry; `hinted_elsewhere`
-    holds the skills the router matched inside one of them, which is direct
-    evidence of use this report cannot count.
+    else could have invoked it. `uncovered_runtimes` names what was active
+    without skill-invocation telemetry: a skill-capable runtime we cannot
+    observe, plus `unattributed` when orchestration ran under no recorded
+    runtime. `hinted_elsewhere` holds the skills the router matched inside one
+    of those — a prompt match, so evidence of intent rather than of invocation,
+    but enough that the skill must not be offered for removal.
     """
     uncovered = sorted(
         runtime
@@ -213,6 +244,8 @@ def classify_zero_usage(
         and runtime in SKILL_CAPABLE_RUNTIMES
         and runtime not in SKILL_OBSERVABLE_RUNTIMES
     )
+    if unattributed_agent_activity > 0:
+        uncovered.append("unattributed")
     hinted = [
         name
         for name in zero_skills
@@ -328,7 +361,7 @@ def main() -> int:
             ts = parse_log_ts(rec.get("ts", 0))
             if ts is None or ts < cutoff:
                 continue
-            hit_runtime = str(rec.get("runtime") or "unknown")
+            hit_runtime = normalize_runtime(rec.get("runtime"))
             runtime_activity[hit_runtime] += 1
             for m in rec.get("skill_matches", []) or []:
                 name = m if isinstance(m, str) else (m.get("name") or m.get("skill") or "")
@@ -363,14 +396,13 @@ def main() -> int:
     turn_count: dict[tuple[str, str, str], int] = defaultdict(int)
     turn_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
     lifecycle_events: list[dict] = []
+    unattributed_agent_activity = 0
     for log in EVENT_LOGS:
         for rec in iter_jsonl(log):
             ts = parse_log_ts(rec.get("ts", ""))
             if ts is None or ts < cutoff:
                 continue
-            runtime = str(rec.get("runtime") or "unknown")
-            if runtime not in {"claude", "codex", "unknown"}:
-                runtime = "unknown"
+            runtime = normalize_runtime(rec.get("runtime"))
             runtime_activity[runtime] += 1
             op = base_name(str(rec.get("op") or "unknown"))
             status = str(rec.get("status") or "unknown")
@@ -382,14 +414,11 @@ def main() -> int:
             if op in {"model-turn", "model-turn-incomplete"}:
                 outcome = "completed" if op == "model-turn" else "incomplete"
                 turn_count[(runtime, role, outcome)] += 1
-            if op in {
-                "agent-run",
-                "review-round-start",
-                "review-round",
-                "task-escalation",
-                "surface-lifecycle",
-                "task-complete",
-            }:
+            if runtime == "unknown" and op in AGENT_DRIVEN_OPS:
+                # Orchestration under no recorded runtime: some agent session
+                # ran, so its skill usage cannot be ruled out.
+                unattributed_agent_activity += 1
+            if op in LIFECYCLE_OPS:
                 lifecycle_events.append(rec)
             counts = rec.get("counts")
             duration = counts.get("duration_ms") if isinstance(counts, dict) else None
@@ -541,28 +570,35 @@ def main() -> int:
     else:
         lines.append("no unattended lifecycle events captured in this window")
     lines.append("")
-    bounds = classify_zero_usage(dead, hint_runtimes, runtime_activity)
+    bounds = classify_zero_usage(
+        dead, hint_runtimes, runtime_activity, unattributed_agent_activity
+    )
     lines.append("## Skill telemetry coverage")
     lines.append("")
     lines.append(
         "Skill invocations are counted from Claude history and transcripts only. Every other "
         "skill-capable runtime executes the same skills without leaving evidence here, so its "
-        "column below is absence of measurement, not absence of use."
+        "row below is absence of measurement, not absence of use. Evidence records count "
+        "per-source activity markers (prompts, transcript tool calls, router hits, script "
+        "events); Claude draws on four sources and the others on fewer, so the counts are a "
+        "presence test and are not comparable across runtimes."
     )
     lines.append("")
-    lines.append("| Runtime | Records observed | Skill invocations observable |")
+    lines.append("| Runtime | Evidence records | Skill invocations observable |")
     lines.append("|---|---:|---|")
     for runtime in sorted(SKILL_CAPABLE_RUNTIMES | set(runtime_activity)):
         if runtime not in SKILL_CAPABLE_RUNTIMES and not runtime_activity.get(runtime):
             continue
-        observable = (
-            "yes (history + transcripts)"
+        label, observable = (
+            (runtime, "yes (history + transcripts)")
             if runtime in SKILL_OBSERVABLE_RUNTIMES
-            else "no — invocations invisible to this report"
+            else (runtime, "no — invocations invisible to this report")
             if runtime in SKILL_CAPABLE_RUNTIMES
-            else "n/a (no model; cannot invoke skills)"
+            # "unknown" is missing attribution, not a known runtime with known
+            # limits; it may well be an agent whose marker was not propagated.
+            else ("unattributed", "unknown — runtime not recorded")
         )
-        lines.append(f"| {runtime} | {runtime_activity.get(runtime, 0)} | {observable} |")
+        lines.append(f"| {label} | {runtime_activity.get(runtime, 0)} | {observable} |")
     lines.append("")
     lines.append("## Claude-only skill telemetry")
     lines.append("")
@@ -589,28 +625,38 @@ def main() -> int:
         # power, so naming every installed skill would be pure noise.
         lines.append(f"## Skill usage evidence unavailable ({len(skills)} installed)")
         lines.append("")
-        lines.append(
-            f"No skill invocation of any kind was observed in {days}d, so this window cannot "
-            "rank skills. Check that Claude history/transcripts cover this project path and "
-            "window before reading any zero as unused."
-        )
+        if runtime_activity.get("claude"):
+            # The sources are demonstrably aligned with this project, so the
+            # window is simply too small or genuinely skill-free.
+            lines.append(
+                f"Claude records exist for this project but contain no skill invocation in "
+                f"{days}d, so this window cannot rank skills. Widen --days, or take it as a "
+                "real signal that no skill ran here, before reading any zero as unused."
+            )
+        else:
+            lines.append(
+                f"No skill invocation of any kind was observed in {days}d, so this window cannot "
+                "rank skills. Check that Claude history/transcripts cover this project path and "
+                "window before reading any zero as unused."
+            )
         if uncovered:
             lines.append("")
             lines.append(
-                ", ".join(uncovered) + " was active here without skill-invocation telemetry, "
-                "so its usage would be invisible even with healthy Claude sources."
+                "Active here without skill-invocation telemetry: " + ", ".join(uncovered)
+                + ". Usage there would be invisible even with healthy Claude sources."
             )
     elif uncovered:
         lines.append(f"## Claude-zero skills ({len(dead)} of {len(skills)} installed, "
                      f"0 invocations typed+auto in {days}d)")
         lines.append("")
         lines.append(
-            "Not a dead-weight verdict: " + ", ".join(uncovered) + " was active in this window "
-            "without skill-invocation telemetry, so these zeros only prove absent Claude "
+            "Not a dead-weight verdict. Active in this window without skill-invocation "
+            "telemetry: " + ", ".join(uncovered) + ". These zeros only prove absent Claude "
             "evidence. Confirm with the user before removing any skill below."
         )
         lines.append("")
-        lines.append("Router intent observed in an uncovered runtime (in use — do not remove): "
+        lines.append("Router intent observed in an uncovered runtime (unverified — a prompt "
+                     "match, not an invocation; do not treat as removable): "
                      + (", ".join(f"/{n}" for n in bounds["hinted_elsewhere"]) or "none"))
         lines.append("")
         lines.append("Dead-weight candidates, unproven (no invocation or router evidence in any "
@@ -620,7 +666,7 @@ def main() -> int:
                      f"0 invocations typed+auto in {days}d)")
         lines.append("")
         lines.append(
-            "No skill-capable runtime without invocation telemetry was observed in this window, "
+            "Nothing was observed in this window that could invoke a skill unobserved, "
             "so these zeros are a complete verdict for it."
         )
         lines.append("")
