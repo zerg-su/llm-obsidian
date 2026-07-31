@@ -40,6 +40,27 @@ that boundary explicit.
 | Watchdog stages | Delivered warning, alert, degraded, and recovery notifications accumulated per agent run |
 | Surface outcomes | Exact-surface lifecycle outcome: auto-closed, expected left open, or auto-close missed |
 
+The `review-round` actor is `review:<runtime>:<model>:<depth>`. The fourth
+segment is the current review depth vocabulary, `simple` or `deep`. Rows emitted
+before the harness-first 2.3 port carry the retired `light` or `full` instead, so
+the two generations are not directly comparable on that segment.
+
+Valid and invalid callbacks are counted exactly once per review round and
+outcome, so repeated coordinator polls for a still-incomplete deep review do not
+inflate either side. A callback belonging to another round or verification
+iteration is not a versioned-contract violation and is never counted as invalid,
+so the schema-valid rate keeps meaning "accepted or rejected by the JSON
+contract".
+
+Known gap: `Review rounds started`, `Findings: blocking/warning/nit`, and the
+`Review round callback` duration lost their producer in the same 2.3 port that
+orphaned the callback counters, and have not been restored. Until they are, a
+report can show non-zero valid callbacks beside zero rounds started and zero
+findings; read that combination as missing instrumentation, not as a clean
+window. Findings counters additionally need a decision, because the emitted
+severity vocabulary is `critical/important/minor` while this table reports
+`blocking/warning/nit`.
+
 Durations are reported as sample count, p50, and nearest-rank p95:
 
 - **Task end-to-end** — dispatch metadata `spawned_at` to validated final reap.
@@ -157,7 +178,7 @@ commands, and absolute worktree paths are not valid arguments.
 ## Dogfood acceptance window
 
 For a release candidate, collect at least 10 completed real tasks across both
-executor directions when possible. Include full and light review modes, one
+executor directions when possible. Include simple and deep review modes, one
 bounded verification loop, and at least one deliberate escalation exercise.
 Record the report date and sample counts; do not copy task content into a release
 issue. The CI suite proves deterministic contracts, while this window measures

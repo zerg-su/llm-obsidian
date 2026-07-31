@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 from pathlib import PurePosixPath
+from collections.abc import Iterable
 from typing import Any, Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,7 +20,12 @@ from harness.workflows.review import (
     ReviewResult,
     review_round_payload,
 )
-from review_contract import ReviewContractError, parse_review_json
+from review_contract import (
+    SEVERITIES,
+    VERDICTS,
+    ReviewContractError,
+    parse_review_json,
+)
 
 
 # The authoritative review-round shape. _round_result accepts a reviewer object
@@ -44,15 +50,25 @@ FINDING_FIELDS: tuple[str, ...] = (
 
 
 def round_schema_lines() -> tuple[str, ...]:
-    """Render the enforced round schema as reviewer-facing prompt lines."""
+    """Render the enforced round schema as reviewer-facing prompt lines.
 
-    def names(fields: tuple[str, ...]) -> str:
+    Keys and enforced value vocabularies both come from the code that rejects
+    them, so a reviewer cannot satisfy the key set and still fail on a value.
+    """
+
+    def names(fields: Iterable[str]) -> str:
         return ", ".join(f"`{field}`" for field in fields)
 
     return (
         f"Return exactly one review-round JSON object with fields: {names(ROUND_FIELDS)}.",
         f"Each finding has {names(FINDING_FIELDS)}.",
         "Use exactly these keys: any extra or missing key is rejected.",
+        f"`verdict` is exactly one of {names(sorted(VERDICTS))}.",
+        f"`severity` is exactly one of {names(sorted(SEVERITIES))}.",
+        "`line` is null or a positive integer, and `schema_version` is `1`.",
+        "A `verdict` of `approve` cannot carry a `critical` or `important` finding.",
+        "Every other finding field is a non-empty string, and `file` is a "
+        "repository-relative path.",
     )
 
 

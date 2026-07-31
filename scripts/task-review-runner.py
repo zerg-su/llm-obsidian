@@ -55,6 +55,14 @@ class TaskReviewError(ValueError):
     pass
 
 
+class StaleRoundCallbackError(TaskReviewError):
+    """A callback belonging to another round or verification iteration.
+
+    Not a versioned-contract violation: the reviewer produced nothing invalid,
+    so it must never be counted against the callback schema-valid rate.
+    """
+
+
 class ActiveReviewRound(NamedTuple):
     run: ReviewGateRun
     lane: object
@@ -606,7 +614,9 @@ def _envelope(path: Path, round_: ReviewRound) -> tuple[CallbackEnvelope, Review
         or payload.get("verification_iteration")
         != round_.verification_iteration
     ):
-        raise TaskReviewError("review callback does not match the active round")
+        raise StaleRoundCallbackError(
+            "review callback does not match the active round"
+        )
     findings = tuple(
         ReviewFinding(
             finding_id=str(item.get("finding_id") or ""),
@@ -632,8 +642,29 @@ def _envelope(path: Path, round_: ReviewRound) -> tuple[CallbackEnvelope, Review
     return envelope, result
 
 
+def _counted_marker(runtime_root: Path, axis: str) -> Path:
+    return _callback_path(runtime_root, axis).parent / ".review-callback-counted.json"
+
+
+def _already_counted(marker: Path, identity: dict[str, Any], outcome: str) -> bool:
+    """True when this exact round already contributed this outcome."""
+
+    try:
+        prior = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return False
+    if not isinstance(prior, dict):
+        return False
+    if any(prior.get(key) != value for key, value in identity.items()):
+        return False
+    counted = prior.get("counted")
+    return isinstance(counted, list) and outcome in counted
+
+
 def _emit_round_callback(
     worktree: Path,
+    vault: Path,
+    runtime_root: Path,
     round_: ReviewRound,
     depth: str,
     *,
@@ -643,18 +674,47 @@ def _emit_round_callback(
 
     Counters and the reviewer route only; never payload, findings, or error text.
     emit_lifecycle_event is always non-fatal, so telemetry cannot break the gate.
+
+    A callback file is not consumed or removed when it is read, so a coordinator
+    polling for a second deep lane re-reads the same round on every invocation.
+    Exactly one event per (round identity, outcome) is therefore emitted, keyed
+    by a marker beside the callback. vault_root is explicit because a
+    current-checkout review has no worktree metadata for origin_vault to read.
     """
 
+    marker = _counted_marker(runtime_root, round_.axis)
+    identity: dict[str, Any] = {
+        "operation_id": round_.operation_id,
+        "verification_iteration": round_.verification_iteration,
+    }
+    outcome = "valid" if valid else "invalid"
+    counter = "valid_callbacks" if valid else "invalid_callbacks"
+    if _already_counted(marker, identity, outcome):
+        return
     route = round_.spec.route
-    emit_lifecycle_event(
+    emitted = emit_lifecycle_event(
         worktree,
         "review-round",
         actor=f"review:{route.runtime}:{route.model}:{depth}",
         counts={
-            "valid_callbacks" if valid else "invalid_callbacks": 1,
+            counter: 1,
             "iteration": round_.verification_iteration,
         },
         status="ok" if valid else "error",
+        vault_root=vault,
+    )
+    if not emitted:
+        return
+    try:
+        prior = json.loads(marker.read_text(encoding="utf-8"))
+        counted = set(prior.get("counted") or []) if isinstance(prior, dict) else set()
+        if any(prior.get(key) != value for key, value in identity.items()):
+            counted = set()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        counted = set()
+    _atomic_json(
+        marker,
+        {"schema_version": 1, **identity, "counted": sorted(counted | {outcome})},
     )
 
 
@@ -1038,12 +1098,20 @@ def _run_review(
             continue
         try:
             _unused, result = _envelope(callback, round_)
+        except StaleRoundCallbackError:
+            # Another round's callback, not a contract violation: never counted
+            # against the schema-valid rate. Behaviour is otherwise unchanged.
+            raise
         except (TaskReviewError, OSError, ValueError):
             # Record the rejection as durable content-free evidence, then keep
             # the existing fail-closed behaviour for the caller.
-            _emit_round_callback(worktree, round_, preset.depth, valid=False)
+            _emit_round_callback(
+                worktree, vault, runtime_root, round_, preset.depth, valid=False
+            )
             raise
-        _emit_round_callback(worktree, round_, preset.depth, valid=True)
+        _emit_round_callback(
+            worktree, vault, runtime_root, round_, preset.depth, valid=True
+        )
         ready.append((lane, round_, result))
     if preset.depth == "deep" and len(ready) != len(
         run.execution.lanes

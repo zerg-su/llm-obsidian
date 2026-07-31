@@ -17,7 +17,14 @@ C2 — scripts/harness/review_submit.py::_round_result validates reviewer output
 field-set equality, but the harness review-gate prompt built by
 scripts/task-review-runner.py names no field, so a reviewer cannot know the shape it
 must produce. This is asserted as a round trip: the schema the generated prompt actually
-communicates must be the schema its own submitter accepts.
+communicates must be the schema its own submitter accepts. Keys are not the whole
+contract, so every verdict and severity value the prompt advertises is also submitted
+and must be accepted.
+
+Review follow-ups also guarded here: the emitter targets an explicit vault_root, because
+a current-checkout review has no worktree metadata for origin_vault to resolve; and it
+counts exactly once per (round identity, outcome), because a callback file is re-read on
+every coordinator poll and is never consumed.
 """
 
 from __future__ import annotations
@@ -36,26 +43,50 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import CallbackEnvelope  # noqa: E402
-from harness.review_submit import ReviewSubmitError, submit_review  # noqa: E402
+from harness.review_submit import (  # noqa: E402
+    FINDING_FIELDS as SUBMIT_FINDING_FIELDS,
+    ROUND_FIELDS as SUBMIT_ROUND_FIELDS,
+    ReviewSubmitError,
+    submit_review,
+)
 from harness.workflows.review import ReviewContext  # noqa: E402
+from review_contract import SEVERITIES, VERDICTS  # noqa: E402
 
-# The contract enforced by review_submit._round_result.
-ROUND_FIELDS = frozenset(
-    {"schema_version", "axis", "verdict", "verification_iteration", "findings"}
-)
-FINDING_FIELDS = frozenset(
-    {
-        "finding_id",
-        "severity",
-        "file",
-        "line",
-        "summary",
-        "evidence",
-        "recommendation",
-    }
-)
+# Imported from the code that enforces them, so the assertion cannot rot.
+ROUND_FIELDS = frozenset(SUBMIT_ROUND_FIELDS)
+FINDING_FIELDS = frozenset(SUBMIT_FINDING_FIELDS)
 HEAD_SHA = "d" * 40
 PROFILE_SHA = "a" * 64
+CANONICAL = {
+    "schema_version": 1,
+    "axis": "correctness",
+    "verdict": "approve",
+    "verification_iteration": 1,
+    "findings": [],
+}
+FINDING = {
+    "finding_id": "f-1",
+    "severity": "minor",
+    "file": "scripts/pipeline-stats.py",
+    "line": 419,
+    "summary": "s",
+    "evidence": "e",
+    "recommendation": "r",
+}
+
+
+def _meta(worktree: Path) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "transport": "review-round",
+        "worktree": str(worktree),
+        "operation_id": "op-review",
+        "run_id": "run-review",
+        "axis": "correctness",
+        "verification_iteration": 1,
+        "parent_session_operation_id": "op-parent",
+        "verification_profile": {"name": "scoped", "sha256": PROFILE_SHA},
+    }
 
 
 class Fail(SystemExit):
@@ -249,29 +280,12 @@ def check_prompt_schema_round_trips(worktree: Path) -> None:
         f"exactly-equal key set from this prompt",
     )
 
-    sample = {
-        "schema_version": 1,
-        "axis": "correctness",
-        "verdict": "approve",
-        "verification_iteration": 1,
-        "findings": [],
-    }
-    meta = {
-        "schema_version": 1,
-        "transport": "review-round",
-        "worktree": str(worktree),
-        "operation_id": "op-review",
-        "run_id": "run-review",
-        "axis": "correctness",
-        "verification_iteration": 1,
-        "parent_session_operation_id": "op-parent",
-        "verification_profile": {"name": "scoped", "sha256": PROFILE_SHA},
-    }
+    sample = dict(CANONICAL)
     port = RecordingPort()
     try:
         submit_review(
             json.dumps({key: sample[key] for key in round_keys}),
-            meta=meta,
+            meta=_meta(worktree),
             worktree=worktree,
             port=port,
         )
@@ -286,11 +300,140 @@ def check_prompt_schema_round_trips(worktree: Path) -> None:
     )
 
 
+def check_gate_prompt_states_enforced_values() -> None:
+    """Key names alone are not the contract: values are enforced too."""
+
+    runner = load_runner()
+    with tempfile.TemporaryDirectory(prefix="rt04-values.") as raw:
+        prompt = _generate_gate_prompt(runner, Path(raw))
+
+    named = set(re.findall(r"`([A-Za-z0-9_-]+)`", prompt))
+    for label, vocabulary in (("verdict", VERDICTS), ("severity", SEVERITIES)):
+        missing = sorted(vocabulary - named)
+        check(
+            f"gate prompt names every enforced {label} value",
+            not missing,
+            f"prompt does not name {missing}; a reviewer satisfying the key set "
+            f"can still be rejected on {label}",
+        )
+    check(
+        "gate prompt states the approve/material-finding rule",
+        "approve" in prompt and "critical" in prompt and "important" in prompt,
+    )
+    check("gate prompt states the line rule", "`line`" in prompt)
+
+
+def check_every_named_value_is_accepted(worktree: Path) -> None:
+    """Each value the prompt advertises must survive its own submitter."""
+
+    for verdict in sorted(VERDICTS):
+        severities = (
+            sorted(SEVERITIES - {"critical", "important"})
+            if verdict == "approve"
+            else sorted(SEVERITIES)
+        )
+        for severity in severities:
+            finding = dict(FINDING, severity=severity)
+            value = dict(CANONICAL, verdict=verdict, findings=[finding])
+            port = RecordingPort()
+            try:
+                submit_review(
+                    json.dumps(value), meta=_meta(worktree), worktree=worktree, port=port
+                )
+            except (ReviewSubmitError, ValueError) as exc:
+                raise Fail(
+                    f"FAIL advertised verdict/severity pair is accepted: "
+                    f"{verdict}/{severity} rejected: {exc}"
+                ) from exc
+            check(
+                f"advertised pair accepted: verdict={verdict} severity={severity}",
+                port.published is not None,
+            )
+
+
+def check_emit_targets_an_explicit_vault() -> None:
+    """A current-checkout review has no worktree metadata to resolve a vault."""
+
+    runner = load_runner()
+    with tempfile.TemporaryDirectory(prefix="rt04-vault.") as raw:
+        tmp = Path(raw)
+        # No .task-meta.json anywhere: exactly the current-checkout condition
+        # under which origin_vault() returns None.
+        worktree = tmp / "checkout"
+        vault = tmp / "vault"
+        runtime_root = tmp / "runtime"
+        for path in (worktree, vault, runtime_root):
+            path.mkdir(parents=True, exist_ok=True)
+        round_ = _stub_round()
+        runner._emit_round_callback(
+            worktree, vault, runtime_root, round_, "simple", valid=False
+        )
+        log = vault / ".vault-meta" / "pipeline-events.jsonl"
+        check(
+            "current-checkout rejection reaches the vault log",
+            log.is_file(),
+            "no telemetry was written without worktree metadata",
+        )
+        rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+        check(
+            "rejection is recorded as one invalid callback",
+            len(rows) == 1
+            and rows[0].get("op") == "review-round"
+            and (rows[0].get("counts") or {}).get("invalid_callbacks") == 1,
+            json.dumps(rows),
+        )
+
+        # Idempotence: re-polling the same round must not count it twice.
+        runner._emit_round_callback(
+            worktree, vault, runtime_root, round_, "simple", valid=False
+        )
+        rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+        check(
+            "re-polling the same round does not double-count",
+            len(rows) == 1,
+            f"{len(rows)} events for one round outcome",
+        )
+
+        # A distinct outcome for the same round is still recorded once.
+        runner._emit_round_callback(
+            worktree, vault, runtime_root, round_, "simple", valid=True
+        )
+        rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+        check(
+            "a distinct outcome for the same round is recorded",
+            len(rows) == 2,
+            f"{len(rows)} events after a valid outcome",
+        )
+
+
+def _stub_round():
+    from harness.contracts import OperationSpec, RuntimeRoute
+    from harness.workflows.review import ReviewRound
+
+    route = RuntimeRoute("claude", "fable", "xhigh", "reviewer-readonly", "a" * 64)
+    spec = OperationSpec(
+        "op-round", "key-round", "review-round", "owner-1", route, "packet.json", "full"
+    )
+    return ReviewRound(
+        parent_operation_id="op-parent",
+        operation_id="op-round",
+        owner_id="owner-1",
+        lane_id="lane-1",
+        run_id="run-1",
+        axis="correctness",
+        verification_iteration=1,
+        spec=spec,
+    )
+
+
 def run() -> None:
     check_producer_exists()
     check_report_counts_invalid_callbacks()
     check_gate_prompt_states_its_schema()
+    check_gate_prompt_states_enforced_values()
     check_prompt_schema_round_trips(ROOT)
+    check_every_named_value_is_accepted(ROOT)
+    check_emit_targets_an_explicit_vault()
 
 
 if __name__ == "__main__":
