@@ -395,7 +395,9 @@ with tempfile.TemporaryDirectory(prefix="upgrade-identity-diagnostic.") as raw:
         and active_operation.get("recovery", {}).get("action")
         == "finish-or-cancel-exact-operation"
         and active_operation.get("recovery", {}).get("inspect_command", [])[-2:]
-        == ["inspect", task_id],
+        == ["inspect", task_id]
+        and active_operation.get("recovery", {}).get("cancel_command", [])[-2:]
+        == ["cancel", task_id],
     )
 
     operation_path.write_text(json.dumps(harness_record(
@@ -489,8 +491,18 @@ with tempfile.TemporaryDirectory(prefix="upgrade-identity-diagnostic.") as raw:
             == "resolve-identity-mismatch"
             for row in rows
         )
+        and next(
+            row for row in rows if row.get("resource") == "worktree"
+        ).get("identity", {}).get("operation_identity")
+        == mismatched_operation.get("identity")
         and "worktree remove"
         not in json.dumps(packet, sort_keys=True),
+    )
+    rejected = run(root, "--diagnose-identities", "--apply")
+    check(
+        "read-only diagnosis rejects every migration mutation option",
+        rejected.returncode == 2
+        and "cannot be combined with migration options" in rejected.stderr,
     )
     after = {
         path.relative_to(root).as_posix(): path.read_bytes()

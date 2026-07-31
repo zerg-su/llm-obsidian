@@ -62,20 +62,20 @@ def _identity_recovery(
     operation_id: str,
     worktree: Path | None = None,
 ) -> dict[str, Any]:
-    inspect_operation = [
+    operation_command = [
         "python3",
         str(root / "scripts/harness-cli.py"),
         "--store",
         str(root / ".vault-meta/harness"),
         "--owner",
         owner_id,
-        "inspect",
-        operation_id,
     ]
+    inspect_operation = operation_command + ["inspect", operation_id]
     if classification == "active":
         return {
             "action": "finish-or-cancel-exact-operation",
             "inspect_command": inspect_operation,
+            "cancel_command": operation_command + ["cancel", operation_id],
             "guidance": (
                 "Inspect this exact operation, then finish or cancel it with the "
                 "installed runtime and rerun upgrade-preflight."
@@ -107,6 +107,15 @@ def _identity_recovery(
             ),
         }
     if classification == "ambiguous":
+        if not owner_id or not operation_id:
+            return {
+                "action": "inspect-identity-evidence",
+                "guidance": (
+                    "Inspect the listed metadata evidence. Do not infer a missing "
+                    "operation owner or remove the worktree; recover through the "
+                    "installed runtime only after the identity is complete."
+                ),
+            }
         return {
             "action": "inspect-and-reconcile-exact-ownership",
             "inspect_command": inspect_operation,
@@ -268,6 +277,7 @@ def identity_diagnostics(root: Path) -> list[dict[str, Any]]:
         operation_id = task_id
         if exact_candidate is not None:
             candidate_identity = exact_candidate["identity"]
+            identity["operation_identity"] = dict(candidate_identity)
             owner_id = str(candidate_identity.get("owner_id") or task_id)
             operation_id = str(
                 candidate_identity.get("operation_id") or task_id
