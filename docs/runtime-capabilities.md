@@ -30,7 +30,13 @@ runtime/session identifiers, actor/operation/status, relative vault paths, and
 numeric counters. Prompt text, search queries, commands, snippets, page bodies,
 and error text are not accepted. `pipeline-stats.py` reports these shared
 operations and unattended lifecycle p50/p95 separately from Claude-only skill
-telemetry. See [pipeline observability](pipeline-observability.md) for metric
+telemetry. Skill invocations are observable in Claude sources only, so that
+report bounds its zero-usage verdict by observed runtime coverage: it names a
+skill a dead-weight candidate only when skill usage was actually observed and no
+skill-capable runtime without invocation telemetry was active, and it holds back
+skills the runtime-tagged router matched inside such a runtime. Absent
+Claude evidence is never rendered as zero Codex usage. See
+[pipeline observability](pipeline-observability.md) for metric
 definitions, sample-size limits, and the dogfood acceptance window.
 
 Durable review pages are intentionally separate from telemetry. In unattended

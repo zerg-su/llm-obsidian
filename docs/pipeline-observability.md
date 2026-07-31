@@ -26,6 +26,25 @@ The first command prints a report. The second also writes the dated page through
 Do not read the third class as Codex usage. The heading and report text make
 that boundary explicit.
 
+## Skill usage is bounded evidence, not a verdict
+
+Only Claude history and transcripts record skill invocations. Codex is
+skill-capable but leaves no invocation trace, and a plain shell run has no model
+and cannot invoke a skill at all. A zero is therefore reported with its evidence
+boundary attached, and the heading states which case applies:
+
+| Heading | Meaning | Safe action |
+|---|---|---|
+| `Dead-weight candidates` | Skill usage was observed, and no skill-capable runtime without invocation telemetry was active | Complete verdict for this window; still confirm before removing |
+| `Claude-zero skills` | Codex was active in the window, so a zero only proves absent Claude evidence | Not a removal list; the report separates skills the router matched inside the uncovered runtime, which are in use |
+| `Skill usage evidence unavailable` | No invocation of any kind was observed | Make no claim; check that history/transcripts cover this project path and window |
+
+`Skill telemetry coverage` above them reports, per runtime, how many records were
+observed and whether its skill invocations are observable at all. Runtime
+attribution comes from the fields the existing seams already carry: `runtime` on
+`pipeline-events.jsonl` and on `router-hits.jsonl`. No new telemetry source,
+file, or emission point is involved.
+
 ## What the lifecycle section measures
 
 | Metric | Meaning |
