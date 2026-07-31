@@ -218,6 +218,12 @@ def provider_argv(
     runtime = str(spec.get("runtime") or "")
     surface_id = str(spec.get("surface_id") or "")
     values = os.environ if env is None else env
+    runtime_interpreter = spec.get("runtime_interpreter")
+    pinned_interpreter = (
+        runtime_interpreter
+        if isinstance(runtime_interpreter, Path)
+        else None
+    )
     if (
         not argv
         or runtime not in {"claude", "codex"}
@@ -233,18 +239,18 @@ def provider_argv(
         or str(values.get("CMUX_SURFACE_ID") or "").casefold()
         != surface_id.casefold()
     ):
-        return _pin_env_shebang(argv, values)
+        return _pin_env_shebang(argv, values, pinned_interpreter)
     candidate = Path(raw_wrapper).expanduser()
     root = Path(raw_root).expanduser()
     try:
         if candidate.is_symlink() or root.is_symlink():
-            return _pin_env_shebang(argv, values)
+            return _pin_env_shebang(argv, values, pinned_interpreter)
         candidate = candidate.resolve()
         root = root.resolve()
         candidate_stat = candidate.stat()
         root_stat = root.stat()
     except OSError:
-        return _pin_env_shebang(argv, values)
+        return _pin_env_shebang(argv, values, pinned_interpreter)
     if (
         candidate.name != runtime
         or candidate.parent != root
@@ -258,12 +264,16 @@ def provider_argv(
         or candidate_stat.st_mode & 0o022
         or root_stat.st_mode & 0o022
     ):
-        return _pin_env_shebang(argv, values)
-    return _pin_env_shebang((str(candidate), *argv[1:]), values)
+        return _pin_env_shebang(argv, values, pinned_interpreter)
+    return _pin_env_shebang(
+        (str(candidate), *argv[1:]), values, pinned_interpreter
+    )
 
 
 def _pin_env_shebang(
-    argv: tuple[str, ...], env: Mapping[str, str]
+    argv: tuple[str, ...],
+    env: Mapping[str, str],
+    pinned_interpreter: Path | None = None,
 ) -> tuple[str, ...]:
     """Resolve one env shebang before protected runtimes sanitize PATH."""
 
@@ -281,11 +291,24 @@ def _pin_env_shebang(
     if match is None:
         return argv
     interpreter_name = match.group(1).decode("ascii")
-    interpreter = shutil.which(interpreter_name, path=env.get("PATH"))
-    if not interpreter:
-        return argv
-    resolved = Path(interpreter).expanduser().resolve()
-    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+    if pinned_interpreter is not None:
+        resolved = (
+            pinned_interpreter
+            if pinned_interpreter.name == interpreter_name
+            else None
+        )
+    else:
+        interpreter = shutil.which(interpreter_name, path=env.get("PATH"))
+        resolved = (
+            Path(interpreter).expanduser().resolve()
+            if interpreter
+            else None
+        )
+    if (
+        resolved is None
+        or not resolved.is_file()
+        or not os.access(resolved, os.X_OK)
+    ):
         return argv
     return (str(resolved), argv[0], *argv[1:])
 
@@ -599,6 +622,7 @@ def load_spec(path: Path) -> dict[str, Any]:
     )
     task_summary: Path | None = None
     runtime_home: Path | None = None
+    runtime_interpreter: Path | None = None
     research_request_sha256 = str(
         value.get("research_request_sha256") or ""
     )
@@ -632,6 +656,25 @@ def load_spec(path: Path) -> dict[str, Any]:
         ):
             raise RuntimeWorkerError("research launch identity is invalid")
         runtime_home = _absolute(raw_runtime_home, "runtime_home")
+        raw_runtime_interpreter = value.get("runtime_interpreter")
+        if raw_runtime_interpreter:
+            runtime_interpreter = _absolute(
+                raw_runtime_interpreter, "runtime_interpreter"
+            )
+            try:
+                interpreter_stat = runtime_interpreter.stat()
+            except OSError as exc:
+                raise RuntimeWorkerError(
+                    "research runtime interpreter is unavailable"
+                ) from exc
+            if (
+                not runtime_interpreter.is_file()
+                or not os.access(runtime_interpreter, os.X_OK)
+                or interpreter_stat.st_mode & 0o022
+            ):
+                raise RuntimeWorkerError(
+                    "research runtime interpreter is untrusted"
+                )
         try:
             runtime_stat = runtime_home.stat()
         except OSError as exc:
@@ -677,11 +720,20 @@ def load_spec(path: Path) -> dict[str, Any]:
             or len(callback_wake.encode()) > 4096
         ):
             raise RuntimeWorkerError("review callback wake is invalid")
-        if value.get("runtime_home") or research_request_sha256:
+        if (
+            value.get("runtime_home")
+            or value.get("runtime_interpreter")
+            or research_request_sha256
+        ):
             raise RuntimeWorkerError(
                 "research runtime fields require research callback mode"
             )
-    elif value.get("runtime_home") or research_request_sha256 or callback_wake:
+    elif (
+        value.get("runtime_home")
+        or value.get("runtime_interpreter")
+        or research_request_sha256
+        or callback_wake
+    ):
         raise RuntimeWorkerError(
             "research launch fields require research callback mode"
         )
@@ -713,6 +765,7 @@ def load_spec(path: Path) -> dict[str, Any]:
             "callback_mode": callback_mode,
             "task_summary_pointer": task_summary,
             "runtime_home": runtime_home,
+            "runtime_interpreter": runtime_interpreter,
             "research_request_sha256": research_request_sha256,
             "callback_wake": callback_wake,
             "origin_surface": origin_surface,

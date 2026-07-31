@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import signal
+import shutil
 import stat
 import subprocess
 import sys
@@ -54,6 +55,35 @@ class SurfaceLaunch:
 
 
 class ProcessAdapter:
+    @staticmethod
+    def env_shebang_interpreter(
+        argv: Sequence[str], env: Mapping[str, str]
+    ) -> Path | None:
+        """Resolve an env shebang while the coordinator still has host PATH."""
+
+        if not argv:
+            return None
+        try:
+            with Path(argv[0]).open("rb") as handle:
+                first_line = handle.readline(256)
+        except OSError:
+            return None
+        match = re.fullmatch(
+            rb"#![ \t]*/usr/bin/env[ \t]+([A-Za-z0-9._+-]+)[ \t]*\r?\n?",
+            first_line,
+        )
+        if match is None:
+            return None
+        interpreter = shutil.which(
+            match.group(1).decode("ascii"), path=env.get("PATH")
+        )
+        if not interpreter:
+            return None
+        resolved = Path(interpreter).expanduser().resolve()
+        if not resolved.is_file() or not os.access(resolved, os.X_OK):
+            return None
+        return resolved
+
     @staticmethod
     def _contain_unidentified_child(proc: subprocess.Popen[object]) -> None:
         """Synchronously reap a just-spawned child whose identity was not bound."""
@@ -407,6 +437,11 @@ class ProcessAdapter:
             "research-fetch",
             "research-synth",
         }
+        runtime_interpreter = (
+            self.env_shebang_interpreter(argv, os.environ)
+            if research_mode
+            else None
+        )
         if research_mode:
             if (
                 runtime != "codex"
@@ -488,6 +523,11 @@ class ProcessAdapter:
                 "runtime_home": (
                     str(resolved_runtime_home)
                     if resolved_runtime_home is not None
+                    else ""
+                ),
+                "runtime_interpreter": (
+                    str(runtime_interpreter)
+                    if runtime_interpreter is not None
                     else ""
                 ),
                 "research_request_sha256": research_request_sha256,

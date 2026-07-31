@@ -26,6 +26,7 @@ from harness.store import OperationStore
 module = runpy.run_path(str(ROOT / "scripts/research-isolation.py"))
 main = module["main"]
 parser = module["parser"]
+execution_value = module["_execution_value"]
 
 
 def check(label: str, value: bool) -> None:
@@ -93,6 +94,29 @@ def invoke(
         )
     assert result == 0
     return json.loads(output.getvalue())
+
+
+attention_execution = SimpleNamespace(
+    parent=SimpleNamespace(state="awaiting-callback"),
+    fetch=SimpleNamespace(
+        spec=SimpleNamespace(operation_id="fetch-attention"),
+        run_id="fetch-run",
+        state="attention-required",
+        resources=SimpleNamespace(surface_id=""),
+    ),
+    synth=None,
+    stage="fetch",
+    result_artifact=None,
+)
+attention_status = execution_value(
+    attention_execution,
+    operation_id="research-attention",
+)
+check(
+    "top-level status surfaces attention from the active research stage",
+    attention_status["status"] == "attention-required"
+    and attention_status["fetch"]["status"] == "attention-required",
+)
 
 
 with tempfile.TemporaryDirectory(prefix="research-cli.") as raw:

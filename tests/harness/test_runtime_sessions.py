@@ -42,7 +42,11 @@ from harness.runtime_sessions import (
     RuntimeSessionManager,
     RuntimeSessionRequest,
 )
-from harness.runtime_worker import run as run_runtime_worker
+from harness.runtime_worker import (
+    load_spec as load_runtime_spec,
+    provider_argv as runtime_provider_argv,
+    run as run_runtime_worker,
+)
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -264,6 +268,27 @@ class FakeProcess:
             self.terminations.append(process_group)
 
 
+class ParentRecordingProcess(ProcessAdapter):
+    def __init__(self) -> None:
+        self.launch: SurfaceLaunch | None = None
+
+    def prepare_surface_launch(self, **kwargs: object) -> SurfaceLaunch:
+        self.launch = super().prepare_surface_launch(**kwargs)
+        return self.launch
+
+    def await_surface_handle(
+        self, launch: SurfaceLaunch, *, timeout_seconds: float
+    ) -> ProcessHandle:
+        del launch, timeout_seconds
+        return ProcessHandle(
+            123,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+
+
 class FakeDriver:
     def command(
         self,
@@ -278,6 +303,23 @@ class FakeDriver:
         check("driver receives the typed route", route.runtime == "claude")
         result = ("/usr/bin/claude", "--model", route.model)
         return (*result, "--resume", resume) if resume else result
+
+
+class ShebangDriver:
+    def __init__(self, binary: Path) -> None:
+        self.binary = binary
+
+    def command(
+        self,
+        route: RuntimeRoute,
+        *,
+        resume: str = "",
+        callback_pointer: Path | None = None,
+        product_root: Path | None = None,
+        session_root: Path | None = None,
+    ) -> tuple[str, ...]:
+        del route, resume, callback_pointer, product_root, session_root
+        return (str(self.binary), "--strict-config")
 
 
 def envelope(
@@ -362,6 +404,82 @@ with tempfile.TemporaryDirectory(prefix="research-home-boundary.") as raw:
         check("research wake is exactly one line", True)
     else:
         check("research wake is exactly one line", False)
+
+
+with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
+    root = Path(raw)
+    cwd = root / "scratch"
+    cwd.mkdir()
+    (cwd / "prompt.md").write_text("bounded research", encoding="utf-8")
+    runtime_home = root / "codex-home"
+    runtime_home.mkdir(mode=0o700)
+    binary_root = root / "bin"
+    binary_root.mkdir()
+    node = binary_root / "node"
+    node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    node.chmod(0o755)
+    codex = root / "codex.js"
+    codex.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    codex.chmod(0o755)
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "research-safe", "e" * 64
+    )
+    process = ParentRecordingProcess()
+    manager = RuntimeSessionManager(
+        OperationStore(root / "store"),
+        FakeCmux([]),
+        process,
+        {"codex": ShebangDriver(codex)},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    request = RuntimeSessionRequest(
+        OperationSpec(
+            "runtime-1",
+            "runtime-key-1",
+            "research-fetch",
+            "owner-1",
+            route,
+            "context/manifest.json",
+            "research-cited-artifact",
+        ),
+        "lane-research",
+        "run-1",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "artifact.json",
+        callback_mode="research-fetch",
+        runtime_home=runtime_home,
+        research_request_sha256="f" * 64,
+        callback_wake="continue bounded research",
+    )
+    with patch.dict(os.environ, {"PATH": str(binary_root)}):
+        manager.start(request)
+    assert process.launch is not None
+    launch_value = json.loads(
+        process.launch.spec_path.read_text(encoding="utf-8")
+    )
+    loaded_launch = load_runtime_spec(process.launch.spec_path)
+    protected_argv = runtime_provider_argv(
+        loaded_launch,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    check(
+        "parent pins env shebang interpreter for the protected worker",
+        launch_value["runtime_interpreter"] == str(node.resolve())
+        and launch_value["argv"]
+        == [str(codex), "--strict-config", "bounded research"]
+        and protected_argv
+        == (
+            str(node.resolve()),
+            str(codex),
+            "--strict-config",
+            "bounded research",
+        ),
+        (launch_value, protected_argv),
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:

@@ -278,11 +278,21 @@ def _execution_value(
     fetch = execution.fetch
     synth = execution.synth
     result = result_artifact or execution.result_artifact
+    active = (
+        synth
+        if synth is not None and execution.stage.startswith("synth")
+        else fetch
+    )
+    status = (
+        "attention-required"
+        if active.state == "attention-required"
+        else parent.state
+    )
     return {
         "schema_version": 1,
         "operation_id": operation_id,
         "stage": execution.stage,
-        "status": parent.state,
+        "status": status,
         "fetch": {
             "operation_id": fetch.spec.operation_id,
             "run_id": fetch.run_id,
