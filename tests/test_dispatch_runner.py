@@ -328,7 +328,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_request,
         review,
     )
-    custom_prompt = runner.render_task_prompt(custom_request, config)
+    custom_prompt_request = dict(custom_request)
+    custom_prompt_request["_approved_plan_file"] = (
+        runner.custom_approval_plan_path(custom_request)
+    )
+    custom_prompt = runner.render_task_prompt(custom_prompt_request, config)
     expect_error(
         "custom dispatch cannot start from validation alone",
         lambda: runner.harness_request(custom_request, config, effective),
@@ -341,11 +345,36 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         review=review,
         prompt=custom_prompt,
     )
+    host_calls = []
+    original_run = runner.subprocess.run
+    original_platform = runner.sys.platform
+    original_program = runner.HOST_APPROVAL_PROGRAM
+    try:
+        runner.sys.platform = "darwin"
+        runner.HOST_APPROVAL_PROGRAM = Path(sys.executable)
+
+        def fake_host_run(argv, **kwargs):
+            host_calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(argv, 0, "Approve\n", "")
+
+        runner.subprocess.run = fake_host_run
+        host_choice = runner.host_custom_approval_decision(custom_challenge)
+    finally:
+        runner.subprocess.run = original_run
+        runner.sys.platform = original_platform
+        runner.HOST_APPROVAL_PROGRAM = original_program
+    check(
+        "host approval choice is not accepted through argv or stdin",
+        host_choice == "approve"
+        and host_calls[0][0][-1] == custom_challenge["challenge_sha256"]
+        and host_calls[0][1].get("input") is None,
+        host_calls,
+    )
     expect_error(
         "custom approval must have a persisted validation challenge",
         lambda: runner.authorize_custom_request(
             custom_request,
-            custom_challenge,
+            "a" * 64,
             "a" * 64,
         ),
         "validated before start",
@@ -353,6 +382,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     runner.persist_custom_approval_challenge(
         custom_request,
         custom_challenge,
+        runner.custom_approval_snapshot(
+            custom_request,
+            custom_challenge,
+            session=session,
+            effective=effective,
+            review=review,
+            prompt=custom_prompt,
+        ),
     )
     expect_error(
         "custom decision rejects a different challenge digest",
@@ -360,7 +397,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             custom_request,
             custom_challenge,
             "f" * 64,
-            "approve",
+            host_decision=lambda _challenge: "approve",
         ),
         "does not match",
     )
@@ -368,20 +405,20 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_request,
         custom_challenge,
         custom_challenge["challenge_sha256"],
-        "approve",
+        host_decision=lambda _challenge: "approve",
     )
     expect_error(
         "custom start rejects a different one-shot token",
         lambda: runner.authorize_custom_request(
             custom_request,
-            custom_challenge,
+            "a" * 64,
             "f" * 64,
         ),
         "token does not match",
     )
     approved_custom_request = runner.authorize_custom_request(
         custom_request,
-        custom_challenge,
+        "a" * 64,
         approval_decision["approval_token"],
     )
     custom_harness = runner.harness_request(
@@ -454,10 +491,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "custom spec mutation invalidates the persisted approval challenge",
         lambda: runner.authorize_custom_request(
             changed_request,
-            changed_challenge,
+            "b" * 64,
             approval_decision["approval_token"],
         ),
-        "no longer matches",
+        "request bytes changed",
     )
     custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
 
@@ -494,7 +531,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and not Path(cli_raw["worktree"]).exists(),
         cli_without_approval.stderr,
     )
-    cli_approve = subprocess.run(
+    model_cli_approve = subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
@@ -509,37 +546,61 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         cwd=ROOT,
         text=True,
         capture_output=True,
-        check=True,
+        check=False,
     )
-    cli_token = json.loads(cli_approve.stdout)["approval_token"]
     check(
-        "custom CLI decision is durable before start",
+        "model-accessible CLI cannot self-authorize a pending challenge",
+        model_cli_approve.returncode != 0
+        and "unrecognized arguments" in model_cli_approve.stderr
+        and not Path(cli_raw["worktree"]).exists(),
+        model_cli_approve.stderr,
+    )
+    cli_request = runner.validate_request(cli_raw)
+    cli_prompt_request = dict(cli_request)
+    cli_prompt_request["_approved_plan_file"] = (
+        runner.custom_approval_plan_path(cli_request)
+    )
+    cli_prompt = runner.render_task_prompt(cli_prompt_request, config)
+    cli_exact_challenge = runner.custom_approval_challenge(
+        cli_request,
+        request_sha256=runner.sha256_file(cli_spec),
+        effective=effective,
+        review=review,
+        prompt=cli_prompt,
+    )
+    cli_approval = runner.record_custom_approval_decision(
+        cli_request,
+        cli_exact_challenge,
+        cli_challenge,
+        host_decision=lambda _challenge: "approve",
+    )
+    cli_token = cli_approval["approval_token"]
+    check(
+        "host custom decision is durable before start",
         not Path(cli_raw["worktree"]).exists(),
     )
     changed_cli_custom = json.loads(json.dumps(custom_payload))
     changed_cli_custom["spec_id"] = "changed-before-cli-start"
     custom_spec.write_text(json.dumps(changed_cli_custom), encoding="utf-8")
-    cli_after_mutation = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "start",
-            "--spec",
-            str(cli_spec),
-            "--approval-token",
-            cli_token,
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+    changed_cli_request = runner.validate_request(cli_raw)
+    frozen_cli_request = runner.authorize_custom_request(
+        changed_cli_request,
+        runner.sha256_file(cli_spec),
+        cli_token,
+    )
+    frozen_spec, frozen_compiled, _frozen_policy, _frozen_card = (
+        runner.custom_contract_for_request(frozen_cli_request)
     )
     check(
-        "custom CLI start rejects spec mutation after approval",
-        cli_after_mutation.returncode == 3
-        and "no longer matches" in cli_after_mutation.stderr
+        "custom start installs the approved snapshot despite mutable spec drift",
+        frozen_spec.spec_id == custom_payload["spec_id"]
+        and frozen_spec.spec_id != changed_cli_custom["spec_id"]
+        and frozen_compiled.definition_sha256
+        == cli_exact_challenge["definition_sha256"]
+        and runner.approved_plan_sha256(frozen_cli_request)
+        == cli_exact_challenge["plan_sha256"]
+        and runner.render_task_prompt(frozen_cli_request, config) == cli_prompt
         and not Path(cli_raw["worktree"]).exists(),
-        cli_after_mutation.stderr,
     )
     custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
 

@@ -86,6 +86,7 @@ COMPLETION_PASS_LIMITS = {"attention": 2, "autonomous": 3}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
+HOST_APPROVAL_PROGRAM = Path("/usr/bin/osascript")
 DEFAULT_DISPATCH = {
     "codex_home": "",
     "profile": "",
@@ -552,6 +553,9 @@ def custom_contract_for_request(
 ) -> tuple[PipelineSpec, CompiledPipeline, CustomPipelinePolicy, str]:
     """Compile the effect-free custom contract for preview or approval."""
 
+    frozen = request.get("_approved_custom_contract")
+    if isinstance(frozen, tuple) and len(frozen) == 4:
+        return frozen
     path = request.get("custom_pipeline_spec")
     if request.get("pipeline") != "custom":
         raise DispatchError("custom pipeline contract requires pipeline=custom")
@@ -623,10 +627,7 @@ def custom_approval_challenge(
             "origin_session": request["origin_session"],
             "placement": request["placement"],
         },
-        "route": {
-            key: effective[key]
-            for key in ("runtime", "model", "effort", "config_sha256")
-        },
+        "route": effective,
         "review": {
             "mode": review.mode,
             "cross_model": review.cross_model,
@@ -655,11 +656,81 @@ def custom_approval_path(request: dict[str, Any]) -> Path:
     )
 
 
+def custom_approval_plan_path(request: dict[str, Any]) -> Path:
+    return custom_approval_path(request).with_suffix(".plan.md")
+
+
+def approved_plan_file(request: dict[str, Any]) -> Path:
+    value = request.get("_approved_plan_file")
+    return value if isinstance(value, Path) else request["plan_file"]
+
+
+def approved_plan_sha256(request: dict[str, Any]) -> str:
+    value = request.get("_approved_plan_sha256")
+    if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return sha256_file(request["plan_file"])
+
+
+def _review_snapshot(review: ReviewPolicy) -> dict[str, Any]:
+    return {
+        "mode": review.mode,
+        "cross_model": review.cross_model,
+        "runtime": review.runtime,
+        "model": review.model,
+        "effort": review.effort,
+        "max_verify_iterations": review.max_verify_iterations,
+        "verification_profile": review.verification_profile,
+        "verification_profile_sha256": review.verification_profile_sha256,
+    }
+
+
+def _review_from_snapshot(value: dict[str, Any]) -> ReviewPolicy:
+    return ReviewPolicy(
+        depth="deep" if value["mode"] == "deep" else "simple",
+        cross_model=value["cross_model"],
+        enabled=value["mode"] != "skip",
+        runtime=value["runtime"],
+        model=value["model"],
+        effort=value["effort"],
+        verification_profile=value["verification_profile"],
+        verification_profile_sha256=value["verification_profile_sha256"],
+    )
+
+
+def custom_approval_snapshot(
+    request: dict[str, Any],
+    challenge: dict[str, Any],
+    *,
+    session: dict[str, Any],
+    effective: dict[str, Any],
+    review: ReviewPolicy,
+    prompt: str,
+) -> dict[str, Any]:
+    spec, _compiled, _policy, _card = custom_contract_for_request(request)
+    return {
+        "schema_version": 1,
+        "pipeline_spec": pipeline_spec_payload(spec),
+        "approval_card": custom_approval_card_for_request(request),
+        "prompt": prompt,
+        "plan_sha256": challenge["plan_sha256"],
+        "session": session,
+        "effective": effective,
+        "review": _review_snapshot(review),
+    }
+
+
 def persist_custom_approval_challenge(
-    request: dict[str, Any], challenge: dict[str, Any]
+    request: dict[str, Any],
+    challenge: dict[str, Any],
+    snapshot: dict[str, Any],
 ) -> None:
     path = custom_approval_path(request)
     ensure_owned_dir(path.parent)
+    plan_path = custom_approval_plan_path(request)
+    plan_text = request["plan_file"].read_text(encoding="utf-8")
+    if hashlib.sha256(plan_text.encode()).hexdigest() != challenge["plan_sha256"]:
+        raise DispatchError("custom approval plan changed during validation")
     if path.exists() or path.is_symlink():
         info = path.lstat()
         if (
@@ -669,11 +740,18 @@ def persist_custom_approval_challenge(
             or stat.S_IMODE(info.st_mode) & 0o077
         ):
             raise DispatchError("custom approval challenge is not owner-only")
-        if read_object(path).get("challenge") != challenge:
+        existing = read_object(path)
+        if (
+            existing.get("challenge") != challenge
+            or existing.get("snapshot") != snapshot
+            or not plan_path.is_file()
+            or sha256_file(plan_path) != challenge["plan_sha256"]
+        ):
             raise DispatchError(
                 "custom approval challenge changed; use a fresh request_id"
             )
         return
+    atomic_text(plan_path, plan_text)
     exclusive_json(
         path,
         {
@@ -684,36 +762,84 @@ def persist_custom_approval_challenge(
             "actor": "",
             "approval_token_sha256": "",
             "challenge": challenge,
+            "snapshot": snapshot,
         },
     )
 
 
 def _approval_lock(path: Path) -> int:
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     descriptor = os.open(
         path.with_suffix(".lock"),
-        os.O_RDWR | os.O_CREAT,
+        flags,
         0o600,
     )
-    os.chmod(path.with_suffix(".lock"), 0o600)
+    info = os.fstat(descriptor)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+        os.close(descriptor)
+        raise DispatchError("custom approval lock is not owner-only")
+    os.fchmod(descriptor, 0o600)
     fcntl.flock(descriptor, fcntl.LOCK_EX)
     return descriptor
+
+
+def host_custom_approval_decision(challenge: dict[str, Any]) -> str:
+    """Ask through a host-owned macOS dialog; stdin/argv cannot approve."""
+
+    if sys.platform != "darwin" or not HOST_APPROVAL_PROGRAM.is_file():
+        raise DispatchError(
+            "custom approval requires the macOS host confirmation dialog"
+        )
+    script = """
+on run argv
+  set challengeDigest to item 1 of argv
+  set messageText to "Approve exact custom pipeline challenge?" & return & return & challengeDigest
+  set answer to display dialog messageText with title "LLM Obsidian" buttons {"Reject", "Revise", "Approve"} default button "Revise"
+  return button returned of answer
+end run
+""".strip()
+    try:
+        result = subprocess.run(
+            [
+                str(HOST_APPROVAL_PROGRAM),
+                "-e",
+                script,
+                challenge["challenge_sha256"],
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DispatchError(f"host approval dialog failed: {exc}") from exc
+    if result.returncode != 0:
+        raise DispatchError("host approval dialog did not return a decision")
+    decision = result.stdout.strip().lower()
+    if decision not in {"approve", "reject", "revise"}:
+        raise DispatchError("host approval dialog returned an invalid decision")
+    return decision
 
 
 def record_custom_approval_decision(
     request: dict[str, Any],
     challenge: dict[str, Any],
     challenge_sha256: str,
-    decision: str,
+    *,
+    host_decision: Any = host_custom_approval_decision,
 ) -> dict[str, Any]:
-    """Persist a distinct coordinator decision after the user-facing gate."""
+    """Persist a decision produced only by the host confirmation boundary."""
 
-    if decision not in {"approve", "reject", "revise"}:
-        raise DispatchError("custom approval decision is invalid")
     if challenge_sha256 != challenge["challenge_sha256"]:
         raise DispatchError("custom approval challenge digest does not match")
     path = custom_approval_path(request)
     if path.is_symlink() or not path.is_file():
         raise DispatchError("custom pipeline must be validated before decision")
+    info = path.stat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise DispatchError("custom approval challenge is not owner-only")
     lock = _approval_lock(path)
     try:
         record = read_object(path)
@@ -723,12 +849,15 @@ def record_custom_approval_decision(
             )
         if record.get("status") != "pending":
             raise DispatchError("custom approval decision is already durable")
+        decision = host_decision(challenge)
+        if decision not in {"approve", "reject", "revise"}:
+            raise DispatchError("host approval decision is invalid")
         token = secrets.token_hex(32) if decision == "approve" else ""
         record.update(
             {
                 "status": "approved" if decision == "approve" else decision,
                 "decision": decision,
-                "actor": "coordinator-user-decision",
+                "actor": "host-user-dialog",
                 "approval_token_sha256": (
                     hashlib.sha256(token.encode()).hexdigest() if token else ""
                 ),
@@ -750,10 +879,10 @@ def record_custom_approval_decision(
 
 def authorize_custom_request(
     request: dict[str, Any],
-    challenge: dict[str, Any],
+    request_sha256: str,
     approval_token: str,
 ) -> dict[str, Any]:
-    """Atomically consume exact post-decision evidence before effects."""
+    """Consume the host decision while installing its immutable snapshot."""
 
     if not re.fullmatch(r"[0-9a-f]{64}", approval_token):
         raise DispatchError("custom start requires --approval-token")
@@ -766,33 +895,113 @@ def authorize_custom_request(
     lock = _approval_lock(path)
     try:
         persisted = read_object(path)
-        if persisted.get("challenge") != challenge:
-            raise DispatchError(
-                "custom approval challenge no longer matches validation"
-            )
+        challenge = persisted.get("challenge")
+        snapshot = persisted.get("snapshot")
+        if not isinstance(challenge, dict) or not isinstance(snapshot, dict):
+            raise DispatchError("custom approval snapshot is unavailable")
+        if challenge.get("request_sha256") != request_sha256:
+            raise DispatchError("custom approval request bytes changed")
+        coordinator = challenge.get("coordinator")
+        if coordinator != {
+            "origin_surface": request["origin_surface"],
+            "origin_session": request["origin_session"],
+            "placement": request["placement"],
+        }:
+            raise DispatchError("custom approval coordinator identity changed")
         if (
             persisted.get("status") != "approved"
             or persisted.get("decision") != "approve"
-            or persisted.get("actor") != "coordinator-user-decision"
+            or persisted.get("actor") != "host-user-dialog"
         ):
             raise DispatchError("custom pipeline has no approved decision receipt")
         if persisted.get("approval_token_sha256") != hashlib.sha256(
             approval_token.encode()
         ).hexdigest():
             raise DispatchError("custom approval token does not match")
+        plan_path = custom_approval_plan_path(request)
+        plan_info = plan_path.stat() if plan_path.exists() else None
+        if (
+            plan_path.is_symlink()
+            or not plan_path.is_file()
+            or plan_info is None
+            or plan_info.st_uid != os.getuid()
+            or stat.S_IMODE(plan_info.st_mode) & 0o077
+            or sha256_file(plan_path) != challenge.get("plan_sha256")
+        ):
+            raise DispatchError("approved plan snapshot is unavailable")
+        try:
+            spec = parse_pipeline_spec(
+                json.dumps(snapshot["pipeline_spec"], sort_keys=True)
+            )
+            policy = CustomPipelinePolicy.default()
+            compiled = compile_custom_spec(
+                spec,
+                builtin_registry(),
+                policy=policy,
+                capabilities=("route:resolved",),
+            )
+        except (KeyError, HarnessContractError, ValueError) as exc:
+            raise DispatchError("approved custom snapshot is invalid") from exc
+        card = render_custom_approval(spec, compiled, policy=policy) + "\n".join(
+            (
+                "Inherited harness permissions: cmux-target:policy-only",
+                "Inherited harness side effects: cmux-surface:policy-only",
+                "Coordinator target: "
+                f"surface={request['origin_surface']}; "
+                f"session={request['origin_session']}; "
+                f"placement={request['placement']}",
+                "",
+            )
+        )
+        prompt = snapshot.get("prompt")
+        if (
+            compiled.definition_sha256 != challenge.get("definition_sha256")
+            or hashlib.sha256(
+                json.dumps(
+                    pipeline_spec_payload(spec),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            != challenge.get("pipeline_spec_sha256")
+            or hashlib.sha256(card.encode()).hexdigest()
+            != challenge.get("approval_card_sha256")
+            or card != snapshot.get("approval_card")
+            or not isinstance(prompt, str)
+            or hashlib.sha256(prompt.encode()).hexdigest()
+            != challenge.get("prompt_sha256")
+            or snapshot.get("plan_sha256") != challenge.get("plan_sha256")
+            or snapshot.get("effective") != challenge.get("route")
+            or snapshot.get("review") != challenge.get("review")
+        ):
+            raise DispatchError("approved custom snapshot no longer matches")
+        expected_session = {
+            "schema_version": 1,
+            "session_id": request["origin_session"],
+            **request["session_route"],
+            "config_sha256": snapshot["effective"]["config_sha256"],
+        }
+        if snapshot.get("session") != expected_session:
+            raise DispatchError("approved custom session snapshot changed")
+        review = _review_from_snapshot(snapshot["review"])
         persisted["status"] = "consumed"
         atomic_json(path, persisted)
     finally:
         os.close(lock)
-    spec, compiled, _policy, card = custom_contract_for_request(request)
-    del spec
     approved = dict(request)
     approved["_custom_approval"] = ExplicitPipelineApproval.for_card(
         definition_sha256=compiled.definition_sha256,
         approval_card=card,
-        actor="coordinator-user-decision",
+        actor="host-user-dialog",
         decision="approve",
     )
+    approved["_approved_custom_contract"] = (spec, compiled, policy, card)
+    approved["_approved_plan_file"] = plan_path
+    approved["_approved_plan_sha256"] = challenge["plan_sha256"]
+    approved["_approved_prompt"] = prompt
+    approved["_approved_session_route"] = snapshot["session"]
+    approved["_approved_effective_route"] = snapshot["effective"]
+    approved["_approved_review"] = review
     return approved
 
 
@@ -900,6 +1109,9 @@ def keep_plan_branch(body: str) -> str:
 
 
 def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
+    approved = request.get("_approved_prompt")
+    if isinstance(approved, str):
+        return approved
     template_path = request["vault_root"] / "skills" / "dispatch" / "references" / "task-prompt-template.md"
     body = keep_plan_branch(extract_prompt_body(template_path.read_text(encoding="utf-8")))
     context = request["wiki_context"]
@@ -946,7 +1158,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<codex-home/profile or inherited>": codex_env,
         "<wiki-reap-command>": config["reap_skill"],
         "<review-skill>": config["review_skill"],
-        "<absolute path to wiki/plans/<file>.md>": str(request["plan_file"]),
+        "<absolute path to wiki/plans/<file>.md>": str(approved_plan_file(request)),
     }
     for old, new in replacements.items():
         body = body.replace(old, new)
@@ -1051,6 +1263,9 @@ def review_policy(
 ) -> ReviewPolicy:
     """Resolve and freeze the deterministic task-side review preset."""
 
+    approved = request.get("_approved_review")
+    if isinstance(approved, ReviewPolicy):
+        return approved
     raw = request["review"]
     mode = raw["mode"] or config["review_mode"]
     if mode not in REVIEW_MODES:
@@ -1094,6 +1309,10 @@ def review_policy(
 
 
 def resolved_routes(request: dict[str, Any], *, persist: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:
+    approved_session = request.get("_approved_session_route")
+    approved_effective = request.get("_approved_effective_route")
+    if isinstance(approved_session, dict) and isinstance(approved_effective, dict):
+        return dict(approved_session), dict(approved_effective)
     config = load_config(request["vault_root"])
     if persist:
         session = capture_session(
@@ -1214,7 +1433,7 @@ def write_task_files(
     for name, value in handoffs.items():
         atomic_text(worktree / name, value + "\n")
     atomic_text(worktree / ".task-prompt.md", render_task_prompt(request, config))
-    plan_hash = sha256_file(request["plan_file"])
+    plan_hash = approved_plan_sha256(request)
     review = review_policy(request, config)
     meta: dict[str, Any] = {
         "version": 3,
@@ -1348,7 +1567,7 @@ def harness_request(
     return HarnessDispatchRequest(
         task_id=request["request_id"],
         owner_id=request["request_id"],
-        plan_sha256=sha256_file(request["plan_file"]),
+        plan_sha256=approved_plan_sha256(request),
         context_manifest=context_manifest,
         route=route,
         placement=request["placement"],
@@ -1748,11 +1967,6 @@ def main() -> int:
     approve = sub.add_parser("approve")
     approve.add_argument("--spec", type=Path, required=True)
     approve.add_argument("--challenge-sha256", required=True)
-    approve.add_argument(
-        "--decision",
-        choices=("approve", "reject", "revise"),
-        required=True,
-    )
     launch = sub.add_parser("start")
     launch.add_argument("--spec", type=Path, required=True)
     launch.add_argument("--approval-token", default="")
@@ -1771,7 +1985,13 @@ def main() -> int:
             config = load_dispatch_config(request["vault_root"], request["target_repo"])
             session, effective = resolved_routes(request, persist=False)
             review = review_policy(request, config)
-            prompt = render_task_prompt(request, config)
+            prompt_request = request
+            if request["pipeline"] == "custom":
+                prompt_request = dict(request)
+                prompt_request["_approved_plan_file"] = (
+                    custom_approval_plan_path(request)
+                )
+            prompt = render_task_prompt(prompt_request, config)
             result = {
                 "schema_version": 1,
                 "status": "valid",
@@ -1811,7 +2031,18 @@ def main() -> int:
                     prompt=prompt,
                 )
                 if args.command == "validate":
-                    persist_custom_approval_challenge(request, challenge)
+                    persist_custom_approval_challenge(
+                        request,
+                        challenge,
+                        custom_approval_snapshot(
+                            request,
+                            challenge,
+                            session=session,
+                            effective=effective,
+                            review=review,
+                            prompt=prompt,
+                        ),
+                    )
                 result["challenge_sha256"] = challenge["challenge_sha256"]
             if args.command == "approve":
                 if challenge is None:
@@ -1822,27 +2053,13 @@ def main() -> int:
                     request,
                     challenge,
                     args.challenge_sha256,
-                    args.decision,
                 )
             print(json.dumps(result, sort_keys=True))
             return 0
         if request["pipeline"] == "custom":
-            config = load_dispatch_config(
-                request["vault_root"], request["target_repo"]
-            )
-            _session, effective = resolved_routes(request, persist=False)
-            review = review_policy(request, config)
-            prompt = render_task_prompt(request, config)
-            challenge = custom_approval_challenge(
-                request,
-                request_sha256=spec_sha256,
-                effective=effective,
-                review=review,
-                prompt=prompt,
-            )
             request = authorize_custom_request(
                 request,
-                challenge,
+                spec_sha256,
                 args.approval_token,
             )
         print(json.dumps(start(request, spec_sha256), ensure_ascii=False, sort_keys=True))

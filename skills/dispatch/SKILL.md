@@ -62,10 +62,10 @@ internal agent unless the user requests a persistent session.
    inherited authority, limits, stops and outcomes. Custom validation persists
    an owner-only `challenge_sha256` bound to every material input and origin;
    it is not authorization.
-7. Ask once, then record the answer with `python3 <vault-root>/scripts/dispatch-runner.py
-   approve --spec <request.json> --challenge-sha256 <exact-validate-challenge>
-   --decision approve|reject|revise`. Reject/revise are terminal. Only approve
-   returns `approval_token`.
+7. Run `python3 <vault-root>/scripts/dispatch-runner.py approve --spec
+   <request.json> --challenge-sha256 <exact-validate-challenge>`. Only the
+   host dialog can choose approve/reject/revise; argv/stdin cannot. Reject/revise
+   are terminal. Approve returns `approval_token`.
 8. Start once with `python3 <vault-root>/scripts/dispatch-runner.py start --spec
    <request.json> --approval-token <exact-one-shot-token>` for custom, omitting
    the token for built-ins. Never synthesize decisions/tokens or reuse a token;
