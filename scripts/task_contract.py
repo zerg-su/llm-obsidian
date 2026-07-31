@@ -59,6 +59,7 @@ V3_META_FIELDS = {
     "plan_file",
     "approved_plan_sha256",
     "interaction_policy",
+    "pipeline_policy",
     "review_policy",
     "reap_policy",
     "surface_policy",
@@ -185,6 +186,50 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     policy = meta.get("interaction_policy")
     if policy not in {"interactive", "unattended"}:
         raise ContractError("interaction_policy must be interactive or unattended")
+    if version == 3:
+        pipeline = meta.get("pipeline_policy")
+        if not isinstance(pipeline, dict) or set(pipeline) != {
+            "name",
+            "definition_sha256",
+            "completion_policy",
+            "total_pass_limit",
+        }:
+            raise ContractError(
+                "v3 pipeline_policy must contain the complete compiled selection"
+            )
+        name = pipeline.get("name")
+        completion = pipeline.get("completion_policy")
+        pass_limit = pipeline.get("total_pass_limit")
+        definition_sha256 = pipeline.get("definition_sha256")
+        if name not in {
+            "lifecycle/default",
+            "engineering/change",
+            "engineering/fix",
+        }:
+            raise ContractError("v3 pipeline_policy.name is invalid")
+        if (
+            not isinstance(definition_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", definition_sha256)
+        ):
+            raise ContractError(
+                "v3 pipeline_policy.definition_sha256 is invalid"
+            )
+        if completion not in {"attention", "autonomous"}:
+            raise ContractError(
+                "v3 pipeline_policy.completion_policy is invalid"
+            )
+        expected_limit = {
+            "attention": 2,
+            "autonomous": 3,
+        }[completion]
+        if pass_limit != expected_limit:
+            raise ContractError(
+                "v3 pipeline_policy total_pass_limit mismatches completion_policy"
+            )
+        if completion == "autonomous" and name != "engineering/fix":
+            raise ContractError(
+                "v3 autonomous completion requires engineering/fix"
+            )
     plan_value = meta.get("plan_file")
     hash_value = meta.get("approved_plan_sha256")
     plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""

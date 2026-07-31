@@ -35,6 +35,7 @@
     "plan_file",
     "approved_plan_sha256",
     "interaction_policy",
+    "pipeline_policy",
     "review_policy",
     "reap_policy",
     "surface_policy",
@@ -125,6 +126,62 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "interaction_policy": {"const": "unattended"},
+    "pipeline_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "definition_sha256",
+        "completion_policy",
+        "total_pass_limit"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "lifecycle/default",
+            "engineering/change",
+            "engineering/fix"
+          ]
+        },
+        "definition_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "completion_policy": {
+          "enum": ["attention", "autonomous"]
+        },
+        "total_pass_limit": {
+          "enum": [2, 3]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "completion_policy": {"const": "attention"}
+            }
+          },
+          "then": {
+            "properties": {
+              "total_pass_limit": {"const": 2}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "completion_policy": {"const": "autonomous"}
+            }
+          },
+          "then": {
+            "properties": {
+              "name": {"const": "engineering/fix"},
+              "total_pass_limit": {"const": 3}
+            }
+          }
+        }
+      ]
+    },
     "review_policy": {
       "type": "object",
       "additionalProperties": false,

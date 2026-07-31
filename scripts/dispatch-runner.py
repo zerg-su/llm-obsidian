@@ -62,6 +62,7 @@ from harness.workflows.dispatch import (  # noqa: E402
 TASK_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 RUNTIMES = {"claude", "codex"}
 REVIEW_MODES = {"simple", "deep", "skip"}
+COMPLETION_PASS_LIMITS = {"attention": 2, "autonomous": 3}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
@@ -269,6 +270,17 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     pipeline = str(raw.get("pipeline") or "lifecycle/default").strip()
     if pipeline not in EXECUTABLE_BUILTINS:
         raise DispatchError("pipeline must name an executable pipeline")
+    completion_policy = str(
+        raw.get("completion_policy") or "attention"
+    ).strip()
+    if completion_policy not in COMPLETION_PASS_LIMITS:
+        raise DispatchError(
+            "completion_policy must be attention or autonomous"
+        )
+    if pipeline != "engineering/fix" and completion_policy != "attention":
+        raise DispatchError(
+            "autonomous completion_policy requires engineering/fix"
+        )
     origin_session = require_string(raw.get("origin_session"), "origin_session", maximum=128)
     session_route = raw.get("session_route")
     if not isinstance(session_route, dict):
@@ -374,6 +386,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "origin_surface": origin_surface,
         "placement": placement,
         "pipeline": pipeline,
+        "completion_policy": completion_policy,
         "origin_session": origin_session,
         "session_route": {
             "runtime": session_runtime,
@@ -520,6 +533,39 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         body = body.replace(old, new)
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
+    if request["pipeline"] == "engineering/fix":
+        policy = request["completion_policy"]
+        phase_contract = "\n".join(
+            (
+                "## Typed engineering/fix phases",
+                "",
+                "This is one persistent executor session. Complete these phases in",
+                "order: `reproduce`, `root-cause`, `regression-test`, `minimal-fix`.",
+                "Before moving to the next phase, write the bounded result JSON shown",
+                "by the submitter help and publish it through:",
+                "",
+                f"`python3 {request['vault_root']}/scripts/"
+                "pipeline-step-submit.py "
+                f"--worktree {request['worktree']} --step <phase> "
+                "--result <worktree-relative-result.json>`",
+                "",
+                "The submitter derives the child OperationSpec identity and chains",
+                "the exact prior receipt. Never edit an accepted receipt. On",
+                "`cannot-reproduce`, publish that typed outcome, raise the normal",
+                "attention packet, and remain paused. Resume from the first missing",
+                "receipt after a provider restart; do not repeat accepted phases.",
+                "",
+                f"Selected completion_policy={policy}; "
+                f"total_pass_limit={COMPLETION_PASS_LIMITS[policy]}.",
+                "",
+            )
+        )
+        marker = "## Harness completion"
+        if marker not in body:
+            raise DispatchError(
+                "dispatch prompt completion marker is unavailable"
+            )
+        body = body.replace(marker, phase_contract + "\n" + marker, 1)
     if "<!-- BRANCH" in body or "<description from user" in body:
         raise DispatchError("dispatch prompt rendering left control placeholders")
     return body.rstrip() + "\n"
@@ -735,6 +781,16 @@ def write_task_files(
         "plan_file": str(request["plan_file"]),
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
+        "pipeline_policy": {
+            "name": request["pipeline"],
+            "definition_sha256": compiled_builtin(
+                request["pipeline"]
+            ).definition_sha256,
+            "completion_policy": request["completion_policy"],
+            "total_pass_limit": COMPLETION_PASS_LIMITS[
+                request["completion_policy"]
+            ],
+        },
         "review_policy": {
             "mode": review.mode,
             "cross_model": review.cross_model,
@@ -832,6 +888,7 @@ def harness_request(
         placement=request["placement"],
         review=review,
         pipeline_name=request["pipeline"],
+        completion_policy=request["completion_policy"],
     )
 
 

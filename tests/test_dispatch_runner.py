@@ -215,12 +215,42 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         ).pipeline_name
         == "engineering/change",
     )
-    invalid_pipeline = json.loads(json.dumps(raw_request))
-    invalid_pipeline["pipeline"] = "engineering/fix"
+    fix_raw = json.loads(json.dumps(raw_request))
+    fix_raw["pipeline"] = "engineering/fix"
+    fix_raw["completion_policy"] = "autonomous"
+    fix_request = runner.validate_request(fix_raw)
+    fix_contract = runner.lifecycle_contract(
+        review,
+        fix_request["pipeline"],
+    )
+    fix_prompt = runner.render_task_prompt(fix_request, config)
+    check(
+        "approved dispatch selects the executable engineering fix profile",
+        fix_request["pipeline"] == "engineering/fix"
+        and fix_request["completion_policy"] == "autonomous"
+        and fix_contract["pipeline"] == "engineering/fix@1.0.0"
+        and "root-cause:model_step@1.0.0" in fix_contract["summary"]
+        and "bounded_loop@1.0.0" in fix_contract["summary"]
+        and "human_gate@1.0.0" in fix_contract["summary"],
+        fix_contract,
+    )
+    check(
+        "engineering fix prompt binds the typed phase submit transport",
+        "pipeline-step-submit.py" in fix_prompt
+        and "reproduce" in fix_prompt
+        and "root-cause" in fix_prompt
+        and "regression-test" in fix_prompt
+        and "minimal-fix" in fix_prompt
+        and "completion_policy=autonomous" in fix_prompt
+        and "total_pass_limit=3" in fix_prompt,
+        fix_prompt,
+    )
+    invalid_completion = json.loads(json.dumps(fix_raw))
+    invalid_completion["completion_policy"] = "forever"
     expect_error(
-        "dispatch rejects a catalog-only pipeline without a production executor",
-        lambda: runner.validate_request(invalid_pipeline),
-        "executable pipeline",
+        "dispatch rejects an unbounded completion policy",
+        lambda: runner.validate_request(invalid_completion),
+        "completion_policy",
     )
 
     expert_raw = json.loads(json.dumps(raw_request))

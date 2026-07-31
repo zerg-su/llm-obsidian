@@ -105,6 +105,7 @@ class DispatchRequest:
     placement: str = "split"
     review: ReviewPolicy = ReviewPolicy()
     pipeline_name: str = "lifecycle/default"
+    completion_policy: str = "attention"
 
     def __post_init__(self) -> None:
         if self.placement not in {"split", "workspace"}:
@@ -113,6 +114,15 @@ class DispatchRequest:
             raise ValueError("dispatch requires an approved plan sha256")
         if self.pipeline_name not in EXECUTABLE_BUILTINS:
             raise ValueError("dispatch requires an executable pipeline")
+        if self.completion_policy not in {"attention", "autonomous"}:
+            raise ValueError("dispatch completion policy is invalid")
+        if (
+            self.pipeline_name != "engineering/fix"
+            and self.completion_policy != "attention"
+        ):
+            raise ValueError(
+                "autonomous completion is supported only by engineering/fix"
+            )
 
 
 def operation_spec(request: DispatchRequest) -> OperationSpec:
@@ -132,6 +142,7 @@ def operation_spec(request: DispatchRequest) -> OperationSpec:
             },
             "placement": request.placement,
             "contract_sha256": contract.definition_sha256,
+            "completion_policy": request.completion_policy,
             "review": {
                 "mode": request.review.mode,
                 "cross_model": request.review.cross_model,
