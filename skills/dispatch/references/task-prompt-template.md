@@ -95,7 +95,7 @@ then write `.task-summary.json` with exactly this canonical JSON shape to
 trigger the automatic review gate:
 
 ```json
-{"schema_version":1,"type":"session","title":"<bounded title>","session":"<origin session id>","body":"<bounded Markdown summary>"}
+<canonical-task-summary-json>
 ```
 
 Do not

@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             {"title": "Dispatch Context", "summary": "prior pipeline decision"},
         ],
         "suggested_agents": [],
-        "reap": {"type": "session", "title": "Fast dispatch result"},
+        "reap": {"type": "repo-touch", "title": "Fast dispatch result"},
     }
 
     request = runner.validate_request(raw_request)
@@ -223,7 +223,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "task prompt leaves automatic review launch to the harness",
         "write `.task-summary.json` with exactly this canonical JSON shape"
         in prompt
-        and '"schema_version":1,"type":"session"' in prompt
+        and (
+            '{"schema_version":1,"type":"repo-touch",'
+            '"title":"Fast dispatch result","session":"unit-session",'
+            '"body":"<bounded Markdown summary>"}'
+        )
+        in prompt
         and "task-review-runner.py run" not in prompt,
         prompt,
     )
@@ -888,7 +893,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     summary = worktree / ".task-summary.json"
     summary.write_text(
-        json.dumps({"type": "session", "title": "Fast dispatch result"}) + "\n",
+        json.dumps({"type": "repo-touch", "title": "Fast dispatch result"}) + "\n",
         encoding="utf-8",
     )
     handoff = subprocess.run(

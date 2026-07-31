@@ -1159,6 +1159,17 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<wiki-reap-command>": config["reap_skill"],
         "<review-skill>": config["review_skill"],
         "<absolute path to wiki/plans/<file>.md>": str(approved_plan_file(request)),
+        "<canonical-task-summary-json>": json.dumps(
+            {
+                "schema_version": 1,
+                "type": request["reap"]["type"],
+                "title": request["reap"]["title"],
+                "session": request["origin_session"],
+                "body": "<bounded Markdown summary>",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
     }
     for old, new in replacements.items():
         body = body.replace(old, new)
