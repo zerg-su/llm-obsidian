@@ -9,7 +9,7 @@ sessions:
 source_cwd: "/Users/zak/Projects/llm-obsidian"
 status: pending
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 tags:
   - plan
   - manual-save
@@ -57,6 +57,7 @@ related:
 3. Сделать custom pipeline столь же проверяемым и replayable, как built-in.
 4. Не позволить task content или prompt injection расширить permissions.
 5. Создать безопасный путь promotion повторяемого custom pipeline в built-in.
+6. Не оставлять unattended run навсегда заблокированным живой моделью, которая не опубликовала обязательный callback.
 
 ## Не-цели
 
@@ -218,6 +219,30 @@ enforced capability.
 - Любое изменение spec создаёт новую version/run; active definition immutable.
 - Failed custom run паркуется на safe boundary. Repair не переписывает историю.
 
+## Callback liveness и unattended recovery
+
+Callback transport не должен зависеть только от того, вспомнила ли модель выполнить финальный submit. Generic runtime получает code-owned recovery ladder, одинаковый для built-in и custom pipelines.
+
+Model-free observer периодически проверяет только bounded evidence:
+
+- exact provider/supervisor identity и process status;
+- revision и state durable operation;
+- наличие и stable digest typed result, callback/outbox и receipt;
+- content-free hash нормализованного cmux screen и exact native prompt classification.
+
+Raw screen, prompt, result body и callback body не сохраняются в telemetry. Частые probes не вызывают модель и не расходуют model tokens.
+
+Recovery ladder:
+
+1. Каждые 30–60 секунд code-only observer обновляет liveness evidence.
+2. Если typed result уже существует, но submit/ingestion отсутствует, harness после короткого stable-read grace сам выполняет существующий exact submit/reconcile без model call.
+3. После 10 минут без durable или видимого прогресса operation получает content-free `suspected-idle`; модель не прерывается.
+4. Не раньше 15 минут полной неподвижности harness может отправить один bounded status/callback nudge, только если screen и process evidence не показывают активную работу.
+5. После 20–25 минут без реакции допускается один identity-bound provider restart в пределах compiled model-restart budget. Resume начинается с первой отсутствующей receipt и не повторяет принятые model/effect phases.
+6. Исчерпание nudge/restart budget создаёт durable `attention-required` и typed callback координатору; бесконечный recovery loop запрещён.
+
+Каждая ступень имеет idempotency key и durable receipt. Process death, callback pending ingestion, result-without-submit, live-but-idle provider и unknown prompt являются разными typed состояниями и не смешиваются. Пороговые значения code-owned; custom `PipelineSpec` не может ослабить их или увеличить число nudges/restarts.
+
 ## Возврат к пользователю
 
 Custom pipeline использует те же typed conditions, что built-ins 2.4:
@@ -260,6 +285,7 @@ Raw task content и model prompts не копируются в promoted definiti
 - compile rejection category;
 - approval/revision count;
 - terminal/attention category;
+- liveness stage, model-free recovery count, nudge count и provider restart count;
 - promotion-candidate fingerprint count.
 
 Запрещены intent text, prompt, raw spec body, decisions, file contents,
@@ -279,6 +305,7 @@ commands, errors и credentials.
 | Wiki становится control plane | Runtime scratch + compiled hash authoritative |
 | Repair мутирует активную программу | New definition/version/run |
 | Custom pipeline маскирует built-in | Deterministic code-owned built-in-fit baseline |
+| Живая модель не отправила callback | Model-free observer → exact submit/reconcile → one nudge → bounded restart → typed attention |
 
 ## Acceptance criteria
 
@@ -301,6 +328,9 @@ commands, errors и credentials.
 - Resume/reconcile не повторяет принятые model outputs и completed effects.
 - Cross-runtime capability mismatch обнаруживается до launch.
 - Typed escalation паркует run и создаёт decision packet.
+- Typed result без callback восстанавливается code-owned submit/reconcile без model call.
+- Live-but-idle provider получает не более одного nudge и одного разрешённого restart; active provider не прерывается по одному лишь wall clock.
+- Restart продолжает первую отсутствующую phase и не повторяет accepted receipts/effects.
 - Disabling custom authoring не ломает built-ins 2.4.
 
 ### Security
@@ -319,6 +349,7 @@ commands, errors и credentials.
   bounded loop, review verification и deliberate escalation.
 - Нет permission escapes, duplicate effects, unresolved callback failures или
   auto-close misses.
+- Live dogfood включает result-without-submit, live-but-idle provider, provider death и exhausted recovery; unattended runs либо завершаются, либо оставляют durable typed attention без участия пользователя.
 - Число human interventions на completed task не хуже built-in baseline.
 - Хотя бы один custom candidate прошёл ручной promotion exercise без
   автоматического изменения registry.
@@ -346,6 +377,7 @@ Rollback отключает model-authored specs и оставляет built-ins
 - approval delta renderer;
 - security/eval corpus;
 - custom replay, resume и escalation tests;
+- generic callback-liveness observer и bounded unattended recovery ladder;
 - promotion candidate reporting;
 - dogfood report и rollback switch;
 - ADR о permission ceiling и запрете self-authored capabilities.
