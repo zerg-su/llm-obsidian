@@ -7,6 +7,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -326,12 +327,51 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_request,
         review,
     )
-    custom_harness = runner.harness_request(
+    custom_prompt = runner.render_task_prompt(custom_request, config)
+    expect_error(
+        "custom dispatch cannot start from validation alone",
+        lambda: runner.harness_request(custom_request, config, effective),
+        "approval evidence",
+    )
+    custom_challenge = runner.custom_approval_challenge(
         custom_request,
+        request_sha256="a" * 64,
+        effective=effective,
+        review=review,
+        prompt=custom_prompt,
+    )
+    expect_error(
+        "custom approval must have a persisted validation challenge",
+        lambda: runner.authorize_custom_request(
+            custom_request,
+            custom_challenge,
+            custom_challenge["approval_sha256"],
+        ),
+        "validated before start",
+    )
+    runner.persist_custom_approval_challenge(
+        custom_request,
+        custom_challenge,
+    )
+    expect_error(
+        "custom approval rejects a different digest",
+        lambda: runner.authorize_custom_request(
+            custom_request,
+            custom_challenge,
+            "f" * 64,
+        ),
+        "does not match",
+    )
+    approved_custom_request = runner.authorize_custom_request(
+        custom_request,
+        custom_challenge,
+        custom_challenge["approval_sha256"],
+    )
+    custom_harness = runner.harness_request(
+        approved_custom_request,
         config,
         effective,
     )
-    custom_prompt = runner.render_task_prompt(custom_request, config)
     check(
         "dispatch validates and binds one explicitly approved custom contract",
         custom_request["pipeline"] == "custom"
@@ -366,6 +406,89 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_policy,
     )
     custom_payload = json.loads(custom_spec.read_text(encoding="utf-8"))
+    mutated_custom = json.loads(json.dumps(custom_payload))
+    mutated_custom["spec_id"] = "changed-after-validation"
+    custom_spec.write_text(json.dumps(mutated_custom), encoding="utf-8")
+    changed_request = runner.validate_request(custom_raw)
+    changed_prompt = runner.render_task_prompt(changed_request, config)
+    changed_challenge = runner.custom_approval_challenge(
+        changed_request,
+        request_sha256="a" * 64,
+        effective=effective,
+        review=review,
+        prompt=changed_prompt,
+    )
+    expect_error(
+        "custom spec mutation invalidates the persisted approval challenge",
+        lambda: runner.authorize_custom_request(
+            changed_request,
+            changed_challenge,
+            custom_challenge["approval_sha256"],
+        ),
+        "no longer matches",
+    )
+    custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
+
+    cli_raw = json.loads(json.dumps(custom_raw))
+    cli_raw["request_id"] = str(uuid.uuid4())
+    cli_raw["task_name"] = "custom-cli-approval"
+    cli_raw["branch"] = "task/custom-cli-approval"
+    cli_raw["worktree"] = str(
+        tmp / "worktrees" / "custom-cli-approval"
+    )
+    cli_spec = custom_dir / f"{cli_raw['request_id']}.json"
+    cli_spec.write_text(
+        json.dumps(cli_raw, sort_keys=True), encoding="utf-8"
+    )
+    cli_validate = subprocess.run(
+        [sys.executable, str(SCRIPT), "validate", "--spec", str(cli_spec)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    cli_token = json.loads(cli_validate.stdout)["approval_sha256"]
+    cli_without_approval = subprocess.run(
+        [sys.executable, str(SCRIPT), "start", "--spec", str(cli_spec)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "custom CLI start fails before effects without exact approval",
+        cli_without_approval.returncode == 3
+        and "--approval-sha256" in cli_without_approval.stderr
+        and not Path(cli_raw["worktree"]).exists(),
+        cli_without_approval.stderr,
+    )
+    changed_cli_custom = json.loads(json.dumps(custom_payload))
+    changed_cli_custom["spec_id"] = "changed-before-cli-start"
+    custom_spec.write_text(json.dumps(changed_cli_custom), encoding="utf-8")
+    cli_after_mutation = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "start",
+            "--spec",
+            str(cli_spec),
+            "--approval-sha256",
+            cli_token,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "custom CLI start rejects spec mutation after approval",
+        cli_after_mutation.returncode == 3
+        and "no longer matches" in cli_after_mutation.stderr
+        and not Path(cli_raw["worktree"]).exists(),
+        cli_after_mutation.stderr,
+    )
+    custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
+
     unresolved_context = json.loads(json.dumps(custom_payload))
     unresolved_context["context_pointers"] = [
         {

@@ -70,12 +70,19 @@ explicitly asks for a visible persistent session.
    capabilities, enforcement-labelled permissions/effects, worst-case node and
    model counts, loop stops, terminal outcomes, and absolute budget ceiling.
    Ask once. Do not freeze, mutate, or spawn before explicit approval of that
-   exact definition hash.
+   exact definition hash. For custom pipelines, validation also returns and
+   persists one owner-only `approval_sha256` challenge bound to the exact
+   request/spec/plan, route, prompt, review policy, and rendered approval card.
 7. After approval, start the exact UUID once:
 
    ```bash
-   python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json>
+   python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json> \
+     --approval-sha256 <exact-validate-token>  # custom only
    ```
+
+   Never calculate, replace, or reuse the token from another validation. A
+   custom start without it, or after any bound input changes, fails before
+   worktree/cmux effects. Built-in starts omit the option.
 
 8. Show the bounded typed launch result. When it returns
    `coordinator_action: return-to-idle-without-polling`, end this turn. Do not

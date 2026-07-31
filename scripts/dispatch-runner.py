@@ -59,9 +59,10 @@ from harness.custom_pipelines import (  # noqa: E402
     compile_custom_spec,
     freeze_custom_pipeline,
     parse_pipeline_spec,
+    pipeline_spec_payload,
     render_custom_approval,
 )
-from harness.pipelines import render_contract  # noqa: E402
+from harness.pipelines import CompiledPipeline, render_contract  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
@@ -530,9 +531,28 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
 def custom_pipeline_for_request(
     request: dict[str, Any],
 ) -> FrozenCustomPipeline | None:
-    path = request.get("custom_pipeline_spec")
+    """Freeze a custom contract only from explicit bound approval evidence."""
+
     if request.get("pipeline") != "custom":
         return None
+    approval = request.get("_custom_approval")
+    if not isinstance(approval, ExplicitPipelineApproval):
+        raise DispatchError("custom pipeline requires exact approval evidence")
+    spec, compiled, policy, card = custom_contract_for_request(request)
+    try:
+        return freeze_custom_pipeline(spec, compiled, approval, card)
+    except (HarnessContractError, OSError, ValueError) as exc:
+        raise DispatchError(f"custom pipeline changed after approval: {exc}") from exc
+
+
+def custom_contract_for_request(
+    request: dict[str, Any],
+) -> tuple[PipelineSpec, CompiledPipeline, CustomPipelinePolicy, str]:
+    """Compile the effect-free custom contract for preview or approval."""
+
+    path = request.get("custom_pipeline_spec")
+    if request.get("pipeline") != "custom":
+        raise DispatchError("custom pipeline contract requires pipeline=custom")
     if not isinstance(path, Path):
         raise DispatchError("custom pipeline spec is unavailable")
     try:
@@ -545,25 +565,135 @@ def custom_pipeline_for_request(
             capabilities=("route:resolved",),
         )
         card = render_custom_approval(spec, compiled, policy=policy)
-        approval = ExplicitPipelineApproval.for_card(
-            definition_sha256=compiled.definition_sha256,
-            approval_card=card,
-            actor="user",
-            decision="approve",
-        )
-        return freeze_custom_pipeline(spec, compiled, approval, card)
+        return spec, compiled, policy, card
     except (HarnessContractError, OSError, ValueError) as exc:
         raise DispatchError(f"custom pipeline changed after validation: {exc}") from exc
 
 
+def custom_approval_challenge(
+    request: dict[str, Any],
+    *,
+    request_sha256: str,
+    effective: dict[str, Any],
+    review: ReviewPolicy,
+    prompt: str,
+) -> dict[str, Any]:
+    """Bind one exact pre-effect validation result to later approval."""
+
+    spec, compiled, _policy, card = custom_contract_for_request(request)
+    path = request["custom_pipeline_spec"]
+    payload = {
+        "schema_version": 1,
+        "request_id": request["request_id"],
+        "request_sha256": request_sha256,
+        "custom_spec_sha256": sha256_file(path),
+        "pipeline_spec_sha256": hashlib.sha256(
+            json.dumps(
+                pipeline_spec_payload(spec),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
+        "definition_sha256": compiled.definition_sha256,
+        "approval_card_sha256": hashlib.sha256(card.encode()).hexdigest(),
+        "plan_sha256": sha256_file(request["plan_file"]),
+        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "route": {
+            key: effective[key]
+            for key in ("runtime", "model", "effort", "config_sha256")
+        },
+        "review": {
+            "mode": review.mode,
+            "cross_model": review.cross_model,
+            "runtime": review.runtime,
+            "model": review.model,
+            "effort": review.effort,
+            "max_verify_iterations": review.max_verify_iterations,
+            "verification_profile": review.verification_profile,
+            "verification_profile_sha256": (
+                review.verification_profile_sha256
+            ),
+        },
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {**payload, "approval_sha256": digest}
+
+
+def custom_approval_path(request: dict[str, Any]) -> Path:
+    return (
+        request["vault_root"]
+        / ".vault-meta"
+        / "dispatch-approval-challenges"
+        / f"{request['request_id']}.json"
+    )
+
+
+def persist_custom_approval_challenge(
+    request: dict[str, Any], challenge: dict[str, Any]
+) -> None:
+    path = custom_approval_path(request)
+    ensure_owned_dir(path.parent)
+    if path.exists() or path.is_symlink():
+        info = path.lstat()
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            raise DispatchError("custom approval challenge is not owner-only")
+        if read_object(path) != challenge:
+            raise DispatchError(
+                "custom approval challenge changed; use a fresh request_id"
+            )
+        return
+    exclusive_json(path, challenge)
+
+
+def authorize_custom_request(
+    request: dict[str, Any],
+    challenge: dict[str, Any],
+    approval_sha256: str,
+) -> dict[str, Any]:
+    """Consume exact coordinator evidence after the user approves the card."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", approval_sha256):
+        raise DispatchError("custom start requires --approval-sha256")
+    path = custom_approval_path(request)
+    if path.is_symlink() or not path.is_file():
+        raise DispatchError("custom pipeline must be validated before start")
+    info = path.stat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise DispatchError("custom approval challenge is not owner-only")
+    persisted = read_object(path)
+    if persisted != challenge:
+        raise DispatchError("custom approval challenge no longer matches validation")
+    if approval_sha256 != challenge["approval_sha256"]:
+        raise DispatchError("custom approval digest does not match validation")
+    spec, compiled, _policy, card = custom_contract_for_request(request)
+    del spec
+    approved = dict(request)
+    approved["_custom_approval"] = ExplicitPipelineApproval.for_card(
+        definition_sha256=compiled.definition_sha256,
+        approval_card=card,
+        actor="user",
+        decision="approve",
+    )
+    return approved
+
+
 def compiled_pipeline_for_request(request: dict[str, Any]):
-    custom = custom_pipeline_for_request(request)
-    return custom.compiled if custom is not None else compiled_builtin(request["pipeline"])
+    if request.get("pipeline") == "custom":
+        return custom_contract_for_request(request)[1]
+    return compiled_builtin(request["pipeline"])
 
 
 def execution_pipeline_for_request(request: dict[str, Any]) -> str:
-    custom = custom_pipeline_for_request(request)
-    return custom.spec.baseline_pipeline if custom is not None else request["pipeline"]
+    if request.get("pipeline") == "custom":
+        return custom_contract_for_request(request)[0].baseline_pipeline
+    return request["pipeline"]
 
 
 def task_pipeline_policy(request: dict[str, Any]) -> dict[str, object]:
@@ -711,9 +841,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
     if request["pipeline"] == "custom":
-        custom = custom_pipeline_for_request(request)
-        if custom is None:
-            raise DispatchError("custom pipeline contract is unavailable")
+        _spec, compiled, _policy, _card = custom_contract_for_request(request)
         phase_contract = "\n".join(
             (
                 "## Typed custom pipeline steps",
@@ -745,7 +873,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
                 "files required by the approved plan.",
                 "",
                 "Approved custom definition: "
-                f"`{custom.definition_sha256}`.",
+                f"`{compiled.definition_sha256}`.",
                 "",
             )
         )
@@ -1153,26 +1281,21 @@ def lifecycle_contract_for_request(
     request: dict[str, Any],
     review: ReviewPolicy,
 ) -> dict[str, str]:
-    custom = custom_pipeline_for_request(request)
-    if custom is None:
+    if request.get("pipeline") != "custom":
         return lifecycle_contract(
             review,
             request["pipeline"],
             request["completion_policy"],
         )
-    policy = CustomPipelinePolicy.default()
-    definition = custom.compiled.definition
+    spec, compiled, policy, card = custom_contract_for_request(request)
+    definition = compiled.definition
     return {
         "pipeline": f"custom/{definition.profile}@{definition.version}",
-        "definition_sha256": custom.definition_sha256,
+        "definition_sha256": compiled.definition_sha256,
         "summary": (
-            render_custom_approval(
-                custom.spec,
-                custom.compiled,
-                policy=policy,
-            )
+            card
             + render_contract(
-                custom.compiled,
+                compiled,
                 completion_policy=request["completion_policy"],
                 review_mode=review.mode,
                 max_verify_iterations=review.max_verify_iterations,
@@ -1511,6 +1634,7 @@ def main() -> int:
     validate.add_argument("--spec", type=Path, required=True)
     launch = sub.add_parser("start")
     launch.add_argument("--spec", type=Path, required=True)
+    launch.add_argument("--approval-sha256", default="")
     args = parser.parse_args()
     try:
         spec_path = args.spec.expanduser().resolve()
@@ -1527,7 +1651,7 @@ def main() -> int:
             session, effective = resolved_routes(request, persist=False)
             review = review_policy(request, config)
             prompt = render_task_prompt(request, config)
-            print(json.dumps({
+            result = {
                 "schema_version": 1,
                 "status": "valid",
                 "request_id": request["request_id"],
@@ -1555,8 +1679,38 @@ def main() -> int:
                         review.verification_profile_sha256
                     ),
                 },
-            }, sort_keys=True))
+            }
+            if request["pipeline"] == "custom":
+                challenge = custom_approval_challenge(
+                    request,
+                    request_sha256=spec_sha256,
+                    effective=effective,
+                    review=review,
+                    prompt=prompt,
+                )
+                persist_custom_approval_challenge(request, challenge)
+                result["approval_sha256"] = challenge["approval_sha256"]
+            print(json.dumps(result, sort_keys=True))
             return 0
+        if request["pipeline"] == "custom":
+            config = load_dispatch_config(
+                request["vault_root"], request["target_repo"]
+            )
+            _session, effective = resolved_routes(request, persist=False)
+            review = review_policy(request, config)
+            prompt = render_task_prompt(request, config)
+            challenge = custom_approval_challenge(
+                request,
+                request_sha256=spec_sha256,
+                effective=effective,
+                review=review,
+                prompt=prompt,
+            )
+            request = authorize_custom_request(
+                request,
+                challenge,
+                args.approval_sha256,
+            )
         print(json.dumps(start(request, spec_sha256), ensure_ascii=False, sort_keys=True))
         return 0
     except (
