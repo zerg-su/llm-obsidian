@@ -140,7 +140,8 @@
           "enum": [
             "lifecycle/default",
             "engineering/change",
-            "engineering/fix"
+            "engineering/fix",
+            "custom"
           ]
         },
         "definition_sha256": {
@@ -152,9 +153,29 @@
         },
         "total_pass_limit": {
           "enum": [2, 3]
+        },
+        "source": {"const": "custom"},
+        "baseline": {
+          "enum": [
+            "lifecycle/default",
+            "engineering/change",
+            "engineering/fix"
+          ]
         }
       },
       "allOf": [
+        {
+          "if": {"properties": {"name": {"const": "custom"}}},
+          "then": {"required": ["source", "baseline"]},
+          "else": {
+            "not": {
+              "anyOf": [
+                {"required": ["source"]},
+                {"required": ["baseline"]}
+              ]
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -175,7 +196,7 @@
           },
           "then": {
             "properties": {
-              "name": {"const": "engineering/fix"},
+              "name": {"enum": ["engineering/fix", "custom"]},
               "total_pass_limit": {"const": 3}
             }
           }

@@ -53,6 +53,7 @@ from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor, SupervisorError
 from .verification import (
     VerificationError,
+    compose_commands,
     load_profiles,
     run_profile,
 )
@@ -80,7 +81,7 @@ from research_contract import (
     load_artifact,
     validate_result_artifact,
 )
-from lifecycle_telemetry import emit_compiled_pipeline_event
+from lifecycle_telemetry import emit_compiled_pipeline_event, emit_lifecycle_event
 from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary
 
@@ -697,6 +698,22 @@ def run(
     ready = spec["ready_path"]
     exit_path = spec["exit_path"]
     store = OperationStore(spec["store_root"])
+    trusted_store = spec["store_root"]
+    trusted_vault = trusted_store.parent.parent
+    if (
+        spec["callback_mode"] == "task-summary"
+        and trusted_store != trusted_vault / ".vault-meta" / "harness"
+    ):
+        _atomic_json(ready, {"schema_version": 1, "status": "failed"})
+        _atomic_json(
+            exit_path,
+            {
+                "schema_version": 1,
+                "status": "store-root-invalid",
+                "exit_code": 2,
+            },
+        )
+        return 2
     process = ProcessAdapter()
     handle: ProcessHandle | None = None
     research_input_sha256 = ""
@@ -1109,6 +1126,29 @@ def run(
                 summary_attention_revision = current.revision
         except Exception:
             pass
+        if is_custom_pipeline and pipeline is not None:
+            marker = spec_path.parent / "pipeline-custom" / "attention-telemetry.json"
+            if not marker.exists():
+                emit_compiled_pipeline_event(
+                    spec["cwd"],
+                    event="attention",
+                    pipeline_id=pipeline.definition.pipeline_id,
+                    pipeline_version=pipeline.definition.version,
+                    profile=pipeline.definition.profile,
+                    compiler_outcome="custom-resolved",
+                    definition_sha=pipeline.definition_sha256,
+                    primitive_count=len(pipeline.definition.steps),
+                    attention_category="custom-attention",
+                    status="degraded",
+                )
+                _atomic_json(
+                    marker,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "status": "emitted",
+                    },
+                )
         if write_error:
             _atomic_json(
                 spec_path.parent / "callback-error.json",
@@ -1798,7 +1838,7 @@ def run(
                         and fix_submit_attempt_digest != result_digest
                     ):
                         fix_submit_attempt_digest = result_digest
-                        subprocess.run(
+                        submitted = subprocess.run(
                             [
                                 sys.executable,
                                 str(trusted_vault / "scripts" / "pipeline-step-submit.py"),
@@ -1810,6 +1850,22 @@ def run(
                             capture_output=True,
                             check=False,
                         )
+                        if submitted.returncode != 0:
+                            _atomic_json(
+                                spec_path.parent
+                                / "pipeline-fix"
+                                / "submit-failed.json",
+                                {
+                                    "schema_version": 1,
+                                    "operation_id": round_.spec.operation_id,
+                                    "returncode": submitted.returncode,
+                                    "status": "attention-required",
+                                },
+                            )
+                            summary_attention(
+                                "pipeline-fix-submit-failed",
+                                AttentionReason.CALLBACK_INVALID,
+                            )
                 return
             if not raw or len(raw) > MAX_OUTBOX_BYTES:
                 raise RuntimeWorkerError(
@@ -1942,7 +1998,7 @@ def run(
             "raised_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "receipt_operation_id": receipt.operation_id if receipt is not None else "",
             "receipt_sha256": receipt_sha256,
-            "allowed_decisions": ["stop", "resume"],
+            "allowed_decisions": ["stop", "reapprove-pipeline"],
         }
         if path.is_file() and not path.is_symlink():
             if json.loads(path.read_text(encoding="utf-8")) != packet:
@@ -1952,10 +2008,18 @@ def run(
         notify_path = spec_path.parent / "pipeline-custom" / "attention-notify.json"
         if notify_path.is_file() and not notify_path.is_symlink():
             return
+        command = (
+            "python3 "
+            + shlex.quote(str(trusted_vault / "scripts" / "task_escalation.py"))
+            + " resolve --worktree "
+            + shlex.quote(str(spec["cwd"]))
+            + " --decision <decision>"
+        )
         cmux_adapter.send(
             spec["origin_surface"],
             "Typed custom pipeline escalation received. Inspect "
-            f"{path} and resolve from the originating coordinator.",
+            f"{path} and resolve from the originating coordinator with: "
+            f"{command}. Allowed decisions: stop, reapprove-pipeline.",
         )
         cmux_adapter.send_key(spec["origin_surface"], "Enter")
         write_immutable_json(
@@ -2117,7 +2181,7 @@ def run(
                         and custom_submit_attempt_digest != result_digest
                     ):
                         custom_submit_attempt_digest = result_digest
-                        subprocess.run(
+                        submitted = subprocess.run(
                             [
                                 sys.executable,
                                 str(trusted_vault / "scripts" / "pipeline-step-submit.py"),
@@ -2129,6 +2193,22 @@ def run(
                             capture_output=True,
                             check=False,
                         )
+                        if submitted.returncode != 0:
+                            _atomic_json(
+                                spec_path.parent
+                                / "pipeline-custom"
+                                / "submit-failed.json",
+                                {
+                                    "schema_version": 1,
+                                    "operation_id": round_.spec.operation_id,
+                                    "returncode": submitted.returncode,
+                                    "status": "attention-required",
+                                },
+                            )
+                            summary_attention(
+                                "pipeline-custom-submit-failed",
+                                AttentionReason.CALLBACK_INVALID,
+                            )
                 return
             raw = callback_path.read_bytes()
             if not raw or len(raw) > MAX_OUTBOX_BYTES:
@@ -2434,12 +2514,6 @@ def run(
                 )
             current_session = str(meta.get("origin_session") or "")
             validate_handoff(meta, summary, current_session)
-            trusted_store = spec["store_root"]
-            trusted_vault = trusted_store.parent.parent
-            if trusted_store != trusted_vault / ".vault-meta" / "harness":
-                raise RuntimeWorkerError(
-                    "task summary store is not the trusted vault harness"
-                )
             review = task_review_status(
                 meta,
                 spec["cwd"],
@@ -2991,7 +3065,9 @@ def run(
                 succeeded = all(code == 0 for code in exit_codes)
                 expected_command_ids = [
                     f"{profile.name}-{index + 1}"
-                    for index in range(len(profile.commands))
+                    for index in range(
+                        len(compose_commands(profile, pipeline_extra_commands))
+                    )
                 ]
                 if (
                     len(heads) != 1
@@ -4337,6 +4413,38 @@ def run(
                 ),
                 liveness_policy,
             )
+            if decision.action != "observe":
+                telemetry_marker = (
+                    spec_path.parent
+                    / "liveness"
+                    / "telemetry"
+                    / f"{decision.action_id}.json"
+                )
+                if not telemetry_marker.exists():
+                    emit_lifecycle_event(
+                        spec["cwd"],
+                        "pipeline-liveness",
+                        actor=decision.action,
+                        counts={"model_call": int(decision.model_call)},
+                        identifiers={
+                            "stage": decision.action,
+                            "action_id": decision.action_id,
+                        },
+                        status=(
+                            "degraded"
+                            if decision.action
+                            in {"suspected-idle", "attention-required"}
+                            else "ok"
+                        ),
+                    )
+                    _atomic_json(
+                        telemetry_marker,
+                        {
+                            "schema_version": 1,
+                            "action_id": decision.action_id,
+                            "status": "emitted",
+                        },
+                    )
             if decision.action == "reconcile-result":
                 if spec["callback_mode"] == "task-summary":
                     recover_task_summary_attention()

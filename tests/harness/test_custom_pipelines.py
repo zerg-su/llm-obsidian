@@ -48,6 +48,8 @@ VALID = {
     "intent": "engineering-change",
     "task_profile": "change",
     "baseline_pipeline": "engineering/change",
+    "route_alias": "executor-default",
+    "required_capabilities": ["route:resolved"],
     "input_schema": "approved-plan/v1",
     "output_schema": "reap-ready/v1",
     "steps": [
@@ -126,8 +128,20 @@ recompiled = compile_custom_spec(
     policy=policy,
     capabilities=("route:resolved",),
 )
+reordered = deepcopy(VALID)
+reordered["requested_permissions"].reverse()
+reordered["requested_side_effects"].reverse()
+reordered["terminal_outcomes"].reverse()
+reordered["transitions"].reverse()
+reordered_compiled = compile_custom_spec(
+    parse_pipeline_spec(reordered),
+    builtin_registry(),
+    policy=policy,
+    capabilities=("route:resolved",),
+)
 
 check("strict parser produces a stable compiled hash", compiled.definition_sha256 == recompiled.definition_sha256)
+check("set-like spec ordering does not change the canonical hash", compiled.definition_sha256 == reordered_compiled.definition_sha256)
 check("custom compiler uses the existing compiler", compiled.compiler_version.startswith("1."))
 check("custom budget is bounded by the code-owned ceiling", compiled.worst_case_budget.attempt_limit <= policy.worst_case_budget.attempt_limit)
 
@@ -410,6 +424,26 @@ expect_rejection(
     "permission expansion fails closed",
     lambda value: value["requested_permissions"].append("network"),
     "permission ceiling",
+)
+expect_rejection(
+    "policy-only permission claims are unavailable to custom specs",
+    lambda value: value["requested_permissions"].append("cmux-target"),
+    "permission ceiling",
+)
+expect_rejection(
+    "policy-only side effects are unavailable to custom specs",
+    lambda value: value["requested_side_effects"].append("cmux-surface"),
+    "side-effect ceiling",
+)
+expect_rejection(
+    "model-authored provider routes fail closed",
+    lambda value: value.__setitem__("route_alias", "arbitrary-provider"),
+    "route alias",
+)
+expect_rejection(
+    "unavailable route capabilities fail before launch",
+    lambda value: value["required_capabilities"].append("network:open"),
+    "capability ceiling",
 )
 expect_rejection(
     "budget expansion fails closed",

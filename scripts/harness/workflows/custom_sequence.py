@@ -339,7 +339,12 @@ def reconcile_custom_sequence(
         key = (current, receipt.outcome)
         traversals[key] = traversals.get(key, 0) + 1
         if traversals[key] > transition.max_traversals:
-            raise CustomSequenceError("custom transition traversal budget exhausted")
+            return CustomSequenceProgress(
+                "attention",
+                completed_steps=tuple((*completed, current)),
+                terminal_outcome="loop-exhausted",
+                prior_receipt=receipt,
+            )
         completed.append(current)
         prior = receipt
         if transition.target.startswith("terminal:"):

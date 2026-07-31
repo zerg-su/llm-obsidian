@@ -442,6 +442,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(context, list) or len(context) > 5:
         raise DispatchError("wiki_context must contain at most five entries")
     normalized_context: list[dict[str, str]] = []
+    context_source_paths = [plan_file]
     for item in context:
         if not isinstance(item, dict):
             raise DispatchError("wiki_context entries must be objects")
@@ -451,6 +452,22 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         if len(matches) != 1:
             raise DispatchError(f"wiki context target must exist exactly once: {title}")
         normalized_context.append({"title": title, "summary": summary})
+        context_source_paths.append(matches[0])
+    if parsed_custom is not None:
+        allowed_context: dict[str, int] = {}
+        for source_path in context_source_paths:
+            raw_source = source_path.read_bytes()
+            allowed_context[hashlib.sha256(raw_source).hexdigest()] = len(raw_source)
+        for pointer in parsed_custom.context_pointers:
+            source_size = allowed_context.get(pointer.content_sha256)
+            if source_size is None:
+                raise DispatchError(
+                    "custom context pointer is not in the approved context packet"
+                )
+            if source_size > pointer.byte_limit:
+                raise DispatchError(
+                    "custom context pointer exceeds its declared byte limit"
+                )
     agents = raw.get("suggested_agents") or []
     if not isinstance(agents, list) or len(agents) > 2:
         raise DispatchError("suggested_agents must contain at most two entries")
@@ -547,6 +564,29 @@ def compiled_pipeline_for_request(request: dict[str, Any]):
 def execution_pipeline_for_request(request: dict[str, Any]) -> str:
     custom = custom_pipeline_for_request(request)
     return custom.spec.baseline_pipeline if custom is not None else request["pipeline"]
+
+
+def task_pipeline_policy(request: dict[str, Any]) -> dict[str, object]:
+    """Render honest task metadata without exposing the raw custom spec."""
+
+    policy: dict[str, object] = {
+        "name": request["pipeline"],
+        "definition_sha256": compiled_pipeline_for_request(
+            request
+        ).definition_sha256,
+        "completion_policy": request["completion_policy"],
+        "total_pass_limit": COMPLETION_PASS_LIMITS[
+            request["completion_policy"]
+        ],
+    }
+    if request["pipeline"] == "custom":
+        policy.update(
+            {
+                "source": "custom",
+                "baseline": execution_pipeline_for_request(request),
+            }
+        )
+    return policy
 
 
 def load_dispatch_config(vault_root: Path, target_repo: Path) -> dict[str, Any]:
@@ -970,16 +1010,7 @@ def write_task_files(
         "plan_file": str(request["plan_file"]),
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
-        "pipeline_policy": {
-            "name": execution_pipeline_for_request(request),
-            "definition_sha256": compiled_pipeline_for_request(
-                request
-            ).definition_sha256,
-            "completion_policy": request["completion_policy"],
-            "total_pass_limit": COMPLETION_PASS_LIMITS[
-                request["completion_policy"]
-            ],
-        },
+        "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
             "mode": review.mode,
             "cross_model": review.cross_model,

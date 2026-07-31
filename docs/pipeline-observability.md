@@ -127,6 +127,16 @@ are recorded in
 and its
 [superseding ADR](decisions/v2.4-state-free-executable-lifecycle.md).
 
+LLM Obsidian 2.5 adds approved custom definitions without changing that
+ownership. Raw `PipelineSpec` data stays in owner-only runtime scratch. The
+shared event stream sees only the normalized definition hash, custom/built-in
+compiler outcome, bounded primitive/loop counters, terminal or attention
+category, and idempotent liveness stages. `custom-pipeline-report.py` groups
+those fingerprints and marks a promotion candidate only after repeated
+successful runs with zero observed attention; it never promotes a definition
+or copies task content. See the
+[2.5 boundary ADR](decisions/v2.5-model-authored-pipeline-boundary.md).
+
 ### Compiled event call contract
 
 `lifecycle_telemetry.emit_compiled_pipeline_event()` is the best-effort seam for

@@ -188,11 +188,15 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         raise ContractError("interaction_policy must be interactive or unattended")
     if version == 3:
         pipeline = meta.get("pipeline_policy")
-        if not isinstance(pipeline, dict) or set(pipeline) != {
+        base_pipeline_fields = {
             "name",
             "definition_sha256",
             "completion_policy",
             "total_pass_limit",
+        }
+        if not isinstance(pipeline, dict) or frozenset(pipeline) not in {
+            frozenset(base_pipeline_fields),
+            frozenset(base_pipeline_fields | {"source", "baseline"}),
         }:
             raise ContractError(
                 "v3 pipeline_policy must contain the complete compiled selection"
@@ -205,6 +209,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             "lifecycle/default",
             "engineering/change",
             "engineering/fix",
+            "custom",
         }:
             raise ContractError("v3 pipeline_policy.name is invalid")
         if (
@@ -226,9 +231,29 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError(
                 "v3 pipeline_policy total_pass_limit mismatches completion_policy"
             )
-        if completion == "autonomous" and name != "engineering/fix":
+        if name == "custom":
+            if (
+                pipeline.get("source") != "custom"
+                or pipeline.get("baseline")
+                not in {
+                    "lifecycle/default",
+                    "engineering/change",
+                    "engineering/fix",
+                }
+            ):
+                raise ContractError(
+                    "v3 custom pipeline requires its exact source and baseline"
+                )
+        elif set(pipeline) != base_pipeline_fields:
             raise ContractError(
-                "v3 autonomous completion requires engineering/fix"
+                "v3 built-in pipeline cannot carry custom source metadata"
+            )
+        if completion == "autonomous" and name not in {
+            "engineering/fix",
+            "custom",
+        }:
+            raise ContractError(
+                "v3 autonomous completion requires engineering/fix or custom"
             )
     plan_value = meta.get("plan_file")
     hash_value = meta.get("approved_plan_sha256")

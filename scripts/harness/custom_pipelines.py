@@ -16,8 +16,8 @@ from typing import Any, Mapping
 
 from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
 from .pipelines import (
-    DEFAULT_PERMISSION_CEILING,
-    DEFAULT_SIDE_EFFECTS,
+    PERMISSION_BINDINGS,
+    SIDE_EFFECT_BINDINGS,
     CompletionPolicy,
     CompiledPipeline,
     PipelineBudget,
@@ -45,6 +45,20 @@ VERIFICATION_CHECKS = {
     "model-routing": "make test-model-routing",
     "vault-validation": "python3 scripts/validate-vault.py --summary",
 }
+ENFORCEABLE_CUSTOM_PERMISSIONS = tuple(
+    sorted(
+        key
+        for key, binding in PERMISSION_BINDINGS.items()
+        if binding != "policy-only"
+    )
+)
+ENFORCEABLE_CUSTOM_SIDE_EFFECTS = tuple(
+    sorted(
+        key
+        for key, binding in SIDE_EFFECT_BINDINGS.items()
+        if binding != "policy-only"
+    )
+)
 
 
 def _exact_fields(value: Mapping[str, Any], fields: frozenset[str], label: str) -> None:
@@ -68,7 +82,12 @@ def _identifier(value: Any, label: str) -> str:
     return value
 
 
-def _string_tuple(value: Any, label: str) -> tuple[str, ...]:
+def _string_tuple(
+    value: Any,
+    label: str,
+    *,
+    preserve_order: bool = False,
+) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ContractError(f"{label} must be an array")
     items = tuple(
@@ -77,7 +96,7 @@ def _string_tuple(value: Any, label: str) -> tuple[str, ...]:
     )
     if len(items) != len(set(items)):
         raise ContractError(f"{label} must be unique")
-    return items
+    return items if preserve_order else tuple(sorted(items))
 
 
 def _integer(value: Any, label: str, *, minimum: int = 0) -> int:
@@ -127,6 +146,8 @@ class PipelineSpec:
     intent: str
     task_profile: str
     baseline_pipeline: str
+    route_alias: str
+    required_capabilities: tuple[str, ...]
     input_schema: str
     output_schema: str
     steps: tuple[PipelineStep, ...]
@@ -150,6 +171,7 @@ class PipelineSpec:
             (self.spec_id, "spec_id"),
             (self.intent, "intent"),
             (self.task_profile, "task_profile"),
+            (self.route_alias, "route_alias"),
         ):
             _identifier(value, label)
         if not SEMVER_RE.fullmatch(self.version):
@@ -185,6 +207,8 @@ class CustomPipelinePolicy:
     max_transitions: int
     max_loop_traversals: int
     max_model_calls: int
+    route_aliases: tuple[str, ...]
+    capability_ceiling: tuple[str, ...]
     permission_ceiling: tuple[str, ...]
     side_effect_ceiling: tuple[str, ...]
     worst_case_budget: PipelineBudget
@@ -206,6 +230,14 @@ class CustomPipelinePolicy:
             _integer(value, f"custom policy {label}", minimum=1)
         if not isinstance(self.worst_case_budget, PipelineBudget):
             raise ContractError("custom policy budget is invalid")
+        for values, label in (
+            (self.route_aliases, "route aliases"),
+            (self.capability_ceiling, "capability ceiling"),
+        ):
+            if not isinstance(values, tuple) or not values:
+                raise ContractError(f"custom policy {label} is invalid")
+            for value in values:
+                _identifier(value, f"custom policy {label}")
 
     @classmethod
     def default(cls) -> "CustomPipelinePolicy":
@@ -218,8 +250,10 @@ class CustomPipelinePolicy:
             max_transitions=16,
             max_loop_traversals=3,
             max_model_calls=8,
-            permission_ceiling=DEFAULT_PERMISSION_CEILING,
-            side_effect_ceiling=DEFAULT_SIDE_EFFECTS,
+            route_aliases=("executor-default",),
+            capability_ceiling=("route:resolved",),
+            permission_ceiling=ENFORCEABLE_CUSTOM_PERMISSIONS,
+            side_effect_ceiling=ENFORCEABLE_CUSTOM_SIDE_EFFECTS,
             worst_case_budget=PipelineBudget().scaled(3),
         )
 
@@ -464,6 +498,8 @@ TOP_FIELDS = frozenset(
         "intent",
         "task_profile",
         "baseline_pipeline",
+        "route_alias",
+        "required_capabilities",
         "input_schema",
         "output_schema",
         "steps",
@@ -591,11 +627,22 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
         intent=value["intent"],
         task_profile=value["task_profile"],
         baseline_pipeline=value["baseline_pipeline"],
+        route_alias=value["route_alias"],
+        required_capabilities=_string_tuple(
+            value["required_capabilities"], "required capabilities"
+        ),
         input_schema=value["input_schema"],
         output_schema=value["output_schema"],
         steps=tuple(steps),
-        transitions=tuple(transitions),
-        controls=tuple(controls),
+        transitions=tuple(
+            sorted(
+                transitions,
+                key=lambda item: (item.from_step, item.outcome, item.target),
+            )
+        ),
+        controls=tuple(
+            sorted(controls, key=lambda item: item.identity)
+        ),
         budget=budget,
         completion_policy=value["completion_policy"],
         requested_permissions=_string_tuple(
@@ -604,9 +651,13 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
         requested_side_effects=_string_tuple(
             value["requested_side_effects"], "requested side effects"
         ),
-        context_pointers=tuple(pointers),
+        context_pointers=tuple(
+            sorted(pointers, key=lambda item: item.pointer_id)
+        ),
         verification_checks=_string_tuple(
-            value["verification_checks"], "verification checks"
+            value["verification_checks"],
+            "verification checks",
+            preserve_order=True,
         ),
         review_mode=value["review_mode"],
         human_gates=_string_tuple(value["human_gates"], "human gates"),
@@ -633,6 +684,7 @@ def render_authoring_contract(*, intent: str, task_profile: str) -> str:
             "Return exactly one JSON object matching schemas/pipeline-spec-v1.schema.json.",
             f"Intent: {intent}; task profile: {task_profile}.",
             f"Baseline: {baseline}.",
+            "Use route_alias=executor-default and only capabilities proven by the harness.",
             "Recommend the built-in when it satisfies the task; propose custom only for a semantic gap.",
             "Use only registered primitive ids, bounded identifiers, and declared context hashes.",
             "Do not emit shell, Python, filesystem paths, credentials, dependencies, or plugins.",
@@ -790,10 +842,20 @@ def compile_custom_spec(
 
     if len(spec.steps) > policy.max_steps:
         raise ContractError("PipelineSpec exceeds the code-owned step limit")
+    if spec.route_alias not in policy.route_aliases:
+        raise ContractError("PipelineSpec route alias is not code-owned")
+    if not set(spec.required_capabilities).issubset(policy.capability_ceiling):
+        raise ContractError("PipelineSpec exceeds the capability ceiling")
+    if not set(spec.required_capabilities).issubset(capabilities):
+        raise ContractError("PipelineSpec route lacks required capabilities")
     if len(spec.controls) > policy.max_controls:
         raise ContractError("PipelineSpec exceeds the code-owned control limit")
     if len(spec.context_pointers) > policy.max_context_pointers:
         raise ContractError("PipelineSpec exceeds the context pointer limit")
+    if len({item.pointer_id for item in spec.context_pointers}) != len(
+        spec.context_pointers
+    ):
+        raise ContractError("PipelineSpec context pointer ids must be unique")
     if sum(item.byte_limit for item in spec.context_pointers) > policy.max_context_bytes:
         raise ContractError("PipelineSpec exceeds the context byte limit")
     if len(spec.verification_checks) > policy.max_verification_checks:
@@ -908,6 +970,8 @@ def render_custom_approval(
             f"Custom pipeline: {spec.spec_id}@{spec.version}",
             f"Definition: {compiled.definition_sha256}",
             f"Baseline: {spec.baseline_pipeline}",
+            f"Route: {spec.route_alias}; capabilities: "
+            + (", ".join(spec.required_capabilities) or "none"),
             "Delta: " + " -> ".join(step.step_id for step in spec.steps),
             "Control flow: "
             f"transitions={len(spec.transitions)}, loops={len(loop_edges)}, "

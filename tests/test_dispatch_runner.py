@@ -256,6 +256,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                 "intent": "engineering-change",
                 "task_profile": "change",
                 "baseline_pipeline": "engineering/change",
+                "route_alias": "executor-default",
+                "required_capabilities": ["route:resolved"],
                 "input_schema": "approved-plan/v1",
                 "output_schema": "reap-ready/v1",
                 "steps": [
@@ -337,6 +339,39 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and operation_spec(custom_harness).contract_sha256
         == custom_contract["definition_sha256"],
     )
+    custom_policy = runner.task_pipeline_policy(custom_request)
+    check(
+        "task metadata classifies custom execution without embedding its raw spec",
+        custom_policy["name"] == "custom"
+        and custom_policy["source"] == "custom"
+        and custom_policy["baseline"] == "engineering/change"
+        and set(custom_policy)
+        == {
+            "name",
+            "source",
+            "baseline",
+            "definition_sha256",
+            "completion_policy",
+            "total_pass_limit",
+        },
+        custom_policy,
+    )
+    custom_payload = json.loads(custom_spec.read_text(encoding="utf-8"))
+    unresolved_context = json.loads(json.dumps(custom_payload))
+    unresolved_context["context_pointers"] = [
+        {
+            "pointer_id": "unapproved-context",
+            "content_sha256": "a" * 64,
+            "byte_limit": 1024,
+        }
+    ]
+    custom_spec.write_text(json.dumps(unresolved_context), encoding="utf-8")
+    expect_error(
+        "custom context pointers must bind the approved context packet",
+        lambda: runner.validate_request(custom_raw),
+        "approved context packet",
+    )
+    custom_spec.write_text(json.dumps(custom_payload), encoding="utf-8")
     escaped_custom = json.loads(json.dumps(custom_raw))
     escaped_custom["custom_pipeline_spec"] = str(plan)
     expect_error(

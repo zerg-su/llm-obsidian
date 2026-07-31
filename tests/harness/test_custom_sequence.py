@@ -57,6 +57,8 @@ def raw_spec(*, loop: bool = False) -> dict[str, object]:
         "intent": "engineering-change",
         "task_profile": "change",
         "baseline_pipeline": "engineering/change",
+        "route_alias": "executor-default",
+        "required_capabilities": ["route:resolved"],
         "input_schema": "approved-plan/v1",
         "output_schema": "reap-ready/v1",
         "steps": [
@@ -153,6 +155,58 @@ with tempfile.TemporaryDirectory(prefix="custom-sequence.") as raw:
         check("undeclared model decisions fail closed", "not allowed" in str(exc), exc)
     else:
         check("undeclared model decisions fail closed", False)
+
+    loop_receipts = [design_receipt, revise_receipt]
+    for visit, expected_step, outcome in (
+        (2, "design", "complete"),
+        (3, "implement", "revise"),
+        (4, "design", "complete"),
+        (5, "implement", "revise"),
+    ):
+        round_ = prepare_custom_step(
+            store,
+            parent_record,
+            spec,
+            definition_sha256=definition,
+            approved_plan_sha256=plan,
+            initial_head_sha=head,
+            receipts=tuple(loop_receipts),
+        )
+        check(
+            f"loop visit {visit} targets the declared step",
+            round_.visit == visit and round_.step_id == expected_step,
+            round_,
+        )
+        loop_receipts.append(
+            accept_custom_step(
+                store,
+                round_,
+                custom_step_envelope(
+                    round_,
+                    outcome=outcome,
+                    output_pointer=f"loop-{visit}.md",
+                    output_sha256=sha(f"loop-{visit}"),
+                    head_sha=head,
+                ),
+                current_head_sha=head,
+                receipt_path=root / "receipts" / f"{visit:02d}.json",
+            )
+        )
+    exhausted = reconcile_custom_sequence(
+        parent_record,
+        spec,
+        definition_sha256=definition,
+        approved_plan_sha256=plan,
+        initial_head_sha=head,
+        receipts=tuple(loop_receipts),
+    )
+    check(
+        "loop traversal exhaustion becomes a typed attention boundary",
+        exhausted.action == "attention"
+        and exhausted.terminal_outcome == "loop-exhausted"
+        and exhausted.prior_receipt == loop_receipts[-1],
+        exhausted,
+    )
 
     linear_spec = parse_pipeline_spec(raw_spec())
     linear_store = OperationStore(root / "linear-store")

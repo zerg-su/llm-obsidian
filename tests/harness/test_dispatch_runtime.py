@@ -133,6 +133,8 @@ with tempfile.TemporaryDirectory() as raw:
         "intent": "engineering-change",
         "task_profile": "change",
         "baseline_pipeline": "engineering/change",
+        "route_alias": "executor-default",
+        "required_capabilities": ["route:resolved"],
         "input_schema": "approved-plan/v1",
         "output_schema": "reap-ready/v1",
         "steps": [

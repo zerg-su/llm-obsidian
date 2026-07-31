@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "spec_id", "version", "intent", "task_profile",
-    "baseline_pipeline", "input_schema", "output_schema", "steps", "transitions", "controls",
+    "baseline_pipeline", "route_alias", "required_capabilities", "input_schema", "output_schema", "steps", "transitions", "controls",
     "budget", "completion_policy", "requested_permissions",
     "requested_side_effects", "context_pointers", "verification_checks",
     "review_mode", "human_gates", "terminal_outcomes"
@@ -18,6 +18,8 @@
     "intent": {"$ref": "#/$defs/identifier"},
     "task_profile": {"$ref": "#/$defs/identifier"},
     "baseline_pipeline": {"type": "string", "pattern": "^[A-Za-z0-9._:-]+/[A-Za-z0-9._:-]+$", "maxLength": 128},
+    "route_alias": {"$ref": "#/$defs/identifier"},
+    "required_capabilities": {"$ref": "#/$defs/identifiers"},
     "input_schema": {"$ref": "#/$defs/schemaId"},
     "output_schema": {"$ref": "#/$defs/schemaId"},
     "steps": {

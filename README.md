@@ -362,6 +362,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
 | v2.4.1 typed fix loops, install, upgrade, and rollback | [v2.4.1 release notes](docs/releases/v2.4.1.md) |
+| v2.5.0 model-authored bounded pipelines and callback liveness | [v2.5.0 release notes](docs/releases/v2.5.0.md) |
 | v2.4.0 baseline release | [v2.4.0 release notes](docs/releases/v2.4.0.md) |
 | Numeric, content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |
 | Local PDF/Office/OCR path | [Document ingestion](docs/document-ingestion.md) |

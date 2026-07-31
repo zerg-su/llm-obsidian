@@ -1,7 +1,7 @@
 ---
 name: dispatch
 metadata:
-  version: 1.5.0
+  version: 1.6.0
 description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
@@ -46,7 +46,15 @@ explicitly asks for a visible persistent session.
    Freeze one code-owned pipeline selected during clarification:
    `lifecycle/default`, `engineering/change`, or `engineering/fix`. A fix also
    freezes `completion_policy=attention|autonomous`; other pipelines use
-   `attention`. Never infer autonomous mode after approval.
+   `attention`. Never infer autonomous mode after approval. If the deterministic
+   selector proves that no built-in expresses the approved task, propose one
+   strict `PipelineSpec` from `schemas/pipeline-spec-v1.schema.json` under the
+   same ignored request scratch, set `pipeline=custom`, and include its absolute
+   `custom_pipeline_spec`. Use only registered sequential primitives, typed
+   transitions, code-bounded loops, `executor-default`, approved context hashes,
+   and registered verification checks. Never emit commands, arbitrary paths or
+   providers, or capabilities outside code-owned ceilings. Recommend a built-in
+   whenever it fits; custom is a semantic-gap path, not a preference toggle.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
@@ -58,7 +66,11 @@ explicitly asks for a visible persistent session.
 
    Include exact repo/base/branch/worktree, runtime/model/effort, plan, selected
    context, `interaction_policy`, review/reap/surface/watchdog policy, and all
-   forbidden effects. Ask once. Do not mutate or spawn before explicit approval.
+   forbidden effects. For custom, show the rendered baseline delta, route and
+   capabilities, enforcement-labelled permissions/effects, worst-case node and
+   model counts, loop stops, terminal outcomes, and absolute budget ceiling.
+   Ask once. Do not freeze, mutate, or spawn before explicit approval of that
+   exact definition hash.
 7. After approval, start the exact UUID once:
 
    ```bash
@@ -88,6 +100,16 @@ session through exact harness prompts for `reproduce`, `root-cause`,
 replays an accepted phase. `attention` allows two total fix passes and returns a
 typed decision when exhausted; explicitly approved `autonomous` allows three
 and then fails terminally. Mechanism/security failures always return attention.
+An approved custom definition uses the same store, FSM, supervisor, provider
+session, verification, review, and reap boundary. The executor handles only the
+current registered `.task-pipeline-step-request.json`; the harness selects the
+next typed transition, enforces traversal/model-call limits, and resumes from
+the first missing receipt. Stable typed results without a callback are submitted
+by code without another model call. A content-free observer probes every 60
+seconds, marks ten-minute idle, permits at most one 15-minute nudge and one
+identity-bound 20-minute restart, then creates durable attention. Disabling
+`features.custom_pipeline_authoring` blocks new custom definitions without
+invalidating frozen active runs or built-ins.
 After the semantic pipeline and verification finish, the task writes
 `.task-summary.json` and remains available. The harness then drives
 `task-review-runner.py` idempotently through callback consumption, executor
