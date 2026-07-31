@@ -31,6 +31,10 @@ from .pipelines import (
 CUSTOM_SPEC_VERSION = 1
 CUSTOM_COMPILER_VERSION = "1.0.0"
 REVIEW_MODES = frozenset({"simple", "deep", "skip"})
+BASELINES = {
+    "change": "engineering/change",
+    "fix": "engineering/fix",
+}
 
 
 def _exact_fields(value: Mapping[str, Any], fields: frozenset[str], label: str) -> None:
@@ -120,7 +124,10 @@ class PipelineSpec:
             _identifier(value, label)
         if not SEMVER_RE.fullmatch(self.version):
             raise ContractError("version must be a semantic version")
-        if not SCHEMA_RE.fullmatch(self.baseline_pipeline) or "/" not in self.baseline_pipeline:
+        if (
+            not SCHEMA_RE.fullmatch(self.baseline_pipeline)
+            or "/" not in self.baseline_pipeline
+        ):
             raise ContractError("baseline_pipeline must name a built-in pipeline")
         if self.review_mode not in REVIEW_MODES:
             raise ContractError("review_mode is invalid")
@@ -160,6 +167,56 @@ class CustomPipelinePolicy:
             side_effect_ceiling=DEFAULT_SIDE_EFFECTS,
             worst_case_budget=PipelineBudget().scaled(3),
         )
+
+
+@dataclass(frozen=True)
+class ExplicitPipelineApproval:
+    definition_sha256: str
+    approval_card_sha256: str
+    actor: str
+    decision: str
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported pipeline approval schema")
+        for value, label in (
+            (self.definition_sha256, "approval definition_sha256"),
+            (self.approval_card_sha256, "approval card sha256"),
+        ):
+            if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+                raise ContractError(f"{label} must be a lowercase sha256")
+        _identifier(self.actor, "approval actor")
+        if self.decision not in {"approve", "revise", "reject"}:
+            raise ContractError("approval decision is invalid")
+
+    @classmethod
+    def for_card(
+        cls,
+        *,
+        definition_sha256: str,
+        approval_card: str,
+        actor: str,
+        decision: str,
+    ) -> "ExplicitPipelineApproval":
+        return cls(
+            definition_sha256=definition_sha256,
+            approval_card_sha256=hashlib.sha256(approval_card.encode()).hexdigest(),
+            actor=actor,
+            decision=decision,
+        )
+
+
+@dataclass(frozen=True)
+class FrozenCustomPipeline:
+    compiled: CompiledPipeline
+    spec_sha256: str
+    approval_sha256: str
+    schema_version: int = 1
+
+    @property
+    def definition_sha256(self) -> str:
+        return self.compiled.definition_sha256
 
 
 TOP_FIELDS = frozenset(
@@ -301,6 +358,47 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
     )
 
 
+def select_builtin_baseline(intent: str, task_profile: str) -> str:
+    """Choose the comparison baseline without trusting model output."""
+
+    _identifier(intent, "intent")
+    _identifier(task_profile, "task_profile")
+    return BASELINES.get(task_profile, "lifecycle/default")
+
+
+def render_authoring_contract(*, intent: str, task_profile: str) -> str:
+    """Bounded prompt fragment for one model proposal step."""
+
+    baseline = select_builtin_baseline(intent, task_profile)
+    return "\n".join(
+        (
+            "Return exactly one JSON object matching schemas/pipeline-spec-v1.schema.json.",
+            f"Intent: {intent}; task profile: {task_profile}.",
+            f"Baseline: {baseline}.",
+            "Recommend the built-in when it satisfies the task; propose custom only for a semantic gap.",
+            "Use only registered primitive ids, bounded identifiers, and declared context hashes.",
+            "Do not emit shell, Python, filesystem paths, credentials, dependencies, or plugins.",
+            "The harness validates, renders, and requires explicit user approval before effects.",
+        )
+    ) + "\n"
+
+
+def _built_in_semantically_fits(spec: PipelineSpec) -> bool:
+    from .pipeline_builtins import compiled_builtin
+
+    baseline = compiled_builtin(spec.baseline_pipeline).definition
+    return (
+        spec.input_schema == baseline.input_schema
+        and spec.output_schema == baseline.output_schema
+        and spec.steps == baseline.steps
+        and spec.controls == baseline.control_primitives
+        and spec.completion_policy
+        in {item.policy for item in baseline.completion_policies}
+        and not spec.verification_checks
+        and spec.review_mode == "simple"
+    )
+
+
 def _budget_within(value: PipelineBudget, ceiling: PipelineBudget) -> bool:
     return all(
         left <= right
@@ -321,6 +419,14 @@ def compile_custom_spec(
     capabilities: tuple[str, ...] = (),
 ) -> CompiledPipeline:
     """Compile a model proposal without creating any operation or effect."""
+
+    selected_baseline = select_builtin_baseline(spec.intent, spec.task_profile)
+    if spec.baseline_pipeline != selected_baseline:
+        raise ContractError(
+            "PipelineSpec baseline differs from the deterministic baseline"
+        )
+    if _built_in_semantically_fits(spec):
+        raise ContractError("built-in already fits; custom pipeline is unnecessary")
 
     if len(spec.steps) > policy.max_steps:
         raise ContractError("PipelineSpec exceeds the code-owned step limit")
@@ -370,6 +476,31 @@ def compile_custom_spec(
         compiled,
         canonical_definition=canonical,
         definition_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
+    )
+
+
+def freeze_custom_pipeline(
+    spec: PipelineSpec,
+    compiled: CompiledPipeline,
+    approval: ExplicitPipelineApproval,
+    approval_card: str,
+) -> FrozenCustomPipeline:
+    """Bind exact user consent to an immutable compiled definition."""
+
+    if approval.actor != "user" or approval.decision != "approve":
+        raise ContractError("only explicit user approval can freeze a pipeline")
+    if approval.definition_sha256 != compiled.definition_sha256:
+        raise ContractError("approval definition does not match compiled definition")
+    card_sha256 = hashlib.sha256(approval_card.encode()).hexdigest()
+    if approval.approval_card_sha256 != card_sha256:
+        raise ContractError("approval card does not match the reviewed contract")
+    spec_sha256 = hashlib.sha256(
+        json.dumps(to_dict(spec), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return FrozenCustomPipeline(
+        compiled=compiled,
+        spec_sha256=spec_sha256,
+        approval_sha256=approval.approval_card_sha256,
     )
 
 

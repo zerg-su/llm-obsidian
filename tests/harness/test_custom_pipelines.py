@@ -13,10 +13,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.custom_pipelines import (  # noqa: E402
+    ExplicitPipelineApproval,
     CustomPipelinePolicy,
     compile_custom_spec,
+    freeze_custom_pipeline,
     parse_pipeline_spec,
+    render_authoring_contract,
     render_custom_approval,
+    select_builtin_baseline,
 )
 from harness.pipeline_builtins import builtin_registry  # noqa: E402
 
@@ -94,6 +98,10 @@ VALID = {
 
 policy = CustomPipelinePolicy.default()
 spec = parse_pipeline_spec(json.dumps(VALID))
+check(
+    "code-owned selector chooses the baseline",
+    select_builtin_baseline(spec.intent, spec.task_profile) == "engineering/change",
+)
 compiled = compile_custom_spec(
     spec,
     builtin_registry(),
@@ -119,6 +127,28 @@ check(
     and "Requested permissions:" in approval
     and "Explicit user approval required" in approval,
 )
+authoring = render_authoring_contract(
+    intent=spec.intent,
+    task_profile=spec.task_profile,
+)
+check(
+    "authoring contract names the schema and forbids executable content",
+    "pipeline-spec-v1.schema.json" in authoring
+    and "Do not emit shell, Python" in authoring
+    and "Baseline: engineering/change" in authoring,
+)
+approval_receipt = ExplicitPipelineApproval.for_card(
+    definition_sha256=compiled.definition_sha256,
+    approval_card=approval,
+    actor="user",
+    decision="approve",
+)
+frozen = freeze_custom_pipeline(spec, compiled, approval_receipt, approval)
+check(
+    "exact explicit approval freezes the compiled hash",
+    frozen.definition_sha256 == compiled.definition_sha256
+    and frozen.approval_sha256 == approval_receipt.approval_card_sha256,
+)
 
 
 def expect_rejection(label: str, mutation, token: str) -> None:
@@ -143,6 +173,66 @@ expect_rejection(
     lambda value: value.__setitem__("shell", "rm -rf /"),
     "unknown fields",
 )
+
+wrong_baseline = deepcopy(VALID)
+wrong_baseline["baseline_pipeline"] = "engineering/fix"
+try:
+    compile_custom_spec(
+        parse_pipeline_spec(wrong_baseline),
+        builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+except Exception as exc:
+    check("model cannot choose a permissive delta baseline", "deterministic baseline" in str(exc))
+else:
+    check("model cannot choose a permissive delta baseline", False)
+
+equivalent = deepcopy(VALID)
+equivalent["steps"][0]["step_id"] = "tdd-slices"
+equivalent["controls"] = []
+equivalent["completion_policy"] = "attention"
+equivalent["verification_checks"] = []
+try:
+    compile_custom_spec(
+        parse_pipeline_spec(equivalent),
+        builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+except Exception as exc:
+    check("built-in-equivalent proposals are rejected", "built-in already fits" in str(exc))
+else:
+    check("built-in-equivalent proposals are rejected", False)
+
+for label, receipt, token in (
+    (
+        "model cannot approve its own proposal",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256=compiled.definition_sha256,
+            approval_card=approval,
+            actor="model",
+            decision="approve",
+        ),
+        "user",
+    ),
+    (
+        "approval cannot be replayed for a different definition",
+        ExplicitPipelineApproval.for_card(
+            definition_sha256="b" * 64,
+            approval_card=approval,
+            actor="user",
+            decision="approve",
+        ),
+        "definition",
+    ),
+):
+    try:
+        freeze_custom_pipeline(spec, compiled, receipt, approval)
+    except Exception as exc:
+        check(label, token in str(exc))
+    else:
+        check(label, False)
 expect_rejection(
     "arbitrary commands fail closed",
     lambda value: value["verification_checks"].append("python -c evil"),
