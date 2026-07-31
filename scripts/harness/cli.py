@@ -119,6 +119,38 @@ def _runtime_workspace(
     return workspace_id, window_id
 
 
+def _continuation_time_budget(
+    store: OperationStore,
+    record: OperationRecord,
+) -> float | None:
+    path = (
+        store.root
+        / "owners"
+        / record.spec.owner_id
+        / "runtime"
+        / record.spec.operation_id
+        / "session.json"
+    )
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    budget = value.get("time_budget_seconds") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or value.get("operation_id") != record.spec.operation_id
+        or value.get("run_id") != record.run_id
+        or not isinstance(budget, (int, float))
+        or isinstance(budget, bool)
+        or budget <= 0
+    ):
+        return None
+    return float(budget)
+
+
 def _reconcile_owned_resources(
     store: OperationStore,
     record: OperationRecord,
@@ -263,6 +295,21 @@ def _resume(
         if not initial.resume_state:
             return store.transition(owner, operation_id, initial.state)
         store.transition(owner, operation_id, initial.resume_state)
+        if initial.attention_reason == AttentionReason.CALLBACK_TIMEOUT:
+            current = store.read(owner, operation_id)
+            time_budget_seconds = _continuation_time_budget(store, current)
+            if time_budget_seconds is None:
+                return _attention(
+                    store,
+                    owner,
+                    operation_id,
+                    reason=AttentionReason.ATTENTION_REQUIRED,
+                )
+            OperationSupervisor(
+                store, owner, operation_id
+            ).begin_continuation(
+                time_budget_seconds=time_budget_seconds
+            )
     current = store.read(owner, operation_id)
     if current.state == "cancelling":
         return _cancel_or_close(

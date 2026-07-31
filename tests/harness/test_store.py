@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import replace
@@ -493,6 +494,59 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         resumed.returncode == 0
         and pending_after_resume.state == "attention-required"
         and pending_after_resume.pending_effect == "open-surface",
+    )
+
+    create_cli_operation("op-resume-timeout-cli", state="awaiting-callback")
+    timed_out = store.read("owner-cli", "op-resume-timeout-cli")
+    store.save(
+        replace(
+            timed_out,
+            attempt=1,
+            attempt_limit=3,
+            deadline_at=1.0,
+            token_limit=100,
+            revision=timed_out.revision + 1,
+        ),
+        expected_revision=timed_out.revision,
+    )
+    timeout_session = (
+        store.root
+        / "owners"
+        / "owner-cli"
+        / "runtime"
+        / "op-resume-timeout-cli"
+        / "session.json"
+    )
+    timeout_session.parent.mkdir(parents=True)
+    timeout_session.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "op-resume-timeout-cli",
+                "run_id": "run-op-resume-timeout-cli",
+                "time_budget_seconds": 30.0,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store.transition(
+        "owner-cli",
+        "op-resume-timeout-cli",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    resumed_timeout = run_cli("resume", "op-resume-timeout-cli")
+    timeout_after_resume = store.read(
+        "owner-cli", "op-resume-timeout-cli"
+    )
+    check(
+        "CLI resume rearms one bounded callback window after explicit timeout recovery",
+        resumed_timeout.returncode == 0
+        and timeout_after_resume.state == "awaiting-callback"
+        and timeout_after_resume.attempt == 2
+        and timeout_after_resume.deadline_at > time.time(),
     )
 
     create_cli_operation("op-resume-cleanup-cli", state="exiting")
