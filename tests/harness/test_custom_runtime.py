@@ -27,7 +27,10 @@ from harness.custom_pipelines import (
     render_custom_approval,
 )
 from harness.pipeline_builtins import builtin_registry
-from harness.runtime_worker import run as run_worker
+from harness.runtime_worker import (
+    _submit_failure_requires_attention,
+    run as run_worker,
+)
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.workflows.custom_sequence import custom_step_request, prepare_custom_step
@@ -89,6 +92,14 @@ def custom_spec() -> dict[str, object]:
 
 with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
     root = Path(raw)
+    callback_race = root / "callback-race.json"
+    callback_race.write_text("{}\n", encoding="utf-8")
+    collided = subprocess.CompletedProcess([], 2, "", "already exists")
+    if _submit_failure_requires_attention(collided, callback_race):
+        raise AssertionError("published callback collision must remain recoverable")
+    callback_race.unlink()
+    if not _submit_failure_requires_attention(collided, callback_race):
+        raise AssertionError("missing callback after submit failure must require attention")
     vault = root / "vault"
     worktree = root / "worktree"
     state_root = (

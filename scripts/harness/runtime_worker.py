@@ -366,6 +366,14 @@ def _bounded_file_sha256(path: Path, *, limit: int = MAX_OUTBOX_BYTES) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _submit_failure_requires_attention(
+    result: subprocess.CompletedProcess[str], callback_path: Path
+) -> bool:
+    """Ignore the benign race where the model published the same callback."""
+
+    return result.returncode != 0 and not callback_path.is_file()
+
+
 def _write_once_json(path: Path, value: object) -> None:
     encoded = (
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
@@ -1850,7 +1858,9 @@ def run(
                             capture_output=True,
                             check=False,
                         )
-                        if submitted.returncode != 0:
+                        if _submit_failure_requires_attention(
+                            submitted, callback_path
+                        ):
                             _atomic_json(
                                 spec_path.parent
                                 / "pipeline-fix"
@@ -2193,7 +2203,9 @@ def run(
                             capture_output=True,
                             check=False,
                         )
-                        if submitted.returncode != 0:
+                        if _submit_failure_requires_attention(
+                            submitted, callback_path
+                        ):
                             _atomic_json(
                                 spec_path.parent
                                 / "pipeline-custom"
