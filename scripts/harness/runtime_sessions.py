@@ -1193,6 +1193,54 @@ class RuntimeSessionManager:
         self._notify()
         return self._result(parent, "callback-target-registered")
 
+    def continue_same_session_round(
+        self,
+        owner_id: str,
+        parent_operation_id: str,
+        checkpoint: str,
+        prompt_pointer: str,
+        callback_operation_id: str,
+        callback_run_id: str,
+        callback_pointer: str,
+    ) -> RuntimeSessionResult:
+        """Retarget one child, send one prompt, then await its callback.
+
+        The child owns only the typed result receipt. Provider and cmux
+        resources remain anchored to the persistent parent operation.
+        """
+
+        self.register_callback_target(
+            owner_id,
+            parent_operation_id,
+            callback_operation_id,
+            callback_run_id,
+            callback_pointer,
+        )
+        self.continue_session(
+            owner_id,
+            parent_operation_id,
+            checkpoint,
+            prompt_pointer,
+        )
+        parent = self.store.read(owner_id, parent_operation_id)
+        if parent.state == "running":
+            self.store.transition(
+                owner_id,
+                parent_operation_id,
+                "awaiting-callback",
+            )
+            parent = self.store.read(owner_id, parent_operation_id)
+        elif parent.state != "awaiting-callback":
+            raise RuntimeSessionError(
+                "same-session round cannot await its callback"
+            )
+        self._notify()
+        return self._result(
+            parent,
+            "round-continued",
+            checkpoint=checkpoint,
+        )
+
     def accept_callback(
         self, envelope: CallbackEnvelope
     ) -> RuntimeSessionResult:

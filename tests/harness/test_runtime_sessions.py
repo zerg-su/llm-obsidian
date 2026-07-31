@@ -825,9 +825,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     store.create(child_spec, lane_id="lane-shared", run_id="run-round-1")
     for state in ("preflight", "starting", "running", "awaiting-callback"):
         store.transition("owner-1", "round-1", state)
-    registered = manager.register_callback_target(
+    registered = manager.continue_same_session_round(
         "owner-1",
         "runtime-1",
+        "checkpoint-1",
+        "continue.md",
         "round-1",
         "run-round-1",
         "callbacks/round.json",
@@ -848,6 +850,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     check(
         "serial child callback target reuses parent ownership",
         registered.callback_pointer == "callbacks/round.json"
+        and registered.record.state == "awaiting-callback"
         and registered.record.resources.surface_id == SURFACE
         and child_accepted.record.spec.operation_id == "round-1"
         and child_accepted.record.state == "finalizing"
@@ -882,7 +885,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     check(
         "unknown ownership becomes visible attention without mutation",
         unknown.action == "attention-required"
-        and unknown.record.state == "running"
+        and unknown.record.state == "awaiting-callback"
         and cmux.closed == [],
     )
     process.status_value = "alive"

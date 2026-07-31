@@ -107,7 +107,13 @@ def task_meta(
     plan: Path,
     task_id: str,
     profile_sha: str,
+    pipeline_name: str,
 ) -> dict[str, object]:
+    pipeline = compile_pipeline(
+        builtin_definitions()[pipeline_name],
+        builtin_registry(),
+        capabilities=("route:resolved",),
+    )
     return {
         "version": 3,
         "project_id": PROJECT,
@@ -116,6 +122,12 @@ def task_meta(
         "origin_session": "coordinator-session",
         "executor_runtime": "codex",
         "interaction_policy": "unattended",
+        "pipeline_policy": {
+            "name": pipeline_name,
+            "definition_sha256": pipeline.definition_sha256,
+            "completion_policy": "attention",
+            "total_pass_limit": 2,
+        },
         "plan_file": str(plan),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
         "vault_root": str(vault),
@@ -238,7 +250,14 @@ def run_case(
     profile_sha = load_profiles(
         vault / "config" / "verification-profiles.toml"
     )["scoped"].sha256
-    meta = task_meta(vault, worktree, plan, operation_id, profile_sha)
+    meta = task_meta(
+        vault,
+        worktree,
+        plan,
+        operation_id,
+        profile_sha,
+        pipeline_name,
+    )
     write_json(worktree / ".task-meta.json", meta)
     if review_state == "skipped":
         head = subprocess.run(
