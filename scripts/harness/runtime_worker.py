@@ -50,7 +50,9 @@ from .workflows.engineering_fix import (
     accept_phase,
     load_receipt,
     prepare_next_phase,
+    prepare_retry_phase,
     reconcile_fix,
+    reconcile_retry_fix,
 )
 from research_contract import (
     ResearchContractError,
@@ -1161,15 +1163,20 @@ def run(
         cmux_adapter.send_key(spec["surface_id"], "Enter")
         write_immutable_json(notify_path, marker)
 
-    def notify_fix_finalization() -> bool:
+    def notify_fix_finalization(iteration: int) -> bool:
         notify_path = (
             spec_path.parent
             / "pipeline-fix"
-            / "finalization-notify.json"
+            / (
+                "finalization-notify.json"
+                if iteration == 0
+                else f"pass-{iteration}/finalization-notify.json"
+            )
         )
         marker = {
             "schema_version": 1,
             "operation_id": spec["operation_id"],
+            "iteration": iteration,
             "status": "sent",
         }
         if notify_path.is_file() and not notify_path.is_symlink():
@@ -1178,8 +1185,9 @@ def run(
                     "engineering/fix finalization notification changed"
                 )
             return False
+        phase_count = "four" if iteration == 0 else "three retry"
         message = (
-            "All four typed engineering/fix phase receipts are accepted. "
+            f"All {phase_count} typed engineering/fix phase receipts are accepted. "
             "Finish the task in this same session: commit the minimal fix, "
             "run the approved scoped verification, and write the canonical "
             ".task-summary.json. Do not repeat an accepted phase."
@@ -1188,6 +1196,92 @@ def run(
         cmux_adapter.send_key(spec["surface_id"], "Enter")
         write_immutable_json(notify_path, marker)
         return True
+
+    def notify_cannot_reproduce(receipt: FixStepReceipt) -> None:
+        receipt_sha256 = receipt.receipt_sha256
+        attention_path = spec["cwd"] / ".task-needs-attention.json"
+        marker = {
+            "version": 1,
+            "id": f"pipeline-decision-{receipt_sha256[:24]}",
+            "status": "pending",
+            "task_name": "engineering/fix cannot reproduce",
+            "category": "pipeline-decision",
+            "reason": (
+                "The approved fix pipeline cannot reproduce the reported defect"
+            ),
+            "question": "Choose stop or retry-with-fixture",
+            "worktree": str(spec["cwd"]),
+            "task_surface": spec["surface_id"],
+            "raised_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            ),
+            "receipt_operation_id": receipt.operation_id,
+            "receipt_sha256": receipt_sha256,
+            "allowed_decisions": ["stop", "retry-with-fixture"],
+        }
+        if attention_path.exists():
+            if attention_path.is_symlink() or not attention_path.is_file():
+                raise RuntimeWorkerError(
+                    "pipeline decision packet is invalid"
+                )
+            current = json.loads(attention_path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(current, dict)
+                or current.get("id") != marker["id"]
+                or current.get("category") != "pipeline-decision"
+                or current.get("receipt_operation_id")
+                != receipt.operation_id
+                or current.get("receipt_sha256") != receipt_sha256
+            ):
+                raise RuntimeWorkerError(
+                    "pipeline decision packet changed"
+                )
+        else:
+            _atomic_json(attention_path, marker)
+        notify_path = (
+            spec_path.parent
+            / "pipeline-fix"
+            / "cannot-reproduce-notify.json"
+        )
+        delivery = {
+            "schema_version": 1,
+            "operation_id": spec["operation_id"],
+            "receipt_sha256": receipt_sha256,
+            "status": "sent",
+        }
+        if notify_path.is_file() and not notify_path.is_symlink():
+            if json.loads(notify_path.read_text(encoding="utf-8")) != delivery:
+                raise RuntimeWorkerError(
+                    "pipeline decision delivery changed"
+                )
+            return
+        command = (
+            "python3 "
+            + shlex.quote(
+                str(
+                    spec["store_root"].parent.parent
+                    / "scripts"
+                    / "task_escalation.py"
+                )
+            )
+            + " resolve --worktree "
+            + shlex.quote(str(spec["cwd"]))
+            + " --decision <decision>"
+        )
+        message = (
+            "Typed task escalation callback received. Category: "
+            "pipeline-decision. The approved engineering/fix pipeline "
+            "cannot reproduce the defect. Inspect "
+            f"{attention_path} and resolve from the originating coordinator "
+            f"with: {command}. Allowed decisions: stop, retry-with-fixture."
+        )
+        if len(message.encode()) > 4096:
+            raise RuntimeWorkerError(
+                "pipeline decision notification exceeds its bound"
+            )
+        cmux_adapter.send(spec["origin_surface"], message)
+        cmux_adapter.send_key(spec["origin_surface"], "Enter")
+        write_immutable_json(notify_path, delivery)
 
     def drive_fix_transport() -> None:
         nonlocal fix_callback_digest, fix_callback_stable_reads
@@ -1215,6 +1309,22 @@ def run(
             ):
                 raise RuntimeWorkerError(
                     "engineering/fix metadata mismatches its compiled contract"
+                )
+            completion_policy = str(
+                policy.get("completion_policy") or ""
+            )
+            total_pass_limit = policy.get("total_pass_limit")
+            if (
+                completion_policy not in {"attention", "autonomous"}
+                or type(total_pass_limit) is not int
+                or total_pass_limit
+                != {
+                    "attention": 2,
+                    "autonomous": 3,
+                }[completion_policy]
+            ):
+                raise RuntimeWorkerError(
+                    "engineering/fix completion policy is invalid"
                 )
             approved_plan_sha256 = str(
                 meta.get("approved_plan_sha256") or ""
@@ -1265,29 +1375,36 @@ def run(
                 write_immutable_json(controller_path, controller)
             initial_head_sha = str(controller["initial_head_sha"])
             parent = store.read(spec["owner_id"], spec["operation_id"])
-            receipt_root = (
+            initial_receipt_root = (
                 spec_path.parent / "pipeline-fix" / "pass-0"
             )
-            receipts: list[FixStepReceipt] = []
+            initial_receipts: list[FixStepReceipt] = []
             for step_id in (
                 "reproduce",
                 "root-cause",
                 "regression-test",
                 "minimal-fix",
             ):
-                receipt_path = receipt_root / step_id / "receipt.json"
+                receipt_path = (
+                    initial_receipt_root / step_id / "receipt.json"
+                )
                 if not receipt_path.is_file():
                     break
-                receipts.append(load_receipt(receipt_path))
-            progress = reconcile_fix(
+                initial_receipts.append(load_receipt(receipt_path))
+            initial_progress = reconcile_fix(
                 parent,
                 definition_sha256=pipeline.definition_sha256,
                 approved_plan_sha256=approved_plan_sha256,
                 initial_head_sha=initial_head_sha,
-                receipts=tuple(receipts),
+                receipts=tuple(initial_receipts),
                 iteration=0,
             )
-            if progress.action == "attention":
+            if initial_progress.action == "attention":
+                cannot_receipt = initial_progress.prior_receipt
+                if cannot_receipt is None:
+                    raise RuntimeWorkerError(
+                        "cannot-reproduce receipt is unavailable"
+                    )
                 emit_compiled_pipeline_event(
                     spec["cwd"],
                     event="fix-phase-attention",
@@ -1300,18 +1417,169 @@ def run(
                     loop_iteration=0,
                     attention_category="cannot-reproduce",
                 )
+                notify_cannot_reproduce(cannot_receipt)
                 summary_attention(
                     "pipeline-fix-cannot-reproduce",
                     AttentionReason.ATTENTION_REQUIRED,
                 )
                 return
+            iteration = 0
+            receipt_root = initial_receipt_root
+            receipts = initial_receipts
+            progress = initial_progress
+            retry_intent: dict[str, object] | None = None
+            retry_intent_paths = sorted(
+                (spec_path.parent / "pipeline-fix").glob(
+                    "pass-*/retry-intent.json"
+                )
+            )
+            if retry_intent_paths and progress.action != "complete":
+                raise RuntimeWorkerError(
+                    "fix retry started before the initial pass completed"
+                )
+            expected_retry_iterations = list(
+                range(1, len(retry_intent_paths) + 1)
+            )
+            observed_retry_iterations: list[int] = []
+            for path in retry_intent_paths:
+                match = re.fullmatch(
+                    r"pass-([1-9][0-9]*)", path.parent.name
+                )
+                if match is None:
+                    raise RuntimeWorkerError(
+                        "fix retry intent path is invalid"
+                    )
+                observed_retry_iterations.append(int(match.group(1)))
+            if (
+                observed_retry_iterations != expected_retry_iterations
+                or len(retry_intent_paths) >= int(total_pass_limit)
+            ):
+                raise RuntimeWorkerError(
+                    "fix retry intents are not a bounded prefix"
+                )
+            if retry_intent_paths:
+                retry_intent_path = retry_intent_paths[-1]
+                if retry_intent_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "fix retry intent cannot be a symlink"
+                    )
+                retry_intent = json.loads(
+                    retry_intent_path.read_text(encoding="utf-8")
+                )
+                iteration = observed_retry_iterations[-1]
+                expected_intent_fields = {
+                    "schema_version",
+                    "operation_id",
+                    "definition_sha256",
+                    "iteration",
+                    "completion_policy",
+                    "total_pass_limit",
+                    "reproduction_receipt_sha256",
+                    "verification_operation_id",
+                    "verification_sha256",
+                    "failed_head_sha",
+                    "current_head_sha",
+                    "status",
+                }
+                if (
+                    not isinstance(retry_intent, dict)
+                    or set(retry_intent) != expected_intent_fields
+                    or retry_intent.get("schema_version") != 1
+                    or retry_intent.get("operation_id")
+                    != spec["operation_id"]
+                    or retry_intent.get("definition_sha256")
+                    != pipeline.definition_sha256
+                    or retry_intent.get("iteration") != iteration
+                    or retry_intent.get("completion_policy")
+                    != completion_policy
+                    or retry_intent.get("total_pass_limit")
+                    != total_pass_limit
+                    or retry_intent.get("status") != "pending"
+                    or not initial_receipts
+                    or retry_intent.get(
+                        "reproduction_receipt_sha256"
+                    )
+                    != initial_receipts[0].receipt_sha256
+                ):
+                    raise RuntimeWorkerError(
+                        "fix retry intent identity changed"
+                    )
+                verification_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / str(retry_intent["verification_operation_id"])
+                    / "receipt.json"
+                )
+                if (
+                    verification_path.is_symlink()
+                    or not verification_path.is_file()
+                ):
+                    raise RuntimeWorkerError(
+                        "fix retry verification receipt is unavailable"
+                    )
+                verification_value = json.loads(
+                    verification_path.read_text(encoding="utf-8")
+                )
+                verification_sha256 = hashlib.sha256(
+                    json.dumps(
+                        verification_value,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                if (
+                    not isinstance(verification_value, dict)
+                    or verification_value.get("status") != "failed"
+                    or verification_value.get("parent_operation_id")
+                    != spec["operation_id"]
+                    or verification_value.get("head_sha")
+                    != retry_intent["failed_head_sha"]
+                    or verification_sha256
+                    != retry_intent["verification_sha256"]
+                ):
+                    raise RuntimeWorkerError(
+                        "fix retry verification binding changed"
+                    )
+                receipt_root = (
+                    spec_path.parent
+                    / "pipeline-fix"
+                    / f"pass-{iteration}"
+                )
+                receipts = []
+                for step_id in (
+                    "root-cause",
+                    "regression-test",
+                    "minimal-fix",
+                ):
+                    receipt_path = (
+                        receipt_root / step_id / "receipt.json"
+                    )
+                    if not receipt_path.is_file():
+                        break
+                    receipts.append(load_receipt(receipt_path))
+                progress = reconcile_retry_fix(
+                    parent,
+                    definition_sha256=pipeline.definition_sha256,
+                    reproduction_receipt=initial_receipts[0],
+                    verification_sha256=str(
+                        retry_intent["verification_sha256"]
+                    ),
+                    failed_head_sha=str(
+                        retry_intent["failed_head_sha"]
+                    ),
+                    current_head_sha=str(
+                        retry_intent["current_head_sha"]
+                    ),
+                    receipts=tuple(receipts),
+                    iteration=iteration,
+                )
             if progress.action == "complete":
                 retarget_fix_callback(
                     operation_id=spec["operation_id"],
                     run_id=spec["run_id"],
                     callback_pointer=".task-summary.json",
                 )
-                if notify_fix_finalization():
+                if notify_fix_finalization(iteration):
                     emit_compiled_pipeline_event(
                         spec["cwd"],
                         event="fix-final-retarget",
@@ -1321,9 +1589,15 @@ def run(
                         compiler_outcome="resolved",
                         definition_sha=pipeline.definition_sha256,
                         primitive_count=len(pipeline.definition.steps),
-                        loop_iteration=0,
+                        loop_iteration=iteration,
                         terminal_category="phases-complete",
                     )
+                if (
+                    retry_intent is not None
+                    and git_head()
+                    == retry_intent["current_head_sha"]
+                ):
+                    return
                 fix_transport_complete = True
                 return
             if spec["task_summary_pointer"].is_file():
@@ -1337,20 +1611,41 @@ def run(
                         "status": "ignored-until-phases-complete",
                     },
                 )
-            round_ = prepare_next_phase(
-                store,
-                parent,
-                definition_sha256=pipeline.definition_sha256,
-                approved_plan_sha256=approved_plan_sha256,
-                initial_head_sha=initial_head_sha,
-                receipts=tuple(receipts),
-                iteration=0,
-            )
+            if retry_intent is None:
+                round_ = prepare_next_phase(
+                    store,
+                    parent,
+                    definition_sha256=pipeline.definition_sha256,
+                    approved_plan_sha256=approved_plan_sha256,
+                    initial_head_sha=initial_head_sha,
+                    receipts=tuple(receipts),
+                    iteration=0,
+                )
+            else:
+                round_ = prepare_retry_phase(
+                    store,
+                    parent,
+                    definition_sha256=pipeline.definition_sha256,
+                    reproduction_receipt=initial_receipts[0],
+                    verification_sha256=str(
+                        retry_intent["verification_sha256"]
+                    ),
+                    failed_head_sha=str(
+                        retry_intent["failed_head_sha"]
+                    ),
+                    current_head_sha=str(
+                        retry_intent["current_head_sha"]
+                    ),
+                    receipts=tuple(receipts),
+                    iteration=iteration,
+                )
             result_pointer = (
-                f".task-pipeline/results/pass-0/{round_.step_id}.json"
+                f".task-pipeline/results/pass-{iteration}/"
+                f"{round_.step_id}.json"
             )
             output_pointer = (
-                f".task-pipeline/outputs/pass-0/{round_.step_id}.md"
+                f".task-pipeline/outputs/pass-{iteration}/"
+                f"{round_.step_id}.md"
             )
             request = {
                 "schema_version": 1,
@@ -1667,6 +1962,7 @@ def run(
 
     def finish_task_summary(raw: bytes) -> None:
         nonlocal callback_handled, summary_digest, summary_stable_reads
+        nonlocal fix_transport_complete
         digest = hashlib.sha256(raw).hexdigest()
         if digest != summary_digest:
             summary_digest = digest
@@ -2480,6 +2776,219 @@ def run(
                         count += 1
                 return count
 
+            def fix_retry_policy() -> tuple[str, int]:
+                raw_policy = meta.get("pipeline_policy")
+                if not isinstance(raw_policy, dict):
+                    raise RuntimeWorkerError(
+                        "engineering/fix completion policy is unavailable"
+                    )
+                completion = str(
+                    raw_policy.get("completion_policy") or ""
+                )
+                limit = raw_policy.get("total_pass_limit")
+                if (
+                    completion not in {"attention", "autonomous"}
+                    or type(limit) is not int
+                    or limit
+                    != {
+                        "attention": 2,
+                        "autonomous": 3,
+                    }[completion]
+                ):
+                    raise RuntimeWorkerError(
+                        "engineering/fix completion policy is invalid"
+                    )
+                return completion, limit
+
+            def schedule_fix_retry(
+                failed: dict[str, object],
+            ) -> None:
+                nonlocal fix_transport_complete
+                completion, total_limit = fix_retry_policy()
+                completed_passes = failed_verification_count()
+                if completed_passes < 1:
+                    raise RuntimeWorkerError(
+                        "engineering/fix failed-pass count is invalid"
+                    )
+                verification_sha256 = hashlib.sha256(
+                    json.dumps(
+                        failed,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                if completed_passes >= total_limit:
+                    if completion == "attention":
+                        summary_attention(
+                            "pipeline-verification-retry-exhausted",
+                            AttentionReason.RETRY_EXHAUSTED,
+                        )
+                        return
+                    terminal_path = (
+                        spec_path.parent
+                        / "pipeline-fix"
+                        / "terminal-exhausted.json"
+                    )
+                    write_immutable_json(
+                        terminal_path,
+                        {
+                            "schema_version": 1,
+                            "operation_id": spec["operation_id"],
+                            "completion_policy": completion,
+                            "total_pass_limit": total_limit,
+                            "completed_passes": completed_passes,
+                            "verification_operation_id": failed[
+                                "operation_id"
+                            ],
+                            "verification_sha256": verification_sha256,
+                            "failed_head_sha": failed["head_sha"],
+                            "status": "retry-exhausted",
+                        },
+                    )
+                    current_parent = store.read(
+                        spec["owner_id"], spec["operation_id"]
+                    )
+                    if current_parent.state not in TERMINAL:
+                        store.transition(
+                            spec["owner_id"],
+                            spec["operation_id"],
+                            "failed",
+                        )
+                    return
+                reproduction_path = (
+                    spec_path.parent
+                    / "pipeline-fix"
+                    / "pass-0"
+                    / "reproduce"
+                    / "receipt.json"
+                )
+                reproduction = load_receipt(reproduction_path)
+                iteration = completed_passes
+                intent_path = (
+                    spec_path.parent
+                    / "pipeline-fix"
+                    / f"pass-{iteration}"
+                    / "retry-intent.json"
+                )
+                write_immutable_json(
+                    intent_path,
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "definition_sha256": pipeline.definition_sha256,
+                        "iteration": iteration,
+                        "completion_policy": completion,
+                        "total_pass_limit": total_limit,
+                        "reproduction_receipt_sha256": (
+                            reproduction.receipt_sha256
+                        ),
+                        "verification_operation_id": failed[
+                            "operation_id"
+                        ],
+                        "verification_sha256": verification_sha256,
+                        "failed_head_sha": failed["head_sha"],
+                        "current_head_sha": git_head(),
+                        "status": "pending",
+                    },
+                )
+                fix_transport_complete = False
+                emit_compiled_pipeline_event(
+                    spec["cwd"],
+                    event="fix-retry-scheduled",
+                    pipeline_id=pipeline.definition.pipeline_id,
+                    pipeline_version=pipeline.definition.version,
+                    profile=pipeline.definition.profile,
+                    compiler_outcome="resolved",
+                    definition_sha=pipeline.definition_sha256,
+                    primitive_count=len(pipeline.definition.steps),
+                    loop_iteration=iteration,
+                    terminal_category="verification-failed",
+                )
+
+            def accept_fix_retry_resubmission(
+                failed: dict[str, object],
+            ) -> bool:
+                matching_intents: list[dict[str, object]] = []
+                for intent_path in sorted(
+                    (spec_path.parent / "pipeline-fix").glob(
+                        "pass-*/retry-intent.json"
+                    )
+                ):
+                    if intent_path.is_symlink():
+                        raise RuntimeWorkerError(
+                            "fix retry intent cannot be a symlink"
+                        )
+                    intent = json.loads(
+                        intent_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        isinstance(intent, dict)
+                        and intent.get("verification_operation_id")
+                        == failed["operation_id"]
+                    ):
+                        matching_intents.append(intent)
+                if len(matching_intents) != 1:
+                    raise RuntimeWorkerError(
+                        "failed verification has no exact fix retry"
+                    )
+                intent = matching_intents[0]
+                iteration = intent.get("iteration")
+                if type(iteration) is not int:
+                    raise RuntimeWorkerError(
+                        "fix retry iteration is invalid"
+                    )
+                receipt_root = (
+                    spec_path.parent
+                    / "pipeline-fix"
+                    / f"pass-{iteration}"
+                )
+                if not all(
+                    (receipt_root / step / "receipt.json").is_file()
+                    for step in (
+                        "root-cause",
+                        "regression-test",
+                        "minimal-fix",
+                    )
+                ):
+                    return False
+                response_receipt_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / str(failed["operation_id"])
+                    / "response-receipt.json"
+                )
+                response_sha256 = hashlib.sha256(
+                    json.dumps(
+                        intent, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                response_receipt = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "verification_operation_id": failed["operation_id"],
+                    "failed_head_sha": failed["head_sha"],
+                    "resubmitted_head_sha": verification_head,
+                    "response_sha256": response_sha256,
+                    "status": "accepted",
+                }
+                write_immutable_json(
+                    response_receipt_path, response_receipt
+                )
+                failed_record = store.read(
+                    spec["owner_id"], str(failed["operation_id"])
+                )
+                if failed_record.state == "attention-required":
+                    store.transition(
+                        spec["owner_id"],
+                        failed_record.spec.operation_id,
+                        "failed",
+                    )
+                elif failed_record.state != "failed":
+                    raise RuntimeWorkerError(
+                        "failed verification operation cannot resume"
+                    )
+                return True
+
             def verification_attention_packet(
                 receipt: dict[str, object],
                 *,
@@ -2935,24 +3444,30 @@ def run(
                 reconcile_failed_verification_child(
                     previous_verification
                 )
-                allow_resubmit = (
-                    failed_verification_count()
-                    <= MAX_PIPELINE_VERIFY_RESUBMITS
-                )
-                notify_verification_attention(
-                    previous_verification,
-                    allow_resubmit=allow_resubmit,
-                )
-                if not allow_resubmit:
-                    summary_attention(
-                        "pipeline-verification-retry-exhausted",
-                        AttentionReason.RETRY_EXHAUSTED,
+                if _pipeline_name == "engineering/fix":
+                    if not accept_fix_retry_resubmission(
+                        previous_verification
+                    ):
+                        return
+                else:
+                    allow_resubmit = (
+                        failed_verification_count()
+                        <= MAX_PIPELINE_VERIFY_RESUBMITS
                     )
-                    return
-                if not accept_verification_resubmission(
-                    previous_verification
-                ):
-                    return
+                    notify_verification_attention(
+                        previous_verification,
+                        allow_resubmit=allow_resubmit,
+                    )
+                    if not allow_resubmit:
+                        summary_attention(
+                            "pipeline-verification-retry-exhausted",
+                            AttentionReason.RETRY_EXHAUSTED,
+                        )
+                        return
+                    if not accept_verification_resubmission(
+                        previous_verification
+                    ):
+                        return
             existing_verification = (
                 verification_receipt()
                 if verify_step is not None
@@ -2965,19 +3480,22 @@ def run(
                     existing_verification is not None
                     and existing_verification["status"] == "failed"
                 ):
-                    allow_resubmit = (
-                        failed_verification_count()
-                        <= MAX_PIPELINE_VERIFY_RESUBMITS
-                    )
-                    notify_verification_attention(
-                        existing_verification,
-                        allow_resubmit=allow_resubmit,
-                    )
-                    if not allow_resubmit:
-                        summary_attention(
-                            "pipeline-verification-retry-exhausted",
-                            AttentionReason.RETRY_EXHAUSTED,
+                    if _pipeline_name == "engineering/fix":
+                        schedule_fix_retry(existing_verification)
+                    else:
+                        allow_resubmit = (
+                            failed_verification_count()
+                            <= MAX_PIPELINE_VERIFY_RESUBMITS
                         )
+                        notify_verification_attention(
+                            existing_verification,
+                            allow_resubmit=allow_resubmit,
+                        )
+                        if not allow_resubmit:
+                            summary_attention(
+                                "pipeline-verification-retry-exhausted",
+                                AttentionReason.RETRY_EXHAUSTED,
+                            )
                     return
             if (
                 existing_verification is not None

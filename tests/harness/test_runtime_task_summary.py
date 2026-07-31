@@ -108,6 +108,8 @@ def task_meta(
     task_id: str,
     profile_sha: str,
     pipeline_name: str,
+    completion_policy: str = "attention",
+    total_pass_limit: int = 2,
 ) -> dict[str, object]:
     pipeline = compile_pipeline(
         builtin_definitions()[pipeline_name],
@@ -125,8 +127,8 @@ def task_meta(
         "pipeline_policy": {
             "name": pipeline_name,
             "definition_sha256": pipeline.definition_sha256,
-            "completion_policy": "attention",
-            "total_pass_limit": 2,
+            "completion_policy": completion_policy,
+            "total_pass_limit": total_pass_limit,
         },
         "plan_file": str(plan),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
@@ -182,6 +184,9 @@ def run_case(
     bind_contract: bool = True,
     pipeline_name: str = "lifecycle/default",
     fix_outcome: str = "complete",
+    fix_retry_passes: int = 0,
+    completion_policy: str = "attention",
+    total_pass_limit: int = 2,
     verification_runner: Callable[..., subprocess.CompletedProcess[str]]
     | None = None,
 ) -> tuple[
@@ -258,6 +263,8 @@ def run_case(
         operation_id,
         profile_sha,
         pipeline_name,
+        completion_policy,
+        total_pass_limit,
     )
     write_json(worktree / ".task-meta.json", meta)
     if review_state == "skipped":
@@ -304,7 +311,52 @@ def run_case(
         and not hasattr(request, "wake_message"),
     )
     provider = root / f"provider-{operation_id}.py"
-    if pipeline_name == "engineering/fix":
+    if pipeline_name == "engineering/fix" and fix_retry_passes:
+        provider.write_text(
+            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            "root=pathlib.Path.cwd()\n"
+            "summary=pathlib.Path(sys.argv[1])\n"
+            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "state=pathlib.Path(sys.argv[4])\n"
+            "passes=int(sys.argv[5])\n"
+            "request=root/'.task-pipeline-step-request.json'\n"
+            "outbox=root/'.task-pipeline-step-callback.json'\n"
+            "seen=set()\n"
+            "for iteration in range(passes):\n"
+            "  expected_steps=('reproduce','root-cause','regression-test','minimal-fix') if iteration==0 else ('root-cause','regression-test','minimal-fix')\n"
+            "  for expected in expected_steps:\n"
+            "    for _ in range(500):\n"
+            "      if request.is_file():\n"
+            "        row=json.loads(request.read_text(encoding='utf-8'))\n"
+            "        if row.get('iteration')==iteration and row.get('step_id')==expected and row.get('operation_id') not in seen: break\n"
+            "      time.sleep(0.01)\n"
+            "    else: raise SystemExit(3)\n"
+            "    seen.add(row['operation_id'])\n"
+            "    output=root/row['output_pointer']\n"
+            "    output.parent.mkdir(parents=True,exist_ok=True)\n"
+            "    output.write_text(f'{iteration}:{expected} evidence\\n',encoding='utf-8')\n"
+            "    head=subprocess.run(['git','rev-parse','HEAD'],cwd=root,text=True,capture_output=True,check=True).stdout.strip()\n"
+            "    payload={key:row[key] for key in ('schema_version','parent_operation_id','definition_sha256','step_id','iteration','input_schema','input_sha256','input_head_sha','prior_receipt_sha256','verification_sha256','output_schema')}\n"
+            "    payload.update({'output_pointer':row['output_pointer'],'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'head_sha':head,'status':'complete'})\n"
+            "    encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
+            "    digest=hashlib.sha256(encoded).hexdigest()\n"
+            "    callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
+            "    outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "    for _ in range(500):\n"
+            "      if not outbox.exists(): break\n"
+            "      time.sleep(0.01)\n"
+            "    else: raise SystemExit(4)\n"
+            "  marker=(state/'pipeline-fix'/'finalization-notify.json') if iteration==0 else (state/'pipeline-fix'/f'pass-{iteration}'/'finalization-notify.json')\n"
+            "  for _ in range(500):\n"
+            "    if marker.is_file(): break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(5)\n"
+            "  subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
+            "  summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "time.sleep(0.3)\n",
+            encoding="utf-8",
+        )
+    elif pipeline_name == "engineering/fix":
         provider.write_text(
             "import hashlib,json,pathlib,subprocess,sys,time\n"
             "root=pathlib.Path.cwd()\n"
@@ -370,6 +422,12 @@ def run_case(
             *(
                 (str(root / f"state-{operation_id}"),)
                 if pipeline_name == "engineering/fix"
+                else ()
+            ),
+            *(
+                (str(fix_retry_passes),)
+                if pipeline_name == "engineering/fix"
+                and fix_retry_passes
                 else ()
             ),
         ),
@@ -633,8 +691,206 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         ),
     )
 
+    retry_task = "edeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    retry_verification_pass = [0]
+
+    def fail_once_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        if argv == ["make", "test-harness"]:
+            retry_verification_pass[0] += 1
+        return subprocess.CompletedProcess(
+            argv,
+            1 if retry_verification_pass[0] == 1 else 0,
+            "",
+            "failed\n" if retry_verification_pass[0] == 1 else "",
+        )
+
+    def approve_retry(vault: Path, worktree: Path) -> None:
+        retry_meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        retry_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / retry_task
+            / retry_task,
+            dispatch_operation_id=retry_task,
+            owner_id=retry_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                retry_head,
+                "scoped",
+                retry_meta["review_policy"][
+                    "verification_profile_sha256"
+                ],
+            ),
+            product_root=worktree,
+        )
+
+    retry_store, _retry_cmux, retry_state, retry_rc = run_case(
+        root,
+        retry_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_retry_passes=2,
+        review_state="missing",
+        review_launcher=approve_retry,
+        verification_runner=fail_once_verification,
+    )
+    retry_parent = retry_store.read("owner-1", retry_task)
+    retry_receipts = list(
+        (retry_state / "pipeline-fix").glob("pass-*/*/receipt.json")
+    )
+    retry_verifications = [
+        record
+        for record in retry_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
+    retry_intent = json.loads(
+        (
+            retry_state
+            / "pipeline-fix"
+            / "pass-1"
+            / "retry-intent.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "engineering fix retries once from the original reproduction receipt",
+        retry_rc == 0
+        and retry_parent.state == "finalizing"
+        and retry_parent.accepted_callback_kind == "wiki-summary"
+        and len(retry_receipts) == 7
+        and len(retry_verifications) == 2
+        and sorted(record.state for record in retry_verifications)
+        == ["complete", "failed"]
+        and retry_intent["iteration"] == 1
+        and retry_intent["status"] == "pending"
+        and retry_intent["reproduction_receipt_sha256"]
+        == hashlib.sha256(
+            json.dumps(
+                json.loads(
+                    (
+                        retry_state
+                        / "pipeline-fix"
+                        / "pass-0"
+                        / "reproduce"
+                        / "receipt.json"
+                    ).read_text(encoding="utf-8")
+                ),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
+        (retry_parent, retry_receipts, retry_verifications, retry_intent),
+    )
+
+    attention_limit_task = "eceeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+
+    def fail_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 1, "", "failed\n")
+
+    (
+        attention_limit_store,
+        _attention_limit_cmux,
+        attention_limit_state,
+        attention_limit_rc,
+    ) = run_case(
+        root,
+        attention_limit_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_retry_passes=2,
+        completion_policy="attention",
+        total_pass_limit=2,
+        verification_runner=fail_verification,
+    )
+    attention_limit_parent = attention_limit_store.read(
+        "owner-1", attention_limit_task
+    )
+    check(
+        "attention fix policy stops durably after two total passes",
+        attention_limit_rc == 0
+        and attention_limit_parent.state == "attention-required"
+        and attention_limit_parent.attention_reason
+        == AttentionReason.RETRY_EXHAUSTED
+        and not (
+            attention_limit_state
+            / "pipeline-fix"
+            / "pass-2"
+            / "retry-intent.json"
+        ).exists(),
+        attention_limit_parent,
+    )
+
+    autonomous_limit_task = "ebeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    (
+        autonomous_limit_store,
+        _autonomous_limit_cmux,
+        autonomous_limit_state,
+        autonomous_limit_rc,
+    ) = run_case(
+        root,
+        autonomous_limit_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_retry_passes=3,
+        completion_policy="autonomous",
+        total_pass_limit=3,
+        verification_runner=fail_verification,
+    )
+    autonomous_limit_parent = autonomous_limit_store.read(
+        "owner-1", autonomous_limit_task
+    )
+    terminal_exhausted = json.loads(
+        (
+            autonomous_limit_state
+            / "pipeline-fix"
+            / "terminal-exhausted.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "autonomous fix policy fails terminally after three total passes",
+        autonomous_limit_rc == 0
+        and autonomous_limit_parent.state == "failed"
+        and terminal_exhausted["status"] == "retry-exhausted"
+        and terminal_exhausted["total_pass_limit"] == 3
+        and not (
+            autonomous_limit_state / "callback-error.json"
+        ).exists(),
+        (autonomous_limit_parent, terminal_exhausted),
+    )
+
     cannot_task = "efefefef-efef-4fef-8fef-efefefefefef"
-    cannot_store, _cannot_cmux, cannot_state, cannot_rc = run_case(
+    cannot_store, cannot_cmux, cannot_state, cannot_rc = run_case(
         root,
         cannot_task,
         valid_summary,
@@ -650,6 +906,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             )
         ).read_text(encoding="utf-8")
     )
+    cannot_attention = json.loads(
+        (
+            root
+            / f"worktree-{cannot_task}"
+            / ".task-needs-attention.json"
+        ).read_text(encoding="utf-8")
+    )
+    cannot_notifications = [
+        item
+        for item in cannot_cmux.sent
+        if item[0] == ORIGIN and "pipeline-decision" in item[1]
+    ]
     check(
         "cannot reproduce is a typed durable attention boundary",
         cannot_rc == 0
@@ -658,8 +926,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         == AttentionReason.ATTENTION_REQUIRED
         and not cannot_record.accepted_callback_id
         and cannot_receipt["step_id"] == "reproduce"
-        and cannot_receipt["status"] == "cannot-reproduce",
-        (cannot_record, cannot_receipt),
+        and cannot_receipt["status"] == "cannot-reproduce"
+        and cannot_attention["category"] == "pipeline-decision"
+        and cannot_attention["status"] == "pending"
+        and cannot_attention["allowed_decisions"]
+        == ["stop", "retry-with-fixture"]
+        and cannot_attention["receipt_operation_id"]
+        == cannot_receipt["operation_id"]
+        and len(cannot_notifications) == 1
+        and "task_escalation.py" in cannot_notifications[0][1]
+        and "resolve --worktree" in cannot_notifications[0][1],
+        (
+            cannot_record,
+            cannot_receipt,
+            cannot_attention,
+            cannot_notifications,
+        ),
     )
 
     failing_task = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
