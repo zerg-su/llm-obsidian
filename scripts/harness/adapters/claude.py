@@ -123,6 +123,21 @@ class ClaudeDriver:
                         f"Bash(git -C {quoted} rev-parse HEAD)",
                         f"Bash(git -C {quoted} status --short)",
                         f"Bash(git -C {quoted} diff)",
+                        (
+                            f"Bash(git -C {quoted} --no-pager log "
+                            "--oneline -20)"
+                        ),
+                        (
+                            f"Bash(git -C {quoted} --no-pager show "
+                            "--stat --oneline HEAD)"
+                        ),
+                        (
+                            f"Bash(python3 {quoted}/scripts/"
+                            "check-skill-budget.py)"
+                        ),
+                        f"Bash(make -C {quoted} test-harness)",
+                        f"Bash(make -C {quoted} test-model-routing)",
+                        f"Bash(git -C {quoted} diff --check)",
                     )
                 )
                 if callback_pointer is not None:

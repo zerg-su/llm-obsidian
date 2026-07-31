@@ -1352,6 +1352,18 @@ review_submit = shlex.join(
         str(callback.parent),
     )
 )
+quoted_product = shlex.quote(str(product))
+reviewer_readonly_probes = {
+    f"Bash(git -C {quoted_product} --no-pager log --oneline -20)",
+    (
+        f"Bash(git -C {quoted_product} --no-pager show "
+        "--stat --oneline HEAD)"
+    ),
+    f"Bash(python3 {quoted_product}/scripts/check-skill-budget.py)",
+    f"Bash(make -C {quoted_product} test-harness)",
+    f"Bash(make -C {quoted_product} test-model-routing)",
+    f"Bash(git -C {quoted_product} diff --check)",
+}
 try:
     callback_instruction = claude_callback[
         claude_callback.index("--append-system-prompt") + 1
@@ -1380,6 +1392,14 @@ check(
     and f"Bash({review_submit})" in claude_callback
     and f"Bash(git -C {shlex.quote(str(product))} rev-parse HEAD)"
     in claude_callback
+    and reviewer_readonly_probes.issubset(claude_callback)
+    and "Bash(*)" not in claude_callback
+    and not any(
+        token in item
+        for item in claude_callback
+        if item.startswith("Bash(")
+        for token in (" && ", " || ", ";", "$(", "`")
+    )
     and not any(
         item.startswith(("Edit(", "Write("))
         and item
