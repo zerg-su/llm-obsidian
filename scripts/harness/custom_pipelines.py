@@ -38,6 +38,13 @@ BASELINES = {
     "change": "engineering/change",
     "fix": "engineering/fix",
 }
+VERIFICATION_CHECKS = {
+    "diff-check": "git diff --check",
+    "harness-tests": "make test-harness",
+    "instruction-lint": "make test-instruction-lint",
+    "model-routing": "make test-model-routing",
+    "vault-validation": "python3 scripts/validate-vault.py --summary",
+}
 
 
 def _exact_fields(value: Mapping[str, Any], fields: frozenset[str], label: str) -> None:
@@ -379,7 +386,7 @@ def resolve_custom_executable(
     registry: PrimitiveRegistry,
     policy: CustomPipelinePolicy,
     capabilities: tuple[str, ...] = (),
-) -> tuple[str, CompiledPipeline]:
+) -> tuple[str, CompiledPipeline, tuple[str, ...]]:
     """Resolve an approved custom contract onto an existing runtime executor."""
 
     from .pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
@@ -403,7 +410,11 @@ def resolve_custom_executable(
     )
     if custom_shape != baseline_shape:
         raise ContractError("custom executable shape differs from its baseline")
-    return baseline, frozen.compiled
+    commands = tuple(
+        VERIFICATION_CHECKS[check]
+        for check in frozen.spec.verification_checks
+    )
+    return baseline, frozen.compiled, commands
 
 
 TOP_FIELDS = frozenset(
@@ -625,6 +636,12 @@ def compile_custom_spec(
         raise ContractError("PipelineSpec exceeds the context byte limit")
     if len(spec.verification_checks) > policy.max_verification_checks:
         raise ContractError("PipelineSpec exceeds the verification check limit")
+    unknown_checks = set(spec.verification_checks) - set(VERIFICATION_CHECKS)
+    if unknown_checks:
+        raise ContractError(
+            "PipelineSpec uses an unregistered verification check: "
+            + ",".join(sorted(unknown_checks))
+        )
     if not set(spec.requested_permissions).issubset(policy.permission_ceiling):
         raise ContractError("PipelineSpec exceeds the code-owned permission ceiling")
     if not set(spec.requested_side_effects).issubset(policy.side_effect_ceiling):

@@ -757,9 +757,11 @@ def run(
         _pipeline_name, pipeline = compiled_executable_for_contract(
             operation_contract
         )
+        pipeline_extra_commands: tuple[str, ...] = ()
     except ValueError:
         try:
-            _pipeline_name, pipeline = resolve_custom_executable(
+            _pipeline_name, pipeline, pipeline_extra_commands = (
+                resolve_custom_executable(
                 store_root=spec_path.parent.parent,
                 operation_id=spec["operation_id"],
                 definition_sha256=operation_contract,
@@ -767,8 +769,9 @@ def run(
                 policy=CustomPipelinePolicy.default(),
                 capabilities=("route:resolved",),
             )
+            )
         except (ContractError, OSError, ValueError):
-            _pipeline_name, pipeline = "", None
+            _pipeline_name, pipeline, pipeline_extra_commands = "", None, ()
     last_prompt_digest = ""
     next_prompt_probe = 0.0
     handled_control_id = ""
@@ -3346,6 +3349,7 @@ def run(
                                     verification_runner
                                     or subprocess.run
                                 ),
+                                extra_commands=pipeline_extra_commands,
                                 pointer_root=spec_path.parent,
                             )
                         )

@@ -96,7 +96,7 @@ VALID = {
             "byte_limit": 65536,
         }
     ],
-    "verification_checks": ["focused-tests", "diff-check"],
+    "verification_checks": ["harness-tests", "diff-check"],
     "review_mode": "simple",
     "human_gates": ["initial-approval"],
     "terminal_outcomes": ["completed", "attention-required"],
@@ -205,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
         and stored.stat().st_mode & 0o077 == 0
         and stored.parent.stat().st_mode & 0o077 == 0,
     )
-    baseline_name, executable = resolve_custom_executable(
+    baseline_name, executable, extra_commands = resolve_custom_executable(
         store_root=Path(raw) / "runtime",
         operation_id="custom-operation-1",
         definition_sha256=frozen.definition_sha256,
@@ -216,7 +216,8 @@ with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
     check(
         "runtime resolves custom execution through the existing baseline",
         baseline_name == "engineering/change"
-        and executable.definition_sha256 == frozen.definition_sha256,
+        and executable.definition_sha256 == frozen.definition_sha256
+        and extra_commands == ("make test-harness", "git diff --check"),
     )
     tampered = json.loads(stored.read_text(encoding="utf-8"))
     tampered["definition_sha256"] = "f" * 64
@@ -319,6 +320,11 @@ expect_rejection(
     "arbitrary commands fail closed",
     lambda value: value["verification_checks"].append("python -c evil"),
     "verification check",
+)
+expect_rejection(
+    "unknown verification checks fail closed",
+    lambda value: value["verification_checks"].append("invented-check"),
+    "unregistered verification check",
 )
 expect_rejection(
     "permission expansion fails closed",
