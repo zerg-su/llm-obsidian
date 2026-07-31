@@ -18,12 +18,22 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.process import ProcessAdapter
-from harness.contracts import AttentionReason, OperationSpec, RuntimeRoute
+from harness.contracts import (
+    DEFAULT_TIME_BUDGET_SECONDS,
+    DEFAULT_TOKEN_LIMIT,
+    AttentionReason,
+    OperationSpec,
+    RuntimeRoute,
+)
 from harness.pipeline_builtins import builtin_definitions, builtin_registry
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionRequest
-from harness.runtime_worker import run as run_worker
+from harness.runtime_worker import (
+    _pipeline_verify_identity,
+    run as run_worker,
+)
 from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
@@ -65,10 +75,11 @@ def dispatch_record(
     operation_id: str,
     *,
     bind_contract: bool = True,
+    pipeline_name: str = "lifecycle/default",
 ) -> None:
     route = RuntimeRoute("codex", "gpt-5.6-sol", "high", "executor", "a" * 64)
     lifecycle = compile_pipeline(
-        builtin_definitions()["lifecycle/default"],
+        builtin_definitions()[pipeline_name],
         builtin_registry(),
         capabilities=("route:resolved",),
     )
@@ -157,6 +168,9 @@ def run_case(
         Callable[[Path, Path, Path, str], None] | None
     ) = None,
     bind_contract: bool = True,
+    pipeline_name: str = "lifecycle/default",
+    verification_runner: Callable[..., subprocess.CompletedProcess[str]]
+    | None = None,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -215,7 +229,12 @@ def run_case(
         },
     )
     store = OperationStore(vault / ".vault-meta" / "harness")
-    dispatch_record(store, operation_id, bind_contract=bind_contract)
+    dispatch_record(
+        store,
+        operation_id,
+        bind_contract=bind_contract,
+        pipeline_name=pipeline_name,
+    )
     profile_sha = load_profiles(
         vault / "config" / "verification-profiles.toml"
     )["scoped"].sha256
@@ -310,6 +329,7 @@ def run_case(
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-1",
                 cmux_adapter=cmux,
                 review_launcher=review_launcher,
+                verification_runner=verification_runner,
             )
         )
     )
@@ -383,6 +403,586 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         sent_marker["status"] == "sent"
         and sent_marker["callback_id"] == record.accepted_callback_id,
         sent_marker,
+    )
+
+    engineering_task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    verification_calls: list[tuple[str, ...]] = []
+
+    def pass_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        verification_calls.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    (
+        engineering_store,
+        engineering_cmux,
+        engineering_state,
+        engineering_rc,
+    ) = run_case(
+        root,
+        engineering_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=pass_verification,
+    )
+    engineering_record = engineering_store.read(
+        "owner-1", engineering_task
+    )
+    verification_receipt = json.loads(
+        (
+            engineering_state / "pipeline-step-verify.json"
+        ).read_text(encoding="utf-8")
+    )
+    engineering_operations = engineering_store.list("owner-1")
+    engineering_verify = [
+        record
+        for record in engineering_operations
+        if record.spec.kind == "pipeline-verify"
+    ]
+    check(
+        "engineering change runs verification in one derived operation",
+        engineering_rc == 0
+        and engineering_record.spec.operation_id == engineering_task
+        and engineering_record.state == "finalizing"
+        and engineering_record.accepted_callback_kind == "wiki-summary"
+        and len(engineering_verify) == 1
+        and engineering_verify[0].spec.operation_id
+        == verification_receipt["operation_id"]
+        and engineering_verify[0].spec.operation_id != engineering_task
+        and engineering_verify[0].lane_id
+        == verification_receipt["lane_id"]
+        and engineering_verify[0].run_id
+        == verification_receipt["run_id"]
+        and engineering_verify[0].state == "complete"
+        and verification_receipt["parent_operation_id"]
+        == engineering_task
+        and verification_receipt["status"] == "complete"
+        and verification_receipt["step_id"] == "verify"
+        and len(verification_receipt["evidence"]) == 3
+        and verification_calls
+        == [
+            ("make", "test-harness"),
+            ("make", "test-model-routing"),
+            ("git", "diff", "--check"),
+        ]
+        and len(engineering_cmux.sent) == 1,
+        (
+            engineering_record,
+            engineering_verify,
+            verification_receipt,
+            verification_calls,
+        ),
+    )
+
+    failing_task = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    failing_commands = [0]
+    commands_before_resubmission = []
+
+    def fail_then_pass_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        failing_commands[0] += 1
+        return subprocess.CompletedProcess(
+            argv,
+            1 if failing_commands[0] == 1 else 0,
+            "ok\n" if failing_commands[0] > 1 else "",
+            "failed\n" if failing_commands[0] == 1 else "",
+        )
+
+    def resubmit_failed_verification(
+        _vault: Path,
+        worktree: Path,
+        _state: Path,
+        _profile_sha: str,
+    ) -> None:
+        def respond() -> None:
+            import time
+
+            packet_path = worktree / ".task-verification.json"
+            for _ in range(100):
+                if packet_path.is_file():
+                    break
+                time.sleep(0.02)
+            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            (worktree / "product.txt").write_text(
+                "ready\nfixed\n", encoding="utf-8"
+            )
+            subprocess.run(
+                ["git", "add", "product.txt"], cwd=worktree, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "fix verification"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            resubmitted_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            (
+                _vault
+                / ".vault-meta"
+                / "harness"
+                / "review-data"
+                / failing_task
+                / failing_task
+                / "review-gate.json"
+            ).unlink(missing_ok=True)
+            time.sleep(0.12)
+            commands_before_resubmission.append(failing_commands[0])
+            packet_sha256 = hashlib.sha256(
+                json.dumps(
+                    packet, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            write_json(
+                worktree / ".task-verification-response.json",
+                {
+                    "schema_version": 1,
+                    "operation_id": failing_task,
+                    "verification_operation_id": packet[
+                        "verification_operation_id"
+                    ],
+                    "failed_head_sha": packet["head_sha"],
+                    "packet_sha256": packet_sha256,
+                    "response": "fix-and-resubmit",
+                    "resubmitted_head_sha": resubmitted_head,
+                },
+            )
+
+        threading.Thread(target=respond).start()
+
+    def approve_resubmitted_verification(
+        vault: Path, worktree: Path
+    ) -> None:
+        gate = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / failing_task
+            / failing_task
+        )
+        (gate / "review-gate.json").unlink(missing_ok=True)
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=failing_task,
+            owner_id=failing_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    failed_store, failed_cmux, failed_state, failed_rc = run_case(
+        root,
+        failing_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=fail_then_pass_verification,
+        before_start=resubmit_failed_verification,
+        review_launcher=approve_resubmitted_verification,
+    )
+    failed_record = failed_store.read("owner-1", failing_task)
+    resubmitted_receipt = json.loads(
+        (failed_state / "pipeline-step-verify.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    failed_packet = json.loads(
+        (
+            root
+            / f"worktree-{failing_task}"
+            / ".task-verification.json"
+        ).read_text(encoding="utf-8")
+    )
+    response_receipts = list(
+        (failed_state / "pipeline-verification").glob(
+            "*/response-receipt.json"
+        )
+    )
+    failed_verifications = [
+        record
+        for record in failed_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
+    failed_by_id = {
+        record.spec.operation_id: record
+        for record in failed_verifications
+    }
+    failed_attempt = failed_by_id.get(
+        str(failed_packet["verification_operation_id"])
+    )
+    resubmitted_attempt = failed_by_id.get(
+        str(resubmitted_receipt["operation_id"])
+    )
+    check(
+        "fix-and-resubmit consumes an identity-bound response and reaches review",
+        failed_rc == 0
+        and failed_record.state == "finalizing"
+        and failed_record.accepted_callback_kind == "wiki-summary"
+        and len(failed_verifications) == 2
+        and failed_attempt is not None
+        and failed_attempt.state == "failed"
+        and resubmitted_attempt is not None
+        and resubmitted_attempt.state == "complete"
+        and failed_attempt.spec.operation_id
+        != resubmitted_attempt.spec.operation_id
+        and resubmitted_receipt["parent_operation_id"] == failing_task
+        and resubmitted_receipt["status"] == "complete"
+        and failed_packet["status"] == "attention-required"
+        and failed_packet["step_id"] == "verify"
+        and failed_packet["safe_boundary"] == "tdd-slices-complete"
+        and failed_packet["allowed_responses"]
+        == ["fix-and-resubmit", "escalate"]
+        and failed_packet["evidence"][0]["command_id"]
+        == "scoped-1"
+        and failed_packet["response_pointer"]
+        == ".task-verification-response.json"
+        and len(response_receipts) == 1
+        and json.loads(
+            response_receipts[0].read_text(encoding="utf-8")
+        )["status"]
+        == "accepted"
+        and commands_before_resubmission == [1]
+        and failing_commands == [4]
+        and failed_cmux.sent
+        and failed_cmux.sent[0][0] == CHILD
+        and ".task-verification.json" in failed_cmux.sent[0][1],
+        (
+            failed_record,
+            failed_verifications,
+            resubmitted_receipt,
+            failed_packet,
+            response_receipts,
+            commands_before_resubmission,
+            failed_cmux.sent,
+        ),
+    )
+
+    crash_task = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    crash_commands: list[tuple[str, ...]] = []
+    crash_commands_before_response: list[int] = []
+    recovered_links: list[str] = []
+
+    def pass_crash_restart_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        crash_commands.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    def prepare_receipt_before_link_crash(
+        vault: Path,
+        worktree: Path,
+        state: Path,
+        profile_sha: str,
+    ) -> None:
+        crash_store = OperationStore(
+            vault / ".vault-meta" / "harness"
+        )
+        parent = crash_store.read("owner-1", crash_task)
+        pipeline = compile_pipeline(
+            builtin_definitions()["engineering/change"],
+            builtin_registry(),
+            capabilities=("route:resolved",),
+        )
+        failed_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        input_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "definition_sha256": pipeline.definition_sha256,
+                    "head_sha": failed_head,
+                    "profile_sha256": profile_sha,
+                    "schema_version": 1,
+                    "summary": valid_summary,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        child, lane_id, run_id = _pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=pipeline.definition_sha256,
+            input_sha256=input_sha256,
+            profile="scoped",
+        )
+        crash_store.create(child, lane_id=lane_id, run_id=run_id)
+        child_supervisor = OperationSupervisor(
+            crash_store, "owner-1", child.operation_id
+        )
+        child_supervisor.configure_budget(
+            attempt_limit=1,
+            model_restart_limit=0,
+            time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+            token_limit=DEFAULT_TOKEN_LIMIT,
+        )
+        for child_state in (
+            "preflight",
+            "starting",
+            "running",
+            "verifying",
+        ):
+            child_supervisor.transition(child_state)
+        child_supervisor.consume_attempt()
+        effect_id = f"pipeline-verify-{input_sha256[:32]}"
+        crash_store.begin_effect(
+            "owner-1", child.operation_id, effect_id
+        )
+        evidence_dir = (
+            state
+            / "pipeline-verification"
+            / child.operation_id
+            / "evidence"
+        )
+        evidence_dir.mkdir(parents=True)
+        output = evidence_dir / "scoped-1.log"
+        output.write_text("failed before crash\n", encoding="utf-8")
+        child_receipt = {
+            "schema_version": 1,
+            "operation_id": child.operation_id,
+            "parent_operation_id": crash_task,
+            "lane_id": lane_id,
+            "run_id": run_id,
+            "definition_sha256": pipeline.definition_sha256,
+            "step_id": "verify",
+            "head_sha": failed_head,
+            "input_sha256": input_sha256,
+            "profile": "scoped",
+            "profile_sha256": profile_sha,
+            "effect_id": effect_id,
+            "status": "failed",
+            "evidence": [
+                {
+                    "profile": "scoped",
+                    "profile_sha256": profile_sha,
+                    "head_sha": failed_head,
+                    "command_id": "scoped-1",
+                    "cwd": ".",
+                    "exit_code": 1,
+                    "started_at": "1",
+                    "finished_at": "2",
+                    "output_pointer": output.relative_to(state).as_posix(),
+                }
+            ],
+        }
+        write_json(
+            state
+            / "pipeline-verification"
+            / child.operation_id
+            / "receipt.json",
+            child_receipt,
+        )
+        check(
+            "crash fixture stops after child receipt and before controller link",
+            not (state / "pipeline-step-verify.json").exists(),
+            state,
+        )
+        (worktree / "product.txt").write_text(
+            "ready\nfixed after crash\n", encoding="utf-8"
+        )
+        subprocess.run(
+            ["git", "add", "product.txt"], cwd=worktree, check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "fix after verify crash"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        resubmitted_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / crash_task
+            / crash_task
+            / "review-gate.json"
+        ).unlink(missing_ok=True)
+
+        def respond_after_recovery() -> None:
+            import time
+
+            packet_path = worktree / ".task-verification.json"
+            for _ in range(100):
+                if packet_path.is_file():
+                    break
+                time.sleep(0.02)
+            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            linked = json.loads(
+                (state / "pipeline-step-verify.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            recovered_links.append(str(linked["operation_id"]))
+            crash_commands_before_response.append(
+                len(crash_commands)
+            )
+            packet_sha256 = hashlib.sha256(
+                json.dumps(
+                    packet, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            write_json(
+                worktree / ".task-verification-response.json",
+                {
+                    "schema_version": 1,
+                    "operation_id": crash_task,
+                    "verification_operation_id": child.operation_id,
+                    "failed_head_sha": failed_head,
+                    "packet_sha256": packet_sha256,
+                    "response": "fix-and-resubmit",
+                    "resubmitted_head_sha": resubmitted_head,
+                },
+            )
+
+        threading.Thread(target=respond_after_recovery).start()
+
+    def approve_crash_restart(vault: Path, worktree: Path) -> None:
+        gate = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / crash_task
+            / crash_task
+        )
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=crash_task,
+            owner_id=crash_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    (
+        crash_store,
+        _crash_cmux,
+        crash_state,
+        crash_rc,
+    ) = run_case(
+        root,
+        crash_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        before_start=prepare_receipt_before_link_crash,
+        verification_runner=pass_crash_restart_verification,
+        review_launcher=approve_crash_restart,
+        review_state="missing",
+    )
+    crash_parent = crash_store.read("owner-1", crash_task)
+    crash_children = [
+        record
+        for record in crash_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
+    crash_response_receipts = list(
+        (crash_state / "pipeline-verification").glob(
+            "*/response-receipt.json"
+        )
+    )
+    check(
+        "restart recovers an orphan failed receipt before resubmission",
+        crash_rc == 0
+        and crash_parent.state == "finalizing"
+        and len(crash_children) == 2
+        and sorted(record.state for record in crash_children)
+        == ["complete", "failed"]
+        and recovered_links
+        and recovered_links[0]
+        != json.loads(
+            (crash_state / "pipeline-step-verify.json").read_text(
+                encoding="utf-8"
+            )
+        )["operation_id"]
+        and crash_commands_before_response == [0]
+        and crash_commands
+        == [
+            ("make", "test-harness"),
+            ("make", "test-model-routing"),
+            ("git", "diff", "--check"),
+        ]
+        and len(crash_response_receipts) == 1,
+        (
+            crash_parent,
+            crash_children,
+            recovered_links,
+            crash_commands_before_response,
+            crash_commands,
+        ),
     )
 
     # A restarted worker sees a duplicate durable callback and the sent marker;
@@ -547,6 +1147,26 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
     asynchronous_task = "99999999-9999-4999-8999-999999999999"
     asynchronous_calls: list[str] = []
+    asynchronous_verification_heads: list[str] = []
+    asynchronous_verification_calls: list[tuple[str, ...]] = []
+
+    def record_asynchronous_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            result = subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            asynchronous_verification_heads.append(
+                result.stdout.strip()
+            )
+            return result
+        asynchronous_verification_calls.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
 
     def complete_when_callback_arrives(vault: Path, worktree: Path) -> None:
         asynchronous_calls.append(str(worktree))
@@ -710,21 +1330,30 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         valid_summary,
         review_state="missing",
         review_launcher=complete_when_callback_arrives,
+        pipeline_name="engineering/change",
+        verification_runner=record_asynchronous_verification,
     )
     asynchronous_record = asynchronous_store.read(
         "owner-1", asynchronous_task
     )
     check(
-        "worker delivers findings and drives same-session resolution",
+        "engineering change re-verifies the new resolution HEAD before same-session review",
         asynchronous_rc == 0
         and len(asynchronous_calls) == 4
+        and len(set(asynchronous_verification_heads)) == 2
+        and len(asynchronous_verification_calls) == 6
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
         and len(asynchronous_cmux.sent) == 2
         and asynchronous_cmux.sent[0][0] == CHILD
         and "Typed review findings" in asynchronous_cmux.sent[0][1]
         and asynchronous_cmux.sent[1][0] == ORIGIN,
-        (asynchronous_calls, asynchronous_record),
+        (
+            asynchronous_calls,
+            asynchronous_verification_heads,
+            asynchronous_verification_calls,
+            asynchronous_record,
+        ),
     )
     asynchronous_packet = (
         root / f"worktree-{asynchronous_task}" / ".task-review.json"

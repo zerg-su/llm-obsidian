@@ -17,6 +17,9 @@ from .pipelines import (
 
 VERSION = "1.0.0"
 StepSpec = tuple[str, str, str, str, str, tuple[str, ...]]
+EXECUTABLE_BUILTINS = frozenset(
+    {"lifecycle/default", "engineering/change"}
+)
 
 BUILTINS: dict[str, tuple[str, str, tuple[StepSpec, ...]]] = {
     "lifecycle/default": (
@@ -207,3 +210,15 @@ def compiled_builtin(name: str) -> CompiledPipeline:
         builtin_registry(),
         capabilities=("route:resolved",),
     )
+
+
+def compiled_executable_for_contract(
+    definition_sha256: str,
+) -> tuple[str, CompiledPipeline]:
+    """Resolve an exact production contract without adding runtime state."""
+
+    for name in sorted(EXECUTABLE_BUILTINS):
+        compiled = compiled_builtin(name)
+        if compiled.definition_sha256 == definition_sha256:
+            return name, compiled
+    raise ValueError("unknown executable pipeline contract")

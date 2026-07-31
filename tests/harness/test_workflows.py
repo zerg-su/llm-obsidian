@@ -56,6 +56,27 @@ check(
     and spec.contract_sha256 == lifecycle.definition_sha256,
 )
 check("dispatch defaults to automatic simple review", request.review == ReviewPolicy())
+change_request = DispatchRequest(
+    "task-change",
+    "owner-1",
+    "b" * 64,
+    "packets/change/manifest.json",
+    route,
+    pipeline_name="engineering/change",
+)
+change = compile_pipeline(
+    builtin_definitions()["engineering/change"],
+    builtin_registry(),
+    capabilities=("route:resolved",),
+)
+change_spec = operation_spec(change_request)
+check(
+    "engineering change reuses the dispatch identity and binds its exact contract",
+    change_spec.operation_id == change_request.task_id
+    and change_spec.kind == "dispatch"
+    and change_spec.contract_sha256 == change.definition_sha256
+    and change_spec.idempotency_key != spec.idempotency_key,
+)
 workspace = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route, placement="workspace")
 check("workspace is a dispatch placement", workspace.placement == "workspace")
 

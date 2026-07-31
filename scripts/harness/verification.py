@@ -69,7 +69,9 @@ def run_profile(
     runner: Runner = subprocess.run,
     max_output_bytes: int = 131_072,
     extra_commands: tuple[str, ...] = (),
+    pointer_root: Path | None = None,
 ) -> list[VerificationEvidence]:
+    pointer_root = (pointer_root or root).resolve()
     head_result = runner(["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=False)
     if head_result.returncode:
         raise VerificationError("cannot resolve verification HEAD")
@@ -94,7 +96,7 @@ def run_profile(
             result.returncode,
             str(started),
             str(finished),
-            pointer.relative_to(root).as_posix(),
+            pointer.relative_to(pointer_root).as_posix(),
         )
         evidence.append(item)
         if result.returncode:

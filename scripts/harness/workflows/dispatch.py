@@ -17,7 +17,7 @@ from ..contracts import (
     OwnedResources,
     RuntimeRoute,
 )
-from ..pipeline_builtins import compiled_builtin
+from ..pipeline_builtins import EXECUTABLE_BUILTINS, compiled_builtin
 from ..state_machine import TERMINAL
 from ..store import OperationStore
 from ..supervisor import OperationSupervisor, SupervisorError
@@ -104,16 +104,19 @@ class DispatchRequest:
     route: RuntimeRoute
     placement: str = "split"
     review: ReviewPolicy = ReviewPolicy()
+    pipeline_name: str = "lifecycle/default"
 
     def __post_init__(self) -> None:
         if self.placement not in {"split", "workspace"}:
             raise ValueError("dispatch placement must be split or workspace")
         if len(self.plan_sha256) != 64:
             raise ValueError("dispatch requires an approved plan sha256")
+        if self.pipeline_name not in EXECUTABLE_BUILTINS:
+            raise ValueError("dispatch requires an executable pipeline")
 
 
 def operation_spec(request: DispatchRequest) -> OperationSpec:
-    contract = compiled_builtin("lifecycle/default")
+    contract = compiled_builtin(request.pipeline_name)
     identity = json.dumps(
         {
             "task_id": request.task_id,
