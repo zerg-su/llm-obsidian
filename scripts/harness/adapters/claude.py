@@ -101,7 +101,7 @@ class ClaudeDriver:
                             "run the exact review_submit.py command. Never "
                             f"hand-write the generated callback: {callback_pointer}"
                             + (
-                                "; its exact session-relative alias is "
+                                "; the input file's exact session-relative alias is "
                                 f"{relative_input}"
                                 if relative_input
                                 else ""
@@ -115,12 +115,9 @@ class ClaudeDriver:
             )
             args.extend(("Read", "Glob", "Grep"))
             if callback_pointer is not None:
-                callback_rule = _absolute_permission_path(callback_pointer)
                 input_rule = _absolute_permission_path(input_pointer)
                 args.extend(
                     (
-                        f"Edit({callback_rule})",
-                        f"Write({callback_rule})",
                         f"Edit({input_rule})",
                         f"Write({input_rule})",
                     )
@@ -128,8 +125,6 @@ class ClaudeDriver:
                 if relative_callback:
                     args.extend(
                         (
-                            f"Edit({relative_callback})",
-                            f"Write({relative_callback})",
                             f"Edit({relative_input})",
                             f"Write({relative_input})",
                         )
@@ -222,10 +217,12 @@ class ClaudeDriver:
         except ClaudeDriverError:
             return False
         if route.profile == "reviewer-callback":
-            callback_rule = _absolute_permission_path(callback_pointer)
+            input_rule = _absolute_permission_path(
+                callback_pointer.with_name(".review-input.json")
+            )
             return (
-                f"Edit({callback_rule})" in command
-                and f"Write({callback_rule})" in command
+                f"Edit({input_rule})" in command
+                and f"Write({input_rule})" in command
             )
         return route.profile in {"executor", "prototype"}
 

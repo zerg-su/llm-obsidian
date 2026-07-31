@@ -1460,20 +1460,21 @@ codex_callback = CodexDriver(Path("/usr/bin/codex")).command(
 )
 check(
     "review callback profile edits and writes only isolated scratch transport",
-    f"Write(/{callback})" in claude_callback
-    and f"Edit(/{callback})" in claude_callback
-    and f"Write(/{review_input})" in claude_callback
+    f"Write(/{review_input})" in claude_callback
     and f"Edit(/{review_input})" in claude_callback
+    and f"Write(/{callback})" not in claude_callback
+    and f"Edit(/{callback})" not in claude_callback
     and f"Write({callback})" not in claude_callback
     and f"Edit({callback})" not in claude_callback
     and f"Write({review_input})" not in claude_callback
     and f"Edit({review_input})" not in claude_callback
-    and "Write(owned-review-scratch/callback.json)" in claude_callback
-    and "Edit(owned-review-scratch/callback.json)" in claude_callback
+    and "Write(owned-review-scratch/callback.json)" not in claude_callback
+    and "Edit(owned-review-scratch/callback.json)" not in claude_callback
     and "Write(owned-review-scratch/.review-input.json)" in claude_callback
     and "Edit(owned-review-scratch/.review-input.json)" in claude_callback
     and str(callback) in callback_instruction
     and "absolute path verbatim" in callback_instruction
+    and "input file's exact session-relative alias" in callback_instruction
     and f"Bash({review_submit})" in claude_callback
     and f"Bash(git -C {shlex.quote(str(product))} rev-parse HEAD)"
     in claude_callback
@@ -1489,12 +1490,8 @@ check(
         item.startswith(("Edit(", "Write("))
         and item
         not in {
-            f"Edit(/{callback})",
-            f"Write(/{callback})",
             f"Edit(/{review_input})",
             f"Write(/{review_input})",
-            "Edit(owned-review-scratch/callback.json)",
-            "Write(owned-review-scratch/callback.json)",
             "Edit(owned-review-scratch/.review-input.json)",
             "Write(owned-review-scratch/.review-input.json)",
         }
