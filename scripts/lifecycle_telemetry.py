@@ -104,6 +104,7 @@ def emit_lifecycle_event(
     *,
     actor: str,
     counts: Mapping[str, object] | None = None,
+    identifiers: Mapping[str, object] | None = None,
     status: str = "ok",
     vault_root: Path | None = None,
 ) -> bool:
@@ -119,6 +120,7 @@ def emit_lifecycle_event(
             actor=actor,
             session=meta.get("origin_session"),
             counts=numeric_counts(counts),
+            identifiers=identifiers,
             status=status,
             root=root,
         )
@@ -126,9 +128,50 @@ def emit_lifecycle_event(
         return False
 
 
+def emit_compiled_pipeline_event(
+    worktree: Path,
+    *,
+    event: str,
+    pipeline_id: object,
+    pipeline_version: object,
+    profile: object,
+    compiler_outcome: object,
+    definition_sha: object,
+    primitive_count: object,
+    loop_iteration: object = 0,
+    terminal_category: object = None,
+    attention_category: object = None,
+    status: str = "ok",
+    vault_root: Path | None = None,
+) -> bool:
+    """Emit one bounded compiled-pipeline fact without task content."""
+
+    return emit_lifecycle_event(
+        worktree,
+        "compiled-pipeline",
+        actor=event,
+        identifiers={
+            "pipeline_id": pipeline_id,
+            "pipeline_version": pipeline_version,
+            "profile": profile,
+            "compiler_outcome": compiler_outcome,
+            "definition_sha": definition_sha,
+            "terminal_category": terminal_category or "none",
+            "attention_category": attention_category or "none",
+        },
+        counts={
+            "primitive_count": nonnegative_int(primitive_count),
+            "bounded_loop_iteration": nonnegative_int(loop_iteration),
+        },
+        status=status,
+        vault_root=vault_root,
+    )
+
+
 __all__ = [
     "declared_vault",
     "elapsed_ms",
+    "emit_compiled_pipeline_event",
     "emit_lifecycle_event",
     "nonnegative_int",
     "numeric_counts",

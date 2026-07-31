@@ -24,6 +24,9 @@ LOCK_NAME = ".pipeline-events.lock"
 ROTATE_BYTES = 1_048_576
 TOKEN_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 COUNT_KEY_RX = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+IDENTIFIER_KEY_RX = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
+IDENTIFIER_TOKEN_RX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$")
+IDENTIFIER_LIMIT = 16
 STATUSES = {"ok", "degraded", "error", "noop", "conflict"}
 
 
@@ -80,6 +83,35 @@ def safe_counts(counts: Optional[Mapping[str, object]]) -> dict[str, Union[float
     return clean
 
 
+def safe_identifiers(
+    identifiers: Optional[Mapping[str, object]],
+) -> dict[str, str]:
+    """Keep bounded safe keys and mask every non-token identifier value."""
+
+    if identifiers is None:
+        return {}
+    if not isinstance(identifiers, Mapping):
+        raise TypeError("telemetry identifiers need a mapping")
+    clean: dict[str, str] = {}
+    for key, value in identifiers.items():
+        normalized_key = str(key)
+        if not IDENTIFIER_KEY_RX.fullmatch(normalized_key):
+            continue
+        raw = str(value or "").strip()
+        absolute_like = (
+            raw.startswith(("/", "\\", "~"))
+            or re.match(r"^[A-Za-z]:[/\\]", raw) is not None
+        )
+        clean[normalized_key] = (
+            raw
+            if IDENTIFIER_TOKEN_RX.fullmatch(raw) and not absolute_like
+            else safe_token(raw, "unknown")
+        )
+        if len(clean) >= IDENTIFIER_LIMIT:
+            break
+    return clean
+
+
 def build_event(
     op: object,
     *,
@@ -87,6 +119,7 @@ def build_event(
     session: object = None,
     paths: Optional[Iterable[object]] = None,
     counts: Optional[Mapping[str, object]] = None,
+    identifiers: Optional[Mapping[str, object]] = None,
     status: str = "ok",
     environ: Optional[Mapping[str, str]] = None,
 ) -> dict:
@@ -99,7 +132,7 @@ def build_event(
             clean_paths.append(path)
         if len(clean_paths) >= 20:
             break
-    return {
+    event = {
         "schema": 1,
         "ts": datetime.now(timezone.utc).isoformat(),
         "runtime": runtime_name(environ),
@@ -110,6 +143,9 @@ def build_event(
         "paths": clean_paths,
         "counts": safe_counts(counts),
     }
+    if identifiers is not None:
+        event["identifiers"] = safe_identifiers(identifiers)
+    return event
 
 
 def emit_event(
@@ -119,6 +155,7 @@ def emit_event(
     session: object = None,
     paths: Optional[Iterable[object]] = None,
     counts: Optional[Mapping[str, object]] = None,
+    identifiers: Optional[Mapping[str, object]] = None,
     status: str = "ok",
     root: Path = ROOT,
     environ: Optional[Mapping[str, str]] = None,
@@ -132,6 +169,7 @@ def emit_event(
             session=session,
             paths=paths,
             counts=counts,
+            identifiers=identifiers,
             status=status,
             environ=environ,
         )
@@ -151,4 +189,12 @@ def emit_event(
         return False
 
 
-__all__ = ["build_event", "emit_event", "runtime_name", "safe_path", "safe_token"]
+__all__ = [
+    "IDENTIFIER_LIMIT",
+    "build_event",
+    "emit_event",
+    "runtime_name",
+    "safe_identifiers",
+    "safe_path",
+    "safe_token",
+]

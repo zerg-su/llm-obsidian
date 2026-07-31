@@ -59,8 +59,16 @@ Events live in the gitignored `.vault-meta/pipeline-events.jsonl` (plus one
 rotated file). The shared schema accepts only:
 
 - runtime, session, actor, operation, and status identifiers;
+- an optional map of at most 16 safe identifier keys to bounded tokens or
+  one-way hashes;
 - vault-relative page paths where an operation already needs them;
 - non-negative numeric counters.
+
+Identifier values such as pipeline IDs, profile names, versions, outcome
+categories, and definition hashes remain readable only when they match the
+bounded token grammar. Arbitrary text and absolute paths are replaced with a
+short SHA-256 token; unsafe keys are omitted. The identifier map cannot contain
+prompts, commands, prose, or unbounded metadata.
 
 It rejects prompt text, task descriptions, search queries, commands, snippets,
 page bodies, review prose, decisions, and error messages. Lifecycle emission is
@@ -97,9 +105,12 @@ fixed before adding more orchestration.
 
 LLM Obsidian 2.4 adds a catalog/compiler for lifecycle and engineering semantic
 contracts. The existing harness remains the sole executor: it derives the next
-action from the compiled step order plus existing `OperationRecord` and review
-gate evidence. No pipeline controller, second operation identity, progress
-store, or parallel telemetry path exists.
+action from the compiled step order plus existing `OperationRecord`, typed child
+receipts, and review-gate evidence. Each model or verification phase may receive
+a derived child `OperationSpec` and immutable typed receipt. Those children live
+in the same `OperationStore` and advance through the same FSM under the same
+code-owned controller; there is no second progress database, orchestration FSM,
+or parallel telemetry path.
 
 The existing `dispatch-runner.py validate` preview renders the lifecycle
 contract before approval. Rendering the summary is not execution and creates no
@@ -108,12 +119,30 @@ sandbox-enforced write/socket classes and the code-policy-enforced sequencing
 boundary, plus exact model/review limits, side-effect classes, and typed return
 categories.
 
-Existing operation and lifecycle events remain authoritative; compiled progress
-is derived and is never a second durable truth. The original rejected
-controller design and the later state-free execution decision are recorded in
+Existing operation records and typed receipts remain authoritative; compiled
+progress is derived from them and is never a second durable truth. The original
+rejected controller design and the later single-controller execution decision
+are recorded in
 [the original boundary ADR](decisions/v2.4-pipeline-composition-boundary.md)
 and its
 [superseding ADR](decisions/v2.4-state-free-executable-lifecycle.md).
+
+### Compiled event call contract
+
+`lifecycle_telemetry.emit_compiled_pipeline_event()` is the best-effort seam for
+compiled execution telemetry. Callers provide:
+
+- `event`: a short phase token such as `compile`, `primitive`, `loop`,
+  `attention`, or `terminal`;
+- identifiers: pipeline ID, pipeline version, profile, compiler outcome,
+  definition SHA, and terminal/attention category;
+- counters: primitive count and the current bounded-loop iteration.
+
+The helper emits the fixed `compiled-pipeline` operation, applies the shared
+identifier masking and caps, and normalizes the two counters. It returns
+`False` if telemetry cannot be written and never changes the compiled operation
+or its receipt. Task descriptions, primitive inputs/outputs, finding text,
+commands, and absolute worktree paths are not valid arguments.
 
 ## Dogfood acceptance window
 

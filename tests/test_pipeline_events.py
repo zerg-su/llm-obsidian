@@ -106,6 +106,47 @@ def run() -> None:
             "standalone review origin vault resolved",
             lifecycle.origin_vault(standalone_review) == root.resolve(),
         )
+        identifiers = {
+            "pipeline_id": "engineering-fix",
+            "profile": "engineering/fix contains private text",
+            "definition_sha": "a" * 64,
+            "source_root": "/Users/private/plan.md",
+            "bad key": "/Users/private/plan.md",
+            **{f"extra_{index}": f"value-{index}" for index in range(20)},
+        }
+        clean_identifiers = events.safe_identifiers(identifiers)
+        check(
+            "identifier values are exact or masked",
+            clean_identifiers["pipeline_id"] == "engineering-fix"
+            and clean_identifiers["definition_sha"] == "a" * 64
+            and clean_identifiers["profile"].startswith("sha256:")
+            and clean_identifiers["source_root"].startswith("sha256:")
+            and "engineering/fix contains private text"
+            not in json.dumps(clean_identifiers)
+            and "/Users/private/plan.md"
+            not in json.dumps(clean_identifiers),
+        )
+        check(
+            "identifier keys and count are bounded",
+            "bad key" not in clean_identifiers
+            and len(clean_identifiers) == events.IDENTIFIER_LIMIT,
+        )
+        check(
+            "compiled pipeline event emitted",
+            lifecycle.emit_compiled_pipeline_event(
+                worktree,
+                event="compile",
+                pipeline_id="engineering-fix",
+                pipeline_version="2.4.1",
+                profile="engineering/fix",
+                compiler_outcome="compiled",
+                definition_sha="b" * 64,
+                primitive_count=6,
+                loop_iteration=2,
+                terminal_category="complete",
+                attention_category=None,
+            ),
+        )
         check("lifecycle elapsed duration", lifecycle.elapsed_ms("2026-01-01T00:00:00Z", "2026-01-01T00:00:02Z") == 2000)
         check("lifecycle invalid counter is safe", lifecycle.nonnegative_int("broken") == 0)
 
@@ -152,12 +193,37 @@ def run() -> None:
 
         log = root / ".vault-meta/pipeline-events.jsonl"
         records = read_jsonl(log)
-        check("all records", len(records) == 4 + len(lifecycle_samples))
+        check("all records", len(records) == 5 + len(lifecycle_samples))
         check("runtime classification", [item["runtime"] for item in records[:3]] == ["claude", "codex", "unknown"])
         check("unsafe session hashed", records[0]["session"].startswith("sha256:"))
         check("unsafe paths omitted", records[0]["paths"] == ["wiki/concepts/Secret Page.md"])
         allowed = {"schema", "ts", "runtime", "session", "actor", "op", "status", "paths", "counts"}
-        check("fixed event schema", all(set(item) == allowed for item in records))
+        check(
+            "backwards-compatible event schema",
+            all(
+                set(item) == allowed
+                for index, item in enumerate(records)
+                if index != 3
+            )
+            and set(records[3]) == allowed | {"identifiers"},
+        )
+        check(
+            "compiled event carries bounded content-free fields",
+            records[3]["op"] == "compiled-pipeline"
+            and records[3]["actor"] == "compile"
+            and records[3]["identifiers"]
+            == {
+                "attention_category": "none",
+                "compiler_outcome": "compiled",
+                "definition_sha": "b" * 64,
+                "pipeline_id": "engineering-fix",
+                "pipeline_version": "2.4.1",
+                "profile": "engineering/fix",
+                "terminal_category": "complete",
+            }
+            and records[3]["counts"]
+            == {"bounded_loop_iteration": 2, "primitive_count": 6},
+        )
         serialized = log.read_text(encoding="utf-8")
         check("no prompt/query/content fields", not any(f'"{key}"' in serialized for key in ("prompt", "query", "content", "command", "snippet", "reason")))
         check("unsafe session content absent", "arbitrary content" not in serialized)
@@ -176,6 +242,27 @@ def run() -> None:
         check(
             "oversized number rejected safely",
             not events.emit_event("retrieve", counts={"calls": 10**10000}, root=root, environ={}),
+        )
+        blocked_root = root / "not-a-directory"
+        blocked_root.write_text("occupied\n", encoding="utf-8")
+        sentinel = {"primary_operation": "unchanged"}
+        check(
+            "compiled telemetry failure never affects the operation",
+            not lifecycle.emit_compiled_pipeline_event(
+                worktree,
+                event="terminal",
+                pipeline_id="engineering-fix",
+                pipeline_version="2.4.1",
+                profile="engineering/fix",
+                compiler_outcome="compiled",
+                definition_sha="c" * 64,
+                primitive_count=6,
+                loop_iteration=3,
+                terminal_category="failed/exhausted",
+                attention_category=None,
+                vault_root=blocked_root,
+            )
+            and sentinel == {"primary_operation": "unchanged"},
         )
 
         rotate_root = root / "rotate"
