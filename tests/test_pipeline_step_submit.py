@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Typed engineering/fix phase submission contract."""
+"""Hermetic checks for the fixed engineering/fix callback submitter."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -12,213 +13,306 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "pipeline-step-submit.py"
-TASK_ID = "11111111-1111-4111-8111-111111111111"
+REQUEST = ".task-pipeline-step-request.json"
+OUTBOX = ".task-pipeline-step-callback.json"
+failures: list[str] = []
 
 
-def check(label: str, value: bool, detail: object = "") -> None:
-    if not value:
-        raise AssertionError(f"{label}: {detail}")
-    print(f"OK   {label}")
+def check(name: str, condition: bool, detail: object = "") -> None:
+    if condition:
+        print(f"ok - {name}")
+    else:
+        failures.append(name)
+        print(f"not ok - {name}: {detail}")
 
 
-def run(
-    worktree: Path,
-    step: str,
-    result: Path,
-    *,
-    pass_index: int = 1,
-) -> subprocess.CompletedProcess[str]:
+def sha_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def sha(value: str) -> str:
+    return sha_bytes(value.encode())
+
+
+def git(worktree: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(worktree), *args],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def write_json(path: Path, value: object) -> None:
+    path.write_text(
+        json.dumps(value, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run(worktree: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPT),
-            "--worktree",
-            str(worktree),
-            "--step",
-            step,
-            "--pass-index",
-            str(pass_index),
-            "--result",
-            str(result.relative_to(worktree)),
-        ],
+        [sys.executable, str(SCRIPT), "--worktree", str(worktree)],
         text=True,
         capture_output=True,
         check=False,
     )
 
 
-def write_result(
-    path: Path,
-    summary: str,
+def request(
+    worktree: Path,
     *,
-    outcome: str = "complete",
-    evidence: list[str] | None = None,
+    step_id: str = "reproduce",
+    result_pointer: str = ".task-pipeline-step-result.json",
+    output_pointer: str = ".task-pipeline-step-output.md",
+) -> dict[str, object]:
+    input_schema, output_schema = {
+        "reproduce": ("approved-plan/v1", "reproduction/v1"),
+        "root-cause": ("reproduction/v1", "diagnosis/v1"),
+        "regression-test": ("diagnosis/v1", "regression-test/v1"),
+        "minimal-fix": ("regression-test/v1", "implementation-result/v1"),
+    }[step_id]
+    return {
+        "schema_version": 1,
+        "operation_id": f"fix-parent-{step_id}-0-abcdef123456",
+        "run_id": sha(f"run:{step_id}")[:32],
+        "parent_operation_id": "fix-parent",
+        "lane_id": "fix-lane",
+        "definition_sha256": sha("definition"),
+        "step_id": step_id,
+        "iteration": 0,
+        "input_schema": input_schema,
+        "input_sha256": sha(f"input:{step_id}"),
+        "input_head_sha": git(worktree, "rev-parse", "HEAD"),
+        "prior_receipt_sha256": (
+            "" if step_id == "reproduce" else sha("prior-receipt")
+        ),
+        "output_schema": output_schema,
+        "result_pointer": result_pointer,
+        "output_pointer": output_pointer,
+    }
+
+
+def prepare(
+    worktree: Path,
+    raw_request: dict[str, object],
+    *,
+    status: str = "complete",
+    output: bytes = b"bounded phase evidence\n",
+    declared_output_sha256: str | None = None,
+    declared_head_sha: str | None = None,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "outcome": outcome,
-                "summary": summary,
-                "evidence": evidence or [],
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_json(worktree / REQUEST, raw_request)
+    output_path = worktree / str(raw_request["output_pointer"])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(output)
+    write_json(
+        worktree / str(raw_request["result_pointer"]),
+        {
+            "schema_version": 1,
+            "status": status,
+            "output_sha256": (
+                declared_output_sha256
+                if declared_output_sha256 is not None
+                else sha_bytes(output)
+            ),
+            "head_sha": (
+                declared_head_sha
+                if declared_head_sha is not None
+                else git(worktree, "rev-parse", "HEAD")
+            ),
+        },
     )
+
+
+def reset_transport(worktree: Path) -> None:
+    for path in (
+        worktree / REQUEST,
+        worktree / OUTBOX,
+        worktree / ".task-pipeline-step-result.json",
+        worktree / ".task-pipeline-step-output.md",
+    ):
+        if path.is_symlink() or path.is_file():
+            path.unlink()
 
 
 with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
-    worktree = Path(raw) / "worktree"
+    worktree = Path(raw) / "generic-target"
     worktree.mkdir()
-    (worktree / ".task-meta.json").write_text(
-        json.dumps(
-            {
-                "version": 3,
-                "task_id": TASK_ID,
-                "worktree": str(worktree),
-                "pipeline_policy": {
-                    "name": "engineering/fix",
-                    "definition_sha256": "a" * 64,
-                    "completion_policy": "autonomous",
-                    "total_pass_limit": 3,
-                },
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (worktree / "evidence.txt").write_text("reproduced\n", encoding="utf-8")
+    git(worktree, "init", "-b", "main")
+    git(worktree, "config", "user.email", "test@example.invalid")
+    git(worktree, "config", "user.name", "Pipeline Test")
+    (worktree / "README.md").write_text("fixture\n", encoding="utf-8")
+    git(worktree, "add", "README.md")
+    git(worktree, "commit", "-m", "fixture")
 
-    reproduce = worktree / "results" / "reproduce.json"
-    write_result(
-        reproduce,
-        "The failure reproduces.",
-        evidence=["evidence.txt"],
-    )
-    first = run(worktree, "reproduce", reproduce)
-    check("first phase is accepted", first.returncode == 0, first.stderr)
-    first_receipt = json.loads(first.stdout)
+    raw_request = request(worktree)
+    prepare(worktree, raw_request)
+    before = {
+        path.relative_to(worktree).as_posix()
+        for path in worktree.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    }
+    result = run(worktree)
+    after = {
+        path.relative_to(worktree).as_posix()
+        for path in worktree.rglob("*")
+        if path.is_file() and ".git" not in path.parts
+    }
+    callback = json.loads((worktree / OUTBOX).read_text(encoding="utf-8"))
+    payload = callback["payload"]
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode()
     check(
-        "receipt binds exact pipeline and result",
-        first_receipt["parent_operation_id"] == TASK_ID
-        and first_receipt["definition_sha256"] == "a" * 64
-        and first_receipt["step_id"] == "reproduce"
-        and first_receipt["pass_index"] == 1
-        and first_receipt["previous_receipt_sha256"] == ""
-        and len(first_receipt["input_sha256"]) == 64
-        and len(first_receipt["output_sha256"]) == 64
-        and len(first_receipt["receipt_sha256"]) == 64,
-        first_receipt,
+        "fixed request produces one exact CallbackEnvelope in the fixed outbox",
+        result.returncode == 0
+        and after - before == {OUTBOX}
+        and callback["schema_version"] == 1
+        and callback["operation_id"] == raw_request["operation_id"]
+        and callback["run_id"] == raw_request["run_id"]
+        and callback["kind"] == "result"
+        and callback["payload_sha256"] == sha_bytes(encoded)
+        and callback["callback_id"]
+        == "result-" + callback["payload_sha256"][:24],
+        (result.stderr, callback, after - before),
     )
-    duplicate = run(worktree, "reproduce", reproduce)
     check(
-        "exact duplicate is idempotent",
-        duplicate.returncode == 0
-        and json.loads(duplicate.stdout) == first_receipt,
-        duplicate.stderr,
-    )
-
-    regression = worktree / "results" / "regression.json"
-    write_result(regression, "A regression test now fails.")
-    out_of_order = run(worktree, "regression-test", regression)
-    check(
-        "out-of-order phase fails closed",
-        out_of_order.returncode == 2
-        and "root-cause" in out_of_order.stderr,
-        out_of_order.stderr,
-    )
-
-    previous = first_receipt
-    for step in ("root-cause", "regression-test", "minimal-fix"):
-        result = worktree / "results" / f"{step}.json"
-        write_result(result, f"{step} complete")
-        accepted = run(worktree, step, result)
-        check(f"{step} is accepted", accepted.returncode == 0, accepted.stderr)
-        receipt = json.loads(accepted.stdout)
-        check(
-            f"{step} chains the prior receipt",
-            receipt["previous_receipt_sha256"]
-            == previous["receipt_sha256"],
-            receipt,
-        )
-        previous = receipt
-
-    (worktree / ".task-verification.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "operation_id": TASK_ID,
-                "status": "attention-required",
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    pass_two = worktree / "results" / "root-cause-pass-2.json"
-    write_result(pass_two, "Revised diagnosis after failed verification.")
-    resumed = run(
-        worktree,
-        "root-cause",
-        pass_two,
-        pass_index=2,
-    )
-    resumed_receipt = json.loads(resumed.stdout)
-    check(
-        "next pass binds verification attention evidence",
-        resumed.returncode == 0
-        and resumed_receipt["pass_index"] == 2
-        and resumed_receipt["verification_packet_sha256"],
-        resumed.stderr,
+        "callback binds every immutable phase input and observed output",
+        payload
+        == {
+            "schema_version": 1,
+            "parent_operation_id": raw_request["parent_operation_id"],
+            "definition_sha256": raw_request["definition_sha256"],
+            "step_id": raw_request["step_id"],
+            "iteration": raw_request["iteration"],
+            "input_schema": raw_request["input_schema"],
+            "input_sha256": raw_request["input_sha256"],
+            "input_head_sha": raw_request["input_head_sha"],
+            "prior_receipt_sha256": raw_request[
+                "prior_receipt_sha256"
+            ],
+            "output_schema": raw_request["output_schema"],
+            "output_pointer": raw_request["output_pointer"],
+            "output_sha256": sha_bytes(b"bounded phase evidence\n"),
+            "head_sha": git(worktree, "rev-parse", "HEAD"),
+            "status": "complete",
+        },
+        payload,
     )
 
-    cannot = Path(raw) / "cannot"
-    cannot.mkdir()
-    (cannot / ".task-meta.json").write_text(
-        json.dumps(
-            {
-                "version": 3,
-                "task_id": "22222222-2222-4222-8222-222222222222",
-                "worktree": str(cannot),
-                "pipeline_policy": {
-                    "name": "engineering/fix",
-                    "definition_sha256": "b" * 64,
-                    "completion_policy": "attention",
-                    "total_pass_limit": 2,
-                },
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    cannot_result = cannot / "cannot.json"
-    write_result(
-        cannot_result,
-        "The supplied fixture does not reproduce.",
-        outcome="cannot-reproduce",
-    )
-    cannot_run = run(cannot, "reproduce", cannot_result)
+    original_outbox = (worktree / OUTBOX).read_bytes()
+    second = run(worktree)
     check(
-        "cannot-reproduce is a typed terminal outcome",
-        cannot_run.returncode == 0
-        and json.loads(cannot_run.stdout)["outcome"]
-        == "cannot-reproduce",
-        cannot_run.stderr,
+        "submitter never overwrites an existing callback outbox",
+        second.returncode != 0
+        and (worktree / OUTBOX).read_bytes() == original_outbox
+        and "already exists" in second.stderr,
+        second.stderr,
     )
-    too_many = run(
-        cannot,
-        "root-cause",
-        cannot_result,
-        pass_index=3,
+
+    reset_transport(worktree)
+    stale = request(worktree)
+    prepare(worktree, stale, declared_head_sha="f" * 40)
+    stale_result = run(worktree)
+    check(
+        "declared result HEAD must equal the exact current Git HEAD",
+        stale_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "HEAD" in stale_result.stderr,
+        stale_result.stderr,
+    )
+
+    reset_transport(worktree)
+    bad_hash = request(worktree)
+    prepare(worktree, bad_hash, declared_output_sha256=sha("wrong"))
+    bad_hash_result = run(worktree)
+    check(
+        "declared output digest must equal the exact regular output file",
+        bad_hash_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "digest" in bad_hash_result.stderr,
+        bad_hash_result.stderr,
+    )
+
+    reset_transport(worktree)
+    escaped = request(worktree, result_pointer="../result.json")
+    write_json(worktree / REQUEST, escaped)
+    escaped_result = run(worktree)
+    check(
+        "request and output pointers cannot escape the generic target repo",
+        escaped_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "owner-relative" in escaped_result.stderr,
+        escaped_result.stderr,
+    )
+
+    reset_transport(worktree)
+    symlinked = request(worktree)
+    write_json(worktree / REQUEST, symlinked)
+    real_output = worktree / "real-output.md"
+    real_output.write_text("evidence\n", encoding="utf-8")
+    (worktree / str(symlinked["output_pointer"])).symlink_to(real_output)
+    write_json(
+        worktree / str(symlinked["result_pointer"]),
+        {
+            "schema_version": 1,
+            "status": "complete",
+            "output_sha256": sha_bytes(real_output.read_bytes()),
+            "head_sha": git(worktree, "rev-parse", "HEAD"),
+        },
+    )
+    symlink_result = run(worktree)
+    check(
+        "symlinked result or output evidence fails closed",
+        symlink_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "symlink" in symlink_result.stderr,
+        symlink_result.stderr,
+    )
+    (worktree / str(symlinked["output_pointer"])).unlink()
+    real_output.unlink()
+
+    reset_transport(worktree)
+    cannot = request(worktree)
+    prepare(worktree, cannot, status="cannot-reproduce")
+    cannot_result = run(worktree)
+    cannot_callback = json.loads(
+        (worktree / OUTBOX).read_text(encoding="utf-8")
     )
     check(
-        "pass limit fails closed",
-        too_many.returncode == 2
-        and "pass limit" in too_many.stderr,
-        too_many.stderr,
+        "reproduce may submit the typed cannot-reproduce outcome",
+        cannot_result.returncode == 0
+        and cannot_callback["payload"]["status"] == "cannot-reproduce",
+        (cannot_result.stderr, cannot_callback),
     )
+
+    reset_transport(worktree)
+    wrong_phase = request(worktree, step_id="root-cause")
+    prepare(worktree, wrong_phase, status="cannot-reproduce")
+    wrong_phase_result = run(worktree)
+    check(
+        "cannot-reproduce is rejected for every later phase",
+        wrong_phase_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "cannot-reproduce" in wrong_phase_result.stderr,
+        wrong_phase_result.stderr,
+    )
+
+    reset_transport(worktree)
+    unknown = request(worktree)
+    unknown["extra"] = "drift"
+    prepare(worktree, unknown)
+    unknown_result = run(worktree)
+    check(
+        "unknown request fields fail closed",
+        unknown_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "keys" in unknown_result.stderr,
+        unknown_result.stderr,
+    )
+
+
+if failures:
+    raise SystemExit(f"{len(failures)} pipeline submit test(s) failed")
