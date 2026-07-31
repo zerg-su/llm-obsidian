@@ -1299,7 +1299,11 @@ def start(
             pipeline_id=compiled_pipeline.definition.pipeline_id,
             pipeline_version=compiled_pipeline.definition.version,
             profile=compiled_pipeline.definition.profile,
-            compiler_outcome="compiled",
+            compiler_outcome=(
+                "custom-compiled"
+                if request["pipeline"] == "custom"
+                else "compiled"
+            ),
             definition_sha=compiled_pipeline.definition_sha256,
             primitive_count=(
                 len(compiled_pipeline.definition.steps)

@@ -3682,6 +3682,22 @@ def run(
             acceptance = CallbackBroker(
                 store, spec["owner_id"]
             ).accept(envelope)
+            emit_compiled_pipeline_event(
+                spec["cwd"],
+                event="terminal",
+                pipeline_id=pipeline.definition.pipeline_id,
+                pipeline_version=pipeline.definition.version,
+                profile=pipeline.definition.profile,
+                compiler_outcome=(
+                    "custom-resolved"
+                    if pipeline.definition.pipeline_id == "custom"
+                    else "resolved"
+                ),
+                definition_sha=pipeline.definition_sha256,
+                primitive_count=len(pipeline.definition.steps),
+                loop_iteration=0,
+                terminal_category="complete",
+            )
             _atomic_json(
                 spec_path.parent / "callback-receipt.json",
                 {
