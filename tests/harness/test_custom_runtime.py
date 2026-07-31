@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,10 @@ ORIGIN = "11111111-1111-4111-8111-111111111111"
 SURFACE = "22222222-2222-4222-8222-222222222222"
 TASK = "33333333-3333-4333-8333-333333333333"
 PROJECT = "44444444-4444-4444-8444-444444444444"
+PROFILE = os.environ.get("CUSTOM_RUNTIME_PROFILE", "change")
+if PROFILE not in {"change", "fix"}:
+    raise SystemExit("CUSTOM_RUNTIME_PROFILE must be change or fix")
+BASELINE = f"engineering/{PROFILE}"
 
 
 def sha(value: str | bytes) -> str:
@@ -56,11 +61,11 @@ def write_json(path: Path, value: object) -> None:
 def custom_spec() -> dict[str, object]:
     return {
         "schema_version": 1,
-        "spec_id": "e2e-custom",
+        "spec_id": f"e2e-custom-{PROFILE}",
         "version": "1.0.0",
-        "intent": "engineering-change",
-        "task_profile": "change",
-        "baseline_pipeline": "engineering/change",
+        "intent": BASELINE.replace("/", "-"),
+        "task_profile": PROFILE,
+        "baseline_pipeline": BASELINE,
         "route_alias": "executor-default",
         "required_capabilities": ["route:resolved"],
         "input_schema": "approved-plan/v1",
@@ -191,7 +196,7 @@ with tempfile.TemporaryDirectory(prefix="custom-runtime.") as raw:
             "origin_session": "coordinator-session",
             "executor_runtime": "codex",
             "interaction_policy": "unattended",
-            "pipeline_policy": {"name": "custom", "source": "custom", "baseline": "engineering/change", "definition_sha256": compiled.definition_sha256, "completion_policy": "attention", "total_pass_limit": 2},
+            "pipeline_policy": {"name": "custom", "source": "custom", "baseline": BASELINE, "definition_sha256": compiled.definition_sha256, "completion_policy": "attention", "total_pass_limit": 2},
             "plan_file": str(plan),
             "approved_plan_sha256": plan_sha,
             "vault_root": str(vault),
