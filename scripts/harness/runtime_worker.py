@@ -1013,6 +1013,8 @@ def run(
     def summary_attention(
         status: str,
         reason: AttentionReason = AttentionReason.CALLBACK_INVALID,
+        *,
+        write_error: bool = True,
     ) -> None:
         nonlocal callback_handled, summary_attention_revision
         callback_handled = True
@@ -1033,10 +1035,11 @@ def run(
                 summary_attention_revision = current.revision
         except Exception:
             pass
-        _atomic_json(
-            spec_path.parent / "callback-error.json",
-            {"schema_version": 1, "status": status},
-        )
+        if write_error:
+            _atomic_json(
+                spec_path.parent / "callback-error.json",
+                {"schema_version": 1, "status": status},
+            )
 
     def write_immutable_json(path: Path, value: dict[str, object]) -> None:
         encoded = (
@@ -2815,6 +2818,7 @@ def run(
                         summary_attention(
                             "pipeline-verification-retry-exhausted",
                             AttentionReason.RETRY_EXHAUSTED,
+                            write_error=False,
                         )
                         return
                     terminal_path = (

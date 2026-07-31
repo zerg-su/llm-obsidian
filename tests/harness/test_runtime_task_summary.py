@@ -1015,7 +1015,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "owner-1", attention_limit_task
     )
     check(
-        "attention fix policy stops durably after two total passes",
+        "attention fix policy defers summary until verification is terminal",
         attention_limit_rc == 0
         and attention_limit_parent.state == "attention-required"
         and attention_limit_parent.attention_reason
@@ -1025,7 +1025,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             / "pipeline-fix"
             / "pass-2"
             / "retry-intent.json"
-        ).exists(),
+        ).exists()
+        and not (attention_limit_state / "callback-error.json").exists(),
         attention_limit_parent,
     )
 
