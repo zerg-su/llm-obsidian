@@ -15,9 +15,21 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_23 pages, updated 2026-07-21_
+_34 pages, updated 2026-08-01_
 
-- [[daily-pipeline-guide]] — evergreen, 2026-07-21
+- [[dashboard]] — evergreen, 2026-08-01
+- [[lint-report-2026-08-01]] — solid, 2026-08-01
+- [[Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc]] — active, 2026-08-01 `c-000050`
+- [[Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8]] — active, 2026-08-01 `c-000048`
+- [[Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb]] — active, 2026-08-01 `c-000044`
+- [[Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5]] — active, 2026-08-01 `c-000046`
+- [[Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3]] — active, 2026-08-01 `c-000042`
+- [[Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5]] — active, 2026-07-31 `c-000040`
+- [[LLM Obsidian 2.4 typed pipeline composition result]] — solid, 2026-07-31 `c-000037`
+- [[LLM Obsidian 2.5.0 implementation]] — completed, 2026-07-31 `c-000038`
+- [[daily-pipeline-guide]] — evergreen, 2026-07-30
+- [[Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718]] — resolved, 2026-07-29 `c-000032`
+- [[Cross-model review — LLM Obsidian v2.1.3 final release — b5385c24fe5b]] — resolved, 2026-07-29 `c-000033`
 - [[Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf]] — resolved, 2026-07-21 `c-000018`
 - [[Cross-model review — v2.1.2 bilingual documentation — 421315369f47]] — resolved, 2026-07-21 `c-000031`
 - [[Cross-model review — v2.1.2 semantic acceptance refactor — 22c7eb2777c5]] — resolved, 2026-07-21 `c-000028`
@@ -39,5 +51,4 @@ _23 pages, updated 2026-07-21_
 - [[Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465]] — resolved, 2026-07-19 `c-000013`
 - [[Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2]] — resolved, 2026-07-18 `c-000009`
 - [[LLM Obsidian v2.0.8 RD upstream audit]] — active, 2026-07-18 `c-000010`
-- [[dashboard]] — evergreen, 2026-07-11
 <!-- AUTO-INDEX END -->

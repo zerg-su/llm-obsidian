@@ -27,6 +27,13 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] wiki-lint | RT09 vault health audit
+
+- [[lint-report-2026-08-01]] records the 70-page integration-snapshot audit, evidence, and retained warnings.
+- Bounded repairs: [[dashboard]] now links [[backlog]] and [[meta/_index|meta index]]; `wiki/index.md` has a freshness marker; the meta folder index is regenerated to 34 pages.
+- Review resolution: all four typed findings applied; the captured validator identifier and reproduction semantics are corrected.
+- Retained for follow-up: seven legacy-unknown sessions, three frontmatter-density hints, and two stale DragonScale claims.
+
 ## [2026-08-01] reap | df250-real-rt04-invalid-review-callbacks
 
 `c-000051` [[2.5 real dogfood RT04 invalid review callbacks]]. ## RT04 — four invalid review callbacks: classified, one cause class repaired

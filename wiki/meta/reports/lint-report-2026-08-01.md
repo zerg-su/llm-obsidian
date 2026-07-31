@@ -23,8 +23,8 @@ sessions:
 ## Summary
 
 - Pages scanned: 70 Markdown pages.
-- Distinct findings: 15 — 3 bounded/actionable and 12 retained for review.
-- Auto-fixed: 3 — linked both actionable orphans from [[dashboard]] and added the missing index freshness marker.
+- Distinct findings: 16 — 4 bounded/actionable and 12 retained for review.
+- Auto-fixed: 4 — linked both actionable orphans, added the index freshness marker, and regenerated the stale meta folder index.
 - Needs review: 12 — 7 explicit legacy-unknown provenance markers, 3 frontmatter-density hints, and 2 stale DragonScale claims.
 - Machine result before repair: 0 FAIL, 8 WARN.
 - Semantic tiling: 0 error pairs, 0 review pairs; thresholds are not calibrated.
@@ -34,7 +34,7 @@ sessions:
 ```text
 WARN: index: no AUTO-DATE marker (header freshness is unverifiable)
 WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md: sessions is legacy-unknown []
-WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcc64ac — 1ab0c0f125cc.md: sessions is legacy-unknown []
+WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md: sessions is legacy-unknown []
 WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md: sessions is legacy-unknown []
 WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md: sessions is legacy-unknown []
 WARN: schema/provenance: wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md: sessions is legacy-unknown []
@@ -89,9 +89,9 @@ No deterministic FAIL lines existed to carry forward as red items.
 
 ## Index Health
 
-- Stale or unresolved index entries: 0.
-- Baseline warning: `wiki/index.md` lacked `<!-- AUTO-DATE -->`, so freshness could not be checked.
-- Repair: added `<!-- AUTO-DATE --> 2026-08-01` and updated the page date. Future `reindex.py --folder-indexes` runs can refresh it deterministically.
+- Main-index unresolved entries: 0.
+- Baseline folder-index finding: `wiki/meta/_index.md` listed 23 of 34 meta pages and was 11 pages behind.
+- Repairs: added `<!-- AUTO-DATE --> 2026-08-01` to `wiki/index.md`, updated its page date, and regenerated the meta AUTO-INDEX block to all 34 current pages.
 
 ## Address Validation
 
@@ -186,12 +186,18 @@ skill audit: 32 audited, 0 errors, 0 warnings
 - Stale pending plans: none reported by the deterministic validator.
 - Oldest `type: service`, `status: solid` pages: none in this snapshot.
 
+## Review Resolution
+
+- `holistic-01-stale-folder-index-claimed-clean` — applied: regenerated `wiki/meta/_index.md` to 34 pages and corrected the Index Health baseline/resolution.
+- `holistic-02-corrupted-verbatim-validator-evidence` — applied: restored the captured 12-hex identifier `6cddcdcc64ac` in the validator block.
+- `holistic-03-mutating-command-in-reproduction-block` — applied: separated read-only checks from the explicitly labeled mutating folder-index refresh.
+- `holistic-04-audit-absent-from-operations-log` — applied: appended this audit to [[log]] through the dedicated transactional log operation.
+
 ## Reproduction
 
-Run from the repository root:
+Run the read-only checks from the repository root:
 
 ```bash
-python3 scripts/reindex.py
 python3 scripts/validate-vault.py
 ./scripts/allocate-address.sh --peek
 ./scripts/with-timeout 8 ./scripts/tiling-check.py --peek
@@ -201,5 +207,8 @@ python3 scripts/check-skill-budget.py
 python3 skills/improve-skills/scripts/audit_skills.py --strict
 python3 scripts/boundary-score.py --json --include-score-zero --top 200
 ```
+
+> [!warning] Index refresh writes files
+> `python3 scripts/reindex.py --folder-indexes` rewrites derived `.vault-meta/` indexes and folder `_index.md` blocks, and may restamp `wiki/index.md`. Run it only when intentionally refreshing indexes.
 
 The orphan/dead-link pass resolves pathless links by unique filename, includes aliases and non-Markdown Obsidian targets for dead-link classification, ignores fenced examples, and applies the exclusions documented in the repository `wiki-lint` skill.
