@@ -43,7 +43,7 @@ related:
 
 - built-in definitions исполняются через единый compiler;
 - lifecycle и engineering pipelines прошли release acceptance;
-- собрано не менее 10 реальных completed tasks;
+- собран mechanism-focused gate: не менее 10 completed production-harness runs, включая live Claude и Codex routes;
 - definition hashing, replay и capability checks доказаны;
 - per-step operation/controller receipts 2.4 доказали crash/reconcile без
   duplicate model/effect execution;
@@ -346,12 +346,18 @@ commands, errors и credentials.
 
 ### Dogfood release gate
 
-- Не менее 10 завершённых custom runs после built-in-fit rejection.
+> [!decision] Согласованная интерпретация — 2026-07-31
+> Для технического релиза пользователь явно принял mechanism-focused gate:
+> 10 deterministic full-runtime custom runs плюс 2 live cmux-задачи (Claude и
+> Codex). Дополнительные live-прогоны можно выполнить на финальном release
+> candidate, но они не блокируют текущий gate.
+
+- Не менее 10 завершённых production-harness custom runs после built-in-fit rejection; deterministic fixtures допустимы для точной проверки механизма.
 - Представлены Claude и Codex execution routes, change и fix semantics,
   bounded loop, review verification и deliberate escalation.
 - Нет permission escapes, duplicate effects, unresolved callback failures или
   auto-close misses.
-- Live dogfood включает result-without-submit, live-but-idle provider, provider death и exhausted recovery; unattended runs либо завершаются, либо оставляют durable typed attention без участия пользователя.
+- Live dogfood доказывает реальные Claude/Codex launch, callback, review/reap и cleanup routes; result-without-submit, live-but-idle, provider death и exhausted recovery допускают deterministic production-controller fault injection без model tokens. Unattended runs либо завершаются, либо оставляют durable typed attention без участия пользователя.
 - Число human interventions на completed task не хуже built-in baseline.
 - Хотя бы один custom candidate прошёл ручной promotion exercise без
   автоматического изменения registry.

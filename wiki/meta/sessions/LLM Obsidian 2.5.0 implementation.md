@@ -23,6 +23,6 @@ related:
 
 Реализован model-authored custom pipeline как строгий versioned `PipelineSpec`, который проходит deterministic built-in-fit selection, code-owned compiler и exact user approval до эффектов. Исполнение использует существующие store/FSM/supervisor: последовательные typed model steps, bounded transitions/loops, verification, review и reap.
 
-Добавлен model-free callback liveness ladder: stable result recovery, idle evidence, один nudge, один identity-bound restart и durable attention. Dogfood прошёл 10 изолированных approved custom runtimes, а также живые Claude и Codex задачи в cmux. Оба live parent operation завершены и reaped; найденные race, cross-repo review transport и verification-resubmit дефекты получили узкие regression fixes.
+Добавлен model-free callback liveness ladder: stable result recovery, idle evidence, один nudge, один identity-bound restart и durable attention. Dogfood осознанно закрыт как mechanism-focused gate: 10 изолированных deterministic full-runtime custom runs плюс 2 живые задачи Claude и Codex в cmux. Оба live parent operation завершены и reaped; найденные race, cross-repo review transport и verification-resubmit дефекты получили узкие regression fixes.
 
 Release evidence: `docs/acceptance/v2.5.0-dogfood.md`; release notes: `docs/releases/v2.5.0.md`. Финальный model-free gate зелёный; независимый Fable + Sol review выполняется перед выпуском.
