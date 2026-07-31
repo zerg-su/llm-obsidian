@@ -486,10 +486,18 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     reap = raw.get("reap")
     if not isinstance(reap, dict):
         raise DispatchError("reap must be an object")
+    unknown_reap = set(reap) - {"type", "title", "plan_mode"}
+    if unknown_reap:
+        raise DispatchError(
+            "unknown reap keys: " + ", ".join(sorted(unknown_reap))
+        )
     reap_type = require_string(reap.get("type"), "reap.type", maximum=50)
     if reap_type not in SUMMARY_TYPES:
         raise DispatchError("reap.type is not supported")
     reap_title = require_string(reap.get("title"), "reap.title", maximum=200)
+    reap_plan_mode = str(reap.get("plan_mode") or "final")
+    if reap_plan_mode not in {"final", "shared"}:
+        raise DispatchError("reap.plan_mode must be final or shared")
     return {
         "schema_version": 1,
         "request_id": request_id,
@@ -520,7 +528,11 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         },
         "wiki_context": normalized_context,
         "suggested_agents": normalized_agents,
-        "reap": {"type": reap_type, "title": reap_title},
+        "reap": {
+            "type": reap_type,
+            "title": reap_title,
+            "plan_mode": reap_plan_mode,
+        },
         "review": {
             "mode": review_mode,
             "cross_model": cross_model,
@@ -1502,7 +1514,7 @@ def write_task_files(
             "escalate_severities": ["blocking"],
         },
         "reap_policy": {
-            "mode": "final",
+            "mode": request["reap"]["plan_mode"],
             "auto_file": True,
             "allowed_types": [request["reap"]["type"]],
             "title": request["reap"]["title"],

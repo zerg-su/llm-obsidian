@@ -189,12 +189,20 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check("classic dispatch defaults to split placement", request["placement"] == "split")
     workspace_raw = json.loads(json.dumps(raw_request))
     workspace_raw["placement"] = "workspace"
+    workspace_raw["reap"]["plan_mode"] = "shared"
     workspace_request = runner.validate_request(workspace_raw)
     workspace_prompt = runner.render_task_prompt(workspace_request, config)
     check(
         "workspace dispatch remains an explicit placement",
         workspace_request["placement"] == "workspace"
         and "scripts/harness-cli.py" in workspace_prompt,
+    )
+    unknown_reap = json.loads(json.dumps(raw_request))
+    unknown_reap["reap"]["mode"] = "shared"
+    expect_error(
+        "dispatch rejects unknown reap keys",
+        lambda: runner.validate_request(unknown_reap),
+        "unknown reap keys: mode",
     )
     invalid_placement = json.loads(json.dumps(raw_request))
     invalid_placement["placement"] = "focused"
@@ -943,7 +951,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "workspace dispatch persists exact container ownership",
         workspace_meta["surface_policy"]["placement"] == "workspace"
         and workspace_meta["task_workspace"] == "44444444-4444-4444-8444-444444444444"
-        and workspace_meta["task_window"] == "55555555-5555-4555-8555-555555555555",
+        and workspace_meta["task_window"] == "55555555-5555-4555-8555-555555555555"
+        and workspace_meta["reap_policy"]["mode"] == "shared",
     )
 
     duplicate = json.loads(json.dumps(raw_request))

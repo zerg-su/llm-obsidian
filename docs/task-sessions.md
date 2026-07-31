@@ -66,9 +66,11 @@ surface.
 
 The harness reap workflow owns the symmetric first finalization and uses
 `scripts/reap-runner.py` as its vault-facing adapter. Given the exact worktree,
-it validates the summary/handoff, archives all review operations, renders the
-provenance page, prepares and commits the collision-safe result plus plan close
-in one transaction, validates the vault, archives the broker task, and arms
+it validates the summary/handoff, archives all review operations, and renders
+the provenance page. Default `final` mode commits the collision-safe result
+plus plan close in one transaction. Explicit `shared` mode commits the result
+while binding and retaining the unchanged pending master plan for sibling
+tasks. It then validates the vault, archives the broker task, and arms
 exact-surface exit. Legacy, interactive, ambiguous, conflicted, and
 already-executed recovery cases stay visible and use the diagnostic contract
 rather than an implicit retry.
@@ -168,11 +170,19 @@ cycle, validates all archive links in the result, archives the broker task, and
 removes persistent lane runtimes and the worktree binding pointer. Bounded audit
 metadata remains. Archived tasks are not automatically attached to later work.
 
-`scripts/upgrade-preflight.py` blocks an overlay if any harness operation kind,
-unreaped worktree, unfinished legacy review/research run, or non-archived
-broker task exists. It prints one recovery instruction: finish or cancel every
-listed operation with the installed runtime, then rerun preflight. Do not
-upgrade a live session in place.
+`scripts/upgrade-preflight.py` blocks an overlay for every nonterminal harness
+operation, every terminal harness record that retains a pending effect or exact
+owned resource, and unmatched unreaped worktree, legacy review/research, or
+non-archived broker state. One narrow exception applies when a canonical,
+same-ID terminal dispatch proves all effects settled and all provider,
+supervisor, and cmux ownership released: its matching v3 worktree mirror and
+active lane-free broker mirror are stale rather than live and do not block.
+
+Finish or cancel live operations with the installed runtime. A terminal record
+that retains an effect or resource requires exact ownership inspection and
+reconciliation, not another finish/cancel request. Then rerun preflight. Exact
+per-class doctor guidance is deferred to the diagnostic seam; never upgrade a
+live or uncertain session in place.
 
 The supported UI target is macOS with cmux. Linux receives hermetic/basic
 script coverage. Windows is unsupported.

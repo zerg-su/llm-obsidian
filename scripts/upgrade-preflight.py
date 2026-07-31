@@ -21,6 +21,12 @@ from model_routing import (
     load_tracked_config,
     validate_local_config,
 )
+from harness.contracts import (
+    ContractError,
+    OwnedResources,
+    operation_record_from_dict,
+)
+from harness.state_machine import TERMINAL
 
 
 def worktrees(root: Path) -> list[Path]:
@@ -38,12 +44,71 @@ def read_object(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def same_path(value: Any, path: Path) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        return Path(value).expanduser().resolve() == path
+    except OSError:
+        return False
+
+
+def harness_sessions(root: Path) -> tuple[set[str], list[str]]:
+    released_dispatches: set[str] = set()
+    active: list[str] = []
+    harness_root = root / ".vault-meta/harness/owners"
+    if not harness_root.is_dir():
+        return released_dispatches, active
+    for operation_path in sorted(harness_root.glob("*/operations/*.json")):
+        operation = read_object(operation_path)
+        raw_spec = operation.get("spec")
+        raw_kind = (
+            str(raw_spec.get("kind") or "unknown")
+            if isinstance(raw_spec, dict)
+            else "unknown"
+        )
+        raw_operation_id = (
+            str(raw_spec.get("operation_id") or operation_path.stem)
+            if isinstance(raw_spec, dict)
+            else operation_path.stem
+        )
+        try:
+            record = operation_record_from_dict(operation)
+        except (AttributeError, ContractError, TypeError, ValueError):
+            active.append(f"harness:{raw_kind}:{raw_operation_id}")
+            continue
+        kind = record.spec.kind
+        operation_id = record.spec.operation_id
+        if record.state in TERMINAL:
+            if record.pending_effect or record.resources != OwnedResources():
+                active.append(f"harness:{kind}:{operation_id}")
+            elif kind == "dispatch":
+                if (
+                    operation_id == operation_path.stem
+                    and record.spec.owner_id == operation_id
+                    and operation_path.parents[1].name == operation_id
+                ):
+                    released_dispatches.add(operation_id)
+                else:
+                    active.append(f"harness:{kind}:{operation_id}")
+            continue
+        active.append(f"harness:{kind}:{operation_id}")
+    return released_dispatches, active
+
+
 def active_sessions(root: Path) -> list[str]:
     active: list[str] = []
+    released_dispatches, harness_active = harness_sessions(root)
     for tree in worktrees(root):
         task = read_object(tree / ".task-meta.json")
         if task and not (tree / ".task-reap-complete.json").is_file():
-            active.append(f"task:{tree.name}")
+            released = (
+                task.get("version") == 3
+                and task.get("task_id") in released_dispatches
+                and same_path(task.get("worktree"), tree)
+            )
+            if not released:
+                active.append(f"task:{tree.name}")
         review = read_object(tree / ".review-meta.json")
         if review and review.get("status") not in {"finish_sent", "finished", "archived"}:
             active.append(f"review:{tree.name}")
@@ -61,21 +126,23 @@ def active_sessions(root: Path) -> list[str]:
             task = read_object(task_path)
             if not task or task.get("status") == "archived":
                 continue
-            active.append(f"broker-task:{task.get('task_id') or task_path.parent.name}")
-    harness_root = root / ".vault-meta/harness/owners"
-    if harness_root.is_dir():
-        for operation_path in sorted(harness_root.glob("*/operations/*.json")):
-            operation = read_object(operation_path)
-            if operation.get("state") in {"complete", "failed", "cancelled"}:
-                continue
-            spec = operation.get("spec")
-            kind = str(spec.get("kind") or "unknown") if isinstance(spec, dict) else "unknown"
-            operation_id = (
-                str(spec.get("operation_id") or operation_path.stem)
-                if isinstance(spec, dict)
-                else operation_path.stem
+            raw_task_id = task.get("task_id")
+            task_id = str(raw_task_id or task_path.parent.name)
+            worktrees_value = task.get("worktrees")
+            released = (
+                task.get("schema_version") == 1
+                and task.get("status") == "active"
+                and raw_task_id == task_path.parent.name
+                and task.get("project_id") == task_path.parents[2].name
+                and task_id in released_dispatches
+                and isinstance(worktrees_value, list)
+                and bool(worktrees_value)
+                and all(isinstance(value, str) and value for value in worktrees_value)
+                and not (task_path.parent / "lanes").exists()
             )
-            active.append(f"harness:{kind}:{operation_id}")
+            if not released:
+                active.append(f"broker-task:{task_id}")
+    active.extend(harness_active)
     return sorted(set(active))
 
 
@@ -147,8 +214,9 @@ def main() -> int:
                 file=sys.stderr,
             )
             print(
-                "Recovery: finish or cancel every listed operation with the installed "
-                "runtime, then rerun upgrade-preflight.",
+                "Recovery: finish or cancel live operations with the installed runtime; "
+                "terminal harness records retaining an effect or owned resource require "
+                "exact ownership reconciliation. Then rerun upgrade-preflight.",
                 file=sys.stderr,
             )
             return 4

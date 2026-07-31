@@ -103,6 +103,50 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     import hashlib
     meta = {"plan_file": str(plan), "approved_plan_sha256": hashlib.sha256(pending.encode()).hexdigest()}
     check("pending plan hash validates", runner.approved_plan_state(meta)[1] == "pending")
+    check(
+        "shared task reap retains its approved master plan",
+        not runner.reap_closes_plan(
+            {"reap_policy": {"mode": "shared"}}
+        ),
+    )
+    check(
+        "final task reap closes its approved plan",
+        runner.reap_closes_plan(
+            {"reap_policy": {"mode": "final"}}
+        ),
+    )
+    shared_payload = runner.with_plan_close(
+        {"pages": []},
+        {
+            **meta,
+            "reap_policy": {"mode": "shared"},
+        },
+        vault=vault,
+        plan=plan,
+        result_link="[[Shared result]]",
+        exec_session="executor-session",
+    )
+    final_payload = runner.with_plan_close(
+        {"pages": []},
+        {
+            **meta,
+            "reap_policy": {"mode": "final"},
+        },
+        vault=vault,
+        plan=plan,
+        result_link="[[Final result]]",
+        exec_session="executor-session",
+    )
+    check(
+        "shared reap vault transaction omits plan_close",
+        "plan_close" not in shared_payload,
+    )
+    check(
+        "final reap vault transaction binds exact plan_close",
+        final_payload["plan_close"]["file"] == "wiki/plans/approved.md"
+        and final_payload["plan_close"]["expected_sha256"]
+        == meta["approved_plan_sha256"],
+    )
     plan.write_text("---\nstatus: executed\n---\n", encoding="utf-8")
     check("executed plan is accepted only as recovery", runner.approved_plan_state(meta)[1] == "executed")
     try:

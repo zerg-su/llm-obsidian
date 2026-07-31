@@ -644,6 +644,32 @@ def reroute_closed_plan(text: str, old_link: str, new_link: str, *, label: str) 
     return pattern.sub(rf"\g<1>{new_link}\g<2>", text, count=1)
 
 
+def prepared_reap_plan(
+    meta: dict[str, Any],
+    text: str,
+    *,
+    today: str,
+    result_link: str,
+    exec_session: str | None,
+    label: str,
+) -> str:
+    """Return the exact plan state bound to one prepared reap."""
+
+    policy = meta.get("reap_policy")
+    mode = policy.get("mode") if isinstance(policy, dict) else ""
+    if mode == "shared":
+        return text
+    if mode == "final":
+        return render_plan_close(
+            text,
+            today=today,
+            result_link=result_link,
+            exec_session=exec_session,
+            label=label,
+        )
+    raise PlanCloseError(f"reap preparation: {label} has invalid plan mode")
+
+
 def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
     attention_path = worktree / ".task-needs-attention.json"
@@ -688,7 +714,8 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
     prior_marker: dict[str, Any] = {}
     try:
         if plan_hash == approved_hash:
-            closed_plan = render_plan_close(
+            closed_plan = prepared_reap_plan(
+                meta,
                 plan_text,
                 today=prepared_date,
                 result_link=result_link,

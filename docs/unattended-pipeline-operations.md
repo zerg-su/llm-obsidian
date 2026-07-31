@@ -44,10 +44,18 @@ interruption. Read-only probes may retry within their small budget; model start,
 send, callback, or close does not repeat until reconciliation proves the prior
 effect.
 
-`scripts/upgrade-preflight.py` rejects every active harness kind plus live
-legacy task/review/research state before mutation. Finish or cancel the listed
-operations with the installed runtime, then rerun the preflight. Live 2.2.x
-state is never silently adopted.
+`scripts/upgrade-preflight.py` rejects every nonterminal harness kind, every
+terminal harness record that retains a pending effect or exact owned resource,
+and unmatched live or uncertain legacy task/review/research state before
+mutation. A canonical same-ID terminal dispatch with settled effects and no
+provider, supervisor, or cmux ownership proves only its matching v3 worktree
+and active lane-free broker mirrors stale; those mirrors do not block.
+
+Finish or cancel live operations with the installed runtime. Inspect and
+reconcile exact ownership for a terminal record that still retains an effect or
+resource, then rerun the preflight. Per-class actionable doctor guidance remains
+part of the planned diagnostic seam. Live or uncertain 2.2.x state is never
+silently adopted.
 
 ## Protected research shadow parity
 
