@@ -164,6 +164,11 @@ class FakeProcess:
             in {
                 ("owner-1", "runtime-1", "run-1"),
                 ("owner-summary", "runtime-summary", "run-summary"),
+                (
+                    "owner-phased-summary",
+                    "runtime-phased-summary",
+                    "run-phased-summary",
+                ),
                 ("owner-1", "runtime-workspace", "run-workspace"),
                 (
                     "owner-1",
@@ -590,6 +595,72 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and cmux.opens == 1,
     )
     (cwd / ".task-summary.json").unlink()
+    events.clear()
+    cmux.opens = 0
+
+    phased_parent = OperationSpec(
+        "runtime-phased-summary",
+        "runtime-phased-summary-key",
+        "dispatch",
+        "owner-phased-summary",
+        route,
+        "packets/runtime-summary.json",
+        "scoped",
+    )
+    phased_child = OperationSpec(
+        "runtime-phased-reproduce",
+        "runtime-phased-reproduce-key",
+        "pipeline-model-step",
+        "owner-phased-summary",
+        route,
+        "packets/runtime-summary.json",
+        "scoped",
+    )
+    store.create(
+        phased_child,
+        lane_id="lane-phased-summary",
+        run_id="run-phased-reproduce",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(
+            "owner-phased-summary",
+            phased_child.operation_id,
+            state,
+        )
+    phased_request = RuntimeSessionRequest(
+        phased_parent,
+        "lane-phased-summary",
+        "run-phased-summary",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "callbacks/phased-result.json",
+        callback_mode="task-summary",
+        task_summary_pointer=".task-summary.json",
+        initial_callback_operation_id=phased_child.operation_id,
+        initial_callback_run_id="run-phased-reproduce",
+    )
+    phased_started = manager.start(phased_request)
+    phased_target = json.loads(
+        (
+            store.root
+            / "owners"
+            / "owner-phased-summary"
+            / "runtime"
+            / phased_parent.operation_id
+            / "callback-target.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "task-summary runtime can start on an exact phase child target",
+        phased_started.callback_pointer
+        == "callbacks/phased-result.json"
+        and phased_target["operation_id"]
+        == phased_child.operation_id
+        and phased_target["run_id"] == "run-phased-reproduce"
+        and phased_target["generation"] == 1,
+        (phased_started, phased_target),
+    )
     events.clear()
     cmux.opens = 0
 

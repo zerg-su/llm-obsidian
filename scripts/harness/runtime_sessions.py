@@ -135,6 +135,8 @@ class RuntimeSessionRequest:
     product_root: Path | None = None
     callback_mode: str = "envelope"
     task_summary_pointer: str = ""
+    initial_callback_operation_id: str = ""
+    initial_callback_run_id: str = ""
     runtime_home: Path | None = None
     research_request_sha256: str = ""
     callback_wake: str = ""
@@ -198,6 +200,24 @@ class RuntimeSessionRequest:
             raise RuntimeSessionError(
                 "task_summary_pointer requires task-summary callback mode"
             )
+        if bool(self.initial_callback_operation_id) != bool(
+            self.initial_callback_run_id
+        ):
+            raise RuntimeSessionError(
+                "initial callback target identity must be complete"
+            )
+        if self.initial_callback_operation_id:
+            if (
+                not IDENTIFIER.fullmatch(
+                    self.initial_callback_operation_id
+                )
+                or not IDENTIFIER.fullmatch(
+                    self.initial_callback_run_id
+                )
+            ):
+                raise RuntimeSessionError(
+                    "initial callback target identity is invalid"
+                )
         research_mode = self.callback_mode in {
             "research-fetch",
             "research-synth",
@@ -557,6 +577,12 @@ class RuntimeSessionManager:
                 ),
                 "callback_mode": request.callback_mode,
                 "task_summary_pointer": request.task_summary_pointer,
+                "initial_callback_operation_id": (
+                    request.initial_callback_operation_id
+                ),
+                "initial_callback_run_id": (
+                    request.initial_callback_run_id
+                ),
                 "runtime_home": (
                     str(request.runtime_home) if request.runtime_home else ""
                 ),
@@ -843,6 +869,12 @@ class RuntimeSessionManager:
                 ),
                 "callback_mode": request.callback_mode,
                 "task_summary_pointer": request.task_summary_pointer,
+                "initial_callback_operation_id": (
+                    request.initial_callback_operation_id
+                ),
+                "initial_callback_run_id": (
+                    request.initial_callback_run_id
+                ),
                 "runtime_home": (
                     str(request.runtime_home) if request.runtime_home else ""
                 ),
@@ -881,10 +913,28 @@ class RuntimeSessionManager:
                 "runtime operation budget requires attention"
             ) from exc
         self._write_metadata(record, request)
+        initial_operation_id = request.spec.operation_id
+        initial_run_id = record.run_id
+        if request.initial_callback_operation_id:
+            child = self.store.read(
+                request.spec.owner_id,
+                request.initial_callback_operation_id,
+            )
+            if (
+                child.run_id != request.initial_callback_run_id
+                or child.lane_id != record.lane_id
+                or child.state != "awaiting-callback"
+            ):
+                raise RuntimeSessionError(
+                    "initial callback target must be the exact awaiting "
+                    "same-lane child"
+                )
+            initial_operation_id = child.spec.operation_id
+            initial_run_id = child.run_id
         self._write_callback_target(
             record,
-            operation_id=record.spec.operation_id,
-            run_id=record.run_id,
+            operation_id=initial_operation_id,
+            run_id=initial_run_id,
             callback_pointer=request.callback_pointer,
             generation=1,
         )
