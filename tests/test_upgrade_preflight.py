@@ -74,6 +74,14 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     result = run(root, "--confirm-routing-migration", "--apply")
     check("invalid migration fails before install", result.returncode == 3)
     check("invalid migration leaves no local override", not (root / "config/model-routing.local.toml").exists())
+    (root / ".codex/dispatch-env.toml").write_text(
+        '[codex_dispatch]\n'
+        'codex_review_model = "gpt-5.6-sol"\n'
+        'codex_review_effort = "high"\n'
+        'claude_review_model = "fable"\n'
+        'claude_review_effort = "high"\n',
+        encoding="utf-8",
+    )
 
     harness_ops = root / ".vault-meta/harness/owners/upgrade-test/operations"
     harness_ops.mkdir(parents=True)
@@ -117,9 +125,72 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     broker = root / ".vault-meta/task-sessions/projects/11111111-1111-4111-8111-111111111111/tasks/22222222-2222-4222-8222-222222222222"
     broker.mkdir(parents=True)
     (broker / "task.json").write_text(json.dumps({
-        "task_id": "22222222-2222-4222-8222-222222222222", "status": "active"
+        "schema_version": 1,
+        "task_id": "22222222-2222-4222-8222-222222222222",
+        "status": "active",
+        "worktrees": [str(root)],
     }), encoding="utf-8")
     result = run(root)
     check("active broker task blocks upgrade", result.returncode == 4 and "broker-task:" in result.stderr)
+
+    terminal_id = "22222222-2222-4222-8222-222222222222"
+    (root / ".task-meta.json").write_text(json.dumps({
+        "version": 3,
+        "task_id": terminal_id,
+        "task_name": "cancelled",
+        "worktree": str(root),
+    }), encoding="utf-8")
+    harness_ops = root / ".vault-meta/harness/owners" / terminal_id / "operations"
+    harness_ops.mkdir(parents=True)
+    terminal_path = harness_ops / f"{terminal_id}.json"
+    terminal_path.write_text(json.dumps({
+        "schema_version": 1,
+        "state": "cancelled",
+        "pending_effect": "request-exit",
+        "resources": {
+            "surface_id": "owned-surface",
+            "process_group": 12345,
+            "process_identity": "a" * 64,
+            "supervisor_pid": 12344,
+            "supervisor_identity": "b" * 64,
+        },
+        "spec": {
+            "operation_id": terminal_id,
+            "owner_id": terminal_id,
+            "kind": "dispatch",
+        },
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "terminal dispatch with unsettled ownership keeps legacy mirrors active",
+        result.returncode == 4
+        and f"broker-task:{terminal_id}" in result.stderr
+        and f"harness:dispatch:{terminal_id}" in result.stderr,
+    )
+
+    terminal_path.write_text(json.dumps({
+        "schema_version": 1,
+        "state": "cancelled",
+        "pending_effect": "",
+        "resources": {
+            "surface_id": "",
+            "process_group": 0,
+            "process_identity": "",
+            "supervisor_pid": 0,
+            "supervisor_identity": "",
+        },
+        "spec": {
+            "operation_id": terminal_id,
+            "owner_id": terminal_id,
+            "kind": "dispatch",
+        },
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "resource-free terminal dispatch proves same-ID legacy mirrors stale",
+        result.returncode == 0
+        and f"broker-task:{terminal_id}" not in result.stderr
+        and "task:upgrade-preflight-test" not in result.stderr,
+    )
 
 print("upgrade preflight tests passed")
