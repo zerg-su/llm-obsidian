@@ -764,6 +764,28 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             fix_cmux.sent,
         ),
     )
+    phase_messages = [
+        item[1]
+        for item in fix_cmux.sent
+        if ".task-pipeline-step-request.json" in item[1]
+    ]
+    check(
+        "engineering fix exposes each prior evidence pointer and opaque hash semantics",
+        all(
+            any(
+                f"phase {step}" in message
+                and f"Read prior accepted evidence at {pointer}." in message
+                and "opaque request bindings, not artifact content hashes" in message
+                for message in phase_messages
+            )
+            for step, pointer in (
+                ("root-cause", ".task-pipeline/outputs/pass-0/reproduce.md"),
+                ("regression-test", ".task-pipeline/outputs/pass-0/root-cause.md"),
+                ("minimal-fix", ".task-pipeline/outputs/pass-0/regression-test.md"),
+            )
+        ),
+        phase_messages,
+    )
 
     restart_task = "eadeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
     (

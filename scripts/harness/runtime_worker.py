@@ -1348,6 +1348,24 @@ def run(
 
     def notify_fix_phase(request: dict[str, object]) -> None:
         operation_id = str(request["operation_id"])
+        step_id = str(request["step_id"])
+        iteration = int(request["iteration"])
+        prior_pointer = {
+            "root-cause": ".task-pipeline/outputs/pass-0/reproduce.md",
+            "regression-test": (
+                f".task-pipeline/outputs/pass-{iteration}/root-cause.md"
+            ),
+            "minimal-fix": (
+                f".task-pipeline/outputs/pass-{iteration}/regression-test.md"
+            ),
+        }.get(step_id, "")
+        prior_context = (
+            f"Read prior accepted evidence at {prior_pointer}. "
+            "input_sha256 and prior_receipt_sha256 are opaque request "
+            "bindings, not artifact content hashes. "
+            if prior_pointer
+            else ""
+        )
         notify_path = (
             spec_path.parent
             / "pipeline-fix"
@@ -1357,7 +1375,7 @@ def run(
         marker = {
             "schema_version": 1,
             "operation_id": operation_id,
-            "step_id": str(request["step_id"]),
+            "step_id": step_id,
             "status": "sent",
         }
         if notify_path.is_file() and not notify_path.is_symlink():
@@ -1368,8 +1386,9 @@ def run(
             return
         message = (
             "Typed engineering/fix phase "
-            f"{request['step_id']} is ready in "
+            f"{step_id} is ready in "
             ".task-pipeline-step-request.json. Complete only this phase. "
+            f"{prior_context}"
             f"Write evidence to {request['output_pointer']} and write "
             f"{request['result_pointer']} as exact JSON with fields "
             '{"schema_version":1,"status":"complete",'
