@@ -4,13 +4,20 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.pipeline_builtins import builtin_definitions, builtin_registry
+from harness.pipeline_builtins import (
+    EXECUTABLE_BUILTINS,
+    builtin_definitions,
+    builtin_registry,
+    compiled_builtin,
+    compiled_executable_for_contract,
+)
 from harness.pipelines import compile_pipeline
 
 
@@ -24,9 +31,19 @@ registry = builtin_registry()
 definitions = builtin_definitions()
 
 check(
-    "registry exposes only descriptors backed by existing 2.3 operations",
+    "registry exposes execution and typed control descriptors",
     {primitive.primitive_id for primitive in registry.primitives}
-    == {"model_step", "review", "verify"},
+    == {"bounded_loop", "human_gate", "model_step", "review", "verify"},
+)
+controls = {
+    primitive.primitive_id: primitive
+    for primitive in registry.primitives
+    if primitive.primitive_kind == "control"
+}
+check(
+    "human gate and bounded loop are immutable non-step controls",
+    set(controls) == {"human_gate", "bounded_loop"}
+    and all(not primitive.session_modes for primitive in controls.values()),
 )
 check(
     "built-in model work requires only the preflight fact it can prove",
@@ -50,6 +67,56 @@ compiled = {
     )
     for name, definition in definitions.items()
 }
+
+check(
+    "fix contract explicitly resolves the bounded controls",
+    compiled["engineering/fix"].resolved_control_primitives
+    == ("bounded_loop@1.0.0", "human_gate@1.0.0")
+    and tuple(
+        (item.policy, item.total_pass_limit)
+        for item in compiled["engineering/fix"].definition.completion_policies
+    )
+    == (("attention", 2), ("autonomous", 3)),
+)
+check(
+    "fix compiler exposes the static worst-case of three passes",
+    compiled["engineering/fix"].worst_case_budget.attempt_limit == 9
+    and compiled["engineering/fix"].worst_case_budget.model_restart_limit == 3
+    and compiled["engineering/fix"].worst_case_budget.time_budget_seconds
+    == 5_400
+    and compiled["engineering/fix"].worst_case_budget.token_limit == 600_000,
+)
+check(
+    "both request-time completion modes share one immutable fix contract",
+    compiled_builtin("engineering/fix").definition_sha256
+    == compiled["engineering/fix"].definition_sha256,
+)
+check(
+    "engineering fix is executable only by exact compiled hash",
+    "engineering/fix" in EXECUTABLE_BUILTINS
+    and compiled_executable_for_contract(
+        compiled["engineering/fix"].definition_sha256
+    )[0]
+    == "engineering/fix",
+)
+try:
+    compile_pipeline(
+        replace(
+            definitions["engineering/fix"],
+            completion_policies=(
+                definitions["engineering/fix"].completion_policies[0],
+            ),
+        ),
+        registry,
+        capabilities=("route:resolved",),
+    )
+except Exception as exc:
+    check(
+        "fix compiler rejects a partial completion policy set",
+        "exact bounded completion controls" in str(exc),
+    )
+else:
+    check("fix compiler rejects a partial completion policy set", False)
 
 check(
     "approval is a precondition rather than a fake runtime primitive",

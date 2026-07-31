@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Mapping
 
 from .contracts import (
@@ -24,7 +25,36 @@ SEMVER_RE = re.compile(
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z"
 )
 SESSION_MODES = frozenset({"parent-child", "review", "verification", "worktree"})
-COMPILER_VERSION = "1.0.0"
+PRIMITIVE_KINDS = frozenset({"step", "control"})
+COMPLETION_PASS_LIMITS = MappingProxyType(
+    {"attention": 2, "autonomous": 3}
+)
+PERMISSION_BINDINGS = MappingProxyType(
+    {
+        "callback": "code-policy-enforced",
+        "cmux-socket": "sandbox-enforced",
+        "cmux-target": "policy-only",
+        "git-common-dir": "sandbox-enforced",
+        "git-write": "sandbox-enforced",
+        "loopback": "sandbox-enforced",
+        "product-worktree": "sandbox-enforced",
+        "provider": "code-policy-enforced",
+        "reap": "coordinator-owned",
+    }
+)
+SIDE_EFFECT_BINDINGS = MappingProxyType(
+    {
+        "callback": "code-policy-enforced",
+        "cmux-surface": "policy-only",
+        "git-write": "code-policy-enforced",
+        "provider": "adapter-enforced",
+        "reap": "coordinator-owned",
+        "worktree": "code-policy-enforced",
+    }
+)
+DEFAULT_PERMISSION_CEILING = tuple(sorted(PERMISSION_BINDINGS))
+DEFAULT_SIDE_EFFECTS = tuple(sorted(SIDE_EFFECT_BINDINGS))
+COMPILER_VERSION = "1.1.0"
 
 
 def _require_identifier(value: str, label: str) -> None:
@@ -57,6 +87,82 @@ def _normalized_identifiers(
 
 
 @dataclass(frozen=True)
+class PipelineBudget:
+    """One immutable per-pass envelope used for static upper bounds."""
+
+    attempt_limit: int = DEFAULT_ATTEMPT_LIMIT
+    model_restart_limit: int = DEFAULT_MODEL_RESTART_LIMIT
+    time_budget_seconds: int = int(DEFAULT_TIME_BUDGET_SECONDS)
+    token_limit: int = DEFAULT_TOKEN_LIMIT
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        values = (
+            self.attempt_limit,
+            self.model_restart_limit,
+            self.time_budget_seconds,
+            self.token_limit,
+        )
+        if (
+            self.schema_version != 1
+            or any(type(value) is not int for value in values)
+            or self.attempt_limit < 1
+            or self.model_restart_limit < 0
+            or self.time_budget_seconds < 1
+            or self.token_limit < 1
+        ):
+            raise ContractError("pipeline budget is invalid")
+
+    def scaled(self, operation_count: int) -> PipelineBudget:
+        if type(operation_count) is not int or operation_count < 1:
+            raise ContractError("pipeline budget scale is invalid")
+        return PipelineBudget(
+            attempt_limit=self.attempt_limit * operation_count,
+            model_restart_limit=self.model_restart_limit * operation_count,
+            time_budget_seconds=self.time_budget_seconds * operation_count,
+            token_limit=self.token_limit * operation_count,
+        )
+
+
+@dataclass(frozen=True)
+class CompletionPolicy:
+    """One request-time completion mode admitted by a built-in contract."""
+
+    policy: str
+    total_pass_limit: int
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        expected = COMPLETION_PASS_LIMITS.get(self.policy)
+        if (
+            self.schema_version != 1
+            or expected is None
+            or type(self.total_pass_limit) is not int
+            or self.total_pass_limit != expected
+        ):
+            raise ContractError("completion policy and pass limit are invalid")
+
+
+@dataclass(frozen=True)
+class PrimitiveReference:
+    """An exact primitive identity referenced outside the linear data path."""
+
+    primitive_id: str
+    version: str
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported PrimitiveReference schema")
+        _require_identifier(self.primitive_id, "control primitive_id")
+        _require_version(self.version, "control primitive version")
+
+    @property
+    def identity(self) -> str:
+        return f"{self.primitive_id}@{self.version}"
+
+
+@dataclass(frozen=True)
 class PrimitiveDefinition:
     """Versioned descriptor for one existing harness operation class."""
 
@@ -64,6 +170,7 @@ class PrimitiveDefinition:
     version: str
     session_modes: tuple[str, ...]
     required_capabilities: tuple[str, ...] = ()
+    primitive_kind: str = "step"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -72,8 +179,14 @@ class PrimitiveDefinition:
         _require_identifier(self.primitive_id, "primitive_id")
         _require_version(self.version, "primitive version")
         modes = _normalized_identifiers(self.session_modes, "primitive session mode")
-        if not modes or not set(modes).issubset(SESSION_MODES):
+        if self.primitive_kind not in PRIMITIVE_KINDS:
+            raise ContractError("primitive kind is invalid")
+        if not set(modes).issubset(SESSION_MODES):
             raise ContractError("primitive session modes are invalid")
+        if (self.primitive_kind == "step") != bool(modes):
+            raise ContractError(
+                "step primitives require session modes; control primitives forbid them"
+            )
         object.__setattr__(self, "session_modes", modes)
         object.__setattr__(
             self,
@@ -127,6 +240,13 @@ class PipelineDefinition:
     input_schema: str
     output_schema: str
     steps: tuple[PipelineStep, ...]
+    control_primitives: tuple[PrimitiveReference, ...] = ()
+    pass_budget: PipelineBudget = field(default_factory=PipelineBudget)
+    permission_ceiling: tuple[str, ...] = DEFAULT_PERMISSION_CEILING
+    side_effects: tuple[str, ...] = DEFAULT_SIDE_EFFECTS
+    completion_policies: tuple[CompletionPolicy, ...] = field(
+        default_factory=lambda: (CompletionPolicy("attention", 2),)
+    )
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -141,6 +261,59 @@ class PipelineDefinition:
             raise ContractError("pipeline must contain at least one step")
         if len({step.step_id for step in self.steps}) != len(self.steps):
             raise ContractError("pipeline step ids must be unique")
+        if not isinstance(self.control_primitives, tuple):
+            raise ContractError("control primitives must be a tuple")
+        controls = tuple(
+            sorted(self.control_primitives, key=lambda item: item.identity)
+        )
+        if len({item.identity for item in controls}) != len(controls):
+            raise ContractError("control primitive identities must be unique")
+        object.__setattr__(self, "control_primitives", controls)
+        if not isinstance(self.pass_budget, PipelineBudget):
+            raise ContractError("pass budget must be a PipelineBudget")
+        permissions = _normalized_identifiers(
+            self.permission_ceiling,
+            "permission ceiling",
+        )
+        unknown_permissions = set(permissions) - set(PERMISSION_BINDINGS)
+        if unknown_permissions:
+            raise ContractError(
+                "permission ceiling exceeds code-owned bindings: "
+                + ",".join(sorted(unknown_permissions))
+            )
+        object.__setattr__(self, "permission_ceiling", permissions)
+        side_effects = _normalized_identifiers(
+            self.side_effects,
+            "side effects",
+        )
+        unknown_effects = set(side_effects) - set(SIDE_EFFECT_BINDINGS)
+        if unknown_effects:
+            raise ContractError(
+                "side effects exceed code-owned bindings: "
+                + ",".join(sorted(unknown_effects))
+            )
+        object.__setattr__(self, "side_effects", side_effects)
+        if (
+            not isinstance(self.completion_policies, tuple)
+            or not self.completion_policies
+            or any(
+                not isinstance(item, CompletionPolicy)
+                for item in self.completion_policies
+            )
+        ):
+            raise ContractError("completion policies must be a non-empty tuple")
+        completion_policies = tuple(
+            sorted(self.completion_policies, key=lambda item: item.policy)
+        )
+        if len({item.policy for item in completion_policies}) != len(
+            completion_policies
+        ):
+            raise ContractError("completion policies must be unique")
+        object.__setattr__(
+            self,
+            "completion_policies",
+            completion_policies,
+        )
 
 
 @dataclass(frozen=True)
@@ -183,7 +356,13 @@ class CompiledPipeline:
     canonical_definition: str
     definition_sha256: str
     resolved_primitives: tuple[str, ...]
+    resolved_control_primitives: tuple[str, ...]
     required_capabilities: tuple[str, ...]
+    worst_case_budget: PipelineBudget
+    permission_ceiling: tuple[str, ...]
+    side_effects: tuple[str, ...]
+    permission_bindings: tuple[str, ...]
+    side_effect_bindings: tuple[str, ...]
     schema_version: int = 1
 
 
@@ -268,10 +447,54 @@ def compile_pipeline(
         _normalized_identifiers(capabilities, "available capability")
     )
     resolved: list[PrimitiveDefinition] = []
+    resolved_controls: list[PrimitiveDefinition] = []
     required_capabilities: set[str] = set()
+    for reference in definition.control_primitives:
+        primitive = registry.resolve(reference.primitive_id, reference.version)
+        if primitive.primitive_kind != "control":
+            raise ContractError(
+                f"{primitive.identity} is not a control primitive"
+            )
+        missing = set(primitive.required_capabilities) - available
+        if missing:
+            raise ContractError(
+                f"control {primitive.identity} lacks capabilities: "
+                f"{','.join(sorted(missing))}"
+            )
+        resolved_controls.append(primitive)
+        required_capabilities.update(primitive.required_capabilities)
+
+    control_ids = {item.primitive_id for item in resolved_controls}
+    completion_pairs = tuple(
+        (item.policy, item.total_pass_limit)
+        for item in definition.completion_policies
+    )
+    if (
+        definition.pipeline_id == "engineering"
+        and definition.profile == "fix"
+        and (
+            control_ids != {"bounded_loop", "human_gate"}
+            or completion_pairs != (("attention", 2), ("autonomous", 3))
+        )
+    ):
+        raise ContractError(
+            "engineering/fix requires exact bounded completion controls"
+        )
+    if (
+        any(item.policy == "autonomous" for item in definition.completion_policies)
+        and "bounded_loop" not in control_ids
+    ):
+        raise ContractError(
+            "autonomous completion policy requires bounded_loop"
+        )
+
     previous: PipelineStep | None = None
     for step in definition.steps:
         primitive = registry.resolve(step.primitive_id, step.primitive_version)
+        if primitive.primitive_kind != "step":
+            raise ContractError(
+                f"{primitive.identity} is not an executable step primitive"
+            )
         if step.session_mode not in primitive.session_modes:
             raise ContractError(
                 f"{primitive.identity} does not support session mode "
@@ -306,11 +529,34 @@ def compile_pipeline(
         raise ContractError(
             "pipeline output schema does not match the terminal primitive"
         )
+    pass_limit = (
+        max(
+            item.total_pass_limit
+            for item in definition.completion_policies
+        )
+        if "bounded_loop" in control_ids
+        else 1
+    )
+    worst_case_budget = definition.pass_budget.scaled(pass_limit)
+    permission_bindings = tuple(
+        f"{item}:{PERMISSION_BINDINGS[item]}"
+        for item in definition.permission_ceiling
+    )
+    side_effect_bindings = tuple(
+        f"{item}:{SIDE_EFFECT_BINDINGS[item]}"
+        for item in definition.side_effects
+    )
     canonical = json.dumps(
         {
             "compiler_version": COMPILER_VERSION,
             "definition": to_dict(definition),
             "resolved_primitives": [to_dict(item) for item in resolved],
+            "resolved_control_primitives": [
+                to_dict(item) for item in resolved_controls
+            ],
+            "worst_case_budget": to_dict(worst_case_budget),
+            "permission_bindings": permission_bindings,
+            "side_effect_bindings": side_effect_bindings,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -321,13 +567,22 @@ def compile_pipeline(
         canonical_definition=canonical,
         definition_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
         resolved_primitives=tuple(item.identity for item in resolved),
+        resolved_control_primitives=tuple(
+            item.identity for item in resolved_controls
+        ),
         required_capabilities=tuple(sorted(required_capabilities)),
+        worst_case_budget=worst_case_budget,
+        permission_ceiling=definition.permission_ceiling,
+        side_effects=definition.side_effects,
+        permission_bindings=permission_bindings,
+        side_effect_bindings=side_effect_bindings,
     )
 
 
 def render_contract(
     compiled: CompiledPipeline,
     *,
+    completion_policy: str = "attention",
     review_mode: str = "simple",
     max_verify_iterations: int = 1,
     verification_profile: str = "scoped",
@@ -346,6 +601,19 @@ def render_contract(
         "verification profile",
     )
     definition = compiled.definition
+    completion_modes = {
+        item.policy: item for item in definition.completion_policies
+    }
+    try:
+        selected_completion = completion_modes[completion_policy]
+    except KeyError as exc:
+        raise ContractError(
+            "completion policy is outside the compiled contract"
+        ) from exc
+    budget = compiled.worst_case_budget
+    permissions = ", ".join(compiled.permission_bindings) or "none"
+    if "cmux-target" in definition.permission_ceiling:
+        permissions += "; cmux target scope=policy-only"
     lines = [
         f"Pipeline: {definition.pipeline_id}/{definition.profile}@{definition.version}",
         f"Definition: {compiled.definition_sha256}",
@@ -360,19 +628,25 @@ def render_contract(
         ),
         "Required capabilities: "
         + (", ".join(compiled.required_capabilities) or "none"),
+        "Controls: "
+        + (
+            ", ".join(compiled.resolved_control_primitives)
+            or "none"
+        ),
         "Execution: existing harness supervisor with state-free reconciliation",
         "Limits: "
-        f"attempts={DEFAULT_ATTEMPT_LIMIT}, "
-        f"model-restarts={DEFAULT_MODEL_RESTART_LIMIT}, "
-        f"deadline={int(DEFAULT_TIME_BUDGET_SECONDS)}s, "
-        f"tokens={DEFAULT_TOKEN_LIMIT}",
+        f"attempts={budget.attempt_limit}, "
+        f"model-restarts={budget.model_restart_limit}, "
+        f"deadline={budget.time_budget_seconds}s, "
+        f"tokens={budget.token_limit}",
+        f"Completion: policy={selected_completion.policy}, "
+        f"total-passes={selected_completion.total_pass_limit}",
         f"Review: mode={review_mode}, "
         f"verification-iterations={max_verify_iterations}, "
         f"profile={verification_profile or 'unbound'}",
-        "Side effects: worktree, git-write, cmux-surface, provider, callback, reap",
-        "Permissions: product worktree and Git common dir=sandbox-enforced; "
-        "loopback and cmux socket=sandbox-enforced; "
-        "cmux target scope=policy-only",
+        "Side effects: "
+        + (", ".join(compiled.side_effect_bindings) or "none"),
+        "Permissions: " + permissions,
         "Enforcement: task/review sequencing=code-policy-enforced",
         "Returns: completed, escalation, attention-required, cancelled, timeout",
     ]
