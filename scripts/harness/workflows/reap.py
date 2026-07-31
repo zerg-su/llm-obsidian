@@ -70,7 +70,16 @@ def run_reap(
         run_id=record.run_id,
         summary=summary,
     )
-    CallbackBroker(store, owner_id).accept(envelope)
+    if record.accepted_callback_id:
+        if (
+            record.accepted_callback_kind != envelope.kind
+            or record.accepted_callback_sha256 != envelope.payload_sha256
+        ):
+            raise RuntimeError(
+                "reap summary mismatches the accepted callback receipt"
+            )
+    else:
+        CallbackBroker(store, owner_id).accept(envelope)
     supervisor = OperationSupervisor(store, owner_id, operation_id)
     record = supervisor.read()
     if record.state in TERMINAL:

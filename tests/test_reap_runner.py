@@ -17,9 +17,11 @@ assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 from harness.contracts import OwnedResources, RuntimeRoute
+from harness.callbacks import CallbackBroker
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import DispatchRequest, run_dispatch
+from harness.workflows.reap import summary_callback
 
 failures: list[str] = []
 
@@ -300,6 +302,14 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         runner.authorize_review = (
             lambda *_args, **_kwargs: review_actions.append("authorized")
         )
+        CallbackBroker(runtime_store, task_id).accept(
+            summary_callback(
+                callback_id="wiki-summary-runtime-worker",
+                operation_id=task_id,
+                run_id=dispatched.record.run_id,
+                summary=summary,
+            )
+        )
         reaped = runner.apply_reap(
             vault,
             worktree,
@@ -320,7 +330,8 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
         reaped["status"] == "complete"
         and dispatched.record.state == "awaiting-callback"
         and durable.state == "complete"
-        and durable.accepted_callback_kind == "wiki-summary",
+        and durable.accepted_callback_kind == "wiki-summary"
+        and durable.accepted_callback_id == "wiki-summary-runtime-worker",
     )
     check(
         "reap authorizes the exact review gate before consuming the callback",
