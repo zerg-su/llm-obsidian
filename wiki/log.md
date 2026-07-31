@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-07-29
+updated: 2026-07-31
 tags:
   - meta
   - log
@@ -26,6 +26,9 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-07-31] release | LLM Obsidian 2.5.0 implementation
+- Custom PipelineSpec/compiler/runtime, liveness recovery и live Claude/Codex dogfood завершены; финальный Fable + Sol review остаётся release gate. ([[LLM Obsidian 2.5.0 implementation]])
 
 ## [2026-07-29] review | LLM Obsidian v2.1.3 final release
 

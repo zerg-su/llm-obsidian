@@ -89,6 +89,7 @@
     "wiki/meta/daily-pipeline-guide.md"
   ],
   "harness": [
+    "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md"
   ],
@@ -166,6 +167,7 @@
     "wiki/entities/Andrej Karpathy.md"
   ],
   "pipeline": [
+    "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md"
@@ -190,6 +192,7 @@
     "wiki/meta/sessions/LLM Obsidian v2.1.2 semantic acceptance refactor.md"
   ],
   "release": [
+    "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md"
   ],
   "release-spec": [
@@ -225,6 +228,7 @@
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c.md"
   ],
   "session": [
+    "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/meta/sessions/LLM Obsidian v2.1.2 semantic acceptance refactor.md"
   ],
   "skills": [
@@ -249,6 +253,7 @@
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md"
   ],
   "v2-5": [
+    "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md"
   ]
 }

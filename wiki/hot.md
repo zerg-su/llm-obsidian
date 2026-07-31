@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-07-21
+updated: 2026-07-31
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-07-31: [[LLM Obsidian 2.5.0 implementation]] — custom PipelineSpec, bounded runtime и live dogfood завершены (`c-000036`)
 - 2026-07-21: [[LLM Obsidian v2.1.2 semantic acceptance refactor]] — finalized task result (`c-000030`)
 - 2026-07-18: [[LLM Obsidian v2.0.8 RD upstream audit]] — подготовлен и проверен Fable/high локальный релиз-кандидат v2.0.8 (`c-000010`)
 - 2026-07-11: [[Unattended Pipeline]] — public v2 pipeline and strict contracts (c-000004)

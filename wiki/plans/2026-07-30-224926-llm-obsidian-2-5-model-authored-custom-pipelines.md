@@ -6,8 +6,10 @@ session_id: 019fab00-3160-7380-8920-4b20183afb76
 sessions:
   - id: 019fab00-3160-7380-8920-4b20183afb76
     date: 2026-07-30
+  - id: 019fab00-3160-7380-8920-4b20183afb76
+    date: 2026-07-31
 source_cwd: "/Users/zak/Projects/llm-obsidian"
-status: pending
+status: executed
 created: 2026-07-30
 updated: 2026-07-31
 tags:
@@ -387,3 +389,5 @@ Rollback отключает model-authored specs и оставляет built-ins
 `parallel`/`join`, user-editable DSL и внешний pipeline marketplace не входят
 автоматически в 2.6. Для каждого потребуется отдельное доказательство
 пользовательской ценности и отдельная архитектура ресурсов и безопасности.
+
+Результат: [[LLM Obsidian 2.5.0 implementation]] (reaped 2026-07-31)
