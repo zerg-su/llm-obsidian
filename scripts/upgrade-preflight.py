@@ -82,7 +82,14 @@ def _identity_recovery(
             ),
         }
     if classification == "proven-stale" and resource == "worktree":
-        assert worktree is not None
+        if worktree is None:
+            return {
+                "action": "inspect-identity-evidence",
+                "guidance": (
+                    "Inspect the listed metadata evidence. Do not emit or run a Git "
+                    "recovery command without one concrete worktree path."
+                ),
+            }
         return {
             "action": "inspect-then-remove-exact-worktree",
             "inspect_command": [
@@ -273,8 +280,8 @@ def identity_diagnostics(root: Path) -> list[dict[str, Any]]:
             classification = str(exact_candidate["classification"])
             evidence.extend(exact_candidate["evidence"])
 
-        owner_id = task_id
-        operation_id = task_id
+        owner_id = ""
+        operation_id = ""
         if exact_candidate is not None:
             candidate_identity = exact_candidate["identity"]
             identity["operation_identity"] = dict(candidate_identity)

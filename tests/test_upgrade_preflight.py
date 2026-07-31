@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 import shutil
 import subprocess
 import sys
@@ -26,12 +27,30 @@ from model_routing import load_config
 from task_sessions import TaskSessionStore
 
 
+UPGRADE_PREFLIGHT = runpy.run_path(str(SCRIPT))
+READ_ONLY_CHECKS = 0
+
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(SCRIPT), "--root", str(root), *args], text=True, capture_output=True, check=False)
 
 
 def diagnostic(root: Path) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    global READ_ONLY_CHECKS
+    before = snapshot(root)
     result = run(root, "--diagnose-identities")
+    after = snapshot(root)
+    if before != after:
+        raise AssertionError("identity diagnostic mutated repository or harness state")
+    READ_ONLY_CHECKS += 1
     try:
         value = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -365,11 +384,6 @@ with tempfile.TemporaryDirectory(prefix="upgrade-identity-diagnostic.") as raw:
         owner_id=task_id,
         state="running",
     )), encoding="utf-8")
-    before = {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
     result, packet = diagnostic(root)
     rows = packet.get("diagnostics", [])
     check(
@@ -498,25 +512,74 @@ with tempfile.TemporaryDirectory(prefix="upgrade-identity-diagnostic.") as raw:
         and "worktree remove"
         not in json.dumps(packet, sort_keys=True),
     )
+
+    task_path.write_text(json.dumps({
+        "version": 3,
+        "task_name": "identity-diagnostic",
+        "worktree": str(root),
+    }), encoding="utf-8")
+    result, packet = diagnostic(root)
+    incomplete = next(
+        row for row in packet["diagnostics"]
+        if row.get("resource") == "worktree"
+    )
+    check(
+        "missing task identity emits evidence-only ambiguous recovery",
+        result.returncode == 4
+        and incomplete.get("classification") == "ambiguous"
+        and incomplete.get("recovery", {}).get("action")
+        == "inspect-identity-evidence"
+        and "inspect_command" not in incomplete.get("recovery", {})
+        and "recovery_command" not in incomplete.get("recovery", {})
+        and "worktree remove" not in json.dumps(packet, sort_keys=True),
+    )
+
+    unmatched_task_id = "77777777-7777-4777-8777-777777777777"
+    task_path.write_text(json.dumps({
+        "version": 3,
+        "task_id": unmatched_task_id,
+        "task_name": "identity-diagnostic",
+        "worktree": str(root),
+    }), encoding="utf-8")
+    result, packet = diagnostic(root)
+    unmatched = next(
+        row for row in packet["diagnostics"]
+        if row.get("resource") == "worktree"
+    )
+    check(
+        "missing recorded operation never derives an owner from task metadata",
+        result.returncode == 4
+        and unmatched.get("classification") == "ambiguous"
+        and unmatched.get("recovery", {}).get("action")
+        == "inspect-identity-evidence"
+        and "inspect_command" not in unmatched.get("recovery", {})
+        and "recovery_command" not in unmatched.get("recovery", {})
+        and "worktree remove" not in json.dumps(packet, sort_keys=True),
+    )
+
+    missing_worktree = UPGRADE_PREFLIGHT["_identity_recovery"](
+        resolved_root,
+        "proven-stale",
+        "worktree",
+        owner_id=task_id,
+        operation_id=task_id,
+        worktree=None,
+    )
+    check(
+        "missing stale worktree path fails closed without a Git command",
+        missing_worktree.get("action") == "inspect-identity-evidence"
+        and "inspect_command" not in missing_worktree
+        and "recovery_command" not in missing_worktree,
+    )
     rejected = run(root, "--diagnose-identities", "--apply")
     check(
         "read-only diagnosis rejects every migration mutation option",
         rejected.returncode == 2
         and "cannot be combined with migration options" in rejected.stderr,
     )
-    after = {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
     check(
-        "identity diagnostic never mutates repository or harness state",
-        before.keys() == after.keys()
-        and all(
-            before[path] == after[path]
-            for path in before
-            if path != operation_path.relative_to(root).as_posix()
-        ),
+        "every identity diagnostic preserves all repository and harness bytes",
+        READ_ONLY_CHECKS == 6,
     )
 
 print("upgrade identity diagnostic tests passed")

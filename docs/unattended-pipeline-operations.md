@@ -69,8 +69,10 @@ require exact ownership reconciliation. Mismatched rows show both recorded and
 path-bound identities and deliberately choose neither owner. Proven-stale
 worktree rows provide separate inspect and Git removal command arrays; the
 diagnostic never runs them, edits state, deletes a worktree, or removes an
-operation record. It exits `4` when any active, ambiguous, or mismatched row
-requires attention and `0` for healthy or proven-stale-only results.
+operation record. Active rows also carry an exact `cancel_command`; worktree
+rows mirror their one matched operation under `identity.operation_identity`.
+It exits `4` when any active, ambiguous, or mismatched row requires attention
+and `0` for healthy or proven-stale-only results.
 
 Completed worktrees already carrying the reap completion marker retain their
 existing finalization treatment. Live or uncertain 2.2.x state is never silently
