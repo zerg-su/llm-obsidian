@@ -118,7 +118,10 @@ class PipelineBudget:
             raise ContractError("pipeline budget scale is invalid")
         return PipelineBudget(
             attempt_limit=self.attempt_limit * operation_count,
-            model_restart_limit=self.model_restart_limit * operation_count,
+            # Provider recovery is one operation-global authority. Pipeline
+            # passes may scale model work, time, and tokens, but never create
+            # additional restart opportunities.
+            model_restart_limit=self.model_restart_limit,
             time_budget_seconds=self.time_budget_seconds * operation_count,
             token_limit=self.token_limit * operation_count,
         )

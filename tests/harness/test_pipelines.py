@@ -160,7 +160,7 @@ check(
     compiled.worst_case_budget
     == PipelineBudget(
         attempt_limit=6,
-        model_restart_limit=3,
+        model_restart_limit=1,
         time_budget_seconds=900,
         token_limit=30_000,
     ),
@@ -182,7 +182,7 @@ check(
     and "engineering/change@1.0.0" in summary
     and compiled.definition_sha256 in summary
     and "state-free reconciliation" in summary
-    and "Limits: attempts=6, model-restarts=3, deadline=900s, tokens=30000"
+    and "Limits: attempts=6, model-restarts=1, deadline=900s, tokens=30000"
     in summary
     and "Completion: policy=autonomous, total-passes=3" in summary
     and "Controls: bounded_loop@1.0.0, human_gate@1.0.0" in summary

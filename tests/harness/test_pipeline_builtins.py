@@ -81,7 +81,7 @@ check(
 check(
     "fix compiler exposes the static worst-case of three passes",
     compiled["engineering/fix"].worst_case_budget.attempt_limit == 9
-    and compiled["engineering/fix"].worst_case_budget.model_restart_limit == 3
+    and compiled["engineering/fix"].worst_case_budget.model_restart_limit == 1
     and compiled["engineering/fix"].worst_case_budget.time_budget_seconds
     == 5_400
     and compiled["engineering/fix"].worst_case_budget.token_limit == 600_000,

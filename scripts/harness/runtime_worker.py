@@ -277,17 +277,15 @@ def provider_resume_argv(
             raise RuntimeWorkerError(
                 "Claude provider command lacks the prompt separator"
             ) from exc
-        if separator == len(argv) - 1:
-            raise RuntimeWorkerError("Claude provider command lacks its prompt")
         return (
             *argv[:separator],
             "--resume",
             checkpoint,
-            *argv[separator:],
+            "--",
         )
     if len(argv) < 2:
         raise RuntimeWorkerError("Codex provider command lacks its prompt")
-    return (*argv[:-1], "resume", checkpoint, argv[-1])
+    return (*argv[:-1], "resume", checkpoint)
 
 
 def provider_environment(

@@ -98,7 +98,6 @@ check(
         "--resume",
         "session-1",
         "--",
-        "continue",
     )
     and runtime_worker.provider_resume_argv(
         ("codex", "--model", "gpt-5.6-sol", "continue"),
@@ -111,7 +110,21 @@ check(
         "gpt-5.6-sol",
         "resume",
         "thread-1",
-        "continue",
+    ),
+)
+check(
+    "provider restart never re-injects the original task prompt",
+    "continue"
+    not in runtime_worker.provider_resume_argv(
+        ("claude", "--model", "opus-5", "--", "continue"),
+        "claude",
+        "session-1",
+    )
+    and "continue"
+    not in runtime_worker.provider_resume_argv(
+        ("codex", "--model", "gpt-5.6-sol", "continue"),
+        "codex",
+        "thread-1",
     ),
 )
 try:
