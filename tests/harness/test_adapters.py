@@ -762,9 +762,21 @@ with tempfile.TemporaryDirectory(prefix="codex-executor-policy.") as raw:
         capture_output=True,
         check=True,
     )
-    cmux_socket = policy_root / "cmux.sock"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(cmux_socket))
+    inherited_cmux_socket = os.environ.get("CMUX_SOCKET_PATH", "").strip()
+    inherited_cmux_path = (
+        Path(inherited_cmux_socket).expanduser()
+        if inherited_cmux_socket
+        else None
+    )
+    # Exact-socket executor sandboxes cannot bind a second AF_UNIX path. Reuse
+    # their already validated socket; hermetic host runs still own a fixture.
+    if inherited_cmux_path is not None and inherited_cmux_path.is_socket():
+        cmux_socket = inherited_cmux_path.resolve()
+        server = None
+    else:
+        cmux_socket = policy_root / "cmux.sock"
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(cmux_socket))
     previous_socket = os.environ.get("CMUX_SOCKET_PATH")
     os.environ["CMUX_SOCKET_PATH"] = str(cmux_socket)
     try:
@@ -784,7 +796,8 @@ with tempfile.TemporaryDirectory(prefix="codex-executor-policy.") as raw:
             os.environ.pop("CMUX_SOCKET_PATH", None)
         else:
             os.environ["CMUX_SOCKET_PATH"] = previous_socket
-        server.close()
+        if server is not None:
+            server.close()
     git_common = (
         subprocess.run(
             ["git", "rev-parse", "--git-common-dir"],

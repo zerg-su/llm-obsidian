@@ -8,12 +8,13 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .adapters.cmux import CmuxAdapter
 from .adapters.process import ProcessAdapter, ProcessError, ProcessHandle
@@ -216,13 +217,13 @@ def provider_argv(
     argv = tuple(spec.get("argv") or ())
     runtime = str(spec.get("runtime") or "")
     surface_id = str(spec.get("surface_id") or "")
+    values = os.environ if env is None else env
     if (
         not argv
         or runtime not in {"claude", "codex"}
         or not SURFACE_UUID.fullmatch(surface_id)
     ):
         return argv
-    values = os.environ if env is None else env
     prefix = f"CMUX_{runtime.upper()}_WRAPPER_SHIM"
     raw_wrapper = str(values.get(prefix) or "").strip()
     raw_root = str(values.get(f"{prefix}_ROOT") or "").strip()
@@ -232,18 +233,18 @@ def provider_argv(
         or str(values.get("CMUX_SURFACE_ID") or "").casefold()
         != surface_id.casefold()
     ):
-        return argv
+        return _pin_env_shebang(argv, values)
     candidate = Path(raw_wrapper).expanduser()
     root = Path(raw_root).expanduser()
     try:
         if candidate.is_symlink() or root.is_symlink():
-            return argv
+            return _pin_env_shebang(argv, values)
         candidate = candidate.resolve()
         root = root.resolve()
         candidate_stat = candidate.stat()
         root_stat = root.stat()
     except OSError:
-        return argv
+        return _pin_env_shebang(argv, values)
     if (
         candidate.name != runtime
         or candidate.parent != root
@@ -257,8 +258,36 @@ def provider_argv(
         or candidate_stat.st_mode & 0o022
         or root_stat.st_mode & 0o022
     ):
+        return _pin_env_shebang(argv, values)
+    return _pin_env_shebang((str(candidate), *argv[1:]), values)
+
+
+def _pin_env_shebang(
+    argv: tuple[str, ...], env: Mapping[str, str]
+) -> tuple[str, ...]:
+    """Resolve one env shebang before protected runtimes sanitize PATH."""
+
+    if not argv:
         return argv
-    return (str(candidate), *argv[1:])
+    try:
+        with Path(argv[0]).open("rb") as handle:
+            first_line = handle.readline(256)
+    except OSError:
+        return argv
+    match = re.fullmatch(
+        rb"#![ \t]*/usr/bin/env[ \t]+([A-Za-z0-9._+-]+)[ \t]*\r?\n?",
+        first_line,
+    )
+    if match is None:
+        return argv
+    interpreter_name = match.group(1).decode("ascii")
+    interpreter = shutil.which(interpreter_name, path=env.get("PATH"))
+    if not interpreter:
+        return argv
+    resolved = Path(interpreter).expanduser().resolve()
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        return argv
+    return (str(resolved), argv[0], *argv[1:])
 
 
 def provider_resume_argv(
@@ -4823,6 +4852,30 @@ def run(
                     continue
                 exit_code = os.waitstatus_to_exitcode(status)
                 provider_exited = True
+        if (
+            provider_exited
+            and exit_code != 0
+            and not callback_handled
+            and spec["callback_mode"] in {"research-fetch", "research-synth"}
+        ):
+            try:
+                current = store.read(spec["owner_id"], spec["operation_id"])
+                if (
+                    current.state not in TERMINAL
+                    and current.state != "attention-required"
+                ):
+                    store.transition(
+                        spec["owner_id"],
+                        spec["operation_id"],
+                        "attention-required",
+                        reason=(
+                            AttentionReason.RUNTIME_UNAVAILABLE
+                            if exit_code == 127
+                            else AttentionReason.ATTENTION_REQUIRED
+                        ),
+                    )
+            except Exception:
+                pass
         if (
             provider_exited
             and (

@@ -23,6 +23,7 @@ from harness.contracts import (
 )
 from harness.runtime_worker import (
     _contain_provider_start_failure,
+    provider_argv,
     run as run_worker,
 )
 from harness.store import OperationStore
@@ -87,6 +88,7 @@ def launch(
     mode: str,
     request_sha256: str = "",
     tamper_artifact: bool = False,
+    exit_code: int = 0,
 ) -> tuple[Path, Path]:
     cwd = root / operation_id
     cwd.mkdir()
@@ -116,7 +118,8 @@ def launch(
         "changed.encode()).hexdigest()\n"
         " (root/'artifact.json').write_text(json.dumps(artifact),encoding='utf-8')\n"
         " (root/'complete.pending.json').replace(root/'complete.json')\n"
-        "time.sleep(0.2)\n",
+        "time.sleep(0.2)\n"
+        "sys.exit(int(sys.argv[3]))\n",
         encoding="utf-8",
     )
     prompt = cwd / "prompt.md"
@@ -127,6 +130,7 @@ def launch(
             str(provider),
             str(env_marker),
             "tamper" if tamper_artifact else "normal",
+            str(exit_code),
         ),
         cwd=cwd,
         state_root=root / f"{operation_id}-state",
@@ -145,6 +149,31 @@ def launch(
         callback_wake=f"advance {operation_id}",
     )
     return launch_spec.spec_path, env_marker
+
+
+with tempfile.TemporaryDirectory(prefix="runtime-shebang.") as raw:
+    root = Path(raw)
+    binary_root = root / "bin"
+    binary_root.mkdir()
+    node = binary_root / "node"
+    node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    node.chmod(0o755)
+    codex = root / "codex.js"
+    codex.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    codex.chmod(0o755)
+    command = provider_argv(
+        {
+            "argv": (str(codex), "--help"),
+            "runtime": "codex",
+            "surface_id": SURFACE,
+        },
+        env={"PATH": str(binary_root)},
+    )
+    check(
+        "env shebang is pinned before the research PATH is sanitized",
+        command == (str(node.resolve()), str(codex), "--help"),
+        command,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
@@ -549,4 +578,34 @@ with tempfile.TemporaryDirectory(prefix="runtime-start-failure.") as raw:
             contained_handle.process_identity,
         )
         == "dead",
+    )
+
+with tempfile.TemporaryDirectory(prefix="runtime-provider-exit.") as raw:
+    root = Path(raw)
+    store = OperationStore(root / "store")
+    operation_id = "research-provider-exit"
+    run_id = "run-provider-exit"
+    start_record(store, operation_id, run_id)
+    spec_path, _env_marker = launch(
+        root,
+        store,
+        operation_id=operation_id,
+        run_id=run_id,
+        mode="research-fetch",
+        request_sha256="f" * 64,
+        exit_code=23,
+    )
+    rc = run_worker(
+        spec_path,
+        poll_seconds=0.02,
+        checkpoint_probe=FakeCmux().resume_checkpoint,
+        cmux_adapter=FakeCmux(),
+    )
+    record = store.read("owner-research", operation_id)
+    check(
+        "nonzero research provider exit becomes immediate typed attention",
+        rc == 23
+        and record.state == "attention-required"
+        and record.attention_reason == AttentionReason.ATTENTION_REQUIRED,
+        record,
     )
