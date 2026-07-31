@@ -324,6 +324,19 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
         ),
         "definition",
     )
+    expect_error(
+        "parent contract drift fails before a child operation is created",
+        lambda: prepare_next_phase(
+            store,
+            parent_record,
+            definition_sha256=sha("other-definition"),
+            approved_plan_sha256=plan,
+            initial_head_sha=initial_head,
+            receipts=(),
+            iteration=0,
+        ),
+        "parent contract",
+    )
 
     attention_store = OperationStore(root / "attention-store")
     attention_parent = parent(attention_store)

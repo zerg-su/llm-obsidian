@@ -376,6 +376,10 @@ def reconcile_fix(
     _sha256(definition_sha256, "definition_sha256")
     _sha256(approved_plan_sha256, "approved_plan_sha256")
     _git_oid(initial_head_sha, "initial_head_sha")
+    if parent.spec.contract_sha256 != definition_sha256:
+        raise FixWorkflowError(
+            "fix definition does not match the immutable parent contract"
+        )
     if (
         not isinstance(iteration, int)
         or isinstance(iteration, bool)
