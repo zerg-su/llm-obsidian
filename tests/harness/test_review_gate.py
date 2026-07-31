@@ -366,6 +366,53 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     else:
         check("stale review evidence never unlocks finalization", False)
 
+with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = FakeRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    run = begin(
+        controller,
+        request_for("review-bounded-summary", context=context),
+        scratch,
+    )
+    lane = run.execution.lanes[0]
+    decision = controller.complete_round(
+        run,
+        lane,
+        run.rounds["holistic"],
+        ReviewResult(
+            "holistic",
+            "approve",
+            (
+                ReviewFinding(
+                    "F-long-summary",
+                    "holistic",
+                    "minor",
+                    "s" * 376,
+                    "full evidence remains available",
+                ),
+            ),
+        ),
+    )
+    authorization = authorize_task_finalization(
+        base / "gate",
+        dispatch_operation_id="dispatch-1",
+        expected_head_sha=context.head_sha,
+        expected_profile=context.verification_profile,
+        expected_profile_sha256=context.verification_profile_sha256,
+    )
+    bounded = authorization.evidence["axes"][0]["findings"][0]
+    check(
+        "model-authored finding summaries are bounded before final evidence",
+        decision.action == "approved"
+        and len(bounded["summary"]) == 300
+        and bounded["summary"].endswith("…")
+        and bounded["evidence"] == "full evidence remains available",
+    )
+
 with tempfile.TemporaryDirectory(prefix="review-cleanup-attention.") as raw:
     base = Path(raw)
     scratch = base / "scratch"

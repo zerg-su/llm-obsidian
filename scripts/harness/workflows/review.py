@@ -23,6 +23,17 @@ from ..state_machine import TERMINAL
 from review_contract import AXES, SEVERITIES, VERIFY_BUDGETS
 
 
+MAX_REVIEW_SUMMARY_CHARS = 300
+
+
+def _bounded_finding_summary(value: str) -> str:
+    """Keep round detail while emitting canonical review-v1 evidence."""
+
+    if len(value) <= MAX_REVIEW_SUMMARY_CHARS:
+        return value
+    return value[: MAX_REVIEW_SUMMARY_CHARS - 1].rstrip() + "…"
+
+
 @dataclass(frozen=True)
 class ReviewRequest:
     operation_id: str
@@ -1011,7 +1022,9 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
                         "severity": finding.severity,
                         "file": finding.file,
                         "line": finding.line,
-                        "summary": finding.summary,
+                        "summary": _bounded_finding_summary(
+                            finding.summary
+                        ),
                         "evidence": finding.evidence,
                         "recommendation": finding.recommendation,
                     }
