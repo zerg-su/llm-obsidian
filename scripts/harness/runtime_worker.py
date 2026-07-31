@@ -26,7 +26,10 @@ from .callbacks import (
 from .contracts import (
     AttentionReason,
     CallbackEnvelope,
+    DEFAULT_TIME_BUDGET_SECONDS,
+    DEFAULT_TOKEN_LIMIT,
     EffectOutcome,
+    OperationSpec,
     to_dict,
 )
 from .prompts import PromptDecision, classify
@@ -56,6 +59,7 @@ SURFACE_UUID = re.compile(
 )
 MAX_OUTBOX_BYTES = 70_000
 MAX_SCREEN_BYTES = 70_000
+MAX_PIPELINE_VERIFY_RESUBMITS = 1
 RESEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 CALLBACK_WAIT_STATES = frozenset(
     {"running", "awaiting-callback", "verifying"}
@@ -64,6 +68,43 @@ CALLBACK_WAIT_STATES = frozenset(
 
 class RuntimeWorkerError(RuntimeError):
     pass
+
+
+def _pipeline_verify_identity(
+    parent: OperationSpec,
+    *,
+    definition_sha256: str,
+    input_sha256: str,
+    profile: str,
+) -> tuple[OperationSpec, str, str]:
+    """Derive one immutable verify operation from its exact pipeline input."""
+
+    suffix = f"-verify-{input_sha256[:16]}"
+    operation_id = f"{parent.operation_id[: 128 - len(suffix)]}{suffix}"
+    idempotency_key = hashlib.sha256(
+        (
+            f"{parent.idempotency_key}:pipeline-verify:{operation_id}:"
+            f"{definition_sha256}:{input_sha256}:{profile}"
+        ).encode()
+    ).hexdigest()
+    child = OperationSpec(
+        operation_id=operation_id,
+        idempotency_key=idempotency_key,
+        kind="pipeline-verify",
+        owner_id=parent.owner_id,
+        route=parent.route,
+        context_manifest=parent.context_manifest,
+        verification_profile=profile,
+        keep_open=False,
+        contract_sha256=definition_sha256,
+    )
+    lane_id = hashlib.sha256(
+        f"{idempotency_key}:lane".encode()
+    ).hexdigest()[:32]
+    run_id = hashlib.sha256(
+        f"{idempotency_key}:run".encode()
+    ).hexdigest()[:32]
+    return child, lane_id, run_id
 
 
 def provider_exit_is_final(
@@ -1524,7 +1565,7 @@ def run(
                 ),
                 None,
             )
-            verification_receipt_path = (
+            verification_controller_receipt_path = (
                 spec_path.parent / "pipeline-step-verify.json"
             )
             review_policy = meta.get("review_policy")
@@ -1589,21 +1630,39 @@ def run(
                 "pipeline-verify-"
                 + verification_input_sha256[:32]
             )
+            (
+                verification_spec,
+                verification_lane_id,
+                verification_run_id,
+            ) = _pipeline_verify_identity(
+                operation.spec,
+                definition_sha256=pipeline.definition_sha256,
+                input_sha256=verification_input_sha256,
+                profile=profile.name,
+            )
+            verification_root = (
+                spec_path.parent
+                / "pipeline-verification"
+                / verification_spec.operation_id
+            )
+            verification_receipt_path = (
+                verification_root / "receipt.json"
+            )
 
-            def verification_receipt() -> dict[str, object] | None:
-                if not verification_receipt_path.exists():
+            def load_verification_receipt(
+                receipt_path: Path,
+            ) -> dict[str, object] | None:
+                if not receipt_path.exists():
                     return None
                 if (
-                    not verification_receipt_path.is_file()
-                    or verification_receipt_path.is_symlink()
+                    not receipt_path.is_file()
+                    or receipt_path.is_symlink()
                 ):
                     raise RuntimeWorkerError(
                         "pipeline verification receipt is invalid"
                     )
                 receipt = json.loads(
-                    verification_receipt_path.read_text(
-                        encoding="utf-8"
-                    )
+                    receipt_path.read_text(encoding="utf-8")
                 )
                 evidence = (
                     receipt.get("evidence")
@@ -1613,7 +1672,7 @@ def run(
                 if (
                     not isinstance(receipt, dict)
                     or receipt.get("schema_version") != 1
-                    or receipt.get("operation_id")
+                    or receipt.get("parent_operation_id")
                     != spec["operation_id"]
                     or receipt.get("definition_sha256")
                     != pipeline.definition_sha256
@@ -1627,6 +1686,15 @@ def run(
                     )
                     or receipt.get("status")
                     not in {"complete", "failed"}
+                    or not IDENTIFIER.fullmatch(
+                        str(receipt.get("operation_id") or "")
+                    )
+                    or not IDENTIFIER.fullmatch(
+                        str(receipt.get("lane_id") or "")
+                    )
+                    or not IDENTIFIER.fullmatch(
+                        str(receipt.get("run_id") or "")
+                    )
                     or not isinstance(evidence, list)
                     or not evidence
                 ):
@@ -1653,9 +1721,23 @@ def run(
                         separators=(",", ":"),
                     ).encode()
                 ).hexdigest()
+                (
+                    expected_spec,
+                    expected_lane_id,
+                    expected_run_id,
+                ) = _pipeline_verify_identity(
+                    operation.spec,
+                    definition_sha256=pipeline.definition_sha256,
+                    input_sha256=receipt_input_sha256,
+                    profile=profile.name,
+                )
                 if (
                     receipt.get("input_sha256")
                     != receipt_input_sha256
+                    or receipt.get("operation_id")
+                    != expected_spec.operation_id
+                    or receipt.get("lane_id") != expected_lane_id
+                    or receipt.get("run_id") != expected_run_id
                     or receipt.get("effect_id")
                     != "pipeline-verify-"
                     + receipt_input_sha256[:32]
@@ -1727,13 +1809,101 @@ def run(
                     raise RuntimeWorkerError(
                         "pipeline verification outcome is invalid"
                     )
-                if receipt_head != verification_head:
+                stored = store.read(
+                    spec["owner_id"], expected_spec.operation_id
+                )
+                if (
+                    stored.spec != expected_spec
+                    or stored.lane_id != expected_lane_id
+                    or stored.run_id != expected_run_id
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline verification operation identity is invalid"
+                    )
+                expected_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / expected_spec.operation_id
+                    / "receipt.json"
+                )
+                if receipt_path.resolve() != expected_path.resolve():
+                    raise RuntimeWorkerError(
+                        "pipeline verification receipt pointer is invalid"
+                    )
+                return receipt
+
+            def controller_verification_receipt(
+            ) -> dict[str, object] | None:
+                if not verification_controller_receipt_path.exists():
+                    return None
+                if (
+                    not verification_controller_receipt_path.is_file()
+                    or verification_controller_receipt_path.is_symlink()
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline verification controller receipt is invalid"
+                    )
+                linked = json.loads(
+                    verification_controller_receipt_path.read_text(
+                        encoding="utf-8"
+                    )
+                )
+                if not isinstance(linked, dict):
+                    raise RuntimeWorkerError(
+                        "pipeline verification controller receipt is invalid"
+                    )
+                linked_operation_id = str(
+                    linked.get("operation_id") or ""
+                )
+                if not IDENTIFIER.fullmatch(linked_operation_id):
+                    raise RuntimeWorkerError(
+                        "pipeline verification controller receipt is invalid"
+                    )
+                child_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / linked_operation_id
+                    / "receipt.json"
+                )
+                receipt = load_verification_receipt(child_path)
+                if receipt != linked:
+                    raise RuntimeWorkerError(
+                        "pipeline verification controller linkage is invalid"
+                    )
+                return receipt
+
+            def verification_receipt() -> dict[str, object] | None:
+                receipt = load_verification_receipt(
+                    verification_receipt_path
+                )
+                if receipt is None:
+                    return None
+                if (
+                    receipt["head_sha"] != verification_head
+                    or receipt["operation_id"]
+                    != verification_spec.operation_id
+                ):
                     return None
                 return receipt
 
-            def notify_verification_attention(
+            def failed_verification_count() -> int:
+                count = 0
+                receipts_root = (
+                    spec_path.parent / "pipeline-verification"
+                )
+                if not receipts_root.is_dir():
+                    return 0
+                for path in receipts_root.glob("*/receipt.json"):
+                    receipt = load_verification_receipt(path)
+                    if receipt is not None and receipt["status"] == "failed":
+                        count += 1
+                return count
+
+            def verification_attention_packet(
                 receipt: dict[str, object],
-            ) -> None:
+                *,
+                allow_resubmit: bool,
+            ) -> tuple[dict[str, object], str]:
                 raw_evidence = receipt.get("evidence")
                 if not isinstance(raw_evidence, list):
                     raise RuntimeWorkerError(
@@ -1757,23 +1927,36 @@ def run(
                     raise RuntimeWorkerError(
                         "verification attention evidence is invalid"
                     )
+                allowed = (
+                    ["fix-and-resubmit", "escalate"]
+                    if allow_resubmit
+                    else ["escalate"]
+                )
                 packet = {
                     "schema_version": 1,
                     "operation_id": spec["operation_id"],
-                    "definition_sha256": (
-                        pipeline.definition_sha256
+                    "verification_operation_id": str(
+                        receipt["operation_id"]
                     ),
+                    "verification_lane_id": str(receipt["lane_id"]),
+                    "verification_run_id": str(receipt["run_id"]),
+                    "definition_sha256": pipeline.definition_sha256,
                     "step_id": "verify",
                     "head_sha": str(receipt["head_sha"]),
                     "status": "attention-required",
                     "reason": "verification-failed",
                     "safe_boundary": "tdd-slices-complete",
-                    "allowed_responses": [
-                        "fix-and-resubmit",
-                        "escalate",
-                    ],
+                    "allowed_responses": allowed,
+                    "response_pointer": (
+                        ".task-verification-response.json"
+                    ),
                     "receipt_pointer": str(
-                        verification_receipt_path
+                        (
+                            spec_path.parent
+                            / "pipeline-verification"
+                            / str(receipt["operation_id"])
+                            / "receipt.json"
+                        ).resolve()
                     ),
                     "evidence": packet_evidence,
                 }
@@ -1784,7 +1967,16 @@ def run(
                     raise RuntimeWorkerError(
                         "verification attention packet is too large"
                     )
-                packet_sha256 = hashlib.sha256(encoded).hexdigest()
+                return packet, hashlib.sha256(encoded).hexdigest()
+
+            def notify_verification_attention(
+                receipt: dict[str, object],
+                *,
+                allow_resubmit: bool,
+            ) -> str:
+                packet, packet_sha256 = verification_attention_packet(
+                    receipt, allow_resubmit=allow_resubmit
+                )
                 packet_path = spec["cwd"] / ".task-verification.json"
                 if packet_path.is_symlink():
                     raise RuntimeWorkerError(
@@ -1817,7 +2009,7 @@ def run(
                         == packet_sha256
                         and notified.get("status") == "sent"
                     ):
-                        return
+                        return packet_sha256
                 _atomic_json(
                     notify_path,
                     {
@@ -1830,9 +2022,10 @@ def run(
                 cmux_adapter.send(
                     spec["surface_id"],
                     "Typed pipeline verification attention is ready in "
-                    ".task-verification.json. Resolve it within the "
-                    "approved scope or use task_escalation.py; do not "
-                    "launch review or reap.",
+                    ".task-verification.json. For fix-and-resubmit, "
+                    "commit the fix and write the exact identity-bound "
+                    ".task-verification-response.json; otherwise use "
+                    "task_escalation.py. Do not launch review or reap.",
                 )
                 cmux_adapter.send_key(spec["surface_id"], "Enter")
                 _atomic_json(
@@ -1844,12 +2037,138 @@ def run(
                         "status": "sent",
                     },
                 )
+                return packet_sha256
+
+            def accept_verification_resubmission(
+                failed: dict[str, object],
+            ) -> bool:
+                if verification_head == failed["head_sha"]:
+                    return False
+                _, packet_sha256 = verification_attention_packet(
+                    failed, allow_resubmit=True
+                )
+                response_path = (
+                    spec["cwd"] / ".task-verification-response.json"
+                )
+                try:
+                    raw = response_path.read_bytes()
+                except FileNotFoundError:
+                    return False
+                if (
+                    response_path.is_symlink()
+                    or not raw
+                    or len(raw) > MAX_OUTBOX_BYTES
+                ):
+                    raise RuntimeWorkerError(
+                        "verification resubmission response is invalid"
+                    )
+                response = json.loads(raw)
+                expected_keys = {
+                    "schema_version",
+                    "operation_id",
+                    "verification_operation_id",
+                    "failed_head_sha",
+                    "packet_sha256",
+                    "response",
+                    "resubmitted_head_sha",
+                }
+                if (
+                    not isinstance(response, dict)
+                    or set(response) != expected_keys
+                    or response.get("schema_version") != 1
+                    or response.get("operation_id")
+                    != spec["operation_id"]
+                    or response.get("verification_operation_id")
+                    != failed["operation_id"]
+                    or response.get("failed_head_sha")
+                    != failed["head_sha"]
+                    or response.get("packet_sha256")
+                    != packet_sha256
+                    or response.get("response")
+                    != "fix-and-resubmit"
+                    or response.get("resubmitted_head_sha")
+                    != verification_head
+                ):
+                    raise RuntimeWorkerError(
+                        "verification resubmission response is invalid"
+                    )
+                response_sha256 = hashlib.sha256(
+                    json.dumps(
+                        response, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                response_receipt_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / str(failed["operation_id"])
+                    / "response-receipt.json"
+                )
+                response_receipt = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "verification_operation_id": failed["operation_id"],
+                    "failed_head_sha": failed["head_sha"],
+                    "resubmitted_head_sha": verification_head,
+                    "response_sha256": response_sha256,
+                    "status": "accepted",
+                }
+                if response_receipt_path.is_file():
+                    if response_receipt_path.is_symlink():
+                        raise RuntimeWorkerError(
+                            "verification response receipt is invalid"
+                        )
+                    existing = json.loads(
+                        response_receipt_path.read_text(encoding="utf-8")
+                    )
+                    if existing != response_receipt:
+                        raise RuntimeWorkerError(
+                            "verification response receipt is invalid"
+                        )
+                else:
+                    _atomic_json(
+                        response_receipt_path, response_receipt
+                    )
+                failed_record = store.read(
+                    spec["owner_id"], str(failed["operation_id"])
+                )
+                if failed_record.state == "attention-required":
+                    store.transition(
+                        spec["owner_id"],
+                        failed_record.spec.operation_id,
+                        "failed",
+                    )
+                elif failed_record.state != "failed":
+                    raise RuntimeWorkerError(
+                        "failed verification operation cannot resume"
+                    )
+                return True
 
             def run_verification() -> None:
-                current = store.read(
-                    spec["owner_id"], spec["operation_id"]
-                )
                 existing = verification_receipt()
+                current = store.create(
+                    verification_spec,
+                    lane_id=verification_lane_id,
+                    run_id=verification_run_id,
+                )
+                supervisor = OperationSupervisor(
+                    store,
+                    spec["owner_id"],
+                    verification_spec.operation_id,
+                )
+                supervisor.configure_budget(
+                    attempt_limit=1,
+                    model_restart_limit=0,
+                    time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+                    token_limit=DEFAULT_TOKEN_LIMIT,
+                )
+                current = supervisor.read()
+                if current.state == "created":
+                    supervisor.transition("preflight")
+                    supervisor.transition("starting")
+                    supervisor.transition("running")
+                    supervisor.transition("verifying")
+                    supervisor.consume_attempt()
+                    current = supervisor.read()
                 if current.pending_effect:
                     if (
                         current.pending_effect
@@ -1858,7 +2177,7 @@ def run(
                     ):
                         store.resolve_effect(
                             spec["owner_id"],
-                            spec["operation_id"],
+                            verification_spec.operation_id,
                             EffectOutcome.SUCCEEDED,
                         )
                     else:
@@ -1867,16 +2186,8 @@ def run(
                         )
                         return
                 if existing is None:
-                    current = store.read(
-                        spec["owner_id"], spec["operation_id"]
-                    )
-                    if current.state == "awaiting-callback":
-                        store.transition(
-                            spec["owner_id"],
-                            spec["operation_id"],
-                            "verifying",
-                        )
-                    elif current.state != "verifying":
+                    current = supervisor.read()
+                    if current.state != "verifying":
                         raise RuntimeWorkerError(
                             "pipeline verification state is invalid"
                         )
@@ -1889,8 +2200,7 @@ def run(
                                 profile,
                                 root=spec["cwd"],
                                 evidence_dir=(
-                                    spec_path.parent
-                                    / "pipeline-verification"
+                                    verification_root / "evidence"
                                 ),
                                 runner=(
                                     verification_runner
@@ -1929,7 +2239,14 @@ def run(
                             verification_receipt_path,
                             {
                                 "schema_version": 1,
-                                "operation_id": spec["operation_id"],
+                                "operation_id": (
+                                    verification_spec.operation_id
+                                ),
+                                "parent_operation_id": (
+                                    spec["operation_id"]
+                                ),
+                                "lane_id": verification_lane_id,
+                                "run_id": verification_run_id,
                                 "definition_sha256": (
                                     pipeline.definition_sha256
                                 ),
@@ -1950,18 +2267,18 @@ def run(
                                     else "failed"
                                 ),
                                 "evidence": rows,
-                            },
+                            }
+                        )
+                        _atomic_json(
+                            verification_controller_receipt_path,
+                            json.loads(
+                                verification_receipt_path.read_text(
+                                    encoding="utf-8"
+                                )
+                            ),
                         )
 
-                    # The accepted state-free 2.4 boundary keeps this as the
-                    # dispatch operation's next write-ahead effect. A derived
-                    # verify operation would restore the rejected second
-                    # controller/operation identity.
-                    OperationSupervisor(
-                        store,
-                        spec["owner_id"],
-                        spec["operation_id"],
-                    ).effect(
+                    supervisor.effect(
                         verification_effect_id,
                         execute_verification,
                         persist_result=persist_verification,
@@ -1972,27 +2289,45 @@ def run(
                         "pipeline verification produced no receipt"
                     )
                 if existing["status"] == "failed":
-                    notify_verification_attention(existing)
+                    current = supervisor.read()
+                    if current.state == "verifying":
+                        store.transition(
+                            spec["owner_id"],
+                            verification_spec.operation_id,
+                            "attention-required",
+                            reason=AttentionReason.ATTENTION_REQUIRED,
+                        )
+                    return
+                current = supervisor.read()
+                if current.state == "verifying":
+                    supervisor.transition("finalizing")
+                    supervisor.transition("exiting")
+                    supervisor.transition("complete")
+
+            previous_verification = (
+                controller_verification_receipt()
+                if verify_step is not None
+                else None
+            )
+            if (
+                previous_verification is not None
+                and previous_verification["status"] == "failed"
+                and previous_verification["head_sha"]
+                != verification_head
+            ):
+                if (
+                    failed_verification_count()
+                    > MAX_PIPELINE_VERIFY_RESUBMITS
+                ):
                     summary_attention(
-                        "pipeline-verification-failed",
-                        AttentionReason.ATTENTION_REQUIRED,
+                        "pipeline-verification-retry-exhausted",
+                        AttentionReason.RETRY_EXHAUSTED,
                     )
                     return
-                current = store.read(
-                    spec["owner_id"], spec["operation_id"]
-                )
-                if current.state == "verifying":
-                    store.transition(
-                        spec["owner_id"],
-                        spec["operation_id"],
-                        "running",
-                    )
-                    store.transition(
-                        spec["owner_id"],
-                        spec["operation_id"],
-                        "awaiting-callback",
-                    )
-
+                if not accept_verification_resubmission(
+                    previous_verification
+                ):
+                    return
             existing_verification = (
                 verification_receipt()
                 if verify_step is not None
@@ -2000,9 +2335,25 @@ def run(
             )
             if existing_verification is not None:
                 run_verification()
-                if callback_handled:
-                    return
                 existing_verification = verification_receipt()
+                if (
+                    existing_verification is not None
+                    and existing_verification["status"] == "failed"
+                ):
+                    allow_resubmit = (
+                        failed_verification_count()
+                        <= MAX_PIPELINE_VERIFY_RESUBMITS
+                    )
+                    notify_verification_attention(
+                        existing_verification,
+                        allow_resubmit=allow_resubmit,
+                    )
+                    if not allow_resubmit:
+                        summary_attention(
+                            "pipeline-verification-retry-exhausted",
+                            AttentionReason.RETRY_EXHAUSTED,
+                        )
+                    return
             if (
                 existing_verification is not None
                 and existing_verification["status"] == "complete"
