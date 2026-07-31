@@ -39,6 +39,7 @@ REQUEST_FIELDS = {
     "input_sha256",
     "input_head_sha",
     "prior_receipt_sha256",
+    "verification_sha256",
     "output_schema",
     "result_pointer",
     "output_pointer",
@@ -197,6 +198,22 @@ def _validate_request(
     )
     if (step_id == "reproduce") != (prior == ""):
         raise SubmitError("prior receipt binding does not match the phase")
+    verification = _sha256(
+        request.get("verification_sha256"),
+        "verification_sha256",
+        optional=True,
+    )
+    if iteration == 0:
+        if verification:
+            raise SubmitError(
+                "initial verification_sha256 binding must be empty"
+            )
+    elif not verification:
+        raise SubmitError(
+            "retry verification_sha256 binding must be present"
+        )
+    elif step_id == "reproduce":
+        raise SubmitError("retry cannot repeat the reproduce phase")
     result_pointer, result_path = _pointer(
         worktree, request.get("result_pointer"), "result_pointer"
     )
@@ -219,6 +236,7 @@ def _validate_request(
         "input_sha256": input_sha256,
         "input_head_sha": input_head_sha,
         "prior_receipt_sha256": prior,
+        "verification_sha256": verification,
         "output_schema": output_schema,
         "result_pointer": result_pointer,
         "output_pointer": output_pointer,
@@ -273,6 +291,7 @@ def _envelope(
         "input_sha256": request["input_sha256"],
         "input_head_sha": request["input_head_sha"],
         "prior_receipt_sha256": request["prior_receipt_sha256"],
+        "verification_sha256": request["verification_sha256"],
         "output_schema": request["output_schema"],
         "output_pointer": output_pointer,
         "output_sha256": observed_output_sha256,

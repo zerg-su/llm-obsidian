@@ -64,6 +64,8 @@ def request(
     worktree: Path,
     *,
     step_id: str = "reproduce",
+    iteration: int = 0,
+    verification_sha256: str = "",
     result_pointer: str = ".task-pipeline-step-result.json",
     output_pointer: str = ".task-pipeline-step-output.md",
 ) -> dict[str, object]:
@@ -75,19 +77,22 @@ def request(
     }[step_id]
     return {
         "schema_version": 1,
-        "operation_id": f"fix-parent-{step_id}-0-abcdef123456",
+        "operation_id": (
+            f"fix-parent-{step_id}-{iteration}-abcdef123456"
+        ),
         "run_id": sha(f"run:{step_id}")[:32],
         "parent_operation_id": "fix-parent",
         "lane_id": "fix-lane",
         "definition_sha256": sha("definition"),
         "step_id": step_id,
-        "iteration": 0,
+        "iteration": iteration,
         "input_schema": input_schema,
         "input_sha256": sha(f"input:{step_id}"),
         "input_head_sha": git(worktree, "rev-parse", "HEAD"),
         "prior_receipt_sha256": (
             "" if step_id == "reproduce" else sha("prior-receipt")
         ),
+        "verification_sha256": verification_sha256,
         "output_schema": output_schema,
         "result_pointer": result_pointer,
         "output_pointer": output_pointer,
@@ -193,6 +198,7 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
             "prior_receipt_sha256": raw_request[
                 "prior_receipt_sha256"
             ],
+            "verification_sha256": "",
             "output_schema": raw_request["output_schema"],
             "output_pointer": raw_request["output_pointer"],
             "output_sha256": sha_bytes(b"bounded phase evidence\n"),
@@ -210,6 +216,59 @@ with tempfile.TemporaryDirectory(prefix="pipeline-step-submit.") as raw:
         and (worktree / OUTBOX).read_bytes() == original_outbox
         and "already exists" in second.stderr,
         second.stderr,
+    )
+
+    reset_transport(worktree)
+    retry_request = request(
+        worktree,
+        step_id="root-cause",
+        iteration=1,
+        verification_sha256=sha("verification-packet"),
+    )
+    prepare(worktree, retry_request)
+    retry_result = run(worktree)
+    retry_callback = json.loads(
+        (worktree / OUTBOX).read_text(encoding="utf-8")
+    )
+    check(
+        "retry callback preserves its exact verification packet binding",
+        retry_result.returncode == 0
+        and retry_callback["payload"]["verification_sha256"]
+        == retry_request["verification_sha256"]
+        and retry_callback["payload"]["iteration"] == 1
+        and retry_callback["payload"]["step_id"] == "root-cause",
+        (retry_result.stderr, retry_callback),
+    )
+
+    reset_transport(worktree)
+    missing_retry_verification = request(
+        worktree,
+        step_id="root-cause",
+        iteration=1,
+    )
+    prepare(worktree, missing_retry_verification)
+    missing_verification_result = run(worktree)
+    check(
+        "retry request without a verification packet fails closed",
+        missing_verification_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "verification_sha256" in missing_verification_result.stderr,
+        missing_verification_result.stderr,
+    )
+
+    reset_transport(worktree)
+    first_pass_verification = request(
+        worktree,
+        verification_sha256=sha("unexpected-verification"),
+    )
+    prepare(worktree, first_pass_verification)
+    first_pass_verification_result = run(worktree)
+    check(
+        "initial pass rejects a retry verification binding",
+        first_pass_verification_result.returncode != 0
+        and not (worktree / OUTBOX).exists()
+        and "verification_sha256" in first_pass_verification_result.stderr,
+        first_pass_verification_result.stderr,
     )
 
     reset_transport(worktree)

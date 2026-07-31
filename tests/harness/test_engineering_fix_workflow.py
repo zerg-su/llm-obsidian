@@ -23,7 +23,9 @@ from harness.workflows.engineering_fix import (
     load_receipt,
     phase_envelope,
     prepare_next_phase,
+    prepare_retry_phase,
     reconcile_fix,
+    reconcile_retry_fix,
 )
 
 
@@ -300,6 +302,134 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
         complete,
     )
 
+    retry_verification = sha("failed-verification-packet")
+    failed_head = receipts[-1].head_sha
+    retry_head = "e" * 40
+    retry = prepare_retry_phase(
+        store,
+        parent_record,
+        definition_sha256=definition,
+        reproduction_receipt=reproduce_receipt,
+        verification_sha256=retry_verification,
+        failed_head_sha=failed_head,
+        current_head_sha=retry_head,
+        receipts=(),
+        iteration=1,
+    )
+    changed_store = OperationStore(root / "retry-changed-store")
+    changed_parent = parent(changed_store)
+    retry_changed_verification = prepare_retry_phase(
+        changed_store,
+        changed_parent,
+        definition_sha256=definition,
+        reproduction_receipt=reproduce_receipt,
+        verification_sha256=sha("different-verification-packet"),
+        failed_head_sha=failed_head,
+        current_head_sha=retry_head,
+        receipts=(),
+        iteration=1,
+    )
+    check(
+        "retry starts at root-cause and binds reproduction verification and both HEADs",
+        retry.step_id == "root-cause"
+        and retry.iteration == 1
+        and retry.prior_receipt_sha256
+        == reproduce_receipt.receipt_sha256
+        and retry.verification_sha256 == retry_verification
+        and retry.input_head_sha == retry_head
+        and retry.input_sha256
+        != retry_changed_verification.input_sha256,
+        (retry, retry_changed_verification),
+    )
+    retry_receipts = []
+    retry_round = retry
+    retry_heads = iter(("f" * 40, "1" * 40, "2" * 40))
+    for expected_step in FIX_PHASES[1:]:
+        next_head = next(retry_heads)
+        envelope = phase_envelope(
+            retry_round,
+            status="complete",
+            output_pointer=f"retry-{retry_round.step_id}.md",
+            output_sha256=sha(f"retry:{retry_round.step_id}"),
+            head_sha=next_head,
+        )
+        receipt = accept_phase(
+            store,
+            retry_round,
+            envelope,
+            current_head_sha=next_head,
+            receipt_path=(
+                receipt_root
+                / retry_round.spec.operation_id
+                / "receipt.json"
+            ),
+        )
+        retry_receipts.append(receipt)
+        retry_progress = reconcile_retry_fix(
+            parent_record,
+            definition_sha256=definition,
+            reproduction_receipt=reproduce_receipt,
+            verification_sha256=retry_verification,
+            failed_head_sha=failed_head,
+            current_head_sha=retry_head,
+            receipts=tuple(retry_receipts),
+            iteration=1,
+        )
+        check(
+            f"retry {expected_step} preserves the exact verification binding",
+            receipt.step_id == expected_step
+            and receipt.verification_sha256 == retry_verification
+            and retry_progress.completed_steps
+            == tuple(item.step_id for item in retry_receipts),
+            (receipt, retry_progress),
+        )
+        if retry_progress.action == "start":
+            retry_round = prepare_retry_phase(
+                store,
+                parent_record,
+                definition_sha256=definition,
+                reproduction_receipt=reproduce_receipt,
+                verification_sha256=retry_verification,
+                failed_head_sha=failed_head,
+                current_head_sha=retry_head,
+                receipts=tuple(retry_receipts),
+                iteration=1,
+            )
+    check(
+        "three retry receipts reconstruct completion without repeating reproduce",
+        retry_progress.action == "complete"
+        and retry_progress.completed_steps == FIX_PHASES[1:],
+        retry_progress,
+    )
+    expect_error(
+        "retry receipt cannot replay against another failed HEAD",
+        lambda: reconcile_retry_fix(
+            parent_record,
+            definition_sha256=definition,
+            reproduction_receipt=reproduce_receipt,
+            verification_sha256=retry_verification,
+            failed_head_sha="3" * 40,
+            current_head_sha=retry_head,
+            receipts=(retry_receipts[0],),
+            iteration=1,
+        ),
+        "replay identity",
+    )
+    expect_error(
+        "retry API rejects the initial iteration",
+        lambda: reconcile_retry_fix(
+            parent_record,
+            definition_sha256=definition,
+            reproduction_receipt=reproduce_receipt,
+            verification_sha256=retry_verification,
+            failed_head_sha=failed_head,
+            current_head_sha=retry_head,
+            receipts=(),
+            iteration=0,
+        ),
+        "iteration",
+    )
+
     expect_error(
         "out-of-order receipts fail closed",
         lambda: reconcile_fix(
@@ -347,7 +477,7 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
         approved_plan_sha256=plan,
         initial_head_sha=initial_head,
         receipts=(),
-        iteration=1,
+        iteration=0,
     )
     cannot = phase_envelope(
         attention_round,
@@ -369,7 +499,7 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
         approved_plan_sha256=plan,
         initial_head_sha=initial_head,
         receipts=(cannot_receipt,),
-        iteration=1,
+        iteration=0,
     )
     check(
         "cannot-reproduce is an accepted typed result that reconstructs attention",
@@ -389,6 +519,18 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
             head_sha=initial_head,
         ),
         "cannot-reproduce",
+    )
+    expect_error(
+        "initial phase API cannot synthesize a retry reproduce pass",
+        lambda: reconcile_fix(
+            attention_parent,
+            definition_sha256=definition,
+            approved_plan_sha256=plan,
+            initial_head_sha=initial_head,
+            receipts=(),
+            iteration=1,
+        ),
+        "initial iteration",
     )
 
     changed = json.loads(reproduce_receipt_path.read_text(encoding="utf-8"))

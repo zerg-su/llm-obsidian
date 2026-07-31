@@ -29,6 +29,7 @@ FIX_PHASES = (
     "regression-test",
     "minimal-fix",
 )
+RETRY_PHASES = FIX_PHASES[1:]
 PHASE_SCHEMAS = {
     "reproduce": ("approved-plan/v1", "reproduction/v1"),
     "root-cause": ("reproduction/v1", "diagnosis/v1"),
@@ -49,6 +50,7 @@ RECEIPT_FIELDS = {
     "input_sha256",
     "input_head_sha",
     "prior_receipt_sha256",
+    "verification_sha256",
     "output_schema",
     "output_pointer",
     "output_sha256",
@@ -121,6 +123,7 @@ class FixStepReceipt:
     input_sha256: str
     input_head_sha: str
     prior_receipt_sha256: str
+    verification_sha256: str
     output_schema: str
     output_pointer: str
     output_sha256: str
@@ -160,6 +163,20 @@ class FixStepReceipt:
                 self.prior_receipt_sha256,
                 "receipt prior_receipt_sha256",
             )
+        if self.iteration == 0:
+            if self.verification_sha256:
+                raise FixWorkflowError(
+                    "initial receipt verification_sha256 must be empty"
+                )
+        else:
+            _sha256(
+                self.verification_sha256,
+                "receipt verification_sha256",
+            )
+            if self.step_id == "reproduce":
+                raise FixWorkflowError(
+                    "retry receipt cannot repeat the reproduce phase"
+                )
         _sha256(self.output_sha256, "receipt output_sha256")
         _git_oid(self.input_head_sha, "receipt input_head_sha")
         _git_oid(self.head_sha, "receipt head_sha")
@@ -191,6 +208,7 @@ class FixPhaseRound:
     input_sha256: str
     input_head_sha: str
     prior_receipt_sha256: str
+    verification_sha256: str
     output_schema: str
 
     def __post_init__(self) -> None:
@@ -199,6 +217,14 @@ class FixPhaseRound:
         _identifier(self.parent_operation_id, "fix phase parent_operation_id")
         if self.step_id not in FIX_PHASES:
             raise FixWorkflowError("fix phase is unknown")
+        if (
+            not isinstance(self.iteration, int)
+            or isinstance(self.iteration, bool)
+            or self.iteration < 0
+        ):
+            raise FixWorkflowError(
+                "fix phase iteration must be non-negative"
+            )
         if self.spec.contract_sha256 == "":
             raise FixWorkflowError("fix phase requires a compiled contract")
         for value, label in (
@@ -206,6 +232,20 @@ class FixPhaseRound:
             (self.run_id, "fix phase run_id"),
         ):
             _identifier(value, label)
+        if self.iteration == 0:
+            if self.verification_sha256:
+                raise FixWorkflowError(
+                    "initial phase verification_sha256 must be empty"
+                )
+        else:
+            _sha256(
+                self.verification_sha256,
+                "fix phase verification_sha256",
+            )
+            if self.step_id == "reproduce":
+                raise FixWorkflowError(
+                    "retry phase cannot repeat the reproduce phase"
+                )
 
 
 @dataclass(frozen=True)
@@ -234,6 +274,8 @@ def _input_sha256(
     input_head_sha: str,
     approved_plan_sha256: str,
     prior_receipt_sha256: str,
+    verification_sha256: str,
+    failed_head_sha: str,
 ) -> str:
     return _digest(
         {
@@ -255,6 +297,16 @@ def _input_sha256(
                 if prior_receipt_sha256
                 else ""
             ),
+            "verification_sha256": (
+                _sha256(verification_sha256, "verification_sha256")
+                if verification_sha256
+                else ""
+            ),
+            "failed_head_sha": (
+                _git_oid(failed_head_sha, "failed_head_sha")
+                if failed_head_sha
+                else ""
+            ),
         }
     )
 
@@ -268,6 +320,7 @@ def _round_identity(
     input_sha256: str,
     input_head_sha: str,
     prior_receipt_sha256: str,
+    verification_sha256: str,
 ) -> FixPhaseRound:
     input_schema, output_schema = PHASE_SCHEMAS[step_id]
     short = {
@@ -311,6 +364,7 @@ def _round_identity(
         input_sha256=input_sha256,
         input_head_sha=input_head_sha,
         prior_receipt_sha256=prior_receipt_sha256,
+        verification_sha256=verification_sha256,
         output_schema=output_schema,
     )
 
@@ -350,6 +404,8 @@ def _expected_round(
         input_head_sha=input_head_sha,
         approved_plan_sha256=approved_plan_sha256,
         prior_receipt_sha256=prior_sha256,
+        verification_sha256="",
+        failed_head_sha="",
     )
     return _round_identity(
         parent,
@@ -359,6 +415,7 @@ def _expected_round(
         input_sha256=input_sha256,
         input_head_sha=input_head_sha,
         prior_receipt_sha256=prior_sha256,
+        verification_sha256="",
     )
 
 
@@ -380,12 +437,8 @@ def reconcile_fix(
         raise FixWorkflowError(
             "fix definition does not match the immutable parent contract"
         )
-    if (
-        not isinstance(iteration, int)
-        or isinstance(iteration, bool)
-        or iteration < 0
-    ):
-        raise FixWorkflowError("fix iteration must be non-negative")
+    if iteration != 0 or isinstance(iteration, bool):
+        raise FixWorkflowError("initial iteration must be zero")
     if len(receipts) > len(FIX_PHASES):
         raise FixWorkflowError("fix receipts exceed the fixed phase count")
 
@@ -418,6 +471,8 @@ def reconcile_fix(
             or receipt.input_head_sha != expected.input_head_sha
             or receipt.prior_receipt_sha256
             != expected.prior_receipt_sha256
+            or receipt.verification_sha256
+            != expected.verification_sha256
             or receipt.output_schema != expected.output_schema
         ):
             raise FixWorkflowError("fix receipt replay identity changed")
@@ -438,6 +493,207 @@ def reconcile_fix(
     if len(receipts) == len(FIX_PHASES):
         return FixProgress("complete", "", completed, prior)
     return FixProgress("start", FIX_PHASES[len(receipts)], completed, prior)
+
+
+def _validate_retry_context(
+    parent: OperationRecord,
+    *,
+    definition_sha256: str,
+    reproduction_receipt: FixStepReceipt,
+    verification_sha256: str,
+    failed_head_sha: str,
+    current_head_sha: str,
+    iteration: int,
+) -> None:
+    _sha256(definition_sha256, "definition_sha256")
+    _sha256(verification_sha256, "verification_sha256")
+    _git_oid(failed_head_sha, "failed_head_sha")
+    _git_oid(current_head_sha, "current_head_sha")
+    if parent.spec.contract_sha256 != definition_sha256:
+        raise FixWorkflowError(
+            "fix definition does not match the immutable parent contract"
+        )
+    if (
+        not isinstance(iteration, int)
+        or isinstance(iteration, bool)
+        or iteration < 1
+    ):
+        raise FixWorkflowError("retry iteration must be at least one")
+    if (
+        reproduction_receipt.step_id != "reproduce"
+        or reproduction_receipt.iteration != 0
+        or reproduction_receipt.status != "complete"
+        or reproduction_receipt.output_schema != "reproduction/v1"
+        or reproduction_receipt.verification_sha256
+        or reproduction_receipt.definition_sha256 != definition_sha256
+        or reproduction_receipt.parent_operation_id
+        != parent.spec.operation_id
+        or reproduction_receipt.lane_id != parent.lane_id
+    ):
+        raise FixWorkflowError(
+            "retry requires the original accepted reproduction receipt"
+        )
+
+
+def _expected_retry_round(
+    parent: OperationRecord,
+    *,
+    definition_sha256: str,
+    reproduction_receipt: FixStepReceipt,
+    verification_sha256: str,
+    failed_head_sha: str,
+    current_head_sha: str,
+    step_id: str,
+    iteration: int,
+    prior_receipt: FixStepReceipt | None,
+) -> FixPhaseRound:
+    input_schema, _output_schema = PHASE_SCHEMAS[step_id]
+    if prior_receipt is None:
+        if step_id != RETRY_PHASES[0]:
+            raise FixWorkflowError(
+                "fix retry receipts are not an ordered prefix"
+            )
+        input_head_sha = current_head_sha
+        prior_sha256 = reproduction_receipt.receipt_sha256
+    else:
+        expected_index = RETRY_PHASES.index(prior_receipt.step_id) + 1
+        if (
+            expected_index >= len(RETRY_PHASES)
+            or RETRY_PHASES[expected_index] != step_id
+            or prior_receipt.status != "complete"
+            or prior_receipt.output_schema != input_schema
+        ):
+            raise FixWorkflowError(
+                "fix retry receipts are not an ordered prefix"
+            )
+        input_head_sha = prior_receipt.head_sha
+        prior_sha256 = prior_receipt.receipt_sha256
+    input_sha256 = _input_sha256(
+        definition_sha256=definition_sha256,
+        step_id=step_id,
+        iteration=iteration,
+        input_schema=input_schema,
+        input_head_sha=input_head_sha,
+        approved_plan_sha256="",
+        prior_receipt_sha256=prior_sha256,
+        verification_sha256=verification_sha256,
+        failed_head_sha=failed_head_sha,
+    )
+    return _round_identity(
+        parent,
+        definition_sha256=definition_sha256,
+        step_id=step_id,
+        iteration=iteration,
+        input_sha256=input_sha256,
+        input_head_sha=input_head_sha,
+        prior_receipt_sha256=prior_sha256,
+        verification_sha256=verification_sha256,
+    )
+
+
+def reconcile_retry_fix(
+    parent: OperationRecord,
+    *,
+    definition_sha256: str,
+    reproduction_receipt: FixStepReceipt,
+    verification_sha256: str,
+    failed_head_sha: str,
+    current_head_sha: str,
+    receipts: Sequence[FixStepReceipt],
+    iteration: int,
+) -> FixProgress:
+    """Reconstruct one bounded post-verification retry from exact receipts."""
+
+    _validate_retry_context(
+        parent,
+        definition_sha256=definition_sha256,
+        reproduction_receipt=reproduction_receipt,
+        verification_sha256=verification_sha256,
+        failed_head_sha=failed_head_sha,
+        current_head_sha=current_head_sha,
+        iteration=iteration,
+    )
+    if len(receipts) > len(RETRY_PHASES):
+        raise FixWorkflowError(
+            "fix retry receipts exceed the bounded phase count"
+        )
+
+    prior: FixStepReceipt | None = None
+    for index, receipt in enumerate(receipts):
+        expected_step = RETRY_PHASES[index]
+        if receipt.step_id != expected_step:
+            raise FixWorkflowError(
+                "fix retry receipts are not an ordered prefix"
+            )
+        expected = _expected_retry_round(
+            parent,
+            definition_sha256=definition_sha256,
+            reproduction_receipt=reproduction_receipt,
+            verification_sha256=verification_sha256,
+            failed_head_sha=failed_head_sha,
+            current_head_sha=current_head_sha,
+            step_id=expected_step,
+            iteration=iteration,
+            prior_receipt=prior,
+        )
+        if (
+            receipt.definition_sha256 != definition_sha256
+            or receipt.parent_operation_id != parent.spec.operation_id
+            or receipt.iteration != iteration
+            or receipt.operation_id != expected.spec.operation_id
+            or receipt.lane_id != expected.lane_id
+            or receipt.run_id != expected.run_id
+            or receipt.input_schema != expected.input_schema
+            or receipt.input_sha256 != expected.input_sha256
+            or receipt.input_head_sha != expected.input_head_sha
+            or receipt.prior_receipt_sha256
+            != expected.prior_receipt_sha256
+            or receipt.verification_sha256
+            != expected.verification_sha256
+            or receipt.output_schema != expected.output_schema
+        ):
+            raise FixWorkflowError(
+                "fix retry receipt replay identity changed"
+            )
+        prior = receipt
+
+    completed = tuple(item.step_id for item in receipts)
+    if len(receipts) == len(RETRY_PHASES):
+        return FixProgress("complete", "", completed, prior)
+    return FixProgress(
+        "start", RETRY_PHASES[len(receipts)], completed, prior
+    )
+
+
+def _prepare_round(
+    store: OperationStore,
+    round_: FixPhaseRound,
+) -> FixPhaseRound:
+    try:
+        record = store.create(
+            round_.spec,
+            lane_id=round_.lane_id,
+            run_id=round_.run_id,
+        )
+        if record.state == "created":
+            for state in (
+                "preflight",
+                "starting",
+                "running",
+                "awaiting-callback",
+            ):
+                store.transition(
+                    round_.spec.owner_id,
+                    round_.spec.operation_id,
+                    state,
+                )
+        elif record.state != "awaiting-callback":
+            raise FixWorkflowError(
+                "fix phase operation is not awaiting its exact callback"
+            )
+    except (ContractError, StoreError) as exc:
+        raise FixWorkflowError("fix phase operation identity changed") from exc
+    return round_
 
 
 def prepare_next_phase(
@@ -473,26 +729,49 @@ def prepare_next_phase(
         iteration=iteration,
         prior_receipt=progress.prior_receipt,
     )
-    try:
-        record = store.create(
-            round_.spec,
-            lane_id=round_.lane_id,
-            run_id=round_.run_id,
+    return _prepare_round(store, round_)
+
+
+def prepare_retry_phase(
+    store: OperationStore,
+    parent: OperationRecord,
+    *,
+    definition_sha256: str,
+    reproduction_receipt: FixStepReceipt,
+    verification_sha256: str,
+    failed_head_sha: str,
+    current_head_sha: str,
+    receipts: Sequence[FixStepReceipt],
+    iteration: int,
+) -> FixPhaseRound:
+    """Create or replay the first missing phase of one bounded retry."""
+
+    progress = reconcile_retry_fix(
+        parent,
+        definition_sha256=definition_sha256,
+        reproduction_receipt=reproduction_receipt,
+        verification_sha256=verification_sha256,
+        failed_head_sha=failed_head_sha,
+        current_head_sha=current_head_sha,
+        receipts=receipts,
+        iteration=iteration,
+    )
+    if progress.action != "start":
+        raise FixWorkflowError(
+            f"fix retry cannot prepare a phase from {progress.action}"
         )
-        if record.state == "created":
-            for state in ("preflight", "starting", "running", "awaiting-callback"):
-                store.transition(
-                    round_.spec.owner_id,
-                    round_.spec.operation_id,
-                    state,
-                )
-        elif record.state != "awaiting-callback":
-            raise FixWorkflowError(
-                "fix phase operation is not awaiting its exact callback"
-            )
-    except (ContractError, StoreError) as exc:
-        raise FixWorkflowError("fix phase operation identity changed") from exc
-    return round_
+    round_ = _expected_retry_round(
+        parent,
+        definition_sha256=definition_sha256,
+        reproduction_receipt=reproduction_receipt,
+        verification_sha256=verification_sha256,
+        failed_head_sha=failed_head_sha,
+        current_head_sha=current_head_sha,
+        step_id=progress.step_id,
+        iteration=iteration,
+        prior_receipt=progress.prior_receipt,
+    )
+    return _prepare_round(store, round_)
 
 
 def phase_envelope(
@@ -521,6 +800,7 @@ def phase_envelope(
         "input_sha256": round_.input_sha256,
         "input_head_sha": round_.input_head_sha,
         "prior_receipt_sha256": round_.prior_receipt_sha256,
+        "verification_sha256": round_.verification_sha256,
         "output_schema": round_.output_schema,
         "output_pointer": _relative(output_pointer, "output_pointer"),
         "output_sha256": _sha256(output_sha256, "output_sha256"),
@@ -566,6 +846,7 @@ def _receipt_from_envelope(
         "input_sha256": round_.input_sha256,
         "input_head_sha": round_.input_head_sha,
         "prior_receipt_sha256": round_.prior_receipt_sha256,
+        "verification_sha256": round_.verification_sha256,
         "output_schema": round_.output_schema,
     }
     if any(payload.get(key) != value for key, value in expected.items()):
@@ -587,6 +868,7 @@ def _receipt_from_envelope(
             input_sha256=str(payload["input_sha256"]),
             input_head_sha=str(payload["input_head_sha"]),
             prior_receipt_sha256=str(payload["prior_receipt_sha256"]),
+            verification_sha256=str(payload["verification_sha256"]),
             output_schema=str(payload["output_schema"]),
             output_pointer=str(payload.get("output_pointer") or ""),
             output_sha256=str(payload.get("output_sha256") or ""),
