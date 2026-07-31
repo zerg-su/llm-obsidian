@@ -16,6 +16,7 @@ import review_contract
 import wiki_summary_contract
 import daily_contract
 import task_contract
+from harness.custom_pipelines import CUSTOM_SPEC_VERSION, REVIEW_MODES
 
 
 def load(name: str) -> dict:
@@ -83,6 +84,14 @@ assert review_v3["allOf"] == [
         },
     },
 ]
+pipeline_spec = load("pipeline-spec-v1.schema.json")
+assert pipeline_spec["properties"]["schema_version"] == {"const": CUSTOM_SPEC_VERSION}
+assert set(pipeline_spec["properties"]["review_mode"]["enum"]) == REVIEW_MODES
+assert pipeline_spec["additionalProperties"] is False
+assert pipeline_spec["properties"]["steps"]["maxItems"] == 8
+assert pipeline_spec["properties"]["context_pointers"]["items"] == {
+    "$ref": "#/$defs/contextPointer"
+}
 research = load("research-artifact-v2.schema.json")
 source_props = research["properties"]["sources"]["items"]["properties"]
 assert set(source_props["source_class"]["enum"]) == research_contract.SOURCE_CLASSES
