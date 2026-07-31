@@ -138,6 +138,8 @@ test-release-acceptance:
 test-live-acceptance-runner:
 	@echo "=== test_live_acceptance_runner.py ==="
 	@python3 tests/test_live_acceptance_runner.py
+	@echo "=== test_live_acceptance_surface_cleanup.py ==="
+	@python3 tests/test_live_acceptance_surface_cleanup.py
 
 test-pipeline-runners:
 	@echo "=== deterministic dispatch/reap runners ==="
