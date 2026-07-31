@@ -308,7 +308,10 @@ def execute_release(
         request = {**contract_cell, "commit_sha": commit_sha}
         try:
             value = selected_driver(root, request, timeout=timeout)
-        except Exception as exc:
+        # BaseException: an operator interrupt must leave the same durable
+        # classification as any other incomplete cell, otherwise the leak is
+        # invisible to a resume and the cell is silently skipped.
+        except BaseException as exc:
             prior_attempt = (
                 int(failures[0]["attempt"])
                 if failures and failures[0]["cell_id"] == cell_id
