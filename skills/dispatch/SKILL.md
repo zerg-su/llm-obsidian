@@ -8,11 +8,9 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # /dispatch — approved task handoff
 
-Use this skill to open an isolated task to the right of the current cmux
-surface. The coordinator shapes and approves the plan; the task executes it.
-The default route inherits the current session. Do not use a same-runtime
-external split when an internal agent satisfies the request unless the user
-explicitly asks for a visible persistent session.
+Open an isolated task to the right of the cmux surface. The coordinator
+approves the plan; the task executes it. Inherit the current route. Prefer an
+internal agent unless the user requests a persistent session.
 
 ## Normal path
 
@@ -49,56 +47,29 @@ explicitly asks for a visible persistent session.
    `attention`. Never infer autonomous mode after approval. If the deterministic
    selector proves that no built-in expresses the approved task, propose one
    strict `PipelineSpec` from `schemas/pipeline-spec-v1.schema.json` under the
-   same ignored request scratch, set `pipeline=custom`, and include its absolute
-   `custom_pipeline_spec`. Use only registered sequential primitives, typed
-   transitions, code-bounded loops, `executor-default`, approved context hashes,
-   and registered verification checks. Never emit commands, arbitrary paths or
-   providers, or capabilities outside code-owned ceilings. Recommend a built-in
-   whenever it fits; custom is a semantic-gap path, not a preference toggle.
+   same ignored scratch, set `pipeline=custom`, and include its absolute
+   `custom_pipeline_spec`. Allow only registered sequential primitives/checks,
+   typed transitions, bounded loops, `executor-default`, and approved context
+   hashes. Reject commands, arbitrary paths/providers, and authority expansion.
+   Custom is only for a proven semantic gap.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
-6. Show the typed route/hash and one echo-confirm block:
-
-   ```bash
-   python3 <vault-root>/scripts/dispatch-runner.py validate --spec <request.json>
-   ```
-
-   Include exact repo/base/branch/worktree, runtime/model/effort, plan, selected
-   context, `interaction_policy`, review/reap/surface/watchdog policy, and all
-   forbidden effects. For custom, show the rendered baseline delta, route and
-   capabilities, enforcement-labelled permissions/effects, worst-case node and
-   model counts, loop stops, terminal outcomes, and absolute budget ceiling.
-   Do not freeze, mutate, or spawn before explicit approval of that exact
-   definition hash. For custom pipelines, validation also returns and persists
-   one owner-only pending `challenge_sha256` bound to the exact
-   request/spec/plan, coordinator surface/session, route, prompt, review policy,
-   and rendered approval card.
-7. Ask the user once. Record the exact answer as a separate durable decision;
-   `validate` output is never itself authorization:
-
-   ```bash
-   python3 <vault-root>/scripts/dispatch-runner.py approve \
-     --spec <request.json> \
-     --challenge-sha256 <exact-validate-challenge> \
-     --decision approve|reject|revise
-   ```
-
-   `reject` and `revise` remain terminal for that request UUID. Only `approve`
-   returns a random one-shot `approval_token`; it does not exist before the
-   user-decision boundary.
-8. After approval, start the exact UUID once:
-
-   ```bash
-   python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json> \
-     --approval-token <exact-one-shot-token>  # custom only
-   ```
-
-   Never synthesize a decision, calculate/replace a token, or reuse one from
-   another request. The start atomically consumes it. A custom start without
-   the post-decision token, or after any bound input changes, fails before
-   worktree/cmux effects. Built-in starts omit the option.
-
+6. Run `python3 <vault-root>/scripts/dispatch-runner.py validate --spec
+   <request.json>` and show its typed route/hash echo-confirm block. Include the
+   exact target, route, plan/context, interaction/review/reap/surface/watchdog
+   policy, forbidden effects and, for custom, baseline delta, enforceable plus
+   inherited authority, limits, stops and outcomes. Custom validation persists
+   an owner-only `challenge_sha256` bound to every material input and origin;
+   it is not authorization.
+7. Ask once, then record the answer with `python3 <vault-root>/scripts/dispatch-runner.py
+   approve --spec <request.json> --challenge-sha256 <exact-validate-challenge>
+   --decision approve|reject|revise`. Reject/revise are terminal. Only approve
+   returns `approval_token`.
+8. Start once with `python3 <vault-root>/scripts/dispatch-runner.py start --spec
+   <request.json> --approval-token <exact-one-shot-token>` for custom, omitting
+   the token for built-ins. Never synthesize decisions/tokens or reuse a token;
+   start consumes it atomically and rejects drift before effects.
 9. Show the bounded typed launch result. When it returns
    `coordinator_action: return-to-idle-without-polling`, end this turn. Do not
    poll, wait, or run monitors; typed callbacks resume the idle coordinator.
@@ -106,8 +77,7 @@ explicitly asks for a visible persistent session.
 ## Runner contract
 
 `dispatch-runner.py` owns worktree creation, route sync, prompt rendering,
-v3 `.task-meta.json`, exact task identity, and one `vault-write.py` log
-transaction. The generic provider runtime owns the anchored split/workspace,
+v3 metadata, identity, and one `vault-write.py` transaction. The generic provider runtime owns the anchored split/workspace,
 provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
 failed requests fail closed.
