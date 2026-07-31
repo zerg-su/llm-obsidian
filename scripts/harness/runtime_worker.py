@@ -2910,6 +2910,10 @@ def run(
                         "schema_version": 1,
                         "operation_id": spec["operation_id"],
                         "packet_sha256": packet_sha256,
+                        "reviewed_head_sha": packet[
+                            "reviewed_head_sha"
+                        ],
+                        "summary_sha256": digest,
                         "status": "pending",
                     },
                 )
@@ -2918,7 +2922,9 @@ def run(
                     f"{packet_path.name}. Resolve every finding as applied or "
                     "rejected and commit a new HEAD; for escalation use the "
                     "task_escalation.py raise contract. Do not launch review. "
-                    "Remain available for same-session verification."
+                    "Refresh .task-summary.json after the commit so it covers "
+                    "the final HEAD. Remain available for same-session "
+                    "verification."
                 )
                 if len(message.encode()) > 4096:
                     raise RuntimeWorkerError(
@@ -2932,9 +2938,91 @@ def run(
                         "schema_version": 1,
                         "operation_id": spec["operation_id"],
                         "packet_sha256": packet_sha256,
+                        "reviewed_head_sha": packet[
+                            "reviewed_head_sha"
+                        ],
+                        "summary_sha256": digest,
                         "status": "sent",
                     },
                 )
+
+            def wait_for_summary_refresh_after_resolution(
+                gate_state: dict[str, object],
+            ) -> bool:
+                resolution_path = (
+                    spec_path.parent
+                    / "pipeline-review-resolution-notify.json"
+                )
+                if not resolution_path.is_file():
+                    return False
+                if resolution_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "review resolution notification cannot be a symlink"
+                    )
+                resolution = json.loads(
+                    resolution_path.read_text(encoding="utf-8")
+                )
+                reviewed_head = str(
+                    resolution.get("reviewed_head_sha") or ""
+                )
+                initial_summary = str(
+                    resolution.get("summary_sha256") or ""
+                )
+                context = gate_state.get("context")
+                approved_head = (
+                    str(context.get("head_sha") or "")
+                    if isinstance(context, dict)
+                    else ""
+                )
+                if (
+                    resolution.get("schema_version") != 1
+                    or resolution.get("operation_id")
+                    != spec["operation_id"]
+                    or resolution.get("status") != "sent"
+                    or not re.fullmatch(r"[0-9a-f]{40,64}", reviewed_head)
+                    or not re.fullmatch(r"[0-9a-f]{64}", initial_summary)
+                    or not re.fullmatch(r"[0-9a-f]{40,64}", approved_head)
+                ):
+                    raise RuntimeWorkerError(
+                        "review resolution summary binding is invalid"
+                    )
+                if approved_head == reviewed_head or digest != initial_summary:
+                    return False
+                notify_path = (
+                    spec_path.parent
+                    / "pipeline-summary-refresh-notify.json"
+                )
+                marker = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "approved_head_sha": approved_head,
+                    "summary_sha256": digest,
+                }
+                if notify_path.is_file():
+                    if notify_path.is_symlink():
+                        raise RuntimeWorkerError(
+                            "summary refresh notification cannot be a symlink"
+                        )
+                    existing = json.loads(
+                        notify_path.read_text(encoding="utf-8")
+                    )
+                    if all(
+                        existing.get(field) == value
+                        for field, value in marker.items()
+                    ) and existing.get("status") == "sent":
+                        return True
+                _atomic_json(notify_path, {**marker, "status": "pending"})
+                message = (
+                    "Refresh .task-summary.json before finalization: its body "
+                    "still describes the pre-resolution HEAD. Preserve the "
+                    "exact schema/type/title/session, cover every applied or "
+                    "rejected finding, and summarize final HEAD "
+                    f"{approved_head}."
+                )
+                cmux_adapter.send(spec["surface_id"], message)
+                cmux_adapter.send_key(spec["surface_id"], "Enter")
+                _atomic_json(notify_path, {**marker, "status": "sent"})
+                return True
 
             steps = pipeline.definition.steps
             primitive_shape = tuple(
@@ -4242,6 +4330,10 @@ def run(
                 raise RuntimeWorkerError(
                     "compiled pipeline returned an invalid finalization action"
                 )
+            if wait_for_summary_refresh_after_resolution(
+                review_gate_state()
+            ):
+                return
             callback_handled = True
             encoded = json.dumps(
                 summary, sort_keys=True, separators=(",", ":")

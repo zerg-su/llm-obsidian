@@ -1941,6 +1941,25 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     capture_output=True,
                     check=True,
                 )
+                refresh = (
+                    root
+                    / f"state-{asynchronous_task}"
+                    / "pipeline-summary-refresh-notify.json"
+                )
+                for _ in range(100):
+                    if refresh.is_file():
+                        break
+                    time.sleep(0.02)
+                else:
+                    return
+                summary_path = worktree / ".task-summary.json"
+                refreshed = json.loads(
+                    summary_path.read_text(encoding="utf-8")
+                )
+                refreshed["body"] += (
+                    "\n\nResolved the material review finding at final HEAD."
+                )
+                write_json(summary_path, refreshed)
 
             threading.Thread(target=resolve_after_packet).start()
             return
@@ -1980,14 +1999,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "engineering change re-verifies the new resolution HEAD before same-session review",
         asynchronous_rc == 0
         and len(asynchronous_calls) == 4
+        and len(asynchronous_verification_heads) == 3
         and len(set(asynchronous_verification_heads)) == 2
-        and len(asynchronous_verification_calls) == 6
+        and len(asynchronous_verification_calls) == 9
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
-        and len(asynchronous_cmux.sent) == 2
+        and len(asynchronous_cmux.sent) == 3
         and asynchronous_cmux.sent[0][0] == CHILD
         and "Typed review findings" in asynchronous_cmux.sent[0][1]
-        and asynchronous_cmux.sent[1][0] == ORIGIN,
+        and asynchronous_cmux.sent[1][0] == CHILD
+        and "Refresh .task-summary.json" in asynchronous_cmux.sent[1][1]
+        and asynchronous_cmux.sent[2][0] == ORIGIN,
         (
             asynchronous_calls,
             asynchronous_verification_heads,
@@ -2006,6 +2028,24 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         )["findings"][0]["finding_id"]
         == "F-material",
         asynchronous_packet,
+    )
+    asynchronous_refresh = (
+        root
+        / f"state-{asynchronous_task}"
+        / "pipeline-summary-refresh-notify.json"
+    )
+    check(
+        "review resolution cannot finalize with its pre-resolution summary",
+        asynchronous_refresh.is_file()
+        and "final HEAD"
+        in json.loads(
+            (
+                root
+                / f"worktree-{asynchronous_task}"
+                / ".task-summary.json"
+            ).read_text(encoding="utf-8")
+        )["body"],
+        asynchronous_refresh,
     )
 
     pending_task = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
