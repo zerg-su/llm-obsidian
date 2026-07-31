@@ -919,6 +919,14 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         "task review runner is a public code-owned lifecycle facade",
         module_spec is not None and module_spec.loader is not None,
     )
+    runner_source = (ROOT / "scripts/task-review-runner.py").read_text(
+        encoding="utf-8"
+    )
+    check(
+        "deep resolution stops after the first exhausted lane",
+        'if decision.action == "attention-required":\n                break'
+        in runner_source,
+    )
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)
     task_store = OperationStore(vault / ".vault-meta/harness")

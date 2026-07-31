@@ -978,6 +978,8 @@ def _run_review(
                 ),
                 prepare_round=prepare_round,
             )
+            if decision.action == "attention-required":
+                break
         next_status = (
             decision.action
             if decision is not None
