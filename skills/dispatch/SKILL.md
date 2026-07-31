@@ -39,8 +39,7 @@ internal agent unless the user requests a persistent session.
    `.vault-meta/dispatch-requests/<request-id>.json` containing schema version,
    canonical UUID, task/description, absolute vault/repo/worktree, branch/base,
    absolute pending `plan_file`, optional executor override, verified context,
-   reap type/title plus optional `plan_mode=shared` when several tasks use one
-   approved master plan, and a review object (`mode`, `cross_model`, and optional
+   reap type/title/mode, and a review object (`mode`, `cross_model`, and optional
    expert `runtime`/`model`/`effort`). `skip` cannot carry review overrides.
    Freeze one code-owned pipeline selected during clarification:
    `lifecycle/default`, `engineering/change`, or `engineering/fix`. A fix also
@@ -83,12 +82,12 @@ provider launch, callback relay, resume, and exact cleanup. A UUID is
 claimed before mutation; launched requests are idempotent, while preparing or
 failed requests fail closed.
 
-The metadata retains `interaction_policy`, `approved_plan_sha256`,
-`forbidden_actions`, and `watchdog_policy`. It also freezes the exact review
-preset, its deterministic simple/deep/skip budget (1/2/0), and the coordinator
-verification profile digest. A default `final` reap closes its task plan;
-`shared` files the exact task result while retaining the unchanged approved
-master plan for sibling tasks. `engineering/fix` runs one persistent executor
+The metadata freezes the exact review preset, its deterministic simple/deep/skip
+budget (1/2/0), and the coordinator verification profile digest. Reap mode
+`final` closes its plan; `shared` retains an unchanged pending plan.
+Metadata binds `interaction_policy`, `approved_plan_sha256`,
+`forbidden_actions`, and `watchdog_policy`.
+`engineering/fix` runs one persistent executor
 session through exact harness prompts for `reproduce`, `root-cause`,
 `regression-test`, and `minimal-fix`. The model submits a bounded result through
 `pipeline-step-submit.py`; the coordinator owns immutable receipts and never
@@ -111,11 +110,9 @@ After the semantic pipeline and verification finish, the task writes
 resolution, same-session verification, and terminal authorization. Material
 findings arrive as a typed `.task-review.json` packet plus one exact-surface
 notification; the task applies or rejects every finding in a new commit, or
-uses the normal escalation contract. The task must not launch or orchestrate
-reviewer sessions itself. Generic target
-repositories do not need to ship swarm scripts or routing/verification
-configuration. The code-owned provider runtime owns runtime argv, trust
-prompts, process lifecycle, watchdog, and close-after-exit.
+uses the normal escalation contract. The code-owned provider runtime, not the
+task or target repository, owns reviewer launch, routing, argv, trust prompts,
+watchdog, and close-after-exit.
 Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
 write roots plus localhost-only loopback and cmux-socket policy. `DCG_CONFIG`
 and trusted-`PATH` hardening currently belong to the classic compatibility
