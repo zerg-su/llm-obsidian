@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
 
 from harness.contracts import RuntimeRoute, to_dict
+from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionError, RuntimeSessionManager
 from harness.store import OperationStore, StoreError
 from harness.verification import VerificationError, load_profiles
@@ -256,10 +257,7 @@ def _materialize_prompts(
                 "Read those pointers, inspect the exact product HEAD, and do not edit it.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 "Do not run cd or copy packet files; they are readable in place.",
-                "Return exactly one review-round JSON object with fields:",
-                "`schema_version`, `axis`, `verdict`, `verification_iteration`, `findings`.",
-                "Each finding has `finding_id`, `severity`, `file`, `line`, `summary`,",
-                "`evidence`, and `recommendation`.",
+                *round_schema_lines(),
                 "",
                 f"Write the JSON to this exact scratch file: `{review_input}`.",
                 "Then run this exact scratch-only command:",

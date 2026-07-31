@@ -10,6 +10,7 @@ import os
 import sys
 from pathlib import Path
 from pathlib import PurePosixPath
+from collections.abc import Iterable
 from typing import Any, Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,7 +20,56 @@ from harness.workflows.review import (
     ReviewResult,
     review_round_payload,
 )
-from review_contract import ReviewContractError, parse_review_json
+from review_contract import (
+    SEVERITIES,
+    VERDICTS,
+    ReviewContractError,
+    parse_review_json,
+)
+
+
+# The authoritative review-round shape. _round_result accepts a reviewer object
+# only when its key set is exactly equal to these, so every prompt that asks a
+# reviewer for a round must be rendered from them rather than restating them.
+ROUND_FIELDS: tuple[str, ...] = (
+    "schema_version",
+    "axis",
+    "verdict",
+    "verification_iteration",
+    "findings",
+)
+FINDING_FIELDS: tuple[str, ...] = (
+    "finding_id",
+    "severity",
+    "file",
+    "line",
+    "summary",
+    "evidence",
+    "recommendation",
+)
+
+
+def round_schema_lines() -> tuple[str, ...]:
+    """Render the enforced round schema as reviewer-facing prompt lines.
+
+    Keys and enforced value vocabularies both come from the code that rejects
+    them, so a reviewer cannot satisfy the key set and still fail on a value.
+    """
+
+    def names(fields: Iterable[str]) -> str:
+        return ", ".join(f"`{field}`" for field in fields)
+
+    return (
+        f"Return exactly one review-round JSON object with fields: {names(ROUND_FIELDS)}.",
+        f"Each finding has {names(FINDING_FIELDS)}.",
+        "Use exactly these keys: any extra or missing key is rejected.",
+        f"`verdict` is exactly one of {names(sorted(VERDICTS))}.",
+        f"`severity` is exactly one of {names(sorted(SEVERITIES))}.",
+        "`line` is null or a positive integer, and `schema_version` is `1`.",
+        "A `verdict` of `approve` cannot carry a `critical` or `important` finding.",
+        "Every other finding field is a non-empty string, and `file` is a "
+        "repository-relative path.",
+    )
 
 
 class ReviewSubmitError(ValueError):
@@ -68,13 +118,7 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ReviewSubmitError("review round is not valid JSON") from exc
-    expected = {
-        "schema_version",
-        "axis",
-        "verdict",
-        "verification_iteration",
-        "findings",
-    }
+    expected = set(ROUND_FIELDS)
     if not isinstance(value, dict) or set(value) != expected:
         raise ReviewSubmitError("review round has invalid fields")
     if value.get("schema_version") != 1:
@@ -94,15 +138,7 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
     raw_findings = value.get("findings")
     if not isinstance(raw_findings, list) or len(raw_findings) > 50:
         raise ReviewSubmitError("review round findings must be bounded")
-    fields = {
-        "finding_id",
-        "severity",
-        "file",
-        "line",
-        "summary",
-        "evidence",
-        "recommendation",
-    }
+    fields = set(FINDING_FIELDS)
     findings: list[ReviewFinding] = []
     for item in raw_findings:
         if not isinstance(item, dict) or set(item) != fields:
