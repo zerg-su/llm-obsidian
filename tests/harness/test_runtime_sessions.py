@@ -724,12 +724,20 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     (cwd / "callbacks" / "result.json").unlink()
     callback_target.unlink()
-    continued = manager.continue_session(
-        "owner-1", "runtime-1", "checkpoint-1", "continue.md"
-    )
+    before_continuation = store.read("owner-1", "runtime-1")
+    continuation_started = before_continuation.deadline_at + 5.0
+    with patch(
+        "harness.supervisor.time", return_value=continuation_started
+    ):
+        continued = manager.continue_session(
+            "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+        )
     check(
-        "continuation reuses exact surface without a second launch",
+        "continuation reuses exact surface with a fresh bounded attempt",
         continued.record.state == "running"
+        and continued.record.attempt == before_continuation.attempt + 1
+        and continued.record.deadline_at
+        == continuation_started + request.time_budget_seconds
         and cmux.opens == 1
         and cmux.sent[-1] == (SURFACE, "verify the bounded fix"),
         cmux.sent,

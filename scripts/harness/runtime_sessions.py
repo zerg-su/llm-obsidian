@@ -1047,6 +1047,23 @@ class RuntimeSessionManager:
         prompt = self._read_prompt(prompt_path)
         effect_id = f"continue-{hashlib.sha256(prompt.encode()).hexdigest()[:32]}"
         supervisor = OperationSupervisor(self.store, owner_id, operation_id)
+        current = supervisor.read()
+        if not (
+            current.effect_id == effect_id
+            and current.effect_outcome == EffectOutcome.SUCCEEDED
+        ):
+            time_budget_seconds = metadata.get("time_budget_seconds")
+            if (
+                not isinstance(time_budget_seconds, (int, float))
+                or isinstance(time_budget_seconds, bool)
+                or time_budget_seconds <= 0
+            ):
+                raise RuntimeSessionError(
+                    "same-session continuation has no valid time budget"
+                )
+            supervisor.begin_continuation(
+                time_budget_seconds=float(time_budget_seconds)
+            )
 
         def send_prompt(_record: OperationRecord) -> None:
             self.cmux.send(record.resources.surface_id, prompt)

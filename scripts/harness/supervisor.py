@@ -147,6 +147,37 @@ class OperationSupervisor:
         self.store.save(updated, expected_revision=current.revision)
         return updated
 
+    def begin_continuation(
+        self,
+        *,
+        time_budget_seconds: float,
+        now: float | None = None,
+    ) -> OperationRecord:
+        """Start the next bounded attempt in one already-owned live session."""
+
+        if (
+            not isinstance(time_budget_seconds, (int, float))
+            or isinstance(time_budget_seconds, bool)
+            or time_budget_seconds <= 0
+        ):
+            raise SupervisorError("continuation time budget is invalid")
+        current = self.read()
+        if current.state not in {"running", "awaiting-callback", "verifying"}:
+            raise SupervisorError(
+                "operation cannot begin a continuation from its current state"
+            )
+        if current.attempt >= current.attempt_limit:
+            self._exhaust(current)
+        started = time() if now is None else float(now)
+        updated = replace(
+            current,
+            attempt=current.attempt + 1,
+            deadline_at=started + float(time_budget_seconds),
+            revision=current.revision + 1,
+        )
+        self.store.save(updated, expected_revision=current.revision)
+        return updated
+
     def consume_tokens(
         self, tokens: int, *, now: float | None = None
     ) -> OperationRecord:
