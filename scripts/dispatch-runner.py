@@ -539,21 +539,22 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
             (
                 "## Typed engineering/fix phases",
                 "",
-                "This is one persistent executor session. Complete these phases in",
-                "order: `reproduce`, `root-cause`, `regression-test`, `minimal-fix`.",
-                "Before moving to the next phase, write the bounded result JSON shown",
-                "by the submitter help and publish it through:",
+                "This is one persistent executor session controlled by the harness.",
+                "For this prompt, execute only the exact phase in",
+                "`.task-pipeline-step-request.json`. Write its evidence and bounded",
+                "result to the request's exact `output_pointer` and `result_pointer`,",
+                "then publish one callback through:",
                 "",
                 f"`python3 {request['vault_root']}/scripts/"
                 "pipeline-step-submit.py "
-                f"--worktree {request['worktree']} --step <phase> "
-                "--result <worktree-relative-result.json>`",
+                f"--worktree {request['worktree']}`",
                 "",
-                "The submitter derives the child OperationSpec identity and chains",
-                "the exact prior receipt. Never edit an accepted receipt. On",
-                "`cannot-reproduce`, publish that typed outcome, raise the normal",
-                "attention packet, and remain paused. Resume from the first missing",
-                "receipt after a provider restart; do not repeat accepted phases.",
+                "Stop after submission. Do not begin another phase until the harness",
+                "sends its next prompt in this same session. The coordinator owns",
+                "accepted receipts and chains the next exact input. On",
+                "`cannot-reproduce`, publish that typed outcome and remain paused.",
+                "After a restart, obey the first missing phase from the current",
+                "request; never repeat an accepted phase.",
                 "",
                 f"Selected completion_policy={policy}; "
                 f"total_pass_limit={COMPLETION_PASS_LIMITS[policy]}.",
@@ -1100,11 +1101,19 @@ def start(
 
         stage = "provider-runtime"
         stage_started = time.monotonic()
+        initial_head_sha = ""
+        if request["pipeline"] == "engineering/fix":
+            initial_head_sha = run_command(
+                ["git", "rev-parse", "HEAD"],
+                cwd=request["worktree"],
+                label="engineering/fix initial HEAD",
+            ).stdout.strip()
         launched = start_dispatch(
             lifecycle_request,
             runtime,
             origin_surface=request["origin_surface"],
             cwd=request["worktree"],
+            initial_head_sha=initial_head_sha,
             on_surface_opened=prepare_surface,
         )
         if not prepared:

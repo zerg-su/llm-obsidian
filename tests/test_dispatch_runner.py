@@ -237,10 +237,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check(
         "engineering fix prompt binds the typed phase submit transport",
         "pipeline-step-submit.py" in fix_prompt
-        and "reproduce" in fix_prompt
-        and "root-cause" in fix_prompt
-        and "regression-test" in fix_prompt
-        and "minimal-fix" in fix_prompt
+        and ".task-pipeline-step-request.json" in fix_prompt
+        and "execute only the exact phase" in fix_prompt
+        and "Stop after submission" in fix_prompt
         and "completion_policy=autonomous" in fix_prompt
         and "total_pass_limit=3" in fix_prompt,
         fix_prompt,
@@ -523,6 +522,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     harness_raw["branch"] = "task/harness-start"
     harness_raw["worktree"] = str(tmp / "worktrees" / "harness-start")
     harness_request = runner.validate_request(harness_raw)
+    fix_harness_raw = json.loads(json.dumps(raw_request))
+    fix_harness_raw["request_id"] = str(uuid.uuid4())
+    fix_harness_raw["task_name"] = "harness-fix"
+    fix_harness_raw["branch"] = "task/harness-fix"
+    fix_harness_raw["worktree"] = str(tmp / "worktrees" / "harness-fix")
+    fix_harness_raw["pipeline"] = "engineering/fix"
+    fix_harness_raw["completion_policy"] = "autonomous"
+    fix_harness_request = runner.validate_request(fix_harness_raw)
     class FakeRuntime:
         def __init__(self, root: Path) -> None:
             self.store = OperationStore(root)
@@ -584,6 +591,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         harness_replay = runner.start(
             harness_request, "c" * 64, runtime_manager=fake_runtime
         )
+        fix_harness_result = runner.start(
+            fix_harness_request, "d" * 64, runtime_manager=fake_runtime
+        )
     finally:
         runner.sync_codex_profile = original_sync
         runner.dispatch_log = original_log
@@ -592,7 +602,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check(
         "public start executes one durable harness launch",
-        len(fake_runtime.requests) == 1
+        sum(
+            item.spec.operation_id == harness_request["request_id"]
+            for item in fake_runtime.requests
+        )
+        == 1
         and harness_result["harness"]["run_id"] == harness_record.run_id
         and harness_replay == harness_result
         and harness_record.state == "awaiting-callback",
@@ -601,6 +615,39 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "dispatch binds the product root for provider permission compilation",
         fake_runtime.requests[0].product_root
         == Path(harness_request["worktree"]).resolve(),
+    )
+    fix_runtime_request = fake_runtime.requests[1]
+    fix_phase_request = json.loads(
+        (
+            Path(fix_harness_request["worktree"])
+            / ".task-pipeline-step-request.json"
+        ).read_text(encoding="utf-8")
+    )
+    fix_parent = OperationStore(vault / ".vault-meta/harness").read(
+        fix_harness_request["request_id"],
+        fix_harness_request["request_id"],
+    )
+    fix_child = OperationStore(vault / ".vault-meta/harness").read(
+        fix_harness_request["request_id"],
+        str(fix_phase_request["operation_id"]),
+    )
+    check(
+        "engineering fix starts exactly one typed reproduce child",
+        fix_harness_result["status"] == "launched"
+        and fix_phase_request["step_id"] == "reproduce"
+        and fix_phase_request["iteration"] == 0
+        and fix_runtime_request.callback_pointer
+        == ".task-pipeline-step-callback.json"
+        and fix_runtime_request.task_summary_pointer
+        == ".task-summary.json"
+        and fix_runtime_request.initial_callback_operation_id
+        == fix_phase_request["operation_id"]
+        and fix_runtime_request.initial_callback_run_id
+        == fix_phase_request["run_id"]
+        and fix_child.spec.kind == "pipeline-model-step"
+        and fix_child.lane_id == fix_parent.lane_id
+        and fix_child.state == "awaiting-callback",
+        (fix_phase_request, fix_parent, fix_child),
     )
     spec_hash = "a" * 64
     state_path, prior = runner.begin_run(second, spec_hash)

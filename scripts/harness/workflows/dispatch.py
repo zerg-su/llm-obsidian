@@ -26,6 +26,7 @@ from ..runtime_sessions import (
     RuntimeSessionRequest,
     RuntimeSessionResult,
 )
+from .engineering_fix import FixPhaseRound, prepare_next_phase
 
 
 T = TypeVar("T", bound=Mapping[str, object])
@@ -191,6 +192,48 @@ def _assignment(spec: OperationSpec, role: str) -> str:
     return str(uuid.uuid5(namespace, f"{role}:{spec.idempotency_key}"))
 
 
+def _fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
+    base = f".task-pipeline/pass-{round_.iteration + 1}/{round_.step_id}"
+    return {
+        "schema_version": 1,
+        "operation_id": round_.spec.operation_id,
+        "run_id": round_.run_id,
+        "parent_operation_id": round_.parent_operation_id,
+        "lane_id": round_.lane_id,
+        "definition_sha256": round_.spec.contract_sha256,
+        "step_id": round_.step_id,
+        "iteration": round_.iteration,
+        "input_schema": round_.input_schema,
+        "input_sha256": round_.input_sha256,
+        "input_head_sha": round_.input_head_sha,
+        "prior_receipt_sha256": round_.prior_receipt_sha256,
+        "output_schema": round_.output_schema,
+        "result_pointer": f"{base}-result.json",
+        "output_pointer": f"{base}-output.md",
+    }
+
+
+def _write_fix_phase_request(cwd: Path, round_: FixPhaseRound) -> None:
+    path = cwd / ".task-pipeline-step-request.json"
+    payload = (
+        json.dumps(
+            _fix_phase_request(round_),
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n"
+    )
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("fix phase request must be a regular file")
+        if path.read_text(encoding="utf-8") != payload:
+            raise ValueError("fix phase request changed during replay")
+        return
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(payload, encoding="utf-8")
+    temporary.replace(path)
+
+
 def start_dispatch(
     request: DispatchRequest,
     runtime: RuntimeSessionManager,
@@ -199,6 +242,7 @@ def start_dispatch(
     cwd: Path,
     prompt_pointer: str = ".task-prompt.md",
     summary_pointer: str = ".task-summary.json",
+    initial_head_sha: str = "",
     on_surface_opened: Callable[[RuntimeSessionResult], None] | None = None,
 ) -> RuntimeSessionResult:
     """Start one dispatch through the generic provider runtime.
@@ -208,19 +252,47 @@ def start_dispatch(
     """
 
     spec = operation_spec(request)
+    lane_id = _assignment(spec, "dispatch-lane")
+    run_id = _assignment(spec, "dispatch-run")
+    callback_pointer = summary_pointer
+    initial_callback_operation_id = ""
+    initial_callback_run_id = ""
+    if request.pipeline_name == "engineering/fix":
+        if not re.fullmatch(r"[0-9a-f]{40,64}", initial_head_sha):
+            raise ValueError("engineering/fix requires the initial Git HEAD")
+        parent = runtime.store.create(
+            spec,
+            lane_id=lane_id,
+            run_id=run_id,
+        )
+        round_ = prepare_next_phase(
+            runtime.store,
+            parent,
+            definition_sha256=spec.contract_sha256,
+            approved_plan_sha256=request.plan_sha256,
+            initial_head_sha=initial_head_sha,
+            receipts=(),
+            iteration=0,
+        )
+        _write_fix_phase_request(cwd, round_)
+        callback_pointer = ".task-pipeline-step-callback.json"
+        initial_callback_operation_id = round_.spec.operation_id
+        initial_callback_run_id = round_.run_id
     return runtime.start(
         RuntimeSessionRequest(
             spec=spec,
-            lane_id=_assignment(spec, "dispatch-lane"),
-            run_id=_assignment(spec, "dispatch-run"),
+            lane_id=lane_id,
+            run_id=run_id,
             origin_surface=origin_surface,
             cwd=cwd,
             prompt_pointer=prompt_pointer,
-            callback_pointer=summary_pointer,
+            callback_pointer=callback_pointer,
             placement=request.placement,
             product_root=cwd,
             callback_mode="task-summary",
             task_summary_pointer=summary_pointer,
+            initial_callback_operation_id=initial_callback_operation_id,
+            initial_callback_run_id=initial_callback_run_id,
         ),
         on_surface_opened=on_surface_opened,
     )
