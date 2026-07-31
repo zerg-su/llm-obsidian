@@ -185,6 +185,7 @@ def run_case(
     pipeline_name: str = "lifecycle/default",
     fix_outcome: str = "complete",
     fix_retry_passes: int = 0,
+    fix_retry_summary: object | None = None,
     fix_restart_after: str = "",
     model_restart_limit: int | None = None,
     completion_policy: str = "attention",
@@ -412,7 +413,7 @@ def run_case(
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(5)\n"
             "  subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
-            "  summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "  summary.write_text(sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2],encoding='utf-8')\n"
             "time.sleep(0.3)\n",
             encoding="utf-8",
         )
@@ -488,6 +489,13 @@ def run_case(
                 (str(fix_retry_passes),)
                 if pipeline_name == "engineering/fix"
                 and fix_retry_passes
+                else ()
+            ),
+            *(
+                (json.dumps(fix_retry_summary, sort_keys=True),)
+                if pipeline_name == "engineering/fix"
+                and fix_retry_passes
+                and fix_retry_summary is not None
                 else ()
             ),
             *(
@@ -918,6 +926,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         valid_summary,
         pipeline_name="engineering/fix",
         fix_retry_passes=2,
+        fix_retry_summary={
+            **valid_summary,
+            "body": "Final summary updated after the bounded retry.",
+        },
         review_state="missing",
         review_launcher=approve_retry,
         verification_runner=fail_once_verification,

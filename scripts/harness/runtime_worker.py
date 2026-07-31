@@ -2478,25 +2478,15 @@ def run(
                         "pipeline verification receipt is invalid"
                     )
                 receipt_head = str(receipt["head_sha"])
-                receipt_input_sha256 = hashlib.sha256(
-                    json.dumps(
-                        {
-                            "definition_sha256": (
-                                pipeline.definition_sha256
-                            ),
-                            "head_sha": receipt_head,
-                            "profile_sha256": profile.sha256,
-                            "schema_version": (
-                                verify_step.schema_version
-                                if verify_step is not None
-                                else 1
-                            ),
-                            "summary": summary,
-                        },
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ).encode()
-                ).hexdigest()
+                receipt_input_sha256 = str(
+                    receipt.get("input_sha256") or ""
+                )
+                if not re.fullmatch(
+                    r"[0-9a-f]{64}", receipt_input_sha256
+                ):
+                    raise RuntimeWorkerError(
+                        "pipeline verification input identity is invalid"
+                    )
                 (
                     expected_spec,
                     expected_lane_id,
