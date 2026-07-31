@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
@@ -217,6 +220,151 @@ class FrozenCustomPipeline:
     @property
     def definition_sha256(self) -> str:
         return self.compiled.definition_sha256
+
+
+def pipeline_spec_payload(spec: PipelineSpec) -> dict[str, Any]:
+    """Return the exact published JSON shape, excluding dataclass internals."""
+
+    value = to_dict(spec)
+    for item in value["steps"]:
+        item.pop("schema_version", None)
+    for item in value["controls"]:
+        item.pop("schema_version", None)
+    value["budget"].pop("schema_version", None)
+    for item in value["context_pointers"]:
+        item.pop("schema_version", None)
+    return value
+
+
+class FrozenPipelineStore:
+    """Owner-only scratch for an approved custom contract."""
+
+    def __init__(self, root: Path | str):
+        self.root = Path(root)
+
+    def _path(self, operation_id: str) -> Path:
+        _identifier(operation_id, "custom operation_id")
+        return self.root / operation_id / "custom-pipeline.json"
+
+    def save(
+        self,
+        *,
+        operation_id: str,
+        spec: PipelineSpec,
+        frozen: FrozenCustomPipeline,
+        approval: ExplicitPipelineApproval,
+    ) -> Path:
+        path = self._path(operation_id)
+        payload = {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "definition_sha256": frozen.definition_sha256,
+            "spec_sha256": frozen.spec_sha256,
+            "approval": to_dict(approval),
+            "spec": pipeline_spec_payload(spec),
+        }
+        encoded = (
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.root, 0o700)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or not path.is_file():
+                raise ContractError("frozen custom pipeline must be a regular file")
+            if path.read_bytes() != encoded:
+                raise ContractError("frozen custom pipeline changed during replay")
+            if stat.S_IMODE(path.stat().st_mode) & 0o077:
+                raise ContractError("frozen custom pipeline is not owner-only")
+            return path
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.replace(path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+        os.chmod(path, 0o600)
+        return path
+
+    def load(
+        self,
+        *,
+        operation_id: str,
+        registry: PrimitiveRegistry,
+        policy: CustomPipelinePolicy,
+        capabilities: tuple[str, ...] = (),
+    ) -> FrozenCustomPipeline:
+        path = self._path(operation_id)
+        if path.is_symlink() or not path.is_file():
+            raise ContractError("frozen custom pipeline is unavailable")
+        if (
+            stat.S_IMODE(path.stat().st_mode) & 0o077
+            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077
+        ):
+            raise ContractError("frozen custom pipeline is not owner-only")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ContractError("frozen custom pipeline is invalid") from exc
+        value = _object(value, "frozen custom pipeline")
+        _exact_fields(
+            value,
+            frozenset(
+                {
+                    "schema_version",
+                    "operation_id",
+                    "definition_sha256",
+                    "spec_sha256",
+                    "approval",
+                    "spec",
+                }
+            ),
+            "frozen custom pipeline",
+        )
+        if value["schema_version"] != 1 or value["operation_id"] != operation_id:
+            raise ContractError("frozen custom pipeline identity is invalid")
+        approval_value = _object(value["approval"], "pipeline approval")
+        _exact_fields(
+            approval_value,
+            frozenset(
+                {
+                    "schema_version",
+                    "definition_sha256",
+                    "approval_card_sha256",
+                    "actor",
+                    "decision",
+                }
+            ),
+            "pipeline approval",
+        )
+        approval = ExplicitPipelineApproval(**approval_value)
+        spec = parse_pipeline_spec(_object(value["spec"], "PipelineSpec"))
+        compiled = compile_custom_spec(
+            spec,
+            registry,
+            policy=policy,
+            capabilities=capabilities,
+        )
+        card = render_custom_approval(spec, compiled, policy=policy)
+        frozen = freeze_custom_pipeline(spec, compiled, approval, card)
+        if (
+            value["definition_sha256"] != frozen.definition_sha256
+            or value["spec_sha256"] != frozen.spec_sha256
+        ):
+            raise ContractError("frozen custom pipeline definition changed")
+        return frozen
 
 
 TOP_FIELDS = frozenset(
@@ -466,7 +614,7 @@ def compile_custom_spec(
     canonical = json.dumps(
         {
             "custom_compiler_version": CUSTOM_COMPILER_VERSION,
-            "pipeline_spec": to_dict(spec),
+            "pipeline_spec": pipeline_spec_payload(spec),
             "compiled_pipeline": json.loads(compiled.canonical_definition),
         },
         sort_keys=True,
@@ -495,7 +643,11 @@ def freeze_custom_pipeline(
     if approval.approval_card_sha256 != card_sha256:
         raise ContractError("approval card does not match the reviewed contract")
     spec_sha256 = hashlib.sha256(
-        json.dumps(to_dict(spec), sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            pipeline_spec_payload(spec),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
     ).hexdigest()
     return FrozenCustomPipeline(
         compiled=compiled,

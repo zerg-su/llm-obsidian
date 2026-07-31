@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -15,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.custom_pipelines import (  # noqa: E402
     ExplicitPipelineApproval,
     CustomPipelinePolicy,
+    FrozenPipelineStore,
     compile_custom_spec,
     freeze_custom_pipeline,
     parse_pipeline_spec,
@@ -149,6 +152,41 @@ check(
     frozen.definition_sha256 == compiled.definition_sha256
     and frozen.approval_sha256 == approval_receipt.approval_card_sha256,
 )
+with tempfile.TemporaryDirectory(prefix="custom-pipeline-store.") as raw:
+    store = FrozenPipelineStore(Path(raw) / "runtime")
+    stored = store.save(
+        operation_id="custom-operation-1",
+        spec=spec,
+        frozen=frozen,
+        approval=approval_receipt,
+    )
+    loaded = store.load(
+        operation_id="custom-operation-1",
+        registry=builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+    check(
+        "owner-only frozen store revalidates the exact approved contract",
+        loaded.definition_sha256 == frozen.definition_sha256
+        and stored.stat().st_mode & 0o077 == 0
+        and stored.parent.stat().st_mode & 0o077 == 0,
+    )
+    tampered = json.loads(stored.read_text(encoding="utf-8"))
+    tampered["definition_sha256"] = "f" * 64
+    stored.write_text(json.dumps(tampered), encoding="utf-8")
+    os.chmod(stored, 0o600)
+    try:
+        store.load(
+            operation_id="custom-operation-1",
+            registry=builtin_registry(),
+            policy=policy,
+            capabilities=("route:resolved",),
+        )
+    except Exception as exc:
+        check("frozen store detects contract tampering", "definition" in str(exc))
+    else:
+        check("frozen store detects contract tampering", False)
 
 
 def expect_rejection(label: str, mutation, token: str) -> None:
