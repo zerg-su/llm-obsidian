@@ -41,11 +41,25 @@ from lifecycle_telemetry import (  # noqa: E402
     emit_compiled_pipeline_event,
     emit_lifecycle_event,
 )
-from harness.contracts import RuntimeRoute  # noqa: E402
+from harness.contracts import (  # noqa: E402
+    ContractError as HarnessContractError,
+    RuntimeRoute,
+)
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
     EXECUTABLE_BUILTINS,
+    builtin_registry,
     compiled_builtin,
+)
+from harness.custom_pipelines import (  # noqa: E402
+    CustomPipelinePolicy,
+    ExplicitPipelineApproval,
+    FrozenCustomPipeline,
+    PipelineSpec,
+    compile_custom_spec,
+    freeze_custom_pipeline,
+    parse_pipeline_spec,
+    render_custom_approval,
 )
 from harness.pipelines import render_contract  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
@@ -271,8 +285,38 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     if placement not in {"split", "workspace"}:
         raise DispatchError("placement must be split or workspace")
     pipeline = str(raw.get("pipeline") or "lifecycle/default").strip()
-    if pipeline not in EXECUTABLE_BUILTINS:
+    if pipeline not in {*EXECUTABLE_BUILTINS, "custom"}:
         raise DispatchError("pipeline must name an executable pipeline")
+    custom_pipeline_spec: Path | None = None
+    if pipeline == "custom":
+        custom_pipeline_spec = absolute_file(
+            raw.get("custom_pipeline_spec"),
+            "custom_pipeline_spec",
+        )
+        try:
+            custom_pipeline_spec.relative_to(
+                vault_root / ".vault-meta" / "dispatch-requests"
+            )
+        except ValueError as exc:
+            raise DispatchError(
+                "custom_pipeline_spec must be under the coordinator request scratch"
+            ) from exc
+        try:
+            parsed_custom = parse_pipeline_spec(
+                custom_pipeline_spec.read_text(encoding="utf-8")
+            )
+            compile_custom_spec(
+                parsed_custom,
+                builtin_registry(),
+                policy=CustomPipelinePolicy.default(),
+                capabilities=("route:resolved",),
+            )
+        except (HarnessContractError, OSError, ValueError) as exc:
+            raise DispatchError(f"custom pipeline is invalid: {exc}") from exc
+    elif raw.get("custom_pipeline_spec") is not None:
+        raise DispatchError(
+            "custom_pipeline_spec requires pipeline=custom"
+        )
     completion_policy = str(
         raw.get("completion_policy") or "attention"
     ).strip()
@@ -280,9 +324,21 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         raise DispatchError(
             "completion_policy must be attention or autonomous"
         )
-    if pipeline != "engineering/fix" and completion_policy != "attention":
+    execution_pipeline = (
+        parsed_custom.baseline_pipeline
+        if custom_pipeline_spec is not None
+        else pipeline
+    )
+    if execution_pipeline != "engineering/fix" and completion_policy != "attention":
         raise DispatchError(
             "autonomous completion_policy requires engineering/fix"
+        )
+    if (
+        custom_pipeline_spec is not None
+        and completion_policy != parsed_custom.completion_policy
+    ):
+        raise DispatchError(
+            "completion_policy differs from the custom pipeline contract"
         )
     origin_session = require_string(raw.get("origin_session"), "origin_session", maximum=128)
     session_route = raw.get("session_route")
@@ -322,6 +378,13 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
             "unknown review keys: " + ", ".join(sorted(unknown_review))
         )
     review_mode = str(raw_review.get("mode") or "").strip()
+    if custom_pipeline_spec is not None:
+        if not review_mode:
+            review_mode = parsed_custom.review_mode
+        elif review_mode != parsed_custom.review_mode:
+            raise DispatchError(
+                "review.mode differs from the custom pipeline contract"
+            )
     if review_mode and review_mode not in REVIEW_MODES:
         raise DispatchError("review.mode must be simple, deep, or skip")
     cross_model = raw_review.get("cross_model", False)
@@ -389,6 +452,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "origin_surface": origin_surface,
         "placement": placement,
         "pipeline": pipeline,
+        "custom_pipeline_spec": custom_pipeline_spec,
         "completion_policy": completion_policy,
         "origin_session": origin_session,
         "session_route": {
@@ -413,6 +477,45 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
             "effort": review_effort,
         },
     }
+
+
+def custom_pipeline_for_request(
+    request: dict[str, Any],
+) -> FrozenCustomPipeline | None:
+    path = request.get("custom_pipeline_spec")
+    if request.get("pipeline") != "custom":
+        return None
+    if not isinstance(path, Path):
+        raise DispatchError("custom pipeline spec is unavailable")
+    try:
+        spec = parse_pipeline_spec(path.read_text(encoding="utf-8"))
+        policy = CustomPipelinePolicy.default()
+        compiled = compile_custom_spec(
+            spec,
+            builtin_registry(),
+            policy=policy,
+            capabilities=("route:resolved",),
+        )
+        card = render_custom_approval(spec, compiled, policy=policy)
+        approval = ExplicitPipelineApproval.for_card(
+            definition_sha256=compiled.definition_sha256,
+            approval_card=card,
+            actor="user",
+            decision="approve",
+        )
+        return freeze_custom_pipeline(spec, compiled, approval, card)
+    except (HarnessContractError, OSError, ValueError) as exc:
+        raise DispatchError(f"custom pipeline changed after validation: {exc}") from exc
+
+
+def compiled_pipeline_for_request(request: dict[str, Any]):
+    custom = custom_pipeline_for_request(request)
+    return custom.compiled if custom is not None else compiled_builtin(request["pipeline"])
+
+
+def execution_pipeline_for_request(request: dict[str, Any]) -> str:
+    custom = custom_pipeline_for_request(request)
+    return custom.spec.baseline_pipeline if custom is not None else request["pipeline"]
 
 
 def load_dispatch_config(vault_root: Path, target_repo: Path) -> dict[str, Any]:
@@ -536,7 +639,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         body = body.replace(old, new)
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
-    if request["pipeline"] == "engineering/fix":
+    if execution_pipeline_for_request(request) == "engineering/fix":
         policy = request["completion_policy"]
         phase_contract = "\n".join(
             (
@@ -795,9 +898,9 @@ def write_task_files(
         "approved_plan_sha256": plan_hash,
         "interaction_policy": "unattended",
         "pipeline_policy": {
-            "name": request["pipeline"],
-            "definition_sha256": compiled_builtin(
-                request["pipeline"]
+            "name": execution_pipeline_for_request(request),
+            "definition_sha256": compiled_pipeline_for_request(
+                request
             ).definition_sha256,
             "completion_policy": request["completion_policy"],
             "total_pass_limit": COMPLETION_PASS_LIMITS[
@@ -902,6 +1005,7 @@ def harness_request(
         review=review,
         pipeline_name=request["pipeline"],
         completion_policy=request["completion_policy"],
+        custom_pipeline=custom_pipeline_for_request(request),
     )
 
 
@@ -931,6 +1035,41 @@ def lifecycle_contract(
             review_mode=review.mode,
             max_verify_iterations=review.max_verify_iterations,
             verification_profile=review.verification_profile or "unbound",
+        ),
+    }
+
+
+def lifecycle_contract_for_request(
+    request: dict[str, Any],
+    review: ReviewPolicy,
+) -> dict[str, str]:
+    custom = custom_pipeline_for_request(request)
+    if custom is None:
+        return lifecycle_contract(
+            review,
+            request["pipeline"],
+            request["completion_policy"],
+        )
+    policy = CustomPipelinePolicy.default()
+    definition = custom.compiled.definition
+    return {
+        "pipeline": f"custom/{definition.profile}@{definition.version}",
+        "definition_sha256": custom.definition_sha256,
+        "summary": (
+            render_custom_approval(
+                custom.spec,
+                custom.compiled,
+                policy=policy,
+            )
+            + render_contract(
+                custom.compiled,
+                completion_policy=request["completion_policy"],
+                review_mode=review.mode,
+                max_verify_iterations=review.max_verify_iterations,
+                verification_profile=(
+                    review.verification_profile or "unbound"
+                ),
+            )
         ),
     }
 
@@ -1116,7 +1255,7 @@ def start(
         stage = "provider-runtime"
         stage_started = time.monotonic()
         initial_head_sha = ""
-        if request["pipeline"] == "engineering/fix":
+        if execution_pipeline_for_request(request) == "engineering/fix":
             initial_head_sha = run_command(
                 ["git", "rev-parse", "HEAD"],
                 cwd=request["worktree"],
@@ -1134,7 +1273,7 @@ def start(
             raise DispatchError(
                 "provider runtime started without preparing the task contract"
             )
-        compiled_pipeline = compiled_builtin(request["pipeline"])
+        compiled_pipeline = compiled_pipeline_for_request(request)
         emit_compiled_pipeline_event(
             request["worktree"],
             event="dispatch",
@@ -1293,11 +1432,7 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
-                "pipeline": lifecycle_contract(
-                    review,
-                    request["pipeline"],
-                    request["completion_policy"],
-                ),
+                "pipeline": lifecycle_contract_for_request(request, review),
                 "review": {
                     "mode": review.mode,
                     "cross_model": review.cross_model,

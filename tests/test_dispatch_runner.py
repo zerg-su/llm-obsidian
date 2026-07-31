@@ -240,6 +240,101 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         ).pipeline_name
         == "engineering/change",
     )
+    custom_dir = vault / ".vault-meta" / "dispatch-requests"
+    custom_dir.mkdir(parents=True)
+    custom_spec = custom_dir / "custom-pipeline.json"
+    custom_spec.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "spec_id": "change-with-diff-check",
+                "version": "1.0.0",
+                "intent": "engineering-change",
+                "task_profile": "change",
+                "baseline_pipeline": "engineering/change",
+                "input_schema": "approved-plan/v1",
+                "output_schema": "reap-ready/v1",
+                "steps": [
+                    {
+                        "step_id": "tdd-slices",
+                        "primitive_id": "model_step",
+                        "primitive_version": "1.0.0",
+                        "input_schema": "approved-plan/v1",
+                        "output_schema": "implementation-result/v1",
+                        "session_mode": "worktree",
+                        "semantic_skills": ["tdd"],
+                    },
+                    {
+                        "step_id": "verify",
+                        "primitive_id": "verify",
+                        "primitive_version": "1.0.0",
+                        "input_schema": "implementation-result/v1",
+                        "output_schema": "verified-result/v1",
+                        "session_mode": "verification",
+                        "semantic_skills": [],
+                    },
+                    {
+                        "step_id": "review",
+                        "primitive_id": "review",
+                        "primitive_version": "1.0.0",
+                        "input_schema": "verified-result/v1",
+                        "output_schema": "reap-ready/v1",
+                        "session_mode": "review",
+                        "semantic_skills": ["review"],
+                    },
+                ],
+                "controls": [],
+                "budget": {
+                    "attempt_limit": 2,
+                    "model_restart_limit": 1,
+                    "time_budget_seconds": 900,
+                    "token_limit": 50000,
+                },
+                "completion_policy": "attention",
+                "requested_permissions": [
+                    "git-write",
+                    "product-worktree",
+                ],
+                "requested_side_effects": ["git-write", "worktree"],
+                "context_pointers": [],
+                "verification_checks": ["diff-check"],
+                "review_mode": "simple",
+                "human_gates": ["initial-approval"],
+                "terminal_outcomes": ["completed", "attention-required"],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    custom_raw = json.loads(json.dumps(raw_request))
+    custom_raw["pipeline"] = "custom"
+    custom_raw["custom_pipeline_spec"] = str(custom_spec)
+    custom_request = runner.validate_request(custom_raw)
+    custom_contract = runner.lifecycle_contract_for_request(
+        custom_request,
+        review,
+    )
+    custom_harness = runner.harness_request(
+        custom_request,
+        config,
+        effective,
+    )
+    check(
+        "dispatch validates and binds one explicitly approved custom contract",
+        custom_request["pipeline"] == "custom"
+        and custom_contract["pipeline"] == "custom/change@1.0.0"
+        and "Explicit user approval required" in custom_contract["summary"]
+        and custom_harness.custom_pipeline is not None
+        and operation_spec(custom_harness).contract_sha256
+        == custom_contract["definition_sha256"],
+    )
+    escaped_custom = json.loads(json.dumps(custom_raw))
+    escaped_custom["custom_pipeline_spec"] = str(plan)
+    expect_error(
+        "custom specs stay in owner request scratch",
+        lambda: runner.validate_request(escaped_custom),
+        "request scratch",
+    )
     fix_raw = json.loads(json.dumps(raw_request))
     fix_raw["pipeline"] = "engineering/fix"
     fix_raw["completion_policy"] = "autonomous"
