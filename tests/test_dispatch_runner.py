@@ -219,8 +219,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check(
         "task prompt leaves automatic review launch to the harness",
-        "write `.task-summary.json` to trigger the automatic review gate"
+        "write `.task-summary.json` with exactly this canonical JSON shape"
         in prompt
+        and '"schema_version":1,"type":"session"' in prompt
         and "task-review-runner.py run" not in prompt,
         prompt,
     )

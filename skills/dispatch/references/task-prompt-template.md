@@ -91,7 +91,14 @@ Unknown ownership, prompt, callback, or upgrade state becomes
 `attention-required`.
 
 Commit the explicit product files, run the configured verification profile,
-then write `.task-summary.json` to trigger the automatic review gate. Do not
+then write `.task-summary.json` with exactly this canonical JSON shape to
+trigger the automatic review gate:
+
+```json
+{"schema_version":1,"type":"session","title":"<bounded title>","session":"<origin session id>","body":"<bounded Markdown summary>"}
+```
+
+Do not
 invoke a review runner or orchestrate its provider/cmux lifecycle yourself.
 Remain available in this session while the harness launches review. Material
 findings arrive in `.task-review.json` plus one typed surface notification.
