@@ -3635,8 +3635,9 @@ def run(
                     spec["surface_id"],
                     "Typed pipeline verification attention is ready in "
                     ".task-verification.json. For fix-and-resubmit, "
-                    "commit the fix and write the exact identity-bound "
-                    ".task-verification-response.json; otherwise use "
+                    "commit the fix and run `python3 "
+                    f"{trusted_vault}/scripts/pipeline-verification-resubmit.py "
+                    f"--worktree {spec['cwd']}`; otherwise use "
                     "task_escalation.py. Do not launch review or reap.",
                 )
                 cmux_adapter.send_key(spec["surface_id"], "Enter")

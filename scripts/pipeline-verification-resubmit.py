@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Build the exact identity-bound response for a repaired verification HEAD."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import NoReturn
+
+
+PACKET_NAME = ".task-verification.json"
+RESPONSE_NAME = ".task-verification-response.json"
+MAX_BYTES = 65_536
+GIT_OID = re.compile(r"[0-9a-f]{40,64}\Z")
+PACKET_FIELDS = {
+    "schema_version",
+    "operation_id",
+    "verification_operation_id",
+    "verification_lane_id",
+    "verification_run_id",
+    "definition_sha256",
+    "step_id",
+    "head_sha",
+    "status",
+    "reason",
+    "safe_boundary",
+    "allowed_responses",
+    "response_pointer",
+    "receipt_pointer",
+    "evidence",
+}
+
+
+class ResubmitError(RuntimeError):
+    pass
+
+
+def die(message: str, code: int = 2) -> NoReturn:
+    print(f"pipeline-verification-resubmit: {message}", file=os.sys.stderr)
+    raise SystemExit(code)
+
+
+def _read_packet(path: Path) -> tuple[dict[str, object], bytes]:
+    if path.is_symlink() or not path.is_file():
+        raise ResubmitError("verification packet must be a regular file")
+    raw = path.read_bytes()
+    if not raw or len(raw) > MAX_BYTES:
+        raise ResubmitError("verification packet is empty or oversized")
+    value = json.loads(raw)
+    if (
+        not isinstance(value, dict)
+        or set(value) != PACKET_FIELDS
+        or value.get("schema_version") != 1
+        or value.get("status") != "attention-required"
+        or value.get("reason") != "verification-failed"
+        or value.get("step_id") != "verify"
+        or value.get("response_pointer") != RESPONSE_NAME
+        or "fix-and-resubmit" not in value.get("allowed_responses", [])
+        or not GIT_OID.fullmatch(str(value.get("head_sha") or ""))
+    ):
+        raise ResubmitError("verification packet contract is invalid")
+    canonical = json.dumps(
+        value, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return value, canonical
+
+
+def _head(worktree: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    value = result.stdout.strip()
+    if result.returncode or not GIT_OID.fullmatch(value):
+        raise ResubmitError("current Git HEAD is unavailable")
+    return value
+
+
+def build_response(worktree: Path) -> dict[str, object]:
+    packet, canonical = _read_packet(worktree / PACKET_NAME)
+    failed_head = str(packet["head_sha"])
+    current_head = _head(worktree)
+    if current_head == failed_head:
+        raise ResubmitError("verification repair must commit a new HEAD")
+    return {
+        "schema_version": 1,
+        "operation_id": packet["operation_id"],
+        "verification_operation_id": packet["verification_operation_id"],
+        "failed_head_sha": failed_head,
+        "packet_sha256": hashlib.sha256(canonical).hexdigest(),
+        "response": "fix-and-resubmit",
+        "resubmitted_head_sha": current_head,
+    }
+
+
+def write_response(worktree: Path, response: dict[str, object]) -> str:
+    path = worktree / RESPONSE_NAME
+    if path.is_symlink():
+        raise ResubmitError("verification response cannot be a symlink")
+    encoded = (
+        json.dumps(response, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if path.is_file() and path.read_bytes() == encoded:
+        return "already-ready"
+    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=worktree)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return "ready"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--worktree", type=Path, required=True)
+    args = parser.parse_args()
+    worktree = args.worktree.expanduser().resolve()
+    if not worktree.is_dir():
+        die("worktree must be an existing directory")
+    try:
+        response = build_response(worktree)
+        status = write_response(worktree, response)
+    except (ResubmitError, OSError, ValueError, json.JSONDecodeError) as exc:
+        die(str(exc))
+    print(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": status,
+                "operation_id": response["operation_id"],
+                "response": RESPONSE_NAME,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
