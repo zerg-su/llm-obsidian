@@ -1460,10 +1460,14 @@ codex_callback = CodexDriver(Path("/usr/bin/codex")).command(
 )
 check(
     "review callback profile edits and writes only isolated scratch transport",
-    f"Write({callback})" in claude_callback
-    and f"Edit({callback})" in claude_callback
-    and f"Write({review_input})" in claude_callback
-    and f"Edit({review_input})" in claude_callback
+    f"Write(/{callback})" in claude_callback
+    and f"Edit(/{callback})" in claude_callback
+    and f"Write(/{review_input})" in claude_callback
+    and f"Edit(/{review_input})" in claude_callback
+    and f"Write({callback})" not in claude_callback
+    and f"Edit({callback})" not in claude_callback
+    and f"Write({review_input})" not in claude_callback
+    and f"Edit({review_input})" not in claude_callback
     and "Write(owned-review-scratch/callback.json)" in claude_callback
     and "Edit(owned-review-scratch/callback.json)" in claude_callback
     and "Write(owned-review-scratch/.review-input.json)" in claude_callback
@@ -1485,10 +1489,10 @@ check(
         item.startswith(("Edit(", "Write("))
         and item
         not in {
-            f"Edit({callback})",
-            f"Write({callback})",
-            f"Edit({review_input})",
-            f"Write({review_input})",
+            f"Edit(/{callback})",
+            f"Write(/{callback})",
+            f"Edit(/{review_input})",
+            f"Write(/{review_input})",
             "Edit(owned-review-scratch/callback.json)",
             "Write(owned-review-scratch/callback.json)",
             "Edit(owned-review-scratch/.review-input.json)",

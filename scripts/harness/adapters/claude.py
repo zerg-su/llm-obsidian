@@ -20,6 +20,14 @@ EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 CHECKPOINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
+def _absolute_permission_path(path: Path) -> str:
+    """Encode an absolute file path using Claude Code's `//` rule syntax."""
+
+    if not path.is_absolute():
+        raise ClaudeDriverError("Claude permission path must be absolute")
+    return f"/{path.as_posix()}"
+
+
 @dataclass(frozen=True)
 class ClaudeDriver:
     binary: Path
@@ -107,12 +115,14 @@ class ClaudeDriver:
             )
             args.extend(("Read", "Glob", "Grep"))
             if callback_pointer is not None:
+                callback_rule = _absolute_permission_path(callback_pointer)
+                input_rule = _absolute_permission_path(input_pointer)
                 args.extend(
                     (
-                        f"Edit({callback_pointer})",
-                        f"Write({callback_pointer})",
-                        f"Edit({input_pointer})",
-                        f"Write({input_pointer})",
+                        f"Edit({callback_rule})",
+                        f"Write({callback_rule})",
+                        f"Edit({input_rule})",
+                        f"Write({input_rule})",
                     )
                 )
                 if relative_callback:
@@ -212,9 +222,10 @@ class ClaudeDriver:
         except ClaudeDriverError:
             return False
         if route.profile == "reviewer-callback":
+            callback_rule = _absolute_permission_path(callback_pointer)
             return (
-                f"Edit({callback_pointer})" in command
-                and f"Write({callback_pointer})" in command
+                f"Edit({callback_rule})" in command
+                and f"Write({callback_rule})" in command
             )
         return route.profile in {"executor", "prototype"}
 
