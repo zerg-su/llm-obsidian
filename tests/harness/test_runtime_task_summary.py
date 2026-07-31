@@ -181,6 +181,7 @@ def run_case(
     ) = None,
     bind_contract: bool = True,
     pipeline_name: str = "lifecycle/default",
+    fix_outcome: str = "complete",
     verification_runner: Callable[..., subprocess.CompletedProcess[str]]
     | None = None,
 ) -> tuple[
@@ -303,12 +304,57 @@ def run_case(
         and not hasattr(request, "wake_message"),
     )
     provider = root / f"provider-{operation_id}.py"
-    provider.write_text(
-        "import json,pathlib,sys,time\n"
-        "pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')\n"
-        "time.sleep(0.3)\n",
-        encoding="utf-8",
-    )
+    if pipeline_name == "engineering/fix":
+        provider.write_text(
+            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            "root=pathlib.Path.cwd()\n"
+            "summary=pathlib.Path(sys.argv[1])\n"
+            "time.sleep(0.2)\n"
+            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "outcome=sys.argv[3]\n"
+            "state=pathlib.Path(sys.argv[4])\n"
+            "request=root/'.task-pipeline-step-request.json'\n"
+            "outbox=root/'.task-pipeline-step-callback.json'\n"
+            "seen=set()\n"
+            "for expected in ('reproduce','root-cause','regression-test','minimal-fix'):\n"
+            "  for _ in range(500):\n"
+            "    if request.is_file():\n"
+            "      row=json.loads(request.read_text(encoding='utf-8'))\n"
+            "      if row.get('step_id')==expected and row.get('operation_id') not in seen: break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(3)\n"
+            "  seen.add(row['operation_id'])\n"
+            "  output=root/row['output_pointer']\n"
+            "  output.parent.mkdir(parents=True,exist_ok=True)\n"
+            "  output.write_text(expected+' evidence\\n',encoding='utf-8')\n"
+            "  head=subprocess.run(['git','rev-parse','HEAD'],cwd=root,text=True,capture_output=True,check=True).stdout.strip()\n"
+            "  status='cannot-reproduce' if expected=='reproduce' and outcome=='cannot-reproduce' else 'complete'\n"
+            "  payload={key:row[key] for key in ('schema_version','parent_operation_id','definition_sha256','step_id','iteration','input_schema','input_sha256','input_head_sha','prior_receipt_sha256','verification_sha256','output_schema')}\n"
+            "  payload.update({'output_pointer':row['output_pointer'],'output_sha256':hashlib.sha256(output.read_bytes()).hexdigest(),'head_sha':head,'status':status})\n"
+            "  encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
+            "  digest=hashlib.sha256(encoded).hexdigest()\n"
+            "  callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
+            "  outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "  for _ in range(500):\n"
+            "    if not outbox.exists(): break\n"
+            "    time.sleep(0.01)\n"
+            "  else: raise SystemExit(4)\n"
+            "  if status=='cannot-reproduce': time.sleep(0.1); raise SystemExit(0)\n"
+            "for _ in range(500):\n"
+            "  if (state/'pipeline-fix'/'finalization-notify.json').is_file(): break\n"
+            "  time.sleep(0.01)\n"
+            "else: raise SystemExit(5)\n"
+            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "time.sleep(0.3)\n",
+            encoding="utf-8",
+        )
+    else:
+        provider.write_text(
+            "import json,pathlib,sys,time\n"
+            "pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')\n"
+            "time.sleep(0.3)\n",
+            encoding="utf-8",
+        )
     summary_path = worktree / ".task-summary.json"
     launch = ProcessAdapter().prepare_surface_launch(
         argv=(
@@ -316,6 +362,16 @@ def run_case(
             str(provider),
             str(summary_path),
             json.dumps(summary, sort_keys=True),
+            *(
+                (fix_outcome,)
+                if pipeline_name == "engineering/fix"
+                else ()
+            ),
+            *(
+                (str(root / f"state-{operation_id}"),)
+                if pipeline_name == "engineering/fix"
+                else ()
+            ),
         ),
         cwd=worktree,
         state_root=root / f"state-{operation_id}",
@@ -379,7 +435,7 @@ def run_case(
             ),
             product_root=worktree,
         )
-    thread.join(timeout=3)
+    thread.join(timeout=8 if pipeline_name == "engineering/fix" else 3)
     return store, cmux, launch.spec_path.parent, result[0]
 
 
@@ -500,6 +556,110 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             verification_receipt,
             verification_calls,
         ),
+    )
+
+    fix_task = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    fix_store, fix_cmux, fix_state, fix_rc = run_case(
+        root,
+        fix_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        verification_runner=pass_verification,
+    )
+    fix_record = fix_store.read("owner-1", fix_task)
+    fix_receipts = sorted(
+        (fix_state / "pipeline-fix" / "pass-0").glob("*/receipt.json")
+    )
+    fix_children = [
+        record
+        for record in fix_store.list("owner-1")
+        if record.spec.kind == "pipeline-model-step"
+    ]
+    fix_target = json.loads(
+        (fix_state / "callback-target.json").read_text(encoding="utf-8")
+    )
+    check(
+        "engineering fix multiplexes four typed children in one persistent session",
+        fix_rc == 0
+        and fix_record.state == "finalizing"
+        and fix_record.accepted_callback_kind == "wiki-summary"
+        and len(fix_receipts) == 4
+        and {
+            json.loads(path.read_text(encoding="utf-8"))["step_id"]
+            for path in fix_receipts
+        }
+        == {
+            "reproduce",
+            "root-cause",
+            "regression-test",
+            "minimal-fix",
+        }
+        and len(fix_children) == 4
+        and all(record.state == "complete" for record in fix_children)
+        and fix_target["operation_id"] == fix_task
+        and fix_target["run_id"] == f"run-{fix_task}"
+        and fix_target["callback_pointer"] == ".task-summary.json"
+        and fix_target["generation"] == 6
+        and len(
+            [
+                item
+                for item in fix_cmux.sent
+                if ".task-pipeline-step-request.json" in item[1]
+            ]
+        )
+        == 4
+        and all(
+            '"schema_version":1,"status":"complete"' in item[1]
+            and '"output_sha256":"<sha256-of-evidence>"' in item[1]
+            and '"head_sha":"<current-git-head>"' in item[1]
+            for item in fix_cmux.sent
+            if ".task-pipeline-step-request.json" in item[1]
+        )
+        and len(
+            [
+                item
+                for item in fix_cmux.sent
+                if "All four typed engineering/fix phase receipts are accepted"
+                in item[1]
+            ]
+        )
+        == 1,
+        (
+            fix_record,
+            fix_children,
+            fix_receipts,
+            fix_target,
+            fix_cmux.sent,
+        ),
+    )
+
+    cannot_task = "efefefef-efef-4fef-8fef-efefefefefef"
+    cannot_store, _cannot_cmux, cannot_state, cannot_rc = run_case(
+        root,
+        cannot_task,
+        valid_summary,
+        pipeline_name="engineering/fix",
+        fix_outcome="cannot-reproduce",
+        verification_runner=pass_verification,
+    )
+    cannot_record = cannot_store.read("owner-1", cannot_task)
+    cannot_receipt = json.loads(
+        next(
+            (cannot_state / "pipeline-fix" / "pass-0").glob(
+                "*/receipt.json"
+            )
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "cannot reproduce is a typed durable attention boundary",
+        cannot_rc == 0
+        and cannot_record.state == "attention-required"
+        and cannot_record.attention_reason
+        == AttentionReason.ATTENTION_REQUIRED
+        and not cannot_record.accepted_callback_id
+        and cannot_receipt["step_id"] == "reproduce"
+        and cannot_receipt["status"] == "cannot-reproduce",
+        (cannot_record, cannot_receipt),
     )
 
     failing_task = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"

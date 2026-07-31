@@ -44,11 +44,20 @@ from .verification import (
     load_profiles,
     run_profile,
 )
+from .workflows.engineering_fix import (
+    FixStepReceipt,
+    FixWorkflowError,
+    accept_phase,
+    load_receipt,
+    prepare_next_phase,
+    reconcile_fix,
+)
 from research_contract import (
     ResearchContractError,
     load_artifact,
     validate_result_artifact,
 )
+from lifecycle_telemetry import emit_compiled_pipeline_event
 from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary
 
@@ -744,6 +753,9 @@ def run(
     next_prompt_probe = 0.0
     handled_control_id = ""
     invalid_control_digest = ""
+    fix_callback_digest = ""
+    fix_callback_stable_reads = 0
+    fix_transport_complete = _pipeline_name != "engineering/fix"
 
     def inspect_control() -> None:
         nonlocal handled_control_id, invalid_control_digest
@@ -1021,6 +1033,417 @@ def run(
             {"schema_version": 1, "status": status},
         )
 
+    def write_immutable_json(path: Path, value: dict[str, object]) -> None:
+        encoded = (
+            json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path.is_symlink():
+            raise RuntimeWorkerError("immutable runtime receipt cannot be a symlink")
+        try:
+            descriptor = os.open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            try:
+                current = path.read_bytes()
+            except OSError as exc:
+                raise RuntimeWorkerError(
+                    "immutable runtime receipt is unreadable"
+                ) from exc
+            if current != encoded:
+                raise RuntimeWorkerError(
+                    "immutable runtime receipt changed"
+                )
+            return
+        try:
+            with os.fdopen(descriptor, "wb") as handle_file:
+                handle_file.write(encoded)
+                handle_file.flush()
+                os.fsync(handle_file.fileno())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+
+    def git_head() -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=spec["cwd"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        head = result.stdout.strip()
+        if result.returncode or not re.fullmatch(r"[0-9a-f]{40,64}", head):
+            raise RuntimeWorkerError("engineering/fix HEAD is unavailable")
+        return head
+
+    def retarget_fix_callback(
+        *,
+        operation_id: str,
+        run_id: str,
+        callback_pointer: str,
+    ) -> None:
+        generation, current_operation, current_run, current_pointer = (
+            _callback_target(spec)
+        )
+        expected_pointer = (spec["cwd"] / callback_pointer).resolve()
+        if (
+            current_operation == operation_id
+            and current_run == run_id
+            and current_pointer == expected_pointer
+        ):
+            return
+        if current_operation != spec["operation_id"]:
+            current_child = store.read(spec["owner_id"], current_operation)
+            if current_child.state != "complete":
+                raise RuntimeWorkerError(
+                    "engineering/fix callback target changed before acceptance"
+                )
+        if expected_pointer.exists() or expected_pointer.is_symlink():
+            if expected_pointer.is_symlink() or not expected_pointer.is_file():
+                raise RuntimeWorkerError(
+                    "engineering/fix callback outbox is not reusable"
+                )
+            expected_pointer.unlink()
+        _atomic_json(
+            spec["callback_registration"],
+            {
+                "schema_version": 1,
+                "generation": generation + 1,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "callback_pointer": callback_pointer,
+            },
+        )
+
+    def notify_fix_phase(request: dict[str, object]) -> None:
+        operation_id = str(request["operation_id"])
+        notify_path = (
+            spec_path.parent
+            / "pipeline-fix"
+            / "notifications"
+            / f"{operation_id}.json"
+        )
+        marker = {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "step_id": str(request["step_id"]),
+            "status": "sent",
+        }
+        if notify_path.is_file() and not notify_path.is_symlink():
+            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
+                raise RuntimeWorkerError(
+                    "engineering/fix phase notification changed"
+                )
+            return
+        message = (
+            "Typed engineering/fix phase "
+            f"{request['step_id']} is ready in "
+            ".task-pipeline-step-request.json. Complete only this phase. "
+            f"Write evidence to {request['output_pointer']} and write "
+            f"{request['result_pointer']} as exact JSON with fields "
+            '{"schema_version":1,"status":"complete",'
+            '"output_sha256":"<sha256-of-evidence>",'
+            '"head_sha":"<current-git-head>"}. For the reproduce phase only, '
+            'status may instead be "cannot-reproduce". Then publish the '
+            "request-bound callback with pipeline-step-submit.py. "
+            "Remain in this same session for the next typed request."
+        )
+        if len(message.encode()) > 4096:
+            raise RuntimeWorkerError(
+                "engineering/fix phase notification exceeds its bound"
+            )
+        cmux_adapter.send(spec["surface_id"], message)
+        cmux_adapter.send_key(spec["surface_id"], "Enter")
+        write_immutable_json(notify_path, marker)
+
+    def notify_fix_finalization() -> bool:
+        notify_path = (
+            spec_path.parent
+            / "pipeline-fix"
+            / "finalization-notify.json"
+        )
+        marker = {
+            "schema_version": 1,
+            "operation_id": spec["operation_id"],
+            "status": "sent",
+        }
+        if notify_path.is_file() and not notify_path.is_symlink():
+            if json.loads(notify_path.read_text(encoding="utf-8")) != marker:
+                raise RuntimeWorkerError(
+                    "engineering/fix finalization notification changed"
+                )
+            return False
+        message = (
+            "All four typed engineering/fix phase receipts are accepted. "
+            "Finish the task in this same session: commit the minimal fix, "
+            "run the approved scoped verification, and write the canonical "
+            ".task-summary.json. Do not repeat an accepted phase."
+        )
+        cmux_adapter.send(spec["surface_id"], message)
+        cmux_adapter.send_key(spec["surface_id"], "Enter")
+        write_immutable_json(notify_path, marker)
+        return True
+
+    def drive_fix_transport() -> None:
+        nonlocal fix_callback_digest, fix_callback_stable_reads
+        nonlocal fix_transport_complete
+        if (
+            _pipeline_name != "engineering/fix"
+            or callback_handled
+            or fix_transport_complete
+        ):
+            return
+        try:
+            meta_path = spec["cwd"] / ".task-meta.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            policy = (
+                meta.get("pipeline_policy")
+                if isinstance(meta, dict)
+                else None
+            )
+            if (
+                not isinstance(policy, dict)
+                or policy.get("name") != "engineering/fix"
+                or pipeline is None
+                or policy.get("definition_sha256")
+                != pipeline.definition_sha256
+            ):
+                raise RuntimeWorkerError(
+                    "engineering/fix metadata mismatches its compiled contract"
+                )
+            approved_plan_sha256 = str(
+                meta.get("approved_plan_sha256") or ""
+            )
+            controller_path = (
+                spec_path.parent / "pipeline-fix" / "controller.json"
+            )
+            if controller_path.is_symlink():
+                raise RuntimeWorkerError(
+                    "engineering/fix controller must not be a symlink"
+                )
+            if controller_path.is_file():
+                controller = json.loads(
+                    controller_path.read_text(encoding="utf-8")
+                )
+                if (
+                    not isinstance(controller, dict)
+                    or set(controller)
+                    != {
+                        "schema_version",
+                        "operation_id",
+                        "definition_sha256",
+                        "approved_plan_sha256",
+                        "initial_head_sha",
+                        "iteration",
+                    }
+                    or controller.get("schema_version") != 1
+                    or controller.get("operation_id")
+                    != spec["operation_id"]
+                    or controller.get("definition_sha256")
+                    != pipeline.definition_sha256
+                    or controller.get("approved_plan_sha256")
+                    != approved_plan_sha256
+                    or controller.get("iteration") != 0
+                ):
+                    raise RuntimeWorkerError(
+                        "engineering/fix controller receipt changed"
+                    )
+            else:
+                controller = {
+                    "schema_version": 1,
+                    "operation_id": spec["operation_id"],
+                    "definition_sha256": pipeline.definition_sha256,
+                    "approved_plan_sha256": approved_plan_sha256,
+                    "initial_head_sha": git_head(),
+                    "iteration": 0,
+                }
+                write_immutable_json(controller_path, controller)
+            initial_head_sha = str(controller["initial_head_sha"])
+            parent = store.read(spec["owner_id"], spec["operation_id"])
+            receipt_root = (
+                spec_path.parent / "pipeline-fix" / "pass-0"
+            )
+            receipts: list[FixStepReceipt] = []
+            for step_id in (
+                "reproduce",
+                "root-cause",
+                "regression-test",
+                "minimal-fix",
+            ):
+                receipt_path = receipt_root / step_id / "receipt.json"
+                if not receipt_path.is_file():
+                    break
+                receipts.append(load_receipt(receipt_path))
+            progress = reconcile_fix(
+                parent,
+                definition_sha256=pipeline.definition_sha256,
+                approved_plan_sha256=approved_plan_sha256,
+                initial_head_sha=initial_head_sha,
+                receipts=tuple(receipts),
+                iteration=0,
+            )
+            if progress.action == "attention":
+                emit_compiled_pipeline_event(
+                    spec["cwd"],
+                    event="fix-phase-attention",
+                    pipeline_id=pipeline.definition.pipeline_id,
+                    pipeline_version=pipeline.definition.version,
+                    profile=pipeline.definition.profile,
+                    compiler_outcome="resolved",
+                    definition_sha=pipeline.definition_sha256,
+                    primitive_count=len(pipeline.definition.steps),
+                    loop_iteration=0,
+                    attention_category="cannot-reproduce",
+                )
+                summary_attention(
+                    "pipeline-fix-cannot-reproduce",
+                    AttentionReason.ATTENTION_REQUIRED,
+                )
+                return
+            if progress.action == "complete":
+                retarget_fix_callback(
+                    operation_id=spec["operation_id"],
+                    run_id=spec["run_id"],
+                    callback_pointer=".task-summary.json",
+                )
+                if notify_fix_finalization():
+                    emit_compiled_pipeline_event(
+                        spec["cwd"],
+                        event="fix-final-retarget",
+                        pipeline_id=pipeline.definition.pipeline_id,
+                        pipeline_version=pipeline.definition.version,
+                        profile=pipeline.definition.profile,
+                        compiler_outcome="resolved",
+                        definition_sha=pipeline.definition_sha256,
+                        primitive_count=len(pipeline.definition.steps),
+                        loop_iteration=0,
+                        terminal_category="phases-complete",
+                    )
+                fix_transport_complete = True
+                return
+            if spec["task_summary_pointer"].is_file():
+                _atomic_json(
+                    spec_path.parent
+                    / "pipeline-fix"
+                    / "early-summary.json",
+                    {
+                        "schema_version": 1,
+                        "operation_id": spec["operation_id"],
+                        "status": "ignored-until-phases-complete",
+                    },
+                )
+            round_ = prepare_next_phase(
+                store,
+                parent,
+                definition_sha256=pipeline.definition_sha256,
+                approved_plan_sha256=approved_plan_sha256,
+                initial_head_sha=initial_head_sha,
+                receipts=tuple(receipts),
+                iteration=0,
+            )
+            result_pointer = (
+                f".task-pipeline/results/pass-0/{round_.step_id}.json"
+            )
+            output_pointer = (
+                f".task-pipeline/outputs/pass-0/{round_.step_id}.md"
+            )
+            request = {
+                "schema_version": 1,
+                "operation_id": round_.spec.operation_id,
+                "run_id": round_.run_id,
+                "parent_operation_id": round_.parent_operation_id,
+                "lane_id": round_.lane_id,
+                "definition_sha256": round_.spec.contract_sha256,
+                "step_id": round_.step_id,
+                "iteration": round_.iteration,
+                "input_schema": round_.input_schema,
+                "input_sha256": round_.input_sha256,
+                "input_head_sha": round_.input_head_sha,
+                "prior_receipt_sha256": round_.prior_receipt_sha256,
+                "verification_sha256": round_.verification_sha256,
+                "output_schema": round_.output_schema,
+                "result_pointer": result_pointer,
+                "output_pointer": output_pointer,
+            }
+            _atomic_json(
+                spec["cwd"] / ".task-pipeline-step-request.json",
+                request,
+            )
+            retarget_fix_callback(
+                operation_id=round_.spec.operation_id,
+                run_id=round_.run_id,
+                callback_pointer=".task-pipeline-step-callback.json",
+            )
+            notify_fix_phase(request)
+            _generation, operation_id, run_id, callback_path = (
+                _callback_target(spec)
+            )
+            if (
+                operation_id != round_.spec.operation_id
+                or run_id != round_.run_id
+            ):
+                raise RuntimeWorkerError(
+                    "engineering/fix active callback target changed"
+                )
+            try:
+                raw = callback_path.read_bytes()
+            except FileNotFoundError:
+                return
+            if not raw or len(raw) > MAX_OUTBOX_BYTES:
+                raise RuntimeWorkerError(
+                    "engineering/fix phase callback is invalid"
+                )
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != fix_callback_digest:
+                fix_callback_digest = digest
+                fix_callback_stable_reads = 1
+                return
+            fix_callback_stable_reads += 1
+            if fix_callback_stable_reads < 2:
+                return
+            envelope = _envelope(json.loads(raw))
+            receipt_path = (
+                receipt_root
+                / round_.step_id
+                / "receipt.json"
+            )
+            accepted_receipt = accept_phase(
+                store,
+                round_,
+                envelope,
+                current_head_sha=git_head(),
+                receipt_path=receipt_path,
+            )
+            callback_path.unlink()
+            emit_compiled_pipeline_event(
+                spec["cwd"],
+                event="fix-phase-accepted",
+                pipeline_id=pipeline.definition.pipeline_id,
+                pipeline_version=pipeline.definition.version,
+                profile=pipeline.definition.profile,
+                compiler_outcome="resolved",
+                definition_sha=pipeline.definition_sha256,
+                primitive_count=len(pipeline.definition.steps),
+                loop_iteration=accepted_receipt.iteration,
+                terminal_category=accepted_receipt.step_id,
+            )
+            fix_callback_digest = ""
+            fix_callback_stable_reads = 0
+        except (
+            FixWorkflowError,
+            RuntimeWorkerError,
+            OSError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            summary_attention("pipeline-fix-callback-invalid")
+
     def recover_task_summary_attention() -> None:
         nonlocal callback_handled, summary_digest, summary_stable_reads
         nonlocal summary_attention_revision
@@ -1059,6 +1482,8 @@ def run(
     def inspect_task_summary() -> None:
         nonlocal callback_handled, summary_digest, summary_stable_reads
         if callback_handled:
+            return
+        if _pipeline_name == "engineering/fix" and not fix_transport_complete:
             return
         summary_path: Path = spec["task_summary_pointer"]
         try:
@@ -1597,6 +2022,14 @@ def run(
             if primitive_shape not in {
                 ("model_step", "review"),
                 ("model_step", "verify", "review"),
+                (
+                    "model_step",
+                    "model_step",
+                    "model_step",
+                    "model_step",
+                    "verify",
+                    "review",
+                ),
             }:
                 raise RuntimeWorkerError(
                     "compiled production pipeline shape is unsupported"
@@ -2786,6 +3219,7 @@ def run(
         inspect_control()
         if spec["callback_mode"] == "task-summary":
             recover_task_summary_attention()
+            drive_fix_transport()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",
@@ -2905,6 +3339,7 @@ def run(
     for _ in range(3):
         if spec["callback_mode"] == "task-summary":
             recover_task_summary_attention()
+            drive_fix_transport()
             inspect_task_summary()
         elif spec["callback_mode"] in {
             "research-fetch",
