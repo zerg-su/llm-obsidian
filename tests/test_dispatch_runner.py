@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import shutil
 import subprocess
@@ -345,7 +346,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         lambda: runner.authorize_custom_request(
             custom_request,
             custom_challenge,
-            custom_challenge["approval_sha256"],
+            "a" * 64,
         ),
         "validated before start",
     )
@@ -354,18 +355,34 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_challenge,
     )
     expect_error(
-        "custom approval rejects a different digest",
+        "custom decision rejects a different challenge digest",
+        lambda: runner.record_custom_approval_decision(
+            custom_request,
+            custom_challenge,
+            "f" * 64,
+            "approve",
+        ),
+        "does not match",
+    )
+    approval_decision = runner.record_custom_approval_decision(
+        custom_request,
+        custom_challenge,
+        custom_challenge["challenge_sha256"],
+        "approve",
+    )
+    expect_error(
+        "custom start rejects a different one-shot token",
         lambda: runner.authorize_custom_request(
             custom_request,
             custom_challenge,
             "f" * 64,
         ),
-        "does not match",
+        "token does not match",
     )
     approved_custom_request = runner.authorize_custom_request(
         custom_request,
         custom_challenge,
-        custom_challenge["approval_sha256"],
+        approval_decision["approval_token"],
     )
     custom_harness = runner.harness_request(
         approved_custom_request,
@@ -377,9 +394,24 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         custom_request["pipeline"] == "custom"
         and custom_contract["pipeline"] == "custom/change@1.0.0"
         and "Explicit user approval required" in custom_contract["summary"]
+        and "Inherited harness permissions: cmux-target:policy-only"
+        in custom_contract["summary"]
+        and "Inherited harness side effects: cmux-surface:policy-only"
+        in custom_contract["summary"]
+        and request["origin_surface"] in custom_contract["summary"]
+        and request["origin_session"] in custom_contract["summary"]
         and custom_harness.custom_pipeline is not None
         and operation_spec(custom_harness).contract_sha256
         == custom_contract["definition_sha256"],
+    )
+    check(
+        "custom approval challenge binds exact coordinator target identity",
+        custom_challenge["approval_card_sha256"]
+        == hashlib.sha256(
+            runner.custom_approval_card_for_request(custom_request).encode()
+        ).hexdigest()
+        and custom_challenge["request_id"] == custom_request["request_id"],
+        custom_challenge,
     )
     check(
         "custom prompt keeps runtime transport out of product commits",
@@ -423,7 +455,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         lambda: runner.authorize_custom_request(
             changed_request,
             changed_challenge,
-            custom_challenge["approval_sha256"],
+            approval_decision["approval_token"],
         ),
         "no longer matches",
     )
@@ -447,7 +479,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         capture_output=True,
         check=True,
     )
-    cli_token = json.loads(cli_validate.stdout)["approval_sha256"]
+    cli_challenge = json.loads(cli_validate.stdout)["challenge_sha256"]
     cli_without_approval = subprocess.run(
         [sys.executable, str(SCRIPT), "start", "--spec", str(cli_spec)],
         cwd=ROOT,
@@ -458,9 +490,31 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     check(
         "custom CLI start fails before effects without exact approval",
         cli_without_approval.returncode == 3
-        and "--approval-sha256" in cli_without_approval.stderr
+        and "--approval-token" in cli_without_approval.stderr
         and not Path(cli_raw["worktree"]).exists(),
         cli_without_approval.stderr,
+    )
+    cli_approve = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "approve",
+            "--spec",
+            str(cli_spec),
+            "--challenge-sha256",
+            cli_challenge,
+            "--decision",
+            "approve",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    cli_token = json.loads(cli_approve.stdout)["approval_token"]
+    check(
+        "custom CLI decision is durable before start",
+        not Path(cli_raw["worktree"]).exists(),
     )
     changed_cli_custom = json.loads(json.dumps(custom_payload))
     changed_cli_custom["spec_id"] = "changed-before-cli-start"
@@ -472,7 +526,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             "start",
             "--spec",
             str(cli_spec),
-            "--approval-sha256",
+            "--approval-token",
             cli_token,
         ],
         cwd=ROOT,
@@ -989,7 +1043,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and fix_runtime_request.initial_callback_run_id
         == fix_phase_request["run_id"]
         and fix_runtime_request.attempt_limit == 9
-        and fix_runtime_request.model_restart_limit == 3
+        and fix_runtime_request.model_restart_limit == 1
         and fix_runtime_request.time_budget_seconds == 5400
         and fix_runtime_request.token_limit == 600_000
         and fix_child.spec.kind == "pipeline-model-step"

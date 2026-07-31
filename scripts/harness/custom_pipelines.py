@@ -937,7 +937,7 @@ def freeze_custom_pipeline(
 ) -> FrozenCustomPipeline:
     """Bind exact user consent to an immutable compiled definition."""
 
-    if approval.actor != "user" or approval.decision != "approve":
+    if approval.actor not in {"user", "coordinator-user-decision"} or approval.decision != "approve":
         raise ContractError("only explicit user approval can freeze a pipeline")
     if approval.definition_sha256 != compiled.definition_sha256:
         raise ContractError("approval definition does not match compiled definition")

@@ -69,22 +69,37 @@ explicitly asks for a visible persistent session.
    forbidden effects. For custom, show the rendered baseline delta, route and
    capabilities, enforcement-labelled permissions/effects, worst-case node and
    model counts, loop stops, terminal outcomes, and absolute budget ceiling.
-   Ask once. Do not freeze, mutate, or spawn before explicit approval of that
-   exact definition hash. For custom pipelines, validation also returns and
-   persists one owner-only `approval_sha256` challenge bound to the exact
-   request/spec/plan, route, prompt, review policy, and rendered approval card.
-7. After approval, start the exact UUID once:
+   Do not freeze, mutate, or spawn before explicit approval of that exact
+   definition hash. For custom pipelines, validation also returns and persists
+   one owner-only pending `challenge_sha256` bound to the exact
+   request/spec/plan, coordinator surface/session, route, prompt, review policy,
+   and rendered approval card.
+7. Ask the user once. Record the exact answer as a separate durable decision;
+   `validate` output is never itself authorization:
+
+   ```bash
+   python3 <vault-root>/scripts/dispatch-runner.py approve \
+     --spec <request.json> \
+     --challenge-sha256 <exact-validate-challenge> \
+     --decision approve|reject|revise
+   ```
+
+   `reject` and `revise` remain terminal for that request UUID. Only `approve`
+   returns a random one-shot `approval_token`; it does not exist before the
+   user-decision boundary.
+8. After approval, start the exact UUID once:
 
    ```bash
    python3 <vault-root>/scripts/dispatch-runner.py start --spec <request.json> \
-     --approval-sha256 <exact-validate-token>  # custom only
+     --approval-token <exact-one-shot-token>  # custom only
    ```
 
-   Never calculate, replace, or reuse the token from another validation. A
-   custom start without it, or after any bound input changes, fails before
+   Never synthesize a decision, calculate/replace a token, or reuse one from
+   another request. The start atomically consumes it. A custom start without
+   the post-decision token, or after any bound input changes, fails before
    worktree/cmux effects. Built-in starts omit the option.
 
-8. Show the bounded typed launch result. When it returns
+9. Show the bounded typed launch result. When it returns
    `coordinator_action: return-to-idle-without-polling`, end this turn. Do not
    poll, wait, or run monitors; typed callbacks resume the idle coordinator.
 
