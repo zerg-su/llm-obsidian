@@ -822,6 +822,41 @@ def _run_review(
 
     state = gate.read()
     status = str(state.get("status") or "")
+    stored_lanes = state.get("lanes")
+    if (
+        status == "attention-required"
+        and isinstance(stored_lanes, list)
+        and stored_lanes
+    ):
+        owner_id = str(state.get("owner_id") or "")
+        recoverable = bool(owner_id)
+        for lane in stored_lanes:
+            if not isinstance(lane, dict):
+                recoverable = False
+                break
+            axis = str(lane.get("axis") or "")
+            operation_id = str(lane.get("operation_id") or "")
+            callback = _callback_path(runtime_root, axis)
+            if (
+                not axis
+                or not operation_id
+                or not callback.is_file()
+                or callback.is_symlink()
+            ):
+                recoverable = False
+                break
+            try:
+                record = store.read(owner_id, operation_id)
+            except StoreError:
+                recoverable = False
+                break
+            if record.state not in {"awaiting-callback", "verifying"}:
+                recoverable = False
+                break
+        if recoverable:
+            gate.resume_bound_attention()
+            state = gate.read()
+            status = str(state.get("status") or "")
     if status in {"approved", "skipped", "attention-required"}:
         bound = state.get("context")
         if (

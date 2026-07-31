@@ -429,6 +429,18 @@ with tempfile.TemporaryDirectory(prefix="review-callback-timeout.") as raw:
         and state["final_results"] == {}
         and state["evidence"] == {},
     )
+    store.transition(
+        lane.owner_id,
+        lane.operation_id,
+        "awaiting-callback",
+    )
+    controller.resume_bound_attention()
+    check(
+        "explicit runtime recovery rearms only the existing bound review gate",
+        controller.read()["status"] == "reviewing"
+        and controller.read()["lanes"][0]["operation_id"]
+        == lane.operation_id,
+    )
 
 with tempfile.TemporaryDirectory(prefix="review-defer-callback-timeout.") as raw:
     base = Path(raw)

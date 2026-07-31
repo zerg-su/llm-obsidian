@@ -335,6 +335,43 @@ class ReviewGateController:
             )
         self._replace(status="pending")
 
+    def resume_bound_attention(self) -> None:
+        """Rearm an exact review after its runtime attention was resolved."""
+
+        state = self.read()
+        lanes = state.get("lanes")
+        owner_id = str(state.get("owner_id") or "")
+        if (
+            state.get("status") != "attention-required"
+            or not isinstance(lanes, list)
+            or not lanes
+            or not owner_id
+            or state.get("evidence") not in ({}, None)
+        ):
+            raise ValueError(
+                "only an evidence-free bound review may resume"
+            )
+        for lane in lanes:
+            if not isinstance(lane, dict):
+                raise ValueError("bound review lane is invalid")
+            operation_id = str(lane.get("operation_id") or "")
+            if not operation_id:
+                raise ValueError("bound review lane has no operation")
+            record = self.round_store.read(owner_id, operation_id)
+            if record.state not in {"awaiting-callback", "verifying"}:
+                raise ValueError(
+                    "bound review runtime attention is not resolved"
+                )
+        status = (
+            "verifying"
+            if any(
+                int(lane.get("verification_iteration") or 0) > 0
+                for lane in lanes
+            )
+            else "reviewing"
+        )
+        self._replace(status=status)
+
     @staticmethod
     def _policy(preset: ReviewPreset) -> dict[str, object]:
         return {
