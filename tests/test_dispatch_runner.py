@@ -222,6 +222,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     fix_contract = runner.lifecycle_contract(
         review,
         fix_request["pipeline"],
+        fix_request["completion_policy"],
     )
     fix_prompt = runner.render_task_prompt(fix_request, config)
     check(
@@ -231,7 +232,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and fix_contract["pipeline"] == "engineering/fix@1.0.0"
         and "root-cause:model_step@1.0.0" in fix_contract["summary"]
         and "bounded_loop@1.0.0" in fix_contract["summary"]
-        and "human_gate@1.0.0" in fix_contract["summary"],
+        and "human_gate@1.0.0" in fix_contract["summary"]
+        and "Completion: policy=autonomous, total-passes=3"
+        in fix_contract["summary"],
         fix_contract,
     )
     check(
@@ -644,6 +647,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         == fix_phase_request["operation_id"]
         and fix_runtime_request.initial_callback_run_id
         == fix_phase_request["run_id"]
+        and fix_runtime_request.attempt_limit == 9
+        and fix_runtime_request.model_restart_limit == 3
+        and fix_runtime_request.time_budget_seconds == 5400
+        and fix_runtime_request.token_limit == 600_000
         and fix_child.spec.kind == "pipeline-model-step"
         and fix_child.lane_id == fix_parent.lane_id
         and fix_child.state == "awaiting-callback",

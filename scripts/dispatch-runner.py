@@ -899,6 +899,7 @@ def harness_request(
 def lifecycle_contract(
     review: ReviewPolicy | None = None,
     pipeline_name: str = "lifecycle/default",
+    completion_policy: str = "attention",
 ) -> dict[str, str]:
     """Compile the lifecycle summary shown before dispatch approval."""
 
@@ -917,6 +918,7 @@ def lifecycle_contract(
         "definition_sha256": compiled.definition_sha256,
         "summary": render_contract(
             compiled,
+            completion_policy=completion_policy,
             review_mode=review.mode,
             max_verify_iterations=review.max_verify_iterations,
             verification_profile=review.verification_profile or "unbound",
@@ -1282,7 +1284,11 @@ def main() -> int:
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "session_source": session["source"],
                 "placement": request["placement"],
-                "pipeline": lifecycle_contract(review, request["pipeline"]),
+                "pipeline": lifecycle_contract(
+                    review,
+                    request["pipeline"],
+                    request["completion_policy"],
+                ),
                 "review": {
                     "mode": review.mode,
                     "cross_model": review.cross_model,

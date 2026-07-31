@@ -207,6 +207,7 @@ def _fix_phase_request(round_: FixPhaseRound) -> dict[str, object]:
         "input_sha256": round_.input_sha256,
         "input_head_sha": round_.input_head_sha,
         "prior_receipt_sha256": round_.prior_receipt_sha256,
+        "verification_sha256": round_.verification_sha256,
         "output_schema": round_.output_schema,
         "result_pointer": f"{base}-result.json",
         "output_pointer": f"{base}-output.md",
@@ -252,6 +253,14 @@ def start_dispatch(
     """
 
     spec = operation_spec(request)
+    contract = compiled_builtin(request.pipeline_name)
+    budget = contract.worst_case_budget
+    if request.pipeline_name == "engineering/fix":
+        total_pass_limit = {
+            item.policy: item.total_pass_limit
+            for item in contract.definition.completion_policies
+        }[request.completion_policy]
+        budget = contract.definition.pass_budget.scaled(total_pass_limit)
     lane_id = _assignment(spec, "dispatch-lane")
     run_id = _assignment(spec, "dispatch-run")
     callback_pointer = summary_pointer
@@ -293,6 +302,10 @@ def start_dispatch(
             task_summary_pointer=summary_pointer,
             initial_callback_operation_id=initial_callback_operation_id,
             initial_callback_run_id=initial_callback_run_id,
+            attempt_limit=budget.attempt_limit,
+            model_restart_limit=budget.model_restart_limit,
+            time_budget_seconds=budget.time_budget_seconds,
+            token_limit=budget.token_limit,
         ),
         on_surface_opened=on_surface_opened,
     )
