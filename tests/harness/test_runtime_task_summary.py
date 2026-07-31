@@ -18,12 +18,22 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.process import ProcessAdapter
-from harness.contracts import AttentionReason, OperationSpec, RuntimeRoute
+from harness.contracts import (
+    DEFAULT_TIME_BUDGET_SECONDS,
+    DEFAULT_TOKEN_LIMIT,
+    AttentionReason,
+    OperationSpec,
+    RuntimeRoute,
+)
 from harness.pipeline_builtins import builtin_definitions, builtin_registry
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionRequest
-from harness.runtime_worker import run as run_worker
+from harness.runtime_worker import (
+    _pipeline_verify_identity,
+    run as run_worker,
+)
 from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
@@ -683,6 +693,295 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             response_receipts,
             commands_before_resubmission,
             failed_cmux.sent,
+        ),
+    )
+
+    crash_task = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    crash_commands: list[tuple[str, ...]] = []
+    crash_commands_before_response: list[int] = []
+    recovered_links: list[str] = []
+
+    def pass_crash_restart_verification(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        crash_commands.append(tuple(argv))
+        return subprocess.CompletedProcess(argv, 0, "ok\n", "")
+
+    def prepare_receipt_before_link_crash(
+        vault: Path,
+        worktree: Path,
+        state: Path,
+        profile_sha: str,
+    ) -> None:
+        crash_store = OperationStore(
+            vault / ".vault-meta" / "harness"
+        )
+        parent = crash_store.read("owner-1", crash_task)
+        pipeline = compile_pipeline(
+            builtin_definitions()["engineering/change"],
+            builtin_registry(),
+            capabilities=("route:resolved",),
+        )
+        failed_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        input_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "definition_sha256": pipeline.definition_sha256,
+                    "head_sha": failed_head,
+                    "profile_sha256": profile_sha,
+                    "schema_version": 1,
+                    "summary": valid_summary,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        child, lane_id, run_id = _pipeline_verify_identity(
+            parent.spec,
+            definition_sha256=pipeline.definition_sha256,
+            input_sha256=input_sha256,
+            profile="scoped",
+        )
+        crash_store.create(child, lane_id=lane_id, run_id=run_id)
+        child_supervisor = OperationSupervisor(
+            crash_store, "owner-1", child.operation_id
+        )
+        child_supervisor.configure_budget(
+            attempt_limit=1,
+            model_restart_limit=0,
+            time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+            token_limit=DEFAULT_TOKEN_LIMIT,
+        )
+        for child_state in (
+            "preflight",
+            "starting",
+            "running",
+            "verifying",
+        ):
+            child_supervisor.transition(child_state)
+        child_supervisor.consume_attempt()
+        effect_id = f"pipeline-verify-{input_sha256[:32]}"
+        crash_store.begin_effect(
+            "owner-1", child.operation_id, effect_id
+        )
+        evidence_dir = (
+            state
+            / "pipeline-verification"
+            / child.operation_id
+            / "evidence"
+        )
+        evidence_dir.mkdir(parents=True)
+        output = evidence_dir / "scoped-1.log"
+        output.write_text("failed before crash\n", encoding="utf-8")
+        child_receipt = {
+            "schema_version": 1,
+            "operation_id": child.operation_id,
+            "parent_operation_id": crash_task,
+            "lane_id": lane_id,
+            "run_id": run_id,
+            "definition_sha256": pipeline.definition_sha256,
+            "step_id": "verify",
+            "head_sha": failed_head,
+            "input_sha256": input_sha256,
+            "profile": "scoped",
+            "profile_sha256": profile_sha,
+            "effect_id": effect_id,
+            "status": "failed",
+            "evidence": [
+                {
+                    "profile": "scoped",
+                    "profile_sha256": profile_sha,
+                    "head_sha": failed_head,
+                    "command_id": "scoped-1",
+                    "cwd": ".",
+                    "exit_code": 1,
+                    "started_at": "1",
+                    "finished_at": "2",
+                    "output_pointer": output.relative_to(state).as_posix(),
+                }
+            ],
+        }
+        write_json(
+            state
+            / "pipeline-verification"
+            / child.operation_id
+            / "receipt.json",
+            child_receipt,
+        )
+        check(
+            "crash fixture stops after child receipt and before controller link",
+            not (state / "pipeline-step-verify.json").exists(),
+            state,
+        )
+        (worktree / "product.txt").write_text(
+            "ready\nfixed after crash\n", encoding="utf-8"
+        )
+        subprocess.run(
+            ["git", "add", "product.txt"], cwd=worktree, check=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "fix after verify crash"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        resubmitted_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / crash_task
+            / crash_task
+            / "review-gate.json"
+        ).unlink(missing_ok=True)
+
+        def respond_after_recovery() -> None:
+            import time
+
+            packet_path = worktree / ".task-verification.json"
+            for _ in range(100):
+                if packet_path.is_file():
+                    break
+                time.sleep(0.02)
+            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            linked = json.loads(
+                (state / "pipeline-step-verify.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            recovered_links.append(str(linked["operation_id"]))
+            crash_commands_before_response.append(
+                len(crash_commands)
+            )
+            packet_sha256 = hashlib.sha256(
+                json.dumps(
+                    packet, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            write_json(
+                worktree / ".task-verification-response.json",
+                {
+                    "schema_version": 1,
+                    "operation_id": crash_task,
+                    "verification_operation_id": child.operation_id,
+                    "failed_head_sha": failed_head,
+                    "packet_sha256": packet_sha256,
+                    "response": "fix-and-resubmit",
+                    "resubmitted_head_sha": resubmitted_head,
+                },
+            )
+
+        threading.Thread(target=respond_after_recovery).start()
+
+    def approve_crash_restart(vault: Path, worktree: Path) -> None:
+        gate = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / crash_task
+            / crash_task
+        )
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        ReviewGateController.skip(
+            gate,
+            dispatch_operation_id=crash_task,
+            owner_id=crash_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                meta["review_policy"]["verification_profile_sha256"],
+            ),
+            product_root=worktree,
+        )
+
+    (
+        crash_store,
+        _crash_cmux,
+        crash_state,
+        crash_rc,
+    ) = run_case(
+        root,
+        crash_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        before_start=prepare_receipt_before_link_crash,
+        verification_runner=pass_crash_restart_verification,
+        review_launcher=approve_crash_restart,
+        review_state="missing",
+    )
+    crash_parent = crash_store.read("owner-1", crash_task)
+    crash_children = [
+        record
+        for record in crash_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
+    crash_response_receipts = list(
+        (crash_state / "pipeline-verification").glob(
+            "*/response-receipt.json"
+        )
+    )
+    check(
+        "restart recovers an orphan failed receipt before resubmission",
+        crash_rc == 0
+        and crash_parent.state == "finalizing"
+        and len(crash_children) == 2
+        and sorted(record.state for record in crash_children)
+        == ["complete", "failed"]
+        and recovered_links
+        and recovered_links[0]
+        != json.loads(
+            (crash_state / "pipeline-step-verify.json").read_text(
+                encoding="utf-8"
+            )
+        )["operation_id"]
+        and crash_commands_before_response == [0]
+        and crash_commands
+        == [
+            ("make", "test-harness"),
+            ("make", "test-model-routing"),
+            ("git", "diff", "--check"),
+        ]
+        and len(crash_response_receipts) == 1,
+        (
+            crash_parent,
+            crash_children,
+            recovered_links,
+            crash_commands_before_response,
+            crash_commands,
         ),
     )
 

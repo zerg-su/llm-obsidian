@@ -1834,43 +1834,89 @@ def run(
 
             def controller_verification_receipt(
             ) -> dict[str, object] | None:
-                if not verification_controller_receipt_path.exists():
-                    return None
-                if (
-                    not verification_controller_receipt_path.is_file()
-                    or verification_controller_receipt_path.is_symlink()
-                ):
-                    raise RuntimeWorkerError(
-                        "pipeline verification controller receipt is invalid"
+                linked: dict[str, object] | None = None
+                if verification_controller_receipt_path.exists():
+                    if (
+                        not verification_controller_receipt_path.is_file()
+                        or verification_controller_receipt_path.is_symlink()
+                    ):
+                        raise RuntimeWorkerError(
+                            "pipeline verification controller receipt is invalid"
+                        )
+                    raw_linked = json.loads(
+                        verification_controller_receipt_path.read_text(
+                            encoding="utf-8"
+                        )
                     )
-                linked = json.loads(
-                    verification_controller_receipt_path.read_text(
-                        encoding="utf-8"
+                    if not isinstance(raw_linked, dict):
+                        raise RuntimeWorkerError(
+                            "pipeline verification controller receipt is invalid"
+                        )
+                    linked_operation_id = str(
+                        raw_linked.get("operation_id") or ""
                     )
+                    if not IDENTIFIER.fullmatch(linked_operation_id):
+                        raise RuntimeWorkerError(
+                            "pipeline verification controller receipt is invalid"
+                        )
+                    child_path = (
+                        spec_path.parent
+                        / "pipeline-verification"
+                        / linked_operation_id
+                        / "receipt.json"
+                    )
+                    linked = load_verification_receipt(child_path)
+                    if linked != raw_linked:
+                        raise RuntimeWorkerError(
+                            "pipeline verification controller linkage is invalid"
+                        )
+
+                receipts_root = (
+                    spec_path.parent / "pipeline-verification"
                 )
-                if not isinstance(linked, dict):
-                    raise RuntimeWorkerError(
-                        "pipeline verification controller receipt is invalid"
-                    )
-                linked_operation_id = str(
-                    linked.get("operation_id") or ""
+                receipts = (
+                    [
+                        receipt
+                        for path in receipts_root.glob("*/receipt.json")
+                        if (
+                            receipt := load_verification_receipt(path)
+                        )
+                        is not None
+                    ]
+                    if receipts_root.is_dir()
+                    else []
                 )
-                if not IDENTIFIER.fullmatch(linked_operation_id):
+                unresolved_failures = [
+                    receipt
+                    for receipt in receipts
+                    if receipt["status"] == "failed"
+                    and not verification_response_accepted(receipt)
+                ]
+                if len(unresolved_failures) > 1:
                     raise RuntimeWorkerError(
-                        "pipeline verification controller receipt is invalid"
+                        "multiple failed verification children need reconciliation"
                     )
-                child_path = (
-                    spec_path.parent
-                    / "pipeline-verification"
-                    / linked_operation_id
-                    / "receipt.json"
-                )
-                receipt = load_verification_receipt(child_path)
-                if receipt != linked:
+                if unresolved_failures:
+                    recovered = unresolved_failures[0]
+                    if recovered != linked:
+                        link_verification_receipt(recovered)
+                    return recovered
+                current_receipts = [
+                    receipt
+                    for receipt in receipts
+                    if receipt["operation_id"]
+                    == verification_spec.operation_id
+                ]
+                if len(current_receipts) > 1:
                     raise RuntimeWorkerError(
-                        "pipeline verification controller linkage is invalid"
+                        "duplicate verification child receipts are invalid"
                     )
-                return receipt
+                if current_receipts:
+                    recovered = current_receipts[0]
+                    if recovered != linked:
+                        link_verification_receipt(recovered)
+                    return recovered
+                return linked
 
             def verification_receipt() -> dict[str, object] | None:
                 receipt = load_verification_receipt(
@@ -1885,6 +1931,64 @@ def run(
                 ):
                     return None
                 return receipt
+
+            def verification_response_accepted(
+                receipt: dict[str, object],
+            ) -> bool:
+                response_receipt_path = (
+                    spec_path.parent
+                    / "pipeline-verification"
+                    / str(receipt["operation_id"])
+                    / "response-receipt.json"
+                )
+                if not response_receipt_path.exists():
+                    return False
+                if (
+                    not response_receipt_path.is_file()
+                    or response_receipt_path.is_symlink()
+                ):
+                    raise RuntimeWorkerError(
+                        "verification response receipt is invalid"
+                    )
+                accepted = json.loads(
+                    response_receipt_path.read_text(encoding="utf-8")
+                )
+                if (
+                    not isinstance(accepted, dict)
+                    or accepted.get("schema_version") != 1
+                    or accepted.get("operation_id")
+                    != spec["operation_id"]
+                    or accepted.get("verification_operation_id")
+                    != receipt["operation_id"]
+                    or accepted.get("failed_head_sha")
+                    != receipt["head_sha"]
+                    or accepted.get("status") != "accepted"
+                    or not re.fullmatch(
+                        r"[0-9a-f]{40,64}",
+                        str(accepted.get("resubmitted_head_sha") or ""),
+                    )
+                    or accepted.get("resubmitted_head_sha")
+                    == receipt["head_sha"]
+                    or not re.fullmatch(
+                        r"[0-9a-f]{64}",
+                        str(accepted.get("response_sha256") or ""),
+                    )
+                ):
+                    raise RuntimeWorkerError(
+                        "verification response receipt is invalid"
+                    )
+                return True
+
+            def link_verification_receipt(
+                receipt: dict[str, object],
+            ) -> None:
+                if verification_controller_receipt_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "pipeline verification controller receipt is invalid"
+                    )
+                _atomic_json(
+                    verification_controller_receipt_path, receipt
+                )
 
             def failed_verification_count() -> int:
                 count = 0
@@ -2143,6 +2247,44 @@ def run(
                     )
                 return True
 
+            def reconcile_failed_verification_child(
+                failed: dict[str, object],
+            ) -> None:
+                failed_operation_id = str(failed["operation_id"])
+                failed_record = store.read(
+                    spec["owner_id"], failed_operation_id
+                )
+                if failed_record.pending_effect:
+                    if (
+                        failed_record.pending_effect
+                        != failed["effect_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "failed verification effect is uncertain"
+                        )
+                    store.resolve_effect(
+                        spec["owner_id"],
+                        failed_operation_id,
+                        EffectOutcome.SUCCEEDED,
+                    )
+                    failed_record = store.read(
+                        spec["owner_id"], failed_operation_id
+                    )
+                if failed_record.state == "verifying":
+                    store.transition(
+                        spec["owner_id"],
+                        failed_operation_id,
+                        "attention-required",
+                        reason=AttentionReason.ATTENTION_REQUIRED,
+                    )
+                elif failed_record.state not in {
+                    "attention-required",
+                    "failed",
+                }:
+                    raise RuntimeWorkerError(
+                        "failed verification operation state is invalid"
+                    )
+
             def run_verification() -> None:
                 existing = verification_receipt()
                 current = store.create(
@@ -2269,14 +2411,12 @@ def run(
                                 "evidence": rows,
                             }
                         )
-                        _atomic_json(
-                            verification_controller_receipt_path,
-                            json.loads(
-                                verification_receipt_path.read_text(
-                                    encoding="utf-8"
-                                )
-                            ),
+                        persisted = json.loads(
+                            verification_receipt_path.read_text(
+                                encoding="utf-8"
+                            )
                         )
+                        link_verification_receipt(persisted)
 
                     supervisor.effect(
                         verification_effect_id,
@@ -2315,10 +2455,18 @@ def run(
                 and previous_verification["head_sha"]
                 != verification_head
             ):
-                if (
+                reconcile_failed_verification_child(
+                    previous_verification
+                )
+                allow_resubmit = (
                     failed_verification_count()
-                    > MAX_PIPELINE_VERIFY_RESUBMITS
-                ):
+                    <= MAX_PIPELINE_VERIFY_RESUBMITS
+                )
+                notify_verification_attention(
+                    previous_verification,
+                    allow_resubmit=allow_resubmit,
+                )
+                if not allow_resubmit:
                     summary_attention(
                         "pipeline-verification-retry-exhausted",
                         AttentionReason.RETRY_EXHAUSTED,
