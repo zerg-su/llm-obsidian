@@ -7,6 +7,7 @@
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
+	@python3 scripts/dogfood_gate.py
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_pipeline_builtins.py
