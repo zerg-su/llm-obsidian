@@ -122,6 +122,28 @@ compiled = compile_custom_spec(
     policy=policy,
     capabilities=("route:resolved",),
 )
+fix_raw = json.loads(json.dumps(VALID))
+fix_raw.update(
+    {
+        "spec_id": "fix-with-compact-model-step",
+        "intent": "engineering-fix",
+        "task_profile": "fix",
+        "baseline_pipeline": "engineering/fix",
+    }
+)
+fix_spec = parse_pipeline_spec(fix_raw)
+fix_compiled = compile_custom_spec(
+    fix_spec,
+    builtin_registry(),
+    policy=policy,
+    capabilities=("route:resolved",),
+)
+check(
+    "custom compiler preserves deterministic fix semantics",
+    select_builtin_baseline(fix_spec.intent, fix_spec.task_profile)
+    == "engineering/fix"
+    and fix_compiled.definition.profile == "fix",
+)
 recompiled = compile_custom_spec(
     parse_pipeline_spec(json.dumps(VALID, sort_keys=True)),
     builtin_registry(),
