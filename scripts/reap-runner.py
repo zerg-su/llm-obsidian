@@ -220,8 +220,40 @@ def approved_plan_state(meta: dict[str, Any]) -> tuple[Path, str]:
             raise ReapError("pending approved plan hash drifted")
         return plan, "pending"
     if re.search(r"(?m)^status:\s*executed\s*$", text):
+        if not reap_closes_plan(meta):
+            raise ReapError(
+                "shared approved plan was closed before this task reaped"
+            )
         return plan, "executed"
     raise ReapError("approved plan must be pending or executed recovery state")
+
+
+def reap_closes_plan(meta: dict[str, Any]) -> bool:
+    policy = meta.get("reap_policy")
+    mode = policy.get("mode") if isinstance(policy, dict) else "final"
+    if mode not in {"final", "shared"}:
+        raise ReapError("reap policy has an invalid plan mode")
+    return mode == "final"
+
+
+def with_plan_close(
+    payload: dict[str, Any],
+    meta: dict[str, Any],
+    *,
+    vault: Path,
+    plan: Path,
+    result_link: str,
+    exec_session: object,
+) -> dict[str, Any]:
+    result = dict(payload)
+    if reap_closes_plan(meta):
+        result["plan_close"] = {
+            "file": plan.relative_to(vault).as_posix(),
+            "result_link": result_link,
+            "exec_session": exec_session,
+            "expected_sha256": meta["approved_plan_sha256"],
+        }
+    return result
 
 
 def validate_summary_wikilinks(vault: Path, summary: dict[str, Any]) -> None:
@@ -306,12 +338,14 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
             "log_entry": f"## [{today}] reap | {meta['task_name']}\n\n`{address}` {link}. {summary['body'][:500]}",
             "hot_bullet": f"{today}: {link} — finalized task result (`{address}`)",
         }
-        payload["plan_close"] = {
-            "file": plan.relative_to(vault).as_posix(),
-            "result_link": link,
-            "exec_session": summary.get("session"),
-            "expected_sha256": meta["approved_plan_sha256"],
-        }
+        payload = with_plan_close(
+            payload,
+            meta,
+            vault=vault,
+            plan=plan,
+            result_link=link,
+            exec_session=summary.get("session"),
+        )
         run([sys.executable, str(vault / "scripts/vault-write.py"), "--output", "json"], cwd=vault, input_text=json.dumps(payload, ensure_ascii=False), label="reap vault transaction")
     else:
         expected_closed = str(prepared.get("closed_plan_sha256") or "")

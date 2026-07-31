@@ -65,6 +65,21 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     print(f"OK   {name}")
 
 
+shared_pending_plan = "---\nstatus: pending\n---\n# Shared plan\n"
+check(
+    "shared reap preparation preserves its approved master plan",
+    lifecycle_module.prepared_reap_plan(
+        {"reap_policy": {"mode": "shared"}},
+        shared_pending_plan,
+        today="2026-08-01",
+        result_link="[[Shared task result]]",
+        exec_session="executor-session",
+        label="wiki/plans/shared.md",
+    )
+    == shared_pending_plan,
+)
+
+
 with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     worktree = Path(raw)
     check(

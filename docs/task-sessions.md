@@ -66,9 +66,11 @@ surface.
 
 The harness reap workflow owns the symmetric first finalization and uses
 `scripts/reap-runner.py` as its vault-facing adapter. Given the exact worktree,
-it validates the summary/handoff, archives all review operations, renders the
-provenance page, prepares and commits the collision-safe result plus plan close
-in one transaction, validates the vault, archives the broker task, and arms
+it validates the summary/handoff, archives all review operations, and renders
+the provenance page. Default `final` mode commits the collision-safe result
+plus plan close in one transaction. Explicit `shared` mode commits the result
+while binding and retaining the unchanged pending master plan for sibling
+tasks. It then validates the vault, archives the broker task, and arms
 exact-surface exit. Legacy, interactive, ambiguous, conflicted, and
 already-executed recovery cases stay visible and use the diagnostic contract
 rather than an implicit retry.

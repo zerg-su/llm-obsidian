@@ -279,7 +279,7 @@
       "additionalProperties": false,
       "required": ["mode", "auto_file", "allowed_types", "title"],
       "properties": {
-        "mode": {"const": "final"},
+        "mode": {"enum": ["final", "shared"]},
         "auto_file": {"type": "boolean"},
         "allowed_types": {
           "type": "array",

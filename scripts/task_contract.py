@@ -365,8 +365,10 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     allowed = reap.get("allowed_types")
     title_value = reap.get("title")
     title = title_value.strip() if isinstance(title_value, str) else ""
-    if reap.get("mode") != "final" or not isinstance(reap.get("auto_file"), bool):
-        raise ContractError("reap_policy requires final mode and boolean auto_file")
+    if reap.get("mode") not in {"final", "shared"} or not isinstance(reap.get("auto_file"), bool):
+        raise ContractError(
+            "reap_policy requires final/shared mode and boolean auto_file"
+        )
     if not isinstance(allowed, list) or len(allowed) != 1 or allowed[0] not in SUMMARY_TYPES:
         raise ContractError("reap_policy.allowed_types must contain exactly one known type")
     if not title:
