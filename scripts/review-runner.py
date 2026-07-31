@@ -212,6 +212,7 @@ def _materialize_prompts(
     source_prompt: Path,
     axes: tuple[str, ...],
     callback_root: str,
+    submit_root: Path,
 ) -> dict[str, str]:
     if (
         not source_prompt.is_file()
@@ -232,7 +233,7 @@ def _materialize_prompts(
         command = shlex.join(
             (
                 str(Path(sys.executable).resolve()),
-                str(product_root / "scripts/harness/review_submit.py"),
+                str(submit_root / "scripts/harness/review_submit.py"),
                 "--worktree",
                 str(product_root),
                 "--state-dir",
@@ -393,6 +394,7 @@ def main(
             source_prompt=source_prompt,
             axes=policy.axes,
             callback_root=callback_root,
+            submit_root=Path(__file__).resolve().parent.parent,
         )
         prepared: dict[str, dict[str, Any]] = {}
 

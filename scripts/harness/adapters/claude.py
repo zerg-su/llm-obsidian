@@ -16,6 +16,16 @@ class ClaudeDriverError(ValueError):
     pass
 
 
+def _review_submit_root(
+    callback_pointer: Path | None, product_root: Path
+) -> Path:
+    if callback_pointer is not None:
+        for parent in callback_pointer.parents:
+            if parent.name == ".vault-meta":
+                return parent.parent
+    return product_root
+
+
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 CHECKPOINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
@@ -160,11 +170,14 @@ class ClaudeDriver:
                     )
                 )
                 if callback_pointer is not None:
+                    submit_root = _review_submit_root(
+                        callback_pointer, product_root
+                    )
                     submit = shlex.join(
                         (
                             str(Path(sys.executable).resolve()),
                             str(
-                                product_root
+                                submit_root
                                 / "scripts"
                                 / "harness"
                                 / "review_submit.py"

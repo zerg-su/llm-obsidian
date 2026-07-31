@@ -955,7 +955,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     submit = shlex.join(
         (
             str(Path(sys.executable).resolve()),
-            str(product.resolve() / "scripts/harness/review_submit.py"),
+            str(vault.resolve() / "scripts/harness/review_submit.py"),
             "--worktree",
             str(product.resolve()),
             "--state-dir",

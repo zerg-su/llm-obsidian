@@ -1404,7 +1404,7 @@ check(
     claude_executor[-1] == "--" and claude_reviewer[-1] == "--",
     (claude_executor, claude_reviewer),
 )
-scratch = Path("/tmp/owned-review-scratch")
+scratch = Path("/tmp/review-vault/.vault-meta/owned-review-scratch")
 product = Path("/tmp/product-worktree")
 callback = scratch / "callback.json"
 review_input = scratch / ".review-input.json"
@@ -1415,12 +1415,12 @@ claude_callback = ClaudeDriver(Path("/usr/bin/claude")).command(
     callback_route,
     callback_pointer=callback,
     product_root=product,
-    session_root=Path("/tmp"),
+    session_root=scratch.parent,
 )
 review_submit = shlex.join(
     (
         str(Path(sys.executable).resolve()),
-        str(product / "scripts/harness/review_submit.py"),
+        str(Path("/tmp/review-vault/scripts/harness/review_submit.py")),
         "--worktree",
         str(product),
         "--state-dir",
