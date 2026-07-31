@@ -126,11 +126,14 @@ def active_sessions(root: Path) -> list[str]:
             task = read_object(task_path)
             if not task or task.get("status") == "archived":
                 continue
-            task_id = str(task.get("task_id") or task_path.parent.name)
+            raw_task_id = task.get("task_id")
+            task_id = str(raw_task_id or task_path.parent.name)
             worktrees_value = task.get("worktrees")
             released = (
                 task.get("schema_version") == 1
                 and task.get("status") == "active"
+                and raw_task_id == task_path.parent.name
+                and task.get("project_id") == task_path.parents[2].name
                 and task_id in released_dispatches
                 and isinstance(worktrees_value, list)
                 and bool(worktrees_value)

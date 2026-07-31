@@ -23,6 +23,7 @@ from harness.contracts import (
     to_dict,
 )
 from model_routing import load_config
+from task_sessions import TaskSessionStore
 
 
 def run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -76,6 +77,7 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
     (root / "config").mkdir()
     (root / ".codex").mkdir()
+    (root / "wiki").mkdir()
     shutil.copy2(ROOT / "config/model-routing.toml", root / "config/model-routing.toml")
     (root / ".codex/dispatch-env.toml").write_text('[codex_dispatch]\nclaude_review_model = "custom-claude"\nclaude_review_effort = "xhigh"\n', encoding="utf-8")
     (root / "seed").write_text("seed\n", encoding="utf-8")
@@ -166,18 +168,14 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check("active task blocks upgrade", result.returncode == 4)
 
     (root / ".task-meta.json").unlink()
-    broker = root / ".vault-meta/task-sessions/projects/11111111-1111-4111-8111-111111111111/tasks/22222222-2222-4222-8222-222222222222"
-    broker.mkdir(parents=True)
-    (broker / "task.json").write_text(json.dumps({
-        "schema_version": 1,
-        "task_id": "22222222-2222-4222-8222-222222222222",
-        "status": "active",
-        "worktrees": [str(root)],
-    }), encoding="utf-8")
+    project_id = "11111111-1111-4111-8111-111111111111"
+    terminal_id = "22222222-2222-4222-8222-222222222222"
+    broker_store = TaskSessionStore(root)
+    broker_store.create_task(project_id, terminal_id, worktree=root)
+    broker = broker_store.task_dir(project_id, terminal_id)
     result = run(root)
     check("active broker task blocks upgrade", result.returncode == 4 and "broker-task:" in result.stderr)
 
-    terminal_id = "22222222-2222-4222-8222-222222222222"
     (root / ".task-meta.json").write_text(json.dumps({
         "version": 3,
         "task_id": terminal_id,
@@ -304,5 +302,27 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
         and f"broker-task:{terminal_id}" not in result.stderr
         and "task:upgrade-preflight-test" not in result.stderr,
     )
+
+    broker_path = broker / "task.json"
+    broker_task = json.loads(broker_path.read_text(encoding="utf-8"))
+    broker_identity_cases = (
+        ("missing project ID", "project_id", None),
+        ("mismatched project ID", "project_id", "33333333-3333-4333-8333-333333333333"),
+        ("missing task ID", "task_id", None),
+        ("mismatched task ID", "task_id", "44444444-4444-4444-8444-444444444444"),
+    )
+    for label, field, value in broker_identity_cases:
+        corrupt = dict(broker_task)
+        if value is None:
+            corrupt.pop(field)
+        else:
+            corrupt[field] = value
+        broker_path.write_text(json.dumps(corrupt), encoding="utf-8")
+        result = run(root)
+        check(
+            f"released dispatch cannot release broker with {label}",
+            result.returncode == 4 and "broker-task:" in result.stderr,
+        )
+    broker_path.write_text(json.dumps(broker_task), encoding="utf-8")
 
 print("upgrade preflight tests passed")
