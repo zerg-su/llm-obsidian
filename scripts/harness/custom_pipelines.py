@@ -254,7 +254,12 @@ class CustomPipelinePolicy:
             capability_ceiling=("route:resolved",),
             permission_ceiling=ENFORCEABLE_CUSTOM_PERMISSIONS,
             side_effect_ceiling=ENFORCEABLE_CUSTOM_SIDE_EFFECTS,
-            worst_case_budget=PipelineBudget().scaled(3),
+            # A custom operation may resume its one persistent provider once.
+            # Step/loop counts must never multiply provider restart authority.
+            worst_case_budget=replace(
+                PipelineBudget().scaled(3),
+                model_restart_limit=1,
+            ),
         )
 
 
@@ -697,10 +702,21 @@ def _built_in_semantically_fits(spec: PipelineSpec) -> bool:
     from .pipeline_builtins import compiled_builtin
 
     baseline = compiled_builtin(spec.baseline_pipeline).definition
+    def semantics(step: PipelineStep) -> tuple[object, ...]:
+        return (
+            step.primitive_id,
+            step.primitive_version,
+            step.input_schema,
+            step.output_schema,
+            step.session_mode,
+            step.semantic_skills,
+        )
+
     return (
         spec.input_schema == baseline.input_schema
         and spec.output_schema == baseline.output_schema
-        and spec.steps == baseline.steps
+        and tuple(map(semantics, spec.steps))
+        == tuple(map(semantics, baseline.steps))
         and spec.controls == baseline.control_primitives
         and spec.completion_policy
         in {item.policy for item in baseline.completion_policies}
@@ -875,6 +891,8 @@ def compile_custom_spec(
     policies = [CompletionPolicy("attention", 2)]
     if spec.completion_policy == "autonomous":
         policies.append(CompletionPolicy("autonomous", 3))
+    effective_permissions = policy.permission_ceiling
+    effective_side_effects = policy.side_effect_ceiling
     definition = PipelineDefinition(
         pipeline_id="custom",
         version=spec.version,
@@ -884,8 +902,11 @@ def compile_custom_spec(
         steps=spec.steps,
         control_primitives=spec.controls,
         pass_budget=spec.budget,
-        permission_ceiling=spec.requested_permissions,
-        side_effects=spec.requested_side_effects,
+        # Custom execution uses the existing dispatch/runtime/review harness.
+        # Its effective authority is code-owned and cannot be narrowed by a
+        # model merely omitting fields from the proposal.
+        permission_ceiling=effective_permissions,
+        side_effects=effective_side_effects,
         completion_policies=tuple(policies),
     )
     compiled = compile_pipeline(definition, registry, capabilities=capabilities)
@@ -990,9 +1011,13 @@ def render_custom_approval(
             "Absolute ceiling: "
             f"attempts={ceiling.attempt_limit}, restarts={ceiling.model_restart_limit}, "
             f"deadline={ceiling.time_budget_seconds}s, tokens={ceiling.token_limit}",
-            "Requested permissions: "
+            "Declared permissions: "
+            + (", ".join(spec.requested_permissions) or "none"),
+            "Effective permissions: "
             + (", ".join(compiled.permission_bindings) or "none"),
-            "Requested side effects: "
+            "Declared side effects: "
+            + (", ".join(spec.requested_side_effects) or "none"),
+            "Effective side effects: "
             + (", ".join(compiled.side_effect_bindings) or "none"),
             f"Review: {spec.review_mode}; completion: {spec.completion_policy}",
             "Stops: " + ", ".join(spec.terminal_outcomes),

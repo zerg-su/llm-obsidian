@@ -174,7 +174,8 @@ check(
     and "Absolute ceiling:" in approval
     and "model-calls<=" in approval
     and "Loop bounds:" in approval
-    and "Requested permissions:" in approval
+    and "Declared permissions:" in approval
+    and "Effective permissions:" in approval
     and "Explicit user approval required" in approval,
 )
 authoring = render_authoring_contract(
@@ -390,7 +391,13 @@ else:
     check("model cannot choose a permissive delta baseline", False)
 
 equivalent = deepcopy(VALID)
-equivalent["steps"][0]["step_id"] = "tdd-slices"
+renamed = {"implement": "write-code", "verify": "run-checks", "review": "inspect"}
+for step in equivalent["steps"]:
+    step["step_id"] = renamed[step["step_id"]]
+for transition in equivalent["transitions"]:
+    transition["from_step"] = renamed[transition["from_step"]]
+    if not transition["target"].startswith("terminal:"):
+        transition["target"] = renamed[transition["target"]]
 equivalent["verification_checks"] = []
 try:
     compile_custom_spec(
@@ -403,6 +410,37 @@ except Exception as exc:
     check("built-in-equivalent proposals are rejected", "built-in already fits" in str(exc))
 else:
     check("built-in-equivalent proposals are rejected", False)
+
+minimal_authority = deepcopy(VALID)
+minimal_authority["requested_permissions"] = []
+minimal_authority["requested_side_effects"] = []
+minimal_spec = parse_pipeline_spec(minimal_authority)
+minimal_compiled = compile_custom_spec(
+    minimal_spec,
+    builtin_registry(),
+    policy=policy,
+    capabilities=("route:resolved",),
+)
+minimal_card = render_custom_approval(
+    minimal_spec,
+    minimal_compiled,
+    policy=policy,
+)
+check(
+    "omitted authority cannot hide the effective harness envelope",
+    set(minimal_compiled.definition.permission_ceiling)
+    == set(policy.permission_ceiling)
+    and set(minimal_compiled.definition.side_effects)
+    == set(policy.side_effect_ceiling)
+    and "Declared permissions: none" in minimal_card
+    and "Effective permissions: callback:" in minimal_card,
+)
+
+expect_rejection(
+    "custom provider restart authority is globally capped at one",
+    lambda value: value["budget"].__setitem__("model_restart_limit", 2),
+    "budget ceiling",
+)
 
 for label, receipt, token in (
     (
