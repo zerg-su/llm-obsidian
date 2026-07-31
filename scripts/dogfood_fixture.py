@@ -15,6 +15,10 @@ def redact_token(value: str) -> str:
 
 
 def format_progress(done: int, total: int) -> str:
+    if done < 0 or total < 0 or done > total:
+        raise ValueError(f"invalid progress: done={done}, total={total}")
+    if total == 0:
+        return "0%"
     return f"{round(done / total * 100)}%"
 
 
