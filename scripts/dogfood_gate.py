@@ -16,7 +16,10 @@ branch = subprocess.run(
     check=True,
 ).stdout.strip()
 if (
-    branch == "task/df241-fix-progress-zero"
+    branch in {
+        "task/df241-fix-progress-zero",
+        "task/df241-fix-progress-zero-v2",
+    }
     and (root / ".task-summary.json").is_file()
     and not (root / "tests/.dogfood-retry-approved").is_file()
 ):
