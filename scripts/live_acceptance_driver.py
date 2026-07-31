@@ -515,11 +515,29 @@ class _StartedOperations:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._manager, name)
 
-    def start(self, request: Any, **kwargs: Any) -> Any:
-        result = self._manager.start(request, **kwargs)
-        key = (request.spec.owner_id, request.spec.operation_id)
+    def _remember(self, key: tuple[str, str]) -> None:
         if key not in self.started:
             self.started.append(key)
+
+    def start(self, request: Any, **kwargs: Any) -> Any:
+        key = (request.spec.owner_id, request.spec.operation_id)
+        supplied = kwargs.pop("on_surface_opened", None)
+
+        def surface_opened(opened: Any) -> None:
+            # `start` binds the surface and notifies this seam long before it
+            # returns, and an interrupt in that window escapes its own
+            # `except Exception` handlers.  Record ownership at bind time so
+            # the surface can never be owned by nobody.
+            self._remember(key)
+            if supplied is not None:
+                supplied(opened)
+
+        result = self._manager.start(
+            request, on_surface_opened=surface_opened, **kwargs
+        )
+        # A replay returns an existing record without reopening a surface, so
+        # the seam above may never fire.
+        self._remember(key)
         return result
 
 

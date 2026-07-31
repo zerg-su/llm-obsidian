@@ -131,6 +131,13 @@ class SurfaceTrackingSessions:
         )
         self.records[key] = record
         self.checkpoints[key] = f"checkpoint-{spec.operation_id}"
+        # Production binds the surface and notifies this seam before it
+        # returns; the double must do the same or it cannot exercise the
+        # ownership window that exists before `start` returns.
+        if on_surface_opened is not None:
+            on_surface_opened(
+                SimpleNamespace(record=record, surface_id=surface)
+            )
         if self.deliver_callback:
             pointer = request.cwd / request.callback_pointer
             pointer.parent.mkdir(parents=True, exist_ok=True)
@@ -220,6 +227,20 @@ class SurfaceTrackingSessions:
     # Surfaces this run opened that are still in the tree.
     def leaked(self) -> list[str]:
         return sorted(surface for surface in self.opened if surface in self.tree)
+
+
+class InterruptDuringStartSessions(SurfaceTrackingSessions):
+    """Interrupt after the surface is bound but before `start` returns.
+
+    `runtime_sessions.start` binds the surface and notifies
+    `on_surface_opened` well before it returns its record, so an interrupt in
+    that window leaves an exactly-owned surface that a post-return ledger
+    never learned about.
+    """
+
+    def start(self, request: object, *, on_surface_opened: object = None) -> object:
+        result = super().start(request, on_surface_opened=on_surface_opened)
+        raise KeyboardInterrupt("operator interrupted during runtime start")
 
 
 def prepared_root(stack: list[tempfile.TemporaryDirectory]) -> Path:
@@ -360,6 +381,24 @@ try:
         "interrupt persists a durable failure classification",
         state_path.is_file()
         and json.loads(state_path.read_text(encoding="utf-8")).get("failures"),
+    )
+
+    # ---- boundary 2b: interrupt inside runtime start ---------------------
+    root = prepared_root(handles)
+    tree = {ORIGIN: "coordinator", UNRELATED: "other-task"}
+    start_manager = InterruptDuringStartSessions(root, tree)
+    raised = drive_cell(root, start_manager, timeout=5)
+    check(
+        "interrupt inside runtime start still propagates",
+        raised.startswith("KeyboardInterrupt"),
+    )
+    check(
+        "interrupt inside runtime start releases the bound surface",
+        start_manager.leaked() == [] and len(start_manager.opened) == 1,
+    )
+    check(
+        "interrupt inside runtime start leaves other surfaces untouched",
+        ORIGIN in tree and UNRELATED in tree,
     )
 
     # ---- boundary 3: normal exit must not pass over a stale surface ------
