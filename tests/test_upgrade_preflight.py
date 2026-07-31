@@ -14,6 +14,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/upgrade-preflight.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+from harness.contracts import (
+    EffectOutcome,
+    OperationRecord,
+    OperationSpec,
+    OwnedResources,
+    RuntimeRoute,
+    to_dict,
+)
 from model_routing import load_config
 
 
@@ -25,6 +33,40 @@ def check(name: str, condition: bool) -> None:
     if not condition:
         raise AssertionError(name)
     print(f"OK   {name}")
+
+
+def harness_record(
+    operation_id: str,
+    kind: str,
+    *,
+    owner_id: str,
+    state: str,
+    resources: OwnedResources | None = None,
+    pending_effect: str = "",
+) -> dict[str, object]:
+    return to_dict(OperationRecord(
+        spec=OperationSpec(
+            operation_id=operation_id,
+            idempotency_key=f"{operation_id}-key",
+            kind=kind,
+            owner_id=owner_id,
+            route=RuntimeRoute(
+                "codex", "gpt-5.6-sol", "high", "executor", "a" * 64
+            ),
+            context_manifest="packet/manifest.json",
+            verification_profile="scoped",
+        ),
+        state=state,
+        revision=1,
+        lane_id=f"{operation_id}-lane",
+        run_id=f"{operation_id}-run",
+        resources=resources or OwnedResources(),
+        pending_effect=pending_effect,
+        effect_id=pending_effect,
+        effect_outcome=(
+            EffectOutcome.PENDING if pending_effect else EffectOutcome.NONE
+        ),
+    ))
 
 
 with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
@@ -87,11 +129,12 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     harness_ops.mkdir(parents=True)
     for kind in ("dispatch", "review", "research", "reap", "prototype", "resolve-conflict"):
         (harness_ops / f"{kind}.json").write_text(
-            json.dumps({
-                "schema_version": 1,
-                "state": "running",
-                "spec": {"operation_id": kind, "kind": kind},
-            }),
+            json.dumps(harness_record(
+                kind,
+                kind,
+                owner_id="upgrade-test",
+                state="running",
+            )),
             encoding="utf-8",
         )
     result = run(root)
@@ -105,7 +148,8 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     check(
         "active-operation rejection has one recovery instruction",
         result.stderr.count("Recovery:") == 1
-        and "finish or cancel every listed operation" in result.stderr,
+        and "finish or cancel live operations" in result.stderr
+        and "exact ownership reconciliation" in result.stderr,
     )
     shutil.rmtree(root / ".vault-meta")
 
@@ -143,23 +187,21 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
     harness_ops = root / ".vault-meta/harness/owners" / terminal_id / "operations"
     harness_ops.mkdir(parents=True)
     terminal_path = harness_ops / f"{terminal_id}.json"
-    terminal_path.write_text(json.dumps({
-        "schema_version": 1,
-        "state": "cancelled",
-        "pending_effect": "request-exit",
-        "resources": {
-            "surface_id": "owned-surface",
-            "process_group": 12345,
-            "process_identity": "a" * 64,
-            "supervisor_pid": 12344,
-            "supervisor_identity": "b" * 64,
-        },
-        "spec": {
-            "operation_id": terminal_id,
-            "owner_id": terminal_id,
-            "kind": "dispatch",
-        },
-    }), encoding="utf-8")
+    owned = OwnedResources(
+        surface_id="owned-surface",
+        process_group=12345,
+        process_identity="b" * 64,
+        supervisor_pid=12344,
+        supervisor_identity="c" * 64,
+    )
+    terminal_path.write_text(json.dumps(harness_record(
+        terminal_id,
+        "dispatch",
+        owner_id=terminal_id,
+        state="cancelled",
+        resources=owned,
+        pending_effect="request-exit",
+    )), encoding="utf-8")
     result = run(root)
     check(
         "terminal dispatch with unsettled ownership keeps legacy mirrors active",
@@ -167,6 +209,42 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
         and f"broker-task:{terminal_id}" in result.stderr
         and f"harness:dispatch:{terminal_id}" in result.stderr,
     )
+
+    terminal_kinds = ("review", "research", "reap", "prototype", "resolve-conflict")
+    terminal_other_paths: list[tuple[str, str, Path]] = []
+    for kind in terminal_kinds:
+        owner_id = f"terminal-{kind}"
+        operation_id = f"{owner_id}-operation"
+        operation_path = (
+            root / ".vault-meta/harness/owners" / owner_id
+            / "operations" / f"{operation_id}.json"
+        )
+        operation_path.parent.mkdir(parents=True)
+        operation_path.write_text(json.dumps(harness_record(
+            operation_id,
+            kind,
+            owner_id=owner_id,
+            state="failed",
+            resources=owned,
+            pending_effect="request-exit",
+        )), encoding="utf-8")
+        terminal_other_paths.append((kind, operation_id, operation_path))
+    result = run(root)
+    check(
+        "every resource-bearing terminal harness kind blocks upgrade",
+        result.returncode == 4
+        and all(
+            f"harness:{kind}:{operation_id}" in result.stderr
+            for kind, operation_id, _path in terminal_other_paths
+        ),
+    )
+    for kind, operation_id, operation_path in terminal_other_paths:
+        operation_path.write_text(json.dumps(harness_record(
+            operation_id,
+            kind,
+            owner_id=operation_path.parents[1].name,
+            state="failed",
+        )), encoding="utf-8")
 
     terminal_path.write_text(json.dumps({
         "schema_version": 1,
@@ -184,6 +262,40 @@ with tempfile.TemporaryDirectory(prefix="upgrade-preflight-test.") as raw:
             "owner_id": terminal_id,
             "kind": "dispatch",
         },
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "malformed terminal dispatch cannot release legacy mirrors",
+        result.returncode == 4
+        and f"broker-task:{terminal_id}" in result.stderr
+        and f"harness:dispatch:{terminal_id}" in result.stderr,
+    )
+
+    terminal_path.write_text(json.dumps(harness_record(
+        terminal_id,
+        "dispatch",
+        owner_id=terminal_id,
+        state="cancelled",
+    )), encoding="utf-8")
+    (root / ".task-meta.json").write_text(json.dumps({
+        "version": 3,
+        "task_id": terminal_id,
+        "task_name": "cancelled",
+        "worktree": str(root / "different-worktree"),
+    }), encoding="utf-8")
+    result = run(root)
+    check(
+        "released dispatch cannot release a mismatched worktree mirror",
+        result.returncode == 4
+        and f"task:{root.name}" in result.stderr
+        and f"broker-task:{terminal_id}" not in result.stderr,
+    )
+
+    (root / ".task-meta.json").write_text(json.dumps({
+        "version": 3,
+        "task_id": terminal_id,
+        "task_name": "cancelled",
+        "worktree": str(root),
     }), encoding="utf-8")
     result = run(root)
     check(

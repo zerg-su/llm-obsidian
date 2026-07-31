@@ -21,6 +21,12 @@ from model_routing import (
     load_tracked_config,
     validate_local_config,
 )
+from harness.contracts import (
+    ContractError,
+    OwnedResources,
+    operation_record_from_dict,
+)
+from harness.state_machine import TERMINAL
 
 
 def worktrees(root: Path) -> list[Path]:
@@ -36,9 +42,6 @@ def read_object(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-TERMINAL_STATES = {"complete", "failed", "cancelled"}
 
 
 def same_path(value: Any, path: Path) -> bool:
@@ -58,33 +61,36 @@ def harness_sessions(root: Path) -> tuple[set[str], list[str]]:
         return released_dispatches, active
     for operation_path in sorted(harness_root.glob("*/operations/*.json")):
         operation = read_object(operation_path)
-        spec = operation.get("spec")
-        kind = str(spec.get("kind") or "unknown") if isinstance(spec, dict) else "unknown"
-        operation_id = (
-            str(spec.get("operation_id") or operation_path.stem)
-            if isinstance(spec, dict)
+        raw_spec = operation.get("spec")
+        raw_kind = (
+            str(raw_spec.get("kind") or "unknown")
+            if isinstance(raw_spec, dict)
+            else "unknown"
+        )
+        raw_operation_id = (
+            str(raw_spec.get("operation_id") or operation_path.stem)
+            if isinstance(raw_spec, dict)
             else operation_path.stem
         )
-        if operation.get("state") in TERMINAL_STATES:
-            resources = operation.get("resources")
-            released = (
-                operation.get("schema_version") == 1
-                and kind == "dispatch"
-                and operation_id == operation_path.stem
-                and spec.get("owner_id") == operation_id
-                and operation_path.parents[1].name == operation_id
-                and operation.get("pending_effect") == ""
-                and isinstance(resources, dict)
-                and resources.get("surface_id") == ""
-                and resources.get("process_group") == 0
-                and resources.get("process_identity") == ""
-                and resources.get("supervisor_pid") == 0
-                and resources.get("supervisor_identity") == ""
-            )
-            if released:
-                released_dispatches.add(operation_id)
-            elif kind == "dispatch":
+        try:
+            record = operation_record_from_dict(operation)
+        except (AttributeError, ContractError, TypeError, ValueError):
+            active.append(f"harness:{raw_kind}:{raw_operation_id}")
+            continue
+        kind = record.spec.kind
+        operation_id = record.spec.operation_id
+        if record.state in TERMINAL:
+            if record.pending_effect or record.resources != OwnedResources():
                 active.append(f"harness:{kind}:{operation_id}")
+            elif kind == "dispatch":
+                if (
+                    operation_id == operation_path.stem
+                    and record.spec.owner_id == operation_id
+                    and operation_path.parents[1].name == operation_id
+                ):
+                    released_dispatches.add(operation_id)
+                else:
+                    active.append(f"harness:{kind}:{operation_id}")
             continue
         active.append(f"harness:{kind}:{operation_id}")
     return released_dispatches, active
@@ -205,8 +211,9 @@ def main() -> int:
                 file=sys.stderr,
             )
             print(
-                "Recovery: finish or cancel every listed operation with the installed "
-                "runtime, then rerun upgrade-preflight.",
+                "Recovery: finish or cancel live operations with the installed runtime; "
+                "terminal harness records retaining an effect or owned resource require "
+                "exact ownership reconciliation. Then rerun upgrade-preflight.",
                 file=sys.stderr,
             )
             return 4

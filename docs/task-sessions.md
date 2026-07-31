@@ -168,11 +168,19 @@ cycle, validates all archive links in the result, archives the broker task, and
 removes persistent lane runtimes and the worktree binding pointer. Bounded audit
 metadata remains. Archived tasks are not automatically attached to later work.
 
-`scripts/upgrade-preflight.py` blocks an overlay if any harness operation kind,
-unreaped worktree, unfinished legacy review/research run, or non-archived
-broker task exists. It prints one recovery instruction: finish or cancel every
-listed operation with the installed runtime, then rerun preflight. Do not
-upgrade a live session in place.
+`scripts/upgrade-preflight.py` blocks an overlay for every nonterminal harness
+operation, every terminal harness record that retains a pending effect or exact
+owned resource, and unmatched unreaped worktree, legacy review/research, or
+non-archived broker state. One narrow exception applies when a canonical,
+same-ID terminal dispatch proves all effects settled and all provider,
+supervisor, and cmux ownership released: its matching v3 worktree mirror and
+active lane-free broker mirror are stale rather than live and do not block.
+
+Finish or cancel live operations with the installed runtime. A terminal record
+that retains an effect or resource requires exact ownership inspection and
+reconciliation, not another finish/cancel request. Then rerun preflight. Exact
+per-class doctor guidance is deferred to the diagnostic seam; never upgrade a
+live or uncertain session in place.
 
 The supported UI target is macOS with cmux. Linux receives hermetic/basic
 script coverage. Windows is unsupported.
