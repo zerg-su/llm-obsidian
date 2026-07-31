@@ -719,6 +719,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and started.callback_pointer == "callbacks/result.json",
         started,
     )
+    resumable_parent = store.read("owner-1", "runtime-1")
+    try:
+        manager.cleanup("owner-1", "runtime-1")
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError(
+            "an awaiting-callback parent must not enter terminal surface cleanup"
+        )
+    check(
+        "resumable parent retains its exact surface without closing any surface",
+        store.read("owner-1", "runtime-1") == resumable_parent
+        and resumable_parent.resources.surface_id == SURFACE
+        and cmux.closed == [],
+        cmux.closed,
+    )
     duplicate = manager.start(request)
     check(
         "idempotent repeated start never opens a duplicate surface",
