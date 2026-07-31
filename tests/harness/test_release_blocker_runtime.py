@@ -135,6 +135,48 @@ except runtime_worker.RuntimeWorkerError as exc:
     check("provider restart fails closed without a checkpoint", "checkpoint" in str(exc))
 else:
     check("provider restart fails closed without a checkpoint", False)
+
+
+class CallbackWakeCmux:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def send(self, surface_id: str, value: str) -> None:
+        self.events.append((surface_id, value))
+
+    def send_key(self, surface_id: str, value: str) -> None:
+        self.events.append((surface_id, value))
+
+
+with tempfile.TemporaryDirectory(prefix="callback-wake.") as raw:
+    wake_cmux = CallbackWakeCmux()
+    wake_spec = {
+        "origin_surface": "11111111-1111-4111-8111-111111111111",
+        "callback_wake": "Run the exact idempotent current-review drive.",
+    }
+    first_wake = runtime_worker.publish_callback_wake(
+        wake_spec, Path(raw), "callback-wake-1", wake_cmux
+    )
+    repeated_wake = runtime_worker.publish_callback_wake(
+        wake_spec, Path(raw), "callback-wake-1", wake_cmux
+    )
+    marker = json.loads(
+        (Path(raw) / "callback-wake.json").read_text(encoding="utf-8")
+    )
+    check(
+        "accepted current-review callback wakes its exact coordinator once",
+        first_wake
+        and repeated_wake
+        and wake_cmux.events
+        == [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "Run the exact idempotent current-review drive.",
+            ),
+            ("11111111-1111-4111-8111-111111111111", "Enter"),
+        ]
+        and marker["status"] == "sent",
+    )
 check(
     "durable harness state is repository-ignored",
     ".vault-meta/harness/" in (ROOT / ".gitignore").read_text(encoding="utf-8"),

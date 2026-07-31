@@ -471,6 +471,7 @@ class ReviewGateController:
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
@@ -496,6 +497,7 @@ class ReviewGateController:
             product_root=product_root,
             prompt_pointer=prompt_pointer,
             callback_root=callback_root,
+            callback_wake=callback_wake,
             round_store=self.round_store,
             prompt_pointers=prompt_pointers,
             prepare_lane=prepared,
@@ -625,6 +627,7 @@ class ReviewGateController:
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
@@ -643,6 +646,7 @@ class ReviewGateController:
             product_root=product_root,
             prompt_pointer=prompt_pointer,
             callback_root=callback_root,
+            callback_wake=callback_wake,
             prompt_pointers=prompt_pointers,
             prepare_lane=prepare_lane,
         )
@@ -1072,6 +1076,7 @@ class ReviewGateController:
         product_root: Path,
         prompt_pointer: str,
         callback_root: str,
+        callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
@@ -1131,6 +1136,7 @@ class ReviewGateController:
                 product_root=product_root,
                 prompt_pointer=prompt_pointer,
                 callback_root=callback_root,
+                callback_wake=callback_wake,
                 prompt_pointers=prompt_pointers,
                 prepare_lane=prepare_lane,
             )

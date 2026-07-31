@@ -227,6 +227,10 @@ class RuntimeSessionRequest:
             if self.runtime_home is not None
             else None
         )
+        reviewer_wake_mode = (
+            self.callback_mode == "envelope"
+            and self.spec.route.profile == "reviewer-callback"
+        )
         if research_mode:
             expected_callback = (
                 "artifact.json"
@@ -283,6 +287,21 @@ class RuntimeSessionRequest:
             elif self.research_request_sha256:
                 raise RuntimeSessionError(
                     "research synth derives identity from its artifact"
+                )
+        elif reviewer_wake_mode:
+            if self.callback_wake and (
+                self.callback_wake != self.callback_wake.strip()
+                or "\0" in self.callback_wake
+                or "\n" in self.callback_wake
+                or "\r" in self.callback_wake
+                or len(self.callback_wake.encode()) > 4096
+            ):
+                raise RuntimeSessionError(
+                    "review callback wake must be one bounded line"
+                )
+            if runtime_home is not None or self.research_request_sha256:
+                raise RuntimeSessionError(
+                    "research runtime fields require research callback mode"
                 )
         elif (
             runtime_home is not None

@@ -704,6 +704,29 @@ def _run_review(
     )
     preset, request = _request(meta, vault, task_id, context)
     gate = ReviewGateController(gate_root, runtime, store)
+    callback_wake = ""
+    if meta.get("lifecycle") == "current-checkout":
+        raw_policy = meta["review_policy"]
+        wake_argv = [
+            str(Path(sys.executable).resolve()),
+            str(vault / "scripts" / "task-review-runner.py"),
+            "current",
+            "--worktree",
+            str(worktree),
+        ]
+        if raw_policy["mode"] == "deep":
+            wake_argv.append("--deep")
+        if raw_policy["cross_model"]:
+            wake_argv.append("--cross-model")
+        for option in ("runtime", "model", "effort"):
+            value = str(raw_policy.get(option) or "")
+            if value:
+                wake_argv.extend((f"--{option}", value))
+        wake_argv.extend(("--plan", str(meta["plan_file"])))
+        callback_wake = (
+            "Typed current-review callback is ready. Run this exact command: "
+            + shlex.join(wake_argv)
+        )
     gate_exists = gate.state_path.exists()
     pending_replay = False
     if gate_exists:
@@ -797,6 +820,7 @@ def _run_review(
                 prompt_pointer=prompt_pointers[request.policy.axes[0]],
                 prompt_pointers=prompt_pointers,
                 callback_root="callbacks",
+                callback_wake=callback_wake,
                 prepare_lane=prepare_lane,
             )
         except ValueError:

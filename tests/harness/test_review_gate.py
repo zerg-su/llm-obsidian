@@ -1302,6 +1302,12 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(current_runtime.started) == 1
             and current_runtime.started[0].product_root == product.resolve()
             and current_runtime.started[0].cwd != product.resolve()
+            and "Typed current-review callback is ready"
+            in current_runtime.started[0].callback_wake
+            and "task-review-runner.py current"
+            in current_runtime.started[0].callback_wake
+            and f"--worktree {product.resolve()}"
+            in current_runtime.started[0].callback_wake
             and manifest.is_file()
             and product.resolve() not in manifest.parents,
         )

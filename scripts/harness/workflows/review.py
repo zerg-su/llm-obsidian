@@ -493,6 +493,7 @@ def start_review(
     prompt_pointer: str,
     callback_root: str,
     round_store: ReviewRoundStore,
+    callback_wake: str = "",
     prompt_pointers: Mapping[str, str] | None = None,
     prepare_lane: (
         Callable[
@@ -552,6 +553,7 @@ def start_review(
                 callback_pointer=(
                     f"{callback_root}/{axis_name}/.review-callback.json"
                 ),
+                callback_wake=callback_wake,
             )
             try:
                 existing = round_store.read(

@@ -288,6 +288,53 @@ def provider_resume_argv(
     return (*argv[:-1], "resume", checkpoint)
 
 
+def publish_callback_wake(
+    spec: dict[str, Any],
+    state_root: Path,
+    callback_id: str,
+    cmux_adapter: object,
+) -> bool:
+    """Publish one idempotent coordinator wake after durable acceptance."""
+
+    wake = str(spec.get("callback_wake") or "")
+    if not wake:
+        return True
+    notify_path = state_root / "callback-wake.json"
+    notified: dict[str, object] = {}
+    if notify_path.is_file() and not notify_path.is_symlink():
+        value = json.loads(notify_path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise RuntimeWorkerError("callback wake marker is invalid")
+        notified = value
+    if (
+        notified.get("callback_id") == callback_id
+        and notified.get("status") == "sent"
+    ):
+        return True
+    _atomic_json(
+        notify_path,
+        {
+            "schema_version": 1,
+            "callback_id": callback_id,
+            "status": "pending",
+        },
+    )
+    try:
+        cmux_adapter.send(spec["origin_surface"], wake)
+        cmux_adapter.send_key(spec["origin_surface"], "Enter")
+    except Exception:
+        return False
+    _atomic_json(
+        notify_path,
+        {
+            "schema_version": 1,
+            "callback_id": callback_id,
+            "status": "sent",
+        },
+    )
+    return True
+
+
 def provider_environment(
     spec: dict[str, Any],
     *,
@@ -590,6 +637,20 @@ def load_spec(path: Path) -> dict[str, Any]:
         elif research_request_sha256:
             raise RuntimeWorkerError(
                 "research synth request digest must be derived"
+            )
+    elif callback_mode == "envelope" and callback_wake:
+        if (
+            not SURFACE_UUID.fullmatch(origin_surface)
+            or callback_wake != callback_wake.strip()
+            or "\0" in callback_wake
+            or "\n" in callback_wake
+            or "\r" in callback_wake
+            or len(callback_wake.encode()) > 4096
+        ):
+            raise RuntimeWorkerError("review callback wake is invalid")
+        if value.get("runtime_home") or research_request_sha256:
+            raise RuntimeWorkerError(
+                "research runtime fields require research callback mode"
             )
     elif value.get("runtime_home") or research_request_sha256 or callback_wake:
         raise RuntimeWorkerError(
@@ -1105,6 +1166,14 @@ def run(
                     ),
                 },
             )
+            if not publish_callback_wake(
+                spec,
+                spec_path.parent,
+                envelope.callback_id,
+                cmux_adapter,
+            ):
+                callback_handled = False
+                return
         except CallbackTimeoutError:
             _atomic_json(
                 spec_path.parent / "callback-timeout.json",
