@@ -1120,6 +1120,29 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         surface_id=SURFACE,
         runtime="claude",
     )
+    review_wake_launch = ProcessAdapter().prepare_surface_launch(
+        argv=(str(Path(sys.executable).resolve()), "-c", "pass"),
+        cwd=cwd,
+        state_root=root / "review-wake-state",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=cwd / "callbacks" / "review-wake.json",
+        store_root=worker_store.root,
+        owner_id="owner-worker",
+        operation_id="worker-1",
+        run_id="run-worker",
+        surface_id=SURFACE,
+        runtime="claude",
+        callback_mode="envelope",
+        callback_wake="resume exact current review",
+    )
+    review_wake_spec = json.loads(
+        review_wake_launch.spec_path.read_text(encoding="utf-8")
+    )
+    check(
+        "envelope worker preserves one bounded current-review wake",
+        review_wake_spec["callback_wake"]
+        == "resume exact current review",
+    )
     worker_result: list[int] = []
     worker_thread = threading.Thread(
         target=lambda: worker_result.append(

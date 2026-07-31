@@ -439,14 +439,19 @@ class ProcessAdapter:
                 raise ProcessError(
                     "research synth request identity must be derived"
                 )
-        elif (
-            resolved_runtime_home is not None
-            or research_request_sha256
-            or callback_wake
-        ):
+        elif resolved_runtime_home is not None or research_request_sha256:
             raise ProcessError(
                 "research launch fields require research callback mode"
             )
+        elif callback_wake and (
+            callback_mode != "envelope"
+            or callback_wake != callback_wake.strip()
+            or "\0" in callback_wake
+            or "\n" in callback_wake
+            or "\r" in callback_wake
+            or len(callback_wake.encode()) > 4096
+        ):
+            raise ProcessError("review callback wake is invalid")
         if any(not isinstance(part, str) or "\0" in part for part in argv):
             raise ProcessError("surface launch argv is invalid")
         resolved_state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
