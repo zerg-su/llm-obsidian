@@ -22,6 +22,7 @@ from harness.contracts import (
     RuntimeRoute,
     to_dict,
 )
+from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore, StoreError
@@ -40,6 +41,7 @@ from harness.workflows.review_gate import (
     ReviewGateRun,
     ReviewPreset,
 )
+from lifecycle_telemetry import emit_lifecycle_event
 from model_routing import (
     load_config,
     resolve,
@@ -570,7 +572,8 @@ def _prompt(
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 "Do not run cd or copy packet files; they are readable in place.",
-                f"Write exactly one review-round JSON to `{review_input}`.",
+                *round_schema_lines(),
+                f"Write that exact JSON to `{review_input}`.",
                 "Then submit it through this exact command:",
                 "",
                 f"`{submit}`",
@@ -627,6 +630,32 @@ def _envelope(path: Path, round_: ReviewRound) -> tuple[CallbackEnvelope, Review
         int(payload.get("verification_iteration", -1)),
     )
     return envelope, result
+
+
+def _emit_round_callback(
+    worktree: Path,
+    round_: ReviewRound,
+    depth: str,
+    *,
+    valid: bool,
+) -> None:
+    """Emit the documented content-free callback-validity counter for one round.
+
+    Counters and the reviewer route only; never payload, findings, or error text.
+    emit_lifecycle_event is always non-fatal, so telemetry cannot break the gate.
+    """
+
+    route = round_.spec.route
+    emit_lifecycle_event(
+        worktree,
+        "review-round",
+        actor=f"review:{route.runtime}:{route.model}:{depth}",
+        counts={
+            "valid_callbacks" if valid else "invalid_callbacks": 1,
+            "iteration": round_.verification_iteration,
+        },
+        status="ok" if valid else "error",
+    )
 
 
 def load_active_round(
@@ -1007,7 +1036,14 @@ def _run_review(
         callback = _callback_path(runtime_root, lane.axis)
         if not callback.is_file() or callback.is_symlink():
             continue
-        _unused, result = _envelope(callback, round_)
+        try:
+            _unused, result = _envelope(callback, round_)
+        except (TaskReviewError, OSError, ValueError):
+            # Record the rejection as durable content-free evidence, then keep
+            # the existing fail-closed behaviour for the caller.
+            _emit_round_callback(worktree, round_, preset.depth, valid=False)
+            raise
+        _emit_round_callback(worktree, round_, preset.depth, valid=True)
         ready.append((lane, round_, result))
     if preset.depth == "deep" and len(ready) != len(
         run.execution.lanes
