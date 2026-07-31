@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass, replace
+from pathlib import Path
 
-from .contracts import ContractError, ID_RE, SHA256_RE
+from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
 
 
 PROCESS_STATES = frozenset({"alive", "dead", "unknown"})
@@ -226,7 +229,10 @@ def observe_liveness(
             current = replace(current, restart_count=current.restart_count + 1)
             return _decision("restart", evidence, current), current
         return _decision("attention-required", evidence, current), current
-    if evidence.process_status != "alive" or evidence.prompt_state == "interactive":
+    if (
+        evidence.process_status != "alive"
+        or evidence.prompt_state != "non-interactive"
+    ):
         return _decision("observe", evidence, current), current
 
     idle_seconds = evidence.observed_at - current.last_progress_at
@@ -246,3 +252,83 @@ def observe_liveness(
     if idle_seconds >= policy.suspected_idle_seconds:
         return _decision("suspected-idle", evidence, current), current
     return _decision("observe", evidence, current), current
+
+
+class LivenessController:
+    """Persist content-free state and idempotent recovery receipts."""
+
+    def __init__(self, root: Path | str):
+        self.root = Path(root)
+
+    @staticmethod
+    def _write(path: Path, value: object) -> None:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        encoded = (
+            json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+        )
+        descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        temporary = Path(raw)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _state(self) -> LivenessState | None:
+        path = self.root / "state.json"
+        if not path.exists():
+            return None
+        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+            raise ContractError("liveness state is not owner-only")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                raise TypeError
+            return LivenessState(**value)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ContractError("liveness state is invalid") from exc
+
+    def observe(
+        self,
+        evidence: LivenessEvidence,
+        policy: LivenessPolicy,
+    ) -> LivenessDecision:
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.root, 0o700)
+        previous = self._state()
+        if previous is None:
+            current = LivenessState.start(evidence)
+            decision = _decision("observe", evidence, current)
+        else:
+            decision, current = observe_liveness(previous, evidence, policy)
+        self._write(self.root / "state.json", to_dict(current))
+        if decision.action != "observe":
+            receipt = {
+                "schema_version": 1,
+                "action": decision.action,
+                "action_id": decision.action_id,
+                "observed_at": evidence.observed_at,
+                "operation_revision": evidence.operation_revision,
+                "operation_state": evidence.operation_state,
+                "screen_sha256": evidence.screen_sha256,
+                "typed_result_sha256": evidence.typed_result_sha256,
+                "callback_sha256": evidence.callback_sha256,
+                "receipt_sha256": evidence.receipt_sha256,
+                "nudge_count": current.nudge_count,
+                "restart_count": current.restart_count,
+            }
+            path = self.root / "receipts" / f"{decision.action_id}.json"
+            if path.is_file() and not path.is_symlink():
+                existing = json.loads(path.read_text(encoding="utf-8"))
+                if existing != receipt:
+                    raise ContractError("liveness receipt changed during replay")
+            elif path.exists() or path.is_symlink():
+                raise ContractError("liveness receipt is not a regular file")
+            else:
+                self._write(path, receipt)
+        return decision

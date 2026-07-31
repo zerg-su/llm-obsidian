@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.liveness import (  # noqa: E402
     LivenessEvidence,
+    LivenessController,
     LivenessPolicy,
     LivenessState,
     observe_liveness,
@@ -119,5 +121,34 @@ check(
 dead = replace(base, observed_at=1060, process_status="dead")
 decision, _ = observe_liveness(state, dead, policy)
 check("provider death is distinct from live idle", decision.action == "restart")
+
+with tempfile.TemporaryDirectory(prefix="liveness-state.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    stored_idle = controller.observe(
+        replace(base, observed_at=1601),
+        policy,
+    )
+    stored_nudge = controller.observe(
+        replace(base, observed_at=1901),
+        policy,
+    )
+    replay = controller.observe(
+        replace(base, observed_at=1901),
+        policy,
+    )
+    receipts = list((Path(raw) / "receipts").glob("*.json"))
+    check(
+        "durable controller records each recovery stage once",
+        stored_idle.action == "suspected-idle"
+        and stored_nudge.action == "nudge"
+        and replay.action == "suspected-idle"
+        and len(receipts) == 3,
+    )
+    check(
+        "liveness state and receipts remain owner-only",
+        (Path(raw) / "state.json").stat().st_mode & 0o077 == 0
+        and all(path.stat().st_mode & 0o077 == 0 for path in receipts),
+    )
 
 print("\nAll liveness tests passed.")

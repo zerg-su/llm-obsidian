@@ -41,6 +41,11 @@ from .custom_pipelines import (
     CustomPipelinePolicy,
     resolve_custom_executable,
 )
+from .liveness import (
+    LivenessController,
+    LivenessEvidence,
+    LivenessPolicy,
+)
 from .pipelines import reconcile_pipeline
 from .review_finalization import task_review_status
 from .state_machine import TERMINAL
@@ -335,6 +340,20 @@ def _atomic_json(path: Path, value: object) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _bounded_file_sha256(path: Path, *, limit: int = MAX_OUTBOX_BYTES) -> str:
+    """Return only a bounded content digest; invalid pointers are no evidence."""
+
+    try:
+        if path.is_symlink() or not path.is_file():
+            return ""
+        raw = path.read_bytes()
+    except OSError:
+        return ""
+    if not raw or len(raw) > limit:
+        return ""
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _write_once_json(path: Path, value: object) -> None:
@@ -773,7 +792,12 @@ def run(
         except (ContractError, OSError, ValueError):
             _pipeline_name, pipeline, pipeline_extra_commands = "", None, ()
     last_prompt_digest = ""
+    latest_screen_digest = ""
+    latest_prompt_state = "unknown"
     next_prompt_probe = 0.0
+    liveness_policy = LivenessPolicy.default()
+    liveness_controller = LivenessController(spec_path.parent / "liveness")
+    next_liveness_probe = 0.0
     handled_control_id = ""
     invalid_control_digest = ""
     fix_callback_digest = ""
@@ -883,7 +907,7 @@ def run(
             )
 
     def inspect_prompt() -> None:
-        nonlocal last_prompt_digest
+        nonlocal last_prompt_digest, latest_screen_digest, latest_prompt_state
         try:
             record = store.read(spec["owner_id"], spec["operation_id"])
         except Exception:
@@ -901,13 +925,17 @@ def run(
         if not encoded or len(encoded) > MAX_SCREEN_BYTES:
             return
         digest = hashlib.sha256(encoded).hexdigest()
-        if digest == last_prompt_digest:
-            return
         decision = classify(
             spec["runtime"],
             screen,
             closure_armed=record.state == "exiting",
         )
+        latest_screen_digest = digest
+        latest_prompt_state = (
+            "interactive" if decision.interactive else "non-interactive"
+        )
+        if digest == last_prompt_digest:
+            return
         if not decision.interactive:
             return
         last_prompt_digest = digest
@@ -3749,6 +3777,174 @@ def run(
     exit_code = 0
     provider_exited = False
     exit_containment_failed = False
+
+    def restart_for_liveness(action_id: str) -> None:
+        nonlocal handle, provider_exited, exit_code, exit_containment_failed
+
+        supervisor = OperationSupervisor(
+            store, spec["owner_id"], spec["operation_id"]
+        )
+        try:
+            budgeted = supervisor.consume_model_restart(
+                explicitly_permitted=True
+            )
+            old_handle = handle
+            if not provider_exited:
+                process.signal_owned_child_group(
+                    old_handle.process_group,
+                    old_handle.process_identity,
+                    signal.SIGTERM,
+                )
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    waited, _status = os.waitpid(old_handle.pid, os.WNOHANG)
+                    if waited == old_handle.pid:
+                        break
+                    time.sleep(0.05)
+                else:
+                    process.signal_owned_child_group(
+                        old_handle.process_group,
+                        old_handle.process_identity,
+                        signal.SIGKILL,
+                    )
+                    os.waitpid(old_handle.pid, 0)
+            restarted = process.start(
+                provider_command,
+                cwd=spec["cwd"],
+                env=provider_env,
+            )
+            resources = budgeted.resources
+            supervisor.bind_resources(
+                OwnedResources(
+                    surface_id=resources.surface_id or spec["surface_id"],
+                    process_group=restarted.process_group,
+                    supervisor_pid=resources.supervisor_pid or os.getpid(),
+                    process_identity=restarted.process_identity,
+                    supervisor_identity=(
+                        resources.supervisor_identity or supervisor_identity
+                    ),
+                )
+            )
+            handle = restarted
+            provider_exited = False
+            exit_code = 0
+            exit_containment_failed = False
+            write_immutable_json(
+                spec_path.parent
+                / "liveness"
+                / f"provider-restart-{budgeted.model_restarts}.json",
+                {
+                    "schema_version": 1,
+                    "action_id": action_id,
+                    "operation_id": spec["operation_id"],
+                    "run_id": spec["run_id"],
+                    "model_restarts": budgeted.model_restarts,
+                    "old_process_identity": old_handle.process_identity,
+                    "new_process_identity": restarted.process_identity,
+                    "status": "restarted",
+                },
+            )
+        except (
+            HarnessContractError,
+            OSError,
+            ProcessError,
+            StoreError,
+            SupervisorError,
+        ):
+            try:
+                current = store.read(spec["owner_id"], spec["operation_id"])
+                if current.state not in TERMINAL and current.state != "attention-required":
+                    store.transition(
+                        spec["owner_id"],
+                        spec["operation_id"],
+                        "attention-required",
+                        reason=AttentionReason.ATTENTION_REQUIRED,
+                    )
+            except Exception:
+                pass
+
+    def inspect_liveness() -> None:
+        try:
+            record = store.read(spec["owner_id"], spec["operation_id"])
+            process_status = (
+                "dead"
+                if provider_exited
+                else process.process_status(
+                    handle.process_group,
+                    handle.process_identity,
+                )
+            )
+            typed_result_sha256 = (
+                _bounded_file_sha256(
+                    spec["cwd"] / spec["task_summary_pointer"]
+                )
+                if spec["callback_mode"] == "task-summary"
+                else ""
+            )
+            callback_sha256 = ""
+            if spec["callback_mode"] != "task-summary":
+                try:
+                    callback_sha256 = _bounded_file_sha256(
+                        _callback_target(spec)[3]
+                    )
+                except RuntimeWorkerError:
+                    callback_sha256 = ""
+            decision = liveness_controller.observe(
+                LivenessEvidence(
+                    observed_at=time.time(),
+                    process_status=process_status,
+                    operation_revision=record.revision,
+                    operation_state=record.state,
+                    screen_sha256=latest_screen_digest,
+                    prompt_state=latest_prompt_state,
+                    typed_result_sha256=typed_result_sha256,
+                    callback_sha256=callback_sha256,
+                    receipt_sha256=_bounded_file_sha256(
+                        spec_path.parent / "callback-receipt.json"
+                    ),
+                ),
+                liveness_policy,
+            )
+            if decision.action == "reconcile-result":
+                if spec["callback_mode"] == "task-summary":
+                    recover_task_summary_attention()
+                    drive_fix_transport()
+                    inspect_task_summary()
+                elif spec["callback_mode"] in {
+                    "research-fetch",
+                    "research-synth",
+                }:
+                    inspect_research()
+                else:
+                    inspect_callback()
+            elif decision.action == "nudge":
+                cmux_adapter.send(
+                    spec["surface_id"],
+                    "Harness liveness check: continue the current task, or if "
+                    "it is complete, write the exact required typed callback now.",
+                )
+                cmux_adapter.send_key(spec["surface_id"], "Enter")
+            elif decision.action == "restart":
+                restart_for_liveness(decision.action_id)
+            elif decision.action == "attention-required":
+                current = store.read(spec["owner_id"], spec["operation_id"])
+                if current.state not in TERMINAL and current.state != "attention-required":
+                    store.transition(
+                        spec["owner_id"],
+                        spec["operation_id"],
+                        "attention-required",
+                        reason=AttentionReason.RETRY_EXHAUSTED,
+                    )
+        except (
+            HarnessContractError,
+            OSError,
+            ProcessError,
+            StoreError,
+            TypeError,
+            ValueError,
+        ):
+            return
+
     while True:
         inspect_control()
         if spec["callback_mode"] == "task-summary":
@@ -3778,6 +3974,9 @@ def run(
                 },
             )
         now = time.monotonic()
+        if now >= next_liveness_probe:
+            next_liveness_probe = now + liveness_policy.probe_seconds
+            inspect_liveness()
         if now >= next_prompt_probe:
             next_prompt_probe = now + 0.2
             inspect_prompt()
