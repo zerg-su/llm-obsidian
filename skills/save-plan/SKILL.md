@@ -36,6 +36,10 @@ If a required field is missing, duplicated, or materially ambiguous, stop and
 ask before metadata or writing. Do not infer or invent contract values. An
 existing block must match and render once. Do not create a second goal artifact.
 
+Before Step 2, render that block once in the selected plan and validate it with
+`scripts/outcome_contract.py`'s `extract_from_plan`. Stop on any JSON, schema,
+bounds, or identity rejection; validation precedes address allocation.
+
 ### 2. Resolve metadata
 
 Run a single batched `Bash` call to gather:
@@ -99,7 +103,7 @@ Filename: `wiki/plans/<ts>-<slug>.md` (relative to the project root).
 
 If file already exists (rare same-second collision), append `-1`, `-2`, etc.
 
-Before writing, validate final Markdown with `scripts/outcome_contract.py`'s
+Before writing, revalidate final Markdown with `scripts/outcome_contract.py`'s
 `extract_from_plan`; stop on rejection. Send one `pages:[{op:"create", ...}]`
 payload to `scripts/vault-write.py`, `actor:"save-plan"`, with the full page and
 contract in the same successful `vault-write.py` transaction. On collision exit

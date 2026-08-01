@@ -70,17 +70,18 @@ print("OK   design preserves the contract through owned, testable vertical slice
 prototype = skill("prototype")
 require(
     prototype,
-    "one falsifiable question with a success/failure criterion",
+    "one falsifiable question/pass-fail criterion",
     "harness-owned disposable worktree/minimal ContextPacket",
     "one run command/bounded evidence",
-    "production code remains unchanged",
+    "keep production unchanged",
     "Question",
     "Evidence",
     "Decision",
     "Limitations",
     "Provenance",
-    "how it informs the incoming Outcome Contract",
-    "A successful spike proves neither desired outcome nor production completion",
+    "and how it informs incoming Outcome Contract",
+    "Spike success proves neither desired outcome nor production completion",
+    "Only the harness may remove",
     "Promotion requires separate authorization",
 )
 normalized_prototype = " ".join(prototype.split())
@@ -114,6 +115,9 @@ require(
 )
 assert "Canonical frontmatter schema lives in `wiki/plans/_index.md`" not in save_plan
 normalized_save_plan = " ".join(save_plan.split())
+assert normalized_save_plan.index("extract_from_plan") < normalized_save_plan.index(
+    "./scripts/allocate-address.sh"
+), "The canonical contract must validate before address allocation"
 assert normalized_save_plan.index("extract_from_plan") < normalized_save_plan.index(
     'Send one `pages:[{op:"create", ...}]` payload'
 ), "The canonical contract must validate before the writer effect"
