@@ -27,6 +27,14 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] reap | llm-obsidian-2-6-skills-audit
+
+`c-000064` [[LLM Obsidian 2.6 skill quality baseline audit]]. Completed the mandatory pre-branch audit-only improve-skills meta-gate on integrated foundation `21bdca927739c34a7ebb109f1e0393fca6230340`. The committed report at `docs/skill-quality-baseline-audit-v2.6.0.md` records protected behavior, all five passes including goal preservation, nine unique `fix` verdicts, and exact ownership: four findings to A, two to B, two to C, and one to integration. No skill, script, schema, test, adapter, harness behavior, or vault page changed. Final HEAD `701bae4d3e
+
+## [2026-08-01 18:06] dispatch | llm-obsidian-2-6-skills-audit
+
+Spawned an approved unattended task session (cmux `99CE3B6B-336B-46D4-9E87-82450F55F3B3`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-skills-audit`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-skills-audit` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-08-01] reap | llm-obsidian-2-6-foundation
 
 `c-000061` [[LLM Obsidian 2.6.0 technical foundation]]. ## Outcome
