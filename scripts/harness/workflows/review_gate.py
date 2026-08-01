@@ -18,6 +18,7 @@ from ..contracts import (
     AttentionReason,
     CallbackEnvelope,
     OperationRecord,
+    OwnedResources,
     to_dict,
 )
 from ..state_machine import TERMINAL
@@ -32,11 +33,13 @@ from .review import (
     ReviewRound,
     ReviewRoundStore,
     ReviewRuntimePort,
+    ReviewSessionRequest,
     accept_review_round,
     finish_review_lane,
     prepare_review_round,
     review_evidence_envelope,
     review_round_envelope,
+    review_session_specs,
     start_review,
     verify_review_lane,
 )
@@ -831,6 +834,7 @@ class ReviewGateController:
         digest = hashlib.sha256(callback_path.read_bytes()).hexdigest()
         self._replace(
             status="approved",
+            context=self._context(context),
             evidence={
                 "pointer": callback_path.relative_to(self.root).as_posix(),
                 "sha256": digest,
@@ -940,6 +944,92 @@ class ReviewGateController:
         return ReviewGateDecision(
             "approved", lane, evidence_path=evidence
         )
+
+    def recover_finalizing_approved_round(
+        self,
+        run: ReviewGateRun,
+        lane: ReviewLaneSession,
+        round_: ReviewRound,
+        result: ReviewResult,
+        *,
+        context: ReviewContext,
+        recovery_pointer: str,
+        recovery_sha256: str,
+    ) -> ReviewGateDecision:
+        """Replay one exact accepted approval after a verified repair HEAD."""
+
+        state = self.read()
+        previous = run.execution.request.context
+        recovery_path = (self.root / recovery_pointer).resolve()
+        try:
+            recovery_path.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(
+                "review recovery evidence escapes the gate"
+            ) from exc
+        child = self.round_store.read(
+            round_.owner_id, round_.operation_id
+        )
+        expected = review_round_envelope(round_, result)
+        recovery_identity = {
+            "pointer": recovery_pointer,
+            "sha256": recovery_sha256,
+            "status": "staged",
+        }
+        stored_recovery = state.get("finalizing_recovery")
+        if (
+            state.get("status") != "verifying"
+            or run.execution.request.policy.depth != "simple"
+            or run.execution.request.policy.axes != ("holistic",)
+            or lane.axis != "holistic"
+            or round_.axis != "holistic"
+            or result.verdict != "approve"
+            or previous.head_sha == context.head_sha
+            or previous.verification_profile
+            != context.verification_profile
+            or previous.verification_profile_sha256
+            != context.verification_profile_sha256
+            or child.state not in {"finalizing", "complete"}
+            or child.resources != OwnedResources()
+            or child.pending_effect
+            or child.accepted_callback_id != expected.callback_id
+            or child.accepted_callback_kind != expected.kind
+            or child.accepted_callback_sha256
+            != expected.payload_sha256
+            or not recovery_path.is_file()
+            or recovery_path.is_symlink()
+            or not SHA256.fullmatch(recovery_sha256)
+            or hashlib.sha256(recovery_path.read_bytes()).hexdigest()
+            != recovery_sha256
+            or (
+                stored_recovery is not None
+                and stored_recovery != recovery_identity
+            )
+        ):
+            raise ValueError(
+                "finalizing review recovery identity is invalid"
+            )
+        recovered_request = replace(
+            run.execution.request,
+            context=context,
+        )
+        recovered_run = ReviewGateRun(
+            replace(run.execution, request=recovered_request),
+            run.rounds,
+        )
+        if stored_recovery is None:
+            self._replace(finalizing_recovery=recovery_identity)
+        decision = self.complete_round(
+            recovered_run,
+            lane,
+            round_,
+            result,
+        )
+        if decision.action != "approved":
+            raise ValueError(
+                "finalizing review recovery did not reach approval"
+            )
+        return decision
 
     def defer_round_for_resolution(
         self,
@@ -1185,6 +1275,47 @@ class ReviewGateController:
             context=context,
             lane_ids=None,
         )
+        if prompt_pointers is not None and set(prompt_pointers) != set(
+            request.policy.axes
+        ):
+            raise ValueError(
+                "review prompt pointers must cover every exact axis"
+            )
+        if any(
+            request.route_for(axis).profile != "reviewer-callback"
+            for axis in request.policy.axes
+        ):
+            raise ValueError(
+                "provider review sessions require the reviewer-callback profile"
+            )
+        exact_cwd = cwd.expanduser().resolve()
+        exact_product = product_root.expanduser().resolve()
+        for identity in review_session_specs(request):
+            axis_name = (
+                "standards"
+                if identity.axis
+                == "standards-correctness-architecture-security"
+                else identity.axis
+            )
+            ReviewSessionRequest(
+                spec=identity.spec,
+                lane_id=identity.lane_id,
+                run_id=identity.run_id,
+                origin_surface=origin_surface,
+                cwd=exact_cwd,
+                product_root=exact_product,
+                prompt_pointer=(
+                    prompt_pointer
+                    if prompt_pointers is None
+                    else prompt_pointers[identity.axis]
+                ),
+                placement="workspace",
+                callback_pointer=(
+                    f"{callback_root.rstrip('/')}/{axis_name}/"
+                    ".review-callback.json"
+                ),
+                callback_wake=callback_wake,
+            )
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
@@ -1200,6 +1331,8 @@ class ReviewGateController:
             context=self._context(context),
             round_results={},
             final_results={},
+            awaiting_resolution={},
+            resolution_evidence={},
             evidence={},
         )
         try:

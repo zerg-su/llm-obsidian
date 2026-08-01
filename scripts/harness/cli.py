@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 from pathlib import Path
@@ -293,6 +294,93 @@ def _cancel_or_close(
     return store.transition(owner, operation_id, "cancelled")
 
 
+def _recover_finalizing_review_if_present(
+    store: OperationStore,
+    owner: str,
+    operation_id: str,
+    *,
+    runtime_manager: object | None = None,
+) -> bool:
+    """Recover one exact accepted review callback without starting a model."""
+
+    store_root = store.root.expanduser().resolve()
+    vault = store_root.parents[1]
+    session_path = (
+        store_root
+        / "owners"
+        / owner
+        / "runtime"
+        / operation_id
+        / "session.json"
+    )
+    if not session_path.is_file() or session_path.is_symlink():
+        return False
+    try:
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSessionError(
+            "dispatch recovery session metadata is invalid"
+        ) from exc
+    if not isinstance(session, dict):
+        raise RuntimeSessionError(
+            "dispatch recovery session metadata is invalid"
+        )
+    worktree = Path(str(session.get("cwd") or "")).expanduser()
+    response_path = worktree / ".task-verification-response.json"
+    if (
+        session.get("operation_id") != operation_id
+        or not worktree.is_absolute()
+        or not response_path.is_file()
+    ):
+        return False
+    gate_path = (
+        vault
+        / ".vault-meta"
+        / "harness"
+        / "review-data"
+        / operation_id
+        / operation_id
+        / "review-gate.json"
+    )
+    if not gate_path.is_file() or gate_path.is_symlink():
+        return False
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSessionError(
+            "dispatch recovery review gate is invalid"
+        ) from exc
+    if not isinstance(gate, dict) or gate.get("status") != "verifying":
+        return False
+    runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
+    module_spec = importlib.util.spec_from_file_location(
+        "_harness_task_review_recovery",
+        runner_path,
+    )
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeSessionError(
+            "dispatch recovery implementation is unavailable"
+        )
+    module = importlib.util.module_from_spec(module_spec)
+    try:
+        module_spec.loader.exec_module(module)
+        recover = getattr(module, "recover_finalizing_review")
+        runtime = runtime_manager or RuntimeSessionManager.for_root(
+            vault,
+            store_root=store_root,
+        )
+        receipt = recover(worktree, runtime_manager=runtime)
+    except Exception as exc:
+        raise RuntimeSessionError(
+            "dispatch finalizing review recovery failed"
+        ) from exc
+    if not isinstance(receipt, dict) or receipt.get("status") != "approved":
+        raise RuntimeSessionError(
+            "dispatch finalizing review recovery did not authorize review"
+        )
+    return True
+
+
 def _resume(
     store: OperationStore,
     owner: str,
@@ -300,6 +388,7 @@ def _resume(
     *,
     process_adapter: object,
     cmux_adapter: object,
+    review_runtime_manager: object | None = None,
 ) -> TransitionResult:
     """Restore the exact paused phase and drive cleanup without a model."""
 
@@ -312,6 +401,13 @@ def _resume(
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
     if initial.state == "attention-required":
+        if initial.spec.kind == "dispatch":
+            _recover_finalizing_review_if_present(
+                store,
+                owner,
+                operation_id,
+                runtime_manager=review_runtime_manager,
+            )
         if not initial.resume_state:
             return store.transition(owner, operation_id, initial.state)
         store.transition(owner, operation_id, initial.resume_state)

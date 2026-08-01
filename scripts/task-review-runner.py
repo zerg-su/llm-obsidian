@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -20,9 +21,12 @@ from harness.context import ContextBuilder, ContextInput, outcome_contract_input
 from harness.contracts import (
     AttentionReason,
     CallbackEnvelope,
+    EffectOutcome,
+    OwnedResources,
     RuntimeRoute,
     to_dict,
 )
+from harness.runtime_worker import _pipeline_verify_identity
 from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
@@ -34,6 +38,7 @@ from harness.workflows.review import (
     ReviewOperationRequest,
     ReviewResult,
     ReviewRound,
+    review_round_envelope,
     review_session_specs,
     runtime_status_is_live,
 )
@@ -41,6 +46,8 @@ from harness.workflows.review_gate import (
     ReviewGateController,
     ReviewGateRun,
     ReviewPreset,
+    ReviewScopeBoundary,
+    review_context_sha256,
 )
 from model_routing import (
     load_config,
@@ -56,6 +63,7 @@ from review_resolution import (
     ReviewResolutionEvidence,
     build_resolution_evidence,
     validate_resolution,
+    validate_resolution_evidence,
 )
 from review_telemetry import emit_review_event
 from task_contract import normalize
@@ -83,6 +91,16 @@ class ResolutionBundle(NamedTuple):
     resolution: ReviewResolution
     fix_delta: bytes
     by_axis: Mapping[str, ReviewResolutionEvidence]
+
+
+class FinalizingRecovery(NamedTuple):
+    context: ReviewContext
+    context_manifest: Path
+    marker_pointer: str
+    marker_sha256: str
+    response_receipt_path: Path
+    response_receipt: Mapping[str, object]
+    result: ReviewResult
 
 
 def _atomic_text(path: Path, value: str) -> None:
@@ -256,6 +274,76 @@ def _resolution_bundle(
     except ResolutionError as exc:
         raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
     return ResolutionBundle(resolution, fix_delta, by_axis)
+
+
+def _recovery_resolution_bundle(
+    worktree: Path,
+    task_id: str,
+    persisted: ReviewResolutionEvidence,
+    resolved_head: str,
+) -> ResolutionBundle:
+    """Rebuild recovery evidence from the durable reviewer-seen finding set."""
+
+    resolution_path = worktree / ".task-review-resolution.json"
+    if not resolution_path.is_file() or resolution_path.is_symlink():
+        raise TaskReviewError("review resolution evidence is unavailable")
+    try:
+        resolution = validate_resolution(
+            _read_json(resolution_path, "review resolution evidence"),
+            expected_operation_id=task_id,
+            expected_reviewed_head_sha=persisted.reviewed_head_sha,
+            expected_resolved_head_sha=resolved_head,
+            expected_finding_ids=persisted.previous_finding_ids,
+        )
+    except ResolutionError as exc:
+        raise TaskReviewError(
+            f"review resolution evidence is invalid: {exc}"
+        ) from exc
+    for item in resolution.resolutions:
+        if (
+            item.disposition == "out-of-scope"
+            and not item.follow_up.startswith("https://")
+            and not item.follow_up.startswith("[[")
+            and _git(
+                worktree,
+                "cat-file",
+                "-t",
+                f"{resolved_head}:{item.follow_up}",
+            )
+            != "blob"
+        ):
+            raise TaskReviewError(
+                "repository follow-up must be a file on the resolved HEAD"
+            )
+    fix_delta = _git_bytes(
+        worktree,
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        persisted.reviewed_head_sha,
+        resolved_head,
+        "--",
+    )
+    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_BYTES:
+        raise TaskReviewError(
+            "review fix delta must be non-empty and at most 65536 bytes"
+        )
+    try:
+        evidence = build_resolution_evidence(
+            resolution,
+            axis=persisted.axis,
+            fix_delta=fix_delta,
+            finding_ids=persisted.previous_finding_ids,
+        )
+    except ResolutionError as exc:
+        raise TaskReviewError(
+            f"review resolution evidence is invalid: {exc}"
+        ) from exc
+    return ResolutionBundle(
+        resolution,
+        fix_delta,
+        {persisted.axis: evidence},
+    )
 
 
 def _bounded_input(
@@ -846,6 +934,511 @@ def _envelope(path: Path, round_: ReviewRound) -> tuple[CallbackEnvelope, Review
     return envelope, result
 
 
+def _canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _durable_verification_resubmit(
+    meta: Mapping[str, Any],
+    worktree: Path,
+    store: OperationStore,
+    task_id: str,
+    previous_head: str,
+    current_head: str,
+) -> tuple[Path, dict[str, object], str]:
+    """Bind one worktree resubmit to its exact durable failed verification."""
+
+    packet_path = worktree / ".task-verification.json"
+    response_path = worktree / ".task-verification-response.json"
+    for path, label in (
+        (packet_path, "verification attention packet"),
+        (response_path, "verification resubmission response"),
+    ):
+        if not path.is_file() or path.is_symlink():
+            raise TaskReviewError(
+                f"finalizing review recovery {label} is unavailable"
+            )
+    packet = _read_json(packet_path, "verification attention packet")
+    response = _read_json(
+        response_path, "verification resubmission response"
+    )
+    operation_id = str(packet.get("verification_operation_id") or "")
+    owner_runtime = (
+        store.root
+        / "owners"
+        / task_id
+        / "runtime"
+        / task_id
+    ).resolve()
+    receipt_path = (
+        owner_runtime
+        / "pipeline-verification"
+        / operation_id
+        / "receipt.json"
+    ).resolve()
+    if (
+        not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", operation_id
+        )
+        or not receipt_path.is_file()
+        or receipt_path.is_symlink()
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery verification receipt is unavailable"
+        )
+    receipt = _read_json(receipt_path, "verification receipt")
+    receipt_fields = {
+        "schema_version",
+        "operation_id",
+        "parent_operation_id",
+        "lane_id",
+        "run_id",
+        "definition_sha256",
+        "step_id",
+        "head_sha",
+        "input_sha256",
+        "profile",
+        "profile_sha256",
+        "effect_id",
+        "status",
+        "evidence",
+    }
+    policy = meta.get("pipeline_policy")
+    review_policy = meta.get("review_policy")
+    evidence = receipt.get("evidence")
+    input_sha256 = str(receipt.get("input_sha256") or "")
+    profile = str(receipt.get("profile") or "")
+    if (
+        set(receipt) != receipt_fields
+        or receipt.get("schema_version") != 1
+        or receipt.get("operation_id") != operation_id
+        or receipt.get("parent_operation_id") != task_id
+        or not isinstance(policy, Mapping)
+        or receipt.get("definition_sha256")
+        != policy.get("definition_sha256")
+        or receipt.get("step_id") != "verify"
+        or receipt.get("head_sha") != previous_head
+        or not re.fullmatch(r"[0-9a-f]{64}", input_sha256)
+        or not isinstance(review_policy, Mapping)
+        or profile != review_policy.get("verification_profile")
+        or receipt.get("profile_sha256")
+        != review_policy.get("verification_profile_sha256")
+        or receipt.get("effect_id")
+        != f"pipeline-verify-{input_sha256[:32]}"
+        or receipt.get("status") != "failed"
+        or not isinstance(evidence, list)
+        or not evidence
+        or len(evidence) > 100
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery verification receipt is invalid"
+        )
+    try:
+        parent = store.read(task_id, task_id)
+        expected_spec, expected_lane, expected_run = (
+            _pipeline_verify_identity(
+                parent.spec,
+                definition_sha256=str(receipt["definition_sha256"]),
+                input_sha256=input_sha256,
+                profile=profile,
+            )
+        )
+        child = store.read(task_id, operation_id)
+    except (StoreError, ValueError) as exc:
+        raise TaskReviewError(
+            "finalizing review recovery verification operation is unavailable"
+        ) from exc
+    if (
+        expected_spec.operation_id != operation_id
+        or receipt.get("lane_id") != expected_lane
+        or receipt.get("run_id") != expected_run
+        or child.spec != expected_spec
+        or child.lane_id != expected_lane
+        or child.run_id != expected_run
+        or child.state not in {"attention-required", "failed"}
+        or child.resources != OwnedResources()
+        or child.pending_effect
+        or child.effect_id != receipt.get("effect_id")
+        or child.effect_outcome != EffectOutcome.SUCCEEDED
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery verification operation changed"
+        )
+    packet_evidence: list[dict[str, object]] = []
+    for row in evidence:
+        if (
+            not isinstance(row, dict)
+            or set(row)
+            != {
+                "command_id",
+                "cwd",
+                "exit_code",
+                "started_at",
+                "finished_at",
+                "head_sha",
+                "profile",
+                "profile_sha256",
+                "output_pointer",
+            }
+            or not isinstance(row.get("command_id"), str)
+            or not row["command_id"]
+            or type(row.get("exit_code")) is not int
+            or row.get("head_sha") != previous_head
+            or row.get("profile") != profile
+            or row.get("profile_sha256")
+            != receipt.get("profile_sha256")
+        ):
+            raise TaskReviewError(
+                "finalizing review recovery verification evidence is invalid"
+            )
+        pointer = Path(str(row.get("output_pointer") or ""))
+        output = (owner_runtime / pointer).resolve()
+        evidence_root = (owner_runtime / "pipeline-verification").resolve()
+        if (
+            pointer.is_absolute()
+            or evidence_root not in output.parents
+            or not output.is_file()
+            or output.is_symlink()
+        ):
+            raise TaskReviewError(
+                "finalizing review recovery verification evidence is unavailable"
+            )
+        packet_evidence.append(
+            {
+                "command_id": row["command_id"],
+                "exit_code": row["exit_code"],
+                "output_pointer": str(output),
+            }
+        )
+    expected_packet = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": operation_id,
+        "verification_lane_id": expected_lane,
+        "verification_run_id": expected_run,
+        "definition_sha256": receipt["definition_sha256"],
+        "step_id": "verify",
+        "head_sha": previous_head,
+        "status": "attention-required",
+        "reason": "verification-failed",
+        "safe_boundary": "tdd-slices-complete",
+        "allowed_responses": ["fix-and-resubmit", "escalate"],
+        "response_pointer": ".task-verification-response.json",
+        "receipt_pointer": str(receipt_path),
+        "evidence": packet_evidence,
+    }
+    packet_sha256 = _canonical_sha256(expected_packet)
+    expected_response = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": operation_id,
+        "failed_head_sha": previous_head,
+        "packet_sha256": packet_sha256,
+        "response": "fix-and-resubmit",
+        "resubmitted_head_sha": current_head,
+    }
+    if packet != expected_packet or response != expected_response:
+        raise TaskReviewError(
+            "finalizing review recovery verification transport changed"
+        )
+    response_receipt = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": operation_id,
+        "failed_head_sha": previous_head,
+        "resubmitted_head_sha": current_head,
+        "response_sha256": _canonical_sha256(expected_response),
+        "status": "accepted",
+    }
+    response_receipt_path = receipt_path.with_name("response-receipt.json")
+    if response_receipt_path.exists() and (
+        not response_receipt_path.is_file()
+        or response_receipt_path.is_symlink()
+        or _read_json(
+            response_receipt_path, "verification response receipt"
+        )
+        != response_receipt
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery response receipt changed"
+        )
+    return response_receipt_path, response_receipt, hashlib.sha256(
+        receipt_path.read_bytes()
+    ).hexdigest()
+
+
+def _finalizing_resubmit_recovery(
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    task_id: str,
+    store: OperationStore,
+    gate: ReviewGateController,
+    run: ReviewGateRun,
+    current_context: ReviewContext,
+) -> FinalizingRecovery | None:
+    """Validate one accepted approval stranded after verification repair."""
+
+    state = gate.read()
+    if (
+        state.get("status") != "verifying"
+        or run.execution.request.policy.depth != "simple"
+        or run.execution.request.policy.axes != ("holistic",)
+        or len(run.execution.lanes) != 1
+    ):
+        return None
+    lane = run.execution.lanes[0]
+    round_ = run.rounds.get("holistic")
+    if round_ is None:
+        return None
+    child = gate.round_store.read(round_.owner_id, round_.operation_id)
+    if (
+        child.state not in {"finalizing", "complete"}
+        or child.accepted_callback_kind != "review"
+    ):
+        return None
+    previous_context = run.execution.request.context
+    if previous_context.head_sha == current_context.head_sha:
+        return None
+    summary_path = worktree / ".task-summary.json"
+    resolution_path = worktree / ".task-review-resolution.json"
+    callback_path = _callback_path(runtime_root, "holistic")
+    for path, label in (
+        (summary_path, "task summary"),
+        (resolution_path, "review resolution"),
+        (callback_path, "accepted review callback"),
+    ):
+        if not path.is_file() or path.is_symlink():
+            raise TaskReviewError(
+                f"finalizing review recovery {label} is unavailable"
+            )
+    callback_raw = _read_json(callback_path, "accepted review callback")
+    envelope, result = _envelope(callback_path, round_)
+    expected_envelope = to_dict(review_round_envelope(round_, result))
+    if (
+        result.verdict != "approve"
+        or callback_raw != expected_envelope
+        or envelope.callback_id != child.accepted_callback_id
+        or envelope.kind != child.accepted_callback_kind
+        or envelope.payload_sha256 != child.accepted_callback_sha256
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery callback identity changed"
+        )
+    (
+        response_receipt_path,
+        response_receipt,
+        verification_receipt_sha256,
+    ) = _durable_verification_resubmit(
+        meta,
+        worktree,
+        store,
+        task_id,
+        previous_context.head_sha,
+        current_context.head_sha,
+    )
+    raw_resolution_evidence = state.get("resolution_evidence")
+    if (
+        not isinstance(raw_resolution_evidence, dict)
+        or len(raw_resolution_evidence) != 1
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery resolution boundary is invalid"
+        )
+    persisted_pointer = Path(
+        str(next(iter(raw_resolution_evidence.values())))
+    )
+    persisted_path = (gate.root / persisted_pointer).resolve()
+    if (
+        persisted_pointer.is_absolute()
+        or gate.root not in persisted_path.parents
+        or not persisted_path.is_file()
+        or persisted_path.is_symlink()
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery resolution evidence is unavailable"
+        )
+    try:
+        persisted_resolution = validate_resolution_evidence(
+            _read_json(persisted_path, "persisted review resolution")
+        )
+    except ResolutionError as exc:
+        raise TaskReviewError(
+            f"finalizing review recovery resolution evidence is invalid: {exc}"
+        ) from exc
+    if (
+        persisted_resolution.operation_id != task_id
+        or persisted_resolution.axis != "holistic"
+        or persisted_resolution.resolved_head_sha
+        != previous_context.head_sha
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery resolution identity changed"
+        )
+    bundle = _recovery_resolution_bundle(
+        worktree,
+        task_id,
+        persisted_resolution,
+        current_context.head_sha,
+    )
+    rebuilt_resolution = bundle.by_axis.get("holistic")
+    if (
+        rebuilt_resolution is None
+        or rebuilt_resolution.operation_id
+        != persisted_resolution.operation_id
+        or rebuilt_resolution.axis != persisted_resolution.axis
+        or rebuilt_resolution.reviewed_head_sha
+        != persisted_resolution.reviewed_head_sha
+        or rebuilt_resolution.previous_finding_ids
+        != persisted_resolution.previous_finding_ids
+        or dict(rebuilt_resolution.resolutions)
+        != dict(persisted_resolution.resolutions)
+    ):
+        raise TaskReviewError(
+            "finalizing review recovery finding rulings changed"
+        )
+    summary_bytes = summary_path.read_bytes()
+    if not summary_bytes or len(summary_bytes) > 250_000:
+        raise TaskReviewError(
+            "finalizing review recovery task summary is invalid"
+        )
+    recovery_context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+        resolution_bundle=bundle,
+    )
+    marker = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "round_operation_id": round_.operation_id,
+        "round_run_id": round_.run_id,
+        "accepted_callback_sha256": envelope.payload_sha256,
+        "failed_head_sha": previous_context.head_sha,
+        "resubmitted_head_sha": recovery_context.head_sha,
+        "verification_receipt_sha256": verification_receipt_sha256,
+        "response_receipt_sha256": _canonical_sha256(response_receipt),
+        "persisted_resolution_sha256": hashlib.sha256(
+            persisted_path.read_bytes()
+        ).hexdigest(),
+        "resolution_sha256": hashlib.sha256(
+            resolution_path.read_bytes()
+        ).hexdigest(),
+        "summary_sha256": hashlib.sha256(summary_bytes).hexdigest(),
+        "status": "validated",
+    }
+    marker_name = (
+        "finalizing-review-recovery-"
+        f"{_canonical_sha256(marker)[:16]}.json"
+    )
+    marker_path = gate.root / marker_name
+    if marker_path.exists():
+        if (
+            marker_path.is_symlink()
+            or _read_json(marker_path, "finalizing review recovery marker")
+            != marker
+        ):
+            raise TaskReviewError(
+                "finalizing review recovery marker changed"
+            )
+    else:
+        _atomic_json(marker_path, marker)
+    if response_receipt_path.exists():
+        if _read_json(
+            response_receipt_path, "verification response receipt"
+        ) != response_receipt:
+            raise TaskReviewError(
+                "finalizing review recovery response receipt changed"
+            )
+    else:
+        _atomic_json(response_receipt_path, response_receipt)
+    verification_child = store.read(
+        task_id,
+        str(response_receipt["verification_operation_id"]),
+    )
+    if verification_child.state == "attention-required":
+        store.transition(
+            task_id,
+            verification_child.spec.operation_id,
+            "failed",
+        )
+    elif verification_child.state != "failed":
+        raise TaskReviewError(
+            "finalizing review recovery verification response is not terminal"
+        )
+    return FinalizingRecovery(
+        recovery_context,
+        context_manifest,
+        marker_name,
+        hashlib.sha256(marker_path.read_bytes()).hexdigest(),
+        response_receipt_path,
+        response_receipt,
+        result,
+    )
+
+
+def _apply_finalizing_recovery(
+    *,
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    task_id: str,
+    gate: ReviewGateController,
+    run: ReviewGateRun,
+    recovery: FinalizingRecovery,
+) -> dict[str, Any]:
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    try:
+        decision = gate.recover_finalizing_approved_round(
+            run,
+            lane,
+            round_,
+            recovery.result,
+            context=recovery.context,
+            recovery_pointer=recovery.marker_pointer,
+            recovery_sha256=recovery.marker_sha256,
+        )
+    except (OSError, ValueError) as exc:
+        raise TaskReviewError(
+            f"finalizing review recovery failed: {exc}"
+        ) from exc
+    _emit_round_telemetry(
+        worktree,
+        vault,
+        runtime_root,
+        round_,
+        event="review-callback",
+        terminal_status="accepted",
+    )
+    _emit_round_telemetry(
+        worktree,
+        vault,
+        runtime_root,
+        round_,
+        event="review-round-complete",
+        terminal_status=recovery.result.verdict,
+        severities=tuple(
+            finding.severity for finding in recovery.result.findings
+        ),
+    )
+    return _receipt(
+        status=decision.action,
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=recovery.context_manifest,
+        run=gate.rehydrate(),
+    )
+
+
 def _telemetry_marker(runtime_root: Path, axis: str) -> Path:
     return _callback_path(runtime_root, axis).parent / ".review-telemetry.json"
 
@@ -1305,8 +1898,30 @@ def _run_review(
     if status not in {"reviewing", "verifying"}:
         raise TaskReviewError("review gate has an unsupported state")
     if context.head_sha != run.execution.request.context.head_sha:
-        raise TaskReviewError(
-            "product HEAD changed outside an awaiting-resolution boundary"
+        recovery = _finalizing_resubmit_recovery(
+            meta,
+            vault,
+            worktree,
+            runtime_root,
+            task_id,
+            store,
+            gate,
+            run,
+            context,
+        )
+        if recovery is None:
+            raise TaskReviewError(
+                "product HEAD changed outside an awaiting-resolution boundary"
+            )
+        return _apply_finalizing_recovery(
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            task_id=task_id,
+            gate=gate,
+            run=run,
+            recovery=recovery,
         )
     ready: list[tuple[object, ReviewRound, ReviewResult]] = []
     for lane in run.execution.lanes:
@@ -1420,6 +2035,215 @@ def _run_review(
         runtime_root=runtime_root,
         context_manifest=context_manifest,
         run=None if next_status == "skipped" else gate.rehydrate(),
+    )
+
+
+def recover_finalizing_review(
+    worktree: Path,
+    *,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Recover only the exact accepted-approval verification crash window."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    runtime_root = _runtime_root(vault, task_id)
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(
+        _gate_root(vault, task_id),
+        runtime,
+        store,
+    )
+    if not gate.state_path.is_file() or gate.state_path.is_symlink():
+        raise TaskReviewError(
+            "finalizing review recovery gate is unavailable"
+        )
+    run = gate.rehydrate()
+    context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+    )
+    state = gate.read()
+    if (
+        state.get("status") == "approved"
+        and isinstance(state.get("context"), dict)
+        and state["context"].get("head_sha") == context.head_sha
+        and isinstance(state.get("finalizing_recovery"), dict)
+    ):
+        return _receipt(
+            status="approved",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=run,
+        )
+    if context.head_sha == run.execution.request.context.head_sha:
+        raise TaskReviewError(
+            "finalizing review recovery requires an exact repaired HEAD"
+        )
+    recovery = _finalizing_resubmit_recovery(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+        store,
+        gate,
+        run,
+        context,
+    )
+    if recovery is None:
+        raise TaskReviewError(
+            "finalizing review recovery boundary is unavailable"
+        )
+    return _apply_finalizing_recovery(
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        recovery=recovery,
+    )
+
+
+def _dispatched_review_is_quiescent(
+    store: OperationStore,
+    task_id: str,
+) -> bool:
+    rows = store.list(task_id)
+    if not rows:
+        return False
+    for row in rows:
+        if row.resources != OwnedResources() or row.pending_effect:
+            return False
+        if (
+            row.spec.operation_id == task_id
+            and row.spec.kind == "dispatch"
+        ):
+            if row.state != "attention-required":
+                return False
+        elif row.state not in TERMINAL:
+            return False
+    return True
+
+
+def restart_task_review_for_boundary(
+    worktree: Path,
+    *,
+    kind: str,
+    reason: str,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Start the one persisted fresh review allowed for a dispatched task."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    runtime_root = _runtime_root(vault, task_id)
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(
+        _gate_root(vault, task_id),
+        runtime,
+        store,
+    )
+    if not gate.state_path.is_file() or gate.state_path.is_symlink():
+        raise TaskReviewError("fresh review gate is unavailable")
+    state = gate.read()
+    if (
+        state.get("status") != "attention-required"
+        or state.get("fresh_reevaluation_used") is True
+        or not _dispatched_review_is_quiescent(store, task_id)
+    ):
+        raise TaskReviewError(
+            "fresh review requires one quiescent attention boundary"
+        )
+    run = gate.rehydrate()
+    previous_context = run.execution.request.context
+    context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+    )
+    boundary = ReviewScopeBoundary(
+        kind,
+        review_context_sha256(previous_context),
+        review_context_sha256(context),
+        reason,
+    )
+    prompt_pointers = {
+        axis: _prompt(
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context=context,
+            axis=axis,
+            verification=False,
+        )
+        for axis in run.execution.request.policy.axes
+    }
+
+    def prepare_lane(
+        axis: str,
+        _session_request: object,
+        _result: object,
+        round_: ReviewRound,
+    ) -> None:
+        _write_round_meta(
+            runtime_root=runtime_root,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            depth=run.execution.request.policy.depth,
+            context=context,
+            lane_operation_id=round_.parent_operation_id,
+            round_=round_,
+        )
+
+    for axis in run.execution.request.policy.axes:
+        callback = _callback_path(runtime_root, axis)
+        if callback.is_symlink():
+            raise TaskReviewError("fresh review callback is invalid")
+        callback.unlink(missing_ok=True)
+    fresh = gate.restart_for_boundary(
+        run,
+        boundary=boundary,
+        context=context,
+        origin_surface=str(meta.get("task_surface") or ""),
+        cwd=runtime_root,
+        product_root=worktree,
+        prompt_pointer=prompt_pointers[
+            run.execution.request.policy.axes[0]
+        ],
+        prompt_pointers=prompt_pointers,
+        callback_root="callbacks",
+        prepare_lane=prepare_lane,
+    )
+    if fresh is None:
+        raise TaskReviewError("fresh review boundary is exhausted")
+    return _receipt(
+        status="reviewing",
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=context_manifest,
+        run=fresh,
     )
 
 
@@ -1787,6 +2611,10 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--worktree", type=Path, required=True)
+    fresh = sub.add_parser("fresh")
+    fresh.add_argument("--worktree", type=Path, required=True)
+    fresh.add_argument("--kind", choices=("scope", "context"), required=True)
+    fresh.add_argument("--reason", required=True)
     current = sub.add_parser("current")
     current.add_argument("--worktree", type=Path, required=True)
     current.add_argument("--deep", action="store_true")
@@ -1810,6 +2638,13 @@ def main(
         if args.command == "run":
             result = run_task_review(
                 args.worktree, runtime_manager=runtime_manager
+            )
+        elif args.command == "fresh":
+            result = restart_task_review_for_boundary(
+                args.worktree,
+                kind=args.kind,
+                reason=args.reason,
+                runtime_manager=runtime_manager,
             )
         else:
             result = run_current_review(

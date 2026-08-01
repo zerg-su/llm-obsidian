@@ -24,6 +24,7 @@ from harness.callbacks import CallbackBroker
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
+    EffectOutcome,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
@@ -32,6 +33,7 @@ from harness.contracts import (
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
+from harness.runtime_worker import _pipeline_verify_identity
 from harness.pipeline_builtins import compiled_builtin
 from harness.workflows.review import (
     ReviewContext,
@@ -1038,6 +1040,34 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)
     task_store = OperationStore(vault / ".vault-meta/harness")
+    task_dispatch_spec = OperationSpec(
+        operation_id=task_id,
+        idempotency_key="task-review-dispatch",
+        kind="dispatch",
+        owner_id=task_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=meta["pipeline_policy"]["definition_sha256"],
+    )
+    task_store.create(
+        task_dispatch_spec,
+        lane_id="task-review-dispatch-lane",
+        run_id="task-review-dispatch-run",
+    )
+    for dispatch_state in (
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+    ):
+        task_store.transition(task_id, task_id, dispatch_state)
     task_runtime = FakeRuntime(task_store)
     started = task_review_runner.run_task_review(
         product, runtime_manager=task_runtime
@@ -1322,35 +1352,19 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     verification_input_sha = hashlib.sha256(
         b"failed verification input"
     ).hexdigest()
-    verification_operation_id = (
-        f"{task_id}-verify-{verification_input_sha[:16]}"
+    (
+        verification_spec,
+        verification_lane_id,
+        verification_run_id,
+    ) = _pipeline_verify_identity(
+        task_dispatch_spec,
+        definition_sha256=meta["pipeline_policy"]["definition_sha256"],
+        input_sha256=verification_input_sha,
+        profile="scoped",
     )
-    verification_lane_id = hashlib.sha256(
-        f"{verification_operation_id}:lane".encode()
-    ).hexdigest()[:32]
-    verification_run_id = hashlib.sha256(
-        f"{verification_operation_id}:run".encode()
-    ).hexdigest()[:32]
+    verification_operation_id = verification_spec.operation_id
     verification_effect_id = (
         f"pipeline-verify-{verification_input_sha[:32]}"
-    )
-    verification_spec = OperationSpec(
-        operation_id=verification_operation_id,
-        idempotency_key=hashlib.sha256(
-            f"{verification_operation_id}:idempotency".encode()
-        ).hexdigest(),
-        kind="pipeline-verify",
-        owner_id=task_id,
-        route=RuntimeRoute(
-            "codex",
-            "gpt-5.6-sol",
-            "high",
-            "executor",
-            "f" * 64,
-        ),
-        context_manifest="wiki/plans/approved.md",
-        verification_profile="scoped",
-        contract_sha256=meta["pipeline_policy"]["definition_sha256"],
     )
     task_store.create(
         verification_spec,
@@ -1373,6 +1387,18 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         verification_operation_id,
         "attention-required",
         reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    verification_record = task_store.read(
+        task_id, verification_operation_id
+    )
+    task_store.save(
+        replace(
+            verification_record,
+            effect_id=verification_effect_id,
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=verification_record.revision + 1,
+        ),
+        expected_revision=verification_record.revision,
     )
     owner_runtime = (
         vault
@@ -1550,12 +1576,14 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             )
         resolution_path.write_bytes(exact_resolution_bytes)
 
-        original_complete_round = ReviewGateController.complete_round
+        original_approve = ReviewGateController._approve
 
-        def interrupt_after_staging(*args: object, **kwargs: object) -> object:
-            raise OSError("simulated interruption after recovery staging")
+        def interrupt_after_final_result(
+            *args: object, **kwargs: object
+        ) -> object:
+            raise OSError("simulated interruption after final result")
 
-        ReviewGateController.complete_round = interrupt_after_staging
+        ReviewGateController._approve = interrupt_after_final_result
         try:
             try:
                 recover_finalizing(product, runtime_manager=task_runtime)
@@ -1564,7 +1592,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             else:
                 interrupted = False
         finally:
-            ReviewGateController.complete_round = original_complete_round
+            ReviewGateController._approve = original_approve
         staged_state = json.loads(
             (gate_root / "review-gate.json").read_text(encoding="utf-8")
         )
@@ -1579,10 +1607,17 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             if response_receipt_path.is_file()
             else {}
         )
+        try:
+            terminal_replay = recover_finalizing(
+                product, runtime_manager=task_runtime
+            )
+        except task_review_runner.TaskReviewError:
+            terminal_replay = {"status": "error"}
         if not (
             interrupted
             and staged_state["context"]["head_sha"] == resolved_head
             and replayed["status"] == "approved"
+            and terminal_replay["status"] == "approved"
             and accepted_response.get("verification_operation_id")
             == verification_operation_id
             and accepted_response.get("resubmitted_head_sha")
@@ -1608,7 +1643,18 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     else:
         for record in task_store.list(task_id):
             current = record
-            if current.state not in TERMINAL:
+            if current.spec.operation_id == task_id:
+                if current.state != "attention-required":
+                    task_store.transition(
+                        task_id,
+                        current.spec.operation_id,
+                        "attention-required",
+                        reason=AttentionReason.ATTENTION_REQUIRED,
+                    )
+                    current = task_store.read(
+                        task_id, current.spec.operation_id
+                    )
+            elif current.state not in TERMINAL:
                 if current.state != "cancelling":
                     task_store.transition(
                         task_id,
@@ -1637,11 +1683,14 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
                     ),
                     expected_revision=current.revision,
                 )
-        ReviewGateController(
-            gate_root,
-            task_runtime,
-            task_store,
-        ).mark_pending_attention()
+        fresh_gate_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        fresh_gate_state["status"] = "attention-required"
+        (gate_root / "review-gate.json").write_text(
+            json.dumps(fresh_gate_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         original_plan_bytes = plan.read_bytes()
         original_meta_bytes = (product / ".task-meta.json").read_bytes()
         plan.write_text(
