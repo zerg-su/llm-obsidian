@@ -10,6 +10,52 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.0] - 2026-08-02
+
+### Added
+
+- Added a canonical Outcome Contract v1 embedded in approved plans, stable
+  contract digests in task metadata v4, reserved ContextPacket delivery, and
+  Wiki Summary v2 outcome dispositions with bounded evidence and residual-gap
+  pointers.
+- Added bounded `review-inspect`, identity-bound per-finding review resolution,
+  content-free review telemetry, deterministic paired evaluations, and a
+  five-pass `improve-skills` audit with explicit goal-preservation checks.
+- Added provenance-aware command evidence and RT10 runbook distillation for
+  both agent-executed commands and strictly typed user-attested results.
+
+### Changed
+
+- Refined `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`,
+  `review`, and `reap` using the applicable general practices from pinned
+  Superpowers and Matt Pocock Skills snapshots while retaining the existing
+  harness-first lifecycle.
+- Review now treats implementer summaries as unverified claims, checks the
+  approved outcome before mechanics, classifies every declared evidence item,
+  and preserves independent Fable/spec and Sol/engineering axes in deep mode.
+- Fresh tasks use the clean v4 metadata and severity vocabulary; historical
+  v1-v3 operations and summaries remain readable but are never rewritten or
+  silently migrated.
+
+### Fixed
+
+- Repaired accepted-callback cleanup, stalled review verification and
+  finalization recovery, stale callback liveness, fresh-review resolution
+  identity, protected-research cleanup/error normalization, and dispatch
+  worktree Git-status leakage.
+- Restored the compact debug skill's explicit invocation, diagnosis-only,
+  feedback-loop, and residual-uncertainty governance markers without changing
+  its three-failure architecture stop.
+
+### Security
+
+- Outcome fields cannot authorize effects, widen permissions, continue a typed
+  stop, or create another scheduler, pipeline engine, review lane, or model
+  call in deterministic transitions.
+- Reviewer inspection remains bounded and read-only; callback, resolution,
+  verification, cleanup, and reap evidence stay bound to exact operation,
+  receipt, callback, plan, contract, and Git identities.
+
 ## [2.5.1] - 2026-08-01
 
 ### Added

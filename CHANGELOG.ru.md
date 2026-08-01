@@ -16,6 +16,52 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.0] — 2026-08-02
+
+### Добавлено
+
+- Добавлен канонический Outcome Contract v1 внутри утверждённого плана:
+  стабильный digest в task metadata v4, reserved ContextPacket delivery и
+  Wiki Summary v2 с typed outcome disposition, bounded evidence и residual-gap
+  pointers.
+- Добавлены bounded `review-inspect`, identity-bound решения по каждому review
+  finding, content-free review telemetry, детерминированные paired evaluations
+  и пятипроходный `improve-skills` с обязательной проверкой goal preservation.
+- Добавлен provenance-aware command evidence для RT10 runbook distillation:
+  учитываются agent-executed команды и строго типизированные user-attested
+  результаты.
+
+### Изменено
+
+- `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`, `review` и
+  `reap` получили применимые общие практики из запиненных Superpowers и Matt
+  Pocock Skills без замены harness-first lifecycle.
+- Review считает implementer summary непроверенным claim, сначала проверяет
+  утверждённый outcome, классифицирует каждый declared evidence item и в deep
+  режиме сохраняет независимые Fable/spec и Sol/engineering axes.
+- Новые задачи используют чистые metadata v4 и единый severity vocabulary;
+  исторические v1-v3 operations и summaries остаются читаемыми, но не
+  переписываются и не мигрируются молча.
+
+### Исправлено
+
+- Исправлены accepted-callback cleanup, зависшие review verification и
+  finalization recovery, stale-callback liveness, fresh-review resolution
+  identity, protected-research cleanup/error normalization и загрязнение Git
+  status служебным dispatch binding.
+- В компактный debug skill возвращены явные invocation, diagnosis-only,
+  feedback-loop и residual-uncertainty маркеры без изменения безусловного
+  architecture stop после трёх неудачных исправлений.
+
+### Безопасность
+
+- Outcome fields не могут разрешать effects, расширять permissions, продолжать
+  typed stop или создавать второй scheduler, pipeline engine, review lane либо
+  model call в детерминированных переходах.
+- Reviewer inspection остаётся bounded и read-only; callback, resolution,
+  verification, cleanup и reap evidence привязаны к точным operation, receipt,
+  callback, plan, contract и Git identities.
+
 ## [2.5.1] — 2026-08-01
 
 ### Добавлено
