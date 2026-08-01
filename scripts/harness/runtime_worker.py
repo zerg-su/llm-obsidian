@@ -2712,8 +2712,8 @@ def run(
             )
             meta_path = spec["cwd"] / ".task-meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if not isinstance(meta, dict) or meta.get("version") != 3:
-                raise RuntimeWorkerError("task summary requires v3 metadata")
+            if not isinstance(meta, dict) or meta.get("version") not in {3, 4}:
+                raise RuntimeWorkerError("task summary requires v3 or v4 metadata")
             if (
                 meta.get("task_id") != spec["operation_id"]
                 or Path(str(meta.get("worktree") or "")).resolve()

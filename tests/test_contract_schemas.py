@@ -84,6 +84,18 @@ assert review_v3["allOf"] == [
         },
     },
 ]
+task_meta_v4 = load("task-meta-v4.schema.json")
+assert task_meta_v4["properties"]["version"] == {"const": 4}
+assert {"project_id", "task_id"} <= set(task_meta_v4["required"])
+assert task_meta_v4["properties"]["forbidden_actions"]["const"] == task_contract.FORBIDDEN_ACTIONS
+assert task_meta_v4["additionalProperties"] is False
+review_v4 = task_meta_v4["properties"]["review_policy"]
+assert review_v4["additionalProperties"] is False
+assert set(review_v4["required"]) == task_contract.REVIEW_POLICY_V4_FIELDS
+assert "auto_resolve_severities" not in review_v4["properties"]
+assert "escalate_severities" not in review_v4["properties"]
+assert set(review_v4["properties"]["mode"]["enum"]) == task_contract.REVIEW_MODES
+assert review_v4["allOf"] == review_v3["allOf"]
 pipeline_spec = load("pipeline-spec-v1.schema.json")
 assert pipeline_spec["properties"]["schema_version"] == {"const": CUSTOM_SPEC_VERSION}
 assert set(pipeline_spec["properties"]["review_mode"]["enum"]) == REVIEW_MODES

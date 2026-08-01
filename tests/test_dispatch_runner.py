@@ -787,8 +787,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
     )
     check(
-        "runner writes v3 metadata",
-        meta["version"] == 3
+        "runner writes v4 metadata",
+        meta["version"] == 4
         and meta["task_id"] == request_id
         and meta["worktree"] == str(request["worktree"]),
     )
@@ -806,16 +806,16 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and meta["review_policy"]["model"] == ""
         and meta["review_policy"]["effort"] == "",
     )
-    v3_schema = json.loads(
-        (ROOT / "schemas" / "task-meta-v3.schema.json").read_text(
+    v4_schema = json.loads(
+        (ROOT / "schemas" / "task-meta-v4.schema.json").read_text(
             encoding="utf-8"
         )
     )
     check(
-        "writer output has exact strict v3 schema parity",
-        set(meta) == set(v3_schema["required"])
-        and set(meta) <= set(v3_schema["properties"])
-        and v3_schema["additionalProperties"] is False,
+        "writer output has exact strict v4 schema parity",
+        set(meta) == set(v4_schema["required"])
+        and set(meta) <= set(v4_schema["properties"])
+        and v4_schema["additionalProperties"] is False,
     )
     expert_meta = runner.write_task_files(
         expert,
@@ -840,8 +840,6 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             "verification_profile_sha256": (
                 meta["review_policy"]["verification_profile_sha256"]
             ),
-            "auto_resolve_severities": ["warning", "nit"],
-            "escalate_severities": ["blocking"],
         },
     )
     invalid_budget = json.loads(json.dumps(expert_meta))

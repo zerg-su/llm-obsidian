@@ -267,7 +267,7 @@ def identity_diagnostics(root: Path) -> list[dict[str, Any]]:
 
         if (
             not task
-            or task.get("version") != 3
+            or task.get("version") not in {3, 4}
             or not task_id
             or not isinstance(recorded_worktree, str)
         ):

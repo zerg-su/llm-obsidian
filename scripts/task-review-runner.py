@@ -154,9 +154,10 @@ def _validate_task(worktree: Path) -> tuple[dict[str, Any], Path, str]:
     worktree = worktree.expanduser().resolve()
     if not worktree.is_dir():
         raise TaskReviewError("task worktree is unavailable")
-    meta = _read_json(worktree / ".task-meta.json", "v3 task metadata")
-    if meta.get("version") != 3:
-        raise TaskReviewError("automatic review requires v3 task metadata")
+    meta = _read_json(worktree / ".task-meta.json", "task metadata")
+    version = meta.get("version")
+    if version not in {3, 4}:
+        raise TaskReviewError("automatic review requires v3 or v4 task metadata")
     normalize(meta)
     try:
         task_id = str(uuid.UUID(str(meta.get("task_id") or "")))
@@ -191,11 +192,13 @@ def _validate_task(worktree: Path) -> tuple[dict[str, Any], Path, str]:
         "max_verify_iterations",
         "verification_profile",
         "verification_profile_sha256",
-        "auto_resolve_severities",
-        "escalate_severities",
     }
+    if version == 3:
+        required.update(
+            {"auto_resolve_severities", "escalate_severities"}
+        )
     if set(policy) != required:
-        raise TaskReviewError("v3 review policy fields are not exact")
+        raise TaskReviewError(f"v{version} review policy fields are not exact")
     mode = str(policy.get("mode") or "")
     budget = policy.get("max_verify_iterations")
     if (
@@ -213,7 +216,7 @@ def _validate_task(worktree: Path) -> tuple[dict[str, Any], Path, str]:
             )
         )
     ):
-        raise TaskReviewError("v3 review policy values are invalid")
+        raise TaskReviewError(f"v{version} review policy values are invalid")
     if mode == "skip" and any(
         (
             policy["cross_model"],
@@ -423,7 +426,7 @@ def _request(
         raise TaskReviewError("verification profile binding is stale")
     session = session_from_meta(dict(meta))
     if session is None:
-        raise TaskReviewError("v3 task has no captured session route")
+        raise TaskReviewError("task has no captured session route")
     selected = resolve(
         config,
         "review",
@@ -1234,8 +1237,6 @@ def _current_policy(
         }[mode],
         "verification_profile": "scoped",
         "verification_profile_sha256": profile_sha256,
-        "auto_resolve_severities": ["warning", "nit"],
-        "escalate_severities": ["blocking"],
     }
 
 
@@ -1474,7 +1475,7 @@ def run_current_review(
             if not plan.is_file() or plan.is_symlink():
                 raise TaskReviewError("current review plan is unavailable")
         meta = {
-            "version": 3,
+            "version": 4,
             "lifecycle": "current-checkout",
             "task_id": task_id,
             "task_name": "current checkout review",

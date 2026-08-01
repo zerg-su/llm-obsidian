@@ -1459,7 +1459,7 @@ def write_task_files(
     plan_hash = approved_plan_sha256(request)
     review = review_policy(request, config)
     meta: dict[str, Any] = {
-        "version": 3,
+        "version": 4,
         "project_id": identity["project_id"],
         "task_id": identity["task_id"],
         "task_name": request["task_name"],
@@ -1510,8 +1510,6 @@ def write_task_files(
             "verification_profile_sha256": (
                 review.verification_profile_sha256
             ),
-            "auto_resolve_severities": ["warning", "nit"],
-            "escalate_severities": ["blocking"],
         },
         "reap_policy": {
             "mode": request["reap"]["plan_mode"],
