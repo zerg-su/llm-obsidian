@@ -669,6 +669,30 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and dead_after_cancel.resources == OwnedResources(),
     )
 
+    create_cli_operation("op-invalid-callback-cli", state="running")
+    bind_owned_resources("op-invalid-callback-cli")
+    store.transition(
+        "owner-cli",
+        "op-invalid-callback-cli",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_INVALID,
+    )
+    invalid_callback_rc, _invalid_callback_output = run_cli_in_process(
+        "cancel",
+        "op-invalid-callback-cli",
+        process=FakeProcess("dead"),
+        cmux=FakeCmux("missing"),
+    )
+    invalid_callback_after = store.read(
+        "owner-cli", "op-invalid-callback-cli"
+    )
+    check(
+        "CLI cancel clears proven-dead callback-invalid resources",
+        invalid_callback_rc == 0
+        and invalid_callback_after.state == "cancelled"
+        and invalid_callback_after.resources == OwnedResources(),
+    )
+
     create_cli_operation("op-orphan-surface-cli", state="running")
     bind_owned_resources("op-orphan-surface-cli")
     orphan_surface_process = FakeProcess("dead")

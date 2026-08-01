@@ -188,6 +188,20 @@ with tempfile.TemporaryDirectory(prefix="research-contract.") as raw:
         and "clean_markdown" not in accepted["sources"][0],
     )
 
+    blank_error = json.loads(artifact_path.read_text(encoding="utf-8"))
+    blank_error["fetch_errors"] = [""]
+    artifact_path.write_text(json.dumps(blank_error), encoding="utf-8")
+    try:
+        load_artifact(str(artifact_path), expected_run_id="run-1")
+    except ResearchContractError:
+        check("strict artifact validation rejects blank fetch errors", True)
+    else:
+        check("strict artifact validation rejects blank fetch errors", False)
+    artifact_path.write_text(
+        json.dumps({**blank_error, "fetch_errors": []}),
+        encoding="utf-8",
+    )
+
     inline = json.loads(artifact_path.read_text(encoding="utf-8"))
     inline["sources"][0]["clean_markdown"] = source_body
     artifact_path.write_text(json.dumps(inline), encoding="utf-8")

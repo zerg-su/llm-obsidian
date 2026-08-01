@@ -481,6 +481,30 @@ def _atomic_json(path: Path, value: object) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _normalize_fetch_errors_at_provider_boundary(
+    path: Path,
+    raw: bytes,
+) -> bytes:
+    """Drop only blank provider error strings before strict validation."""
+
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        return raw
+    errors = value.get("fetch_errors")
+    if not isinstance(errors, list):
+        return raw
+    normalized = [
+        item
+        for item in errors
+        if not (isinstance(item, str) and not item.strip())
+    ]
+    if normalized == errors:
+        return raw
+    value["fetch_errors"] = normalized
+    _atomic_json(path, value)
+    return path.read_bytes()
+
+
 def _bounded_file_sha256(path: Path, *, limit: int = MAX_OUTBOX_BYTES) -> str:
     """Return only a bounded content digest; invalid pointers are no evidence."""
 
@@ -2564,6 +2588,14 @@ def run(
             return
         try:
             if spec["callback_mode"] == "research-fetch":
+                normalized_raw = _normalize_fetch_errors_at_provider_boundary(
+                    callback_path,
+                    raw,
+                )
+                if normalized_raw != raw:
+                    last_digest = hashlib.sha256(normalized_raw).hexdigest()
+                    stable_reads = 1
+                    return
                 artifact = load_artifact(
                     str(callback_path),
                     expected_run_id=run_id,

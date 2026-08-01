@@ -253,7 +253,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
                 "source_class": "official",
             }
         ],
-        "fetch_errors": [],
+        "fetch_errors": ["", "rate limited", "   "],
     }
     raw_artifact = json.dumps(artifact, sort_keys=True).encode()
     (cwd / "artifact.json").write_bytes(raw_artifact)
@@ -272,10 +272,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
             cmux_adapter=cmux,
         )
     record = store.read("owner-research", fetch_id)
+    normalized_artifact_raw = (cwd / "artifact.json").read_bytes()
+    normalized_artifact = json.loads(normalized_artifact_raw)
     fetch_payload = {
         "stage": "fetch",
         "artifact_path": "artifact.json",
-        "artifact_sha256": hashlib.sha256(raw_artifact).hexdigest(),
+        "artifact_sha256": hashlib.sha256(normalized_artifact_raw).hexdigest(),
         "source_count": 1,
     }
     fetch_payload_sha = hashlib.sha256(
@@ -289,6 +291,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
         and record.state == "finalizing"
         and record.accepted_callback_kind == "research"
         and record.accepted_callback_sha256 == fetch_payload_sha
+        and normalized_artifact["fetch_errors"] == ["rate limited"]
         and cmux.sent == [(ORIGIN, f"advance {fetch_id}")]
         and cmux.keys == [(ORIGIN, "Enter")],
         (record, cmux.sent),
