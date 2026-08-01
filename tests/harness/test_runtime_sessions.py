@@ -272,6 +272,14 @@ class FakeProcess:
                     "research-fetch-deadline-mismatch",
                     "research-fetch-deadline-mismatch-run",
                 ),
+                (
+                    "research-synth-deadline",
+                    "research-synth-deadline-run",
+                ),
+                (
+                    "research-synth-profile-mismatch",
+                    "research-synth-profile-mismatch-run",
+                ),
             }
             and process_group == 123
             and process_identity == PROCESS_IDENTITY
@@ -1208,13 +1216,27 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         deadline_process,
     )
 
-    def prepare_deadline_fetch(operation_id: str, run_id: str) -> None:
+    protected_research_route = RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "high",
+        "research-safe",
+        "a" * 64,
+    )
+
+    def prepare_deadline_research(
+        operation_id: str,
+        run_id: str,
+        *,
+        kind: str = "research-fetch",
+        protected_profile: bool = True,
+    ) -> None:
         deadline_spec = OperationSpec(
             operation_id,
             f"{operation_id}-key",
-            "research-fetch",
+            kind,
             "owner-deadline",
-            route,
+            protected_research_route if protected_profile else route,
             "packets/research.json",
             "research-cited-artifact",
         )
@@ -1302,7 +1324,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             exiting_fetch,
         )
 
-    prepare_deadline_fetch(
+    prepare_deadline_research(
         "research-fetch-deadline",
         "research-fetch-deadline-run",
     )
@@ -1321,7 +1343,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
 
     deadline_process.status_value = "alive"
     deadline_process.supervisor_status_value = "alive"
-    prepare_deadline_fetch(
+    prepare_deadline_research(
         "research-fetch-deadline-mismatch",
         "research-fetch-deadline-mismatch-run",
     )
@@ -1339,6 +1361,54 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and mismatched_deadline.record.state == "exiting"
         and deadline_process.terminations == [123],
         mismatched_deadline,
+    )
+
+    deadline_process.capture_identity = (  # type: ignore[method-assign]
+        lambda pid, process_group=0: (
+            PROCESS_IDENTITY
+            if pid == 123 and process_group == 123
+            else SUPERVISOR_IDENTITY
+            if pid == 124 and process_group == 0
+            else ""
+        )
+    )
+    deadline_process.status_value = "alive"
+    deadline_process.supervisor_status_value = "alive"
+    prepare_deadline_research(
+        "research-synth-deadline",
+        "research-synth-deadline-run",
+        kind="research-synth",
+    )
+    deadline_process.status_value = "unknown"
+    deadline_process.supervisor_status_value = "unknown"
+    synth_deadline = deadline_manager.cleanup(
+        "owner-deadline", "research-synth-deadline"
+    )
+    check(
+        "accepted research synthesis escalates exact cleanup after deadline",
+        synth_deadline.action == "wait-for-exit"
+        and synth_deadline.record.state == "exiting"
+        and deadline_process.terminations == [123, 123],
+        synth_deadline,
+    )
+
+    deadline_process.status_value = "alive"
+    deadline_process.supervisor_status_value = "alive"
+    prepare_deadline_research(
+        "research-synth-profile-mismatch",
+        "research-synth-profile-mismatch-run",
+        kind="research-synth",
+        protected_profile=False,
+    )
+    profile_mismatch = deadline_manager.cleanup(
+        "owner-deadline", "research-synth-profile-mismatch"
+    )
+    check(
+        "research synthesis cleanup rejects a non-protected profile",
+        profile_mismatch.action == "wait-for-exit"
+        and profile_mismatch.record.state == "exiting"
+        and deadline_process.terminations == [123, 123],
+        profile_mismatch,
     )
 
     process.status_value = "alive"

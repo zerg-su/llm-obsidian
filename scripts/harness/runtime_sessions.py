@@ -1511,8 +1511,12 @@ class RuntimeSessionManager:
                     surface_status=surface_status,
                 )
             if (
-                record.spec.kind == "research-fetch"
+                record.spec.kind in {"research-fetch", "research-synth"}
+                and record.spec.route.profile == "research-safe"
+                and record.spec.verification_profile
+                == "research-cited-artifact"
                 and record.accepted_callback_id
+                and record.accepted_callback_kind == "research"
                 and record.effect_id == "request-exit"
                 and record.effect_outcome == EffectOutcome.SUCCEEDED
                 and record.deadline_at
