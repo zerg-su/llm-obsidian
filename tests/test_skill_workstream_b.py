@@ -96,6 +96,18 @@ def main() -> int:
         failures,
     )
     check(
+        "debug reproduces and records the failure before minimizing it without semantic drift",
+        has_clause(debug, r"reproduce", r"record", r"fail")
+        and has_clause(debug, r"minimi", r"without", r"chang", r"meaning"),
+        failures,
+    )
+    check(
+        "authorized debug repair adds regression evidence and reruns both feedback loops",
+        has_clause(debug, r"authorized", r"fix|repair", r"regression evidence")
+        and has_clause(debug, r"rerun", r"minimi", r"original", r"loop"),
+        failures,
+    )
+    check(
         "a failed fix attempt requires product mutation and the original repro rerun",
         has_clause(debug, r"failed fix attempt", r"product", r"chang|mutat", r"original", r"repro"),
         failures,
