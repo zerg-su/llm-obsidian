@@ -15,7 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from harness import capabilities
 from harness.contracts import RuntimeRoute
-from harness.context import CONTEXT_ROLES, ContextBuilder, ContextInput
+from harness.context import (
+    CONTEXT_ROLES,
+    OUTCOME_POINTER_ID,
+    ContextBuilder,
+    ContextInput,
+    outcome_contract_input,
+)
 from harness.git_ops import GitAdapter, GitError
 from harness.verification import (
     compose_commands,
@@ -75,9 +81,56 @@ with tempfile.TemporaryDirectory(prefix="harness-context.") as raw:
             "route",
             "permissions",
             "verification",
+            "outcome",
         }
         <= CONTEXT_ROLES,
     )
+    outcome_plan = root / "approved-plan.md"
+    outcome_plan.write_text(
+        "# Plan\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Preserve the outcome.",'
+        '"success_evidence":[{"evidence_id":"packet-delivered",'
+        '"observable":"The canonical contract is in the ContextPacket."}],'
+        '"non_goals":["No permission expansion."]}\n```\n',
+        encoding="utf-8",
+    )
+    outcome_input = outcome_contract_input(
+        outcome_plan,
+        expected_sha256=(
+            "533bee36ee156939bf3311cde3ea75d4eafb374d8e0aae5db0cf8da16f97f8f2"
+        ),
+    )
+    outcome_packet = ContextBuilder(root / "outcome-packets").build(
+        "op-outcome", (outcome_input,), metadata={"task": "fixture"}
+    )
+    outcome_manifest = json.loads(
+        (
+            root
+            / "outcome-packets"
+            / outcome_packet.packet_id
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "built-in ContextPacket delivers the reserved canonical outcome input",
+        outcome_manifest["inputs"] == [
+            {
+                "name": "outcome-contract.json",
+                "role": "outcome",
+                "source": str(outcome_plan.resolve()),
+                "storage": "inline",
+                "bytes": len(outcome_input.content or b""),
+                "sha256": outcome_input.content_sha256,
+                "pointer_id": OUTCOME_POINTER_ID,
+            }
+        ],
+    )
+    try:
+        outcome_contract_input(outcome_plan, expected_sha256="0" * 64)
+    except (ValueError, RuntimeError):
+        check("ContextPacket rejects outcome identity drift", True)
+    else:
+        check("ContextPacket rejects outcome identity drift", False)
     try:
         ContextBuilder(root / "bad").build(
             "op-raw",

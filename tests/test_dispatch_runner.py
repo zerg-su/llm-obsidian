@@ -994,6 +994,19 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     harness_raw["branch"] = "task/harness-start"
     harness_raw["worktree"] = str(tmp / "worktrees" / "harness-start")
     harness_request = runner.validate_request(harness_raw)
+    packet_request = runner.harness_request(harness_request, config, effective)
+    packet_manifest = vault / packet_request.context_manifest
+    packet_value = json.loads(packet_manifest.read_text(encoding="utf-8"))
+    check(
+        "built-in dispatch carries Outcome Contract through ContextPacket",
+        packet_manifest.is_file()
+        and any(
+            row.get("pointer_id") == "outcome-contract"
+            and row.get("role") == "outcome"
+            and row.get("sha256") == harness_request["outcome_contract_sha256"]
+            for row in packet_value["inputs"]
+        ),
+    )
     fix_harness_raw = json.loads(json.dumps(raw_request))
     fix_harness_raw["request_id"] = str(uuid.uuid4())
     fix_harness_raw["task_name"] = "harness-fix"

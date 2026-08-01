@@ -48,6 +48,7 @@ from harness.contracts import (  # noqa: E402
     ContractError as HarnessContractError,
     RuntimeRoute,
 )
+from harness.context import ContextBuilder, outcome_contract_input  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
     EXECUTABLE_BUILTINS,
@@ -1586,12 +1587,30 @@ def harness_request(
     config: dict[str, Any],
     effective: dict[str, Any],
 ) -> HarnessDispatchRequest:
-    try:
-        context_manifest = request["plan_file"].relative_to(
-            request["vault_root"]
-        ).as_posix()
-    except ValueError as exc:
-        raise DispatchError("approved plan escaped the coordinator vault") from exc
+    outcome_digest = approved_outcome_contract_sha256(request)
+    packet_root = (
+        request["vault_root"]
+        / ".vault-meta"
+        / "harness"
+        / "context-packets"
+    )
+    manifest = ContextBuilder(packet_root).build(
+        request["request_id"],
+        (
+            outcome_contract_input(
+                approved_plan_file(request),
+                expected_sha256=outcome_digest,
+            ),
+        ),
+        metadata={
+            "task_id": request["request_id"],
+            "approved_plan_sha256": approved_plan_sha256(request),
+            "outcome_contract_sha256": outcome_digest,
+        },
+    )
+    context_manifest = (
+        packet_root / manifest.packet_id / "manifest.json"
+    ).relative_to(request["vault_root"]).as_posix()
     route = RuntimeRoute(
         effective["runtime"],
         effective["model"],
