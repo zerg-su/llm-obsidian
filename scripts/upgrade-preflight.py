@@ -53,12 +53,100 @@ def same_path(value: Any, path: Path) -> bool:
         return False
 
 
-def harness_sessions(root: Path) -> tuple[set[str], list[str]]:
-    released_dispatches: set[str] = set()
-    active: list[str] = []
+def _identity_recovery(
+    root: Path,
+    classification: str,
+    resource: str,
+    *,
+    owner_id: str,
+    operation_id: str,
+    worktree: Path | None = None,
+) -> dict[str, Any]:
+    operation_command = [
+        "python3",
+        str(root / "scripts/harness-cli.py"),
+        "--store",
+        str(root / ".vault-meta/harness"),
+        "--owner",
+        owner_id,
+    ]
+    inspect_operation = operation_command + ["inspect", operation_id]
+    if classification == "active":
+        return {
+            "action": "finish-or-cancel-exact-operation",
+            "inspect_command": inspect_operation,
+            "cancel_command": operation_command + ["cancel", operation_id],
+            "guidance": (
+                "Inspect this exact operation, then finish or cancel it with the "
+                "installed runtime and rerun upgrade-preflight."
+            ),
+        }
+    if classification == "proven-stale" and resource == "worktree":
+        if worktree is None:
+            return {
+                "action": "inspect-identity-evidence",
+                "guidance": (
+                    "Inspect the listed metadata evidence. Do not emit or run a Git "
+                    "recovery command without one concrete worktree path."
+                ),
+            }
+        return {
+            "action": "inspect-then-remove-exact-worktree",
+            "inspect_command": [
+                "git", "-C", str(worktree), "status", "--short"
+            ],
+            "recovery_command": [
+                "git", "-C", str(root), "worktree", "remove", str(worktree)
+            ],
+            "guidance": (
+                "Review the exact worktree for useful changes first. If it is clean "
+                "and no longer needed, remove only this worktree with Git; this "
+                "diagnostic never runs the command."
+            ),
+        }
+    if classification == "proven-stale":
+        return {
+            "action": "retain-terminal-operation-record",
+            "inspect_command": inspect_operation,
+            "guidance": (
+                "The terminal resource-free operation is evidence, not a cleanup "
+                "target. Retain it and recover only its exact stale worktree mirror."
+            ),
+        }
+    if classification == "ambiguous":
+        if not owner_id or not operation_id:
+            return {
+                "action": "inspect-identity-evidence",
+                "guidance": (
+                    "Inspect the listed metadata evidence. Do not infer a missing "
+                    "operation owner or remove the worktree; recover through the "
+                    "installed runtime only after the identity is complete."
+                ),
+            }
+        return {
+            "action": "inspect-and-reconcile-exact-ownership",
+            "inspect_command": inspect_operation,
+            "guidance": (
+                "Inspect the exact recorded identity and reconcile its pending effect "
+                "or owned resources with the installed runtime. Do not remove a "
+                "worktree or infer ownership while evidence is incomplete."
+            ),
+        }
+    return {
+        "action": "resolve-identity-mismatch",
+        "guidance": (
+            "Compare the recorded and path-bound identities. Resolve the conflict "
+            "through the installed runtime; do not choose an owner or remove either "
+            "resource from this diagnostic."
+        ),
+    }
+
+
+def _operation_identity_diagnostics(root: Path) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
     harness_root = root / ".vault-meta/harness/owners"
     if not harness_root.is_dir():
-        return released_dispatches, active
+        return diagnostics
     for operation_path in sorted(harness_root.glob("*/operations/*.json")):
         operation = read_object(operation_path)
         raw_spec = operation.get("spec")
@@ -72,43 +160,200 @@ def harness_sessions(root: Path) -> tuple[set[str], list[str]]:
             if isinstance(raw_spec, dict)
             else operation_path.stem
         )
+        path_owner_id = operation_path.parents[1].name
+        path_operation_id = operation_path.stem
+        evidence = [operation_path.relative_to(root).as_posix()]
         try:
             record = operation_record_from_dict(operation)
         except (AttributeError, ContractError, TypeError, ValueError):
-            active.append(f"harness:{raw_kind}:{raw_operation_id}")
+            identity = {
+                "operation_id": raw_operation_id,
+                "owner_id": (
+                    str(raw_spec.get("owner_id") or "")
+                    if isinstance(raw_spec, dict)
+                    else ""
+                ),
+                "path_operation_id": path_operation_id,
+                "path_owner_id": path_owner_id,
+            }
+            diagnostics.append({
+                "classification": "ambiguous",
+                "resource": "operation",
+                "identity": identity,
+                "evidence": evidence,
+                "blocker": f"harness:{raw_kind}:{raw_operation_id}",
+                "recovery": _identity_recovery(
+                    root,
+                    "ambiguous",
+                    "operation",
+                    owner_id=path_owner_id,
+                    operation_id=path_operation_id,
+                ),
+            })
             continue
         kind = record.spec.kind
         operation_id = record.spec.operation_id
-        if record.state in TERMINAL:
-            if record.pending_effect or record.resources != OwnedResources():
-                active.append(f"harness:{kind}:{operation_id}")
-            elif kind == "dispatch":
-                if (
-                    operation_id == operation_path.stem
-                    and record.spec.owner_id == operation_id
-                    and operation_path.parents[1].name == operation_id
-                ):
-                    released_dispatches.add(operation_id)
-                else:
-                    active.append(f"harness:{kind}:{operation_id}")
+        owner_id = record.spec.owner_id
+        identity = {
+            "operation_id": operation_id,
+            "owner_id": owner_id,
+        }
+        if (
+            operation_id != path_operation_id
+            or owner_id != path_owner_id
+            or (kind == "dispatch" and owner_id != operation_id)
+        ):
+            identity.update({
+                "path_operation_id": path_operation_id,
+                "path_owner_id": path_owner_id,
+            })
+            classification = "mismatched"
+        elif record.state not in TERMINAL:
+            classification = "active"
+        elif record.pending_effect or record.resources != OwnedResources():
+            classification = "ambiguous"
+        elif kind == "dispatch":
+            classification = "proven-stale"
+        else:
             continue
-        active.append(f"harness:{kind}:{operation_id}")
-    return released_dispatches, active
+        row: dict[str, Any] = {
+            "classification": classification,
+            "resource": "operation",
+            "identity": identity,
+            "evidence": evidence,
+            "recovery": _identity_recovery(
+                root,
+                classification,
+                "operation",
+                owner_id=owner_id,
+                operation_id=operation_id,
+            ),
+        }
+        if classification != "proven-stale":
+            row["blocker"] = f"harness:{kind}:{operation_id}"
+        diagnostics.append(row)
+    return diagnostics
+
+
+def identity_diagnostics(root: Path) -> list[dict[str, Any]]:
+    diagnostics = _operation_identity_diagnostics(root)
+    operations: dict[str, list[dict[str, Any]]] = {}
+    for row in diagnostics:
+        identity = row["identity"]
+        operation_id = identity.get("operation_id")
+        if isinstance(operation_id, str) and operation_id:
+            operations.setdefault(operation_id, []).append(row)
+
+    for tree in worktrees(root):
+        task_path = tree / ".task-meta.json"
+        if (
+            not task_path.is_file()
+            or (tree / ".task-reap-complete.json").is_file()
+        ):
+            continue
+        task = read_object(task_path)
+        raw_task_id = task.get("task_id") if task else None
+        task_id = str(raw_task_id or "")
+        recorded_worktree = task.get("worktree") if task else None
+        identity: dict[str, Any] = {
+            "task_id": task_id,
+            "worktree": str(tree),
+        }
+        if isinstance(recorded_worktree, str):
+            identity["recorded_worktree"] = recorded_worktree
+        evidence = [str(task_path)]
+        candidates = operations.get(task_id, []) if task_id else []
+        exact_candidate = candidates[0] if len(candidates) == 1 else None
+
+        if (
+            not task
+            or task.get("version") != 3
+            or not task_id
+            or not isinstance(recorded_worktree, str)
+        ):
+            classification = "ambiguous"
+        elif not same_path(recorded_worktree, tree):
+            classification = "mismatched"
+        elif len(candidates) != 1:
+            classification = "ambiguous"
+        else:
+            classification = str(exact_candidate["classification"])
+            evidence.extend(exact_candidate["evidence"])
+
+        owner_id = ""
+        operation_id = ""
+        if exact_candidate is not None:
+            candidate_identity = exact_candidate["identity"]
+            identity["operation_identity"] = dict(candidate_identity)
+            owner_id = str(candidate_identity.get("owner_id") or task_id)
+            operation_id = str(
+                candidate_identity.get("operation_id") or task_id
+            )
+        row = {
+            "classification": classification,
+            "resource": "worktree",
+            "identity": identity,
+            "evidence": evidence,
+            "recovery": _identity_recovery(
+                root,
+                classification,
+                "worktree",
+                owner_id=owner_id,
+                operation_id=operation_id,
+                worktree=tree,
+            ),
+        }
+        if classification != "proven-stale":
+            row["blocker"] = f"task:{tree.name}"
+        diagnostics.append(row)
+
+    return sorted(
+        diagnostics,
+        key=lambda row: (
+            str(row["identity"].get("operation_id") or row["identity"].get("task_id") or ""),
+            str(row["resource"]),
+            str(row["evidence"][0]),
+        ),
+    )
+
+
+def identity_diagnostic_packet(root: Path) -> dict[str, Any]:
+    diagnostics = identity_diagnostics(root)
+    counts = {
+        classification: sum(
+            row["classification"] == classification for row in diagnostics
+        )
+        for classification in (
+            "active", "proven-stale", "ambiguous", "mismatched"
+        )
+    }
+    attention = counts["active"] + counts["ambiguous"] + counts["mismatched"]
+    return {
+        "schema_version": 1,
+        "status": (
+            "attention-required"
+            if attention
+            else "stale"
+            if counts["proven-stale"]
+            else "healthy"
+        ),
+        "read_only": True,
+        "root": str(root),
+        "counts": counts,
+        "diagnostics": diagnostics,
+    }
 
 
 def active_sessions(root: Path) -> list[str]:
-    active: list[str] = []
-    released_dispatches, harness_active = harness_sessions(root)
+    diagnostics = identity_diagnostics(root)
+    active = [str(row["blocker"]) for row in diagnostics if "blocker" in row]
+    released_dispatches = {
+        str(row["identity"]["operation_id"])
+        for row in diagnostics
+        if row["resource"] == "operation"
+        and row["classification"] == "proven-stale"
+    }
     for tree in worktrees(root):
-        task = read_object(tree / ".task-meta.json")
-        if task and not (tree / ".task-reap-complete.json").is_file():
-            released = (
-                task.get("version") == 3
-                and task.get("task_id") in released_dispatches
-                and same_path(task.get("worktree"), tree)
-            )
-            if not released:
-                active.append(f"task:{tree.name}")
         review = read_object(tree / ".review-meta.json")
         if review and review.get("status") not in {"finish_sent", "finished", "archived"}:
             active.append(f"review:{tree.name}")
@@ -142,7 +387,6 @@ def active_sessions(root: Path) -> list[str]:
             )
             if not released:
                 active.append(f"broker-task:{task_id}")
-    active.extend(harness_active)
     return sorted(set(active))
 
 
@@ -203,9 +447,20 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-routing-migration", action="store_true")
+    parser.add_argument("--diagnose-identities", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
+    if args.diagnose_identities and (
+        args.apply or args.confirm_routing_migration
+    ):
+        parser.error(
+            "--diagnose-identities is read-only and cannot be combined with migration options"
+        )
     try:
+        if args.diagnose_identities:
+            packet = identity_diagnostic_packet(root)
+            print(json.dumps(packet, sort_keys=True))
+            return 4 if packet["status"] == "attention-required" else 0
         running = active_sessions(root)
         if running:
             print(
