@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.adapters.claude import ClaudeDriver
 from harness.adapters.cmux import Surface
 from harness.adapters.codex import CodexDriver
-from harness.callbacks import CallbackTimeoutError
+from harness.callbacks import CallbackBroker, CallbackTimeoutError
 from harness.adapters.process import (
     ProcessAdapter,
     ProcessError,
@@ -35,6 +35,7 @@ from harness.contracts import (
     CallbackEnvelope,
     CapabilityReport,
     OperationSpec,
+    OwnedResources,
     RuntimeRoute,
 )
 from harness.runtime_sessions import (
@@ -216,6 +217,13 @@ class FakeProcess:
         )
         return self.supervisor_status_value
 
+    def capture_identity(self, pid: int, *, process_group: int = 0) -> str:
+        if pid == 123 and process_group == 123:
+            return PROCESS_IDENTITY
+        if pid == 124 and process_group == 0:
+            return SUPERVISOR_IDENTITY
+        return ""
+
     def request_exit(self, process_group: int, identity: str) -> None:
         check(
             "exit receives exact owned identity",
@@ -255,6 +263,7 @@ class FakeProcess:
                     "runtime-workspace-drift",
                     "run-workspace-drift",
                 ),
+                ("research-cleanup", "research-cleanup-run"),
             }
             and process_group == 123
             and process_identity == PROCESS_IDENTITY
@@ -1024,11 +1033,72 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     process.status_value = "alive"
 
+    research_spec = OperationSpec(
+        "research-cleanup",
+        "research-cleanup-key",
+        "research-fetch",
+        "owner-1",
+        route,
+        "packets/research.json",
+        "research-cited-artifact",
+    )
+    store.create(
+        research_spec,
+        lane_id="research-cleanup-lane",
+        run_id="research-cleanup-run",
+    )
+    research_supervisor = OperationSupervisor(
+        store, "owner-1", "research-cleanup"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        research_supervisor.transition(state)
+    research_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    research_payload = {"stage": "fetch"}
+    research_payload_sha = hashlib.sha256(
+        json.dumps(
+            research_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    CallbackBroker(store, "owner-1").accept(
+        CallbackEnvelope(
+            "research-cleanup-callback",
+            "research-cleanup",
+            "research-cleanup-run",
+            "research",
+            research_payload,
+            research_payload_sha,
+        )
+    )
+    process.status_value = "unknown"
+    process.supervisor_status_value = "unknown"
+    research_exiting = manager.request_exit(
+        "owner-1", "research-cleanup"
+    )
+    check(
+        "accepted research cleanup re-probes exact identities before exit",
+        research_exiting.record.state == "exiting"
+        and research_exiting.process_status == "alive"
+        and process.exit_requests == [123],
+        research_exiting,
+    )
+    process.status_value = "alive"
+    process.supervisor_status_value = "alive"
+
     exiting = manager.request_exit("owner-1", "runtime-1")
     check(
         "exit requests the exact PGID before surface close",
         exiting.record.state == "exiting"
-        and process.exit_requests == [123]
+        and process.exit_requests == [123, 123]
         and cmux.closed == []
         and events.index("process-exit") < len(events),
     )

@@ -760,6 +760,44 @@ class RuntimeSessionManager:
             )
         )
 
+    def _accepted_research_cleanup_statuses(
+        self,
+        record: OperationRecord,
+        process_status: str,
+        supervisor_status: str,
+    ) -> tuple[str, str]:
+        """Re-probe exact identities when signal-less liveness is unavailable."""
+
+        if (
+            record.spec.kind not in {"research-fetch", "research-synth"}
+            or record.state not in {"finalizing", "exiting"}
+            or record.accepted_callback_kind != "research"
+            or not record.accepted_callback_id
+            or not record.accepted_callback_sha256
+        ):
+            return process_status, supervisor_status
+        capture = getattr(self.process, "capture_identity", None)
+        if not callable(capture):
+            return process_status, supervisor_status
+        if process_status == "unknown":
+            try:
+                identity = capture(
+                    record.resources.process_group,
+                    process_group=record.resources.process_group,
+                )
+            except Exception:
+                identity = ""
+            if identity == record.resources.process_identity:
+                process_status = "alive"
+        if supervisor_status == "unknown":
+            try:
+                identity = capture(record.resources.supervisor_pid)
+            except Exception:
+                identity = ""
+            if identity == record.resources.supervisor_identity:
+                supervisor_status = "alive"
+        return process_status, supervisor_status
+
     def _abort_prepared_surface(
         self,
         supervisor: OperationSupervisor,
@@ -1368,6 +1406,13 @@ class RuntimeSessionManager:
             record.resources.process_identity,
         )
         supervisor_status = self._supervisor_status(record)
+        process_status, supervisor_status = (
+            self._accepted_research_cleanup_statuses(
+                record,
+                process_status,
+                supervisor_status,
+            )
+        )
         if process_status == "unknown" or (
             process_status == "alive" and supervisor_status in {"dead", "unknown"}
         ):
@@ -1431,6 +1476,13 @@ class RuntimeSessionManager:
             self._supervisor_status(record)
             if resources.supervisor_pid > 1
             else "dead"
+        )
+        process_status, supervisor_status = (
+            self._accepted_research_cleanup_statuses(
+                record,
+                process_status,
+                supervisor_status,
+            )
         )
         try:
             surface_status = (
