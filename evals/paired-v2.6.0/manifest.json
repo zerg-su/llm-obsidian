@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "release": "2.6.0",
+  "cases": [
+    {
+      "case_id": "fix",
+      "workflow": ["clarify", "debug", "tdd", "review"],
+      "pipeline": "engineering/fix",
+      "completion_policy": "autonomous",
+      "route": {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"},
+      "verification_profile": "scoped",
+      "review_mode": "simple",
+      "review_max_verify_iterations": 1,
+      "baseline_plan": "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
+      "baseline_plan_sha256": "cb684b9fd2db88759dcfe39cbc182483cfaa13f382722c70241f27ab33432468",
+      "post_plan": "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md",
+      "post_plan_sha256": "d4787da62ad4691b661577b727a0d3b34387bab483c3602e9efcfc0b5786cd8e",
+      "contract_sha256": "8c9df30737ede13049f5d2dc624d8eb57efea23bf50142842a4680c8dafdaeb1",
+      "expected_evidence_ids": ["fix-unicode", "fix-separators", "fix-original-suite", "fix-scope"],
+      "fixtures": [
+        {"path": "evals/paired-v2.6.0/fix/label_normalizer.py", "sha256": "602b183ea84c0731f368e4e0e246568bc9c0d4dcae6449f262b9b0da729ea327"},
+        {"path": "evals/paired-v2.6.0/fix/test_label_normalizer.py", "sha256": "d68345509559fd38048e9bbe8094b9133f6e09190642d734646c1e98842fd3af"}
+      ],
+      "goal_misaligned_sentinel": true
+    },
+    {
+      "case_id": "design",
+      "workflow": ["clarify", "design", "prototype", "review"],
+      "pipeline": "engineering/change",
+      "completion_policy": "attention",
+      "route": {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"},
+      "verification_profile": "scoped",
+      "review_mode": "simple",
+      "review_max_verify_iterations": 1,
+      "baseline_plan": "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
+      "baseline_plan_sha256": "bfa86fd787c42fa0fd08c61b447e5bea7d11fca60314a60ef76b931e4e1816cc",
+      "post_plan": "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
+      "post_plan_sha256": "50f344940708b4fbb01764b602654edfc3d9dff3d565e23eed72aa5eea5c64d5",
+      "contract_sha256": "900ae99f2785570d07f16e48535efdc493ea6d22254e333311ba3d6377994b61",
+      "expected_evidence_ids": ["design-completeness", "design-prototype", "design-no-second-engine", "design-production-clean"],
+      "fixtures": [
+        {"path": "evals/paired-v2.6.0/design/brief.md", "sha256": "4270ccd9a2f97c929a9cf58ca8f5087a7fc399b750ed5928f3aaf1816e173e08"}
+      ],
+      "goal_misaligned_sentinel": false
+    }
+  ]
+}

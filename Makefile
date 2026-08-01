@@ -62,7 +62,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression paired-eval-verify acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -70,6 +70,7 @@ help:
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"
+	@echo "  make paired-eval-verify Verify frozen 2.6 paired plans and fixture bytes"
 	@echo "  make acceptance-check  Validate the bounded four-cell harness release contract"
 	@echo "  make acceptance-live   Run/resume exactly four provider-backed harness cells"
 	@echo "  make acceptance-live-restart  Discard the matching four-cell checkpoint"
@@ -113,7 +114,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -125,6 +126,9 @@ eval-live:
 	@python3 scripts/agent-evals.py live --runner "$(EVAL_RUNNER)" --trials "$${EVAL_TRIALS:-3}" --report .vault-meta/evals/latest-live.json
 
 eval-regression: eval-smoke bench-retrieval
+
+paired-eval-verify:
+	@python3 scripts/paired-evals.py verify
 
 acceptance-check:
 	@python3 scripts/release-acceptance.py check
@@ -161,6 +165,10 @@ retrieval-experiment:
 test-agent-evals:
 	@echo "=== test_agent_evals.py ==="
 	@python3 tests/test_agent_evals.py
+
+test-paired-evals:
+	@echo "=== test_paired_evals.py ==="
+	@python3 tests/test_paired_evals.py
 
 test-daily-pipeline:
 	@echo "=== test_daily_pipeline.py ==="

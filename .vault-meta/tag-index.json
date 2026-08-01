@@ -172,7 +172,11 @@
     "wiki/plans/2026-07-21-085654-llm-obsidian-v2-1-2-semantic-acceptance-refactor.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
-    "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md"
+    "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
   ],
   "memory": [
     "wiki/concepts/DragonScale Memory.md"
@@ -201,6 +205,12 @@
   "overview": [
     "wiki/overview.md"
   ],
+  "paired-eval": [
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
+  ],
   "person": [
     "wiki/entities/Andrej Karpathy.md"
   ],
@@ -218,7 +228,11 @@
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
     "wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md",
-    "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md"
+    "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
