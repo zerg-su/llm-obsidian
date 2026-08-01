@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: [[LLM Obsidian 2.6 upstream live drift verification]] — finalized task result (`c-000066`)
 - 2026-08-01: [[LLM Obsidian 2.6 skill quality baseline audit]] — finalized task result (`c-000064`)
 - 2026-08-01: [[LLM Obsidian 2.6.0 technical foundation]] — finalized task result (`c-000061`)
 - 2026-08-01: runbook [[RT10 Foundation Verification]] — RT10 foundation verification checks (`c-000060`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[2.5 real dogfood RT02 exact cmux cleanup]] — finalized task result (`c-000043`)
 - 2026-07-31: [[2.5 real dogfood RT03 review delta prototype]] — finalized task result (`c-000041`)
 - 2026-07-31: [[LLM Obsidian 2.5.0 implementation]] — custom PipelineSpec, bounded runtime и live dogfood завершены (`c-000038`)
-- 2026-07-31: [[LLM Obsidian 2.4 typed pipeline composition result]] — 2.4 closed with explicit transitional real-task dogfood waiver (`c-000037`)
 
 ## Active Threads
 

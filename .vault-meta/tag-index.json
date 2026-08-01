@@ -113,6 +113,7 @@
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
+    "wiki/meta/reviews/Cross-model review — 868a768d-1b9d-408b-b13b-4d0e69b1b5a0 — f2f5bdad3872.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
     "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
     "wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md",
@@ -241,6 +242,7 @@
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
     "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
     "wiki/repos/LLM Obsidian 2.6 skill quality baseline audit.md",
+    "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
   "release": [
@@ -263,6 +265,7 @@
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
     "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
     "wiki/repos/LLM Obsidian 2.6 skill quality baseline audit.md",
+    "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
   "retrieval": [
@@ -278,6 +281,7 @@
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
+    "wiki/meta/reviews/Cross-model review — 868a768d-1b9d-408b-b13b-4d0e69b1b5a0 — f2f5bdad3872.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
     "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
     "wiki/meta/reviews/Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718.md",

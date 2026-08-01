@@ -27,6 +27,20 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] reap | llm-obsidian-2-6-upstream-live-check
+
+`c-000066` [[LLM Obsidian 2.6 upstream live drift verification]]. ## Outcome
+
+Protected research on 2026-08-01 proved that `obra/superpowers` `main` remains `44c9b2d6e889982ac18c27d05a19fefe335194e1` and `mattpocock/skills` `main` remains `2ab958093e83e0ec752e6c1c5932da465bf23e0c`, exactly matching both retained pins. The post-pin range is empty, so every plan-approved general-practice judgement remains unchanged. Current release context is recorded with official citations in `docs/upstream-skills-comparison.md`: Superpowers `v6.2.0` and Matt Pocock Skills `v1
+
+## [2026-08-01 18:36] dispatch | llm-obsidian-2-6-upstream-live-check
+
+Spawned an approved unattended task session (cmux `E1D63A1A-45D9-4F9F-8294-CAF896DD2D9A`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-upstream-live-check`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-upstream-live-check` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: [[Superpowers vs Matt Pocock Skills]], [[2.5 real dogfood RT08 upstream skills research]]. Awaiting typed review and final reap.
+
+## [2026-08-01 18:23] dispatch | llm-obsidian-2-6-outcome-contract-foundation
+
+Spawned an approved unattended task session (cmux `D110D90C-ABF0-4F6B-A52F-CD9912FA9BF0`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-outcome-contract-foundation`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-outcome-contract-foundation` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-08-01] reap | llm-obsidian-2-6-skills-audit
 
 `c-000064` [[LLM Obsidian 2.6 skill quality baseline audit]]. Completed the mandatory pre-branch audit-only improve-skills meta-gate on integrated foundation `21bdca927739c34a7ebb109f1e0393fca6230340`. The committed report at `docs/skill-quality-baseline-audit-v2.6.0.md` records protected behavior, all five passes including goal preservation, nine unique `fix` verdicts, and exact ownership: four findings to A, two to B, two to C, and one to integration. No skill, script, schema, test, adapter, harness behavior, or vault page changed. Final HEAD `701bae4d3e
