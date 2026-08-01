@@ -141,7 +141,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST, *, root: Path = ROOT) -> dict[s
         if item.get("review_max_verify_iterations") != 1:
             raise PairedEvalError(f"{label} review budget changed")
         route = item.get("route")
-        if route != {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"}:
+        if route != {"runtime": "codex", "model": "sol", "effort": "high"}:
             raise PairedEvalError(f"{label} route changed")
         plan_contracts = []
         plan_hashes = []
