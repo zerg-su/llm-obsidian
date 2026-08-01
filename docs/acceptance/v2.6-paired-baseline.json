@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase": "baseline",
+  "fixture_set_sha256": "56f418e33d1778ec96974b1c8d26a852c7d5add02ac8590e9f9c6e7a9a1872b4",
+  "cases": [
+    {
+      "case_id": "fix",
+      "contract_sha256": "8c9df30737ede13049f5d2dc624d8eb57efea23bf50142842a4680c8dafdaeb1",
+      "route": {"runtime": "codex", "model": "sol", "effort": "high"},
+      "verification_profile": "scoped",
+      "outcome_disposition": "achieved",
+      "outcome_evidence": {"established": 4, "missing": 0, "contradicted": 0},
+      "user_interventions": 0,
+      "model_rounds": 4,
+      "review_rounds": 1,
+      "callback_failures": 1,
+      "duplicate_effects": 0,
+      "duration_seconds": 925
+    },
+    {
+      "case_id": "design",
+      "contract_sha256": "900ae99f2785570d07f16e48535efdc493ea6d22254e333311ba3d6377994b61",
+      "route": {"runtime": "codex", "model": "sol", "effort": "high"},
+      "verification_profile": "scoped",
+      "outcome_disposition": "achieved",
+      "outcome_evidence": {"established": 4, "missing": 0, "contradicted": 0},
+      "user_interventions": 0,
+      "model_rounds": 1,
+      "review_rounds": 1,
+      "callback_failures": 0,
+      "duplicate_effects": 0,
+      "duration_seconds": 1021
+    }
+  ]
+}
