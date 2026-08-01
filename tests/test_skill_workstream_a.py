@@ -70,7 +70,7 @@ print("OK   design preserves the contract through owned, testable vertical slice
 prototype = skill("prototype")
 require(
     prototype,
-    "one falsifiable question/criterion",
+    "one falsifiable question with a success/failure criterion",
     "harness-owned disposable worktree/minimal ContextPacket",
     "one run command/bounded evidence",
     "production code remains unchanged",
@@ -79,9 +79,9 @@ require(
     "Decision",
     "Limitations",
     "Provenance",
-    "how the local answer informs the incoming Outcome Contract",
+    "how it informs the incoming Outcome Contract",
     "A successful spike proves neither desired outcome nor production completion",
-    "Production promotion requires separate authorization",
+    "Promotion requires separate authorization",
 )
 normalized_prototype = " ".join(prototype.split())
 for heading in ("Question", "Evidence", "Decision", "Limitations", "Provenance"):
