@@ -19,25 +19,27 @@ upstream commit, each snapshot path has a stable upstream URL — for example
 `skills/writing-skills/SKILL.md` in the superpowers pin is
 `https://github.com/obra/superpowers/blob/44c9b2d6e889982ac18c27d05a19fefe335194e1/skills/writing-skills/SKILL.md`.
 
-> **Limitation of this run: exact live-upstream drift remains unresolved.** The
-> protected research workflow completed with nine validated official-source
-> citations, but its packet did not contain a default-branch HEAD SHA for either
-> repository. It therefore cannot establish whether either pinned commit is
-> current. The strongest captured release indicator for `obra/superpowers` was
-> v6.1.1 dated 2026-07-02, while an older releases index showed v5.1.0; neither
-> resolves the contradiction with the pinned tree's declared 6.2.0. The
-> `mattpocock/skills` release capture exposed recent changes but no version label
-> or release commit. Preserve both pins: repin need is unresolved, not “no update
-> needed.”
+> **Live-upstream verification, 2026-08-01: no default-branch drift.** Protected
+> research captured each official `main` history with a full HEAD SHA. The
+> `obra/superpowers` HEAD was
+> [`44c9b2d6e889982ac18c27d05a19fefe335194e1`](https://github.com/obra/superpowers/commit/44c9b2d6e889982ac18c27d05a19fefe335194e1)
+> and the `mattpocock/skills` HEAD was
+> [`2ab958093e83e0ec752e6c1c5932da465bf23e0c`](https://github.com/mattpocock/skills/commit/2ab958093e83e0ec752e6c1c5932da465bf23e0c),
+> exactly matching both pins. The post-pin commit range is therefore empty, so
+> none of the approved general-practice axes below has live drift and no snapshot
+> or manifest update is warranted. Official mutable-head evidence:
+> [Superpowers `main` history](https://github.com/obra/superpowers/commits/main),
+> [Matt Pocock Skills `main` history](https://github.com/mattpocock/skills/commits/main).
 
-The protected packet did confirm that both repositories were available and that
-`obra/superpowers` reported a default branch of `main` plus repository activity
-on 2026-07-31. Those are useful freshness signals, but neither substitutes for
-the full commit response required by the mechanical upgrade procedure. Before a
-future repin, capture the authoritative default-branch SHA and latest release or
-tag from official endpoints, then review only the intervening general-practice
-changes. [Superpowers repository](https://github.com/obra/superpowers),
-[Matt Pocock Skills releases](https://github.com/mattpocock/skills/releases).
+The same protected capture checked release state separately from pin identity.
+`obra/superpowers` showed latest release/tag
+[`v6.2.0`](https://github.com/obra/superpowers/releases/tag/v6.2.0), dated
+2026-07-24 at abbreviated commit `3dcbd5c`; `mattpocock/skills` showed latest
+release/tag [`v1.1.0`](https://github.com/mattpocock/skills/releases/tag/v1.1.0),
+dated 2026-07-08 at abbreviated commit `d574778` ([tags](https://github.com/mattpocock/skills/tags)).
+Both release tags predate the captured 2026-07-28 HEADs. The packet did not
+expose the tags' full commit SHAs, so it does not make a stronger ancestry claim;
+that limitation does not affect the exact `HEAD == pin` no-drift result.
 
 Two rules bound the extraction:
 
@@ -81,9 +83,9 @@ tree, so a downstream adapter cannot read the upstream prose for them:
 Treat `SKILL.md` as authoritative over the changelog and docs pages where they
 disagree.
 
-Both gaps are statements about the retained tree at this commit. The protected
-packet did not expose enough current file content to determine whether upstream
-has since shipped either one, so they remain first checks for the next refresh.
+Both gaps remain current on the default branch: live `HEAD == pin` proves there
+is no intervening tree in which upstream could have added either missing entry.
+They remain first checks after a future HEAD change.
 
 ## Where the libraries differ
 
@@ -321,15 +323,13 @@ lane, so they need their own regression coverage.
 
 ## Re-pin decision
 
-The snapshots are **not** re-vendored in this refresh, for two reasons. Re-pinning
-replaces about 1.5 MB of third-party trees, and that diff is unreviewable
-alongside a judgement update; refreshing the comparison and re-pinning the bytes
-are separate changes with separate evidence. Independently, this run had no
-verified view of current upstream at all, so it had no basis on which to choose a
-new commit. The mechanical upgrade procedure in
-`references/upstream-skills/README.md` covers the re-pin itself.
+The snapshots are **not** re-vendored because the protected live check proved
+that both selected upstream `main` HEADs are already the exact pinned commits.
+The retained bytes and `manifest.json` are therefore the correct mechanical
+state; rewriting either would create churn without a new upstream identity.
 
-The next refresh should start by answering what this one could not: current
-release and default-branch head for both repositories, whether the two retained
-gaps above still exist, and whether any rule cited here has changed. Re-pin when
-an upstream release changes a rule this file cites, not on a schedule.
+Every existing adopt/adapt/reject disposition above remains unchanged because
+the post-pin range is empty. The next refresh should repeat the exact HEAD and
+release checks, then inspect only approved general-practice changes if a HEAD
+moves. Re-pin when a changed upstream commit alters retained evidence, not merely
+because time passed or a release label differs from a package declaration.
