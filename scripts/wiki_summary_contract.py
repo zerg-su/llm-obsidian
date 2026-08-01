@@ -128,7 +128,9 @@ def validate_summary(
         raise WikiSummaryError(
             "Wiki Summary v2 requires declared Outcome Contract evidence IDs"
         )
-    undeclared = set(evidence_ids) - set(declared_evidence_ids)
+    declared_evidence = set(declared_evidence_ids)
+    submitted_evidence = set(evidence_ids)
+    undeclared = submitted_evidence - declared_evidence
     if undeclared:
         raise WikiSummaryError(
             "outcome_evidence_ids are not declared by the Outcome Contract: "
@@ -140,8 +142,10 @@ def validate_summary(
         maximum=MAX_RESIDUAL_GAPS,
     )
     if disposition == "achieved":
-        if not evidence_ids:
-            raise WikiSummaryError("achieved requires at least one outcome evidence ID")
+        if submitted_evidence != declared_evidence:
+            raise WikiSummaryError(
+                "achieved requires every declared Outcome Contract evidence ID"
+            )
         if residual:
             raise WikiSummaryError("achieved cannot carry residual gap pointers")
     elif not residual:

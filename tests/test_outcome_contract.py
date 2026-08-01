@@ -127,6 +127,16 @@ expect_error(
 )
 print("OK   evidence identifiers are bounded and unique")
 
+for boolean_version in (True, False):
+    boolean_contract = dict(CONTRACT)
+    boolean_contract["schema_version"] = boolean_version
+    expect_error(
+        f"boolean schema version {boolean_version}",
+        plan(json.dumps(boolean_contract, separators=(",", ":"))),
+        "schema_version",
+    )
+print("OK   boolean schema versions fail closed")
+
 assert (
     hashlib.sha256((ROOT / "schemas" / "task-meta-v3.schema.json").read_bytes()).hexdigest()
     == "0a24ba1dd17382b411192f9d41051a4a0b2fe50c58956dc3fce47adafe6fa6a1"
@@ -238,8 +248,25 @@ missing_gap = dict(summary_v2)
 missing_gap["residual_gap_pointers"] = []
 expect_summary_error("partial without residual gap", missing_gap, "residual")
 achieved_gap = dict(summary_v2)
-achieved_gap["outcome_disposition"] = "achieved"
+achieved_gap.update(
+    {
+        "outcome_disposition": "achieved",
+        "outcome_evidence_ids": ["digest-stable", "authority-closed"],
+    }
+)
 expect_summary_error("achieved with residual gap", achieved_gap, "residual")
+incomplete_achieved = dict(summary_v2)
+incomplete_achieved.update(
+    {
+        "outcome_disposition": "achieved",
+        "residual_gap_pointers": [],
+    }
+)
+expect_summary_error(
+    "achieved without every declared evidence ID",
+    incomplete_achieved,
+    "every declared",
+)
 for authority in (
     "permissions",
     "forbidden_actions",

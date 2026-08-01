@@ -85,7 +85,8 @@ def validate(value: Any) -> dict[str, Any]:
         raise OutcomeContractError(
             "Outcome Contract is missing fields: " + ", ".join(sorted(missing))
         )
-    if value.get("schema_version") != SCHEMA_VERSION:
+    schema_version = value.get("schema_version")
+    if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
         raise OutcomeContractError(
             f"Outcome Contract schema_version must be {SCHEMA_VERSION}"
         )
