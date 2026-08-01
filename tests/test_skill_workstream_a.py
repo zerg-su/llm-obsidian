@@ -39,3 +39,28 @@ assert normalized_clarify.index("keep the interview open") < normalized_clarify.
     "exactly one user-grounded Outcome Contract"
 ), "Clarify must close material ambiguity before forming the Outcome Contract"
 print("OK   clarify closes ambiguity before one user-grounded Outcome Contract")
+
+
+design = skill("design")
+require(
+    design,
+    "Stay read-only",
+    "Start with ownership boundaries and owned test seams",
+    "Preserve the incoming Outcome Contract without semantic drift",
+    "`desired_outcome`, `success_evidence`, `non_goals`, and optional `purpose`",
+    "the problem and non-goals",
+    "invariants",
+    "alternatives",
+    "data/control flow, failure recovery, rollout, and rollback",
+    "Unresolved fog",
+    "explicitly closed as out of scope",
+    "Do not leave placeholders or undefined interfaces",
+    "Use vertical slices by default",
+    "expand-contract only for a wide migration",
+    "trace each declared evidence ID",
+)
+normalized_design = " ".join(design.split())
+assert normalized_design.index(
+    "Start with ownership boundaries and owned test seams"
+) < normalized_design.index("Produce:"), "Owned seams must shape the design before output"
+print("OK   design preserves the contract through owned, testable vertical slices")
