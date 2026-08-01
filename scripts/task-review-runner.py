@@ -21,17 +21,27 @@ from harness.context import ContextBuilder, ContextInput, outcome_contract_input
 from harness.contracts import (
     AttentionReason,
     CallbackEnvelope,
+    ContractError as HarnessContractError,
     EffectOutcome,
     OwnedResources,
     RuntimeRoute,
     to_dict,
 )
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    resolve_custom_executable,
+)
+from harness.pipeline_builtins import builtin_registry
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore, StoreError
-from harness.verification import load_profiles
+from harness.verification import (
+    VerificationError,
+    compose_commands,
+    load_profiles,
+)
 from harness.workflows.review import (
     ReviewContext,
     ReviewFinding,
@@ -1290,9 +1300,40 @@ def _durable_successful_verification(
             "successful review recovery verification operation changed"
         )
     evidence_root = (owner_runtime / "pipeline-verification").resolve()
+    extra_commands: tuple[str, ...] = ()
+    if policy.get("name") == "custom":
+        try:
+            baseline, compiled, extra_commands, _custom_spec = (
+                resolve_custom_executable(
+                    store_root=owner_runtime.parent,
+                    operation_id=task_id,
+                    definition_sha256=str(receipt["definition_sha256"]),
+                    registry=builtin_registry(),
+                    policy=CustomPipelinePolicy.default(),
+                    capabilities=("route:resolved",),
+                )
+            )
+        except (HarnessContractError, OSError, ValueError) as exc:
+            raise TaskReviewError(
+                "successful review recovery custom pipeline is unavailable"
+            ) from exc
+        if (
+            baseline != policy.get("baseline")
+            or compiled.definition_sha256
+            != receipt.get("definition_sha256")
+        ):
+            raise TaskReviewError(
+                "successful review recovery custom pipeline changed"
+            )
+    try:
+        commands = compose_commands(configured_profile, extra_commands)
+    except VerificationError as exc:
+        raise TaskReviewError(
+            "successful review recovery verification commands are invalid"
+        ) from exc
     expected_command_ids = [
         f"{profile}-{index + 1}"
-        for index in range(len(configured_profile.commands))
+        for index in range(len(commands))
     ]
     if not all(isinstance(row, dict) for row in evidence):
         raise TaskReviewError(

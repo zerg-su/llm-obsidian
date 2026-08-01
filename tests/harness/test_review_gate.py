@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import shlex
 import subprocess
 import tempfile
 import uuid
+from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
+from io import StringIO
 from pathlib import Path
 
 
@@ -21,6 +24,7 @@ import sys
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker
+from harness import cli as harness_cli
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
@@ -34,7 +38,16 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
-from harness.pipeline_builtins import compiled_builtin
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    ExplicitPipelineApproval,
+    FrozenPipelineStore,
+    compile_custom_spec,
+    freeze_custom_pipeline,
+    parse_pipeline_spec,
+    render_custom_approval,
+)
+from harness.pipeline_builtins import builtin_registry, compiled_builtin
 from harness.workflows.review import (
     ReviewContext,
     ReviewFinding,
@@ -1603,15 +1616,82 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             )
         resolution_path.write_bytes(exact_resolution_bytes)
 
-        try:
-            staged = recover_finalizing(
-                product, runtime_manager=task_runtime
+        parent_record = task_store.read(task_id, task_id)
+        if parent_record.state != "attention-required":
+            task_store.transition(
+                task_id,
+                task_id,
+                "attention-required",
+                reason=AttentionReason.ATTENTION_REQUIRED,
             )
-        except task_review_runner.TaskReviewError:
-            staged = {"status": "error"}
+        session_path = (
+            task_store.root
+            / "owners"
+            / task_id
+            / "runtime"
+            / task_id
+            / "session.json"
+        )
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        session_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": task_id,
+                    "run_id": task_store.read(task_id, task_id).run_id,
+                    "cwd": str(product),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cli_output = StringIO()
+        if "review_runtime_manager" in inspect.signature(
+            harness_cli.main
+        ).parameters:
+            with redirect_stdout(cli_output):
+                cli_resume_rc = harness_cli.main(
+                    [
+                        "--store",
+                        str(task_store.root),
+                        "--owner",
+                        task_id,
+                        "--json",
+                        "resume",
+                        task_id,
+                    ],
+                    process_adapter=object(),
+                    cmux_adapter=object(),
+                    review_runtime_manager=task_runtime,
+                )
+        else:
+            cli_resume_rc = 2
+            try:
+                recover_finalizing(
+                    product, runtime_manager=task_runtime
+                )
+            except task_review_runner.TaskReviewError:
+                pass
         staged_state = json.loads(
             (gate_root / "review-gate.json").read_text(encoding="utf-8")
         )
+        staged = {
+            "status": (
+                "verifying"
+                if staged_state.get("status")
+                == "recovery-verification-required"
+                else "error"
+            )
+        }
+        if not (
+            cli_resume_rc == 0
+            and task_store.read(task_id, task_id).state
+            == "awaiting-callback"
+        ):
+            regression_failures.append(
+                "HOL-003 dispatch resume accepts staged recovery"
+            )
         accepted_response = (
             json.loads(response_receipt_path.read_text(encoding="utf-8"))
             if response_receipt_path.is_file()
@@ -1876,6 +1956,293 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             regression_failures.append(
                 "HOL-R03 interruption-safe finalizing replay"
             )
+
+    custom_recovery_id = str(uuid.uuid4())
+    custom_pipeline_raw = {
+        "schema_version": 1,
+        "spec_id": "review-recovery-extra-check",
+        "version": "1.0.0",
+        "intent": "engineering-change",
+        "task_profile": "change",
+        "baseline_pipeline": "engineering/change",
+        "route_alias": "executor-default",
+        "required_capabilities": ["route:resolved"],
+        "input_schema": "approved-plan/v1",
+        "output_schema": "reap-ready/v1",
+        "steps": [
+            {
+                "step_id": "implement",
+                "primitive_id": "model_step",
+                "primitive_version": "1.0.0",
+                "input_schema": "approved-plan/v1",
+                "output_schema": "implementation-result/v1",
+                "session_mode": "worktree",
+                "semantic_skills": ["tdd"],
+            },
+            {
+                "step_id": "verify",
+                "primitive_id": "verify",
+                "primitive_version": "1.0.0",
+                "input_schema": "implementation-result/v1",
+                "output_schema": "verified-result/v1",
+                "session_mode": "verification",
+                "semantic_skills": [],
+            },
+            {
+                "step_id": "review",
+                "primitive_id": "review",
+                "primitive_version": "1.0.0",
+                "input_schema": "verified-result/v1",
+                "output_schema": "reap-ready/v1",
+                "session_mode": "review",
+                "semantic_skills": ["review"],
+            },
+        ],
+        "transitions": [
+            {
+                "from_step": "implement",
+                "outcome": "complete",
+                "target": "verify",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "verify",
+                "outcome": "complete",
+                "target": "review",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "review",
+                "outcome": "complete",
+                "target": "terminal:completed",
+                "max_traversals": 1,
+            },
+        ],
+        "controls": [],
+        "budget": {
+            "attempt_limit": 2,
+            "model_restart_limit": 1,
+            "time_budget_seconds": 900,
+            "token_limit": 50000,
+        },
+        "completion_policy": "attention",
+        "requested_permissions": ["git-write", "product-worktree"],
+        "requested_side_effects": ["git-write", "worktree"],
+        "context_pointers": [
+            {
+                "pointer_id": "approved-plan",
+                "content_sha256": "a" * 64,
+                "byte_limit": 65536,
+            }
+        ],
+        "verification_checks": ["diff-check"],
+        "review_mode": "simple",
+        "human_gates": ["initial-approval"],
+        "terminal_outcomes": ["completed", "attention-required"],
+    }
+    custom_policy = CustomPipelinePolicy.default()
+    custom_spec = parse_pipeline_spec(custom_pipeline_raw)
+    custom_compiled = compile_custom_spec(
+        custom_spec,
+        builtin_registry(),
+        policy=custom_policy,
+        capabilities=("route:resolved",),
+    )
+    custom_card = render_custom_approval(
+        custom_spec,
+        custom_compiled,
+        policy=custom_policy,
+    )
+    custom_approval = ExplicitPipelineApproval.for_card(
+        definition_sha256=custom_compiled.definition_sha256,
+        approval_card=custom_card,
+        actor="user",
+        decision="approve",
+    )
+    custom_frozen = freeze_custom_pipeline(
+        custom_spec,
+        custom_compiled,
+        custom_approval,
+        custom_card,
+    )
+    FrozenPipelineStore(
+        task_store.root
+        / "owners"
+        / custom_recovery_id
+        / "runtime"
+    ).save(
+        operation_id=custom_recovery_id,
+        spec=custom_spec,
+        frozen=custom_frozen,
+        approval=custom_approval,
+    )
+    custom_dispatch_spec = OperationSpec(
+        operation_id=custom_recovery_id,
+        idempotency_key="custom-review-recovery",
+        kind="dispatch",
+        owner_id=custom_recovery_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=custom_compiled.definition_sha256,
+    )
+    task_store.create(
+        custom_dispatch_spec,
+        lane_id="custom-recovery-dispatch-lane",
+        run_id="custom-recovery-dispatch-run",
+    )
+    custom_input_sha = hashlib.sha256(
+        b"custom repaired-head verification"
+    ).hexdigest()
+    (
+        custom_verification_spec,
+        custom_verification_lane,
+        custom_verification_run,
+    ) = _pipeline_verify_identity(
+        custom_dispatch_spec,
+        definition_sha256=custom_compiled.definition_sha256,
+        input_sha256=custom_input_sha,
+        profile="scoped",
+    )
+    task_store.create(
+        custom_verification_spec,
+        lane_id=custom_verification_lane,
+        run_id=custom_verification_run,
+    )
+    for custom_state in (
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+        "finalizing",
+        "exiting",
+        "complete",
+    ):
+        task_store.transition(
+            custom_recovery_id,
+            custom_verification_spec.operation_id,
+            custom_state,
+        )
+    custom_effect_id = f"pipeline-verify-{custom_input_sha[:32]}"
+    custom_record = task_store.read(
+        custom_recovery_id,
+        custom_verification_spec.operation_id,
+    )
+    task_store.save(
+        replace(
+            custom_record,
+            effect_id=custom_effect_id,
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=custom_record.revision + 1,
+        ),
+        expected_revision=custom_record.revision,
+    )
+    custom_owner_runtime = (
+        task_store.root
+        / "owners"
+        / custom_recovery_id
+        / "runtime"
+        / custom_recovery_id
+    )
+    custom_verification_root = (
+        custom_owner_runtime
+        / "pipeline-verification"
+        / custom_verification_spec.operation_id
+    )
+    custom_evidence = []
+    custom_command_count = len(
+        load_profiles(vault / "config/verification-profiles.toml")[
+            "scoped"
+        ].commands
+    ) + 1
+    for command_index in range(1, custom_command_count + 1):
+        custom_output = (
+            custom_verification_root
+            / f"evidence/scoped-{command_index}.log"
+        )
+        custom_output.parent.mkdir(parents=True, exist_ok=True)
+        custom_output.write_text(
+            "custom pipeline verification passed\n",
+            encoding="utf-8",
+        )
+        custom_evidence.append(
+            {
+                "command_id": f"scoped-{command_index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "started_at": f"{command_index}.0",
+                "finished_at": f"{command_index}.5",
+                "head_sha": repaired_head,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "output_pointer": custom_output.relative_to(
+                    custom_owner_runtime
+                ).as_posix(),
+            }
+        )
+    custom_receipt = {
+        "schema_version": 1,
+        "operation_id": custom_verification_spec.operation_id,
+        "parent_operation_id": custom_recovery_id,
+        "lane_id": custom_verification_lane,
+        "run_id": custom_verification_run,
+        "definition_sha256": custom_compiled.definition_sha256,
+        "step_id": "verify",
+        "head_sha": repaired_head,
+        "input_sha256": custom_input_sha,
+        "profile": "scoped",
+        "profile_sha256": profile_sha,
+        "effect_id": custom_effect_id,
+        "status": "complete",
+        "evidence": custom_evidence,
+    }
+    custom_receipt_path = custom_verification_root / "receipt.json"
+    custom_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    custom_receipt_path.write_text(
+        json.dumps(custom_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (custom_owner_runtime / "pipeline-step-verify.json").write_text(
+        json.dumps(custom_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    custom_meta = {
+        "pipeline_policy": {
+            "name": "custom",
+            "source": "custom",
+            "baseline": "engineering/change",
+            "definition_sha256": custom_compiled.definition_sha256,
+        },
+        "review_policy": {
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile_sha,
+        },
+    }
+    try:
+        custom_verified = (
+            task_review_runner._durable_successful_verification(
+                custom_meta,
+                vault,
+                task_store,
+                custom_recovery_id,
+                repaired_head,
+            )
+        )
+    except task_review_runner.TaskReviewError:
+        custom_verified = None
+    if custom_verified != (
+        custom_verification_spec.operation_id,
+        hashlib.sha256(custom_receipt_path.read_bytes()).hexdigest(),
+    ):
+        regression_failures.append(
+            "HOL-004 custom verification commands remain recoverable"
+        )
 
     recovery_id = str(uuid.uuid4())
     recovery_meta = {**meta, "task_id": recovery_id}

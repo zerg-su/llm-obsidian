@@ -350,7 +350,11 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch recovery review gate is invalid"
         ) from exc
-    if not isinstance(gate, dict) or gate.get("status") != "verifying":
+    if not isinstance(gate, dict) or gate.get("status") not in {
+        "verifying",
+        "recovery-verification-required",
+        "fresh-boundary-authorized",
+    }:
         return False
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
@@ -374,9 +378,13 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch finalizing review recovery failed"
         ) from exc
-    if not isinstance(receipt, dict) or receipt.get("status") != "approved":
+    if not isinstance(receipt, dict) or receipt.get("status") not in {
+        "approved",
+        "verifying",
+        "reviewing",
+    }:
         raise RuntimeSessionError(
-            "dispatch finalizing review recovery did not authorize review"
+            "dispatch finalizing review recovery did not make bounded progress"
         )
     return True
 
@@ -469,6 +477,7 @@ def main(
     *,
     process_adapter: object | None = None,
     cmux_adapter: object | None = None,
+    review_runtime_manager: object | None = None,
 ) -> int:
     args = parser().parse_args(argv)
     store = OperationStore(args.store)
@@ -577,6 +586,7 @@ def main(
                     operation_id,
                     process_adapter=process_adapter,
                     cmux_adapter=cmux_adapter,
+                    review_runtime_manager=review_runtime_manager,
                 )
             elif args.command in {"cancel", "close"}:
                 result = _cancel_or_close(
