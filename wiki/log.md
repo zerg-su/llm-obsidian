@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-08-01
+updated: 2026-08-02
 tags:
   - meta
   - log
@@ -26,6 +26,87 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-08-02 01:12] dispatch | llm-obsidian-2-6-paired-design-post-final
+
+Spawned an approved unattended task session (cmux `25230313-4DA6-4C04-A65D-AECAF82B82A8`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-final`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-final` from `14e35df85b97026dbb74c8cba83f1fcd9a317afa`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 01:12] dispatch | llm-obsidian-2-6-paired-fix-post-final
+
+Spawned an approved unattended task session (cmux `243CC318-0178-4663-80F9-E67C74FB1DA4`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-fix-post-final`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-fix-post-final` from `14e35df85b97026dbb74c8cba83f1fcd9a317afa`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:53] dispatch | llm-obsidian-2-6-paired-design-post-current
+
+Spawned an approved unattended task session (cmux `3ABBA696-650D-46B5-8C8B-1BED2267F63B`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-current`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-current` from `a40a579ae88280cc60c88aab5eb7dcbef656c30b`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:53] dispatch | llm-obsidian-2-6-paired-fix-post-current
+
+Spawned an approved unattended task session (cmux `AF9AF92A-8232-4A2C-BAA0-8545F7F26DCB`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-fix-post-current`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-fix-post-current` from `a40a579ae88280cc60c88aab5eb7dcbef656c30b`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:50] dispatch | llm-obsidian-2-6-paired-design-post-change
+
+Spawned an approved unattended task session (cmux `BB219B1F-CDAF-4CD8-BAAF-8F512E5107D8`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-change`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-change` from `a40a579ae88280cc60c88aab5eb7dcbef656c30b`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:50] dispatch | llm-obsidian-2-6-paired-fix-post-change
+
+Spawned an approved unattended task session (cmux `470ED69A-C3FC-4A90-BBE9-781E0B8973C8`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-fix-post-change`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-fix-post-change` from `a40a579ae88280cc60c88aab5eb7dcbef656c30b`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:46] dispatch | llm-obsidian-2-6-paired-design-post
+
+Spawned an approved unattended task session (cmux `45AF3B6B-89EA-4ED0-A810-B528BDB3E3A0`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 00:46] dispatch | llm-obsidian-2-6-paired-fix-post
+
+Spawned an approved unattended task session (cmux `ACF69557-B8C9-41CA-AD23-12194FC67E11`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-fix-post`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-fix-post` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01] reap | llm-obsidian-2-6-skills-a
+
+`c-000078` [[LLM Obsidian 2.6 skill workstream A]]. Implemented only workstream A across clarify, design, prototype, and save-plan, with one dedicated focused instruction-contract test. Clarify closes material ambiguity before one user-grounded Outcome Contract; design preserves it through owned test seams and bounded design output; prototype records question, evidence, decision, limitations, and provenance without claiming production completion, and reserves cleanup to the harness; save-plan validates the contract before address allocation, reva
+
+## [2026-08-01] reap | llm-obsidian-2-6-skills-c
+
+`c-000076` [[LLM Obsidian 2.6 skill workstream C]]. Implemented C-REV-01 and C-REA-01 at final commit 7a1bcc7. The existing holistic/Fable spec review lane receives the exact implementer summary as an unverified claim, evaluates the Outcome Contract first, classifies every declared success-evidence item as established, missing, or contradicted, and checks non-goals for scope creep. Review identity and finalization bind exact v4 summary bytes while v3 identity and the typed no-review bypass remain unchanged. Reap documents Wiki Summary v2, exact a
+
+## [2026-08-01 22:54] dispatch | llm-obsidian-2-6-skills-c
+
+Spawned an approved unattended task session (cmux `221FF47D-5FC2-4F63-ADF5-84D3B341F44B`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-skills-c`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-skills-c` from `foundation/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01 22:54] dispatch | llm-obsidian-2-6-skills-b
+
+Spawned an approved unattended task session (cmux `8027F2AE-D32B-485B-8A46-9B6121E76CD2`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-skills-b`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-skills-b` from `foundation/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01 22:54] dispatch | llm-obsidian-2-6-skills-a
+
+Spawned an approved unattended task session (cmux `2AE3E0EE-004A-41B5-A575-25DFB29EC678`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-skills-a`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-skills-a` from `foundation/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01] reap | llm-obsidian-2-6-paired-design-baseline
+
+`c-000074` [[LLM Obsidian 2.6 paired design baseline]]. ## Result
+
+Committed `docs/acceptance/v2.6-paired-design-result.md` at `7028d4e84e4f1732bd65fec6d5bea322bd0cf142`. The decision composes one pure callback-stall reducer with the existing runtime-worker clock, `OperationStore`, `OperationSupervisor`, `RuntimeSessionManager`, exact ownership, `CallbackBroker`, fixed 10/15/20-minute ladder, and typed attention. It explicitly rejects a scheduler, second pipeline engine, provider-specific lifecycle, ownership guesses, and a model call to choose deter
+
+## [2026-08-01] reap | llm-obsidian-2-6-paired-fix-baseline
+
+`c-000072` [[LLM Obsidian 2.6 paired fix baseline]]. ## Result
+
+Added an observable red regression and the smallest Unicode-aware normalization fix in the frozen paired fixture. `normalize_label` now preserves lowercase Unicode letters and digits, collapses unsafe runs through `[\W_]+`, trims boundary separators, and retains the punctuation-only `untitled` fallback.
+
+## Outcome evidence
+
+- `fix-unicode`: `Résumé Plan` produces `résumé-plan`; `Москва 42` produces `москва-42` without transliteration or letter loss.
+- `fix-separators`: the regression
+
+## [2026-08-01 22:34] dispatch | llm-obsidian-2-6-paired-design-baseline
+
+Spawned an approved unattended task session (cmux `98E4EEC5-BB6F-4B79-874D-119C26FAFF2B`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-baseline`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-baseline` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01 22:34] dispatch | llm-obsidian-2-6-paired-fix-baseline
+
+Spawned an approved unattended task session (cmux `9C22A783-0190-4A7F-952D-8A625F4CB17D`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-fix-baseline`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-fix-baseline` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-01 20:47] dispatch | llm-obsidian-2-6-review-recovery-fix
+
+Spawned an approved unattended task session (cmux `3C764E99-FBA2-4529-A42E-43484E527FA1`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-review-recovery-fix`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-review-recovery-fix` from `release/2.6.0`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: [[2.5 real dogfood RT02 exact cmux cleanup]]. Awaiting typed review and final reap.
 
 ## [2026-08-01] reap | llm-obsidian-2-6-upstream-live-check
 

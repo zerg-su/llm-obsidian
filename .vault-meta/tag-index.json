@@ -84,7 +84,11 @@
   ],
   "dogfood": [
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
-    "wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md"
+    "wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md"
   ],
   "dragonscale": [
     "wiki/concepts/DragonScale on macOS.md"
@@ -107,15 +111,19 @@
   ],
   "harness": [
     "wiki/meta/reviews/Cross-model review — 133542f0-7e4f-47c2-9c86-673fd877ddb1 — eead86d4aecb.md",
+    "wiki/meta/reviews/Cross-model review — 182326f6-532b-4cfa-a638-c230fdadf18a — 87f543018833.md",
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
+    "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
     "wiki/meta/reviews/Cross-model review — 868a768d-1b9d-408b-b13b-4d0e69b1b5a0 — f2f5bdad3872.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
     "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
+    "wiki/meta/reviews/Cross-model review — a381c144-16cd-4998-8ebd-c6467b3505c7 — ee1eccd04289.md",
+    "wiki/meta/reviews/Cross-model review — b2ed5e7b-f060-4371-8d28-111ab195d3f9 — 75dd2e8b5300.md",
     "wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md",
     "wiki/meta/reviews/Cross-model review — ee204ffa-627b-4b49-a086-d569ba212128 — 8e34fbb9548c.md",
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -176,7 +184,11 @@
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
-    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md"
   ],
   "memory": [
     "wiki/concepts/DragonScale Memory.md"
@@ -232,7 +244,11 @@
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline.md",
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md",
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
-    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
+    "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
@@ -255,7 +271,11 @@
     "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md",
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
     "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
+    "wiki/repos/LLM Obsidian 2.6 paired design baseline.md",
+    "wiki/repos/LLM Obsidian 2.6 paired fix baseline.md",
     "wiki/repos/LLM Obsidian 2.6 skill quality baseline audit.md",
+    "wiki/repos/LLM Obsidian 2.6 skill workstream A.md",
+    "wiki/repos/LLM Obsidian 2.6 skill workstream C.md",
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
@@ -278,7 +298,11 @@
     "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md",
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
     "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
+    "wiki/repos/LLM Obsidian 2.6 paired design baseline.md",
+    "wiki/repos/LLM Obsidian 2.6 paired fix baseline.md",
     "wiki/repos/LLM Obsidian 2.6 skill quality baseline audit.md",
+    "wiki/repos/LLM Obsidian 2.6 skill workstream A.md",
+    "wiki/repos/LLM Obsidian 2.6 skill workstream C.md",
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
@@ -289,9 +313,11 @@
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
     "wiki/meta/reviews/Cross-model review — 133542f0-7e4f-47c2-9c86-673fd877ddb1 — eead86d4aecb.md",
+    "wiki/meta/reviews/Cross-model review — 182326f6-532b-4cfa-a638-c230fdadf18a — 87f543018833.md",
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
+    "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
@@ -300,6 +326,8 @@
     "wiki/meta/reviews/Cross-model review — 95db707f-3219-45cf-84d1-715b7344c411 — c50e8025e5d5.md",
     "wiki/meta/reviews/Cross-model review — LLM Obsidian 2.1.3 lifecycle fixes — 1ace771c7718.md",
     "wiki/meta/reviews/Cross-model review — LLM Obsidian v2.1.3 final release — b5385c24fe5b.md",
+    "wiki/meta/reviews/Cross-model review — a381c144-16cd-4998-8ebd-c6467b3505c7 — ee1eccd04289.md",
+    "wiki/meta/reviews/Cross-model review — b2ed5e7b-f060-4371-8d28-111ab195d3f9 — 75dd2e8b5300.md",
     "wiki/meta/reviews/Cross-model review — e5197527-44dc-4df7-b686-a6ce6f092e3d — b4bc43525bf3.md",
     "wiki/meta/reviews/Cross-model review — ee204ffa-627b-4b49-a086-d569ba212128 — 8e34fbb9548c.md",
     "wiki/meta/reviews/Cross-model review — v2.0.8-rd-upstream-audit — db9313c2eba2.md",
@@ -365,6 +393,12 @@
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md"
+  ],
+  "v2.6": [
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
+    "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md"
   ],
   "verification": [
     "wiki/runbooks/RT10 Foundation Verification.md"

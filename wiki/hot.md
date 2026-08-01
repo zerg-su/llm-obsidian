@@ -34,6 +34,10 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: [[LLM Obsidian 2.6 skill workstream A]] — finalized task result (`c-000078`)
+- 2026-08-01: [[LLM Obsidian 2.6 skill workstream C]] — finalized task result (`c-000076`)
+- 2026-08-01: [[LLM Obsidian 2.6 paired design baseline]] — finalized task result (`c-000074`)
+- 2026-08-01: [[LLM Obsidian 2.6 paired fix baseline]] — finalized task result (`c-000072`)
 - 2026-08-01: [[LLM Obsidian 2.6 upstream live drift verification]] — finalized task result (`c-000066`)
 - 2026-08-01: [[LLM Obsidian 2.6 skill quality baseline audit]] — finalized task result (`c-000064`)
 - 2026-08-01: [[LLM Obsidian 2.6.0 technical foundation]] — finalized task result (`c-000061`)
@@ -45,10 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[2.5 real dogfood RT04 invalid review callbacks]] — finalized task result (`c-000051`)
 - 2026-08-01: [[2.5 real dogfood RT06 runtime-neutral telemetry]] — finalized task result (`c-000049`)
 - 2026-08-01: [[2.5 real dogfood RT05 auto-close ownership]] — finalized task result (`c-000047`)
-- 2026-08-01: [[2.5 real dogfood RT01 stale operation reconciliation]] — finalized task result (`c-000045`)
-- 2026-08-01: [[2.5 real dogfood RT02 exact cmux cleanup]] — finalized task result (`c-000043`)
-- 2026-07-31: [[2.5 real dogfood RT03 review delta prototype]] — finalized task result (`c-000041`)
-- 2026-07-31: [[LLM Obsidian 2.5.0 implementation]] — custom PipelineSpec, bounded runtime и live dogfood завершены (`c-000038`)
 
 ## Active Threads
 
