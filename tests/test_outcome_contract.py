@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -17,6 +19,7 @@ from outcome_contract import (  # noqa: E402
     canonical_bytes,
     extract_from_plan,
 )
+import task_contract  # noqa: E402
 
 
 CONTRACT = {
@@ -122,3 +125,66 @@ expect_error(
     "evidence_id values must be unique",
 )
 print("OK   evidence identifiers are bounded and unique")
+
+assert (
+    hashlib.sha256((ROOT / "schemas" / "task-meta-v3.schema.json").read_bytes()).hexdigest()
+    == "0a24ba1dd17382b411192f9d41051a4a0b2fe50c58956dc3fce47adafe6fa6a1"
+)
+assert (
+    hashlib.sha256((ROOT / "schemas" / "pipeline-spec-v1.schema.json").read_bytes()).hexdigest()
+    == "0fedb283c95939ea2aeccc666131b1904f18e1fc07b7560a6e4a39e35db16be2"
+)
+print("OK   v3 metadata and frozen custom grammar remain byte-compatible")
+
+
+def expect_contract_error(label: str, meta: dict[str, object], needle: str) -> None:
+    try:
+        task_contract.normalize(meta)
+    except task_contract.ContractError as exc:
+        assert needle in str(exc), f"{label}: {exc}"
+    else:
+        raise AssertionError(f"{label}: expected ContractError")
+
+
+with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
+    vault = Path(raw)
+    plan_path = vault / "wiki" / "plans" / "approved.md"
+    plan_path.parent.mkdir(parents=True)
+    original_plan = plan(compact)
+    plan_path.write_text(original_plan, encoding="utf-8")
+    meta = json.loads((ROOT / ".task-meta.json").read_text(encoding="utf-8"))
+    meta.update(
+        {
+            "vault_root": str(vault),
+            "plan_file": str(plan_path),
+            "approved_plan_sha256": hashlib.sha256(original_plan.encode()).hexdigest(),
+            "outcome_contract_sha256": DIGEST,
+        }
+    )
+    normalized = task_contract.normalize(meta)
+    assert normalized["outcome_contract_sha256"] == DIGEST
+
+    missing_digest = dict(meta)
+    missing_digest.pop("outcome_contract_sha256")
+    expect_contract_error(
+        "missing outcome digest", missing_digest, "outcome_contract_sha256"
+    )
+
+    editorial_drift = original_plan + "\nEditorial note.\n"
+    plan_path.write_text(editorial_drift, encoding="utf-8")
+    expect_contract_error(
+        "independent plan drift", meta, "approved plan hash changed"
+    )
+
+    changed = dict(CONTRACT)
+    changed["desired_outcome"] = "A locally convenient proxy."
+    changed_plan = plan(json.dumps(changed, separators=(",", ":")))
+    plan_path.write_text(changed_plan, encoding="utf-8")
+    outcome_drift = dict(meta)
+    outcome_drift["approved_plan_sha256"] = hashlib.sha256(
+        changed_plan.encode()
+    ).hexdigest()
+    expect_contract_error(
+        "independent outcome drift", outcome_drift, "Outcome Contract digest changed"
+    )
+print("OK   v4 detects plan drift and outcome drift independently")

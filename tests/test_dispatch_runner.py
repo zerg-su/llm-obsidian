@@ -88,7 +88,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
     plan.write_text(
-        "---\ntype: plan\nstatus: pending\nsession_id: unit-session\n---\n\n# Approved\n",
+        "---\ntype: plan\nstatus: pending\nsession_id: unit-session\n---\n\n"
+        "# Approved\n\n## Outcome Contract\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Complete the dispatched fixture.",'
+        '"success_evidence":[{"evidence_id":"fixture-green",'
+        '"observable":"The deterministic dispatch fixture passes."}],'
+        '"non_goals":["No external effects."]}\n```\n',
         encoding="utf-8",
     )
     target.mkdir()
@@ -128,6 +133,18 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     }
 
     request = runner.validate_request(raw_request)
+    missing_outcome = json.loads(json.dumps(raw_request))
+    missing_plan = vault / "wiki" / "plans" / "missing-outcome.md"
+    missing_plan.write_text(
+        "---\ntype: plan\nstatus: pending\n---\n\n# Missing\n",
+        encoding="utf-8",
+    )
+    missing_outcome["plan_file"] = str(missing_plan)
+    expect_error(
+        "dispatch rejects a missing Outcome Contract before effects",
+        lambda: runner.validate_request(missing_outcome),
+        "exactly one Outcome Contract",
+    )
     config = runner.load_dispatch_config(vault, target)
     session, effective = runner.resolved_routes(request, persist=False)
     prompt = runner.render_task_prompt(request, config)
@@ -791,6 +808,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         meta["version"] == 4
         and meta["task_id"] == request_id
         and meta["worktree"] == str(request["worktree"]),
+    )
+    check(
+        "runner binds v4 metadata to the approved Outcome Contract",
+        meta["outcome_contract_sha256"] == request["outcome_contract_sha256"]
+        and len(meta["outcome_contract_sha256"]) == 64,
     )
     check(
         "runner binds automatic review to an exact verification profile",

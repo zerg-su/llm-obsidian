@@ -39,6 +39,7 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
+from outcome_contract import OutcomeContractError, extract_from_bytes  # noqa: E402
 from lifecycle_telemetry import (  # noqa: E402
     emit_compiled_pipeline_event,
     emit_lifecycle_event,
@@ -294,6 +295,10 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     plan_text = plan_file.read_text(encoding="utf-8")
     if re.search(r"(?m)^status:\s*pending\s*$", plan_text) is None:
         raise DispatchError("approved plan status must be pending")
+    try:
+        outcome_contract_sha256 = extract_from_bytes(plan_file.read_bytes()).sha256
+    except (OSError, OutcomeContractError) as exc:
+        raise DispatchError(f"approved plan Outcome Contract is invalid: {exc}") from exc
     worktree = absolute_dir(raw.get("worktree"), "worktree", must_exist=False)
     if worktree.exists():
         raise DispatchError(f"worktree already exists: {worktree}")
@@ -509,6 +514,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "branch": branch,
         "base_branch": base_branch,
         "plan_file": plan_file,
+        "outcome_contract_sha256": outcome_contract_sha256,
         "origin_surface": origin_surface,
         "placement": placement,
         "pipeline": pipeline,
@@ -682,6 +688,13 @@ def approved_plan_sha256(request: dict[str, Any]) -> str:
     if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
         return value
     return sha256_file(request["plan_file"])
+
+
+def approved_outcome_contract_sha256(request: dict[str, Any]) -> str:
+    try:
+        return extract_from_bytes(approved_plan_file(request).read_bytes()).sha256
+    except (OSError, OutcomeContractError) as exc:
+        raise DispatchError(f"approved plan Outcome Contract is invalid: {exc}") from exc
 
 
 def _review_snapshot(review: ReviewPolicy) -> dict[str, Any]:
@@ -1457,6 +1470,7 @@ def write_task_files(
         atomic_text(worktree / name, value + "\n")
     atomic_text(worktree / ".task-prompt.md", render_task_prompt(request, config))
     plan_hash = approved_plan_sha256(request)
+    outcome_hash = approved_outcome_contract_sha256(request)
     review = review_policy(request, config)
     meta: dict[str, Any] = {
         "version": 4,
@@ -1497,6 +1511,7 @@ def write_task_files(
         },
         "plan_file": str(request["plan_file"]),
         "approved_plan_sha256": plan_hash,
+        "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",
         "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
