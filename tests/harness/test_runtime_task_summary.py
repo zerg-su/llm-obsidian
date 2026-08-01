@@ -598,7 +598,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     resolved_head = "b" * 40
     handoff_gate = {
         "awaiting_resolution": {
-            "holistic": {"reviewed_head_sha": reviewed_head}
+            "holistic": {
+                "reviewed_head_sha": reviewed_head,
+                "material_finding_ids": ["F-material"],
+            }
         }
     }
     write_json(
@@ -647,6 +650,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "automatic review drive resumes after the exact durable handoff",
         _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
+    stale_handoff = json.loads(
+        (handoff / ".task-review-resolution.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    stale_handoff["resolutions"][0]["finding_id"] = "F-stale"
+    write_json(handoff / ".task-review-resolution.json", stale_handoff)
+    check(
+        "automatic review drive rejects a prior-boundary finding identity",
+        not _review_resolution_handoff_ready(
             worktree=handoff,
             operation_id=TASK,
             gate_state=handoff_gate,
@@ -2032,12 +2051,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 )
             )
             gate_state["status"] = "awaiting-resolution"
+            gate_state["active_review_operation_id"] = (
+                "review-operation-current"
+            )
             gate_state["awaiting_resolution"] = {
                 "spec": {
                     "pointer": result_pointer.relative_to(
                         gate_root
                     ).as_posix(),
                     "reviewed_head_sha": head,
+                    "review_operation_id": "review-operation-current",
+                    "round_operation_id": "round-operation-current",
+                    "round_run_id": "round-run-current",
+                    "callback_id": "callback-current",
+                    "callback_sha256": "c" * 64,
+                    "material_finding_ids": ["F-material"],
                 }
             }
             write_json(gate_root / "review-gate.json", gate_state)
@@ -2200,6 +2228,18 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         == ["applied", "out-of-scope", "rejected"]
         and asynchronous_packet_payload["material_finding_ids"]
         == ["F-material"]
+        and asynchronous_packet_payload["review_operation_id"]
+        == "review-operation-current"
+        and asynchronous_packet_payload["review_callbacks"]
+        == [
+            {
+                "axis": "spec",
+                "round_operation_id": "round-operation-current",
+                "round_run_id": "round-run-current",
+                "callback_id": "callback-current",
+                "callback_sha256": "c" * 64,
+            }
+        ]
         and asynchronous_packet_payload["resolution_path"]
         == ".task-review-resolution.json",
         asynchronous_packet,

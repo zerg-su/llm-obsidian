@@ -615,10 +615,20 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
     base = Path(raw)
     scratch = base / "scratch"
     scratch.mkdir()
+    product = base / "product"
+    product.mkdir()
     store = OperationStore(base / "store")
     runtime = FakeRuntime(store)
     controller = ReviewGateController(base / "gate", runtime, store)
-    run = begin(controller, request_for("review-budget", context=context), scratch)
+    run = controller.begin(
+        dispatch_operation_id="review-budget",
+        request=request_for("review-budget", context=context),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-budget",
+    )
     lane = run.execution.lanes[0]
     waiting = controller.complete_round(
         run,
@@ -730,16 +740,57 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
             boundary_authorization_path.read_bytes()
         ).hexdigest(),
     )
+    stale_packet = product / ".task-review.json"
+    stale_resolution = product / ".task-review-resolution.json"
+    stale_packet.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "review-budget",
+                "reviewed_head_sha": active_context.head_sha,
+                "material_finding_ids": ["F-budget-2"],
+                "findings": [{"finding_id": "F-budget-2"}],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    stale_resolution.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "review-budget",
+                "reviewed_head_sha": active_context.head_sha,
+                "resolved_head_sha": "2" * 40,
+                "resolutions": [
+                    {
+                        "finding_id": "F-budget-2",
+                        "disposition": "applied",
+                        "rationale": "Prior-boundary resolution.",
+                        "follow_up": "",
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     fresh = controller.restart_for_boundary(
         run,
         boundary=boundary,
         context=new_context,
         origin_surface="11111111-1111-4111-8111-111111111111",
         cwd=scratch,
-        product_root=ROOT,
+        product_root=product,
         prompt_pointer="prompts/compact.md",
         callback_root="callbacks/review-budget-fresh",
         max_verify_iterations=0,
+    )
+    check(
+        "fresh boundary invalidates the previous executor review transport",
+        not stale_packet.exists() and not stale_resolution.exists(),
     )
     repeated = controller.restart_for_boundary(
         fresh,
@@ -747,7 +798,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         context=new_context,
         origin_surface="11111111-1111-4111-8111-111111111111",
         cwd=scratch,
-        product_root=ROOT,
+        product_root=product,
         prompt_pointer="prompts/compact.md",
         callback_root="callbacks/review-budget-fresh",
         max_verify_iterations=0,
@@ -763,23 +814,40 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
     )
     assert fresh is not None
     fresh_lane = fresh.execution.lanes[0]
+    fresh_result = ReviewResult(
+        "holistic",
+        "changes-requested",
+        (
+            ReviewFinding(
+                "F-fresh-1",
+                "holistic",
+                "important",
+                "fresh context defect",
+                "fresh review found a product gap",
+            ),
+        ),
+    )
     fresh_waiting = controller.complete_round(
         fresh,
         fresh_lane,
         fresh.rounds["holistic"],
-        ReviewResult(
-            "holistic",
-            "changes-requested",
-            (
-                ReviewFinding(
-                    "F-fresh-1",
-                    "holistic",
-                    "important",
-                    "fresh context defect",
-                    "fresh review found a product gap",
-                ),
-            ),
-        ),
+        fresh_result,
+    )
+    fresh_round = fresh.rounds["holistic"]
+    fresh_callback = review_round_envelope(fresh_round, fresh_result)
+    fresh_boundary = controller.read()["awaiting_resolution"]["holistic"]
+    check(
+        "fresh resolution boundary binds operation callback findings and HEAD",
+        fresh_boundary["review_operation_id"]
+        == fresh.execution.request.policy.operation_id
+        and fresh_boundary["round_operation_id"]
+        == fresh_round.operation_id
+        and fresh_boundary["round_run_id"] == fresh_round.run_id
+        and fresh_boundary["callback_id"] == fresh_callback.callback_id
+        and fresh_boundary["callback_sha256"]
+        == fresh_callback.payload_sha256
+        and fresh_boundary["material_finding_ids"] == ["F-fresh-1"]
+        and fresh_boundary["reviewed_head_sha"] == new_context.head_sha,
     )
     fresh_exhausted = controller.continue_after_resolution(
         fresh,
