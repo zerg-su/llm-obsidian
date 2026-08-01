@@ -89,6 +89,7 @@ SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update",
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
 HOST_APPROVAL_PROGRAM = Path("/usr/bin/osascript")
+TASK_LOCAL_GIT_EXCLUDES = (".task-origin-session",)
 DEFAULT_DISPATCH = {
     "codex_home": "",
     "profile": "",
@@ -1405,6 +1406,42 @@ def run_command(
     return result
 
 
+def ensure_task_git_excludes(worktree: Path) -> None:
+    """Keep dispatch-owned runtime bindings out of product Git status."""
+
+    raw_path = run_command(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=worktree,
+        label="task Git exclude path",
+    ).stdout.strip()
+    if not raw_path:
+        raise DispatchError("task Git exclude path is empty")
+    exclude = Path(raw_path)
+    if not exclude.is_absolute():
+        exclude = worktree / exclude
+    if exclude.is_symlink() or (exclude.exists() and not exclude.is_file()):
+        raise DispatchError("task Git exclude path is not a regular file")
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        current = handle.read()
+        existing = set(current.splitlines())
+        missing = [
+            pattern
+            for pattern in TASK_LOCAL_GIT_EXCLUDES
+            if pattern not in existing
+        ]
+        if missing:
+            handle.seek(0, os.SEEK_END)
+            if current and not current.endswith("\n"):
+                handle.write("\n")
+            handle.write("".join(f"{pattern}\n" for pattern in missing))
+            handle.flush()
+            os.fsync(handle.fileno())
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def create_worktree(request: dict[str, Any]) -> None:
     try:
         GitAdapter(request["target_repo"]).create_worktree(
@@ -1463,6 +1500,7 @@ def write_task_files(
     child: dict[str, str],
 ) -> dict[str, Any]:
     worktree = request["worktree"]
+    ensure_task_git_excludes(worktree)
     handoffs = {
         ".task-cmux-surface": child["surface"],
         ".task-origin-session": request["origin_session"],

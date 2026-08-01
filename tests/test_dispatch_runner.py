@@ -910,6 +910,35 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "runner binds task commands to the exact origin session",
         (worktree / ".task-origin-session").read_text().strip() == meta["origin_session"],
     )
+    origin_ignored = subprocess.run(
+        ["git", "check-ignore", ".task-origin-session"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "runner keeps the task origin binding out of product status",
+        origin_ignored.returncode == 0,
+        origin_ignored.stderr,
+    )
+    exclude_result = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    exclude_path = Path(exclude_result.stdout.strip())
+    if not exclude_path.is_absolute():
+        exclude_path = worktree / exclude_path
+    check(
+        "runner installs the task origin exclusion once across replay",
+        exclude_path.read_text(encoding="utf-8").splitlines().count(
+            ".task-origin-session"
+        )
+        == 1,
+    )
     detected = subprocess.run(
         [str(ROOT / "scripts" / "current-session-id.sh")],
         cwd=worktree,
