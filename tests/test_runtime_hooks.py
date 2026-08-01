@@ -178,6 +178,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
 
     task = vault / "task-worktree"
     task.mkdir()
+    (task / "wiki").mkdir()
+    (task / "scripts").mkdir()
+    (task / ".vault-meta").mkdir()
+    (task / "scripts" / "vault-write.py").write_text(
+        "# marker\n", encoding="utf-8"
+    )
+    shutil.copy2(
+        ROOT / "scripts" / "lib_sanitize.py",
+        task / "scripts" / "lib_sanitize.py",
+    )
     (task / ".task-meta.json").write_text(json.dumps({"vault_root": str(vault)}), encoding="utf-8")
     task_payload = {
         "session_id": "task-session",
@@ -225,16 +235,60 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     )
     command_log = vault / ".vault-meta" / "command-log.jsonl"
     command_log_before = command_log.read_text(encoding="utf-8")
+    task_command_log = task / ".vault-meta" / "command-log.jsonl"
     task_capture = subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "command-capture"],
-        input=json.dumps({**task_payload, "tool_name": "Bash"}),
+        input=json.dumps(
+            {
+                **task_payload,
+                "tool_name": "Bash",
+                "tool_input": {"command": "token=abcdef123456 echo safe"},
+                "tool_response": {"is_error": False},
+            }
+        ),
         text=True, capture_output=True, env=task_env,
     )
+    task_records = (
+        task_command_log.read_text(encoding="utf-8").splitlines()
+        if task_command_log.is_file()
+        else []
+    )
     check(
-        "task command capture stays disabled",
+        "task shell capture writes only the sanitized task-worktree log",
         task_capture.returncode == 0
+        and len(task_records) == 1
+        and "token=REDACTED" in task_records[0]
+        and "abcdef123456" not in task_records[0]
         and command_log.read_text(encoding="utf-8") == command_log_before,
         task_capture.stderr,
+    )
+    for tool_name, command in (
+        ("Read", "echo ignored"),
+        ("Bash", "-----BEGIN PRIVATE KEY-----"),
+    ):
+        subprocess.run(
+            [
+                sys.executable,
+                str(vault / "hooks" / "run-hook.py"),
+                "command-capture",
+            ],
+            input=json.dumps(
+                {
+                    **task_payload,
+                    "tool_name": tool_name,
+                    "tool_input": {"command": command},
+                    "tool_response": {"is_error": False},
+                }
+            ),
+            text=True,
+            capture_output=True,
+            env=task_env,
+        )
+    check(
+        "task capture ignores non-shell tools and rejects residual credentials",
+        task_command_log.read_text(encoding="utf-8").splitlines()
+        == task_records
+        and command_log.read_text(encoding="utf-8") == command_log_before,
     )
     subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "router"],
