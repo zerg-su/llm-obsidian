@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "clarify",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "The user's request, repository facts, and unresolved material decisions.",
+      "overall_outcome": "One user-grounded Outcome Contract with unambiguous desired outcome, evidence, and non-goals.",
+      "local_subgoal": "Resolve material ambiguity one question at a time without mutating the repository.",
+      "completion_proxies": ["Questions were answered.", "A requirements summary was produced."],
+      "required_outcome_evidence": ["The canonical contract preserves agreed terms, invariants, edge cases, and user decisions without invented goals."],
+      "evidence": "A-CLA-01; skills/clarify/SKILL.md; tests/test_skill_workstream_a.py",
+      "change": "none in post-audit; integrated correction closes A-CLA-01",
+      "behavior_proof": "The read-only boundary, one-question cadence, and user decision authority remain unchanged."
+    },
+    {
+      "skill": "design",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "An approved Outcome Contract plus current architecture facts and constraints.",
+      "overall_outcome": "A testable architecture decision that preserves the approved outcome and non-goals.",
+      "local_subgoal": "Shape owned boundaries, alternatives, flows, recovery, and vertical slices without implementation mutation.",
+      "completion_proxies": ["A design document exists.", "Local acceptance criteria are listed."],
+      "required_outcome_evidence": ["The design traces each slice and acceptance seam to the unchanged contract and closes or records all material fog."],
+      "evidence": "A-DES-01; skills/design/SKILL.md; tests/test_skill_workstream_a.py",
+      "change": "none in post-audit; integrated correction closes A-DES-01",
+      "behavior_proof": "Design remains read-only and preserves ownership, alternatives, recovery, rollout, rollback, and approval boundaries."
+    },
+    {
+      "skill": "prototype",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "One falsifiable technical question serving an approved Outcome Contract.",
+      "overall_outcome": "Durable bounded evidence that informs the approved outcome without changing production.",
+      "local_subgoal": "Answer the single question in an owned disposable worktree.",
+      "completion_proxies": ["The prototype command succeeded.", "A local technical decision was reached."],
+      "required_outcome_evidence": ["The durable result records question, evidence, decision, limitations, and provenance while production remains unchanged."],
+      "evidence": "A-PRO-01; skills/prototype/SKILL.md; tests/test_skill_workstream_a.py",
+      "change": "none in post-audit; integrated correction closes A-PRO-01",
+      "behavior_proof": "The one-question scope, disposable ownership, exact cleanup, and separate promotion authorization remain unchanged."
+    },
+    {
+      "skill": "save-plan",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "A discussed plan and its single approved canonical Outcome Contract.",
+      "overall_outcome": "One validated pending plan page written transactionally without semantic drift or a second goal artifact.",
+      "local_subgoal": "Persist the approved plan with exact metadata through the vault writer.",
+      "completion_proxies": ["A page was created.", "The vault transaction returned success."],
+      "required_outcome_evidence": ["Final Markdown revalidates the exact contract and one writer transaction creates the page without direct log or hot mutation."],
+      "evidence": "A-SVP-01; skills/save-plan/SKILL.md; tests/test_skill_workstream_a.py; tests/test_save_plan_contract.py",
+      "change": "none in post-audit; integrated correction closes A-SVP-01",
+      "behavior_proof": "Persist-only invocation, writer path, address and session provenance, collision handling, and pending status remain unchanged."
+    },
+    {
+      "skill": "debug",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "A reproducible defect and the approved outcome evidence it blocks.",
+      "overall_outcome": "A root-cause repair that establishes the declared outcome evidence without speculative mutation.",
+      "local_subgoal": "Reproduce, minimize, falsify hypotheses, and repair the narrowest authorized seam.",
+      "completion_proxies": ["The focused regression is green.", "The diff is clean.", "A callback was accepted."],
+      "required_outcome_evidence": ["The minimized and original repro loops pass and the repaired defect is traced to declared outcome evidence."],
+      "evidence": "B-DBG-01 and HOL-003; skills/debug/SKILL.md; tests/test_skill_workstream_b.py",
+      "change": "none in post-audit; integrated correction closes B-DBG-01 and preserves the frozen debug loop",
+      "behavior_proof": "Diagnosis-only remains non-mutating; root cause precedes fixes; regression, reruns, escalation, and the three-failure stop remain mandatory."
+    },
+    {
+      "skill": "tdd",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "Approved observable behavior and its Outcome Contract evidence identity.",
+      "overall_outcome": "The requested behavior is implemented through red-green slices and established outcome evidence.",
+      "local_subgoal": "Prove one observable vertical slice red then green at the correct production seam.",
+      "completion_proxies": ["A focused test passes.", "A runnable slice is committed."],
+      "required_outcome_evidence": ["Preserved-base red, focused and affected green, and the corresponding declared success evidence are all established."],
+      "evidence": "B-TDD-01; skills/tdd/SKILL.md; tests/test_skill_workstream_b.py",
+      "change": "none in post-audit; integrated correction closes B-TDD-01",
+      "behavior_proof": "Authorization, minimum production change, green refactor, external-only doubles, proportional exemptions, and gate strength remain unchanged."
+    },
+    {
+      "skill": "review",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "Exact product HEAD, approved plan, Outcome Contract, and an unverified implementer report.",
+      "overall_outcome": "An independent exact-identity verdict on outcome attainment, correctness, non-goals, and material risks.",
+      "local_subgoal": "Classify each evidence item and finding without mutating product files or changing review topology.",
+      "completion_proxies": ["A callback was accepted.", "The exact HEAD passed local checks."],
+      "required_outcome_evidence": ["Every declared evidence item is established, missing, or contradicted; non-goals are checked; final authorization binds exact HEAD and profile."],
+      "evidence": "C-REV-01; skills/review/SKILL.md; tests/test_workstream_c_review_reap.py",
+      "change": "none in post-audit; integrated correction closes C-REV-01",
+      "behavior_proof": "Harness ownership, read-only reviewers, independent deep axes, typed rulings, exact identity, and bounded loops remain unchanged."
+    },
+    {
+      "skill": "reap",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "Approved exact-HEAD review evidence and a typed task summary.",
+      "overall_outcome": "A durable Wiki Summary v2 records the truthful outcome disposition, evidence IDs, and residual gaps.",
+      "local_subgoal": "Validate and file one exact task result transaction, then close only owned lifecycle resources.",
+      "completion_proxies": ["The vault writer succeeded.", "The task surface closed."],
+      "required_outcome_evidence": ["Approved review evidence authorizes the exact HEAD and the filed disposition preserves the desired outcome without silent rewriting."],
+      "evidence": "C-REA-01; skills/reap/SKILL.md; tests/test_workstream_c_review_reap.py",
+      "change": "none in post-audit; integrated correction closes C-REA-01",
+      "behavior_proof": "Coordinator ownership, optimistic writer transaction, shared-plan behavior, exact cleanup, and external-effect prohibitions remain unchanged."
+    },
+    {
+      "skill": "improve-skills",
+      "verdict": "no-change",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "overall_input": "An explicit skill-quality scope, protected behavior inventory, and approved overall task outcome.",
+      "overall_outcome": "More predictable skills with workflow semantics and the user's approved outcome preserved.",
+      "local_subgoal": "Audit five quality passes and apply only evidenced minimum corrections.",
+      "completion_proxies": ["Structural audit is green.", "Every skill has a verdict.", "Instruction and budget tests pass."],
+      "required_outcome_evidence": ["Exhaustive five-pass verdicts bind local subgoals to approved outcomes and behavioral comparison shows no regression."],
+      "evidence": "I-IMP-01; skills/improve-skills/SKILL.md; skills/improve-skills/references/quality-model.md; tests/test_improve_skills.py",
+      "change": "none in post-audit; integrated correction closes I-IMP-01",
+      "behavior_proof": "Manual invocation, quality-only boundary, protected inventory, minimum-edit rule, and fix/no-change/defer discipline remain unchanged."
+    }
+  ]
+}
