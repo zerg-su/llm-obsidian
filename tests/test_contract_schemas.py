@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import research_contract
 import review_contract
+import review_resolution
 import wiki_summary_contract
 import daily_contract
 import task_contract
@@ -96,6 +97,12 @@ assert "auto_resolve_severities" not in review_v4["properties"]
 assert "escalate_severities" not in review_v4["properties"]
 assert set(review_v4["properties"]["mode"]["enum"]) == task_contract.REVIEW_MODES
 assert review_v4["allOf"] == review_v3["allOf"]
+review_resolution_v1 = load("review-resolution-v1.schema.json")
+resolution_items = review_resolution_v1["$defs"]["resolution"]
+assert set(resolution_items["properties"]["disposition"]["enum"]) == (
+    review_resolution.DISPOSITIONS
+)
+assert "attempted" not in resolution_items["properties"]["disposition"]["enum"]
 pipeline_spec = load("pipeline-spec-v1.schema.json")
 assert pipeline_spec["properties"]["schema_version"] == {"const": CUSTOM_SPEC_VERSION}
 assert set(pipeline_spec["properties"]["review_mode"]["enum"]) == REVIEW_MODES

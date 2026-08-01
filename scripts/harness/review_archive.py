@@ -18,10 +18,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from harness.contracts import CallbackEnvelope, ContractError
 from harness.verification import VerificationError, load_profiles
 from review_contract import ReviewContractError, validate_review
+from review_resolution import (
+    ResolutionError,
+    ReviewResolutionEvidence,
+    validate_resolution_evidence,
+)
 
 
 class ArchiveError(ValueError):
     pass
+
+
+EMPTY_RESOLUTION_SHA256 = hashlib.sha256(b"[]").hexdigest()
 
 
 def fail(message: str) -> int:
@@ -142,13 +150,59 @@ def validated_callback(
     return envelope, review
 
 
+def validated_resolutions(
+    operation: Path,
+    meta: dict[str, Any],
+    *,
+    operation_id: str,
+) -> tuple[ReviewResolutionEvidence, ...]:
+    raw_entries = meta.get("resolution_evidence", [])
+    if not isinstance(raw_entries, list) or len(raw_entries) > 10:
+        raise ArchiveError("review resolution evidence list is invalid")
+    evidence: list[ReviewResolutionEvidence] = []
+    pointers: set[str] = set()
+    for entry in raw_entries:
+        if not isinstance(entry, dict) or set(entry) != {"pointer", "sha256"}:
+            raise ArchiveError("review resolution evidence pointer is invalid")
+        pointer = Path(str(entry.get("pointer") or ""))
+        path = (operation / pointer).resolve()
+        digest = str(entry.get("sha256") or "")
+        if (
+            pointer.is_absolute()
+            or pointer.as_posix() in pointers
+            or operation not in path.parents
+            or not path.is_file()
+            or path.is_symlink()
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+        ):
+            raise ArchiveError("review resolution evidence is unavailable")
+        pointers.add(pointer.as_posix())
+        try:
+            item = validate_resolution_evidence(read_object(path))
+        except ResolutionError as exc:
+            raise ArchiveError(
+                f"review resolution evidence is invalid: {exc}"
+            ) from exc
+        if item.operation_id != operation_id:
+            raise ArchiveError("review resolution evidence operation changed")
+        evidence.append(item)
+    return tuple(evidence)
+
+
 def title_component(value: str) -> str:
     normalized = re.sub(r'[\\/:*?"<>|#^\[\]]+', "-", value)
     normalized = " ".join(normalized.split()).strip(" .-")
     return (normalized or "review")[:100].strip(" .-") or "review"
 
 
-def render_page(title: str, review_id: str, review: dict[str, Any], address: str) -> str:
+def render_page(
+    title: str,
+    review_id: str,
+    review: dict[str, Any],
+    address: str,
+    resolutions: tuple[ReviewResolutionEvidence, ...] = (),
+) -> str:
     today = date.today().isoformat()
     profile = review["verification_profile"]
     lines = [
@@ -210,6 +264,29 @@ def render_page(title: str, review_id: str, review: dict[str, Any], address: str
         lines.extend(["", f"## {heading}", ""])
         values = review[key]
         lines.extend(f"- {value}" for value in values) if values else lines.append("- None")
+    lines.extend(["", "## Executor resolutions", ""])
+    if not resolutions:
+        lines.append("- None required")
+    for evidence in resolutions:
+        lines.extend(
+            [
+                f"### {evidence.axis} · `{evidence.reviewed_head_sha}` → `{evidence.resolved_head_sha}`",
+                "",
+                f"- Fix delta SHA-256: `{evidence.fix_delta_sha256}`",
+            ]
+        )
+        if not evidence.previous_finding_ids:
+            lines.append("- No material findings on this independent axis")
+        for finding_id in evidence.previous_finding_ids:
+            resolution = evidence.resolutions[finding_id]
+            lines.extend(
+                [
+                    f"- **{finding_id} · {resolution.disposition}**",
+                    f"  - Rationale: {resolution.rationale}",
+                ]
+            )
+            if resolution.follow_up:
+                lines.append(f"  - Follow-up: {resolution.follow_up}")
     lines.extend(
         [
             "",
@@ -252,6 +329,10 @@ def current_archive(
     ):
         if marker.get(field) != expected.get(field):
             raise ArchiveError("existing review archive marker is stale")
+    if marker.get(
+        "resolution_evidence_sha256", EMPTY_RESOLUTION_SHA256
+    ) != expected.get("resolution_evidence_sha256"):
+        raise ArchiveError("existing review archive resolution evidence is stale")
     relative = Path(str(marker.get("path") or ""))
     page = (vault / relative).resolve()
     try:
@@ -280,6 +361,7 @@ ARCHIVE_IDENTITY_FIELDS = (
     "wikilink",
     "verdict",
     "rounds",
+    "resolution_evidence_sha256",
 )
 
 
@@ -288,6 +370,7 @@ def prepared_archive(
     vault: Path,
     expected: dict[str, Any],
     review: dict[str, Any],
+    resolutions: tuple[ReviewResolutionEvidence, ...],
 ) -> tuple[dict[str, Any], str]:
     """Persist one stable address/body before the external vault mutation."""
 
@@ -317,6 +400,7 @@ def prepared_archive(
             str(intent["review_id"]),
             review,
             address,
+            resolutions,
         )
         if hashlib.sha256(body.encode()).hexdigest() != intent.get(
             "content_sha256"
@@ -341,6 +425,7 @@ def prepared_archive(
         str(expected["review_id"]),
         review,
         allocated,
+        resolutions,
     )
     digest = hashlib.sha256(body.encode()).hexdigest()
     short = hashlib.sha256(str(expected["review_id"]).encode()).hexdigest()[:12]
@@ -401,6 +486,9 @@ def main() -> int:
         meta = read_object(operation / ".review-meta.json")
         _envelope, review = validated_callback(operation, meta, worktree, vault)
         operation_id = review["operation_id"]
+        resolutions = validated_resolutions(
+            operation, meta, operation_id=operation_id
+        )
         review_id = str(meta.get("review_id") or operation_id)
         if review_id != operation_id:
             raise ArchiveError("review identity does not match the operation")
@@ -410,7 +498,9 @@ def main() -> int:
         short = hashlib.sha256(review_id.encode()).hexdigest()[:12]
         title = f"Cross-model review — {task} — {short}"
         relative = Path("wiki/meta/reviews") / f"{title}.md"
-        body = render_page(title, review_id, review, "c-000001")
+        body = render_page(
+            title, review_id, review, "c-000001", resolutions
+        )
         rounds = 1 + max(
             axis["verification_iteration"] for axis in review["axes"]
         )
@@ -427,6 +517,13 @@ def main() -> int:
             "wikilink": f"[[{title}]]",
             "verdict": review["verdict"],
             "rounds": rounds,
+            "resolution_evidence_sha256": hashlib.sha256(
+                json.dumps(
+                    [item.payload() for item in resolutions],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
             "content_sha256": hashlib.sha256(body.encode()).hexdigest(),
         }
         if not args.dry_run:
@@ -446,6 +543,7 @@ def main() -> int:
                 vault,
                 result,
                 review,
+                resolutions,
             )
             if not committed_archive(vault, intent):
                 writer = subprocess.run(

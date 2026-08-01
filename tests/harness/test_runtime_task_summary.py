@@ -1963,6 +1963,33 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     capture_output=True,
                     check=True,
                 )
+                resolved_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                write_json(
+                    worktree / ".task-review-resolution.json",
+                    {
+                        "schema_version": 1,
+                        "operation_id": asynchronous_task,
+                        "reviewed_head_sha": head,
+                        "resolved_head_sha": resolved_head,
+                        "resolutions": [
+                            {
+                                "finding_id": "F-material",
+                                "disposition": "applied",
+                                "rationale": (
+                                    "The committed resolution is present on "
+                                    "the resolved HEAD."
+                                ),
+                                "follow_up": "",
+                            }
+                        ],
+                    },
+                )
                 refresh = (
                     root
                     / f"state-{asynchronous_task}"
@@ -2045,10 +2072,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "executor receives a bounded typed decision packet",
         asynchronous_packet.is_file()
-        and json.loads(
-            asynchronous_packet.read_text(encoding="utf-8")
-        )["findings"][0]["finding_id"]
-        == "F-material",
+        and (
+            asynchronous_packet_payload := json.loads(
+                asynchronous_packet.read_text(encoding="utf-8")
+            )
+        )["findings"][0]["finding_id"] == "F-material"
+        and asynchronous_packet_payload["allowed_dispositions"]
+        == ["applied", "out-of-scope", "rejected"]
+        and asynchronous_packet_payload["material_finding_ids"]
+        == ["F-material"]
+        and asynchronous_packet_payload["resolution_path"]
+        == ".task-review-resolution.json",
         asynchronous_packet,
     )
     asynchronous_refresh = (

@@ -27,6 +27,7 @@ test-harness:
 	@python3 tests/harness/test_research_notifier.py
 	@python3 tests/harness/test_engineering_skills.py
 	@python3 tests/harness/test_review_inspect.py
+	@python3 tests/harness/test_review_resolution.py
 	@python3 tests/harness/test_review_transport.py
 	@python3 tests/harness/test_review_vertical.py
 	@python3 tests/harness/test_review_gate.py

@@ -18,6 +18,7 @@ SUBMIT = ROOT / "scripts/harness/review_submit.py"
 ARCHIVE = ROOT / "scripts/harness/review_archive.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from review_contract import ReviewContractError, validate_review
+from review_resolution import validate_resolution_evidence
 from harness.review_archive import render_page
 from harness.review_submit import ReviewCallbackPort, submit_review
 from harness.verification import load_profiles
@@ -110,6 +111,37 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         "worktree": str(worktree),
         "task_name": "transport-test",
     }
+    resolution_payload = {
+        "schema_version": 1,
+        "operation_id": "operation-1",
+        "axis": "holistic",
+        "reviewed_head_sha": "0" * 40,
+        "resolved_head_sha": head,
+        "fix_delta_sha256": "d" * 64,
+        "previous_finding_ids": ["F-round-1"],
+        "resolutions": [
+            {
+                "finding_id": "F-round-1",
+                "disposition": "rejected",
+                "rationale": (
+                    "The final verification proved the reported path is "
+                    "unreachable under the bound invariant."
+                ),
+                "follow_up": "",
+            }
+        ],
+    }
+    resolution_path = operation / "resolution-holistic-0.json"
+    resolution_path.write_text(
+        json.dumps(resolution_payload, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    meta["resolution_evidence"] = [
+        {
+            "pointer": resolution_path.relative_to(operation).as_posix(),
+            "sha256": hashlib.sha256(resolution_path.read_bytes()).hexdigest(),
+        }
+    ]
     (operation / ".review-meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
     class CapturePort:
@@ -263,6 +295,19 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
     check(
         "archive validates coordinator config for a generic product root",
         not (worktree / "config" / "verification-profiles.toml").exists(),
+    )
+    dry_page = render_page(
+        "Archive evidence",
+        "operation-1",
+        review,
+        "c-000123",
+        (validate_resolution_evidence(resolution_payload),),
+    )
+    check(
+        "archive renders durable per-finding disposition evidence",
+        "## Executor resolutions" in dry_page
+        and "F-round-1 · rejected" in dry_page
+        and "reported path is unreachable" in dry_page,
     )
     scripts = vault / "scripts"
     scripts.mkdir()

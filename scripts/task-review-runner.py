@@ -48,6 +48,15 @@ from model_routing import (
     routing_from_environment,
     session_from_meta,
 )
+from review_resolution import (
+    MATERIAL_SEVERITIES,
+    MAX_FIX_DELTA_BYTES,
+    ResolutionError,
+    ReviewResolution,
+    ReviewResolutionEvidence,
+    build_resolution_evidence,
+    validate_resolution,
+)
 from task_contract import normalize
 
 
@@ -67,6 +76,12 @@ class ActiveReviewRound(NamedTuple):
     run: ReviewGateRun
     lane: object
     round: ReviewRound
+
+
+class ResolutionBundle(NamedTuple):
+    resolution: ReviewResolution
+    fix_delta: bytes
+    by_axis: Mapping[str, ReviewResolutionEvidence]
 
 
 def _atomic_text(path: Path, value: str) -> None:
@@ -127,6 +142,119 @@ def _git(worktree: Path, *args: str) -> str:
     if result.returncode:
         raise TaskReviewError("cannot resolve the exact product revision")
     return result.stdout.strip()
+
+
+def _git_bytes(worktree: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=worktree,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        raise TaskReviewError("cannot build the exact review fix delta")
+    return result.stdout
+
+
+def _resolution_bundle(
+    worktree: Path,
+    gate_root: Path,
+    task_id: str,
+    awaiting: Mapping[str, object],
+    resolved_head: str,
+) -> ResolutionBundle:
+    reviewed_heads: set[str] = set()
+    finding_ids_by_axis: dict[str, tuple[str, ...]] = {}
+    all_finding_ids: list[str] = []
+    for axis in sorted(awaiting):
+        raw_boundary = awaiting[axis]
+        if not isinstance(raw_boundary, dict):
+            raise TaskReviewError("review resolution boundary is invalid")
+        pointer = Path(str(raw_boundary.get("pointer") or ""))
+        result_path = (gate_root / pointer).resolve()
+        if (
+            pointer.is_absolute()
+            or gate_root not in result_path.parents
+            or not result_path.is_file()
+            or result_path.is_symlink()
+        ):
+            raise TaskReviewError("review finding evidence is unavailable")
+        result = _read_json(result_path, "review finding evidence")
+        findings = result.get("findings")
+        if result.get("axis") != axis or not isinstance(findings, list):
+            raise TaskReviewError("review finding evidence is invalid")
+        material = tuple(
+            str(finding.get("finding_id") or "")
+            for finding in findings
+            if isinstance(finding, dict)
+            and finding.get("severity") in MATERIAL_SEVERITIES
+        )
+        if "" in material:
+            raise TaskReviewError("material finding identity is invalid")
+        finding_ids_by_axis[str(axis)] = material
+        all_finding_ids.extend(material)
+        reviewed_heads.add(str(raw_boundary.get("reviewed_head_sha") or ""))
+    if len(all_finding_ids) != len(set(all_finding_ids)):
+        raise TaskReviewError("material finding identities repeat across axes")
+    if len(reviewed_heads) != 1 or "" in reviewed_heads:
+        raise TaskReviewError("review resolution heads are inconsistent")
+    reviewed_head = next(iter(reviewed_heads))
+    resolution_path = worktree / ".task-review-resolution.json"
+    if not resolution_path.is_file() or resolution_path.is_symlink():
+        raise TaskReviewError("review resolution evidence is unavailable")
+    raw_resolution = _read_json(resolution_path, "review resolution evidence")
+    try:
+        resolution = validate_resolution(
+            raw_resolution,
+            expected_operation_id=task_id,
+            expected_reviewed_head_sha=reviewed_head,
+            expected_resolved_head_sha=resolved_head,
+            expected_finding_ids=tuple(all_finding_ids),
+        )
+    except ResolutionError as exc:
+        raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
+    for item in resolution.resolutions:
+        if (
+            item.disposition == "out-of-scope"
+            and not item.follow_up.startswith("https://")
+            and not item.follow_up.startswith("[[")
+            and _git(
+                worktree,
+                "cat-file",
+                "-t",
+                f"{resolved_head}:{item.follow_up}",
+            )
+            != "blob"
+        ):
+            raise TaskReviewError(
+                "repository follow-up must be a file on the resolved HEAD"
+            )
+    fix_delta = _git_bytes(
+        worktree,
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        reviewed_head,
+        resolved_head,
+        "--",
+    )
+    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_BYTES:
+        raise TaskReviewError(
+            "review fix delta must be non-empty and at most 65536 bytes"
+        )
+    try:
+        by_axis = {
+            axis: build_resolution_evidence(
+                resolution,
+                axis=axis,
+                fix_delta=fix_delta,
+                finding_ids=finding_ids,
+            )
+            for axis, finding_ids in finding_ids_by_axis.items()
+        }
+    except ResolutionError as exc:
+        raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
+    return ResolutionBundle(resolution, fix_delta, by_axis)
 
 
 def _bounded_input(
@@ -298,6 +426,7 @@ def _context(
     worktree: Path,
     runtime_root: Path,
     task_id: str,
+    resolution_bundle: ResolutionBundle | None = None,
 ) -> tuple[ReviewContext, Path]:
     head = _git(worktree, "rev-parse", "HEAD")
     plan = Path(str(meta["plan_file"])).expanduser().resolve()
@@ -361,6 +490,55 @@ def _context(
     inputs.append(
         ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
     )
+    if resolution_bundle is not None:
+        resolution_payload = {
+            "schema_version": 1,
+            "operation_id": resolution_bundle.resolution.operation_id,
+            "reviewed_head_sha": (
+                resolution_bundle.resolution.reviewed_head_sha
+            ),
+            "resolved_head_sha": (
+                resolution_bundle.resolution.resolved_head_sha
+            ),
+            "previous_finding_ids": [
+                item.finding_id
+                for item in resolution_bundle.resolution.resolutions
+            ],
+            "resolutions": [
+                item.payload()
+                for item in resolution_bundle.resolution.resolutions
+            ],
+            "fix_delta_sha256": hashlib.sha256(
+                resolution_bundle.fix_delta
+            ).hexdigest(),
+        }
+        inputs.extend(
+            (
+                ContextInput(
+                    "resolution-evidence.json",
+                    str(worktree / ".task-review-resolution.json"),
+                    (
+                        json.dumps(
+                            resolution_payload,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    ).encode(),
+                    role="resolution",
+                ),
+                ContextInput(
+                    "fix-delta.patch",
+                    (
+                        "git:diff:"
+                        f"{resolution_bundle.resolution.reviewed_head_sha}.."
+                        f"{resolution_bundle.resolution.resolved_head_sha}"
+                    ),
+                    resolution_bundle.fix_delta,
+                    role="fix",
+                ),
+            )
+        )
     builder = ContextBuilder(runtime_root / "packets")
     manifest = builder.build(
         task_id,
@@ -1035,6 +1213,21 @@ def _run_review(
                 context_manifest=context_manifest,
                 run=run,
             )
+        bundle = _resolution_bundle(
+            worktree,
+            gate_root,
+            task_id,
+            awaiting,
+            context.head_sha,
+        )
+        context, context_manifest = _context(
+            meta,
+            vault,
+            worktree,
+            runtime_root,
+            task_id,
+            resolution_bundle=bundle,
+        )
         decision = None
         for lane in run.execution.lanes:
             if lane.axis not in awaiting:
@@ -1066,6 +1259,7 @@ def _run_review(
                 run,
                 lane,
                 context=context,
+                resolution=bundle.by_axis[lane.axis],
                 verification_prompt_pointer=pointer,
                 callback_pointer=(
                     _callback_path(runtime_root, lane.axis)
