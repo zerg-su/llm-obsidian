@@ -91,6 +91,11 @@ def main() -> int:
         failures,
     )
     check(
+        "repro-backed root cause is established before product mutation",
+        has_clause(debug, r"root cause", r"repro(?:.*evidence|-backed)|evidence.*repro", r"before", r"product (?:change|mutation)"),
+        failures,
+    )
+    check(
         "a failed fix attempt requires product mutation and the original repro rerun",
         has_clause(debug, r"failed fix attempt", r"product", r"chang|mutat", r"original", r"repro"),
         failures,
@@ -102,7 +107,7 @@ def main() -> int:
     )
     check(
         "debug completion traces the repaired defect to declared outcome evidence",
-        has_clause(debug, r"repaired defect", r"declared", r"success|outcome", r"evidence")
+        has_clause(debug, r"repaired defect|defect repair", r"declared", r"success|outcome", r"evidence")
         and has_clause(debug, r"evidence", r"missing|absen|gap|not established", r"not claim|no .*claim|bars", r"complet"),
         failures,
     )
