@@ -761,6 +761,45 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         and fresh.execution.lanes[0].max_verify_iterations == 0
         and controller.read()["status"] == "reviewing",
     )
+    assert fresh is not None
+    fresh_lane = fresh.execution.lanes[0]
+    fresh_waiting = controller.complete_round(
+        fresh,
+        fresh_lane,
+        fresh.rounds["holistic"],
+        ReviewResult(
+            "holistic",
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "F-fresh-1",
+                    "holistic",
+                    "important",
+                    "fresh context defect",
+                    "fresh review found a product gap",
+                ),
+            ),
+        ),
+    )
+    fresh_exhausted = controller.continue_after_resolution(
+        fresh,
+        fresh_lane,
+        context=replace(new_context, head_sha="3" * 40),
+        resolution=resolution_evidence(
+            "review-budget",
+            "holistic",
+            new_context.head_sha,
+            "3" * 40,
+            "F-fresh-1",
+        ),
+        verification_prompt_pointer="prompts/fresh-verify.md",
+        callback_pointer="callbacks/review-budget-fresh/holistic/.review-callback.json",
+    )
+    check(
+        "fresh review resolutions remain bound to the dispatch identity",
+        fresh_waiting.action == "awaiting-resolution"
+        and fresh_exhausted.action == "attention-required",
+    )
 
 with tempfile.TemporaryDirectory(prefix="review-gate-deep.") as raw:
     base = Path(raw)

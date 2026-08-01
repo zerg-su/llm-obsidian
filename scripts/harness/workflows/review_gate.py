@@ -1236,6 +1236,15 @@ class ReviewGateController:
             for finding in previous_result.findings
             if finding.severity in MATERIAL_SEVERITIES
         )
+        expected_resolution_operation_id = (
+            run.execution.request.policy.operation_id
+        )
+        if state.get("fresh_reevaluation_used") is True:
+            expected_resolution_operation_id = str(
+                state.get("resolution_operation_id")
+                or state.get("dispatch_operation_id")
+                or ""
+            )
         if (
             context.head_sha == previous_head
             or context.verification_profile
@@ -1248,7 +1257,7 @@ class ReviewGateController:
             )
         if (
             resolution.operation_id
-            != run.execution.request.policy.operation_id
+            != expected_resolution_operation_id
             or resolution.axis != lane.axis
             or resolution.reviewed_head_sha != previous_head
             or resolution.resolved_head_sha != context.head_sha
@@ -1463,6 +1472,9 @@ class ReviewGateController:
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
+            resolution_operation_id=(
+                run.execution.request.policy.operation_id
+            ),
             policy={
                 **dict(state.get("policy") or {}),
                 "max_verify_iterations": (
