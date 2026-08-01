@@ -5,14 +5,14 @@ description: Answer one technical question in a disposable worktree. Use for bou
 
 # Prototype
 
-State one falsifiable question and a success/failure criterion. Ask the harness
-to create an owned disposable worktree and minimal ContextPacket.
+Ask one falsifiable question/pass-fail criterion in a harness-owned disposable
+worktree/minimal ContextPacket. Use one run command/bounded evidence; keep
+production unchanged. No production tests/polish/compatibility.
 
-Implement only enough to answer the question. Provide one run command and
-capture bounded evidence. Do not add production tests, polish, compatibility
-layers, or unrelated features. Record the decision and limitations.
-
-The artifact remains off main. Harness cleanup may remove only the exact owned
-worktree after the decision is durably captured and no process uses it.
-Unknown ownership becomes `attention-required`; never guess or run broad
-worktree cleanup. Promotion into production requires separate authorization.
+Durably record `Question`/`Evidence`/`Decision`/`Limitations`/`Provenance`,
+and how it informs incoming Outcome Contract. Spike success proves
+neither desired outcome nor production completion.
+Keep off main. Only the harness may remove the exact owned worktree after
+decision is durably captured and idle; this skill never removes it. Unknown
+ownership -> `attention-required`; never guess/clean broadly. Promotion
+requires separate authorization.

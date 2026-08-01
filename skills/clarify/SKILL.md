@@ -6,38 +6,34 @@ description: >-
 
 # Clarify
 
-Interview the user until requirements, constraints, edge cases, acceptance
-criteria, and important branches of the decision tree are resolved.
-
 ## Interview loop
 
-1. Inspect the codebase first for facts available locally. Keep this inspection
-   read-only.
-2. Select the unresolved decision whose answer constrains the most later
-   decisions.
-3. Ask exactly one question, briefly explain why it matters, and recommend an
-   answer. Use the runtime's interactive question tool when available;
-   otherwise ask in plain text. The one-question rule applies in both cases.
-4. Wait for the answer. Material decisions belong to the user; do not silently
-   choose a material tradeoff for them.
-5. Use the answer to choose the next branch. Continue until shared
-   understanding is reached; do not impose an arbitrary question limit.
+1. Inspect the codebase first for local facts. Keep this inspection read-only.
+2. Pick the unresolved decision that constrains the most later choices. Ask
+   exactly one question, explain why it matters, and recommend an answer. Use
+   the interactive question tool when available, otherwise text.
+3. Wait. Material decisions belong to the user; never choose one silently.
+4. Retain agreed terms, invariants, contradictions, edge cases, and ADR
+   candidates in context. Brainstorm or model the domain only when real
+   ambiguity requires it.
+5. Repeat without a question limit until requirements, constraints, acceptance
+   criteria, edge cases, and important branches are resolved.
 
 ## Alignment gate
 
-During the interview:
+During the interview, do not edit files, write code or a final plan, run
+implementation commands, enact the proposal, or bundle questions.
 
-- Do not write code or edit files.
-- Do not create a final implementation plan.
-- Do not run implementation commands or enact the proposal.
-- Do not bundle several questions into one message.
+Before closing alignment, confirm that `desired_outcome`, `success_evidence`,
+and `non_goals` are materially unambiguous; `purpose` is optional. If any
+required field is still materially ambiguous, keep the interview open with the
+one-question loop.
 
-When the user confirms shared understanding or asks to start planning or
-implementation, summarize the agreed requirements, constraints, edge cases,
-acceptance criteria, and approach. If they confirmed alignment without
-authorizing a next action, ask which handoff they want. If they already
-authorized planning or implementation, do not ask for redundant confirmation.
+After the user confirms alignment or requests planning/implementation, form
+exactly one user-grounded Outcome Contract with `desired_outcome`,
+`success_evidence`, `non_goals`, and optional `purpose`. Summarize the agreed
+facts and approach. Do not infer or invent a goal, evidence, or non-goal.
 
-When architecture or domain boundaries are the unresolved subject, hand the
-agreed facts to `design`; keep this interview focused on user choices rather
-than drafting alternatives here.
+If no next action is authorized, ask which handoff they want; otherwise do not
+ask again. For unresolved architecture/domain boundaries, hand agreed facts to
+`design` instead of drafting alternatives here.

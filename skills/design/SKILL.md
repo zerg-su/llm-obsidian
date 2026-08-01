@@ -5,21 +5,19 @@ description: Shape read-only architecture, domain boundaries, alternatives, and 
 
 # Design
 
-Stay read-only. Gather the current constraints, users, failure modes, and
-authoritative seams. Ask one question at a time only when a material choice
-cannot be resolved from available evidence.
+Stay read-only. Ask one question per material unknown.
 
-Produce:
+Start with ownership boundaries and owned test seams. Preserve the incoming
+Outcome Contract—optional `purpose`, `desired_outcome`, `success_evidence`, and
+`non_goals`—without semantic drift.
 
-- the problem and non-goals;
-- invariants and ownership boundaries;
-- two or three credible alternatives with operational tradeoffs;
-- the recommended design and why it wins here;
-- data/control flow, failure recovery, rollout, and rollback;
-- testable acceptance criteria;
-- ADR candidates for decisions that should remain durable.
+Produce problem/non-goals, invariants, 2-3 alternatives/tradeoffs,
+recommendation/interfaces, data/control flow, recovery,
+rollout/rollback, testable acceptance criteria per evidence ID/seam, ADRs.
 
-Separate facts, assumptions, and decisions. Prefer the smallest architecture
-that satisfies the constraints. Stop for approval before implementation,
-public-interface change, migration, new dependency, security boundary, or
-external effect.
+Separate fact/assumption/decision; distinguish Unresolved fog from explicit
+out-of-scope. No placeholders/undefined interfaces; name owners/contracts.
+
+Default to vertical slices; use expand-contract only for wide migration.
+Get approval before implementation or interface/migration/dependency/security/
+external-effect change.
