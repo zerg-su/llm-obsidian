@@ -88,3 +88,32 @@ for heading in ("Question", "Evidence", "Decision", "Limitations", "Provenance")
         f"prototype durable record must define `{heading}` exactly once"
     )
 print("OK   prototype records bounded evidence without claiming outcome completion")
+
+
+save_plan = skill("save-plan")
+require(
+    save_plan,
+    "persist a plan WITHOUT executing it",
+    "exactly one canonical Outcome Contract JSON block",
+    "`schema_version: 1`",
+    "`desired_outcome`, `success_evidence`, and `non_goals`",
+    "optional `purpose`",
+    "missing, duplicated, or materially ambiguous",
+    "Do not infer or invent contract values",
+    "without semantic drift",
+    "scripts/outcome_contract.py",
+    "extract_from_plan",
+    "same successful `vault-write.py` transaction",
+    "Do not create a second goal artifact",
+    "scripts/vault_schema.py",
+    "scripts/vault-write.py",
+    "Do not use Write/Edit on the page directly",
+    "Do NOT update `wiki/log.md`",
+    "Do NOT update `wiki/hot.md`",
+)
+assert "Canonical frontmatter schema lives in `wiki/plans/_index.md`" not in save_plan
+normalized_save_plan = " ".join(save_plan.split())
+assert normalized_save_plan.index("extract_from_plan") < normalized_save_plan.index(
+    'Send one `pages:[{op:"create", ...}]` payload'
+), "The canonical contract must validate before the writer effect"
+print("OK   save-plan writes one validated contract with the plan transaction")

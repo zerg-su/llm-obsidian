@@ -43,6 +43,17 @@ If multiple candidates exist, ask the user which one to save.
 
 If no obvious plan block exists, ask the user to paste the plan or specify what to save.
 
+Identify the approved Outcome Contract from the same conversation. The saved
+plan must contain exactly one canonical Outcome Contract JSON block with
+`schema_version: 1`, `desired_outcome`, `success_evidence`, and `non_goals`,
+plus optional `purpose`. Preserve those approved values without semantic drift.
+
+If a required field is missing, duplicated, or materially ambiguous, stop and
+ask the user to resolve it before allocating metadata or writing. Do not infer
+or invent contract values from local plan steps. If the plan already contains
+a contract block, confirm that it is the same approved contract instead of
+adding another. Do not create a second goal artifact.
+
 ### 2. Resolve metadata
 
 Run a single batched `Bash` call to gather:
@@ -87,6 +98,12 @@ Example: «Создать hello.txt в текущем каталоге» → `so
 
 ### 4. Compose the page
 
+Place a `## Outcome Contract` section immediately after the title. Its `json`
+fence contains the actual approved contract from step 1, with no placeholder
+values. Preserve the remaining plan content verbatim, exactly as discussed in
+chat; if that content already included the contract, move neither its values
+nor its meaning and render it only once.
+
 ```markdown
 ---
 type: plan
@@ -107,7 +124,11 @@ tags:
 
 # <title>
 
-<plan content verbatim, exactly as discussed in chat>
+## Outcome Contract
+
+<exactly one approved and validated JSON block>
+
+<remaining plan content verbatim, exactly as discussed in chat>
 ```
 
 ### 5. Create through the vault writer
@@ -116,7 +137,23 @@ Filename: `wiki/plans/<ts>-<slug>.md` (relative to the project root).
 
 If file already exists (rare same-second collision), append `-1`, `-2`, etc.
 
-Send one `pages:[{op:"create", ...}]` payload to `scripts/vault-write.py` with `actor:"save-plan"` and the full JSON-escaped Markdown. A collision returns exit 4; choose the next suffix and retry. Do not use Write/Edit on the page directly.
+Before the writer effect, validate the final composed Markdown with the
+code-owned `scripts/outcome_contract.py` `extract_from_plan` function. For a
+shell value named `page`, the bounded preflight is:
+
+```bash
+PYTHONPATH=scripts python3 -c \
+  'import sys; from outcome_contract import extract_from_plan; extract_from_plan(sys.stdin.read())' \
+  <<<"$page"
+```
+
+Stop if validation rejects a missing, duplicate, malformed, oversized, or
+semantically changed contract. Send one `pages:[{op:"create", ...}]` payload to
+`scripts/vault-write.py` with `actor:"save-plan"` and the full JSON-escaped
+Markdown, including that validated contract, in the same successful
+`vault-write.py` transaction. A collision returns exit 4 without creating the
+page; choose the next suffix and retry the same content. Do not use Write/Edit
+on the page directly.
 
 ### 6. Confirm to user
 
@@ -151,4 +188,8 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 
 ## Schema reference
 
-Canonical frontmatter schema lives in `wiki/plans/_index.md`. Keep this skill in sync if schema changes (e.g., new required fields).
+The code-owned canonical frontmatter schema is `scripts/vault_schema.py`;
+`scripts/vault-write.py` imports and enforces it before mutation. The Outcome
+Contract schema, bounds, extraction, and canonical identity live in
+`scripts/outcome_contract.py`. Keep this skill aligned with those authorities;
+`wiki/plans/_index.md` is only a generated listing.
