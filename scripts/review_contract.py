@@ -13,7 +13,8 @@ from typing import Any
 
 SCHEMA_VERSION = 1
 VERDICTS = {"approve", "changes-requested", "blocked"}
-SEVERITIES = {"critical", "important", "minor"}
+SEVERITIES = frozenset({"critical", "important", "minor"})
+MATERIAL_SEVERITIES = SEVERITIES - {"minor"}
 MODES = {"simple", "deep"}
 AXES = {
     "simple": ("holistic",),
@@ -214,7 +215,7 @@ def validate_review(
             for finding_index, finding in enumerate(raw_findings)
         ]
         if axis_verdict == "approve" and any(
-            finding["severity"] in {"critical", "important"} for finding in findings
+            finding["severity"] in MATERIAL_SEVERITIES for finding in findings
         ):
             raise ReviewContractError(f"{field} cannot approve with material findings")
         axes.append(

@@ -55,6 +55,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from review_contract import SEVERITIES
+
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 HISTORY = Path.home() / ".claude" / "history.jsonl"
 # Claude Code project dir = path with every non-alphanumeric char dashed
@@ -91,6 +93,8 @@ KNOWN_RUNTIMES = frozenset({"claude", "codex", "unknown"})
 LIFECYCLE_OPS = frozenset({
     "agent-run",
     "review-round-start",
+    "review-callback",
+    "review-round-complete",
     "review-round",
     "task-escalation",
     "surface-lifecycle",
@@ -505,14 +509,33 @@ def main() -> int:
         task_runs = matching("agent-run", "task:")
         reviewer_runs = matching("agent-run", "reviewer:")
         review_starts = matching("review-round-start")
-        review_rounds = matching("review-round")
+        review_callbacks = matching("review-callback")
+        review_completions = matching("review-round-complete")
+        legacy_review_rounds = matching("review-round")
         escalations = matching("task-escalation")
         surfaces = matching("surface-lifecycle")
         completions = matching("task-complete")
-        valid_callbacks = sum(event_count(event, "valid_callbacks") for event in review_rounds)
-        invalid_callbacks = sum(event_count(event, "invalid_callbacks") for event in review_rounds)
-        callback_total = valid_callbacks + invalid_callbacks
-        callback_rate = f"{valid_callbacks / callback_total * 100:.1f}%" if callback_total else "-"
+        accepted_callbacks = sum(
+            event_count(event, "accepted_callbacks")
+            for event in review_callbacks
+        ) + sum(
+            event_count(event, "valid_callbacks")
+            for event in legacy_review_rounds
+        )
+        rejected_callbacks = sum(
+            event_count(event, "rejected_callbacks")
+            for event in review_callbacks
+        ) + sum(
+            event_count(event, "invalid_callbacks")
+            for event in legacy_review_rounds
+        )
+        callback_total = accepted_callbacks + rejected_callbacks
+        callback_rate = (
+            f"{accepted_callbacks / callback_total * 100:.1f}%"
+            if callback_total
+            else "-"
+        )
+        finding_events = review_completions + legacy_review_rounds
 
         lines.append("| Metric | Value |")
         lines.append("|---|---:|")
@@ -521,12 +544,23 @@ def main() -> int:
             ("Validated task completions", int(sum(event_count(e, "tasks") for e in completions))),
             ("Reviewer agent runs", len(reviewer_runs)),
             ("Review rounds started", int(sum(event_count(e, "rounds_started") for e in review_starts))),
-            ("Valid review callbacks", int(valid_callbacks)),
-            ("Invalid review callbacks", int(invalid_callbacks)),
-            ("Callback schema-valid rate", callback_rate),
-            ("Findings: blocking", int(sum(event_count(e, "blocking_findings") for e in review_rounds))),
-            ("Findings: warning", int(sum(event_count(e, "warning_findings") for e in review_rounds))),
-            ("Findings: nit", int(sum(event_count(e, "nit_findings") for e in review_rounds))),
+            ("Review rounds completed", int(sum(
+                event_count(e, "rounds_completed")
+                for e in review_completions
+            ))),
+            ("Accepted review callbacks", int(accepted_callbacks)),
+            ("Rejected review callbacks", int(rejected_callbacks)),
+            ("Callback acceptance rate", callback_rate),
+            *[
+                (
+                    f"Findings: {severity}",
+                    int(sum(
+                        event_count(e, f"{severity}_findings")
+                        for e in finding_events
+                    )),
+                )
+                for severity in sorted(SEVERITIES)
+            ],
             ("Escalations raised", int(sum(event_count(e, "raised") for e in escalations))),
             ("Escalations resolved", int(sum(event_count(e, "resolved") for e in escalations))),
             ("Escalation delivery failures", int(sum(event_count(e, "delivery_failures") for e in escalations))),
@@ -551,7 +585,10 @@ def main() -> int:
             ("Task end-to-end", completions),
             ("Task agent process", task_runs),
             ("Reviewer process", reviewer_runs),
-            ("Review round callback", review_rounds),
+            (
+                "Review round",
+                review_completions + legacy_review_rounds,
+            ),
             (
                 "Human escalation wait",
                 [event for event in escalations if event_count(event, "resolved") > 0],

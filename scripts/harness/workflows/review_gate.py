@@ -40,7 +40,7 @@ from .review import (
     start_review,
     verify_review_lane,
 )
-from review_contract import VERIFY_BUDGETS, validate_review
+from review_contract import MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
 from review_resolution import ReviewResolutionEvidence
 
 
@@ -871,7 +871,7 @@ class ReviewGateController:
         material = tuple(
             finding
             for finding in result.findings
-            if finding.severity in {"critical", "important"}
+            if finding.severity in MATERIAL_SEVERITIES
         )
         if result.verdict == "blocked":
             self._mark_attention(run.execution.lanes)
@@ -1057,7 +1057,7 @@ class ReviewGateController:
         material_ids = tuple(
             finding.finding_id
             for finding in previous_result.findings
-            if finding.severity in {"critical", "important"}
+            if finding.severity in MATERIAL_SEVERITIES
         )
         if (
             context.head_sha == previous_head

@@ -1140,6 +1140,29 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         )["status"]
         == "awaiting-resolution",
     )
+    review_events = [
+        json.loads(line)
+        for line in (
+            vault / ".vault-meta/pipeline-events.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+        if json.loads(line).get("op", "").startswith("review-")
+    ]
+    check(
+        "production review emits content-free start callback and completion telemetry",
+        [event["op"] for event in review_events]
+        == ["review-round-start", "review-callback", "review-round-complete"]
+        and review_events[1]["counts"]["accepted_callbacks"] == 1
+        and review_events[2]["counts"]["important_findings"] == 1
+        and review_events[2]["counts"]["critical_findings"] == 0
+        and review_events[2]["counts"]["minor_findings"] == 0
+        and review_events[2]["identifiers"]
+        == {
+            "axis": "holistic",
+            "reviewer_runtime": "codex",
+            "terminal_status": "changes-requested",
+        }
+        and "F-task-1" not in json.dumps(review_events, sort_keys=True),
+    )
     reviewed_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=product,

@@ -53,7 +53,7 @@ source, file, or emission point is involved. Both seams are clamped to the same
 vocabulary, and `unknown` is rendered as **unattributed** — it means the emitting
 process carried no runtime marker, not that no model was involved. Agent-driven
 orchestration frequently lands there, so an unattributed record carrying an
-`agent-run`, `review-round`, `surface-lifecycle`, `task-complete`,
+`agent-run`, `review-callback`, `review-round-complete`, `surface-lifecycle`, `task-complete`,
 `task-escalation` or `model-turn` op counts as uncovered and blocks the complete
 verdict.
 
@@ -65,40 +65,31 @@ verdict.
 | Validated task completions | Final reaps whose result, summary, plan, and originating session passed the contract |
 | Reviewer agent runs | Supervisor-wrapped reviewer processes that returned |
 | Review rounds started | Initial review or same-session verification handoffs actually sent to a live reviewer |
-| Valid / invalid callbacks | Reviewer payloads accepted or rejected by the versioned JSON contract |
+| Accepted / rejected callbacks | Callback handoffs accepted by the active round or rejected at its typed transport boundary |
 | Findings by severity | Numeric counts only; finding text and file evidence are not copied into telemetry |
 | Escalations raised / resolved / delivery failures | Material decisions created, answered, or not delivered to the originating coordinator |
 | Watchdog stages | Delivered warning, alert, degraded, and recovery notifications accumulated per agent run |
 | Surface outcomes | Exact-surface lifecycle outcome: auto-closed, expected left open, or auto-close missed |
 
-The `review-round` actor is `review:<runtime>:<model>:<depth>`. The fourth
-segment is the current review depth vocabulary, `simple` or `deep`. Rows emitted
-before the harness-first 2.3 port carry the retired `light` or `full` instead, so
-the two generations are not directly comparable on that segment.
+Review events use the fixed `review` actor. Content-free identifiers carry the
+axis, reviewer runtime, and terminal status; numeric counters carry iteration,
+duration, and severity totals. Accepted and rejected callbacks are counted once
+per active round and outcome, so repeated coordinator polls for an incomplete
+deep review do not inflate either side. A stale callback is a transport
+rejection, not a claim that its versioned JSON shape was invalid.
 
-Valid and invalid callbacks are counted exactly once per review round and
-outcome, so repeated coordinator polls for a still-incomplete deep review do not
-inflate either side. A callback belonging to another round or verification
-iteration is not a versioned-contract violation and is never counted as invalid,
-so the schema-valid rate keeps meaning "accepted or rejected by the JSON
-contract".
-
-Known gap: `Review rounds started`, `Findings: blocking/warning/nit`, and the
-`Review round callback` duration lost their producer in the same 2.3 port that
-orphaned the callback counters, and have not been restored. Until they are, a
-report can show non-zero valid callbacks beside zero rounds started and zero
-findings; read that combination as missing instrumentation, not as a clean
-window. Findings counters additionally need a decision, because the emitted
-severity vocabulary is `critical/important/minor` while this table reports
-`blocking/warning/nit`.
+Round-start, callback, and round-complete producers share the executable
+`critical`, `important`, `minor` severity vocabulary with `pipeline-stats`.
+Historical `review-round` rows remain readable by the report, but new review
+operations emit `review-round-start`, `review-callback`, and
+`review-round-complete`.
 
 Durations are reported as sample count, p50, and nearest-rank p95:
 
 - **Task end-to-end** — dispatch metadata `spawned_at` to validated final reap.
 - **Task/reviewer process** — supervisor start to agent exit plus post-exit
   lifecycle handling.
-- **Review round callback** — handoff sent to a schema-valid or rejected
-  callback.
+- **Review round** — handoff start through accepted round completion.
 - **Human escalation wait** — escalation raised to coordinator decision sent.
 
 Zero-duration synthetic checks are excluded. Percentiles are directional until
@@ -140,7 +131,7 @@ wikilink to the archive during coordinator `/reap`.
 Useful release questions are ratios and trends, not one attractive latency:
 
 - **Completion:** validated completions compared with task runs.
-- **Review transport:** valid callbacks divided by all callback attempts.
+- **Review transport:** accepted callbacks divided by accepted plus rejected callbacks.
 - **Autonomy:** escalations and auto-close misses per completed task; expected
   attended surfaces left open are reported separately.
 - **Reliability:** watchdog alerts, degraded sampling, relay failures, and

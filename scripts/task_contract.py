@@ -12,6 +12,8 @@ import uuid
 from pathlib import Path
 from typing import Any, NoReturn
 
+from review_contract import MATERIAL_SEVERITIES, SEVERITIES
+
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 REVIEW_MODES = {"simple", "deep", "skip"}
@@ -528,11 +530,11 @@ def review_action(meta: dict[str, Any], review: dict[str, Any], iteration: int) 
         return "escalate"
     severities = {f.get("severity") for f in findings if isinstance(f, dict)}
     if policy["version"] == 4:
-        if not severities <= {"critical", "important", "minor"}:
+        if not severities <= set(SEVERITIES):
             return "escalate"
         return (
             "resolve"
-            if severities & {"critical", "important"}
+            if severities & MATERIAL_SEVERITIES
             else "approve"
         )
     if "blocking" in severities:

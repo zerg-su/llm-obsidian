@@ -11,10 +11,11 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from review_contract import MATERIAL_SEVERITIES
+
 
 SCHEMA_VERSION = 1
 DISPOSITIONS = frozenset({"applied", "rejected", "out-of-scope"})
-MATERIAL_SEVERITIES = frozenset({"critical", "important"})
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 GIT_HEAD = re.compile(r"[0-9a-f]{40,64}\Z")
 AXES = frozenset(

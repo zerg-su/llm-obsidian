@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Sequence
 
@@ -41,7 +42,6 @@ from harness.workflows.review_gate import (
     ReviewGateRun,
     ReviewPreset,
 )
-from lifecycle_telemetry import emit_lifecycle_event
 from model_routing import (
     load_config,
     resolve,
@@ -57,6 +57,7 @@ from review_resolution import (
     build_resolution_evidence,
     validate_resolution,
 )
+from review_telemetry import emit_review_event
 from task_contract import normalize
 
 
@@ -67,8 +68,8 @@ class TaskReviewError(ValueError):
 class StaleRoundCallbackError(TaskReviewError):
     """A callback belonging to another round or verification iteration.
 
-    Not a versioned-contract violation: the reviewer produced nothing invalid,
-    so it must never be counted against the callback schema-valid rate.
+    This is a transport rejection, not a claim that the versioned payload
+    schema itself was invalid.
     """
 
 
@@ -675,6 +676,7 @@ def _callback_path(runtime_root: Path, axis: str) -> Path:
 def _write_round_meta(
     *,
     runtime_root: Path,
+    vault: Path,
     worktree: Path,
     task_id: str,
     depth: str,
@@ -685,6 +687,7 @@ def _write_round_meta(
     directory = _callback_path(runtime_root, round_.axis).parent
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
+    started_at = _round_telemetry_state(runtime_root, round_)["started_at"]
     _atomic_json(
         directory / ".review-meta.json",
         {
@@ -697,6 +700,7 @@ def _write_round_meta(
             "review_mode": depth,
             "axis": round_.axis,
             "verification_iteration": round_.verification_iteration,
+            "started_at": started_at,
             "worktree": str(worktree),
             "task_name": task_id,
             "head_sha": context.head_sha,
@@ -705,6 +709,14 @@ def _write_round_meta(
                 "sha256": context.verification_profile_sha256,
             },
         },
+    )
+    _emit_round_telemetry(
+        worktree,
+        vault,
+        runtime_root,
+        round_,
+        event="review-round-start",
+        terminal_status="started",
     )
 
 
@@ -827,80 +839,76 @@ def _envelope(path: Path, round_: ReviewRound) -> tuple[CallbackEnvelope, Review
     return envelope, result
 
 
-def _counted_marker(runtime_root: Path, axis: str) -> Path:
-    return _callback_path(runtime_root, axis).parent / ".review-callback-counted.json"
+def _telemetry_marker(runtime_root: Path, axis: str) -> Path:
+    return _callback_path(runtime_root, axis).parent / ".review-telemetry.json"
 
 
-def _already_counted(marker: Path, identity: dict[str, Any], outcome: str) -> bool:
-    """True when this exact round already contributed this outcome."""
-
+def _round_telemetry_state(
+    runtime_root: Path, round_: ReviewRound
+) -> dict[str, Any]:
+    identity = {
+        "schema_version": 1,
+        "operation_id": round_.operation_id,
+        "verification_iteration": round_.verification_iteration,
+    }
     try:
-        prior = json.loads(marker.read_text(encoding="utf-8"))
+        prior = json.loads(
+            _telemetry_marker(runtime_root, round_.axis).read_text(
+                encoding="utf-8"
+            )
+        )
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return False
-    if not isinstance(prior, dict):
-        return False
-    if any(prior.get(key) != value for key, value in identity.items()):
-        return False
-    counted = prior.get("counted")
-    return isinstance(counted, list) and outcome in counted
+        prior = {}
+    if (
+        isinstance(prior, dict)
+        and all(prior.get(key) == value for key, value in identity.items())
+        and isinstance(prior.get("started_at"), str)
+        and isinstance(prior.get("emitted"), list)
+    ):
+        return prior
+    return {
+        **identity,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "emitted": [],
+    }
 
 
-def _emit_round_callback(
+def _emit_round_telemetry(
     worktree: Path,
     vault: Path,
     runtime_root: Path,
     round_: ReviewRound,
-    depth: str,
     *,
-    valid: bool,
+    event: str,
+    terminal_status: str,
+    severities: Sequence[str] = (),
 ) -> None:
-    """Emit the documented content-free callback-validity counter for one round.
+    """Emit one replay-bounded event; every failure remains non-fatal."""
 
-    Counters and the reviewer route only; never payload, findings, or error text.
-    emit_lifecycle_event is always non-fatal, so telemetry cannot break the gate.
-
-    A callback file is not consumed or removed when it is read, so a coordinator
-    polling for a second deep lane re-reads the same round on every invocation.
-    Exactly one event per (round identity, outcome) is therefore emitted, keyed
-    by a marker beside the callback. vault_root is explicit because a
-    current-checkout review has no worktree metadata for origin_vault to read.
-    """
-
-    marker = _counted_marker(runtime_root, round_.axis)
-    identity: dict[str, Any] = {
-        "operation_id": round_.operation_id,
-        "verification_iteration": round_.verification_iteration,
-    }
-    outcome = "valid" if valid else "invalid"
-    counter = "valid_callbacks" if valid else "invalid_callbacks"
-    if _already_counted(marker, identity, outcome):
-        return
-    route = round_.spec.route
-    emitted = emit_lifecycle_event(
-        worktree,
-        "review-round",
-        actor=f"review:{route.runtime}:{route.model}:{depth}",
-        counts={
-            counter: 1,
-            "iteration": round_.verification_iteration,
-        },
-        status="ok" if valid else "error",
-        vault_root=vault,
-    )
-    if not emitted:
-        return
     try:
-        prior = json.loads(marker.read_text(encoding="utf-8"))
-        counted = set(prior.get("counted") or []) if isinstance(prior, dict) else set()
-        if any(prior.get(key) != value for key, value in identity.items()):
-            counted = set()
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        counted = set()
-    _atomic_json(
-        marker,
-        {"schema_version": 1, **identity, "counted": sorted(counted | {outcome})},
-    )
+        state = _round_telemetry_state(runtime_root, round_)
+        event_key = f"{event}:{terminal_status}"
+        emitted = set(str(item) for item in state["emitted"])
+        if event_key in emitted:
+            return
+        if not emit_review_event(
+            worktree,
+            vault,
+            event=event,
+            axis=round_.axis,
+            reviewer_runtime=round_.spec.route.runtime,
+            iteration=round_.verification_iteration,
+            terminal_status=terminal_status,
+            started_at=str(state["started_at"]),
+            severities=severities,
+        ):
+            return
+        _atomic_json(
+            _telemetry_marker(runtime_root, round_.axis),
+            {**state, "emitted": sorted(emitted | {event_key})},
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return
 
 
 def load_active_round(
@@ -1076,6 +1084,7 @@ def _run_review(
         ) -> None:
             _write_round_meta(
                 runtime_root=runtime_root,
+                vault=vault,
                 worktree=worktree,
                 task_id=task_id,
                 depth=preset.depth,
@@ -1247,6 +1256,7 @@ def _run_review(
             ) -> None:
                 _write_round_meta(
                     runtime_root=runtime_root,
+                    vault=vault,
                     worktree=worktree,
                     task_id=task_id,
                     depth=preset.depth,
@@ -1300,19 +1310,25 @@ def _run_review(
         try:
             _unused, result = _envelope(callback, round_)
         except StaleRoundCallbackError:
-            # Another round's callback, not a contract violation: never counted
-            # against the schema-valid rate. Behaviour is otherwise unchanged.
-            raise
-        except (TaskReviewError, OSError, ValueError):
-            # Record the rejection as durable content-free evidence, then keep
-            # the existing fail-closed behaviour for the caller.
-            _emit_round_callback(
-                worktree, vault, runtime_root, round_, preset.depth, valid=False
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-callback",
+                terminal_status="rejected",
             )
             raise
-        _emit_round_callback(
-            worktree, vault, runtime_root, round_, preset.depth, valid=True
-        )
+        except (TaskReviewError, OSError, ValueError):
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-callback",
+                terminal_status="rejected",
+            )
+            raise
         ready.append((lane, round_, result))
     if preset.depth == "deep" and len(ready) != len(
         run.execution.lanes
@@ -1329,7 +1345,7 @@ def _run_review(
     if preset.depth == "deep" and any(
         result.verdict == "changes-requested"
         and any(
-            finding.severity in {"critical", "important"}
+            finding.severity in MATERIAL_SEVERITIES
             for finding in result.findings
         )
         for _lane, _round, result in ready
@@ -1337,6 +1353,25 @@ def _run_review(
         for lane, round_, result in ready:
             decision = gate.defer_round_for_resolution(
                 run, lane, round_, result
+            )
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-callback",
+                terminal_status="accepted",
+            )
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-round-complete",
+                terminal_status=result.verdict,
+                severities=tuple(
+                    finding.severity for finding in result.findings
+                ),
             )
             if decision.action == "attention-required":
                 break
@@ -1347,6 +1382,25 @@ def _run_review(
                 lane,
                 round_,
                 result,
+            )
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-callback",
+                terminal_status="accepted",
+            )
+            _emit_round_telemetry(
+                worktree,
+                vault,
+                runtime_root,
+                round_,
+                event="review-round-complete",
+                terminal_status=result.verdict,
+                severities=tuple(
+                    finding.severity for finding in result.findings
+                ),
             )
             if decision.action == "attention-required":
                 break

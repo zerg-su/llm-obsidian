@@ -13,6 +13,9 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from review_contract import SEVERITIES  # noqa: E402
+
 MODULE = ROOT / "scripts" / "pipeline_events.py"
 LIFECYCLE_MODULE = ROOT / "scripts" / "lifecycle_telemetry.py"
 
@@ -158,14 +161,24 @@ def run() -> None:
             ("agent-run", "reviewer:claude", {"duration_ms": 2500, "watchdog_recoveries": 1}),
             ("review-round-start", "review:claude:fable:full", {"rounds_started": 1, "iteration": 1}),
             (
-                "review-round",
-                "review:claude:fable:full",
+                "review-callback",
+                "review",
                 {
                     "duration_ms": 2000,
-                    "valid_callbacks": 1,
+                    "accepted_callbacks": 1,
+                    "iteration": 1,
+                },
+            ),
+            (
+                "review-round-complete",
+                "review",
+                {
+                    "duration_ms": 2000,
+                    "rounds_completed": 1,
                     "findings": 2,
-                    "warning_findings": 1,
-                    "nit_findings": 1,
+                    "important_findings": 1,
+                    "minor_findings": 1,
+                    "iteration": 1,
                 },
             ),
             ("task-escalation", "raise:permission", {"raised": 1, "delivery_failures": 1}),
@@ -275,6 +288,7 @@ def run() -> None:
         # The report labels shared operations separately from Claude-only skill data.
         (root / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/pipeline-stats.py", root / "scripts/pipeline-stats.py")
+        shutil.copy2(ROOT / "scripts/review_contract.py", root / "scripts/review_contract.py")
         env = dict(os.environ)
         env["HOME"] = str(root / "home")
         result = subprocess.run(
@@ -288,6 +302,12 @@ def run() -> None:
         check("codex operation reported", "| codex | vault-write | ok | 1 |" in result.stdout)
         check("claude operation reported", "| claude | retrieve | ok | 1 |" in result.stdout)
         check("numeric latency percentiles reported", "| claude | retrieve | ok | 1 | 12.5 | 12.5 |" in result.stdout)
+        check(
+            "review stats use the executable severity vocabulary",
+            all(f"Findings: {severity}" in result.stdout for severity in SEVERITIES)
+            and "Findings: warning" not in result.stdout
+            and "Findings: nit" not in result.stdout,
+        )
         check("model turn role section", "## Model turn timing by session role" in result.stdout)
         check(
             "model turn role counters and latency",
@@ -296,7 +316,12 @@ def run() -> None:
             and "| claude | coordinator | 1 | 0 | 500.0 | 500.0 |" in result.stdout,
         )
         check("lifecycle dogfood section", "## Unattended lifecycle dogfood" in result.stdout)
-        check("callback validation rate", "| Callback schema-valid rate | 100.0% |" in result.stdout)
+        check(
+            "callback acceptance rate",
+            "| Callback acceptance rate | 100.0% |" in result.stdout
+            and "| Accepted review callbacks | 1 |" in result.stdout
+            and "| Rejected review callbacks | 0 |" in result.stdout,
+        )
         check("lifecycle completion counted", "| Validated task completions | 1 |" in result.stdout)
         check(
             "surface outcomes counted",
