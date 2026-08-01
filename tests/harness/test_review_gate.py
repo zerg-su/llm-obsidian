@@ -739,6 +739,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         product_root=ROOT,
         prompt_pointer="prompts/compact.md",
         callback_root="callbacks/review-budget-fresh",
+        max_verify_iterations=0,
     )
     repeated = controller.restart_for_boundary(
         fresh,
@@ -749,12 +750,15 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         product_root=ROOT,
         prompt_pointer="prompts/compact.md",
         callback_root="callbacks/review-budget-fresh",
+        max_verify_iterations=0,
     )
     check(
         "one explicit scope/context boundary permits one fresh compact run",
         fresh is not None
         and len(runtime.started) == 2
         and repeated is not None
+        and fresh.execution.request.policy.max_verify_iterations == 0
+        and fresh.execution.lanes[0].max_verify_iterations == 0
         and controller.read()["status"] == "reviewing",
     )
 

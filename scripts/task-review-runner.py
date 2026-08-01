@@ -2468,6 +2468,7 @@ def _launch_authorized_task_review(
     context: ReviewContext,
     context_manifest: Path,
     boundary: ReviewScopeBoundary,
+    max_verify_iterations: int | None = None,
 ) -> dict[str, Any]:
     """Launch one pre-authorized fresh run after complete scratch preflight."""
 
@@ -2517,6 +2518,7 @@ def _launch_authorized_task_review(
         ],
         prompt_pointers=prompt_pointers,
         callback_root="callbacks",
+        max_verify_iterations=max_verify_iterations,
         prepare_lane=prepare_lane,
     )
     if fresh is None:
@@ -2529,6 +2531,165 @@ def _launch_authorized_task_review(
         runtime_root=runtime_root,
         context_manifest=context_manifest,
         run=fresh,
+    )
+
+
+def recover_task_review_for_mechanism(
+    worktree: Path,
+    *,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Use one resolved mechanism escalation to replace a dead review lane."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    attention_path = worktree / ".task-needs-attention.json"
+    attention = _read_json(attention_path, "task escalation")
+    current_context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        _runtime_root(vault, task_id),
+        task_id,
+    )
+    decision = str(attention.get("decision") or "")
+    if (
+        attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(
+            "authorize-one-bounded-fresh-context-review-boundary-for-"
+        )
+        or current_context.head_sha[:7] not in decision
+    ):
+        raise TaskReviewError(
+            "review mechanism recovery lacks exact coordinator authorization"
+        )
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(
+        _gate_root(vault, task_id),
+        runtime,
+        store,
+    )
+    state = gate.read()
+    run = gate.rehydrate()
+    stored_boundary = state.get("fresh_boundary")
+    if (
+        state.get("fresh_reevaluation_used") is True
+        and state.get("status") in {"fresh-reevaluation", "reviewing", "verifying"}
+        and isinstance(stored_boundary, dict)
+        and str(attention.get("id") or "")
+        in str(stored_boundary.get("reason") or "")
+    ):
+        return _receipt(
+            status=(
+                "verifying"
+                if state.get("status") == "verifying"
+                else "reviewing"
+            ),
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=_runtime_root(vault, task_id),
+            context_manifest=context_manifest,
+            run=run,
+        )
+    if (
+        state.get("status")
+        not in {"verifying", "attention-required", "fresh-boundary-authorized"}
+        or state.get("fresh_reevaluation_used") is True
+        or state.get("final_results") not in ({}, None)
+        or not run.execution.lanes
+    ):
+        raise TaskReviewError(
+            "review mechanism recovery is not at one stale verification boundary"
+        )
+    for lane in run.execution.lanes:
+        parent = store.read(task_id, lane.operation_id)
+        round_ = run.rounds.get(lane.axis)
+        if round_ is None:
+            raise TaskReviewError("review mechanism recovery round is unavailable")
+        child = store.read(task_id, round_.operation_id)
+        if (
+            parent.state not in TERMINAL
+            or child.state not in TERMINAL
+            or parent.resources != OwnedResources()
+            or child.resources != OwnedResources()
+            or parent.pending_effect
+            or child.pending_effect
+        ):
+            raise TaskReviewError(
+                "review mechanism recovery still has live review ownership"
+            )
+    previous_context = run.execution.request.context
+    boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(previous_context),
+        review_context_sha256(current_context),
+        (
+            "resolved mechanism escalation "
+            f"{attention.get('id')}: replace the dead verification runtime"
+        ),
+    )
+    authorization = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "kind": boundary.kind,
+        "previous_context_sha256": boundary.previous_context_sha256,
+        "next_context_sha256": boundary.next_context_sha256,
+        "reason": boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": str(attention.get("id") or ""),
+        "verification_receipt_sha256": hashlib.sha256(
+            attention_path.read_bytes()
+        ).hexdigest(),
+        "status": "authorized",
+    }
+    authorization_name = (
+        "fresh-boundary-authorization-"
+        f"{_canonical_sha256(authorization)[:16]}.json"
+    )
+    authorization_path = gate.root / authorization_name
+    if authorization_path.exists():
+        if (
+            authorization_path.is_symlink()
+            or _read_json(
+                authorization_path, "fresh boundary authorization"
+            )
+            != authorization
+        ):
+            raise TaskReviewError(
+                "review mechanism recovery authorization changed"
+            )
+    else:
+        _atomic_json(authorization_path, authorization)
+    if state.get("status") == "verifying":
+        gate._mark_attention(run.execution.lanes)
+    if gate.read().get("status") != "fresh-boundary-authorized":
+        gate.authorize_fresh_boundary(
+            run,
+            boundary=boundary,
+            authorization_pointer=authorization_name,
+            authorization_sha256=hashlib.sha256(
+                authorization_path.read_bytes()
+            ).hexdigest(),
+        )
+    return _launch_authorized_task_review(
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=_runtime_root(vault, task_id),
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        context=current_context,
+        context_manifest=context_manifest,
+        boundary=boundary,
+        max_verify_iterations=0,
     )
 
 
@@ -2981,6 +3142,8 @@ def parser() -> argparse.ArgumentParser:
     fresh.add_argument("--worktree", type=Path, required=True)
     fresh.add_argument("--kind", choices=("scope", "context"), required=True)
     fresh.add_argument("--reason", required=True)
+    recover = sub.add_parser("recover")
+    recover.add_argument("--worktree", type=Path, required=True)
     current = sub.add_parser("current")
     current.add_argument("--worktree", type=Path, required=True)
     current.add_argument("--deep", action="store_true")
@@ -3010,6 +3173,11 @@ def main(
                 args.worktree,
                 kind=args.kind,
                 reason=args.reason,
+                runtime_manager=runtime_manager,
+            )
+        elif args.command == "recover":
+            result = recover_task_review_for_mechanism(
+                args.worktree,
                 runtime_manager=runtime_manager,
             )
         else:

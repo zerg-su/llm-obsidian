@@ -1329,10 +1329,23 @@ class ReviewGateController:
         callback_root: str,
         callback_wake: str = "",
         prompt_pointers: Mapping[str, str] | None = None,
+        max_verify_iterations: int | None = None,
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
     ) -> ReviewGateRun | None:
+        if (
+            max_verify_iterations is not None
+            and (
+                type(max_verify_iterations) is not int
+                or max_verify_iterations < 0
+                or max_verify_iterations
+                > run.execution.request.policy.max_verify_iterations
+            )
+        ):
+            raise ValueError(
+                "fresh review verification budget cannot expand"
+            )
         state = self.read()
         if (
             state.get("fresh_reevaluation_used") is True
@@ -1348,7 +1361,16 @@ class ReviewGateController:
                 "reason": boundary.reason,
             }
         ):
-            return self.rehydrate()
+            replay = self.rehydrate()
+            if (
+                max_verify_iterations is not None
+                and replay.execution.request.policy.max_verify_iterations
+                != max_verify_iterations
+            ):
+                raise ValueError(
+                    "fresh review verification budget changed across replay"
+                )
+            return replay
         if state.get("fresh_reevaluation_used") is True:
             self._mark_attention(run.execution.lanes)
             return None
@@ -1388,6 +1410,11 @@ class ReviewGateController:
             policy=replace(
                 run.execution.request.policy,
                 operation_id=operation_id,
+                max_verify_iterations=(
+                    run.execution.request.policy.max_verify_iterations
+                    if max_verify_iterations is None
+                    else max_verify_iterations
+                ),
             ),
             context=context,
             lane_ids=None,
@@ -1436,6 +1463,12 @@ class ReviewGateController:
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
+            policy={
+                **dict(state.get("policy") or {}),
+                "max_verify_iterations": (
+                    request.policy.max_verify_iterations
+                ),
+            },
             fresh_boundary={
                 "kind": boundary.kind,
                 "previous_context_sha256": (
