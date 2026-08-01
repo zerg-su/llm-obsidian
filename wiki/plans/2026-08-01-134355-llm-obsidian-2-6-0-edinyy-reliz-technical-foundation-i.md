@@ -21,6 +21,34 @@ tags:
 
 Выпустить один крупный `2.6.0` из обычного `/Users/zak/Projects/llm-obsidian`, без публичного `2.5.2`.
 
+### North Star
+
+После 2.6 утверждённый пользователем outcome проходит от clarify через plan, dispatch, pipeline execution, review и reap без смыслового дрейфа. Harness детерминированно владеет identity, bounds, переходами и evidence flow; модели принимают только семантические решения и не могут подменить исходный outcome локальным proxy вроде зелёных тестов или формального task completion.
+
+### Outcome Contract этого релиза
+
+План остаётся единственным source of truth. Канонический bounded JSON-блок ниже имеет собственный digest, который не зависит от остальных редакционных изменений плана:
+
+```json
+{
+  "schema_version": 1,
+  "purpose": "Предотвратить потерю пользовательской цели при декомпозиции больших планов и автономном выполнении pipeline.",
+  "desired_outcome": "Каждая новая v4-задача сохраняет утверждённый пользователем outcome до независимо проверенного результата и typed reap disposition без добавления второго orchestration или stop authority.",
+  "success_evidence": [
+    {"evidence_id": "paired-contract-stability", "observable": "Baseline и post-change paired fixtures используют один и тот же outcome-contract digest, route и verification budget."},
+    {"evidence_id": "semantic-drift-detection", "observable": "Review отклоняет реализацию, которая локально зелёная, но не достигает desired_outcome или выходит за non_goals."},
+    {"evidence_id": "typed-reap-disposition", "observable": "Wiki Summary v2 сохраняет achieved, partially-achieved или not-achieved вместе с bounded evidence IDs и residual-gap pointers."},
+    {"evidence_id": "legacy-isolation", "observable": "Активные v1-v3 операции не конвертируются и завершаются по прежнему frozen contract."}
+  ],
+  "non_goals": [
+    "Отдельный пользовательский goal-скилл.",
+    "Новый scheduler, pipeline engine или model-owned lifecycle authority.",
+    "Импорт tracker, GitHub, subagent или orchestration механики upstream-репозиториев.",
+    "Автоматическая миграция активных v1-v3 операций."
+  ]
+}
+```
+
 Внутри релиза сохранить рекомендацию Fable как внутреннюю последовательность:
 
 1. Technical foundation.
@@ -52,6 +80,8 @@ Swarm integration repair в релиз не входит. Namespace, branding и
 CLI обязан:
 
 - принимать exact worktree, refs и repository-relative paths;
+- разрешать reviewer’у bounded read-only navigation по exact ContextPacket root и exact worktree: предпочтительно через явные `--packet-root`/`--worktree`, а если нужен `cd` — только как code-owned переход в один из этих validated roots без shell chaining;
+- материализовать обязательные packet inputs в формате, читаемом штатными `Read`/`Grep`, чтобы `.bin`-расширение не вынуждало reviewer использовать shell для обычного чтения;
 - иметь фиксированные лимиты вывода и timeout;
 - запрещать Git mutation, remote operations, shell chaining, glob expansion, pipes, redirects и environment injection;
 - не писать в product tree, Git metadata, telemetry или vault;
@@ -68,7 +98,9 @@ CLI обязан:
 - `critical` и `important` считать material findings;
 - `minor` сохранять в результате, но не открывать обязательный fix loop;
 - не конвертировать активные v3 operations: upgrade preflight требует сначала завершить их;
-- старые v1–v3 архивы остаются исторически читаемыми, но новые операции их не создают.
+- старые v1–v3 архивы остаются исторически читаемыми, но новые операции их не создают;
+- для plan-mode v4 добавить обязательный `outcome_contract_sha256`, вычисленный из канонического Outcome Contract внутри утверждённой plan page;
+- любое отсутствие, неоднозначность или drift contract digest до effect приводит к fail-closed, а после запуска — к typed attention, без переписывания цели моделью.
 
 Добавить harness-owned resolution evidence по каждому material finding:
 
@@ -104,9 +136,34 @@ Producer и `pipeline-stats` используют одну severity-конста
 3. При изменении pins обновить snapshot bytes и manifest отдельным механическим commit.
 4. Обновить adopt/adapt/reject judgement отдельным commit.
 5. Не импортировать GitHub, installer, issue tracker, worktree или чужую orchestration-механику.
-6. Новые идеи вне шести утверждённых skills записать как будущие кандидаты, не расширяя 2.6.
+6. Новые идеи вне явно расширенного 2.6 inventory записать как будущие кандидаты; Outcome Contract является отдельным одобренным scope amendment, а не скрытым расширением.
 
-### 2.5 RT10 и foundation checkpoint
+### 2.5 Outcome Contract foundation
+
+До foundation checkpoint реализовать только детерминированный transport и typed contracts:
+
+- определить bounded schema с обязательными `desired_outcome`, `success_evidence`, `non_goals` и опциональным `purpose`;
+- не добавлять `invariants` и `stop_conditions`: safety, permissions, forbidden actions, budgets, watchdog и terminal outcomes остаются существующей code-owned authority;
+- хранить контракт как один канонический JSON-блок внутри plan page; отдельный свободно дрейфующий artifact запрещён;
+- канонически сериализовать контракт и вычислять независимый `outcome_contract_sha256`;
+- bind digest рядом с `approved_plan_sha256` в новых `task-meta v4` operations;
+- доставлять контракт built-in semantic steps через ContextPacket, а custom pipelines — через существующий reserved `context_pointer` с `pointer_id=outcome-contract`; grammar v1, переходы и loop semantics не менять;
+- code-owned проверки подтверждают только schema, bounds, digest, identity и evidence references; deterministic transitions не получают дополнительных model calls;
+- выпустить `wiki-summary v2` с `outcome_disposition=achieved|partially-achieved|not-achieved`, bounded `outcome_evidence_ids` и `residual_gap_pointers`;
+- обновить callback broker, task-summary validation, reap и архивное чтение так, чтобы новые v4 operations создавали v2 summary, а старые v1 summaries оставались читаемыми;
+- fixture-команды не хранить сырьём в Outcome Contract: `success_evidence` описывает observable behavior и ссылается на зарегистрированный verification check/evidence ID.
+
+Обязательные deterministic tests:
+
+- canonical serialization и стабильный digest;
+- rejection отсутствующего, дублированного, oversized или изменённого contract block;
+- независимое обнаружение plan drift и outcome drift;
+- v3 operation и frozen custom definition остаются byte-compatible и не получают новый pointer задним числом;
+- reserved context pointer нельзя переопределить model-authored spec;
+- Wiki Summary v2 принимает только declared disposition/evidence IDs и отклоняет свободные новые authority fields;
+- ни один contract field не может разрешить запрещённый effect, продолжить typed stop или расширить permissions.
+
+### 2.6 RT10 и foundation checkpoint
 
 После установки локального adapter с foundation-ветки выполнить RT10 `distill-runbook`.
 
@@ -114,34 +171,36 @@ Producer и `pipeline-stats` используют одну severity-конста
 
 - прогнать foundation test gate;
 - зафиксировать exact foundation SHA;
-- больше не менять telemetry definitions и paired-task fixtures;
+- больше не менять telemetry definitions, Outcome Contract schema/serialization и paired-task fixtures;
+- заморозить contract-bearing paired fixtures до baseline: оба прогона используют идентичные contract bytes и digest;
 - этот SHA становится внутренним baseline, но не тегом и не публичным релизом.
 
 ## 3. Skill intelligence workstreams
 
 ### Обязательный meta-gate `improve-skills`
 
-Перед созданием веток A/B/C прогнать все шесть изменяемых skills — `clarify`, `design`, `prototype`, `debug`, `tdd`, `review` — через локальный `improve-skills`:
-
-Pre-branch запуск является строго audit-only: он фиксирует verdicts, baseline findings и behavioural expectations, но не изменяет skills. Каждый finding заранее назначается своей ветке-владельцу — A для `clarify`/`design`/`prototype`, B для `debug`/`tdd`, C для `review`; любые правки выполняются только внутри этой workstream. Frozen foundation SHA остаётся единым branch point и baseline для paired comparison.
+Перед созданием веток A/B/C прогнать расширенный inventory — `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`, `review`, `reap` и `improve-skills` — через локальный `improve-skills`.
 
 - выполнить строгий структурный аудит `python3 skills/improve-skills/scripts/audit_skills.py --strict`;
-- зафиксировать baseline findings и behavioural expectations до редактирования;
+- зафиксировать baseline findings, behavioural expectations и goal-preservation expectations до редактирования;
 - использовать pinned `writing-skills` из Superpowers и `writing-great-skills` Matt Pocock только как reference evidence;
-- исправлять только доказанные проблемы, не переносить чужую orchestration и не менять workflow semantics без отдельного решения.
+- исправлять только доказанные проблемы, не переносить чужую orchestration и не менять workflow semantics вне явно одобренного Outcome Contract amendment.
 
-В каждой workstream findings `improve-skills` становятся входом для focused изменений и тестов. После интеграции выполнить единый post-audit тех же шести skills и принять изменение только если:
+Pre-branch запуск является строго audit-only: он фиксирует verdicts, но не изменяет skills. Каждый finding заранее назначается владельцу — A для `clarify`/`design`/`prototype`/`save-plan`, B для `debug`/`tdd`, C для `review`/`reap`, integration branch для `improve-skills`. `dispatch` и schema/harness wiring принадлежат technical foundation и проверяются как product change, а не как quality-only edit. Frozen foundation SHA остаётся единым branch point и baseline для paired comparison.
+
+В каждой workstream findings `improve-skills` становятся входом для focused изменений и тестов. После интеграции выполнить единый post-audit того же inventory и принять изменение только если:
 
 - строгий аудит, instruction lint и skill-budget checks зелёные;
 - paired behavioural comparison не ухудшил completion, число вмешательств, rounds или lifecycle stability;
 - каждое изменение связано с исходным finding либо подтверждённым behavioural improvement;
-- недоказанные улучшения удалены или вынесены за пределы 2.6.
+- недоказанные улучшения удалены или вынесены за пределы 2.6;
+- goal-preservation pass подтверждает, что скилл получает общий outcome, не заменяет его локальным proxy и связывает completion claim с объявленным evidence.
 
 `improve-skills` остаётся manual engineering meta-skill и не запускается автоматически в пользовательских workflow.
 
 Все три ветки создаются от одного foundation SHA и разрабатываются параллельно. На ветках выполняются self-review и focused deterministic tests; отдельных Fable/Sol review не запускать.
 
-### Workstream A — clarify, design, prototype
+### Workstream A — clarify, design, prototype, save-plan
 
 `clarify`:
 
@@ -149,7 +208,9 @@ Pre-branch запуск является строго audit-only: он фикс�
 - задаёт строго один material question за раз;
 - включает brainstorming/domain modeling только при реальной неоднозначности;
 - фиксирует в контексте термины, инварианты, противоречия, edge cases и ADR candidates;
-- ничего не пишет до отдельной разрешённой vault transaction.
+- ничего не пишет до отдельной разрешённой vault transaction;
+- на alignment gate формирует один Outcome Contract из согласованных решений, не придумывая неоговорённую цель;
+- при материальной неоднозначности `desired_outcome`, evidence или non-goals продолжает интервью, а не создаёт placeholder.
 
 `design` и plan capture:
 
@@ -158,7 +219,9 @@ Pre-branch запуск является строго audit-only: он фикс�
 - запрещают placeholders и неопределённые интерфейсы;
 - используют vertical slices по умолчанию;
 - используют expand-contract только для wide migrations;
-- различают unresolved fog и явно закрытый out-of-scope.
+- различают unresolved fog и явно закрытый out-of-scope;
+- сохраняют `desired_outcome`, `success_evidence`, `non_goals` и опциональный `purpose` без семантического дрейфа;
+- `save-plan` пишет канонический Outcome Contract в ту же vault transaction, что и plan page, и не создаёт второй goal artifact.
 
 `prototype`:
 
@@ -185,9 +248,10 @@ Pre-branch запуск является строго audit-only: он фикс�
 - проверяет observable behavior, а не наличие текста в source;
 - regression test демонстрирует red и green на правильном seam;
 - доказательство red на pre-fix состоянии выполняется в disposable worktree или на сохранённом base, без destructive reset рабочего checkout;
-- docs, mechanical config и disposable prototypes используют эквивалентную пропорциональную проверку.
+- docs, mechanical config и disposable prototypes используют эквивалентную пропорциональную проверку;
+- red/green и локальная acceptance не считаются завершением, если они не подтверждают соответствующий `success_evidence` общего Outcome Contract.
 
-### Workstream C — review semantics
+### Workstream C — review и reap semantics
 
 Обновить skill и harness вместе:
 
@@ -197,11 +261,26 @@ Pre-branch запуск является строго audit-only: он фикс�
 - verification классифицирует finding как addressed или not-addressed;
 - новый material regression в fix delta присоединяется к открытому набору;
 - наблюдение вне scope получает durable follow-up, но не расширяет текущий loop;
-- simple review остаётся одной holistic session;
-- deep review сохраняет независимые Fable/spec и Sol/standards-correctness-architecture-security lanes;
-- axes не сливаются и не rerank’ятся.
+- simple review остаётся одной holistic session: проверка Outcome Contract является первым разделом этой же сессии;
+- deep review сохраняет независимые Fable/spec и Sol/standards-correctness-architecture-security lanes; Outcome Contract плюс approved plan входят в существующую Fable/spec lane;
+- новая lane, дополнительная review surface или дополнительный model call не создаются;
+- axes не сливаются и не rerank’ятся;
+- reviewer классифицирует каждый `success_evidence` как established, missing или contradicted и отдельно проверяет `non_goals` на scope creep;
+- `reap` принимает только approved review evidence, пишет Wiki Summary v2 disposition и residual gaps и никогда молча не переписывает desired outcome.
 
 Обобщённый nuance/exemption detector в 2.6 не входит. Hard safety, permission, lifecycle и external-effect prohibitions сохраняются.
+
+### Сквозной goal-preservation contract
+
+`improve-skills` получает пятый обязательный pass `goal preservation` для engineering skills:
+
+- назвать общий outcome/input, который скилл обязан сохранить;
+- назвать допустимый локальный subgoal и доказать, что он служит общему outcome;
+- найти completion proxies — зелёный тест, чистый diff, закрытый ticket, callback или task summary — которые ошибочно могут быть приняты за пользовательский результат;
+- требовать evidence именно для approved outcome, не добавляя новый model call в code-owned переход;
+- выдавать `fix`, `no-change` или `defer` по существующей verdict discipline.
+
+Полный semantic flow 2.6: `clarify` создаёт контракт → `design`/`save-plan` сохраняют → `dispatch` валидирует и bind’ит digest → semantic steps получают общий outcome и локальный subgoal → существующая review lane проверяет достижение → `reap` фиксирует typed disposition. Ни один этап не имеет права менять контракт; изменение цели требует нового пользовательского решения и нового approved digest.
 
 ## 4. Интеграция и циклы исправлений
 
@@ -212,7 +291,7 @@ Pre-branch запуск является строго audit-only: он фикс�
    - Workstream A;
    - Workstream B;
    - Workstream C.
-3. Общие router tests, version files, changelog и release docs меняются только на integration branch.
+3. Общие router tests, `improve-skills` goal-preservation pass, version files, changelog и release docs меняются только на integration branch.
 4. Конфликты решает coordinator по утверждённому плану; branch executors не переписывают чужие изменения.
 5. После каждого merge запускается только затронутый suite; полный gate запускается после всех merge.
 
@@ -231,10 +310,12 @@ Pre-branch запуск является строго audit-only: он фикс�
 
 ### Paired baseline
 
-На foundation SHA выполнить две замороженные задачи:
+На foundation SHA выполнить две замороженные contract-bearing задачи:
 
 1. Fix: `clarify → debug → tdd → review`.
 2. Design: `clarify → design → prototype → review`.
+
+До первого запуска сохранить canonical contract bytes, digest, fixture/base, expected evidence IDs и намеренно включить один локально зелёный, но goal-misaligned вариант для проверки semantic-drift detection. Foundation и post-change прогоны обязаны использовать те же bytes; изменение контракта аннулирует пару вместо тихого продолжения.
 
 После интеграции skill changes повторить те же задачи:
 
@@ -251,7 +332,10 @@ Pre-branch запуск является строго audit-only: он фикс�
 - findings по severity;
 - callback/lifecycle failures;
 - duplicate effects;
-- соблюдение новых skill invariants.
+- соблюдение новых skill invariants;
+- established/missing/contradicted outcome evidence;
+- scope creep относительно `non_goals`;
+- совпадение contract digest и корректность Wiki Summary v2 disposition.
 
 ### Real-task dogfood
 
@@ -260,7 +344,8 @@ Pre-branch запуск является строго audit-only: он фикс�
 - неоднозначная архитектурная задача через clarify/design;
 - воспроизводимый product defect через debug/TDD;
 - review с применённым и аргументированно отклонённым finding;
-- disposable prototype с durable evidence result.
+- disposable prototype с durable evidence result;
+- хотя бы одна из задач должна иметь несколько локально успешных подшагов, но незавершённый desired outcome, чтобы проверить `partially-achieved` и отсутствие ложного completion claim.
 
 Задачи можно запускать параллельно только в независимых worktrees. Они не считаются доказательством универсального улучшения — вывод ограничивается проверенными классами задач.
 
@@ -275,7 +360,9 @@ Pre-branch запуск является строго audit-only: он фикс�
 - MCP sync check;
 - upstream snapshot verification;
 - `git diff --check`;
-- bounded review-inspect live smoke;
+- bounded review-inspect live smoke, включая чтение exact ContextPacket без shell workaround и validated read-only navigation по packet/worktree roots;
+- Outcome Contract parser/digest/task-meta v4/context delivery/Wiki Summary v2 compatibility gate;
+- негативный smoke, где зелёные локальные проверки не достигают desired outcome и review блокирует completion;
 - отсутствие unresolved callbacks и принадлежащих релизу orphan surfaces;
 - paired comparison и четыре real tasks;
 - version, changelog и release docs для `2.6.0`.
@@ -297,4 +384,7 @@ Push, tag и публикация релиза остаются ручными �
 - Текущая custom pipeline grammar остаётся последовательной с bounded backward loops.
 - Release-level параллелизм обеспечивают coordinator, isolated worktrees и существующие typed pipelines.
 - Нового scheduler, `parallel/join`, nested pipeline или runtime DSL в 2.6 нет.
+- Outcome Contract не является вторым plan, отдельным Goal-скиллом или lifecycle authority; он является bounded semantic input с отдельным digest внутри plan page.
+- `purpose` опционален; `desired_outcome`, `success_evidence` и `non_goals` обязательны; stop/safety/permission authority остаётся в существующих typed harness contracts.
+- Новые task-meta v4 operations требуют Outcome Contract и Wiki Summary v2; активные v1-v3 operations и исторические summaries не мигрируются.
 - Перед реализацией сохранённая версия этого плана проходит один Fable xhigh plan review; material замечания вносятся в план одним batch до dispatch.
