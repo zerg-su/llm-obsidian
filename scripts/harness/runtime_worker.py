@@ -485,7 +485,7 @@ def _normalize_fetch_errors_at_provider_boundary(
     path: Path,
     raw: bytes,
 ) -> bytes:
-    """Drop only blank provider error strings before strict validation."""
+    """Normalize only bounded provider error forms before strict validation."""
 
     value = json.loads(raw)
     if not isinstance(value, dict):
@@ -493,12 +493,31 @@ def _normalize_fetch_errors_at_provider_boundary(
     errors = value.get("fetch_errors")
     if not isinstance(errors, list):
         return raw
-    normalized = [
-        item
-        for item in errors
-        if not (isinstance(item, str) and not item.strip())
-    ]
-    if normalized == errors:
+    normalized: list[object] = []
+    changed = False
+    for item in errors:
+        if isinstance(item, str):
+            if not item.strip():
+                changed = True
+                continue
+            normalized.append(item)
+            continue
+        if isinstance(item, Mapping) and set(item) == {"url", "error"}:
+            url = item["url"]
+            error = item["error"]
+            if (
+                isinstance(url, str)
+                and url.strip()
+                and isinstance(error, str)
+                and error.strip()
+            ):
+                canonical = f"{url}: {error}"
+                if len(canonical) <= 2000:
+                    normalized.append(canonical)
+                    changed = True
+                    continue
+        normalized.append(item)
+    if not changed:
         return raw
     value["fetch_errors"] = normalized
     _atomic_json(path, value)
