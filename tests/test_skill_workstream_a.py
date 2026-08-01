@@ -64,3 +64,27 @@ assert normalized_design.index(
     "Start with ownership boundaries and owned test seams"
 ) < normalized_design.index("Produce:"), "Owned seams must shape the design before output"
 print("OK   design preserves the contract through owned, testable vertical slices")
+
+
+prototype = skill("prototype")
+require(
+    prototype,
+    "one falsifiable question",
+    "owned disposable worktree",
+    "one run command",
+    "production code remains unchanged",
+    "Question",
+    "Evidence",
+    "Decision",
+    "Limitations",
+    "Provenance",
+    "how this local answer informs the incoming Outcome Contract",
+    "A successful spike does not establish the desired outcome",
+    "Promotion into production requires separate authorization",
+)
+normalized_prototype = " ".join(prototype.split())
+for heading in ("Question", "Evidence", "Decision", "Limitations", "Provenance"):
+    assert normalized_prototype.count(f"`{heading}`") == 1, (
+        f"prototype durable record must define `{heading}` exactly once"
+    )
+print("OK   prototype records bounded evidence without claiming outcome completion")
