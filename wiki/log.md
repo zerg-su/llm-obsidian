@@ -27,6 +27,27 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] reap | df250-real-rt08-upstream-skills-research
+
+`c-000057` [[2.5 real dogfood RT08 upstream skills research]]. ## RT08 — upstream skills research refresh
+
+Refreshed the `obra/superpowers` and `mattpocock/skills` comparison and updated the reusable integration guidance. Commit `83e0977`.
+
+### Result
+
+- **`docs/upstream-skills-comparison.md`** (new) — axis-by-axis comparison, each claim cited to an exact snapshot file plus a stable upstream URL derived from the pinned commit. Axes: steering form, context budget, TDD posture, review discipline, delegation and context isolation, decomposition, debugging, pro
+
+## [2026-08-01] reap | df250-real-rt09-vault-health-audit
+
+`c-000055` [[2.5 real dogfood RT09 vault health audit]]. ## Result
+
+Final HEAD `e339bf1` contains the RT09 audit commit `d7a6e2b` plus the complete typed-review resolution. The audit transactionally updated [[dashboard]], `wiki/index.md`, [[meta/_index|meta index]], [[lint-report-2026-08-01]], and [[log]], with the affected `.vault-meta` indexes regenerated. It preserved unrelated knowledge pages, `hot.md`, and `.obsidian` state.
+
+## Audit evidence
+
+- Baseline: 70 indexed Markdown pages; deterministic validation 0 FAIL / 8 WARN.
+- Final state: 0 actio
+
 ## [2026-08-01] reap | df250-real-rt07-stale-identity-diagnostic
 
 `c-000053` [[2.5 real dogfood RT07 stale identity diagnostic]]. ## Outcome

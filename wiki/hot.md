@@ -34,6 +34,8 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: [[2.5 real dogfood RT08 upstream skills research]] — finalized task result (`c-000057`)
+- 2026-08-01: [[2.5 real dogfood RT09 vault health audit]] — finalized task result (`c-000055`)
 - 2026-08-01: [[2.5 real dogfood RT07 stale identity diagnostic]] — finalized task result (`c-000053`)
 - 2026-08-01: [[2.5 real dogfood RT04 invalid review callbacks]] — finalized task result (`c-000051`)
 - 2026-08-01: [[2.5 real dogfood RT06 runtime-neutral telemetry]] — finalized task result (`c-000049`)
@@ -47,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-07-18: [[LLM Obsidian v2.0.8 RD upstream audit]] — подготовлен и проверен Fable/high локальный релиз-кандидат v2.0.8 (`c-000010`)
 - 2026-07-11: [[Unattended Pipeline]] — public v2 pipeline and strict contracts (c-000004)
 - 2026-07-06: [[Dispatch Reap Live Smoke gpt-5.5]] - live Codex gpt-5.5 dispatch/reap-send smoke filed (`c-000004`)
-- 2026-07-05: вольт инициализирован из шаблона llm-obsidian v1.0.0
 
 ## Active Threads
 
