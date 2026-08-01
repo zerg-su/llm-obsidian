@@ -1033,6 +1033,47 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     process.status_value = "alive"
 
+    noncallback_spec = OperationSpec(
+        "noncallback-cleanup",
+        "noncallback-cleanup-key",
+        "task-split",
+        "owner-1",
+        route,
+        "packets/noncallback.json",
+        "typed-result",
+    )
+    store.create(
+        noncallback_spec,
+        lane_id="noncallback-cleanup-lane",
+        run_id="noncallback-cleanup-run",
+    )
+    noncallback_supervisor = OperationSupervisor(
+        store, "owner-1", "noncallback-cleanup"
+    )
+    for state in ("preflight", "starting", "running", "finalizing"):
+        noncallback_supervisor.transition(state)
+    noncallback_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    process.status_value = "unknown"
+    process.supervisor_status_value = "unknown"
+    noncallback_result = manager.request_exit(
+        "owner-1", "noncallback-cleanup"
+    )
+    check(
+        "manager non-callback unknown ownership stays fail-closed",
+        noncallback_result.record.state == "attention-required"
+        and noncallback_result.process_status == "unknown"
+        and process.exit_requests == [],
+        noncallback_result,
+    )
+
     mismatch_spec = OperationSpec(
         "generic-cleanup-mismatch",
         "generic-cleanup-mismatch-key",
@@ -1079,7 +1120,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             mismatch_payload_sha,
         )
     )
-    process.status_value = "unknown"
+    process.status_value = "dead"
     process.supervisor_status_value = "unknown"
     exact_capture = process.capture_identity
     process.capture_identity = lambda pid, process_group=0: "c" * 64  # type: ignore[method-assign]
@@ -1089,11 +1130,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     check(
         "callback cleanup fails closed when exact identities do not match",
         mismatch_result.record.state == "attention-required"
-        and mismatch_result.process_status == "unknown"
         and process.exit_requests == [],
         mismatch_result,
     )
     process.capture_identity = exact_capture  # type: ignore[method-assign]
+    process.status_value = "unknown"
 
     generic_spec = OperationSpec(
         "generic-cleanup",
