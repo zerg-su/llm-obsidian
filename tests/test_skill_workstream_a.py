@@ -46,41 +46,42 @@ require(
     design,
     "Stay read-only",
     "Start with ownership boundaries and owned test seams",
-    "Preserve the incoming Outcome Contract without semantic drift",
-    "`desired_outcome`, `success_evidence`, `non_goals`, and optional `purpose`",
-    "the problem and non-goals",
+    "Preserve the incoming Outcome Contract",
+    "without semantic drift",
+    "`purpose`, `desired_outcome`, `success_evidence`, and `non_goals`",
+    "problem/non-goals",
     "invariants",
-    "alternatives",
-    "data/control flow, failure recovery, rollout, and rollback",
+    "alternatives/tradeoffs",
+    "data/control flow, recovery, rollout/rollback",
     "Unresolved fog",
-    "explicitly closed as out of scope",
-    "Do not leave placeholders or undefined interfaces",
-    "Use vertical slices by default",
-    "expand-contract only for a wide migration",
-    "trace each declared evidence ID",
+    "explicit out-of-scope",
+    "No placeholders/undefined interfaces",
+    "Default to vertical slices",
+    "expand-contract only for wide migration",
+    "testable acceptance criteria per evidence ID/seam",
 )
 normalized_design = " ".join(design.split())
 assert normalized_design.index(
     "Start with ownership boundaries and owned test seams"
-) < normalized_design.index("Produce:"), "Owned seams must shape the design before output"
+) < normalized_design.index("Produce "), "Owned seams must shape the design before output"
 print("OK   design preserves the contract through owned, testable vertical slices")
 
 
 prototype = skill("prototype")
 require(
     prototype,
-    "one falsifiable question",
-    "owned disposable worktree",
-    "one run command",
+    "one falsifiable question/criterion",
+    "harness-owned disposable worktree/minimal ContextPacket",
+    "one run command/bounded evidence",
     "production code remains unchanged",
     "Question",
     "Evidence",
     "Decision",
     "Limitations",
     "Provenance",
-    "how this local answer informs the incoming Outcome Contract",
-    "A successful spike does not establish the desired outcome",
-    "Promotion into production requires separate authorization",
+    "how the local answer informs the incoming Outcome Contract",
+    "A successful spike proves neither desired outcome nor production completion",
+    "Production promotion requires separate authorization",
 )
 normalized_prototype = " ".join(prototype.split())
 for heading in ("Question", "Evidence", "Decision", "Limitations", "Provenance"):

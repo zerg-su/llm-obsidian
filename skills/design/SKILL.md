@@ -5,33 +5,19 @@ description: Shape read-only architecture, domain boundaries, alternatives, and 
 
 # Design
 
-Stay read-only. Gather the current constraints, users, failure modes, and
-authoritative seams. Ask one question at a time only when a material choice
-cannot be resolved from available evidence.
+Stay read-only. Ask one question per material unknown.
 
 Start with ownership boundaries and owned test seams. Preserve the incoming
-Outcome Contract without semantic drift: keep its `desired_outcome`,
-`success_evidence`, `non_goals`, and optional `purpose` unchanged.
+Outcome Contract—optional `purpose`, `desired_outcome`, `success_evidence`, and
+`non_goals`—without semantic drift.
 
-Produce:
+Produce problem/non-goals, invariants, 2-3 alternatives/tradeoffs,
+recommendation/interfaces, data/control flow, recovery,
+rollout/rollback, testable acceptance criteria per evidence ID/seam, ADRs.
 
-- the problem and non-goals;
-- invariants and ownership boundaries;
-- two or three credible alternatives with operational tradeoffs;
-- the recommended design and why it wins here;
-- defined interfaces plus data/control flow, failure recovery, rollout, and
-  rollback;
-- testable acceptance criteria that trace each declared evidence ID to an
-  owned seam;
-- ADR candidates for decisions that should remain durable.
+Separate fact/assumption/decision; distinguish Unresolved fog from explicit
+out-of-scope. No placeholders/undefined interfaces; name owners/contracts.
 
-Separate facts, assumptions, and decisions. Label Unresolved fog that still
-needs a decision separately from work explicitly closed as out of scope. Do not
-leave placeholders or undefined interfaces; name their owner and observable
-contract.
-
-Use vertical slices by default. Use expand-contract only for a wide migration
-that cannot be safely delivered as vertical slices. Prefer the smallest
-architecture that satisfies the constraints. Stop for approval before
-implementation, public-interface change, migration, new dependency, security
-boundary, or external effect.
+Default to vertical slices; use expand-contract only for wide migration.
+Get approval before implementation or interface/migration/dependency/security/
+external-effect change.

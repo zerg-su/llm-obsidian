@@ -11,48 +11,30 @@ allowed-tools: Read Bash Glob
 
 # save-plan: Save A Discussed Plan To The Wiki
 
-Files a plan that was discussed in the current conversation as a permanent page in `wiki/plans/` (this vault — the current project root). Use when the plan **did not** go through Claude Code's `ExitPlanMode` tool (those are captured automatically by the `.claude/hooks/plan-capture.sh` hook).
-
-The vault is the durable home for plans across sessions.
+File a discussed plan under this vault's `wiki/plans/` only when it did not use
+`ExitPlanMode`; `.claude/hooks/plan-capture.sh` captures that path.
 
 ## When to use
 
-User triggers this with one of:
-
-- `/save-plan`
-- "save this plan", "save plan", "save the plan"
-- "запиши план", "сохрани план", "зафайл план", "файлы план"
-- "save plan to wiki", "файлы план в вики"
-
-**Do not** invoke when user says "save plan and start executing" — that's an ExitPlanMode workflow. Instead, suggest entering plan mode.
-
-**Do not** invoke for general "save this conversation" — that's `/save`.
+Use the explicit triggers in the description. For "save and execute", suggest
+plan mode; for a general conversation save, use `/save`.
 
 ## Steps
 
 ### 1. Identify the plan content
 
-Look back in the conversation for the most recent block that looks like a plan. Markers:
+Find the latest coherent plan using its Plan/План heading, steps, goal, risks,
+open questions, or checklist. If none exists, ask for it; if several exist, ask
+which one to save.
 
-- Headers like `## План:`, `# План`, `## Plan:`
-- Numbered "Шаги" / "Steps" sections
-- Sections "Цель", "Goal", "Риски", "Risks", "Открытые вопросы"
-- A coherent block of markdown with checklist or numbered actions
-
-If multiple candidates exist, ask the user which one to save.
-
-If no obvious plan block exists, ask the user to paste the plan or specify what to save.
-
-Identify the approved Outcome Contract from the same conversation. The saved
-plan must contain exactly one canonical Outcome Contract JSON block with
+Find the approved Outcome Contract in the same conversation. The page needs
+exactly one canonical Outcome Contract JSON block with
 `schema_version: 1`, `desired_outcome`, `success_evidence`, and `non_goals`,
-plus optional `purpose`. Preserve those approved values without semantic drift.
+plus optional `purpose`, without semantic drift.
 
 If a required field is missing, duplicated, or materially ambiguous, stop and
-ask the user to resolve it before allocating metadata or writing. Do not infer
-or invent contract values from local plan steps. If the plan already contains
-a contract block, confirm that it is the same approved contract instead of
-adding another. Do not create a second goal artifact.
+ask before metadata or writing. Do not infer or invent contract values. An
+existing block must match and render once. Do not create a second goal artifact.
 
 ### 2. Resolve metadata
 
@@ -73,36 +55,16 @@ echo "date=$(date '+%Y-%m-%d')"
 
 ### 3. Derive title + slug
 
-- **title** — text of the plan's first H1/H2 with `#` symbols stripped, or first non-empty line. Keep human formatting (allow cyrillic, spaces, punctuation). Used in frontmatter and body verbatim.
-- **slug** — derived from title by **transliterating cyrillic → latin first** (simplified GOST: а→a, б→b, в→v, г→g, д→d, е→e, ё→yo, ж→zh, з→z, и→i, й→y, к→k, л→l, м→m, н→n, о→o, п→p, р→r, с→s, т→t, у→u, ф→f, х→kh, ц→ts, ч→ch, ш→sh, щ→shch, ъ→drop, ы→y, ь→drop, э→e, ю→yu, я→ya), then lowercase, replace any non-`[a-z0-9 ]` with space, collapse spaces to single `-`, trim leading/trailing `-`, cut to 60 chars. Result is pure latin ASCII (filename-friendly, FS-safe, grep-able). If empty after cleanup → `untitled-plan`. Title in frontmatter retains original cyrillic — only the filename is transliterated.
-
-Reference shell impl (matches `plan-capture.sh` hook for consistency):
-
-```bash
-slug=$(printf '%s' "$title" \
-  | tr '[:upper:]' '[:lower:]' \
-  | sed -E '
-      s/ё/yo/g; s/щ/shch/g; s/ю/yu/g; s/я/ya/g; s/ж/zh/g; s/х/kh/g;
-      s/ц/ts/g; s/ч/ch/g; s/ш/sh/g; s/й/y/g;
-      s/а/a/g; s/б/b/g; s/в/v/g; s/г/g/g; s/д/d/g; s/е/e/g;
-      s/з/z/g; s/и/i/g; s/к/k/g; s/л/l/g; s/м/m/g; s/н/n/g;
-      s/о/o/g; s/п/p/g; s/р/r/g; s/с/s/g; s/т/t/g; s/у/u/g;
-      s/ф/f/g; s/ы/y/g; s/э/e/g;
-      s/[ъь]//g;
-    ' \
-  | sed -E 's/[^a-z0-9 ]+/ /g; s/[[:space:]]+/-/g; s/-+/-/g; s/^-+//; s/-+$//' \
-  | cut -c1-60)
-```
-
-Example: «Создать hello.txt в текущем каталоге» → `sozdat-hello-txt-v-tekushchem-kataloge`.
+- **title** — first H1/H2 or non-empty line, preserved verbatim.
+- **slug** — use the exact code-owned `slug=$(...)` transliteration block in
+  `.claude/hooks/plan-capture.sh`: lowercase Cyrillic-to-Latin, ASCII
+  alphanumerics/hyphens, 60 characters; empty becomes `untitled-plan`. Only the
+  filename is transliterated.
 
 ### 4. Compose the page
 
-Place a `## Outcome Contract` section immediately after the title. Its `json`
-fence contains the actual approved contract from step 1, with no placeholder
-values. Preserve the remaining plan content verbatim, exactly as discussed in
-chat; if that content already included the contract, move neither its values
-nor its meaning and render it only once.
+After the title, render `## Outcome Contract` and the actual approved `json`
+block once; then preserve the remaining discussed plan verbatim.
 
 ```markdown
 ---
@@ -137,23 +99,12 @@ Filename: `wiki/plans/<ts>-<slug>.md` (relative to the project root).
 
 If file already exists (rare same-second collision), append `-1`, `-2`, etc.
 
-Before the writer effect, validate the final composed Markdown with the
-code-owned `scripts/outcome_contract.py` `extract_from_plan` function. For a
-shell value named `page`, the bounded preflight is:
-
-```bash
-PYTHONPATH=scripts python3 -c \
-  'import sys; from outcome_contract import extract_from_plan; extract_from_plan(sys.stdin.read())' \
-  <<<"$page"
-```
-
-Stop if validation rejects a missing, duplicate, malformed, oversized, or
-semantically changed contract. Send one `pages:[{op:"create", ...}]` payload to
-`scripts/vault-write.py` with `actor:"save-plan"` and the full JSON-escaped
-Markdown, including that validated contract, in the same successful
-`vault-write.py` transaction. A collision returns exit 4 without creating the
-page; choose the next suffix and retry the same content. Do not use Write/Edit
-on the page directly.
+Before writing, validate final Markdown with `scripts/outcome_contract.py`'s
+`extract_from_plan`; stop on rejection. Send one `pages:[{op:"create", ...}]`
+payload to `scripts/vault-write.py`, `actor:"save-plan"`, with the full page and
+contract in the same successful `vault-write.py` transaction. On collision exit
+4, increment the suffix and retry unchanged content. Do not use Write/Edit on
+the page directly.
 
 ### 6. Confirm to user
 
@@ -170,10 +121,9 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 
 ## Conventions
 
-- Tag `manual-save` distinguishes manual saves from hook-captured (`ExitPlanMode`-approved). Both have `type: plan`.
-- `status: pending` always at creation. User updates manually to `executed` / `abandoned` later via Obsidian.
-- `session_id` is the Claude Code session UUID, suitable for grep-lookup in `~/.claude/projects/<encoded-cwd>/sessions/<id>.jsonl` for full transcript.
-- Plans enter the same validated mutation path as every other wiki page; the Stop hook handles the scoped commit.
+- `manual-save` distinguishes this from hook capture; both are `type: plan`.
+- Create as `pending`; the user later chooses `executed` or `abandoned`.
+- `session_id` supports transcript lookup; Stop owns the scoped commit.
 
 ## Edge cases
 
@@ -188,8 +138,6 @@ Do NOT update `wiki/hot.md` — plans are not "recent context" worth caching.
 
 ## Schema reference
 
-The code-owned canonical frontmatter schema is `scripts/vault_schema.py`;
-`scripts/vault-write.py` imports and enforces it before mutation. The Outcome
-Contract schema, bounds, extraction, and canonical identity live in
-`scripts/outcome_contract.py`. Keep this skill aligned with those authorities;
-`wiki/plans/_index.md` is only a generated listing.
+Canonical frontmatter authority is `scripts/vault_schema.py`, enforced by
+`scripts/vault-write.py`; Outcome Contract authority is
+`scripts/outcome_contract.py`. `wiki/plans/_index.md` is generated listing only.
