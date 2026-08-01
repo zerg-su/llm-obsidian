@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-08-01
+updated: 2026-08-02
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-02: [[LLM Obsidian 2.6 paired fix post-change final]] — finalized task result (`c-000084`)
 - 2026-08-01: [[LLM Obsidian 2.6 skill workstream A]] — finalized task result (`c-000078`)
 - 2026-08-01: [[LLM Obsidian 2.6 skill workstream C]] — finalized task result (`c-000076`)
 - 2026-08-01: [[LLM Obsidian 2.6 paired design baseline]] — finalized task result (`c-000074`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[2.5 real dogfood RT07 stale identity diagnostic]] — finalized task result (`c-000053`)
 - 2026-08-01: [[2.5 real dogfood RT04 invalid review callbacks]] — finalized task result (`c-000051`)
 - 2026-08-01: [[2.5 real dogfood RT06 runtime-neutral telemetry]] — finalized task result (`c-000049`)
-- 2026-08-01: [[2.5 real dogfood RT05 auto-close ownership]] — finalized task result (`c-000047`)
 
 ## Active Threads
 

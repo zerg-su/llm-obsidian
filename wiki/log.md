@@ -27,6 +27,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-paired-fix-post-final
+
+`c-000084` [[LLM Obsidian 2.6 paired fix post-change final]]. Implemented and committed the frozen paired-fixture Unicode label fix at `c0d027f82e14e83b4d4368fec2a7e640d75d8cac`. The accepted typed evidence reproduces the pre-fix loss (`Résumé Plan` -> `r-sum-plan`; `Москва 42` -> `42`), isolates the ASCII-only `[a-z0-9]` allow-list as root cause, and proves the new observable regression red before the fix. The implementation now joins Unicode-aware alphanumeric runs while excluding underscore, so Unicode letters remain lowercase, unsafe separator runs col
+
 ## [2026-08-02 01:12] dispatch | llm-obsidian-2-6-paired-design-post-final
 
 Spawned an approved unattended task session (cmux `25230313-4DA6-4C04-A65D-AECAF82B82A8`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-final`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-final` from `14e35df85b97026dbb74c8cba83f1fcd9a317afa`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
