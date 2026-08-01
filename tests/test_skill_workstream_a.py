@@ -118,7 +118,10 @@ normalized_save_plan = " ".join(save_plan.split())
 assert normalized_save_plan.index("extract_from_plan") < normalized_save_plan.index(
     "./scripts/allocate-address.sh"
 ), "The canonical contract must validate before address allocation"
-assert normalized_save_plan.index("extract_from_plan") < normalized_save_plan.index(
+assert normalized_save_plan.count("extract_from_plan") >= 2, (
+    "Save-plan must retain both pre-allocation and final-page validation"
+)
+assert normalized_save_plan.rindex("extract_from_plan") < normalized_save_plan.index(
     'Send one `pages:[{op:"create", ...}]` payload'
 ), "The canonical contract must validate before the writer effect"
 print("OK   save-plan writes one validated contract with the plan transaction")
