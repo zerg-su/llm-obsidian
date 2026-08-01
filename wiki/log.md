@@ -27,6 +27,13 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] research | Superpowers vs Matt Pocock Skills
+
+- Refreshed the upstream skill-library comparison against the byte-verified pins in `references/upstream-skills/`
+- Pages created: [[Superpowers vs Matt Pocock Skills]]
+- Repo guidance: `docs/upstream-skills-comparison.md`, corrected the ambiguous mattpocock version in the pin record
+- Limitation: live-upstream drift unverified; protected research fetch failed three times with exit 127 (cmux wrapper vs sanitized RESEARCH_PATH), filed in `docs/feature-gaps.md`
+
 ## [2026-08-01] reap | df250-real-rt08-upstream-skills-research
 
 `c-000057` [[2.5 real dogfood RT08 upstream skills research]]. ## RT08 — upstream skills research refresh
@@ -72,7 +79,6 @@ Spawned an approved unattended task session (cmux `0AF194B8-B118-45A2-BAC1-0EC3C
 ## [2026-08-01 02:30] dispatch | df250-real-rt07-stale-identity-diagnostic
 
 Spawned an approved unattended task session (cmux `C4F2C9CB-A1C6-4368-920B-7E130943E731`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt07-stale-identity-diagnostic`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt07-stale-identity-diagnostic` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[2.5 real dogfood RT05 auto-close ownership]], [[Unattended Pipeline]]. Awaiting typed review and final reap.
-
 ## [2026-08-01] reap | df250-real-rt04-invalid-review-callbacks
 
 `c-000051` [[2.5 real dogfood RT04 invalid review callbacks]]. ## RT04 — four invalid review callbacks: classified, one cause class repaired
