@@ -20,10 +20,22 @@ LLM Obsidian.
 
 ## Current pins
 
-| Snapshot | Upstream | Version | Commit | License |
-|---|---|---:|---|---|
-| `obra-superpowers/` | `https://github.com/obra/superpowers` | 6.2.0 | `44c9b2d6e889982ac18c27d05a19fefe335194e1` | MIT |
-| `mattpocock-skills/` | `https://github.com/mattpocock/skills` | 1.2.0 | `2ab958093e83e0ec752e6c1c5932da465bf23e0c` | MIT |
+The commit is the identity of a pin. Declared versions are recorded for
+orientation only, and upstream may disagree with itself about them, so each is
+attributed to the file it came from.
+
+| Snapshot | Upstream | `package.json` | `.claude-plugin/plugin.json` | Commit | License |
+|---|---|---:|---:|---|---|
+| `obra-superpowers/` | `https://github.com/obra/superpowers` | 6.2.0 | 6.2.0 | `44c9b2d6e889982ac18c27d05a19fefe335194e1` | MIT |
+| `mattpocock-skills/` | `https://github.com/mattpocock/skills` | 1.1.0 | 1.2.0 | `2ab958093e83e0ec752e6c1c5932da465bf23e0c` | MIT |
+
+The `mattpocock-skills` pin declares two different versions in two upstream files
+at the same commit, and its `CHANGELOG.md` top section is `1.1.0`. Both numbers
+are recorded so this is not mistaken for a stale or partial capture.
+
+Local analysis of these pins — the side-by-side comparison, adoption
+dispositions, and the material we deliberately do not import — lives in
+[`docs/upstream-skills-comparison.md`](../../docs/upstream-skills-comparison.md).
 
 The machine-readable pin, capture date, included paths, and deterministic tree
 digests are in `manifest.json`. Verify the retained bytes without executing any

@@ -30,6 +30,9 @@
   "codex": [
     "wiki/concepts/Unattended Pipeline.md"
   ],
+  "comparison": [
+    "wiki/comparisons/Superpowers vs Matt Pocock Skills.md"
+  ],
   "compatibility": [
     "wiki/concepts/DragonScale on macOS.md"
   ],
@@ -271,7 +274,11 @@
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/meta/sessions/LLM Obsidian v2.1.2 semantic acceptance refactor.md"
   ],
+  "skill-authoring": [
+    "wiki/comparisons/Superpowers vs Matt Pocock Skills.md"
+  ],
   "skills": [
+    "wiki/comparisons/Superpowers vs Matt Pocock Skills.md",
     "wiki/meta/daily-pipeline-guide.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md"
   ],
@@ -286,6 +293,9 @@
   ],
   "todo": [
     "wiki/backlog.md"
+  ],
+  "upstream": [
+    "wiki/comparisons/Superpowers vs Matt Pocock Skills.md"
   ],
   "v2-0-8": [
     "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md"

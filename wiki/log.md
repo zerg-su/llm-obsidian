@@ -27,6 +27,12 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] research | Superpowers vs Matt Pocock Skills
+- Refreshed the upstream skill-library comparison against the byte-verified pins in `references/upstream-skills/`
+- Pages created: [[Superpowers vs Matt Pocock Skills]]
+- Repo guidance: `docs/upstream-skills-comparison.md`, corrected the ambiguous mattpocock version in the pin record
+- Limitation: live-upstream drift unverified; protected research fetch failed three times with exit 127 (cmux wrapper vs sanitized RESEARCH_PATH), filed in `docs/feature-gaps.md`
+
 ## [2026-08-01] reap | df250-real-rt04-invalid-review-callbacks
 
 `c-000051` [[2.5 real dogfood RT04 invalid review callbacks]]. ## RT04 — four invalid review callbacks: classified, one cause class repaired
