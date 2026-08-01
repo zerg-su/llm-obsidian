@@ -105,6 +105,58 @@ class RuntimeWorkerError(RuntimeError):
     pass
 
 
+def _review_resolution_handoff_ready(
+    *,
+    worktree: Path,
+    operation_id: str,
+    gate_state: Mapping[str, object],
+    current_head: str,
+) -> bool:
+    """Return true only after the executor publishes one complete fix handoff."""
+
+    awaiting = gate_state.get("awaiting_resolution")
+    if not isinstance(awaiting, dict) or not awaiting:
+        return False
+    reviewed_heads = {
+        str(boundary.get("reviewed_head_sha") or "")
+        for boundary in awaiting.values()
+        if isinstance(boundary, dict)
+    }
+    if len(reviewed_heads) != 1 or "" in reviewed_heads:
+        return False
+    resolution_path = worktree / ".task-review-resolution.json"
+    if not resolution_path.is_file() or resolution_path.is_symlink():
+        return False
+    try:
+        resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    items = resolution.get("resolutions") if isinstance(resolution, dict) else None
+    if (
+        resolution.get("schema_version") != 1
+        or resolution.get("operation_id") != operation_id
+        or resolution.get("reviewed_head_sha") != next(iter(reviewed_heads))
+        or resolution.get("resolved_head_sha") != current_head
+        or not isinstance(items, list)
+        or not items
+    ):
+        return False
+    return all(
+        isinstance(item, dict)
+        and isinstance(item.get("finding_id"), str)
+        and bool(item["finding_id"])
+        and item.get("disposition") in DISPOSITIONS
+        and isinstance(item.get("rationale"), str)
+        and bool(item["rationale"])
+        and isinstance(item.get("follow_up"), str)
+        and (
+            item["disposition"] != "out-of-scope"
+            or bool(item["follow_up"])
+        )
+        for item in items
+    )
+
+
 def _pipeline_verify_identity(
     parent: OperationSpec,
     *,
@@ -3371,7 +3423,6 @@ def run(
                             if verify_step is not None
                             else 1
                         ),
-                        "summary": summary,
                     },
                     sort_keys=True,
                     separators=(",", ":"),
@@ -4496,6 +4547,13 @@ def run(
                 if gate_state.get("status") == "awaiting-resolution":
                     notify_review_resolution(gate_state)
                     if review.status == "stale":
+                        if not _review_resolution_handoff_ready(
+                            worktree=spec["cwd"],
+                            operation_id=spec["operation_id"],
+                            gate_state=gate_state,
+                            current_head=verification_head,
+                        ):
+                            return
                         drive_review()
                         return
                     _atomic_json(

@@ -30,6 +30,7 @@ from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.runtime_worker import (
     _pipeline_verify_identity,
+    _review_resolution_handoff_ready,
     run as run_worker,
 )
 from harness.store import OperationStore
@@ -591,6 +592,67 @@ def run_case(
 
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
+    handoff = root / "resolution-handoff"
+    handoff.mkdir()
+    reviewed_head = "a" * 40
+    resolved_head = "b" * 40
+    handoff_gate = {
+        "awaiting_resolution": {
+            "holistic": {"reviewed_head_sha": reviewed_head}
+        }
+    }
+    write_json(
+        handoff / ".task-review-resolution.json",
+        {
+            "schema_version": 1,
+            "operation_id": TASK,
+            "reviewed_head_sha": reviewed_head,
+            "resolved_head_sha": "",
+            "resolutions": [
+                {
+                    "finding_id": "F-material",
+                    "disposition": "",
+                    "rationale": "",
+                    "follow_up": "",
+                }
+            ],
+        },
+    )
+    check(
+        "automatic review drive waits for the complete resolution handoff",
+        not _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
+    write_json(
+        handoff / ".task-review-resolution.json",
+        {
+            "schema_version": 1,
+            "operation_id": TASK,
+            "reviewed_head_sha": reviewed_head,
+            "resolved_head_sha": resolved_head,
+            "resolutions": [
+                {
+                    "finding_id": "F-material",
+                    "disposition": "applied",
+                    "rationale": "The bounded correction is committed.",
+                    "follow_up": "",
+                }
+            ],
+        },
+    )
+    check(
+        "automatic review drive resumes after the exact durable handoff",
+        _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
     valid_summary = {
         "schema_version": 1,
         "type": "session",
@@ -2088,13 +2150,25 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     asynchronous_record = asynchronous_store.read(
         "owner-1", asynchronous_task
     )
+    asynchronous_verification_children = [
+        record
+        for record in asynchronous_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
     check(
-        "engineering change re-verifies the new resolution HEAD before same-session review",
+        "summary-only refresh reuses the exact-HEAD verification identity and effect",
         asynchronous_rc == 0
         and len(asynchronous_calls) == 4
-        and len(asynchronous_verification_heads) == 3
+        and len(asynchronous_verification_heads) == 2
         and len(set(asynchronous_verification_heads)) == 2
-        and len(asynchronous_verification_calls) == 9
+        and len(asynchronous_verification_calls) == 6
+        and len(asynchronous_verification_children) == 2
+        and all(
+            child.state == "complete"
+            and child.resources.process_group == 0
+            and not child.pending_effect
+            for child in asynchronous_verification_children
+        )
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
         and len(asynchronous_cmux.sent) == 3
@@ -2107,6 +2181,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             asynchronous_calls,
             asynchronous_verification_heads,
             asynchronous_verification_calls,
+            asynchronous_verification_children,
             asynchronous_record,
         ),
     )
