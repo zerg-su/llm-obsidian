@@ -267,6 +267,16 @@ expect_summary_error(
     incomplete_achieved,
     "every declared",
 )
+complete_achieved = dict(incomplete_achieved)
+complete_achieved["outcome_evidence_ids"] = [
+    "digest-stable",
+    "authority-closed",
+]
+assert validate_summary(
+    complete_achieved,
+    declared_evidence_ids=declared,
+    require_schema=True,
+) == complete_achieved
 for authority in (
     "permissions",
     "forbidden_actions",
