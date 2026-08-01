@@ -33,6 +33,18 @@ for path in sorted((ROOT / "schemas").glob("*.schema.json")):
 
 summary = load("wiki-summary-v1.schema.json")
 assert set(summary["properties"]["type"]["enum"]) == wiki_summary_contract.TYPES
+summary_v2 = load("wiki-summary-v2.schema.json")
+assert summary_v2["additionalProperties"] is False
+assert set(summary_v2["properties"]["type"]["enum"]) == wiki_summary_contract.TYPES
+assert set(summary_v2["properties"]["outcome_disposition"]["enum"]) == (
+    wiki_summary_contract.OUTCOME_DISPOSITIONS
+)
+assert summary_v2["properties"]["outcome_evidence_ids"]["maxItems"] == (
+    wiki_summary_contract.MAX_OUTCOME_EVIDENCE_IDS
+)
+assert summary_v2["properties"]["residual_gap_pointers"]["maxItems"] == (
+    wiki_summary_contract.MAX_RESIDUAL_GAPS
+)
 review = load("review-v1.schema.json")
 assert set(review["properties"]["verdict"]["enum"]) == review_contract.VERDICTS
 assert set(review["properties"]["mode"]["enum"]) == review_contract.MODES

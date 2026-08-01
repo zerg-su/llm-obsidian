@@ -1174,6 +1174,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         if config.get("codex_home")
         else "inherited current Codex environment"
     )
+    outcome_contract = extract_from_bytes(request["plan_file"].read_bytes())
     replacements = {
         "<task_name>": request["task_name"],
         "<description from user, multi-line ok>": request["description"],
@@ -1187,11 +1188,14 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<absolute path to wiki/plans/<file>.md>": str(approved_plan_file(request)),
         "<canonical-task-summary-json>": json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "type": request["reap"]["type"],
                 "title": request["reap"]["title"],
                 "session": request["origin_session"],
                 "body": "<bounded Markdown summary>",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": list(outcome_contract.evidence_ids),
+                "residual_gap_pointers": [],
             },
             ensure_ascii=False,
             separators=(",", ":"),

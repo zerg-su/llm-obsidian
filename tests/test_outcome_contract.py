@@ -20,6 +20,7 @@ from outcome_contract import (  # noqa: E402
     extract_from_plan,
 )
 import task_contract  # noqa: E402
+from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
 
 
 CONTRACT = {
@@ -188,3 +189,66 @@ with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
         "independent outcome drift", outcome_drift, "Outcome Contract digest changed"
     )
 print("OK   v4 detects plan drift and outcome drift independently")
+
+declared = {"digest-stable", "authority-closed"}
+summary_v2 = {
+    "schema_version": 2,
+    "type": "repo-touch",
+    "title": "Outcome foundation",
+    "session": "executor-session",
+    "body": "Implemented the bounded contract.",
+    "outcome_disposition": "partially-achieved",
+    "outcome_evidence_ids": ["digest-stable"],
+    "residual_gap_pointers": ["[[Release verification follow-up]]"],
+}
+assert validate_summary(
+    summary_v2,
+    declared_evidence_ids=declared,
+    require_schema=True,
+) == summary_v2
+assert validate_summary(
+    {
+        "schema_version": 1,
+        "type": "repo-touch",
+        "title": "Historical result",
+        "session": None,
+        "body": "Legacy archive remains readable.",
+    },
+    require_schema=True,
+)["schema_version"] == 1
+
+
+def expect_summary_error(label: str, value: dict[str, object], needle: str) -> None:
+    try:
+        validate_summary(
+            value,
+            declared_evidence_ids=declared,
+            require_schema=True,
+        )
+    except WikiSummaryError as exc:
+        assert needle in str(exc), f"{label}: {exc}"
+    else:
+        raise AssertionError(f"{label}: expected WikiSummaryError")
+
+
+undeclared = dict(summary_v2)
+undeclared["outcome_evidence_ids"] = ["invented-green-check"]
+expect_summary_error("undeclared evidence", undeclared, "not declared")
+missing_gap = dict(summary_v2)
+missing_gap["residual_gap_pointers"] = []
+expect_summary_error("partial without residual gap", missing_gap, "residual")
+achieved_gap = dict(summary_v2)
+achieved_gap["outcome_disposition"] = "achieved"
+expect_summary_error("achieved with residual gap", achieved_gap, "residual")
+for authority in (
+    "permissions",
+    "forbidden_actions",
+    "stop_conditions",
+    "continue_after_attention",
+):
+    expanded_summary = dict(summary_v2)
+    expanded_summary[authority] = True
+    expect_summary_error(
+        f"summary authority field {authority}", expanded_summary, "unknown fields"
+    )
+print("OK   Wiki Summary v2 is typed, evidence-bound, and authority-closed")

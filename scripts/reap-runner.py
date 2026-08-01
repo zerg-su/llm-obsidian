@@ -20,7 +20,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from lifecycle_telemetry import emit_lifecycle_event  # noqa: E402
 from task_contract import ContractError, validate_handoff  # noqa: E402
 from vault_schema import unresolved_wikilinks  # noqa: E402
-from wiki_summary_contract import WikiSummaryError, validate_summary  # noqa: E402
+from wiki_summary_contract import (  # noqa: E402
+    WikiSummaryError,
+    validate_summary_for_task,
+)
 from harness.contracts import OwnedResources  # noqa: E402
 from harness.runtime_sessions import (  # noqa: E402
     RuntimeSessionError,
@@ -146,12 +149,23 @@ def archive_reviews(
 
 
 def summary_with_reviews(vault: Path, worktree: Path, markers: list[str]) -> dict[str, Any]:
-    argv = [sys.executable, str(vault / "scripts/parse-wiki-summary.py"), "--json-file", str(worktree / ".task-summary.json")]
+    meta_path = worktree / ".task-meta.json"
+    meta = read_json(meta_path)
+    argv = [
+        sys.executable,
+        str(vault / "scripts/parse-wiki-summary.py"),
+        "--json-file",
+        str(worktree / ".task-summary.json"),
+        "--task-meta",
+        str(meta_path),
+    ]
     for marker in markers:
         argv.extend(["--review-archive-marker", marker])
     raw = run(argv, cwd=vault, label="summary parsing")
     try:
-        return validate_summary(json.loads(raw), allow_missing_session=True)
+        return validate_summary_for_task(
+            json.loads(raw), meta, allow_missing_session=True
+        )
     except (json.JSONDecodeError, WikiSummaryError) as exc:
         raise ReapError(f"summary contract is invalid: {exc}") from exc
 
@@ -162,6 +176,29 @@ def unique(values: list[str]) -> list[str]:
         if value and value not in result:
             result.append(value)
     return result
+
+
+def outcome_markdown(summary: dict[str, Any]) -> str:
+    if summary.get("schema_version") != 2:
+        return ""
+    evidence = ", ".join(
+        f"`{item}`" for item in summary["outcome_evidence_ids"]
+    ) or "none"
+    gaps = "\n".join(
+        f"- {item}" for item in summary["residual_gap_pointers"]
+    ) or "- none"
+    return (
+        "## Outcome\n\n"
+        f"Outcome disposition: `{summary['outcome_disposition']}`\n\n"
+        f"Outcome evidence IDs: {evidence}\n\n"
+        f"Residual gaps:\n{gaps}"
+    )
+
+
+def archived_summary_body(summary: dict[str, Any]) -> str:
+    body = str(summary["body"]).rstrip()
+    outcome = outcome_markdown(summary)
+    return f"{body}\n\n{outcome}" if outcome else body
 
 
 def frontmatter_page(
@@ -176,7 +213,8 @@ def frontmatter_page(
     runtime = str(meta.get("executor_runtime") or meta.get("runtime") or "")
     model = str(route.get("model") or meta.get("model") or "") if isinstance(route, dict) else str(meta.get("model") or "")
     agents = [str(item.get("name") or "") for item in meta.get("suggested_agents", []) if isinstance(item, dict)]
-    related = unique(re.findall(r"\[\[([^\]|#]+)", summary["body"]))[:20]
+    durable_body = archived_summary_body(summary)
+    related = unique(re.findall(r"\[\[([^\]|#]+)", durable_body))[:20]
     today = date.today().isoformat()
     lines = [
         "---", f"type: {page_type}", f"title: {json.dumps(summary['title'], ensure_ascii=False)}",
@@ -190,9 +228,25 @@ def frontmatter_page(
         lines.append(f"executor_model: {json.dumps(model, ensure_ascii=False)}")
     if agents:
         lines.extend(["suggested_agents:", *[f"  - {json.dumps(item, ensure_ascii=False)}" for item in agents]])
+    if summary.get("schema_version") == 2:
+        lines.append(f"outcome_disposition: {summary['outcome_disposition']}")
+        lines.extend(
+            [
+                "outcome_evidence_ids:",
+                *[
+                    f"  - {item}"
+                    for item in summary["outcome_evidence_ids"]
+                ],
+                "residual_gap_pointers:",
+                *[
+                    f"  - {json.dumps(item, ensure_ascii=False)}"
+                    for item in summary["residual_gap_pointers"]
+                ],
+            ]
+        )
     if related:
         lines.extend(["related:", *[f"  - {json.dumps(f'[[{item}]]', ensure_ascii=False)}" for item in related]])
-    lines.extend(["---", "", f"# {summary['title']}", "", summary["body"].rstrip(), ""])
+    lines.extend(["---", "", f"# {summary['title']}", "", durable_body, ""])
     return "\n".join(lines)
 
 
@@ -201,7 +255,7 @@ def update_page(path: Path, summary: dict[str, Any], task_name: str) -> tuple[st
     expected = hashlib.sha256(old.encode()).hexdigest()
     today = date.today().isoformat()
     text = re.sub(r"(?m)^updated:\s*\d{4}-\d{2}-\d{2}\s*$", f"updated: {today}", old, count=1)
-    text = text.rstrip() + f"\n\n## {today} {task_name}\n\n{summary['body'].rstrip()}\n"
+    text = text.rstrip() + f"\n\n## {today} {task_name}\n\n{archived_summary_body(summary)}\n"
     return text, expected
 
 
@@ -257,7 +311,16 @@ def with_plan_close(
 
 
 def validate_summary_wikilinks(vault: Path, summary: dict[str, Any]) -> None:
-    missing = unresolved_wikilinks(vault / "wiki", str(summary.get("body") or ""))
+    link_source = "\n".join(
+        [
+            str(summary.get("body") or ""),
+            *[
+                str(item)
+                for item in summary.get("residual_gap_pointers", [])
+            ],
+        ]
+    )
+    missing = unresolved_wikilinks(vault / "wiki", link_source)
     if missing:
         rendered = ", ".join(f"[[{target}]]" for target in missing[:10])
         raise ReapError(
@@ -285,7 +348,11 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     started = time.monotonic()
     meta = read_json(worktree / ".task-meta.json")
     authorize_review(vault, worktree, meta)
-    raw_summary = validate_summary(read_json(worktree / ".task-summary.json"), allow_missing_session=True)
+    raw_summary = validate_summary_for_task(
+        read_json(worktree / ".task-summary.json"),
+        meta,
+        allow_missing_session=True,
+    )
     if meta.get("version") not in {3, 4} or meta.get("interaction_policy") != "unattended":
         raise ReapError("reap-runner supports v3/v4 unattended final tasks only")
     try:
@@ -415,8 +482,9 @@ def apply_reap(
     """Route one typed task summary through the durable harness callback seam."""
 
     meta = read_json(worktree / ".task-meta.json")
-    summary = validate_summary(
+    summary = validate_summary_for_task(
         read_json(worktree / ".task-summary.json"),
+        meta,
         allow_missing_session=True,
     )
     if meta.get("version") not in {3, 4} or meta.get("interaction_policy") != "unattended":

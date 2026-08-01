@@ -85,7 +85,7 @@ from research_contract import (
 from lifecycle_telemetry import emit_compiled_pipeline_event, emit_lifecycle_event
 from review_resolution import DISPOSITIONS, MATERIAL_SEVERITIES
 from task_contract import ContractError, validate_handoff
-from wiki_summary_contract import WikiSummaryError, validate_summary
+from wiki_summary_contract import WikiSummaryError, validate_summary_for_task
 
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -2759,13 +2759,16 @@ def run(
             return
         try:
             raw_summary = json.loads(raw)
-            summary = validate_summary(
-                raw_summary, allow_missing_session=True, require_schema=True
-            )
             meta_path = spec["cwd"] / ".task-meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if not isinstance(meta, dict) or meta.get("version") not in {3, 4}:
                 raise RuntimeWorkerError("task summary requires v3 or v4 metadata")
+            summary = validate_summary_for_task(
+                raw_summary,
+                meta,
+                allow_missing_session=True,
+                require_schema=True,
+            )
             if (
                 meta.get("task_id") != spec["operation_id"]
                 or Path(str(meta.get("worktree") or "")).resolve()

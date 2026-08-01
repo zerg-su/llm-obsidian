@@ -32,7 +32,13 @@ import re
 import sys
 from pathlib import Path
 
-from wiki_summary_contract import TYPES, WikiSummaryError, render_markdown, validate_summary
+from wiki_summary_contract import (
+    TYPES,
+    WikiSummaryError,
+    render_markdown,
+    validate_summary,
+    validate_summary_for_task,
+)
 
 HEADER_RX = re.compile(r"^(type|title|session):\s*(.*)$")
 MARKER = "## Wiki Summary"
@@ -79,7 +85,12 @@ def fail(code: int, msg: str) -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file", type=Path, help="legacy Markdown summary input")
-    parser.add_argument("--json-file", type=Path, help="canonical v1 JSON summary input")
+    parser.add_argument("--json-file", type=Path, help="canonical versioned JSON summary input")
+    parser.add_argument(
+        "--task-meta",
+        type=Path,
+        help="optional task metadata binding required for canonical v2 JSON",
+    )
     parser.add_argument("--render-markdown", action="store_true", help="render validated canonical JSON")
     parser.add_argument(
         "--review-archive-marker",
@@ -96,7 +107,15 @@ def main(argv: list[str]) -> int:
     if args.json_file:
         try:
             raw_json = json.loads(args.json_file.read_text(encoding="utf-8"))
-            summary = validate_summary(raw_json, require_schema=True)
+            summary = (
+                validate_summary_for_task(
+                    raw_json,
+                    json.loads(args.task_meta.read_text(encoding="utf-8")),
+                    require_schema=True,
+                )
+                if args.task_meta
+                else validate_summary(raw_json, require_schema=True)
+            )
             for marker in args.review_archive_marker:
                 summary = attach_review_archive(summary, marker)
         except (OSError, json.JSONDecodeError, WikiSummaryError) as exc:

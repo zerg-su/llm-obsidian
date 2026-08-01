@@ -249,9 +249,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "write `.task-summary.json` with exactly this canonical JSON shape"
         in prompt
         and (
-            '{"schema_version":1,"type":"repo-touch",'
+            '{"schema_version":2,"type":"repo-touch",'
             '"title":"Fast dispatch result","session":"unit-session",'
-            '"body":"<bounded Markdown summary>"}'
+            '"body":"<bounded Markdown summary>",'
+            '"outcome_disposition":"achieved",'
+            '"outcome_evidence_ids":["fixture-green"],'
+            '"residual_gap_pointers":[]}'
         )
         in prompt
         and "task-review-runner.py run" not in prompt,
@@ -921,7 +924,19 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     summary = worktree / ".task-summary.json"
     summary.write_text(
-        json.dumps({"type": "repo-touch", "title": "Fast dispatch result"}) + "\n",
+        json.dumps(
+            {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "title": "Fast dispatch result",
+                "session": "unit-session",
+                "body": "The fixture outcome is established.",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": ["fixture-green"],
+                "residual_gap_pointers": [],
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     handoff = subprocess.run(
@@ -942,7 +957,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         check=False,
     )
     check(
-        "native task thread completes the exact v3 handoff",
+        "native task thread completes the exact v4 handoff",
         detected.returncode == 0
         and detected.stdout.strip() == "unit-session"
         and handoff.returncode == 0,

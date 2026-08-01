@@ -516,6 +516,11 @@ def validate_handoff(
     verify_plan_hash: bool = True,
 ) -> dict[str, Any]:
     policy = normalize(meta, verify_plan_hash=verify_plan_hash)
+    expected_summary_version = 2 if policy["version"] == 4 else 1
+    if summary.get("schema_version", 1) != expected_summary_version:
+        raise ContractError(
+            f"v{policy['version']} task requires Wiki Summary v{expected_summary_version}"
+        )
     if policy["interaction_policy"] != "unattended":
         raise ContractError("legacy/interactive task requires user confirmation")
     origin = str(meta.get("origin_session") or "")
