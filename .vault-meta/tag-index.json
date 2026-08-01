@@ -106,6 +106,7 @@
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
+    "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
@@ -231,7 +232,8 @@
     "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md",
     "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md",
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
-    "wiki/repos/2.5 real dogfood RT09 vault health audit.md"
+    "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
+    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -251,7 +253,8 @@
     "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md",
     "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md",
     "wiki/repos/2.5 real dogfood RT08 upstream skills research.md",
-    "wiki/repos/2.5 real dogfood RT09 vault health audit.md"
+    "wiki/repos/2.5 real dogfood RT09 vault health audit.md",
+    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
   ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -263,6 +266,7 @@
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
+    "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",

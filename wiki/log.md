@@ -27,6 +27,22 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] reap | llm-obsidian-2-6-foundation
+
+`c-000061` [[LLM Obsidian 2.6.0 technical foundation]]. ## Outcome
+
+Implemented only section 2, Technical foundation. Final foundation baseline: `9c8cf8bb8fdc3bc88770b10b6145a1264f583bee`. The overall 2.6 plan remains pending; section 3 skill-intelligence workstreams and later amendments were not implemented.
+
+## Repository touch
+
+- Added bounded review inspection, clean task-meta v4 semantics, and required per-finding resolution evidence.
+- Restored content-free review telemetry with the canonical severity vocabulary.
+- Protected upstream drift refr
+
+## [2026-08-01 13:49] dispatch | llm-obsidian-2-6-foundation
+
+Spawned an approved unattended task session (cmux `5457806D-E501-43A7-A172-58503E7D752E`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-foundation`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-foundation` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-08-01] research | Superpowers vs Matt Pocock Skills
 
 - Refreshed the upstream skill-library comparison against the byte-verified pins in `references/upstream-skills/`
