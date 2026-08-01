@@ -16,6 +16,36 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.5.1] — 2026-08-01
+
+### Добавлено
+
+- Добавлены точная диагностика stale operations с identity-bound recovery,
+  прототип same-session review delta и сравнение запиненных библиотек
+  Superpowers и Matt Pocock Skills.
+- Зафиксированы результаты девяти независимых real-task dogfood задач для
+  change, fix, prototype, research и vault-health workflows.
+
+### Изменено
+
+- Усилены lifecycle-контракты task/review: exact surface ownership, canonical
+  summaries, prior-phase evidence, bounded telemetry verdicts и явная проверка
+  валидности review callbacks.
+- Shared plans сохраняются при reap; документация скиллов удерживается в
+  бюджете; исправлена навигация вольта, найденная real-task аудитом.
+
+### Исправлено
+
+- Исправлены abnormal acceptance cleanup, доказательство release stale
+  operation, неоднозначные reap modes, callback races и порядок review
+  finalization.
+- Protected research сразу классифицирует умерший provider, сохраняет
+  разрешённый runtime interpreter и обходит cmux wrapper только для
+  изолированных fetch/synthesis. Dispatch и review сохраняют exact-surface
+  wrappers.
+- Исправлены task summary rendering и stale identity diagnostics: repair и
+  resume остаются привязаны к точной operation и принятому phase evidence.
+
 ## [2.3.0] — 2026-07-30
 
 ### Добавлено

@@ -371,6 +371,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
 | Typed fix loops, install, upgrade и rollback 2.4.1 | [Release notes 2.4.1](docs/releases/v2.4.1.md) |
+| Стабилизация lifecycle на реальных задачах 2.5.1 | [Release notes 2.5.1](docs/releases/v2.5.1.md) |
 | Model-authored bounded pipelines и callback liveness 2.5.0 | [Release notes 2.5.0](docs/releases/v2.5.0.md) |
 | Базовый релиз 2.4.0 | [Release notes 2.4.0](docs/releases/v2.4.0.md) |
 | Numeric content-free metrics | [Pipeline observability](docs/pipeline-observability.md) |

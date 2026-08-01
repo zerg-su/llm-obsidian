@@ -33,11 +33,10 @@ release cannot publish without a schema-v2 pass on the exact clean release SHA.
 
 ## Protected research under the cmux surface wrapper
 
-Open defect. The protected `research` workflow cannot launch its provider when
-the runtime worker runs inside a cmux surface, so protected outbound research is
-currently unavailable and callers must treat it as failing rather than slow.
-Observed three times, always as fetch-stage `exit_code` 127 with no
-`artifact.json` and no fetched sources.
+Resolved in 2.5.1. Before the fix, the protected `research` workflow could not
+launch its provider when the runtime worker ran inside a cmux surface. It was
+observed three times as fetch-stage `exit_code` 127 with no `artifact.json` and
+no fetched sources.
 
 The launch resolves through a chain that ends outside repository ownership:
 
@@ -62,9 +61,8 @@ reason the branch is wrong for this flow rather than merely unlucky.
 The direct provider invocation works under full sanitization: running the pinned
 interpreter against the Codex JS entrypoint under `env -i` with
 `PATH=RESEARCH_PATH` and `HOME`/`CODEX_HOME` set to the runtime home returns 0.
-The bounded repair is therefore to skip the wrapper-shim branch for the
-`research-fetch` and `research-synth` callback modes and use the direct argv with
-the pinned interpreter. That change touches the shared provider launch path used
-by dispatch and review, so it needs its own task, its own regressions, and a
-deliberate decision about whether any other callback mode should stop taking the
-wrapper.
+The 2.5.1 repair skips the wrapper-shim branch only for `research-fetch` and
+`research-synth`, using the direct argv with the pinned interpreter. A focused
+regression proves the protected path under sanitized `PATH`; the same test and
+the release-blocker runtime suite prove that ordinary dispatch/review modes
+still select the exact-surface wrapper.

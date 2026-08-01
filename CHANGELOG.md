@@ -10,6 +10,34 @@ Only public releases are listed. Versions 2.0.5 and 2.1.1 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.5.1] - 2026-08-01
+
+### Added
+
+- Added an exact stale-operation diagnostic with identity-bound recovery
+  guidance, a same-session review delta prototype, and a pinned comparison of
+  the Superpowers and Matt Pocock skill libraries.
+- Added durable real-task dogfood evidence for nine independent tasks spanning
+  change, fix, prototype, research, and vault-health workflows.
+
+### Changed
+
+- Tightened task/review lifecycle contracts around exact surface ownership,
+  canonical summaries, prior-phase evidence, bounded telemetry verdicts, and
+  explicit review callback validity.
+- Preserved shared plans during reap, bounded skill documentation, and repaired
+  vault navigation found by the real-task audit.
+
+### Fixed
+
+- Fixed abnormal acceptance cleanup, stale operation release proof, ambiguous
+  reap modes, callback races, and review finalization ordering.
+- Protected research now classifies a dead provider immediately, persists its
+  resolved runtime interpreter, and bypasses the cmux wrapper only for isolated
+  fetch/synthesis. Dispatch and review keep their exact-surface wrappers.
+- Fixed task summary rendering and stale identity diagnostics so repair and
+  resume remain bound to the exact operation and accepted phase evidence.
+
 ## [2.3.0] - 2026-07-30
 
 ### Added
