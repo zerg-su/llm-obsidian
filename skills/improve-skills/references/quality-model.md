@@ -60,6 +60,24 @@ Classify candidate text before changing it:
 
 Absence of proof yields `no-change`, not a cosmetic rewrite.
 
+## Goal-preservation pass
+
+- Name the approved overall input and desired outcome that the skill receives;
+  do not derive a replacement goal from its local mechanics.
+- Name the skill's permitted local subgoal and explain how it serves that
+  unchanged outcome.
+- List plausible completion proxies such as a green focused test, clean diff,
+  accepted callback, written page, committed report, or completed local step.
+- Name the declared outcome evidence required before any outcome-level
+  completion claim. Local green may establish one evidence item, but cannot
+  silently establish the whole result.
+- If the skill cannot preserve the outcome or evidence identity without a
+  workflow, authority, permission, or model-call change, use `defer`.
+
+Pass when the local subgoal is explicitly subordinate to the approved outcome,
+completion proxies are identified, and required outcome evidence—not local
+mechanical success—controls the completion claim.
+
 ## LLM Obsidian preservation gate
 
 A quality-only pass preserves:
@@ -82,10 +100,22 @@ For each skill record:
 ```text
 skill: <name>
 verdict: fix | no-change | defer
-pass: invocation | hierarchy | steering | pruning
+passes:
+  invocation: pass | <finding-id>
+  hierarchy: pass | <finding-id>
+  steering: pass | <finding-id>
+  pruning: pass | <finding-id>
+  goal_preservation: pass | <finding-id>
+overall_input: <approved task/contract input preserved by the skill>
+overall_outcome: <approved observable outcome preserved by the skill>
+local_subgoal: <bounded goal this skill may pursue>
+completion_proxies: [<local success that cannot close the outcome>]
+required_outcome_evidence: [<evidence required for the outcome claim>]
 evidence: <file/section or deterministic finding>
 change: <smallest correction, or none>
-behavior proof: <why protected behavior is unchanged>
+behavior_proof: <why protected behavior is unchanged>
 ```
 
-The audit is complete only when every installed skill has exactly one verdict.
+Validate the record with `audit_skills.py --verdicts <file> --strict`. The audit is complete only
+when every installed skill has exactly one five-pass verdict record and the
+record inventory matches the audited inventory exactly.

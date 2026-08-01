@@ -33,6 +33,84 @@ assert not [finding for row in rows for finding in row["findings"]], rows
 print("OK   repository skill inventory passes structural audit")
 
 
+valid_verdicts = {
+    "schema_version": 1,
+    "records": [
+        {
+            "skill": "fixture",
+            "verdict": "fix",
+            "passes": {
+                "invocation": "pass",
+                "hierarchy": "pass",
+                "steering": "F-001",
+                "pruning": "pass",
+                "goal_preservation": "F-001",
+            },
+            "overall_input": "The approved task and its Outcome Contract.",
+            "overall_outcome": "Deliver the declared observable result.",
+            "local_subgoal": "Make this skill's bounded step predictable.",
+            "completion_proxies": ["The focused test is green."],
+            "required_outcome_evidence": [
+                "The declared success-evidence item is independently established."
+            ],
+            "evidence": "skills/fixture/SKILL.md:10",
+            "change": "Sharpen the completion boundary.",
+            "behavior_proof": "Invocation and authority remain unchanged.",
+        }
+    ],
+}
+assert module.validate_verdict_records(valid_verdicts, ("fixture",)) == valid_verdicts
+
+missing_goal_pass = json.loads(json.dumps(valid_verdicts))
+del missing_goal_pass["records"][0]["passes"]["goal_preservation"]
+try:
+    module.validate_verdict_records(missing_goal_pass, ("fixture",))
+except ValueError as exc:
+    assert "five named passes" in str(exc)
+else:
+    raise AssertionError("missing goal-preservation pass was accepted")
+
+missing_skill = json.loads(json.dumps(valid_verdicts))
+try:
+    module.validate_verdict_records(missing_skill, ("fixture", "other"))
+except ValueError as exc:
+    assert "same skill names" in str(exc)
+else:
+    raise AssertionError("incomplete verdict inventory was accepted")
+print("OK   verdict records require exhaustive goal-preservation evidence")
+
+
+with tempfile.TemporaryDirectory(prefix="improve-skills-verdicts.") as raw:
+    skills = Path(raw) / "skills"
+    fixture = skills / "fixture"
+    fixture.mkdir(parents=True)
+    (fixture / "SKILL.md").write_text(
+        "---\nname: fixture\ndescription: Verdict fixture.\n---\n\n# Fixture\n",
+        encoding="utf-8",
+    )
+    verdict_path = Path(raw) / "verdicts.json"
+    verdict_path.write_text(json.dumps(valid_verdicts), encoding="utf-8")
+    command = [
+        sys.executable,
+        str(SCRIPT),
+        "--skills-dir",
+        str(skills),
+        "--verdicts",
+        str(verdict_path),
+        "--strict",
+        "--json",
+    ]
+    validated = subprocess.run(command, check=False, capture_output=True, text=True)
+    assert validated.returncode == 0, validated.stderr
+    assert json.loads(validated.stdout)["verdicts_validated"] is True
+
+    verdict_path.write_text(json.dumps(missing_goal_pass), encoding="utf-8")
+    rejected = subprocess.run(command, check=False, capture_output=True, text=True)
+    assert rejected.returncode == 1
+    assert "five named passes" in json.loads(rejected.stdout)["verdicts_error"]
+    print("OK   CLI validates the same exhaustive verdict record contract")
+
+
 with tempfile.TemporaryDirectory(prefix="improve-skills-test.") as raw:
     skills = Path(raw) / "skills"
     good = skills / "good"

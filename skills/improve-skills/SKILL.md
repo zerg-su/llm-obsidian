@@ -32,9 +32,12 @@ and every protected behavior is named before a file is changed.
 
 ## 2. Apply the quality model
 
-Read [quality-model.md](references/quality-model.md) completely. Run its four
-passes—invocation, information hierarchy, steering, and pruning—against every
-in-scope skill. For every changed or new skill, also require a distinct
+Read [quality-model.md](references/quality-model.md) completely. Run its five
+passes—invocation, information hierarchy, steering, pruning, and goal
+preservation—against every in-scope skill. The fifth pass records the approved
+overall input and outcome, the skill's permitted local subgoal, completion
+proxies that must not close the task, and the outcome evidence required before
+claiming success. For every changed or new skill, also require a distinct
 strong-intent trigger, router false-positive coverage, one verifiable
 completion criterion, one authoritative source for each rule, progressive
 disclosure, and an explicit authorization boundary. Remove no-op sentences
@@ -44,15 +47,24 @@ Assign exactly one verdict per skill:
 
 - `fix`: name the concrete failure mode, quote or locate its evidence, and
   describe the smallest behavior-preserving correction;
-- `no-change`: state that all four passes were checked and no confirmed problem
+- `no-change`: state that all five passes were checked and no confirmed problem
   remains;
 - `defer`: name the improvement that would alter behavior or expand scope.
 
 Potential polish is not a finding. Do not edit a skill merely to make wording
 uniform.
 
-Completion criterion: the verdict set and inventory contain the same skill
-names with no omissions or duplicates.
+Write one schema-v1 verdict record per skill using the exact shape in the
+quality model. Validate the record set against the same inventory:
+
+```bash
+python3 skills/improve-skills/scripts/audit_skills.py \
+  --verdicts <verdict-records.json> --strict
+```
+
+Completion criterion: the validated verdict set and inventory contain the same
+skill names exactly once, every record contains all five passes, and no local
+completion proxy substitutes for its required outcome evidence.
 
 ## 3. Make the smallest edits
 
@@ -73,6 +85,8 @@ Run:
 
 ```bash
 python3 skills/improve-skills/scripts/audit_skills.py --strict
+python3 skills/improve-skills/scripts/audit_skills.py \
+  --verdicts <verdict-records.json> --strict
 make test-instruction-lint test-skill-budget test-codex-adapter
 python3 scripts/release-acceptance.py check
 ```
@@ -82,5 +96,6 @@ tests required by the approved release scope; do not substitute narrative
 confidence for a failing check.
 
 Completion criterion: deterministic audit and applicable tests pass, every
-skill has a verdict, and the final report separates changed, unchanged, and
-deferred skills.
+skill has one validated five-pass verdict, and the final report separates
+changed, unchanged, and deferred skills while binding completion claims to the
+approved outcome evidence.

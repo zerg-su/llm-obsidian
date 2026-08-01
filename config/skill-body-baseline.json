@@ -66,18 +66,18 @@
       "token_estimate": 198
     },
     "dispatch": {
-      "body_bytes": 8074,
-      "body_lines": 140,
-      "closure_bytes": 8074,
-      "closure_token_estimate": 2019,
-      "token_estimate": 2019
+      "body_bytes": 8031,
+      "body_lines": 132,
+      "closure_bytes": 8031,
+      "closure_token_estimate": 2008,
+      "token_estimate": 2008
     },
     "distill-runbook": {
-      "body_bytes": 4395,
-      "body_lines": 82,
-      "closure_bytes": 4395,
-      "closure_token_estimate": 1099,
-      "token_estimate": 1099
+      "body_bytes": 4343,
+      "body_lines": 77,
+      "closure_bytes": 4343,
+      "closure_token_estimate": 1086,
+      "token_estimate": 1086
     },
     "draft": {
       "body_bytes": 7840,
@@ -94,11 +94,11 @@
       "token_estimate": 1687
     },
     "improve-skills": {
-      "body_bytes": 3067,
-      "body_lines": 77,
-      "closure_bytes": 6893,
-      "closure_token_estimate": 1724,
-      "token_estimate": 767
+      "body_bytes": 3845,
+      "body_lines": 92,
+      "closure_bytes": 9239,
+      "closure_token_estimate": 2310,
+      "token_estimate": 962
     },
     "journal": {
       "body_bytes": 2464,
@@ -136,11 +136,11 @@
       "token_estimate": 171
     },
     "reap": {
-      "body_bytes": 3265,
+      "body_bytes": 3247,
       "body_lines": 64,
-      "closure_bytes": 3265,
-      "closure_token_estimate": 817,
-      "token_estimate": 817
+      "closure_bytes": 3247,
+      "closure_token_estimate": 812,
+      "token_estimate": 812
     },
     "research": {
       "body_bytes": 1183,
@@ -213,11 +213,11 @@
       "token_estimate": 4048
     },
     "wiki-lint": {
-      "body_bytes": 12925,
+      "body_bytes": 12905,
       "body_lines": 219,
-      "closure_bytes": 25168,
-      "closure_token_estimate": 6292,
-      "token_estimate": 3232
+      "closure_bytes": 25148,
+      "closure_token_estimate": 6287,
+      "token_estimate": 3227
     },
     "wiki-query": {
       "body_bytes": 7047,

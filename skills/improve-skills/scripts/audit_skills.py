@@ -13,6 +13,27 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FRONTMATTER_BOUNDARY = "---"
 LOCAL_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+PASS_NAMES = {
+    "invocation",
+    "hierarchy",
+    "steering",
+    "pruning",
+    "goal_preservation",
+}
+VERDICTS = {"fix", "no-change", "defer"}
+VERDICT_RECORD_FIELDS = {
+    "skill",
+    "verdict",
+    "passes",
+    "overall_input",
+    "overall_outcome",
+    "local_subgoal",
+    "completion_proxies",
+    "required_outcome_evidence",
+    "evidence",
+    "change",
+    "behavior_proof",
+}
 
 
 @dataclass(frozen=True)
@@ -20,6 +41,85 @@ class Finding:
     severity: str
     code: str
     message: str
+
+
+def _nonempty_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be non-empty text")
+    return value
+
+
+def _nonempty_text_list(value: object, label: str) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+        or len(set(value)) != len(value)
+    ):
+        raise ValueError(f"{label} must be a non-empty unique text list")
+    return value
+
+
+def validate_verdict_records(
+    payload: object,
+    inventory: tuple[str, ...],
+) -> dict[str, object]:
+    """Validate one exhaustive five-pass verdict record per installed skill."""
+
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version",
+        "records",
+    }:
+        raise ValueError("verdict payload fields changed")
+    if payload.get("schema_version") != 1:
+        raise ValueError("verdict payload schema_version must be 1")
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise ValueError("verdict records must be a list")
+
+    expected = tuple(sorted(inventory))
+    if len(expected) != len(set(expected)) or any(not item for item in expected):
+        raise ValueError("inventory skill names must be unique and non-empty")
+    observed: list[str] = []
+    for index, record in enumerate(records):
+        label = f"verdict record {index + 1}"
+        if not isinstance(record, dict) or set(record) != VERDICT_RECORD_FIELDS:
+            raise ValueError(f"{label} fields changed")
+        skill = _nonempty_text(record.get("skill"), f"{label} skill")
+        observed.append(skill)
+        verdict = record.get("verdict")
+        if verdict not in VERDICTS:
+            raise ValueError(f"{label} verdict must be fix, no-change, or defer")
+        passes = record.get("passes")
+        if not isinstance(passes, dict) or set(passes) != PASS_NAMES:
+            raise ValueError(f"{label} must contain exactly five named passes")
+        for pass_name, result in passes.items():
+            _nonempty_text(result, f"{label} {pass_name} result")
+        if verdict == "no-change" and set(passes.values()) != {"pass"}:
+            raise ValueError(f"{label} no-change verdict requires five pass results")
+        if verdict in {"fix", "defer"} and set(passes.values()) == {"pass"}:
+            raise ValueError(f"{label} {verdict} verdict requires a finding")
+        for field in (
+            "overall_input",
+            "overall_outcome",
+            "local_subgoal",
+            "evidence",
+            "change",
+            "behavior_proof",
+        ):
+            _nonempty_text(record.get(field), f"{label} {field}")
+        _nonempty_text_list(
+            record.get("completion_proxies"),
+            f"{label} completion_proxies",
+        )
+        _nonempty_text_list(
+            record.get("required_outcome_evidence"),
+            f"{label} required_outcome_evidence",
+        )
+
+    if tuple(sorted(observed)) != expected or len(observed) != len(set(observed)):
+        raise ValueError("verdict records and inventory must contain the same skill names exactly once")
+    return payload
 
 
 def split_frontmatter(path: Path) -> tuple[list[str], str]:
@@ -146,6 +246,11 @@ def audit_directory(skills_dir: Path) -> list[dict[str, object]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skills-dir", type=Path, default=REPO_ROOT / "skills")
+    parser.add_argument(
+        "--verdicts",
+        type=Path,
+        help="validate one schema-v1 five-pass verdict record per audited skill",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict", action="store_true", help="fail on warnings as well as errors")
     args = parser.parse_args()
@@ -161,6 +266,19 @@ def main() -> int:
         for row in rows
         for finding in row.get("findings", [])
     )
+    verdicts_validated = False
+    verdicts_error = ""
+    if args.verdicts is not None:
+        try:
+            verdict_payload = json.loads(args.verdicts.read_text(encoding="utf-8"))
+            validate_verdict_records(
+                verdict_payload,
+                tuple(str(row["skill"]) for row in rows),
+            )
+            verdicts_validated = True
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            verdicts_error = str(exc)
+            errors += 1
     payload = {
         "schema_version": 1,
         "skills_dir": str(args.skills_dir),
@@ -169,6 +287,10 @@ def main() -> int:
         "warnings": warnings,
         "skills": rows,
     }
+    if args.verdicts is not None:
+        payload["verdicts_validated"] = verdicts_validated
+        if verdicts_error:
+            payload["verdicts_error"] = verdicts_error
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -176,6 +298,10 @@ def main() -> int:
         for row in rows:
             for finding in row.get("findings", []):
                 print(f"{finding['severity'].upper()} {row['skill']} {finding['code']}: {finding['message']}")
+        if verdicts_error:
+            print(f"ERROR verdict-records: {verdicts_error}")
+        elif args.verdicts is not None:
+            print("verdict records: complete five-pass inventory")
         print(f"skill audit: {len(rows)} audited, {errors} errors, {warnings} warnings")
 
     return 1 if errors or (args.strict and warnings) else 0
