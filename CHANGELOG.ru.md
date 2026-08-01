@@ -12,7 +12,7 @@
 > в частном DevOps-вольте до публичного универсального выпуска 2026 года.
 > Поэтому эта история начинается заново с версии 1.0.0.
 
-Ниже перечислены только публичные релизы. Версии 2.0.5 и 2.1.1 были
+Ниже перечислены только публичные релизы. Версии 2.0.5, 2.1.1 и 2.4.0 были
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
@@ -45,6 +45,37 @@
   wrappers.
 - Исправлены task summary rendering и stale identity diagnostics: repair и
   resume остаются привязаны к точной operation и принятому phase evidence.
+
+## [2.5.0] — 2026-07-31
+
+### Добавлено
+
+- Добавлены ограниченные model-authored данные `PipelineSpec`, строгая
+  компиляция, immutable approval snapshots, typed branches/loops и
+  зарегистрированные checks поверх существующего harness lifecycle.
+- Добавлены code-owned liveness recovery и content-free promotion reporting
+  для повторяющихся успешных custom definitions.
+
+### Безопасность
+
+- Provider routes, команды, permissions, effects, dependencies и approval
+  остались вне власти модели; custom definition не может расширить выбранный
+  built-in baseline.
+
+## [2.4.1] — 2026-07-31
+
+### Добавлено
+
+- Завершён исполняемый профиль `engineering/fix` с persistent-фазами
+  reproduce, root-cause, regression-test, minimal-fix, verification, review и
+  reap-ready.
+- Добавлены immutable phase receipts, bounded retry/restart policy, typed
+  решения `cannot-reproduce` и restart-safe resume по принятому evidence.
+
+### Изменено
+
+- Compiled pipelines используют единственные 2.3 operation store, supervisor,
+  provider session, callback seam и coordinator-owned finalization path.
 
 ## [2.3.0] — 2026-07-30
 

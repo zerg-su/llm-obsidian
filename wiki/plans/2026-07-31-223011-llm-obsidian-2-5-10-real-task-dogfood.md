@@ -9,7 +9,7 @@ sessions:
 source_cwd: "/Users/zak/Projects/llm-obsidian"
 status: pending
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-01
 tags:
   - plan
   - dogfood
@@ -31,13 +31,24 @@ related:
 
 - Target: ordinary LLM Obsidian v2.5.0, never Swarm.
 - Integration branch: `dogfood/2.5-real-10`; `main` changes only once after the final gate.
-- Waves: `3 + 3 + 3 + 1`; maximum concurrency is 3.
-- Executors: five Codex/Sol default tasks and five Claude/Opus 5 default tasks.
-- Reviews: eight simple and two deep; final aggregate review is independent Fable + Sol deep review.
-- Only completed useful tasks count. `cannot-reproduce`, infrastructure stop or no-result tasks remain evidence and receive replacements until ten tasks complete.
+- Release-gate waves: `3 + 3 + 3`; maximum concurrency is 3. RT10 moved to post-2.5.1 adapter dogfood.
+- Accepted release mix: five Codex/Sol tasks and four Claude/Opus 5 tasks.
+- Accepted release mix: seven simple and two deep task reviews; final aggregate review is independent Fable + Sol deep review.
+- Only completed useful tasks count. The user explicitly accepted the nine completed RT01–RT09 tasks for the 2.5.1 gate; RT10 is deferred and is not represented as complete.
 - Eligible narrow repo-owned mechanism defects may be repaired autonomously with regression tests. Dependency, security, public-interface, migration, permission, external-effect and scope-expansion findings become typed parked findings and do not stop unrelated tasks.
 - Do not push, publish, deploy, delete worktrees, broaden permissions or commit unrelated user changes.
-- No version bump is promised. Decide on a possible 2.5.1 only after the dogfood report and final review.
+- Version 2.5.1 is approved for preparation after the aggregate dogfood report and final Fable + Sol review; push, tag and release remain manual.
+
+## Contract amendment — 2026-08-01
+
+After RT01–RT09 completed, the user explicitly accepted the nine-task window as
+sufficient for the 2.5.1 stabilization release and moved RT10 to post-release
+dogfood after adapter reinstall. The accepted waiver also records RT08 as a
+pinned-only comparison with live-upstream drift still unverified. This section
+and the amended acceptance bullets supersede the original ten-task target for
+2.5.1; no tenth result is fabricated.
+
+Aggregate evidence: `docs/acceptance/v2.5.1-real-task-dogfood.md`.
 
 ## Phase 0 — safe baseline
 
@@ -59,7 +70,7 @@ related:
 | RT07 | 3 | Codex/Sol | `design` + `tdd`, engineering/change | simple | Add a read-only, exact-identity stale worktree/operation diagnostic and actionable recovery guidance without automatic deletion or guessing ownership; integrate with the existing doctor/preflight seam rather than a second state system. |
 | RT08 | 3 | Claude/Opus 5 | protected `research` + `wiki-ingest`, lifecycle/default | simple | Refresh the existing Superpowers/Matt-skills comparison against current upstream primary sources, retain minimal cited evidence and update the durable integration guidance without importing tool-specific GitHub workflow assumptions. |
 | RT09 | 3 | Codex/Sol | `wiki-lint` + `obsidian-markdown`, lifecycle/default | simple | Run a real vault health audit, repair the highest-value bounded frontmatter/link/orphan issues transactionally, and leave a reproducible dashboard/report. Do not rewrite unrelated knowledge pages. |
-| RT10 | 4 | Claude/Opus 5 | `distill-runbook`, lifecycle/default | simple | Distill the accepted dogfood recovery and release commands into a human-executable, AI-outage-safe runbook using actual command evidence from the completed window; verify copy-paste paths and failure stops.
+| RT10 | post-release | Claude/Opus 5 | `distill-runbook`, lifecycle/default | simple | Deferred by explicit user decision until the released 2.5.1 adapters are installed and a new session loads them; it is not counted in the 2.5.1 gate. |
 
 ## Wave controller
 
@@ -73,12 +84,12 @@ related:
 
 ## Acceptance
 
-- Ten useful tasks are terminal complete, with five Codex and five Claude executors.
-- Eight simple and two deep task reviews are approved or have every material finding resolved in the same lane.
-- At least seven engineering and three knowledge/ops tasks complete.
+- Nine useful tasks are terminal complete, with five Codex and four Claude executors; RT10 is explicitly deferred post-release.
+- Seven simple and two deep task reviews are approved or have every material finding resolved in the same lane.
+- Seven engineering/prototype tasks and two knowledge/ops tasks complete.
 - No unresolved callback, provider, surface, cleanup, duplicate-effect or replay failure remains.
 - Every repo-owned repair has a regression test and the original failing loop rerun.
 - Full `make test`, `make acceptance-check`, vault validation, adapter sync and `git diff --check` pass on the exact integration HEAD.
-- Dogfood report separates product findings, harness defects, task replacements, model/runtime behavior, human interventions and remaining material decisions.
+- `docs/acceptance/v2.5.1-real-task-dogfood.md` separates product findings, harness defects, task replacements, model/runtime behavior, human interventions and remaining material decisions.
 - Final independent Fable + Sol deep review approves the exact candidate.
 - `main` remains unchanged until the user accepts the final aggregate result; no push or release occurs automatically.

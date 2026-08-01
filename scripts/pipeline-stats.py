@@ -246,11 +246,16 @@ def classify_zero_usage(
     )
     if unattributed_agent_activity > 0:
         uncovered.append("unattributed")
+    uncovered_hint_runtimes = set(
+        SKILL_CAPABLE_RUNTIMES - SKILL_OBSERVABLE_RUNTIMES
+    )
+    if unattributed_agent_activity > 0:
+        uncovered_hint_runtimes.add("unknown")
     hinted = [
         name
         for name in zero_skills
         if (hint_runtimes.get(name) or set())
-        & (SKILL_CAPABLE_RUNTIMES - SKILL_OBSERVABLE_RUNTIMES)
+        & uncovered_hint_runtimes
     ]
     hinted_set = set(hinted)
     return {

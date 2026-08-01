@@ -6,7 +6,7 @@ All notable changes to llm-obsidian. Format: [Keep a Changelog](https://keepacha
 
 > llm-obsidian descends from [AgriciDaniel/claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) (see [ATTRIBUTION.md](ATTRIBUTION.md)); its mechanics were incubated and battle-tested in a private DevOps vault through 2026 before this generic public release. This changelog starts fresh at 1.0.0.
 
-Only public releases are listed. Versions 2.0.5 and 2.1.1 were internal
+Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
@@ -37,6 +37,37 @@ packages were published for them.
   fetch/synthesis. Dispatch and review keep their exact-surface wrappers.
 - Fixed task summary rendering and stale identity diagnostics so repair and
   resume remain bound to the exact operation and accepted phase evidence.
+
+## [2.5.0] - 2026-07-31
+
+### Added
+
+- Added bounded model-authored `PipelineSpec` data, strict compilation,
+  immutable approval snapshots, typed branching/loops, and registered checks
+  on the existing harness lifecycle.
+- Added code-owned liveness recovery and content-free promotion reporting for
+  repeated successful custom definitions.
+
+### Security
+
+- Kept provider routes, commands, permissions, effects, dependencies, and
+  approval outside model authority; custom definitions cannot widen the
+  selected built-in baseline.
+
+## [2.4.1] - 2026-07-31
+
+### Added
+
+- Completed the executable `engineering/fix` profile with persistent
+  reproduce, root-cause, regression-test, minimal-fix, verification, review,
+  and reap-ready phases.
+- Added immutable phase receipts, bounded retry/restart policy, typed
+  `cannot-reproduce` decisions, and restart-safe resume from accepted evidence.
+
+### Changed
+
+- Kept compiled pipelines on the single 2.3 operation store, supervisor,
+  provider session, callback seam, and coordinator-owned finalization path.
 
 ## [2.3.0] - 2026-07-30
 

@@ -243,6 +243,21 @@ class InterruptDuringStartSessions(SurfaceTrackingSessions):
         raise KeyboardInterrupt("operator interrupted during runtime start")
 
 
+class TerminalRetainedSessions(SurfaceTrackingSessions):
+    """A terminal record may still retain resources after a failed cleanup."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.invalid_exit_attempts = 0
+
+    def request_exit(self, owner_id: str, operation_id: str) -> object:
+        current = self.records[(owner_id, operation_id)]
+        if current.state in {"complete", "failed", "cancelled"}:
+            self.invalid_exit_attempts += 1
+            raise AssertionError("request_exit is invalid for a terminal operation")
+        return super().request_exit(owner_id, operation_id)
+
+
 def prepared_root(stack: list[tempfile.TemporaryDirectory]) -> Path:
     handle = tempfile.TemporaryDirectory(prefix="rt02-surface-cleanup.")
     stack.append(handle)
@@ -338,6 +353,47 @@ try:
         "normal exit releases every surface the run opened",
         raised == "" and manager.leaked() == [] and len(manager.opened) == 1,
     )
+
+    # A failed/cancelled operation is terminal, but it is not released while
+    # its typed ownership record still names resources.  Recovery must remain
+    # visible without trying the invalid terminal -> exiting transition.
+    for terminal_state in ("failed", "cancelled"):
+        root = prepared_root(handles)
+        tree = {ORIGIN: "coordinator", UNRELATED: "other-task"}
+        terminal_manager = TerminalRetainedSessions(root, tree)
+        raised = drive_cell(root, terminal_manager, timeout=5)
+        key = next(iter(terminal_manager.records))
+        current = terminal_manager.records[key]
+        retained = OwnedResources(
+            surface_id=current.resources.surface_id
+            or terminal_manager.opened[0],
+            process_group=2222,
+            supervisor_pid=3333,
+        )
+        tree[retained.surface_id] = current.spec.operation_id
+        terminal_manager.records[key] = replace(
+            current,
+            state=terminal_state,
+            revision=current.revision + 1,
+            resources=retained,
+        )
+        tracked = driver._StartedOperations(terminal_manager)
+        tracked.started.append(key)
+        unreleased = driver._release_started(
+            tracked,
+            sleep=lambda _seconds: None,
+        )
+        check(
+            f"terminal {terminal_state} with owned resources remains recoverable",
+            raised == ""
+            and len(unreleased) == 1
+            and current.spec.operation_id in unreleased[0]
+            and retained.surface_id in tree,
+        )
+        check(
+            f"terminal {terminal_state} never receives an invalid exit request",
+            terminal_manager.invalid_exit_attempts == 0,
+        )
 
     # ---- boundary 1: timeout --------------------------------------------
     root = prepared_root(handles)

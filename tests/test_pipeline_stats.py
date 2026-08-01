@@ -156,6 +156,18 @@ def run_unit(stats) -> None:
         unattributed["uncovered_runtimes"] == ["unattributed"],
         repr(unattributed),
     )
+    unattributed_hint = stats.classify_zero_usage(
+        ["alpha"],
+        {"alpha": {"unknown"}},
+        {"claude": 9, "unknown": 40},
+        unattributed_agent_activity=6,
+    )
+    check(
+        "an unattributed router hint is unverified evidence, not dead weight",
+        unattributed_hint["hinted_elsewhere"] == ["alpha"]
+        and unattributed_hint["dead"] == [],
+        repr(unattributed_hint),
+    )
     check(
         "unattributed activity without an agent op stays out of the verdict",
         stats.classify_zero_usage(
@@ -314,6 +326,13 @@ def run_report_unattributed_agent(tmp: Path) -> None:
         "the unattributed boundary is named in the zero section",
         "unattributed" in out.split("## Claude-zero skills")[1],
         out,
+    )
+    zero_tail = out.split("## Claude-zero skills")[1]
+    hinted, candidates = zero_tail.split("Dead-weight candidates", 1)
+    check(
+        "an unattributed router hint is reported as unverified, not removable",
+        "unverified" in hinted and "/beta" in hinted and "/beta" not in candidates,
+        zero_tail,
     )
     check(
         "an unrecognized router tag does not become its own coverage row",

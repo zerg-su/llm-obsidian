@@ -47,6 +47,10 @@ FINDING_FIELDS: tuple[str, ...] = (
     "evidence",
     "recommendation",
 )
+ROUND_STRING_FIELDS: tuple[str, ...] = ("axis", "verdict")
+FINDING_STRING_FIELDS: tuple[str, ...] = tuple(
+    field for field in FINDING_FIELDS if field != "line"
+)
 
 
 def round_schema_lines() -> tuple[str, ...]:
@@ -113,6 +117,14 @@ def _required_text(meta: dict[str, Any], field: str) -> str:
     return value.strip()
 
 
+def _require_string_fields(
+    value: dict[str, Any], fields: Iterable[str], *, label: str
+) -> None:
+    for field in fields:
+        if not isinstance(value.get(field), str):
+            raise ReviewSubmitError(f"{label} {field} must be a string")
+
+
 def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
     try:
         value = json.loads(raw)
@@ -123,6 +135,7 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
         raise ReviewSubmitError("review round has invalid fields")
     if value.get("schema_version") != 1:
         raise ReviewSubmitError("review round has an unsupported schema")
+    _require_string_fields(value, ROUND_STRING_FIELDS, label="review round field")
     axis = _required_text(value, "axis")
     if axis != _required_text(meta, "axis"):
         raise ReviewSubmitError("review round axis does not match metadata")
@@ -143,7 +156,12 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
     for item in raw_findings:
         if not isinstance(item, dict) or set(item) != fields:
             raise ReviewSubmitError("review round finding has invalid fields")
-        file = str(item.get("file") or "")
+        _require_string_fields(
+            item,
+            FINDING_STRING_FIELDS,
+            label="review round finding field",
+        )
+        file = item["file"]
         path = PurePosixPath(file)
         if (
             not file
@@ -158,14 +176,14 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
         try:
             findings.append(
                 ReviewFinding(
-                    finding_id=str(item.get("finding_id") or ""),
+                    finding_id=item["finding_id"],
                     axis=axis,
-                    severity=str(item.get("severity") or ""),
-                    summary=str(item.get("summary") or ""),
-                    evidence=str(item.get("evidence") or ""),
+                    severity=item["severity"],
+                    summary=item["summary"],
+                    evidence=item["evidence"],
                     file=file,
                     line=item.get("line"),
-                    recommendation=str(item.get("recommendation") or ""),
+                    recommendation=item["recommendation"],
                 )
             )
         except ValueError as exc:
@@ -175,7 +193,7 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
     try:
         return ReviewResult(
             axis=axis,
-            verdict=str(value.get("verdict") or ""),
+            verdict=value["verdict"],
             findings=tuple(findings),
             verification_iteration=iteration,
         )

@@ -20,6 +20,7 @@ from harness.contracts import (
     CallbackEnvelope,
     OperationRecord,
     OperationSpec,
+    OwnedResources,
     RuntimeRoute,
 )
 
@@ -345,6 +346,10 @@ def _result_record(value: object) -> OperationRecord:
     return record
 
 
+def _resources_released(record: OperationRecord) -> bool:
+    return record.resources == OwnedResources()
+
+
 def _read_callback(
     path: Path,
     manager: RuntimeSessions,
@@ -459,15 +464,23 @@ def _await_cleanup(
                 sleep(min(0.25, max(0.0, deadline - time.monotonic())))
                 continue
         if current.state in {"complete", "failed", "cancelled"}:
-            return current
+            if _resources_released(current):
+                return current
+            raise LiveDriverError(
+                f"{operation_id}: terminal {current.state} retained owned resources"
+            )
         if current.state != "exiting":
             raise LiveDriverError(
                 f"{operation_id}: cleanup requires an exiting operation"
             )
         result = manager.cleanup(owner_id, operation_id)
         record = _result_record(result)
-        if record.state == "complete":
-            return record
+        if record.state in {"complete", "failed", "cancelled"}:
+            if _resources_released(record):
+                return record
+            raise LiveDriverError(
+                f"{operation_id}: terminal {record.state} retained owned resources"
+            )
         if record.state == "attention-required":
             if record.attention_reason not in RETRYABLE_CLEANUP_ATTENTION:
                 raise LiveDriverError(
@@ -479,10 +492,6 @@ def _await_cleanup(
                 )
             sleep(min(0.25, max(0.0, deadline - time.monotonic())))
             continue
-        if record.state in {"failed", "cancelled"}:
-            raise LiveDriverError(
-                f"{operation_id}: cleanup stopped in {record.state}"
-            )
         if getattr(result, "action", "") not in {
             "wait-for-exit",
             "wait-for-ownership",
@@ -560,6 +569,11 @@ def _release_started(
         try:
             record = _result_record(tracked.status(owner_id, operation_id))
             if record.state in {"complete", "failed", "cancelled"}:
+                if _resources_released(record):
+                    continue
+                unreleased.append(
+                    f"{operation_id}: terminal {record.state} retained owned resources"
+                )
                 continue
             if record.state == "attention-required":
                 # A deliberate attention state is a fail-closed boundary: the

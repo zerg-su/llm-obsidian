@@ -73,6 +73,22 @@ FINDING = {
     "evidence": "e",
     "recommendation": "r",
 }
+ADVERTISED_STRING_FIELDS = {
+    "axis": "round",
+    "verdict": "round",
+    "finding_id": "finding",
+    "severity": "finding",
+    "file": "finding",
+    "summary": "finding",
+    "evidence": "finding",
+    "recommendation": "finding",
+}
+NON_STRING_JSON_VALUES = {
+    "numeric": 7,
+    "bool": True,
+    "list": ["text"],
+    "object": {"value": "text"},
+}
 
 
 def _meta(worktree: Path) -> dict[str, object]:
@@ -351,6 +367,38 @@ def check_every_named_value_is_accepted(worktree: Path) -> None:
             )
 
 
+def check_advertised_string_fields_reject_non_strings(worktree: Path) -> None:
+    """JSON containers and scalars must not be stringified into valid evidence."""
+
+    accepted: list[str] = []
+    for field, scope in ADVERTISED_STRING_FIELDS.items():
+        for type_name, invalid in NON_STRING_JSON_VALUES.items():
+            finding = dict(FINDING)
+            value = dict(CANONICAL, findings=[finding])
+            if scope == "round":
+                value[field] = invalid
+            else:
+                finding[field] = invalid
+            port = RecordingPort()
+            try:
+                submit_review(
+                    json.dumps(value),
+                    meta=_meta(worktree),
+                    worktree=worktree,
+                    port=port,
+                )
+            except (ReviewSubmitError, ValueError):
+                continue
+            accepted.append(f"{field}={type_name}")
+
+    check(
+        "every advertised string field rejects every non-string JSON type",
+        not accepted,
+        "submitter coerced raw non-strings instead of rejecting them: "
+        + ", ".join(accepted),
+    )
+
+
 def check_emit_targets_an_explicit_vault() -> None:
     """A current-checkout review has no worktree metadata to resolve a vault."""
 
@@ -433,6 +481,7 @@ def run() -> None:
     check_gate_prompt_states_enforced_values()
     check_prompt_schema_round_trips(ROOT)
     check_every_named_value_is_accepted(ROOT)
+    check_advertised_string_fields_reject_non_strings(ROOT)
     check_emit_targets_an_explicit_vault()
 
 
