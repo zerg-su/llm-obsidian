@@ -268,9 +268,15 @@ check(
     and "scope creep" in review_skill,
 )
 check(
-    "reap skill names normal v4 and legacy v1-v3 compatibility",
+    "active unattended v3 review retains the code-owned runner path",
+    "dispatched v3/v4 task" in review_skill,
+)
+check(
+    "reap names normal v4 and frozen unattended v3 runner paths",
     "Normal v4 unattended path" in reap_skill
-    and "legacy v1-v3" in reap_skill
+    and "Active unattended" in reap_skill
+    and "v3 tasks use the same runner" in reap_skill
+    and "legacy v1/v2" in reap_skill
     and "Normal v3 unattended path" not in reap_skill,
 )
 

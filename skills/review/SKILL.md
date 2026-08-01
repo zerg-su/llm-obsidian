@@ -36,7 +36,7 @@ severity cap, reranking, or loop.
 
 ## Flow
 
-1. Run the state facade. For a dispatched v4 task:
+1. Run the state facade. For a dispatched v3/v4 task:
    `python3 <vault-root>/scripts/task-review-runner.py run --worktree
    <worktree>`. For a current/non-dispatched checkout:
    `python3 <checkout>/scripts/task-review-runner.py current --worktree
@@ -61,7 +61,7 @@ severity cap, reranking, or loop.
    re-evaluation; a second restart or exhausted budget is `attention-required`.
 
 Never edit product, open a second verification surface, rerank axes, push,
-publish, or broaden scope. For dispatch, derive paths from v4 `.task-meta.json`
+publish, or broaden scope. For dispatch, derive paths from `.task-meta.json`
 (`vault_root`, worktree, task UUID, preset/profile, origin surface), never the
 generic product root. Current review uses one derived `.vault-meta/harness`
 pointer and owner-only scratch outside the checkout.

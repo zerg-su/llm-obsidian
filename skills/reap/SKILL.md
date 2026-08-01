@@ -23,9 +23,9 @@ python3 scripts/reap-runner.py \
   --current-session "$(./scripts/current-session-id.sh)"
 ```
 
-Require validated v4 `.task-meta.json`, canonical Wiki Summary v2
-`.task-summary.json`, and the exact caller session (never infer focused cmux).
-The runner performs these fail-closed stages:
+New v4 tasks require validated metadata and Wiki Summary v2. Active unattended
+v3 tasks use the same runner with their frozen metadata/Summary v1 contract.
+Require the exact caller session; never infer focused cmux. The runner:
 
 1. Validate Wiki Summary v2 disposition/evidence/gaps and handoff
    (`task_contract.py check-handoff`), plan/outcome hashes and state, route, and
@@ -64,7 +64,7 @@ vault write, review archive, `/reap`, or close command.
 
 ## Interactive/legacy compatibility
 
-For dry-run preview, legacy v1-v3 task metadata or summaries, explicit interactive filing, or read-only diagnosis, load [compatibility.md](references/compatibility.md). <!-- context:conditional -->
+For legacy v1/v2, preview, interactive filing, or diagnosis, load [compatibility.md](references/compatibility.md). <!-- context:conditional -->
 
 Legacy mode must preserve the same typed summary, optimistic write, provenance,
 review, exact-surface, and user-confirmation boundaries. It must never silently
