@@ -29,7 +29,7 @@
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py`; `tests/test_save_plan_contract.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
+| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; applied review findings `HOL-001` and `HOL-003` | resolved |
 | `B-TDD-01` | `skills/tdd/SKILL.md`; `tests/test_skill_workstream_b.py` | resolved |
 | `C-REV-01` | `skills/review/SKILL.md`; outcome-aware review harness; `tests/test_workstream_c_review_reap.py` | resolved |

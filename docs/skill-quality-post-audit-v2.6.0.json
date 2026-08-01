@@ -49,7 +49,7 @@
       "local_subgoal": "Persist the approved plan with exact metadata through the vault writer.",
       "completion_proxies": ["A page was created.", "The vault transaction returned success."],
       "required_outcome_evidence": ["Final Markdown revalidates the exact contract and one writer transaction creates the page without direct log or hot mutation."],
-      "evidence": "A-SVP-01; skills/save-plan/SKILL.md; tests/test_skill_workstream_a.py; tests/test_save_plan_contract.py",
+      "evidence": "A-SVP-01; skills/save-plan/SKILL.md; tests/test_skill_workstream_a.py",
       "change": "none in post-audit; integrated correction closes A-SVP-01",
       "behavior_proof": "Persist-only invocation, writer path, address and session provenance, collision handling, and pending status remain unchanged."
     },
