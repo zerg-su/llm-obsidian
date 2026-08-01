@@ -8,6 +8,9 @@
   "architecture": [
     "wiki/concepts/DragonScale Memory.md"
   ],
+  "audit": [
+    "wiki/meta/reports/lint-report-2026-08-01.md"
+  ],
   "backlog": [
     "wiki/backlog.md",
     "wiki/concepts/cherry-picks.md"
@@ -132,6 +135,9 @@
     "wiki/concepts/LLM Wiki Pattern.md",
     "wiki/concepts/Persistent Wiki Artifact.md"
   ],
+  "lint": [
+    "wiki/meta/reports/lint-report-2026-08-01.md"
+  ],
   "llm": [
     "wiki/concepts/LLM Wiki Pattern.md"
   ],
@@ -164,6 +170,7 @@
     "wiki/index.md",
     "wiki/meta/daily-pipeline-guide.md",
     "wiki/meta/dashboard.md",
+    "wiki/meta/reports/lint-report-2026-08-01.md",
     "wiki/overview.md",
     "wiki/sources/_index.md"
   ],

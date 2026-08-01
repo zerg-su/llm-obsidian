@@ -33,6 +33,13 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 Added `upgrade-preflight.py --diagnose-identities`, a read-only JSON diagnostic that reuses the existing preflight classifier and operation ledger. It reports exact operation/worktree pairs as `active`, `proven-stale`, `ambiguous`, or `mismatched`, with identity-bound guidance. Only a self-owned, path-exact, terminal dispatch with settled effects and zero owned resources can prove its same-ID/same-path v3 worktree mirror stale. The command never edits state, chooses an owner, deletes
 
+## [2026-08-01] wiki-lint | RT09 vault health audit
+
+- [[lint-report-2026-08-01]] records the 70-page integration-snapshot audit, evidence, and retained warnings.
+- Bounded repairs: [[dashboard]] now links [[backlog]] and [[meta/_index|meta index]]; `wiki/index.md` has a freshness marker; the meta folder index is regenerated to 34 pages.
+- Review resolution: all four typed findings applied; the captured validator identifier and reproduction semantics are corrected.
+- Retained for follow-up: seven legacy-unknown sessions, three frontmatter-density hints, and two stale DragonScale claims.
+
 ## [2026-08-01 02:30] dispatch | df250-real-rt08-upstream-skills-research
 
 Spawned an approved unattended task session (cmux `880539DB-3F5F-4939-B73F-24E9EE6CC740`, runtime claude, model claude-opus-5) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt08-upstream-skills-research`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt08-upstream-skills-research` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[LLM Obsidian v2.0.8 RD upstream audit]], [[Source-First Synthesis]]. Awaiting typed review and final reap.

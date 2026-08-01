@@ -2,7 +2,7 @@
 type: meta
 title: "Wiki Index"
 created: 2026-04-07
-updated: 2026-07-11
+updated: 2026-08-01
 tags:
   - meta
   - index
@@ -26,7 +26,7 @@ sessions:
 
 # Wiki Index
 
-Last updated: 2026-07-05 | Контекст: свежий вольт из шаблона llm-obsidian
+Last updated: <!-- AUTO-DATE --> 2026-08-01 | Контекст: свежий вольт из шаблона llm-obsidian
 
 Navigation: [[overview]] | [[log]] | [[hot]] | [[dashboard]] | [[Wiki Map]] | [[getting-started]]
 
