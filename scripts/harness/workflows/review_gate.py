@@ -188,15 +188,20 @@ class ReviewGateAuthorization:
 
 
 def review_context_sha256(context: ReviewContext) -> str:
+    identity = {
+        "manifest": context.manifest,
+        "head_sha": context.head_sha,
+        "verification_profile": context.verification_profile,
+        "verification_profile_sha256": (
+            context.verification_profile_sha256
+        ),
+    }
+    if context.implementer_summary_sha256:
+        identity["implementer_summary_sha256"] = (
+            context.implementer_summary_sha256
+        )
     raw = json.dumps(
-        {
-            "manifest": context.manifest,
-            "head_sha": context.head_sha,
-            "verification_profile": context.verification_profile,
-            "verification_profile_sha256": (
-                context.verification_profile_sha256
-            ),
-        },
+        identity,
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
@@ -390,7 +395,7 @@ class ReviewGateController:
 
     @staticmethod
     def _context(context: ReviewContext) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "manifest": context.manifest,
             "sha256": review_context_sha256(context),
             "head_sha": context.head_sha,
@@ -399,6 +404,11 @@ class ReviewGateController:
                 context.verification_profile_sha256
             ),
         }
+        if context.implementer_summary_sha256:
+            value["implementer_summary_sha256"] = (
+                context.implementer_summary_sha256
+            )
+        return value
 
     @staticmethod
     def _lane(lane: ReviewLaneSession) -> dict[str, object]:
@@ -556,6 +566,9 @@ class ReviewGateController:
             ),
             verification_profile_sha256=str(
                 context.get("verification_profile_sha256") or ""
+            ),
+            implementer_summary_sha256=str(
+                context.get("implementer_summary_sha256") or ""
             ),
         )
         lanes: list[ReviewLaneSession] = []
@@ -1476,6 +1489,7 @@ def authorize_task_finalization(
     expected_head_sha: str,
     expected_profile: str,
     expected_profile_sha256: str,
+    expected_summary_sha256: str = "",
 ) -> ReviewGateAuthorization:
     """Fail closed unless current approved evidence or explicit skip is durable."""
 
@@ -1492,6 +1506,11 @@ def authorize_task_finalization(
         or context.get("verification_profile") != expected_profile
         or context.get("verification_profile_sha256")
         != expected_profile_sha256
+        or (
+            expected_summary_sha256
+            and context.get("implementer_summary_sha256")
+            != expected_summary_sha256
+        )
     ):
         raise ValueError("review gate evidence is stale")
     policy = state.get("policy")

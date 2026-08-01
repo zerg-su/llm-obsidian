@@ -66,6 +66,7 @@ class ReviewContext:
     head_sha: str
     verification_profile: str
     verification_profile_sha256: str
+    implementer_summary_sha256: str = ""
 
     def __post_init__(self) -> None:
         path = PurePosixPath(self.manifest)
@@ -83,6 +84,10 @@ class ReviewContext:
             raise ValueError("review verification profile must be a bounded identifier")
         if not re.fullmatch(r"[0-9a-f]{64}", self.verification_profile_sha256):
             raise ValueError("review verification profile digest must be a sha256")
+        if self.implementer_summary_sha256 and not re.fullmatch(
+            r"[0-9a-f]{64}", self.implementer_summary_sha256
+        ):
+            raise ValueError("review implementer summary digest must be a sha256")
 
 
 @dataclass(frozen=True)
@@ -178,6 +183,15 @@ def operation_spec(request: ReviewOperationRequest) -> OperationSpec:
             "head_sha": request.context.head_sha,
             "verification_profile": request.context.verification_profile,
             "verification_profile_sha256": request.context.verification_profile_sha256,
+            **(
+                {
+                    "implementer_summary_sha256": (
+                        request.context.implementer_summary_sha256
+                    )
+                }
+                if request.context.implementer_summary_sha256
+                else {}
+            ),
         },
     }
     canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -187,6 +188,24 @@ def _head(worktree: Path) -> str:
     return value
 
 
+def _implementer_summary_sha256(
+    meta: Mapping[str, object], worktree: Path
+) -> str:
+    """Bind new v4 finalization to the exact summary reviewed by the lane."""
+
+    if meta.get("version") != 4:
+        return ""
+    path = worktree / ".task-summary.json"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError(
+            "v4 review finalization requires the exact implementer summary"
+        )
+    raw = path.read_bytes()
+    if not raw or len(raw) > 250_000:
+        raise ValueError("v4 implementer summary is empty or oversized")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def require_task_review(
     meta: Mapping[str, object],
     worktree: Path,
@@ -235,6 +254,11 @@ def task_review_status(
             expected_operation_id=expected_operation_id,
         )
         head = _head(worktree)
+        summary_sha256 = (
+            _implementer_summary_sha256(meta, worktree)
+            if mode != "skip"
+            else ""
+        )
     except (OSError, ValueError) as exc:
         return TaskReviewStatus("attention", fallback_root, reason=str(exc))
     state_path = root / "review-gate.json"
@@ -267,6 +291,11 @@ def task_review_status(
         context.get("head_sha") != head
         or context.get("verification_profile") != profile
         or context.get("verification_profile_sha256") != digest
+        or (
+            summary_sha256
+            and context.get("implementer_summary_sha256")
+            != summary_sha256
+        )
     ):
         return TaskReviewStatus(
             "stale", root, reason="review gate evidence is stale"
@@ -289,6 +318,7 @@ def task_review_status(
             expected_head_sha=head,
             expected_profile=profile,
             expected_profile_sha256=digest,
+            expected_summary_sha256=summary_sha256,
         )
     except (OSError, TypeError, ValueError) as exc:
         rendered = str(exc)

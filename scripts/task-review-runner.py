@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive the automatic review gate for one exact v3 dispatch worktree."""
+"""Drive the automatic review gate for one exact v3/v4 dispatch worktree."""
 
 from __future__ import annotations
 
@@ -565,7 +565,21 @@ def _context(
             role="head",
         ),
     ]
+    implementer_summary_sha256 = ""
     if meta.get("version") == 4 and meta.get("lifecycle") != "current-checkout":
+        summary_path = worktree / ".task-summary.json"
+        if not summary_path.is_file() or summary_path.is_symlink():
+            raise TaskReviewError(
+                "v4 review requires the exact implementer summary"
+            )
+        summary_input = _bounded_input(
+            "implementer-summary.json",
+            summary_path,
+            role="task",
+            pointer_root=runtime_root / "pointers",
+        )
+        inputs.append(summary_input)
+        implementer_summary_sha256 = summary_input.content_sha256
         inputs.append(
             outcome_contract_input(
                 plan,
@@ -668,6 +682,7 @@ def _context(
             head,
             str(policy["verification_profile"]),
             str(policy["verification_profile_sha256"]),
+            implementer_summary_sha256,
         ),
         manifest_path,
     )
@@ -861,6 +876,33 @@ def _prompt(
             str(review_input),
         )
     )
+    outcome_instructions = (
+        (
+            "Start with the Outcome Contract before implementation mechanics.",
+            (
+                "Treat the implementer summary and every implementer report as "
+                "unverified claims, never as evidence."
+            ),
+            (
+                "Classify every declared success-evidence item as exactly "
+                "established, missing, or contradicted from independently "
+                "inspected evidence."
+            ),
+            (
+                "Check every declared non-goal for scope creep and emit a "
+                "finding when the implementation crosses it."
+            ),
+            (
+                "Do not approve when missing or contradicted outcome evidence, "
+                "or observed scope creep, prevents the approved outcome."
+            ),
+            "A callback, clean diff, or locally green check is not outcome proof.",
+            "",
+        )
+        if context.implementer_summary_sha256
+        and axis in {"holistic", "spec"}
+        else ()
+    )
     _atomic_text(
         runtime_root / pointer,
         "\n".join(
@@ -875,6 +917,7 @@ def _prompt(
                 f"ContextPacket: `{runtime_root / context.manifest}`.",
                 "The review standard and approved plan are inside the ContextPacket.",
                 "",
+                *outcome_instructions,
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 (

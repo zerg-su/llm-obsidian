@@ -8,13 +8,11 @@ allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 
 # /reap — finalize a dispatched task
 
-Reap is the coordinator-side inverse of dispatch. It validates one task's typed
-summary and approved review history, files the result through the canonical
-vault transaction, closes the plan/lifecycle, then arms process exit. A review
-round is not task completion; reap happens only after the task declares final
-readiness.
+Reap validates one task's typed summary/review, files it through the canonical
+vault transaction, closes the authorized lifecycle, then arms process exit.
+A review round is not task completion; reap follows final readiness.
 
-## Normal v3 unattended path
+## Normal v4 unattended path
 
 Use the code-owned runner exactly once:
 
@@ -25,15 +23,16 @@ python3 scripts/reap-runner.py \
   --current-session "$(./scripts/current-session-id.sh)"
 ```
 
-The worktree must contain validated v3 `.task-meta.json` and canonical
-`.task-summary.json`. The caller session must be exact; never infer it from
-focused cmux state. The runner performs these fail-closed stages:
+Require validated v4 `.task-meta.json`, canonical Wiki Summary v2
+`.task-summary.json`, and the exact caller session (never infer focused cmux).
+The runner performs these fail-closed stages:
 
-1. Validate the typed summary and handoff (`task_contract.py check-handoff`),
-   approved plan hash/state, result route, and every wikilink before mutation.
-2. Archive every review round and require at least one durable approved review.
-   Failed cycles remain accounted for. Summary parsing attaches validated
-   review links; do not invent or duplicate them.
+1. Validate Wiki Summary v2 disposition/evidence/gaps and handoff
+   (`task_contract.py check-handoff`), plan/outcome hashes and state, route, and
+   wikilinks before mutation; never rewrite the desired outcome.
+2. Require approved review evidence for exact HEAD/profile/summary bytes, then
+   archive all rounds, including failed cycles. Parsing attaches validated
+   review links; never invent or duplicate them.
 3. Call `cmux_surface_lifecycle.py prepare-reap`, binding the exact result path,
    plan, task, session, and recovery marker.
 4. Apply one `vault-write.py` transaction: `final` closes its plan; `shared`
@@ -65,7 +64,7 @@ vault write, review archive, `/reap`, or close command.
 
 ## Interactive/legacy compatibility
 
-For dry-run preview, legacy v1/v2 task metadata, explicit interactive filing, or read-only diagnosis, load [compatibility.md](references/compatibility.md). <!-- context:conditional -->
+For dry-run preview, legacy v1-v3 task metadata or summaries, explicit interactive filing, or read-only diagnosis, load [compatibility.md](references/compatibility.md). <!-- context:conditional -->
 
 Legacy mode must preserve the same typed summary, optimistic write, provenance,
 review, exact-surface, and user-confirmation boundaries. It must never silently
