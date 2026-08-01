@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: [[2.5 real dogfood RT07 stale identity diagnostic]] — finalized task result (`c-000053`)
 - 2026-08-01: [[2.5 real dogfood RT04 invalid review callbacks]] — finalized task result (`c-000051`)
 - 2026-08-01: [[2.5 real dogfood RT06 runtime-neutral telemetry]] — finalized task result (`c-000049`)
 - 2026-08-01: [[2.5 real dogfood RT05 auto-close ownership]] — finalized task result (`c-000047`)

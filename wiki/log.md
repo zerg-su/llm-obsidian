@@ -27,6 +27,24 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] reap | df250-real-rt07-stale-identity-diagnostic
+
+`c-000053` [[2.5 real dogfood RT07 stale identity diagnostic]]. ## Outcome
+
+Added `upgrade-preflight.py --diagnose-identities`, a read-only JSON diagnostic that reuses the existing preflight classifier and operation ledger. It reports exact operation/worktree pairs as `active`, `proven-stale`, `ambiguous`, or `mismatched`, with identity-bound guidance. Only a self-owned, path-exact, terminal dispatch with settled effects and zero owned resources can prove its same-ID/same-path v3 worktree mirror stale. The command never edits state, chooses an owner, deletes
+
+## [2026-08-01 02:30] dispatch | df250-real-rt08-upstream-skills-research
+
+Spawned an approved unattended task session (cmux `880539DB-3F5F-4939-B73F-24E9EE6CC740`, runtime claude, model claude-opus-5) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt08-upstream-skills-research`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt08-upstream-skills-research` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[LLM Obsidian v2.0.8 RD upstream audit]], [[Source-First Synthesis]]. Awaiting typed review and final reap.
+
+## [2026-08-01 02:30] dispatch | df250-real-rt09-vault-health-audit
+
+Spawned an approved unattended task session (cmux `0AF194B8-B118-45A2-BAC1-0EC3C00BC560`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt09-vault-health-audit`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt09-vault-health-audit` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[Dashboard]]. Awaiting typed review and final reap.
+
+## [2026-08-01 02:30] dispatch | df250-real-rt07-stale-identity-diagnostic
+
+Spawned an approved unattended task session (cmux `C4F2C9CB-A1C6-4368-920B-7E130943E731`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/df250-real-rt07-stale-identity-diagnostic`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/df250-real-rt07-stale-identity-diagnostic` from `dogfood/2.5-real-10`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md`. Pre-loaded context: [[2.5 real dogfood RT05 auto-close ownership]], [[Unattended Pipeline]]. Awaiting typed review and final reap.
+
 ## [2026-08-01] reap | df250-real-rt04-invalid-review-callbacks
 
 `c-000051` [[2.5 real dogfood RT04 invalid review callbacks]]. ## RT04 — four invalid review callbacks: classified, one cause class repaired

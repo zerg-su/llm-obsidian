@@ -97,6 +97,7 @@
   ],
   "harness": [
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
+    "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
@@ -213,7 +214,8 @@
     "wiki/repos/2.5 real dogfood RT03 review delta prototype.md",
     "wiki/repos/2.5 real dogfood RT04 invalid review callbacks.md",
     "wiki/repos/2.5 real dogfood RT05 auto-close ownership.md",
-    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md"
+    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md",
+    "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -230,7 +232,8 @@
     "wiki/repos/2.5 real dogfood RT03 review delta prototype.md",
     "wiki/repos/2.5 real dogfood RT04 invalid review callbacks.md",
     "wiki/repos/2.5 real dogfood RT05 auto-close ownership.md",
-    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md"
+    "wiki/repos/2.5 real dogfood RT06 runtime-neutral telemetry.md",
+    "wiki/repos/2.5 real dogfood RT07 stale identity diagnostic.md"
   ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -239,6 +242,7 @@
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
     "wiki/meta/reviews/Cross-model review — 232fe53b-d609-4467-9a9d-13e45326368b — ffe07464dfd5.md",
+    "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
     "wiki/meta/reviews/Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb.md",
