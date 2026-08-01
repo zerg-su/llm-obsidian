@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -20,12 +21,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from harness.contracts import (
     AttentionReason,
+    CallbackEnvelope,
     ContractError,
     EffectOutcome,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
 )
+from harness.callbacks import CallbackBroker
 from harness.cli import main as harness_cli_main
 from harness.store import OperationStore, StoreError
 
@@ -331,8 +334,16 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         )
 
     class FakeProcess:
-        def __init__(self, status: str) -> None:
+        def __init__(
+            self,
+            status: str,
+            *,
+            supervisor_status: str | None = None,
+            capture_matches: bool = False,
+        ) -> None:
             self.status = status
+            self.supervisor_status = supervisor_status or status
+            self.capture_matches = capture_matches
             self.terminated: list[int] = []
             self.guardian_requests: list[dict[str, object]] = []
 
@@ -340,6 +351,20 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             self, _process_group: int, _identity: str
         ) -> str:
             return self.status
+
+        def pid_status(self, _pid: int, _identity: str) -> str:
+            return self.supervisor_status
+
+        def capture_identity(
+            self, pid: int, *, process_group: int = 0
+        ) -> str:
+            if not self.capture_matches:
+                return "c" * 64
+            if pid == 42 and process_group == 42:
+                return "a" * 64
+            if pid == 43 and process_group == 0:
+                return "b" * 64
+            return ""
 
         def terminate_exact(
             self, process_group: int, _identity: str
@@ -428,6 +453,27 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 revision=record.revision + 1,
             ),
             expected_revision=record.revision,
+        )
+
+    def accept_result_callback(operation_id: str) -> None:
+        record = store.read("owner-cli", operation_id)
+        payload = {"status": "complete"}
+        payload_sha = hashlib.sha256(
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        CallbackBroker(store, "owner-cli").accept(
+            CallbackEnvelope(
+                f"callback-{operation_id}",
+                operation_id,
+                record.run_id,
+                "result",
+                payload,
+                payload_sha,
+            )
         )
 
     def write_workspace_session(operation_id: str) -> tuple[str, str]:
@@ -669,6 +715,30 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and dead_after_cancel.resources == OwnedResources(),
     )
 
+    create_cli_operation("op-invalid-callback-cli", state="running")
+    bind_owned_resources("op-invalid-callback-cli")
+    store.transition(
+        "owner-cli",
+        "op-invalid-callback-cli",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_INVALID,
+    )
+    invalid_callback_rc, _invalid_callback_output = run_cli_in_process(
+        "cancel",
+        "op-invalid-callback-cli",
+        process=FakeProcess("dead"),
+        cmux=FakeCmux("missing"),
+    )
+    invalid_callback_after = store.read(
+        "owner-cli", "op-invalid-callback-cli"
+    )
+    check(
+        "CLI cancel clears proven-dead callback-invalid resources",
+        invalid_callback_rc == 0
+        and invalid_callback_after.state == "cancelled"
+        and invalid_callback_after.resources == OwnedResources(),
+    )
+
     create_cli_operation("op-orphan-surface-cli", state="running")
     bind_owned_resources("op-orphan-surface-cli")
     orphan_surface_process = FakeProcess("dead")
@@ -806,6 +876,168 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and owned_process.guardian_requests[0]["action"] == "request-exit"
         and owned_process.guardian_requests[0]["operation_id"]
         == "op-owned-cli",
+    )
+
+    create_cli_operation(
+        "op-accepted-unknown-cli", state="awaiting-callback"
+    )
+    bind_owned_resources("op-accepted-unknown-cli")
+    write_workspace_session("op-accepted-unknown-cli")
+    write_callback_target("op-accepted-unknown-cli")
+    accept_result_callback("op-accepted-unknown-cli")
+    accepted_process = FakeProcess(
+        "unknown",
+        supervisor_status="unknown",
+        capture_matches=True,
+    )
+    accepted_cmux = FakeCmux("alive")
+    accepted_rc, _accepted_output = run_cli_in_process(
+        "close",
+        "op-accepted-unknown-cli",
+        process=accepted_process,
+        cmux=accepted_cmux,
+    )
+    accepted_after_exit = store.read(
+        "owner-cli", "op-accepted-unknown-cli"
+    )
+    check(
+        "CLI accepted callback exact identity advances signal-less exit",
+        accepted_rc == 0
+        and accepted_after_exit.state == "exiting"
+        and len(accepted_process.guardian_requests) == 1,
+    )
+    accepted_process.status = "dead"
+    accepted_process.supervisor_status = "dead"
+    cleanup_rc, _cleanup_output = run_cli_in_process(
+        "resume",
+        "op-accepted-unknown-cli",
+        process=accepted_process,
+        cmux=accepted_cmux,
+    )
+    accepted_complete = store.read(
+        "owner-cli", "op-accepted-unknown-cli"
+    )
+    check(
+        "CLI accepted callback exact identity completes cleanup",
+        cleanup_rc == 0
+        and accepted_complete.state == "complete"
+        and accepted_complete.resources == OwnedResources(),
+    )
+
+    create_cli_operation(
+        "op-accepted-mismatch-cli", state="awaiting-callback"
+    )
+    bind_owned_resources("op-accepted-mismatch-cli")
+    accept_result_callback("op-accepted-mismatch-cli")
+    mismatch_process = FakeProcess(
+        "unknown",
+        supervisor_status="unknown",
+        capture_matches=False,
+    )
+    mismatch_rc, _mismatch_output = run_cli_in_process(
+        "close",
+        "op-accepted-mismatch-cli",
+        process=mismatch_process,
+        cmux=FakeCmux("alive"),
+    )
+    mismatch_after = store.read(
+        "owner-cli", "op-accepted-mismatch-cli"
+    )
+    check(
+        "CLI accepted callback identity mismatch stays fail-closed",
+        mismatch_rc == 0
+        and mismatch_after.state == "attention-required"
+        and mismatch_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE
+        and mismatch_process.guardian_requests == [],
+    )
+
+    create_cli_operation(
+        "op-accepted-weak-cli", state="awaiting-callback"
+    )
+    bind_owned_resources(
+        "op-accepted-weak-cli",
+        OwnedResources(
+            "11111111-1111-1111-1111-111111111111",
+            42,
+            43,
+            "a" * 64,
+            "",
+        ),
+    )
+    accept_result_callback("op-accepted-weak-cli")
+    weak_rc, _weak_output = run_cli_in_process(
+        "close",
+        "op-accepted-weak-cli",
+        process=FakeProcess(
+            "unknown",
+            supervisor_status="unknown",
+            capture_matches=True,
+        ),
+        cmux=FakeCmux("alive"),
+    )
+    weak_after = store.read("owner-cli", "op-accepted-weak-cli")
+    check(
+        "CLI accepted callback weak identity stays fail-closed",
+        weak_rc == 0
+        and weak_after.state == "attention-required"
+        and weak_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE,
+    )
+
+    class ProbeErrorProcess(FakeProcess):
+        def process_status(
+            self, _process_group: int, _identity: str
+        ) -> str:
+            raise RuntimeError("probe unavailable")
+
+    create_cli_operation(
+        "op-accepted-probe-error-cli", state="awaiting-callback"
+    )
+    bind_owned_resources("op-accepted-probe-error-cli")
+    accept_result_callback("op-accepted-probe-error-cli")
+    probe_error_rc, _probe_error_output = run_cli_in_process(
+        "close",
+        "op-accepted-probe-error-cli",
+        process=ProbeErrorProcess(
+            "unknown",
+            supervisor_status="unknown",
+            capture_matches=True,
+        ),
+        cmux=FakeCmux("alive"),
+    )
+    probe_error_after = store.read(
+        "owner-cli", "op-accepted-probe-error-cli"
+    )
+    check(
+        "CLI accepted callback probe error stays fail-closed",
+        probe_error_rc == 0
+        and probe_error_after.state == "attention-required"
+        and probe_error_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE,
+    )
+
+    create_cli_operation("op-noncallback-unknown-cli", state="exiting")
+    bind_owned_resources("op-noncallback-unknown-cli")
+    noncallback_rc, _noncallback_output = run_cli_in_process(
+        "close",
+        "op-noncallback-unknown-cli",
+        process=FakeProcess(
+            "unknown",
+            supervisor_status="unknown",
+            capture_matches=True,
+        ),
+        cmux=FakeCmux("alive"),
+    )
+    noncallback_after = store.read(
+        "owner-cli", "op-noncallback-unknown-cli"
+    )
+    check(
+        "CLI non-callback unknown ownership stays fail-closed",
+        noncallback_rc == 0
+        and noncallback_after.state == "attention-required"
+        and noncallback_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE,
     )
 
     create_cli_operation("op-unknown-cli", state="running")

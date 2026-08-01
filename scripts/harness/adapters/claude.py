@@ -143,30 +143,27 @@ class ClaudeDriver:
                 if not product_root.is_absolute():
                     raise ClaudeDriverError("review product root must be absolute")
                 quoted = shlex.quote(str(product_root))
+                inspect = shlex.join(
+                    (
+                        str(Path(sys.executable).resolve()),
+                        str(product_root / "scripts" / "review-inspect.py"),
+                        "--worktree",
+                        str(product_root),
+                    )
+                )
                 args.extend(
                     (
                         f"Bash(python3 {quoted}/tests/test_*.py)",
                         f"Bash(bash {quoted}/tests/test_*.sh)",
                         f"Bash(python3 {quoted}/scripts/lint-instructions.py)",
                         f"Bash(make -C {quoted} test)",
-                        f"Bash(git -C {quoted} rev-parse HEAD)",
-                        f"Bash(git -C {quoted} status --short)",
-                        f"Bash(git -C {quoted} diff)",
-                        (
-                            f"Bash(git -C {quoted} --no-pager log "
-                            "--oneline -20)"
-                        ),
-                        (
-                            f"Bash(git -C {quoted} --no-pager show "
-                            "--stat --oneline HEAD)"
-                        ),
+                        f"Bash({inspect}:*)",
                         (
                             f"Bash(python3 {quoted}/scripts/"
                             "check-skill-budget.py)"
                         ),
                         f"Bash(make -C {quoted} test-harness)",
                         f"Bash(make -C {quoted} test-model-routing)",
-                        f"Bash(git -C {quoted} diff --check)",
                     )
                 )
                 if callback_pointer is not None:

@@ -23,10 +23,12 @@ from harness.contracts import (
 )
 from harness.runtime_worker import (
     _contain_provider_start_failure,
+    _normalize_fetch_errors_at_provider_boundary,
     provider_argv,
     run as run_worker,
 )
 from harness.store import OperationStore
+from research_contract import ResearchContractError, load_artifact
 
 
 SURFACE = "11111111-1111-4111-8111-111111111111"
@@ -253,7 +255,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
                 "source_class": "official",
             }
         ],
-        "fetch_errors": [],
+        "fetch_errors": [
+            "",
+            " rate limited ",
+            "   ",
+            {
+                "url": "https://example.com/rate-limit",
+                "error": "temporary failure",
+            },
+        ],
     }
     raw_artifact = json.dumps(artifact, sort_keys=True).encode()
     (cwd / "artifact.json").write_bytes(raw_artifact)
@@ -272,10 +282,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
             cmux_adapter=cmux,
         )
     record = store.read("owner-research", fetch_id)
+    normalized_artifact_raw = (cwd / "artifact.json").read_bytes()
+    normalized_artifact = json.loads(normalized_artifact_raw)
     fetch_payload = {
         "stage": "fetch",
         "artifact_path": "artifact.json",
-        "artifact_sha256": hashlib.sha256(raw_artifact).hexdigest(),
+        "artifact_sha256": hashlib.sha256(normalized_artifact_raw).hexdigest(),
         "source_count": 1,
     }
     fetch_payload_sha = hashlib.sha256(
@@ -289,9 +301,46 @@ with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
         and record.state == "finalizing"
         and record.accepted_callback_kind == "research"
         and record.accepted_callback_sha256 == fetch_payload_sha
+        and normalized_artifact["fetch_errors"]
+        == [
+            " rate limited ",
+            "https://example.com/rate-limit: temporary failure",
+        ]
         and cmux.sent == [(ORIGIN, f"advance {fetch_id}")]
         and cmux.keys == [(ORIGIN, "Enter")],
         (record, cmux.sent),
+    )
+    malformed_errors = [
+        {"url": "https://example.com", "error": ""},
+        {"url": "https://example.com"},
+        {"url": "https://example.com", "error": "failed", "extra": "x"},
+        {"message": "failed"},
+        {"url": "u" * 1995, "error": "failed"},
+        7,
+        None,
+    ]
+    malformed_path = cwd / "malformed-artifact.json"
+    malformed_artifact = {
+        **normalized_artifact,
+        "fetch_errors": malformed_errors,
+    }
+    malformed_raw = json.dumps(malformed_artifact, sort_keys=True).encode()
+    malformed_path.write_bytes(malformed_raw)
+    unchanged = _normalize_fetch_errors_at_provider_boundary(
+        malformed_path,
+        malformed_raw,
+    )
+    try:
+        load_artifact(str(malformed_path))
+    except ResearchContractError:
+        malformed_rejected = True
+    else:
+        malformed_rejected = False
+    check(
+        "provider boundary preserves malformed fetch errors for strict rejection",
+        unchanged == malformed_raw
+        and json.loads(unchanged)["fetch_errors"] == malformed_errors
+        and malformed_rejected,
     )
     fetch_env = json.loads(env_marker.read_text(encoding="utf-8"))
     check(

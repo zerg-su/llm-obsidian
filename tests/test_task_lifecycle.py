@@ -333,6 +333,42 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
 
     result = run(CONTRACT, "validate", cwd=worktree)
     check("v2 contract valid", result.returncode == 0, result.stderr)
+
+    # New writes use the clean v4 review policy while v3 remains readable.
+    v4 = json.loads(json.dumps(meta))
+    v4["version"] = 4
+    v4["project_id"] = str(uuid.uuid4())
+    v4["task_id"] = str(uuid.uuid4())
+    v4["pipeline_policy"] = {
+        "name": "engineering/change",
+        "definition_sha256": "a" * 64,
+        "completion_policy": "attention",
+        "total_pass_limit": 2,
+    }
+    v4["review_policy"] = {
+        "mode": "simple",
+        "cross_model": False,
+        "runtime": "",
+        "model": "",
+        "effort": "",
+        "max_verify_iterations": 1,
+        "verification_profile": "scoped",
+        "verification_profile_sha256": "b" * 64,
+    }
+    write_json(worktree / "v4.json", v4)
+    result = run(CONTRACT, "validate", "--meta", "v4.json", cwd=worktree)
+    check("clean v4 contract valid", result.returncode == 0, result.stderr)
+    legacy_fields = json.loads(json.dumps(v4))
+    legacy_fields["review_policy"]["auto_resolve_severities"] = []
+    write_json(worktree / "invalid-v4-legacy-review.json", legacy_fields)
+    result = run(
+        CONTRACT,
+        "validate",
+        "--meta",
+        "invalid-v4-legacy-review.json",
+        cwd=worktree,
+    )
+    check("v4 rejects legacy review severity policy fields", result.returncode == 2)
     invalid = dict(meta)
     invalid["version"] = True
     write_json(worktree / "invalid-version.json", invalid)

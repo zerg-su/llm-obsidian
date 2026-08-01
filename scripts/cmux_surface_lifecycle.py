@@ -123,7 +123,7 @@ def require_origin_session(worktree: Path, supplied: str = "") -> None:
     meta = read_json(worktree / ".task-meta.json")
     origin = str(meta.get("origin_session") or "")
     actual = current_session_id()
-    if meta.get("version") == 3:
+    if meta.get("version") in {3, 4}:
         valid = actual != "unknown" and v3_session_is_bound(meta, actual)
     else:
         valid = actual != "unknown" and bool(origin) and actual == origin
@@ -532,7 +532,7 @@ def validated_review_archive(
 def validated_review_archives(
     worktree: Path, vault: Path, meta: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    if meta.get("version") != 3:
+    if meta.get("version") not in {3, 4}:
         value = validated_review_archive(worktree, vault)
         if value is None:
             return []
@@ -839,7 +839,7 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
         "validated": True,
         "completed_at": utc_now(),
     }
-    if meta.get("version") == 3:
+    if meta.get("version") in {3, 4}:
         try:
             broker_task = TaskSessionStore(vault).archive_task(
                 str(meta["project_id"]), str(meta["task_id"])
@@ -848,7 +848,7 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
             die(f"task-session archive failed before final reap completion: {exc}", 3)
         marker["task_session_status"] = broker_task.get("status")
     write_marker(worktree / ".task-reap-complete.json", marker)
-    if meta.get("version") == 3:
+    if meta.get("version") in {3, 4}:
         (worktree / ".task-session-binding.json").unlink(missing_ok=True)
     review_meta = read_object(worktree / ".review-meta.json")
     attention = read_object(worktree / ".task-needs-attention.json")

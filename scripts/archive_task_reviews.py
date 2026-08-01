@@ -37,7 +37,7 @@ def main() -> int:
     vault = args.vault_root.expanduser().resolve()
     try:
         meta = read_object(worktree / ".task-meta.json")
-        if meta.get("version") != 3:
+        if meta.get("version") not in {3, 4}:
             print(json.dumps({"schema_version": 1, "status": "legacy", "markers": []}))
             return 0
         task_id = str(meta.get("task_id") or "")

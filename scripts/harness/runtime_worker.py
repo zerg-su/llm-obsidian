@@ -83,6 +83,7 @@ from research_contract import (
     validate_result_artifact,
 )
 from lifecycle_telemetry import emit_compiled_pipeline_event, emit_lifecycle_event
+from review_resolution import DISPOSITIONS, MATERIAL_SEVERITIES
 from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary
 
@@ -478,6 +479,49 @@ def _atomic_json(path: Path, value: object) -> None:
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _normalize_fetch_errors_at_provider_boundary(
+    path: Path,
+    raw: bytes,
+) -> bytes:
+    """Normalize only bounded provider error forms before strict validation."""
+
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        return raw
+    errors = value.get("fetch_errors")
+    if not isinstance(errors, list):
+        return raw
+    normalized: list[object] = []
+    changed = False
+    for item in errors:
+        if isinstance(item, str):
+            if not item.strip():
+                changed = True
+                continue
+            normalized.append(item)
+            continue
+        if isinstance(item, Mapping) and set(item) == {"url", "error"}:
+            url = item["url"]
+            error = item["error"]
+            if (
+                isinstance(url, str)
+                and url.strip()
+                and isinstance(error, str)
+                and error.strip()
+            ):
+                canonical = f"{url}: {error}"
+                if len(canonical) <= 2000:
+                    normalized.append(canonical)
+                    changed = True
+                    continue
+        normalized.append(item)
+    if not changed:
+        return raw
+    value["fetch_errors"] = normalized
+    _atomic_json(path, value)
+    return path.read_bytes()
 
 
 def _bounded_file_sha256(path: Path, *, limit: int = MAX_OUTBOX_BYTES) -> str:
@@ -2563,6 +2607,14 @@ def run(
             return
         try:
             if spec["callback_mode"] == "research-fetch":
+                normalized_raw = _normalize_fetch_errors_at_provider_boundary(
+                    callback_path,
+                    raw,
+                )
+                if normalized_raw != raw:
+                    last_digest = hashlib.sha256(normalized_raw).hexdigest()
+                    stable_reads = 1
+                    return
                 artifact = load_artifact(
                     str(callback_path),
                     expected_run_id=run_id,
@@ -2712,8 +2764,8 @@ def run(
             )
             meta_path = spec["cwd"] / ".task-meta.json"
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if not isinstance(meta, dict) or meta.get("version") != 3:
-                raise RuntimeWorkerError("task summary requires v3 metadata")
+            if not isinstance(meta, dict) or meta.get("version") not in {3, 4}:
+                raise RuntimeWorkerError("task summary requires v3 or v4 metadata")
             if (
                 meta.get("task_id") != spec["operation_id"]
                 or Path(str(meta.get("worktree") or "")).resolve()
@@ -2946,15 +2998,34 @@ def run(
                     raise RuntimeWorkerError(
                         "review decision packet is invalid"
                     )
+                material_findings = [
+                    finding
+                    for finding in findings
+                    if finding.get("severity") in MATERIAL_SEVERITIES
+                ]
+                if not material_findings:
+                    raise RuntimeWorkerError(
+                        "review decision packet has no material findings"
+                    )
+                material_ids = [
+                    str(finding.get("finding_id") or "")
+                    for finding in material_findings
+                ]
+                if (
+                    "" in material_ids
+                    or len(material_ids) != len(set(material_ids))
+                ):
+                    raise RuntimeWorkerError(
+                        "review decision packet finding identities are invalid"
+                    )
+                reviewed_head = next(iter(reviewed_heads))
                 packet = {
                     "schema_version": 1,
                     "operation_id": spec["operation_id"],
-                    "reviewed_head_sha": next(iter(reviewed_heads)),
-                    "allowed_responses": [
-                        "applied",
-                        "rejected",
-                        "escalated",
-                    ],
+                    "reviewed_head_sha": reviewed_head,
+                    "allowed_dispositions": sorted(DISPOSITIONS),
+                    "resolution_path": ".task-review-resolution.json",
+                    "material_finding_ids": material_ids,
                     "findings": findings,
                 }
                 encoded = json.dumps(
@@ -2984,6 +3055,52 @@ def run(
                             "review decision packet identity changed"
                         )
                 _atomic_json(packet_path, packet)
+                resolution_path = (
+                    spec["cwd"] / ".task-review-resolution.json"
+                )
+                if resolution_path.is_symlink():
+                    raise RuntimeWorkerError(
+                        "review resolution response cannot be a symlink"
+                    )
+                write_resolution_template = True
+                if resolution_path.exists():
+                    current_resolution = json.loads(
+                        resolution_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        not isinstance(current_resolution, dict)
+                        or current_resolution.get("schema_version") != 1
+                        or current_resolution.get("operation_id")
+                        != spec["operation_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "review resolution response identity changed"
+                        )
+                    write_resolution_template = (
+                        current_resolution.get("reviewed_head_sha")
+                        != reviewed_head
+                    )
+                if write_resolution_template:
+                    _atomic_json(
+                        resolution_path,
+                        {
+                            "schema_version": 1,
+                            "operation_id": spec["operation_id"],
+                            "reviewed_head_sha": reviewed_head,
+                            "resolved_head_sha": "",
+                            "resolutions": [
+                                {
+                                    "finding_id": str(
+                                        finding.get("finding_id") or ""
+                                    ),
+                                    "disposition": "",
+                                    "rationale": "",
+                                    "follow_up": "",
+                                }
+                                for finding in material_findings
+                            ],
+                        },
+                    )
                 notify_path = (
                     spec_path.parent
                     / "pipeline-review-resolution-notify.json"
@@ -3022,8 +3139,11 @@ def run(
                 )
                 message = (
                     "Typed review findings are ready in "
-                    f"{packet_path.name}. Resolve every finding as applied or "
-                    "rejected and commit a new HEAD; for escalation use the "
+                    f"{packet_path.name}. Resolve every material finding in "
+                    f"{resolution_path.name} as applied, rejected, or "
+                    "out-of-scope; include bounded rationale, and a durable "
+                    "follow-up pointer for out-of-scope. Commit a new HEAD "
+                    "and set resolved_head_sha; for a material fork use the "
                     "task_escalation.py raise contract. Do not launch review. "
                     "Refresh .task-summary.json after the commit so it covers "
                     "the final HEAD. Remain available for same-session "

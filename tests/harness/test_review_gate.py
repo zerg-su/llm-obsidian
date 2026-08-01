@@ -48,12 +48,39 @@ from harness.workflows.review_gate import (
     authorize_task_finalization,
     review_context_sha256,
 )
+from review_resolution import FindingResolution, ReviewResolutionEvidence
 
 
 def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+def resolution_evidence(
+    operation_id: str,
+    axis: str,
+    reviewed_head: str,
+    resolved_head: str,
+    *finding_ids: str,
+) -> ReviewResolutionEvidence:
+    rows = {
+        finding_id: FindingResolution(
+            finding_id,
+            "applied",
+            "The fix and its regression check are present on the resolved HEAD.",
+        )
+        for finding_id in finding_ids
+    }
+    return ReviewResolutionEvidence(
+        operation_id,
+        axis,
+        reviewed_head,
+        resolved_head,
+        hashlib.sha256(b"bounded fix delta").hexdigest(),
+        tuple(finding_ids),
+        rows,
+    )
 
 
 simple_preset = ReviewPreset.from_flags()
@@ -313,6 +340,10 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         run,
         lane,
         context=resolved_context,
+        resolution=resolution_evidence(
+            "review-auto", "holistic", context.head_sha,
+            resolved_context.head_sha, "F-gate-1",
+        ),
         verification_prompt_pointer="prompts/verify.md",
         callback_pointer="callbacks/review-auto/holistic/.review-callback.json",
     )
@@ -326,6 +357,14 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         and first.lane.verification_iteration == 1
         and len(runtime.started) == 1
         and len(runtime.continued) == 1,
+    )
+    resolution_pointer = controller.read()["resolution_evidence"]["holistic:0"]
+    check(
+        "review gate persists per-finding resolution evidence before verification",
+        (base / "gate" / resolution_pointer).is_file()
+        and json.loads(
+            (base / "gate" / resolution_pointer).read_text(encoding="utf-8")
+        )["previous_finding_ids"] == ["F-gate-1"],
     )
     run = controller.rehydrate()
     first = replace(
@@ -585,6 +624,10 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         run,
         lane,
         context=replace(context, head_sha="1" * 40),
+        resolution=resolution_evidence(
+            "review-budget", "holistic", context.head_sha,
+            "1" * 40, "F-budget-1",
+        ),
         verification_prompt_pointer="prompts/verify.md",
         callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
     )
@@ -617,6 +660,10 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         run,
         first.lane,
         context=replace(context, head_sha="2" * 40),
+        resolution=resolution_evidence(
+            "review-budget", "holistic", "1" * 40,
+            "2" * 40, "F-budget-2",
+        ),
         verification_prompt_pointer="prompts/verify-2.md",
         callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
     )
@@ -826,6 +873,17 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
             run,
             lane,
             context=resolved,
+            resolution=resolution_evidence(
+                "review-deep-resolution",
+                lane.axis,
+                context.head_sha,
+                resolved.head_sha,
+                *(
+                    ("F-deep-resolution",)
+                    if lane.axis == standards_lane.axis
+                    else ()
+                ),
+            ),
             verification_prompt_pointer=f"prompts/{lane.axis}.md",
             callback_pointer=(
                 f"callbacks/deep/{lane.axis}/.review-callback.json"
@@ -1040,6 +1098,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         f"`{submit}`" in prompt_text
         and f"Bash({submit})" in claude_command
         and "Read, Glob, and Grep with absolute paths" in prompt_text
+        and "review-inspect.py" in prompt_text
         and "Do not run cd or copy packet files" in prompt_text,
     )
     round_ = task_review_runner.load_active_round(
@@ -1081,6 +1140,36 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         )["status"]
         == "awaiting-resolution",
     )
+    review_events = [
+        json.loads(line)
+        for line in (
+            vault / ".vault-meta/pipeline-events.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+        if json.loads(line).get("op", "").startswith("review-")
+    ]
+    check(
+        "production review emits content-free start callback and completion telemetry",
+        [event["op"] for event in review_events]
+        == ["review-round-start", "review-callback", "review-round-complete"]
+        and review_events[1]["counts"]["accepted_callbacks"] == 1
+        and review_events[2]["counts"]["important_findings"] == 1
+        and review_events[2]["counts"]["critical_findings"] == 0
+        and review_events[2]["counts"]["minor_findings"] == 0
+        and review_events[2]["identifiers"]
+        == {
+            "axis": "holistic",
+            "reviewer_runtime": "codex",
+            "terminal_status": "changes-requested",
+        }
+        and "F-task-1" not in json.dumps(review_events, sort_keys=True),
+    )
+    reviewed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
     subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
     subprocess.run(
@@ -1090,9 +1179,46 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         capture_output=True,
         text=True,
     )
+    resolved_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (product / ".task-review-resolution.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": task_id,
+                "reviewed_head_sha": reviewed_head,
+                "resolved_head_sha": resolved_head,
+                "resolutions": [
+                    {
+                        "finding_id": "F-task-1",
+                        "disposition": "applied",
+                        "rationale": (
+                            "The corrected product value and its commit are "
+                            "present on the resolved HEAD."
+                        ),
+                        "follow_up": "",
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     verifying = task_review_runner.run_task_review(
         product, runtime_manager=task_runtime
     )
+    verification_manifest = json.loads(
+        Path(str(verifying["context_manifest"])).read_text(encoding="utf-8")
+    )
+    verification_inputs = {
+        item["name"] for item in verification_manifest["inputs"]
+    }
     check(
         "restart-safe verify rehydrates and continues the same parent session",
         verifying["status"] == "verifying"
@@ -1109,6 +1235,11 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             capture_output=True,
             text=True,
         ).stdout.strip(),
+    )
+    check(
+        "same-session verification receives previous findings and bounded fix delta",
+        {"resolution-evidence.json", "fix-delta.patch"}
+        <= verification_inputs,
     )
     recovery_id = str(uuid.uuid4())
     recovery_meta = {**meta, "task_id": recovery_id}
@@ -1408,6 +1539,13 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
+        current_reviewed_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
         subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
         subprocess.run(
@@ -1416,6 +1554,37 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             check=True,
             capture_output=True,
             text=True,
+        )
+        current_resolved_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        (product / ".task-review-resolution.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": started["task_id"],
+                    "reviewed_head_sha": current_reviewed_head,
+                    "resolved_head_sha": current_resolved_head,
+                    "resolutions": [
+                        {
+                            "finding_id": "F-current-1",
+                            "disposition": "applied",
+                            "rationale": (
+                                "The current-checkout correction is present "
+                                "on the resolved HEAD."
+                            ),
+                            "follow_up": "",
+                        }
+                    ],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
         verifying = task_review_runner.run_current_review(
             product,

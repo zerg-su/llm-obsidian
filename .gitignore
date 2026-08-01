@@ -168,6 +168,7 @@ _attachments/
 .vault-meta/memory-backup.json
 .task-session-binding.json
 /.acceptance-sandbox.json
+/.task-review-resolution.json
 
 # DevOps-specific secret containers (defense-in-depth for MG vault)
 # Terraform state can hold plaintext secrets even if the .tf files don't

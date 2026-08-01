@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/review-resolution-v1.schema.json",
+  "title": "Per-finding review resolution v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation_id",
+    "reviewed_head_sha",
+    "resolved_head_sha",
+    "resolutions"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "operation_id": {"$ref": "#/$defs/identifier"},
+    "reviewed_head_sha": {"$ref": "#/$defs/head"},
+    "resolved_head_sha": {"$ref": "#/$defs/head"},
+    "resolutions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {"$ref": "#/$defs/resolution"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+    },
+    "resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "disposition", "rationale", "follow_up"],
+      "properties": {
+        "finding_id": {"$ref": "#/$defs/identifier"},
+        "disposition": {"enum": ["applied", "out-of-scope", "rejected"]},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "follow_up": {"type": "string", "maxLength": 500}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"disposition": {"const": "out-of-scope"}}},
+          "then": {"properties": {"follow_up": {"minLength": 1}}},
+          "else": {"properties": {"follow_up": {"const": ""}}}
+        }
+      ]
+    }
+  }
+}

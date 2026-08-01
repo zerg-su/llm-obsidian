@@ -35,6 +35,7 @@ from .contracts import (
     RuntimeRoute,
 )
 from .state_machine import TERMINAL
+from .reconciliation import prove_accepted_callback_ownership
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor
 
@@ -760,6 +761,28 @@ class RuntimeSessionManager:
             )
         )
 
+    def _cleanup_ownership_statuses(
+        self, record: OperationRecord
+    ) -> tuple[str, str]:
+        proof = prove_accepted_callback_ownership(record, self.process)
+        if proof.applicable:
+            return proof.process_status, proof.supervisor_status
+        resources = record.resources
+        process_status = (
+            self.process.process_status(
+                resources.process_group,
+                resources.process_identity,
+            )
+            if resources.process_group > 1
+            else "dead"
+        )
+        supervisor_status = (
+            self._supervisor_status(record)
+            if resources.supervisor_pid > 1
+            else "dead"
+        )
+        return process_status, supervisor_status
+
     def _abort_prepared_surface(
         self,
         supervisor: OperationSupervisor,
@@ -1363,12 +1386,10 @@ class RuntimeSessionManager:
                 record, AttentionReason.PROCESS_ORPHANED
             )
             return self._result(current, "attention-required")
-        process_status = self.process.process_status(
-            record.resources.process_group,
-            record.resources.process_identity,
+        process_status, supervisor_status = (
+            self._cleanup_ownership_statuses(record)
         )
-        supervisor_status = self._supervisor_status(record)
-        if process_status == "unknown" or (
+        if "unknown" in {process_status, supervisor_status} or (
             process_status == "alive" and supervisor_status in {"dead", "unknown"}
         ):
             current = self._mark_attention(
@@ -1419,18 +1440,8 @@ class RuntimeSessionManager:
         workspace_placement = metadata.get("placement") == "workspace"
         workspace_id = str(metadata.get("workspace_id") or "")
         window_id = str(metadata.get("window_id") or "")
-        process_status = (
-            self.process.process_status(
-                resources.process_group,
-                resources.process_identity,
-            )
-            if resources.process_group > 1
-            else "dead"
-        )
-        supervisor_status = (
-            self._supervisor_status(record)
-            if resources.supervisor_pid > 1
-            else "dead"
+        process_status, supervisor_status = (
+            self._cleanup_ownership_statuses(record)
         )
         try:
             surface_status = (

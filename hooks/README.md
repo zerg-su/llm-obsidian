@@ -17,7 +17,7 @@ JSON, so the plugin command redirects `stop.sh` output to
 | `SessionStart` (`startup`) | `session-nudge.sh` | 0..N one-line maintenance hints: lint age, fold due, tiling age, stale explicitly enabled memory backup, skill-of-the-day, retrieval-assist discipline, gateway probe (only if the MCP gateway is configured). Soft tone, never mandatory. |
 | `PostCompact` | inline | Re-loads `wiki/hot.md` after context compaction — hook-injected context does NOT survive compaction. |
 | `UserPromptSubmit` | `skill-router.sh` | Soft skill hints: matches the prompt against `.claude/skill-rules.json`, prints `Hint: ...` for matches. Disable per-session via `SKILL_ROUTER_MUTE=1`. Logs to `.vault-meta/router-hits.jsonl` (gitignored). |
-| `PostToolUse` (`Bash`) | `command-capture.sh` | Appends a sanitized `{ts, session_id, cwd, command, is_error}` record to `.vault-meta/command-log.jsonl` (credentials masked; the event is dropped if a residual pattern remains). Raw material for `/distill-runbook` and usage telemetry. |
+| `PostToolUse` (`Bash\|exec_command\|shell\|unified_exec`) | `command-capture.py` | Appends one replay-safe sanitized record per normalized shell call to `.vault-meta/command-log.jsonl`. Records separate `provenance_session` from `execution_session`, label `origin` and `outcome`, never store tool output, and are dropped if malformed, oversized, or still credential-like. Raw material for `/distill-runbook` and usage telemetry. |
 | `PostToolUse` (`ExitPlanMode`) | `plan-capture.sh` | Sends every approved plan plus its log entry through the transactional vault writer. |
 | `Stop` | `stop.sh` → `stop-hook.py` | `fcntl`-serialized pipeline: transaction recovery → reindex/folder indexes → section sparse `ensure` even on a clean tree (plus legacy BM25 compatibility) → optional dense chunk refresh with retry marker → optional memory backup → strict validation gate → scoped Git commit that preserves unrelated staging. |
 
@@ -31,6 +31,11 @@ JSON, so the plugin command redirects `stop.sh` output to
   the new plugin registry.
 
 - **One scoped commit per turn.** The hook commits only `wiki/`, `.raw/`, `.vault-meta/`, and opted-in `.claude-memory/`; unrelated staged work remains staged. Stdlib `fcntl` closes the parallel-session race without an external CLI.
+- **Command evidence is typed.** Agent-executed records come only from the four
+  allowlisted shell tool names. User-attested commands use
+  `scripts/command_evidence.py ingest-user`; prompt text is never mined. Both
+  paths share sanitization, residual-secret rejection, size bounds, and replay
+  deduplication. Optional result excerpts exist only on typed user reports.
 - **Memory backup is explicit and fail-closed.** No source is guessed. Set `CLAUDE_MEMORY_DIR` or copy `config/memory-backup.example.json` to `.vault-meta/memory-backup.json` and enable it. The sanitized candidate snapshot and existing backup are scanned before any write/prune; a residual credential pattern blocks the turn-end commit.
 - **Hooks never fail the turn.** Every entry is wrapped in `[ -x ... ] && ... || true`; scripts exit 0 even on internal errors.
 - **Non-vault sessions are safe.** Every hook feature-detects the vault (`wiki/hot.md`, script presence), so installing the plugin globally does not break other projects.

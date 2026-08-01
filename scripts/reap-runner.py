@@ -286,8 +286,8 @@ def _finalize_reap(vault: Path, worktree: Path, current: str) -> dict[str, Any]:
     meta = read_json(worktree / ".task-meta.json")
     authorize_review(vault, worktree, meta)
     raw_summary = validate_summary(read_json(worktree / ".task-summary.json"), allow_missing_session=True)
-    if meta.get("version") != 3 or meta.get("interaction_policy") != "unattended":
-        raise ReapError("reap-runner supports v3 unattended final tasks only")
+    if meta.get("version") not in {3, 4} or meta.get("interaction_policy") != "unattended":
+        raise ReapError("reap-runner supports v3/v4 unattended final tasks only")
     try:
         validate_handoff(meta, raw_summary, current, verify_plan_hash=False)
     except ContractError as exc:
@@ -419,8 +419,8 @@ def apply_reap(
         read_json(worktree / ".task-summary.json"),
         allow_missing_session=True,
     )
-    if meta.get("version") != 3 or meta.get("interaction_policy") != "unattended":
-        raise ReapError("reap-runner supports v3 unattended final tasks only")
+    if meta.get("version") not in {3, 4} or meta.get("interaction_policy") != "unattended":
+        raise ReapError("reap-runner supports v3/v4 unattended final tasks only")
     try:
         validate_handoff(meta, summary, current, verify_plan_hash=False)
     except ContractError as exc:

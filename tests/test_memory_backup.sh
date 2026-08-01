@@ -11,7 +11,8 @@ ok()  { pass=$((pass+1)); printf '  OK   %s\n' "$1"; }
 bad() { fail=$((fail+1)); failures+=("$1: $2"); printf '  FAIL %s - %s\n' "$1" "$2"; }
 
 mkdir -p "$SANDBOX/scripts" "$SANDBOX/source-memory" "$SANDBOX/fake-home/.claude/projects"
-cp "$REPO_ROOT/scripts/memory-backup.py" "$REPO_ROOT/scripts/lib_sanitize.py" "$SANDBOX/scripts/"
+cp "$REPO_ROOT/scripts/memory-backup.py" "$REPO_ROOT/scripts/lib_sanitize.py" \
+  "$REPO_ROOT/scripts/command_evidence.py" "$SANDBOX/scripts/"
 SCRIPT="$SANDBOX/scripts/memory-backup.py"
 SRC="$SANDBOX/source-memory"
 BK="$SANDBOX/.claude-memory"
@@ -123,15 +124,32 @@ PYEOF
 [[ "$?" == 0 ]] && ok "sanitizer-residual-unit" || bad "sanitizer-residual-unit" "python assertion failed"
 
 # Command capture shares the sanitizer and drops an event if anything remains.
-printf '%s' '{"tool_input":{"command":"token=abcdef123456 echo safe"},"tool_response":{}}' \
+python3 - "$SANDBOX" <<'PYEOF' \
   | CLAUDE_PROJECT_DIR="$SANDBOX" python3 "$REPO_ROOT/.claude/hooks/command-capture.py"
+import json, sys
+print(json.dumps({
+    "session_id": "capture-test",
+    "cwd": sys.argv[1],
+    "tool_name": "Bash",
+    "tool_use_id": "known-token",
+    "tool_input": {"command": "token=abcdef123456 echo safe"},
+    "tool_response": {},
+}))
+PYEOF
 COMMAND_LOG="$SANDBOX/.vault-meta/command-log.jsonl"
 grep -q 'token=REDACTED' "$COMMAND_LOG" && ok "capture-known-token-redacted" || bad "capture-known-token-redacted" "redaction missing"
 before_lines=$(wc -l < "$COMMAND_LOG" | tr -d ' ')
-python3 - <<'PYEOF' \
+python3 - "$SANDBOX" <<'PYEOF' \
   | CLAUDE_PROJECT_DIR="$SANDBOX" python3 "$REPO_ROOT/.claude/hooks/command-capture.py"
-import json
-print(json.dumps({"tool_input": {"command": "-----BEGIN " + "PRIVATE KEY-----"}, "tool_response": {}}))
+import json, sys
+print(json.dumps({
+    "session_id": "capture-test",
+    "cwd": sys.argv[1],
+    "tool_name": "Bash",
+    "tool_use_id": "residual-secret",
+    "tool_input": {"command": "-----BEGIN " + "PRIVATE KEY-----"},
+    "tool_response": {},
+}))
 PYEOF
 after_lines=$(wc -l < "$COMMAND_LOG" | tr -d ' ')
 [[ "$before_lines" == "$after_lines" ]] && ok "capture-residual-event-dropped" || bad "capture-residual-event-dropped" "unsafe event appended"

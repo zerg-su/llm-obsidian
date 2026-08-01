@@ -3,9 +3,8 @@
 
 RT04. Two repository-owned defects are guarded here.
 
-C1 — the callback-validity signal documented in docs/pipeline-observability.md
-("Valid / invalid callbacks | Reviewer payloads accepted or rejected by the versioned
-JSON contract") lost its only producer when 04cb7ed deleted the legacy
+C1 — the callback transport signal documented in docs/pipeline-observability.md
+("Accepted / rejected callbacks") lost its only producer when 04cb7ed deleted the legacy
 skills/review-dispatch/scripts/spawn_review.py, while scripts/pipeline-stats.py kept
 consuming the counters. The pre-existing coverage in tests/test_pipeline_events.py
 synthesizes the counter it then asserts on, so it passes with zero producers in the
@@ -139,7 +138,7 @@ class RecordingPort:
 def check_producer_exists() -> None:
     """A consumed, documented counter must be emitted by something in the tree."""
 
-    counters = ("valid_callbacks", "invalid_callbacks")
+    counters = ("accepted_callbacks", "rejected_callbacks")
     producers: dict[str, list[str]] = {name: [] for name in counters}
     consumers: dict[str, list[str]] = {name: [] for name in counters}
     for path in sorted((ROOT / "scripts").rglob("*.py")):
@@ -159,8 +158,8 @@ def check_producer_exists() -> None:
 
     doc = (ROOT / "docs/pipeline-observability.md").read_text(encoding="utf-8")
     check(
-        "callback validity signal is still documented",
-        "Valid / invalid callbacks" in doc,
+        "callback transport signal is still documented",
+        "Accepted / rejected callbacks" in doc,
     )
     for name in counters:
         check(
@@ -190,18 +189,18 @@ def check_report_counts_invalid_callbacks() -> None:
 
     with tempfile.TemporaryDirectory(prefix="rt04-report.") as raw:
         root = Path(raw)
-        actor = "review:claude:fable:full"
+        actor = "review"
         events.emit_event(
-            "review-round",
+            "review-callback",
             actor=actor,
-            counts={"valid_callbacks": 1, "iteration": 1, "duration_ms": 1000},
+            counts={"accepted_callbacks": 1, "iteration": 1, "duration_ms": 1000},
             root=root,
             environ={},
         )
         events.emit_event(
-            "review-round",
+            "review-callback",
             actor=actor,
-            counts={"invalid_callbacks": 1, "iteration": 1, "duration_ms": 1000},
+            counts={"rejected_callbacks": 1, "iteration": 1, "duration_ms": 1000},
             status="error",
             root=root,
             environ={},
@@ -209,6 +208,9 @@ def check_report_counts_invalid_callbacks() -> None:
         (root / "scripts").mkdir()
         shutil.copy2(
             ROOT / "scripts/pipeline-stats.py", root / "scripts/pipeline-stats.py"
+        )
+        shutil.copy2(
+            ROOT / "scripts/review_contract.py", root / "scripts/review_contract.py"
         )
         env = dict(os.environ)
         env["HOME"] = str(root / "home")
@@ -220,17 +222,17 @@ def check_report_counts_invalid_callbacks() -> None:
         )
         check("report exit 0 with an invalid callback", result.returncode == 0, result.stderr)
         check(
-            "report counts the invalid callback",
-            "| Invalid review callbacks | 1 |" in result.stdout,
-            "invalid callbacks were not reported",
+            "report counts the rejected callback",
+            "| Rejected review callbacks | 1 |" in result.stdout,
+            "rejected callbacks were not reported",
         )
         check(
-            "report counts the valid callback",
-            "| Valid review callbacks | 1 |" in result.stdout,
+            "report counts the accepted callback",
+            "| Accepted review callbacks | 1 |" in result.stdout,
         )
         check(
-            "schema-valid rate reflects the rejection",
-            "| Callback schema-valid rate | 50.0% |" in result.stdout,
+            "acceptance rate reflects the rejection",
+            "| Callback acceptance rate | 50.0% |" in result.stdout,
             "a rejected callback must move the rate off 100%",
         )
 
@@ -413,8 +415,13 @@ def check_emit_targets_an_explicit_vault() -> None:
         for path in (worktree, vault, runtime_root):
             path.mkdir(parents=True, exist_ok=True)
         round_ = _stub_round()
-        runner._emit_round_callback(
-            worktree, vault, runtime_root, round_, "simple", valid=False
+        runner._emit_round_telemetry(
+            worktree,
+            vault,
+            runtime_root,
+            round_,
+            event="review-callback",
+            terminal_status="rejected",
         )
         log = vault / ".vault-meta" / "pipeline-events.jsonl"
         check(
@@ -424,16 +431,21 @@ def check_emit_targets_an_explicit_vault() -> None:
         )
         rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
         check(
-            "rejection is recorded as one invalid callback",
+            "rejection is recorded as one rejected callback",
             len(rows) == 1
-            and rows[0].get("op") == "review-round"
-            and (rows[0].get("counts") or {}).get("invalid_callbacks") == 1,
+            and rows[0].get("op") == "review-callback"
+            and (rows[0].get("counts") or {}).get("rejected_callbacks") == 1,
             json.dumps(rows),
         )
 
         # Idempotence: re-polling the same round must not count it twice.
-        runner._emit_round_callback(
-            worktree, vault, runtime_root, round_, "simple", valid=False
+        runner._emit_round_telemetry(
+            worktree,
+            vault,
+            runtime_root,
+            round_,
+            event="review-callback",
+            terminal_status="rejected",
         )
         rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
         check(
@@ -443,8 +455,13 @@ def check_emit_targets_an_explicit_vault() -> None:
         )
 
         # A distinct outcome for the same round is still recorded once.
-        runner._emit_round_callback(
-            worktree, vault, runtime_root, round_, "simple", valid=True
+        runner._emit_round_telemetry(
+            worktree,
+            vault,
+            runtime_root,
+            round_,
+            event="review-callback",
+            terminal_status="accepted",
         )
         rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
         check(

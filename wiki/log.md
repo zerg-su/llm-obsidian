@@ -43,6 +43,10 @@ Implemented only section 2, Technical foundation. Final foundation baseline: `9c
 
 Spawned an approved unattended task session (cmux `5457806D-E501-43A7-A172-58503E7D752E`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-foundation`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-foundation` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: none. Awaiting typed review and final reap.
 
+## [2026-08-01] distill-runbook | RT10 Foundation Verification
+
+`c-000060` [[RT10 Foundation Verification]]. 5 commands; provenance 019fab00-3160-7380-8920-4b20183afb76; execution 019fbd70-fc93-7d12-a0ef-4ac8c2f837cf; 12 agent-executed + 1 user-attested: RT10 foundation adapter, gateway, snapshots, evidence, and runtime verification.
+
 ## [2026-08-01] research | Superpowers vs Matt Pocock Skills
 
 - Refreshed the upstream skill-library comparison against the byte-verified pins in `references/upstream-skills/`

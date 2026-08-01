@@ -26,6 +26,9 @@ test-harness:
 	@python3 tests/harness/test_research_vertical.py
 	@python3 tests/harness/test_research_notifier.py
 	@python3 tests/harness/test_engineering_skills.py
+	@python3 tests/harness/test_review_inspect.py
+	@python3 tests/harness/test_review_resolution.py
+	@python3 tests/harness/test_review_telemetry.py
 	@python3 tests/harness/test_review_transport.py
 	@python3 tests/harness/test_review_vertical.py
 	@python3 tests/harness/test_review_gate.py
@@ -59,7 +62,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -75,6 +78,7 @@ help:
 	@echo "  make test-document-normalize hermetic document routing/cache/fallback tests"
 	@echo "  make test-documents     live Docling ru/en PDF/Office/offline acceptance"
 	@echo "  make test-runtime-hooks Claude/Codex hook wire parity tests"
+	@echo "  make test-command-evidence typed command capture/ingestion tests"
 	@echo "  make test-runtime-detection legacy + three-way runtime detection tests"
 	@echo "  make test-session-map Claude/Codex daily session grouping tests"
 	@echo "  make test-agenda      deterministic daily carry-over and report tests"
@@ -109,7 +113,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -197,6 +201,10 @@ test-research-isolation:
 test-runtime-hooks:
 	@echo "=== test_runtime_hooks.py ==="
 	@python3 tests/test_runtime_hooks.py
+
+test-command-evidence:
+	@echo "=== test_command_evidence.py ==="
+	@python3 tests/test_command_evidence.py
 
 test-runtime-detection:
 	@echo "=== test_detect_runtime.sh ==="

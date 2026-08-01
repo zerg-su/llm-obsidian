@@ -47,6 +47,16 @@ commands = [handler["command"] for groups in hooks.values() for group in groups 
 check("all routes use adapter", all("run-hook.sh" in command for command in commands))
 check("legacy Codex guard removed", all("CODEX_THREAD_ID" not in command for command in commands))
 check("Codex events present", all(name in hooks for name in ("SessionStart", "UserPromptSubmit", "PostToolUse", "PostCompact", "Stop")))
+shell_matchers = {
+    group.get("matcher", "")
+    for group in hooks["PostToolUse"]
+    if "command-capture" in json.dumps(group)
+}
+check(
+    "PostToolUse matches only supported shell tools",
+    shell_matchers == {"Bash|exec_command|shell|unified_exec"},
+    repr(shell_matchers),
+)
 
 with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     vault = Path(raw)
@@ -58,6 +68,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     (vault / ".vault-meta").mkdir()
     (vault / "scripts" / "vault-write.py").write_text("# marker\n", encoding="utf-8")
     shutil.copy2(ROOT / "scripts" / "lib_sanitize.py", vault / "scripts" / "lib_sanitize.py")
+    shutil.copy2(ROOT / "scripts" / "command_evidence.py", vault / "scripts" / "command_evidence.py")
     shutil.copy2(ROOT / "scripts" / "pipeline_events.py", vault / "scripts" / "pipeline_events.py")
     shutil.copy2(ROOT / "scripts" / "lifecycle_telemetry.py", vault / "scripts" / "lifecycle_telemetry.py")
     shutil.copy2(ROOT / "scripts" / "turn_telemetry.py", vault / "scripts" / "turn_telemetry.py")
@@ -178,7 +189,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
 
     task = vault / "task-worktree"
     task.mkdir()
+    (task / "wiki").mkdir()
+    (task / "scripts").mkdir()
+    (task / ".vault-meta").mkdir()
+    (task / "scripts" / "vault-write.py").write_text(
+        "# marker\n", encoding="utf-8"
+    )
+    shutil.copy2(
+        ROOT / "scripts" / "lib_sanitize.py",
+        task / "scripts" / "lib_sanitize.py",
+    )
+    shutil.copy2(
+        ROOT / "scripts" / "command_evidence.py",
+        task / "scripts" / "command_evidence.py",
+    )
     (task / ".task-meta.json").write_text(json.dumps({"vault_root": str(vault)}), encoding="utf-8")
+    (task / ".task-origin-session").write_text("task-origin\n", encoding="utf-8")
     task_payload = {
         "session_id": "task-session",
         "runtime": "codex",
@@ -225,16 +251,169 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     )
     command_log = vault / ".vault-meta" / "command-log.jsonl"
     command_log_before = command_log.read_text(encoding="utf-8")
-    task_capture = subprocess.run(
-        [sys.executable, str(vault / "hooks" / "run-hook.py"), "command-capture"],
-        input=json.dumps({**task_payload, "tool_name": "Bash"}),
-        text=True, capture_output=True, env=task_env,
+    task_command_log = task / ".vault-meta" / "command-log.jsonl"
+    codex_commands = [
+        "pwd && git branch --show-current",
+        "git status --short",
+        "python3 scripts/codex-adapter.py --check",
+        "scripts/mcp-gateway/mcp-gateway.sh codex-sync --check",
+        "python3 references/upstream-skills/verify_snapshots.py",
+        "python3 tests/harness/test_runtime_research.py",
+        "git diff --check",
+    ]
+    task_capture = None
+    for index, command in enumerate(codex_commands, start=1):
+        source = (
+            "const r = await tools.exec_command("
+            + json.dumps(
+                {
+                    "cmd": command,
+                    "workdir": str(task),
+                    "yield_time_ms": 10000,
+                    "max_output_tokens": 5000,
+                },
+                separators=(",", ":"),
+            )
+            + "); text(r.output);"
+        )
+        task_capture = subprocess.run(
+            [sys.executable, str(vault / "hooks" / "run-hook.py"), "command-capture"],
+            input=json.dumps(
+                {
+                    **task_payload,
+                    "tool_name": "unified_exec",
+                    "tool_use_id": f"codex-call-{index}",
+                    "tool_input": {"source": source},
+                    "tool_response": {"is_error": False},
+                }
+            ),
+            text=True, capture_output=True, env=task_env,
+        )
+    task_records = (
+        [json.loads(line) for line in task_command_log.read_text(encoding="utf-8").splitlines()]
+        if task_command_log.is_file()
+        else []
     )
     check(
-        "task command capture stays disabled",
-        task_capture.returncode == 0
+        "seven Codex shell fixtures write only the task-worktree log",
+        task_capture is not None
+        and task_capture.returncode == 0
+        and len(task_records) == 7
+        and [record["command"] for record in task_records] == codex_commands
+        and all(record["execution_session"] == "task-session" for record in task_records)
+        and all(record["provenance_session"] == "task-origin" for record in task_records)
+        and all(record["origin"] == "agent-executed" for record in task_records)
+        and all(record["outcome"] == "unknown" for record in task_records)
         and command_log.read_text(encoding="utf-8") == command_log_before,
-        task_capture.stderr,
+        task_capture.stderr if task_capture is not None else "missing capture result",
+    )
+    replay_source = (
+        "const r = await tools.exec_command("
+        + json.dumps({"cmd": codex_commands[0], "workdir": str(task)}, separators=(",", ":"))
+        + "); text(r.output);"
+    )
+    for tool_name, tool_input, tool_use_id in (
+        ("Read", {"command": "echo ignored"}, "ignored-call"),
+        (
+            "unified_exec",
+            {
+                "source": "const r = await tools.exec_command("
+                + json.dumps(
+                    {"cmd": "-----BEGIN PRIVATE KEY-----", "workdir": str(task)},
+                    separators=(",", ":"),
+                )
+                + "); text(r.output);"
+            },
+            "secret-call",
+        ),
+        (
+            "unified_exec",
+            {
+                "source": "const r = await tools.exec_command("
+                + json.dumps(
+                    {
+                        "cmd": "rg --fixed-strings 'abcdef123456' .vault-meta/command-log.jsonl",
+                        "workdir": str(task),
+                    },
+                    separators=(",", ":"),
+                )
+                + "); text(r.output);"
+            },
+            "literal-secret-search",
+        ),
+        ("unified_exec", {"source": replay_source}, "codex-call-1"),
+    ):
+        subprocess.run(
+            [
+                sys.executable,
+                str(vault / "hooks" / "run-hook.py"),
+                "command-capture",
+            ],
+            input=json.dumps(
+                {
+                    **task_payload,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "tool_input": tool_input,
+                    "tool_response": {"is_error": False},
+                }
+            ),
+            text=True,
+            capture_output=True,
+            env=task_env,
+        )
+    check(
+        "task capture ignores non-shell tools, rejects secret searches, and deduplicates replay",
+        [json.loads(line) for line in task_command_log.read_text(encoding="utf-8").splitlines()]
+        == task_records
+        and command_log.read_text(encoding="utf-8") == command_log_before,
+    )
+    explicit_outcomes = []
+    for index, response in enumerate(
+        (
+            {"exit_code": 0},
+            {"status": "completed"},
+            {"status": "failed"},
+        ),
+        start=1,
+    ):
+        command = f"python3 explicit-{index}.py"
+        source = (
+            "const r = await tools.exec_command("
+            + json.dumps(
+                {"cmd": command, "workdir": str(task)},
+                separators=(",", ":"),
+            )
+            + "); text(r.output);"
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                str(vault / "hooks" / "run-hook.py"),
+                "command-capture",
+            ],
+            input=json.dumps(
+                {
+                    **task_payload,
+                    "tool_name": "unified_exec",
+                    "tool_use_id": f"explicit-outcome-{index}",
+                    "tool_input": {"source": source},
+                    "tool_response": response,
+                }
+            ),
+            text=True,
+            capture_output=True,
+            env=task_env,
+        )
+        explicit_outcomes.append(
+            json.loads(
+                task_command_log.read_text(encoding="utf-8").splitlines()[-1]
+            )["outcome"]
+        )
+    check(
+        "only explicit Codex exit or status evidence sets an outcome",
+        explicit_outcomes == ["success", "success", "error"],
+        explicit_outcomes,
     )
     subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "router"],

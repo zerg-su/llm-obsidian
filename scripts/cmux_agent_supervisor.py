@@ -370,7 +370,7 @@ def validate_trusted_runtime_path(raw: str, runtime: str) -> None:
 
 def task_dcg_config(meta: dict[str, Any] | None = None) -> Path:
     root = SCRIPT_DIR.parent
-    if meta is not None and meta.get("version") == 3:
+    if meta is not None and meta.get("version") in {3, 4}:
         raw = str(meta.get("vault_root") or "").strip()
         candidate = Path(raw).expanduser() if raw else Path()
         if not raw or not candidate.is_absolute():
@@ -623,7 +623,7 @@ def validated_task_git_common_dir(worktree: Path, meta: dict[str, Any]) -> Path:
 
 def validated_task_session_dir(meta: dict[str, Any]) -> Path | None:
     """Return the sole coordinator registry subtree owned by a v3 task."""
-    if meta.get("version") != 3:
+    if meta.get("version") not in {3, 4}:
         return None
     vault = Path(str(meta.get("vault_root") or "")).expanduser().resolve()
     project_id = str(meta.get("project_id") or "").strip()
@@ -1082,7 +1082,7 @@ def automatic_workspace_trust_allowed(
         policy = normalize(meta)
     except (ContractError, OSError, ValueError):
         return False
-    return meta.get("version") in {2, 3} and policy["interaction_policy"] == "unattended"
+    return meta.get("version") in {2, 3, 4} and policy["interaction_policy"] == "unattended"
 
 
 def auto_accept_workspace_trust(

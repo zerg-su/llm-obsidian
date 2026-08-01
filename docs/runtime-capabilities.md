@@ -16,7 +16,7 @@ must not be inferred from another runtime.
 | Turn-end Stop pipeline | Claude `Stop` hook | Codex plugin `Stop` hook opts into the same `stop.sh`; output goes to `.vault-meta/stop-hook-last.log` | Run `.claude/hooks/stop.sh` manually |
 | `SessionStart` hot cache + nudges | Shared runtime adapter | Shared runtime adapter; startup/resume/clear/compact | Manual |
 | `UserPromptSubmit` skill router | Shared runtime adapter, soft hints | Shared runtime adapter, soft hints | Manual |
-| `PostToolUse[Bash]` command capture | Shared runtime adapter, sanitized | Shared runtime adapter for supported Bash events | Manual |
+| Allowlisted shell command capture | Shared runtime adapter, sanitized | `Bash`, `exec_command`, `shell`, and strict literal `unified_exec` normalization | Typed `command_evidence.py ingest-user` |
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
@@ -61,10 +61,14 @@ single target occurrence, and refresh the monthly live-query page in one
 Python contract remains authoritative when the plugin is absent or customized.
 
 Codex hook parity uses the documented lifecycle wire format and fixtures in
-`tests/test_runtime_hooks.py`. Current Codex interception is incomplete for
-unified/streaming shell calls and does not intercept native WebSearch, so hooks
-remain observability/guardrails rather than a security boundary. `ExitPlanMode`
-capture remains Claude-only because Codex exposes no equivalent tool event.
+`tests/test_runtime_hooks.py`. Unified execution is accepted only when the
+allowlisted payload contains literal JSON arguments to `tools.exec_command`;
+arbitrary JavaScript is never evaluated. Command records retain task-origin
+wiki provenance separately from the executing worker session, store no tool
+output, and deduplicate hook replay. Native WebSearch is not intercepted, so
+hooks remain observability/guardrails rather than a security boundary.
+`ExitPlanMode` capture remains Claude-only because Codex exposes no equivalent
+tool event.
 
 Protected web flows (`research`, URL ingest, and deep-query supplements)
 use one owner-scoped root operation with separate fetch and synth child

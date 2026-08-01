@@ -20,7 +20,7 @@ from ..contracts import (
 )
 from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
-from review_contract import AXES, SEVERITIES, VERIFY_BUDGETS
+from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
 MAX_REVIEW_SUMMARY_CHARS = 300
@@ -979,7 +979,7 @@ class ReviewResult:
         if (
             self.verdict == "approve"
             and any(
-                finding.severity in {"critical", "important"}
+                finding.severity in MATERIAL_SEVERITIES
                 for finding in self.findings
             )
         ):
@@ -1131,5 +1131,5 @@ def verify_session(
 
 def resolution_required(result: ReviewResult) -> bool:
     return result.verdict == "changes-requested" and any(
-        finding.severity in {"critical", "important"} for finding in result.findings
+        finding.severity in MATERIAL_SEVERITIES for finding in result.findings
     )

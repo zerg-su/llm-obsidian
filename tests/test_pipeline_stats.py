@@ -20,6 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATS = ROOT / "scripts" / "pipeline-stats.py"
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 class Fail(SystemExit):
@@ -46,6 +47,10 @@ def build_vault(
     """A throwaway vault root: copied script, three skills, isolated Claude home."""
     (tmp / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy2(STATS, tmp / "scripts" / "pipeline-stats.py")
+    shutil.copy2(
+        ROOT / "scripts" / "review_contract.py",
+        tmp / "scripts" / "review_contract.py",
+    )
     for name in ("alpha", "beta", "gamma"):
         skill = tmp / "skills" / name
         skill.mkdir(parents=True, exist_ok=True)
@@ -108,7 +113,13 @@ def run_unit(stats) -> None:
     )
     check(
         "orchestration ops are recognized as model-driven",
-        {"agent-run", "review-round", "surface-lifecycle"} <= set(stats.AGENT_DRIVEN_OPS),
+        {
+            "agent-run",
+            "review-callback",
+            "review-round-complete",
+            "surface-lifecycle",
+        }
+        <= set(stats.AGENT_DRIVEN_OPS),
     )
 
     bounded = stats.classify_zero_usage(

@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.adapters.claude import ClaudeDriver
 from harness.adapters.cmux import Surface
 from harness.adapters.codex import CodexDriver
-from harness.callbacks import CallbackTimeoutError
+from harness.callbacks import CallbackBroker, CallbackTimeoutError
 from harness.adapters.process import (
     ProcessAdapter,
     ProcessError,
@@ -35,6 +35,7 @@ from harness.contracts import (
     CallbackEnvelope,
     CapabilityReport,
     OperationSpec,
+    OwnedResources,
     RuntimeRoute,
 )
 from harness.runtime_sessions import (
@@ -216,6 +217,13 @@ class FakeProcess:
         )
         return self.supervisor_status_value
 
+    def capture_identity(self, pid: int, *, process_group: int = 0) -> str:
+        if pid == 123 and process_group == 123:
+            return PROCESS_IDENTITY
+        if pid == 124 and process_group == 0:
+            return SUPERVISOR_IDENTITY
+        return ""
+
     def request_exit(self, process_group: int, identity: str) -> None:
         check(
             "exit receives exact owned identity",
@@ -255,6 +263,7 @@ class FakeProcess:
                     "runtime-workspace-drift",
                     "run-workspace-drift",
                 ),
+                ("generic-cleanup", "generic-cleanup-run"),
             }
             and process_group == 123
             and process_identity == PROCESS_IDENTITY
@@ -1024,20 +1033,185 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     process.status_value = "alive"
 
+    noncallback_spec = OperationSpec(
+        "noncallback-cleanup",
+        "noncallback-cleanup-key",
+        "task-split",
+        "owner-1",
+        route,
+        "packets/noncallback.json",
+        "typed-result",
+    )
+    store.create(
+        noncallback_spec,
+        lane_id="noncallback-cleanup-lane",
+        run_id="noncallback-cleanup-run",
+    )
+    noncallback_supervisor = OperationSupervisor(
+        store, "owner-1", "noncallback-cleanup"
+    )
+    for state in ("preflight", "starting", "running", "finalizing"):
+        noncallback_supervisor.transition(state)
+    noncallback_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    process.status_value = "unknown"
+    process.supervisor_status_value = "unknown"
+    noncallback_result = manager.request_exit(
+        "owner-1", "noncallback-cleanup"
+    )
+    check(
+        "manager non-callback unknown ownership stays fail-closed",
+        noncallback_result.record.state == "attention-required"
+        and noncallback_result.process_status == "unknown"
+        and process.exit_requests == [],
+        noncallback_result,
+    )
+
+    mismatch_spec = OperationSpec(
+        "generic-cleanup-mismatch",
+        "generic-cleanup-mismatch-key",
+        "task-split",
+        "owner-1",
+        route,
+        "packets/generic-mismatch.json",
+        "typed-result",
+    )
+    store.create(
+        mismatch_spec,
+        lane_id="generic-cleanup-mismatch-lane",
+        run_id="generic-cleanup-mismatch-run",
+    )
+    mismatch_supervisor = OperationSupervisor(
+        store, "owner-1", "generic-cleanup-mismatch"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        mismatch_supervisor.transition(state)
+    mismatch_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    mismatch_payload = {"status": "complete"}
+    mismatch_payload_sha = hashlib.sha256(
+        json.dumps(
+            mismatch_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    CallbackBroker(store, "owner-1").accept(
+        CallbackEnvelope(
+            "generic-cleanup-mismatch-callback",
+            "generic-cleanup-mismatch",
+            "generic-cleanup-mismatch-run",
+            "result",
+            mismatch_payload,
+            mismatch_payload_sha,
+        )
+    )
+    process.status_value = "dead"
+    process.supervisor_status_value = "unknown"
+    exact_capture = process.capture_identity
+    process.capture_identity = lambda pid, process_group=0: "c" * 64  # type: ignore[method-assign]
+    mismatch_result = manager.request_exit(
+        "owner-1", "generic-cleanup-mismatch"
+    )
+    check(
+        "callback cleanup fails closed when exact identities do not match",
+        mismatch_result.record.state == "attention-required"
+        and process.exit_requests == [],
+        mismatch_result,
+    )
+    process.capture_identity = exact_capture  # type: ignore[method-assign]
+    process.status_value = "unknown"
+
+    generic_spec = OperationSpec(
+        "generic-cleanup",
+        "generic-cleanup-key",
+        "task-split",
+        "owner-1",
+        route,
+        "packets/generic.json",
+        "typed-result",
+    )
+    store.create(
+        generic_spec,
+        lane_id="generic-cleanup-lane",
+        run_id="generic-cleanup-run",
+    )
+    generic_supervisor = OperationSupervisor(
+        store, "owner-1", "generic-cleanup"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        generic_supervisor.transition(state)
+    generic_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    generic_payload = {"status": "complete"}
+    generic_payload_sha = hashlib.sha256(
+        json.dumps(
+            generic_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    CallbackBroker(store, "owner-1").accept(
+        CallbackEnvelope(
+            "generic-cleanup-callback",
+            "generic-cleanup",
+            "generic-cleanup-run",
+            "result",
+            generic_payload,
+            generic_payload_sha,
+        )
+    )
+    generic_exiting = manager.request_exit("owner-1", "generic-cleanup")
+    check(
+        "any accepted callback cleanup re-probes exact identities before exit",
+        generic_exiting.record.state == "exiting"
+        and generic_exiting.process_status == "alive"
+        and process.exit_requests == [123],
+        generic_exiting,
+    )
+    process.status_value = "alive"
+    process.supervisor_status_value = "alive"
+
     exiting = manager.request_exit("owner-1", "runtime-1")
     check(
         "exit requests the exact PGID before surface close",
         exiting.record.state == "exiting"
-        and process.exit_requests == [123]
+        and process.exit_requests == [123, 123]
         and cmux.closed == []
         and events.index("process-exit") < len(events),
     )
+    process.status_value = "unknown"
+    process.supervisor_status_value = "unknown"
     still_alive = manager.cleanup("owner-1", "runtime-1")
     check(
-        "cleanup cannot close while provider remains alive",
-        still_alive.action == "wait-for-exit" and cmux.closed == [],
+        "accepted callback exiting cleanup re-probes exact identities",
+        still_alive.action == "wait-for-exit"
+        and still_alive.process_status == "alive"
+        and cmux.closed == [],
     )
     process.status_value = "dead"
+    process.supervisor_status_value = "alive"
     waiting_supervisor = manager.cleanup("owner-1", "runtime-1")
     check(
         "cleanup also waits for the owned supervisor process",
@@ -1587,16 +1761,19 @@ review_submit = shlex.join(
     )
 )
 quoted_product = shlex.quote(str(product))
-reviewer_readonly_probes = {
-    f"Bash(git -C {quoted_product} --no-pager log --oneline -20)",
+review_inspect = shlex.join(
     (
-        f"Bash(git -C {quoted_product} --no-pager show "
-        "--stat --oneline HEAD)"
-    ),
+        str(Path(sys.executable).resolve()),
+        str(product / "scripts" / "review-inspect.py"),
+        "--worktree",
+        str(product),
+    )
+)
+reviewer_readonly_probes = {
+    f"Bash({review_inspect}:*)",
     f"Bash(python3 {quoted_product}/scripts/check-skill-budget.py)",
     f"Bash(make -C {quoted_product} test-harness)",
     f"Bash(make -C {quoted_product} test-model-routing)",
-    f"Bash(git -C {quoted_product} diff --check)",
 }
 try:
     callback_instruction = claude_callback[
@@ -1633,9 +1810,8 @@ check(
     and "absolute path verbatim" in callback_instruction
     and "input file's exact session-relative alias" in callback_instruction
     and f"Bash({review_submit})" in claude_callback
-    and f"Bash(git -C {shlex.quote(str(product))} rev-parse HEAD)"
-    in claude_callback
     and reviewer_readonly_probes.issubset(claude_callback)
+    and not any(item.startswith("Bash(git ") for item in claude_callback)
     and "Bash(*)" not in claude_callback
     and not any(
         token in item

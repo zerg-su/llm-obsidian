@@ -19,15 +19,25 @@ upstream commit, each snapshot path has a stable upstream URL — for example
 `skills/writing-skills/SKILL.md` in the superpowers pin is
 `https://github.com/obra/superpowers/blob/44c9b2d6e889982ac18c27d05a19fefe335194e1/skills/writing-skills/SKILL.md`.
 
-> **Limitation of this run: live-upstream drift was not verified.** Every
-> statement here describes the two pinned commits and nothing newer. This refresh
-> intended to check the pins against current upstream through the protected
-> research workflow; that workflow could not run on this machine (see
-> `docs/feature-gaps.md`, "Protected research under the cmux surface wrapper"),
-> so no outbound source was consulted. Nothing below should be read as a claim
-> about the current state of either upstream repository. Treat every "current"
-> question — latest release, default-branch head, whether a rule has since
-> changed — as open.
+> **Limitation of this run: exact live-upstream drift remains unresolved.** The
+> protected research workflow completed with nine validated official-source
+> citations, but its packet did not contain a default-branch HEAD SHA for either
+> repository. It therefore cannot establish whether either pinned commit is
+> current. The strongest captured release indicator for `obra/superpowers` was
+> v6.1.1 dated 2026-07-02, while an older releases index showed v5.1.0; neither
+> resolves the contradiction with the pinned tree's declared 6.2.0. The
+> `mattpocock/skills` release capture exposed recent changes but no version label
+> or release commit. Preserve both pins: repin need is unresolved, not “no update
+> needed.”
+
+The protected packet did confirm that both repositories were available and that
+`obra/superpowers` reported a default branch of `main` plus repository activity
+on 2026-07-31. Those are useful freshness signals, but neither substitutes for
+the full commit response required by the mechanical upgrade procedure. Before a
+future repin, capture the authoritative default-branch SHA and latest release or
+tag from official endpoints, then review only the intervening general-practice
+changes. [Superpowers repository](https://github.com/obra/superpowers),
+[Matt Pocock Skills releases](https://github.com/mattpocock/skills/releases).
 
 Two rules bound the extraction:
 
@@ -71,9 +81,9 @@ tree, so a downstream adapter cannot read the upstream prose for them:
 Treat `SKILL.md` as authoritative over the changelog and docs pages where they
 disagree.
 
-Both gaps are statements about the retained tree at this commit. Whether upstream
-has since shipped either one is one of the open questions this run could not
-check, and is the first thing to confirm when the pins are next refreshed.
+Both gaps are statements about the retained tree at this commit. The protected
+packet did not expose enough current file content to determine whether upstream
+has since shipped either one, so they remain first checks for the next refresh.
 
 ## Where the libraries differ
 

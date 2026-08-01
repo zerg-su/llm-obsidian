@@ -32,14 +32,16 @@ def context_root(data: dict[str, Any]) -> Path:
     return Path(str(raw)).expanduser().resolve()
 
 
-def task_context(data: dict[str, Any]) -> tuple[bool, Path | None]:
+def task_context(
+    data: dict[str, Any],
+) -> tuple[bool, Path | None, Path | None]:
     """Resolve telemetry origin without granting task hooks coordinator behavior."""
 
     path = context_root(data)
     for candidate in (path, *path.parents):
         if (candidate / ".task-meta.json").is_file():
-            return True, origin_vault(candidate)
-    return False, None
+            return True, origin_vault(candidate), candidate
+    return False, None, None
 
 
 def vault_root(data: dict[str, Any]) -> Path | None:
@@ -129,7 +131,7 @@ def main() -> int:
     data, raw = payload()
     context = context_root(data)
     root = vault_root(data)
-    is_task, origin = task_context(data)
+    is_task, origin, task_root = task_context(data)
     telemetry_root = origin if is_task else root
     if telemetry_root is None:
         return 0
@@ -139,8 +141,19 @@ def main() -> int:
             emit(invoke(PLUGIN_ROOT / ".claude" / "hooks" / "skill-router.py", raw, root).stdout)
     elif route == "command-capture":
         tool_name = str(data.get("tool_name") or "")
-        if not is_task and root is not None and tool_name in {"Bash", "exec_command", "shell", "unified_exec"}:
-            invoke(PLUGIN_ROOT / ".claude" / "hooks" / "command-capture.py", raw, root)
+        capture_root = task_root if is_task else root
+        if (
+            capture_root is not None
+            and (capture_root / "wiki").is_dir()
+            and (capture_root / "scripts" / "vault-write.py").is_file()
+            and tool_name
+            in {"Bash", "exec_command", "shell", "unified_exec"}
+        ):
+            invoke(
+                PLUGIN_ROOT / ".claude" / "hooks" / "command-capture.py",
+                raw,
+                capture_root,
+            )
     elif route == "plan-capture":
         # Codex has no ExitPlanMode tool event. This route remains Claude-only
         # by matcher, while sharing the same adapter and root resolution.

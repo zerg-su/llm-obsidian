@@ -15,10 +15,14 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_34 pages, updated 2026-08-01_
+_38 pages, updated 2026-08-01_
 
 - [[dashboard]] — evergreen, 2026-08-01
 - [[lint-report-2026-08-01]] — solid, 2026-08-01
+- [[Cross-model review — 133542f0-7e4f-47c2-9c86-673fd877ddb1 — eead86d4aecb]] — active, 2026-08-01 `c-000056`
+- [[Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030]] — active, 2026-08-01 `c-000052`
+- [[Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6]] — active, 2026-08-01 `c-000054`
+- [[Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e]] — active, 2026-08-01 `c-000062`
 - [[Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc]] — active, 2026-08-01 `c-000050`
 - [[Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8]] — active, 2026-08-01 `c-000048`
 - [[Cross-model review — 8d9f0b29-0f04-4f32-8484-f203ab212b81 — d877febeeedb]] — active, 2026-08-01 `c-000044`

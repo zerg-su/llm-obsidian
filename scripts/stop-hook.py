@@ -167,7 +167,7 @@ def read_json_object(path: Path) -> dict:
 def dispatched_task_worktree() -> bool:
     """Task splits leave coordinator-owned vault maintenance to the coordinator."""
     meta = read_json_object(ROOT / ".task-meta.json")
-    if meta.get("version") not in {2, 3}:
+    if meta.get("version") not in {2, 3, 4}:
         return False
     raw_vault = str(meta.get("vault_root") or "").strip()
     if not raw_vault:

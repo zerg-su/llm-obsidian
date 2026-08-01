@@ -17,6 +17,6 @@ sessions:
 <!-- AUTO-INDEX START -->
 _2 pages, updated 2026-08-01_
 
-- [[Superpowers vs Matt Pocock Skills]] — developing, 2026-08-01 `c-000052`
+- [[Superpowers vs Matt Pocock Skills]] — developing, 2026-08-01 `c-000058`
 - [[Wiki vs RAG]] — mature, 2026-07-11 `c-000007`
 <!-- AUTO-INDEX END -->

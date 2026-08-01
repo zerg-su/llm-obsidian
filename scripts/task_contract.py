@@ -12,11 +12,13 @@ import uuid
 from pathlib import Path
 from typing import Any, NoReturn
 
+from review_contract import MATERIAL_SEVERITIES, SEVERITIES
+
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 REVIEW_MODES = {"simple", "deep", "skip"}
 REVIEW_VERIFY_BUDGETS = {"simple": 1, "deep": 2, "skip": 0}
-REVIEW_POLICY_FIELDS = {
+REVIEW_POLICY_V4_FIELDS = {
     "mode",
     "cross_model",
     "runtime",
@@ -25,6 +27,9 @@ REVIEW_POLICY_FIELDS = {
     "max_verify_iterations",
     "verification_profile",
     "verification_profile_sha256",
+}
+REVIEW_POLICY_V3_FIELDS = {
+    *REVIEW_POLICY_V4_FIELDS,
     "auto_resolve_severities",
     "escalate_severities",
 }
@@ -111,7 +116,9 @@ def sha256_file(path: Path) -> str:
 
 
 def v3_session_is_bound(meta: dict[str, Any], session_id: str) -> bool:
-    if meta.get("version") != 3 or not session_id:
+    """Keep the historical name while validating exact v3/v4 task bindings."""
+
+    if meta.get("version") not in {3, 4} or not session_id:
         return False
     raw_vault = str(meta.get("vault_root") or "").strip()
     if not raw_vault:
@@ -158,14 +165,14 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             "surface_policy": {"auto_close": False},
             "watchdog_policy": dict(DEFAULT_WATCHDOG_POLICY),
         }
-    if version not in {2, 3}:
+    if version not in {2, 3, 4}:
         raise ContractError(f"unsupported task metadata version: {version!r}")
 
-    if version == 3:
+    if version in {3, 4}:
         unknown = set(meta) - V3_META_FIELDS
         if unknown:
             raise ContractError(
-                "v3 task metadata has unknown fields: "
+                f"v{version} task metadata has unknown fields: "
                 + ", ".join(sorted(unknown))
             )
         for field in ("project_id", "task_id"):
@@ -173,9 +180,11 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             try:
                 normalized = str(uuid.UUID(str(value)))
             except (ValueError, TypeError, AttributeError):
-                raise ContractError(f"v3 {field} must be a UUID") from None
+                raise ContractError(f"v{version} {field} must be a UUID") from None
             if normalized != value:
-                raise ContractError(f"v3 {field} must be a canonical lowercase UUID")
+                raise ContractError(
+                    f"v{version} {field} must be a canonical lowercase UUID"
+                )
 
     for field in ("task_name", "origin_session"):
         if not isinstance(meta.get(field), str) or not meta[field].strip():
@@ -186,7 +195,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     policy = meta.get("interaction_policy")
     if policy not in {"interactive", "unattended"}:
         raise ContractError("interaction_policy must be interactive or unattended")
-    if version == 3:
+    if version in {3, 4}:
         pipeline = meta.get("pipeline_policy")
         base_pipeline_fields = {
             "name",
@@ -199,7 +208,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             frozenset(base_pipeline_fields | {"source", "baseline"}),
         }:
             raise ContractError(
-                "v3 pipeline_policy must contain the complete compiled selection"
+                f"v{version} pipeline_policy must contain the complete compiled selection"
             )
         name = pipeline.get("name")
         completion = pipeline.get("completion_policy")
@@ -211,17 +220,17 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             "engineering/fix",
             "custom",
         }:
-            raise ContractError("v3 pipeline_policy.name is invalid")
+            raise ContractError(f"v{version} pipeline_policy.name is invalid")
         if (
             not isinstance(definition_sha256, str)
             or not re.fullmatch(r"[0-9a-f]{64}", definition_sha256)
         ):
             raise ContractError(
-                "v3 pipeline_policy.definition_sha256 is invalid"
+                f"v{version} pipeline_policy.definition_sha256 is invalid"
             )
         if completion not in {"attention", "autonomous"}:
             raise ContractError(
-                "v3 pipeline_policy.completion_policy is invalid"
+                f"v{version} pipeline_policy.completion_policy is invalid"
             )
         expected_limit = {
             "attention": 2,
@@ -229,7 +238,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         }[completion]
         if pass_limit != expected_limit:
             raise ContractError(
-                "v3 pipeline_policy total_pass_limit mismatches completion_policy"
+                f"v{version} pipeline_policy total_pass_limit mismatches completion_policy"
             )
         if name == "custom":
             if (
@@ -242,18 +251,18 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
                 }
             ):
                 raise ContractError(
-                    "v3 custom pipeline requires its exact source and baseline"
+                    f"v{version} custom pipeline requires its exact source and baseline"
                 )
         elif set(pipeline) != base_pipeline_fields:
             raise ContractError(
-                "v3 built-in pipeline cannot carry custom source metadata"
+                f"v{version} built-in pipeline cannot carry custom source metadata"
             )
         if completion == "autonomous" and name not in {
             "engineering/fix",
             "custom",
         }:
             raise ContractError(
-                "v3 autonomous completion requires engineering/fix or custom"
+                f"v{version} autonomous completion requires engineering/fix or custom"
             )
     plan_value = meta.get("plan_file")
     hash_value = meta.get("approved_plan_sha256")
@@ -286,19 +295,22 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     review = meta.get("review_policy")
     if not isinstance(review, dict) or review.get("mode") not in REVIEW_MODES:
         raise ContractError("review_policy.mode must be simple, deep, or skip")
-    if version == 3 and set(review) != REVIEW_POLICY_FIELDS:
+    expected_review_fields = (
+        REVIEW_POLICY_V3_FIELDS if version == 3 else REVIEW_POLICY_V4_FIELDS
+    )
+    if version in {3, 4} and set(review) != expected_review_fields:
         raise ContractError(
-            "v3 review_policy must contain the complete deterministic preset"
+            f"v{version} review_policy must contain the complete deterministic preset"
         )
     mode = review["mode"]
     max_verify = review.get("max_verify_iterations")
     if isinstance(max_verify, bool) or not isinstance(max_verify, int) or not 0 <= max_verify <= 5:
         raise ContractError("review_policy.max_verify_iterations must be 0..5")
-    if version == 3:
+    if version in {3, 4}:
         expected_budget = REVIEW_VERIFY_BUDGETS[mode]
         if max_verify != expected_budget:
             raise ContractError(
-                f"v3 {mode} review requires exactly {expected_budget} "
+                f"v{version} {mode} review requires exactly {expected_budget} "
                 "verification iteration(s)"
             )
         cross_model = review.get("cross_model")
@@ -350,14 +362,19 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError(
                 "review_policy.verification_profile_sha256 must be a sha256"
             )
-    auto = review.get("auto_resolve_severities")
-    escalate = review.get("escalate_severities")
-    if not isinstance(auto, list) or any(x not in {"warning", "nit"} for x in auto):
-        raise ContractError("auto_resolve_severities may contain warning and nit")
-    if len(auto) != len(set(auto)):
-        raise ContractError("auto_resolve_severities must be unique")
-    if escalate != ["blocking"]:
-        raise ContractError("blocking must be the sole escalate severity")
+    if version in {2, 3}:
+        auto = review.get("auto_resolve_severities")
+        escalate = review.get("escalate_severities")
+        if not isinstance(auto, list) or any(
+            x not in {"warning", "nit"} for x in auto
+        ):
+            raise ContractError(
+                "auto_resolve_severities may contain warning and nit"
+            )
+        if len(auto) != len(set(auto)):
+            raise ContractError("auto_resolve_severities must be unique")
+        if escalate != ["blocking"]:
+            raise ContractError("blocking must be the sole escalate severity")
 
     reap = meta.get("reap_policy")
     if not isinstance(reap, dict):
@@ -424,7 +441,7 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
     All other plan drift remains fail-closed.
     """
     policy = normalize(meta, verify_plan_hash=False)
-    if policy["version"] not in {2, 3}:
+    if policy["version"] not in {2, 3, 4}:
         return policy
     plan = Path(str(meta.get("plan_file") or "")).expanduser().resolve()
     approved = str(meta.get("approved_plan_sha256") or "")
@@ -442,9 +459,11 @@ def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any
         if prepared.get("task_name") != meta.get("task_name"):
             raise ContractError("reap preparation task mismatch")
         prepared_session = str(prepared.get("current_session") or "")
-        if meta.get("version") == 3:
+        if meta.get("version") in {3, 4}:
             if not v3_session_is_bound(meta, prepared_session):
-                raise ContractError("reap preparation session is not bound to the exact v3 task")
+                raise ContractError(
+                    "reap preparation session is not bound to the exact task"
+                )
         elif prepared_session != meta.get("origin_session"):
             raise ContractError("reap preparation session mismatch")
         if prepared.get("approved_plan_sha256") != approved:
@@ -476,9 +495,9 @@ def validate_handoff(
     if policy["interaction_policy"] != "unattended":
         raise ContractError("legacy/interactive task requires user confirmation")
     origin = str(meta.get("origin_session") or "")
-    if meta.get("version") == 3:
+    if meta.get("version") in {3, 4}:
         if not v3_session_is_bound(meta, current_session):
-            raise ContractError("current session is not bound to the exact v3 task")
+            raise ContractError("current session is not bound to the exact task")
     elif not origin or not current_session or origin != current_session:
         raise ContractError("origin session mismatch; unattended filing refused")
     reap = policy["reap_policy"]
@@ -501,7 +520,7 @@ def review_action(meta: dict[str, Any], review: dict[str, Any], iteration: int) 
     findings = review.get("findings")
     if not isinstance(findings, list):
         raise ContractError("review findings must be an array")
-    if review.get("verdict") == "blocked" or any(f.get("severity") == "blocking" for f in findings if isinstance(f, dict)):
+    if review.get("verdict") == "blocked":
         return "escalate"
     if review.get("verdict") == "approve" and not findings:
         return "approve"
@@ -510,6 +529,16 @@ def review_action(meta: dict[str, Any], review: dict[str, Any], iteration: int) 
     if iteration >= rp["max_verify_iterations"]:
         return "escalate"
     severities = {f.get("severity") for f in findings if isinstance(f, dict)}
+    if policy["version"] == 4:
+        if not severities <= set(SEVERITIES):
+            return "escalate"
+        return (
+            "resolve"
+            if severities & MATERIAL_SEVERITIES
+            else "approve"
+        )
+    if "blocking" in severities:
+        return "escalate"
     if severities <= set(rp["auto_resolve_severities"]):
         return "resolve"
     return "escalate"

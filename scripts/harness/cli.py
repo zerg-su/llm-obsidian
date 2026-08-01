@@ -20,7 +20,11 @@ from .contracts import (
     to_dict,
 )
 from .diagnostics import observe as observe_diagnostics
-from .reconciliation import ReconcileDecision, reconcile
+from .reconciliation import (
+    ReconcileDecision,
+    prove_accepted_callback_ownership,
+    reconcile,
+)
 from .state_machine import TERMINAL
 from .status_segment import publish as publish_status
 from .store import OperationStore, StoreError
@@ -165,6 +169,21 @@ def _reconcile_owned_resources(
         has_process_group = resources.process_group > 1
         has_surface = bool(resources.surface_id)
         workspace = _runtime_workspace(store, record)
+        accepted = prove_accepted_callback_ownership(
+            record,
+            process_adapter,
+        )
+        if accepted.applicable:
+            process_status = accepted.process_status
+            supervisor_status = accepted.supervisor_status
+            if "unknown" in {process_status, supervisor_status} or (
+                process_status == "alive" and supervisor_status == "dead"
+            ):
+                return ReconcileDecision(
+                    "none", AttentionReason.ATTENTION_REQUIRED
+                )
+            if "alive" in {process_status, supervisor_status}:
+                return ReconcileDecision("continue")
         if resources.supervisor_pid and not has_process_group:
             return ReconcileDecision(
                 "none", AttentionReason.ATTENTION_REQUIRED

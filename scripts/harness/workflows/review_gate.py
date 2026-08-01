@@ -40,7 +40,8 @@ from .review import (
     start_review,
     verify_review_lane,
 )
-from review_contract import VERIFY_BUDGETS, validate_review
+from review_contract import MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
+from review_resolution import ReviewResolutionEvidence
 
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -443,6 +444,7 @@ class ReviewGateController:
             "lanes": [],
             "round_results": {},
             "final_results": {},
+            "resolution_evidence": {},
             "evidence": {},
         }
         with self._locked():
@@ -679,6 +681,7 @@ class ReviewGateController:
             "lanes": [],
             "round_results": {},
             "final_results": {},
+            "resolution_evidence": {},
             "evidence": {},
         }
         path = root / "review-gate.json"
@@ -705,6 +708,30 @@ class ReviewGateController:
         payload = _result_payload(result)
         if path.exists() and _read_json(path) != payload:
             raise ValueError("review result changed across replay")
+        _atomic_json(path, payload)
+        return path.relative_to(self.root).as_posix()
+
+    def _persist_resolution(
+        self,
+        operation_id: str,
+        resolution: ReviewResolutionEvidence,
+        *,
+        verification_iteration: int,
+    ) -> str:
+        axis = (
+            "standards"
+            if resolution.axis
+            == "standards-correctness-architecture-security"
+            else resolution.axis
+        )
+        path = (
+            self.root
+            / operation_id
+            / f"resolution-{axis}-{verification_iteration}.json"
+        )
+        payload = resolution.payload()
+        if path.exists() and _read_json(path) != payload:
+            raise ValueError("review resolution evidence changed across replay")
         _atomic_json(path, payload)
         return path.relative_to(self.root).as_posix()
 
@@ -788,6 +815,17 @@ class ReviewGateController:
                     "name": context.verification_profile,
                     "sha256": context.verification_profile_sha256,
                 },
+                "resolution_evidence": [
+                    {
+                        "pointer": str(pointer),
+                        "sha256": hashlib.sha256(
+                            (self.root / str(pointer)).read_bytes()
+                        ).hexdigest(),
+                    }
+                    for pointer in dict(
+                        self.read().get("resolution_evidence") or {}
+                    ).values()
+                ],
             },
         )
         digest = hashlib.sha256(callback_path.read_bytes()).hexdigest()
@@ -833,7 +871,7 @@ class ReviewGateController:
         material = tuple(
             finding
             for finding in result.findings
-            if finding.severity in {"critical", "important"}
+            if finding.severity in MATERIAL_SEVERITIES
         )
         if result.verdict == "blocked":
             self._mark_attention(run.execution.lanes)
@@ -982,6 +1020,7 @@ class ReviewGateController:
         lane: ReviewLaneSession,
         *,
         context: ReviewContext,
+        resolution: ReviewResolutionEvidence,
         verification_prompt_pointer: str,
         callback_pointer: str,
         prepare_round: (
@@ -1005,6 +1044,21 @@ class ReviewGateController:
             boundary.get("reviewed_head_sha") or ""
         )
         previous = run.execution.request.context
+        pointer = str(boundary.get("pointer") or "")
+        result_path = (self.root / pointer).resolve()
+        if (
+            not pointer
+            or self.root not in result_path.parents
+            or not result_path.is_file()
+            or result_path.is_symlink()
+        ):
+            raise ValueError("review resolution finding evidence is unavailable")
+        previous_result = _result_from_payload(_read_json(result_path))
+        material_ids = tuple(
+            finding.finding_id
+            for finding in previous_result.findings
+            if finding.severity in MATERIAL_SEVERITIES
+        )
         if (
             context.head_sha == previous_head
             or context.verification_profile
@@ -1015,6 +1069,22 @@ class ReviewGateController:
             raise ValueError(
                 "review verification requires a new HEAD under the same profile"
             )
+        if (
+            resolution.operation_id
+            != run.execution.request.policy.operation_id
+            or resolution.axis != lane.axis
+            or resolution.reviewed_head_sha != previous_head
+            or resolution.resolved_head_sha != context.head_sha
+            or resolution.previous_finding_ids != material_ids
+        ):
+            raise ValueError(
+                "review resolution evidence does not cover the exact material findings"
+            )
+        resolution_pointer = self._persist_resolution(
+            run.execution.request.policy.operation_id,
+            resolution,
+            verification_iteration=lane.verification_iteration,
+        )
         captured: list[ReviewRound] = []
 
         def prepared(
@@ -1061,6 +1131,10 @@ class ReviewGateController:
             ),
             context=self._context(context),
             awaiting_resolution=remaining,
+            resolution_evidence={
+                **dict(state.get("resolution_evidence") or {}),
+                f"{lane.axis}:{lane.verification_iteration}": resolution_pointer,
+            },
             lanes=lanes,
         )
         return ReviewGateDecision("verify", continued, captured[0])

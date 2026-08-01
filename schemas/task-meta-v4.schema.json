@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/task-meta-v4.schema.json",
+  "title": "Dispatch task metadata v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "project_id", "task_id", "task_name", "wiki_runtime",
+    "executor_runtime", "runtime", "origin_session", "spawned_at",
+    "wiki_surface", "wiki_surface_ref", "task_surface", "task_surface_ref",
+    "task_workspace", "task_workspace_ref", "task_window", "task_window_ref",
+    "worktree", "target_repo", "vault_root", "branch", "base_branch",
+    "codex_home", "codex_profile", "wiki_reap_command", "review_skill",
+    "routing", "plan_file", "approved_plan_sha256", "interaction_policy",
+    "pipeline_policy", "review_policy", "reap_policy", "surface_policy",
+    "watchdog_policy", "forbidden_actions", "suggested_agents"
+  ],
+  "properties": {
+    "version": {"const": 4},
+    "project_id": {"type": "string", "format": "uuid"},
+    "task_id": {"type": "string", "format": "uuid"},
+    "task_name": {"type": "string", "minLength": 1},
+    "wiki_runtime": {"enum": ["claude", "codex"]},
+    "executor_runtime": {"enum": ["claude", "codex"]},
+    "runtime": {"enum": ["claude", "codex"]},
+    "origin_session": {"type": "string", "minLength": 1},
+    "spawned_at": {"type": "string", "minLength": 1},
+    "wiki_surface": {"type": "string", "minLength": 1},
+    "wiki_surface_ref": {"type": "string"},
+    "task_surface": {"type": "string", "minLength": 1},
+    "task_surface_ref": {"type": "string"},
+    "task_workspace": {"type": "string"},
+    "task_workspace_ref": {"type": "string"},
+    "task_window": {"type": "string"},
+    "task_window_ref": {"type": "string"},
+    "worktree": {"type": "string", "minLength": 1},
+    "target_repo": {"type": "string", "minLength": 1},
+    "vault_root": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "base_branch": {"type": "string", "minLength": 1},
+    "codex_home": {"type": ["string", "null"]},
+    "codex_profile": {"type": ["string", "null"]},
+    "wiki_reap_command": {"type": "string", "minLength": 1},
+    "review_skill": {"type": "string", "minLength": 1},
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "session", "effective"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runtime", "model", "effort", "source"],
+          "properties": {
+            "runtime": {"enum": ["claude", "codex"]},
+            "model": {"type": "string", "minLength": 1},
+            "effort": {"type": "string", "minLength": 1},
+            "source": {"type": "string", "minLength": 1}
+          }
+        },
+        "effective": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version", "role", "runtime", "model", "effort",
+            "source", "config_sha256", "local_override"
+          ],
+          "properties": {
+            "schema_version": {"const": 1},
+            "role": {"const": "dispatch"},
+            "runtime": {"enum": ["claude", "codex"]},
+            "model": {"type": "string", "minLength": 1},
+            "effort": {"type": "string", "minLength": 1},
+            "source": {
+              "type": "array", "items": {"type": "string"}, "minItems": 1
+            },
+            "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "local_override": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "plan_file": {"type": "string", "minLength": 1},
+    "approved_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "interaction_policy": {"const": "unattended"},
+    "pipeline_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "definition_sha256", "completion_policy", "total_pass_limit"],
+      "properties": {
+        "name": {"enum": ["lifecycle/default", "engineering/change", "engineering/fix", "custom"]},
+        "definition_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "completion_policy": {"enum": ["attention", "autonomous"]},
+        "total_pass_limit": {"enum": [2, 3]},
+        "source": {"const": "custom"},
+        "baseline": {"enum": ["lifecycle/default", "engineering/change", "engineering/fix"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"name": {"const": "custom"}}},
+          "then": {"required": ["source", "baseline"]},
+          "else": {"not": {"anyOf": [{"required": ["source"]}, {"required": ["baseline"]}]}}
+        },
+        {
+          "if": {"properties": {"completion_policy": {"const": "attention"}}},
+          "then": {"properties": {"total_pass_limit": {"const": 2}}}
+        },
+        {
+          "if": {"properties": {"completion_policy": {"const": "autonomous"}}},
+          "then": {
+            "properties": {
+              "name": {"enum": ["engineering/fix", "custom"]},
+              "total_pass_limit": {"const": 3}
+            }
+          }
+        }
+      ]
+    },
+    "review_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode", "cross_model", "runtime", "model", "effort",
+        "max_verify_iterations", "verification_profile",
+        "verification_profile_sha256"
+      ],
+      "properties": {
+        "mode": {"enum": ["simple", "deep", "skip"]},
+        "cross_model": {"type": "boolean"},
+        "runtime": {"enum": ["", "claude", "codex"]},
+        "model": {"type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "effort": {"enum": ["", "minimal", "low", "medium", "high", "xhigh", "max"]},
+        "max_verify_iterations": {"type": "integer", "minimum": 0, "maximum": 2},
+        "verification_profile": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "verification_profile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "simple"}}},
+          "then": {"properties": {"max_verify_iterations": {"const": 1}}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "deep"}}},
+          "then": {"properties": {"max_verify_iterations": {"const": 2}}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "skip"}}},
+          "then": {
+            "properties": {
+              "cross_model": {"const": false}, "runtime": {"const": ""},
+              "model": {"const": ""}, "effort": {"const": ""},
+              "max_verify_iterations": {"const": 0}
+            }
+          }
+        }
+      ]
+    },
+    "reap_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "auto_file", "allowed_types", "title"],
+      "properties": {
+        "mode": {"enum": ["final", "shared"]},
+        "auto_file": {"type": "boolean"},
+        "allowed_types": {
+          "type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true,
+          "items": {"enum": ["session", "decision", "runbook", "incident", "service-update", "repo-touch"]}
+        },
+        "title": {"type": "string", "minLength": 1}
+      }
+    },
+    "surface_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auto_close", "placement"],
+      "properties": {
+        "auto_close": {"type": "boolean"},
+        "placement": {"enum": ["split", "workspace"]}
+      }
+    },
+    "watchdog_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "poll_seconds", "warn_after_seconds", "alert_after_seconds"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "poll_seconds": {"type": "integer", "minimum": 5, "maximum": 300},
+        "warn_after_seconds": {"type": "integer", "minimum": 300, "maximum": 7200},
+        "alert_after_seconds": {"type": "integer", "minimum": 600, "maximum": 14400}
+      }
+    },
+    "forbidden_actions": {
+      "const": ["push", "deploy", "publish", "delete-worktree", "delete-branch", "expand-scope"]
+    },
+    "suggested_agents": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "hint"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "hint": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "model": {"type": "string", "minLength": 1},
+    "effort": {"type": "string", "minLength": 1}
+  }
+}
