@@ -230,6 +230,8 @@ def provider_argv(
         or not SURFACE_UUID.fullmatch(surface_id)
     ):
         return argv
+    if spec.get("callback_mode") in {"research-fetch", "research-synth"}:
+        return _pin_env_shebang(argv, values, pinned_interpreter)
     prefix = f"CMUX_{runtime.upper()}_WRAPPER_SHIM"
     raw_wrapper = str(values.get(prefix) or "").strip()
     raw_root = str(values.get(f"{prefix}_ROOT") or "").strip()

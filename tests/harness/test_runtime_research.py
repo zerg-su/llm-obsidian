@@ -175,6 +175,49 @@ with tempfile.TemporaryDirectory(prefix="runtime-shebang.") as raw:
         command,
     )
 
+    wrapper_root = root / "cmux-cli-shims" / SURFACE
+    wrapper_root.mkdir(parents=True)
+    wrapper = wrapper_root / "codex"
+    wrapper.write_text("#!/usr/bin/env bash\nexit 127\n", encoding="utf-8")
+    wrapper.chmod(0o700)
+    wrapper_env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "CMUX_SURFACE_ID": SURFACE,
+        "CMUX_CODEX_WRAPPER_SHIM": str(wrapper),
+        "CMUX_CODEX_WRAPPER_SHIM_ROOT": str(wrapper_root),
+    }
+    protected_command = provider_argv(
+        {
+            "argv": (str(codex), "--help"),
+            "runtime": "codex",
+            "surface_id": SURFACE,
+            "callback_mode": "research-fetch",
+            "runtime_interpreter": node.resolve(),
+        },
+        env=wrapper_env,
+    )
+    ordinary_command = provider_argv(
+        {
+            "argv": (str(codex), "--help"),
+            "runtime": "codex",
+            "surface_id": SURFACE,
+            "callback_mode": "envelope",
+            "runtime_interpreter": node.resolve(),
+        },
+        env=wrapper_env,
+    )
+    check(
+        "protected research bypasses the cmux wrapper under sanitized PATH",
+        protected_command
+        == (str(node.resolve()), str(codex), "--help"),
+        protected_command,
+    )
+    check(
+        "ordinary runtimes retain the exact-surface cmux wrapper",
+        ordinary_command == (str(wrapper.resolve()), "--help"),
+        ordinary_command,
+    )
+
 
 with tempfile.TemporaryDirectory(prefix="runtime-research.") as raw:
     root = Path(raw)
