@@ -27,6 +27,30 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype
+
+`c-000086` [[LLM Obsidian 2.6 dogfood RT4 callback fallback prototype]]. ## RT4 callback fallback prototype
+
+Disposition: **partially-achieved**. Final product HEAD is `90ed61720896681b31f5d64cb2310320a878d7a6`; it changes only `docs/acceptance/v2.6-dogfood-rt4-callback-fallback-prototype.md`. The deterministic liveness fixture and scoped verification profile passed without a model/provider invocation.
+
+The review finding HOL-001 was applied: the report no longer treats live-progress observation as the complete `rt4-signal` outcome. It explicitly records `rt4-signal`
+
+## [2026-08-02 02:32] dispatch | llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype
+
+Spawned an approved unattended task session (cmux `69591389-8579-462F-9098-E23585860F45`, runtime codex, model gpt-5.6-terra) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype` from `e304624f359c69bfba78073884ec74db6e225a39`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md`. Pre-loaded context: [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]]. Awaiting typed review and final reap.
+
+## [2026-08-02 02:31] dispatch | llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings
+
+Spawned an approved unattended task session (cmux `8376A391-149C-4F45-A36C-F8E7CA1A1495`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings` from `e304624f359c69bfba78073884ec74db6e225a39`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md`. Pre-loaded context: [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]]. Awaiting typed review and final reap.
+
+## [2026-08-02 02:31] dispatch | llm-obsidian-2-6-dogfood-rt2-fresh-review-packet
+
+Spawned an approved unattended task session (cmux `4E5D5EBD-27F7-4DE8-B62A-08452DA6AF46`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-dogfood-rt2-fresh-review-packet`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-dogfood-rt2-fresh-review-packet` from `e304624f359c69bfba78073884ec74db6e225a39`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md`. Pre-loaded context: [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]]. Awaiting typed review and final reap.
+
+## [2026-08-02 02:31] dispatch | llm-obsidian-2-6-dogfood-rt1-watchdog-design
+
+Spawned an approved unattended task session (cmux `DCC082BC-CC63-47D4-A449-77A590441328`, runtime codex, model gpt-5.6-terra) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-dogfood-rt1-watchdog-design`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-dogfood-rt1-watchdog-design` from `e304624f359c69bfba78073884ec74db6e225a39`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md`. Pre-loaded context: [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]]. Awaiting typed review and final reap.
+
 ## [2026-08-02] reap | llm-obsidian-2-6-paired-fix-post-final
 
 `c-000084` [[LLM Obsidian 2.6 paired fix post-change final]]. Implemented and committed the frozen paired-fixture Unicode label fix at `c0d027f82e14e83b4d4368fec2a7e640d75d8cac`. The accepted typed evidence reproduces the pre-fix loss (`Résumé Plan` -> `r-sum-plan`; `Москва 42` -> `42`), isolates the ASCII-only `[a-z0-9]` allow-list as root cause, and proves the new observable regression red before the fix. The implementation now joins Unicode-aware alphanumeric runs while excluding underscore, so Unicode letters remain lowercase, unsafe separator runs col

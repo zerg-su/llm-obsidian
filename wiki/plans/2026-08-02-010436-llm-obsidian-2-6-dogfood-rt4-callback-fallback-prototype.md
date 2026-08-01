@@ -6,8 +6,10 @@ session_id: 019fab00-3160-7380-8920-4b20183afb76
 sessions:
   - id: 019fab00-3160-7380-8920-4b20183afb76
     date: 2026-08-02
+  - id: 019fab00-3160-7380-8920-4b20183afb76
+    date: 2026-08-02
 source_cwd: "/Users/zak/Projects/llm-obsidian"
-status: pending
+status: executed
 created: 2026-08-02
 updated: 2026-08-02
 tags:
@@ -44,3 +46,4 @@ tags:
 - Отчёт не заявляет больше, чем показывает evidence.
 - Если хотя бы один обязательный evidence ID missing, Wiki Summary v2 использует `partially-achieved`.
 
+Результат: [[LLM Obsidian 2.6 dogfood RT4 callback fallback prototype]] (reaped 2026-08-02)
