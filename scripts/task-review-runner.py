@@ -1169,6 +1169,180 @@ def _durable_verification_resubmit(
     ).hexdigest()
 
 
+def _durable_successful_verification(
+    meta: Mapping[str, Any],
+    vault: Path,
+    store: OperationStore,
+    task_id: str,
+    current_head: str,
+) -> tuple[str, str] | None:
+    """Prove the coordinator reran the exact configured profile at HEAD."""
+
+    owner_runtime = (
+        store.root
+        / "owners"
+        / task_id
+        / "runtime"
+        / task_id
+    ).resolve()
+    linked_path = owner_runtime / "pipeline-step-verify.json"
+    if not linked_path.exists():
+        return None
+    if not linked_path.is_file() or linked_path.is_symlink():
+        raise TaskReviewError(
+            "successful review recovery verification link is invalid"
+        )
+    receipt = _read_json(linked_path, "successful verification receipt")
+    operation_id = str(receipt.get("operation_id") or "")
+    receipt_path = (
+        owner_runtime
+        / "pipeline-verification"
+        / operation_id
+        / "receipt.json"
+    ).resolve()
+    if (
+        not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", operation_id
+        )
+        or not receipt_path.is_file()
+        or receipt_path.is_symlink()
+        or _read_json(receipt_path, "successful verification receipt")
+        != receipt
+    ):
+        return None
+    policy = meta.get("pipeline_policy")
+    review_policy = meta.get("review_policy")
+    evidence = receipt.get("evidence")
+    input_sha256 = str(receipt.get("input_sha256") or "")
+    profile = str(receipt.get("profile") or "")
+    configured_profile = load_profiles(
+        vault / "config/verification-profiles.toml"
+    ).get(profile)
+    if (
+        set(receipt)
+        != {
+            "schema_version",
+            "operation_id",
+            "parent_operation_id",
+            "lane_id",
+            "run_id",
+            "definition_sha256",
+            "step_id",
+            "head_sha",
+            "input_sha256",
+            "profile",
+            "profile_sha256",
+            "effect_id",
+            "status",
+            "evidence",
+        }
+        or receipt.get("schema_version") != 1
+        or receipt.get("parent_operation_id") != task_id
+        or not isinstance(policy, Mapping)
+        or receipt.get("definition_sha256")
+        != policy.get("definition_sha256")
+        or receipt.get("step_id") != "verify"
+        or receipt.get("head_sha") != current_head
+        or not re.fullmatch(r"[0-9a-f]{64}", input_sha256)
+        or not isinstance(review_policy, Mapping)
+        or configured_profile is None
+        or profile != review_policy.get("verification_profile")
+        or receipt.get("profile_sha256")
+        != review_policy.get("verification_profile_sha256")
+        or configured_profile.sha256 != receipt.get("profile_sha256")
+        or receipt.get("effect_id")
+        != f"pipeline-verify-{input_sha256[:32]}"
+        or receipt.get("status") != "complete"
+        or not isinstance(evidence, list)
+        or not evidence
+        or len(evidence) > 100
+    ):
+        return None
+    try:
+        parent = store.read(task_id, task_id)
+        expected_spec, expected_lane, expected_run = (
+            _pipeline_verify_identity(
+                parent.spec,
+                definition_sha256=str(receipt["definition_sha256"]),
+                input_sha256=input_sha256,
+                profile=profile,
+            )
+        )
+        child = store.read(task_id, operation_id)
+    except (StoreError, ValueError) as exc:
+        raise TaskReviewError(
+            "successful review recovery verification operation is unavailable"
+        ) from exc
+    if (
+        expected_spec.operation_id != operation_id
+        or receipt.get("lane_id") != expected_lane
+        or receipt.get("run_id") != expected_run
+        or child.spec != expected_spec
+        or child.lane_id != expected_lane
+        or child.run_id != expected_run
+        or child.state != "complete"
+        or child.resources != OwnedResources()
+        or child.pending_effect
+        or child.effect_id != receipt.get("effect_id")
+        or child.effect_outcome != EffectOutcome.SUCCEEDED
+    ):
+        raise TaskReviewError(
+            "successful review recovery verification operation changed"
+        )
+    evidence_root = (owner_runtime / "pipeline-verification").resolve()
+    expected_command_ids = [
+        f"{profile}-{index + 1}"
+        for index in range(len(configured_profile.commands))
+    ]
+    if not all(isinstance(row, dict) for row in evidence):
+        raise TaskReviewError(
+            "successful review recovery verification evidence is invalid"
+        )
+    if [str(row.get("command_id") or "") for row in evidence] != (
+        expected_command_ids
+    ):
+        raise TaskReviewError(
+            "successful review recovery verification command set is incomplete"
+        )
+    for row in evidence:
+        if (
+            not isinstance(row, dict)
+            or set(row)
+            != {
+                "command_id",
+                "cwd",
+                "exit_code",
+                "started_at",
+                "finished_at",
+                "head_sha",
+                "profile",
+                "profile_sha256",
+                "output_pointer",
+            }
+            or type(row.get("exit_code")) is not int
+            or row.get("exit_code") != 0
+            or row.get("head_sha") != current_head
+            or row.get("profile") != profile
+            or row.get("profile_sha256")
+            != receipt.get("profile_sha256")
+        ):
+            raise TaskReviewError(
+                "successful review recovery verification evidence is invalid"
+            )
+        pointer = Path(str(row.get("output_pointer") or ""))
+        output = (owner_runtime / pointer).resolve()
+        if (
+            pointer.is_absolute()
+            or evidence_root not in output.parents
+            or not output.is_file()
+            or output.is_symlink()
+        ):
+            raise TaskReviewError(
+                "successful review recovery verification evidence is unavailable"
+            )
+    return operation_id, hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+
+
 def _finalizing_resubmit_recovery(
     meta: Mapping[str, Any],
     vault: Path,
@@ -1184,7 +1358,12 @@ def _finalizing_resubmit_recovery(
 
     state = gate.read()
     if (
-        state.get("status") != "verifying"
+        state.get("status")
+        not in {
+            "verifying",
+            "recovery-verification-required",
+            "fresh-boundary-authorized",
+        }
         or run.execution.request.policy.depth != "simple"
         or run.execution.request.policy.axes != ("holistic",)
         or len(run.execution.lanes) != 1
@@ -1395,13 +1574,13 @@ def _apply_finalizing_recovery(
 ) -> dict[str, Any]:
     lane = run.execution.lanes[0]
     round_ = run.rounds[lane.axis]
+    initial_status = gate.read().get("status")
     try:
-        decision = gate.recover_finalizing_approved_round(
+        gate.stage_finalizing_reverification(
             run,
             lane,
             round_,
             recovery.result,
-            context=recovery.context,
             recovery_pointer=recovery.marker_pointer,
             recovery_sha256=recovery.marker_sha256,
         )
@@ -1409,33 +1588,111 @@ def _apply_finalizing_recovery(
         raise TaskReviewError(
             f"finalizing review recovery failed: {exc}"
         ) from exc
-    _emit_round_telemetry(
-        worktree,
+    if initial_status == "verifying":
+        _emit_round_telemetry(
+            worktree,
+            vault,
+            runtime_root,
+            round_,
+            event="review-callback",
+            terminal_status="accepted",
+        )
+        _emit_round_telemetry(
+            worktree,
+            vault,
+            runtime_root,
+            round_,
+            event="review-round-complete",
+            terminal_status=recovery.result.verdict,
+            severities=tuple(
+                finding.severity for finding in recovery.result.findings
+            ),
+        )
+    successful = _durable_successful_verification(
+        meta,
         vault,
-        runtime_root,
-        round_,
-        event="review-callback",
-        terminal_status="accepted",
+        gate.round_store,
+        task_id,
+        recovery.context.head_sha,
     )
-    _emit_round_telemetry(
-        worktree,
-        vault,
-        runtime_root,
-        round_,
-        event="review-round-complete",
-        terminal_status=recovery.result.verdict,
-        severities=tuple(
-            finding.severity for finding in recovery.result.findings
-        ),
+    if successful is None:
+        return _receipt(
+            status="verifying",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=recovery.context_manifest,
+            run=gate.rehydrate(),
+        )
+    verification_operation_id, verification_receipt_sha256 = successful
+    previous_context = run.execution.request.context
+    reason = "verified resubmission requires exact-HEAD reviewer inspection"
+    boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(previous_context),
+        review_context_sha256(recovery.context),
+        reason,
     )
-    return _receipt(
-        status=decision.action,
+    authorization = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "kind": boundary.kind,
+        "previous_context_sha256": boundary.previous_context_sha256,
+        "next_context_sha256": boundary.next_context_sha256,
+        "reason": boundary.reason,
+        "authorization_provenance": "pipeline-verification",
+        "verification_operation_id": verification_operation_id,
+        "verification_receipt_sha256": verification_receipt_sha256,
+        "status": "authorized",
+    }
+    authorization_name = (
+        "fresh-boundary-authorization-"
+        f"{_canonical_sha256(authorization)[:16]}.json"
+    )
+    authorization_path = gate.root / authorization_name
+    if authorization_path.exists():
+        if (
+            authorization_path.is_symlink()
+            or _read_json(
+                authorization_path, "fresh boundary authorization"
+            )
+            != authorization
+        ):
+            raise TaskReviewError(
+                "fresh boundary authorization changed across replay"
+            )
+    else:
+        _atomic_json(authorization_path, authorization)
+    authorization_sha256 = hashlib.sha256(
+        authorization_path.read_bytes()
+    ).hexdigest()
+    try:
+        gate.authorize_fresh_boundary(
+            run,
+            boundary=boundary,
+            authorization_pointer=authorization_name,
+            authorization_sha256=authorization_sha256,
+        )
+    except (OSError, ValueError) as exc:
+        raise TaskReviewError(
+            f"finalizing review boundary authorization failed: {exc}"
+        ) from exc
+    if not _dispatched_review_is_quiescent(gate.round_store, task_id):
+        raise TaskReviewError(
+            "verified fresh review boundary is not quiescent"
+        )
+    return _launch_authorized_task_review(
         meta=meta,
         vault=vault,
         worktree=worktree,
         runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        context=recovery.context,
         context_manifest=recovery.context_manifest,
-        run=gate.rehydrate(),
+        boundary=boundary,
     )
 
 
@@ -1895,7 +2152,12 @@ def _run_review(
             context_manifest=context_manifest,
             run=gate.rehydrate(),
         )
-    if status not in {"reviewing", "verifying"}:
+    if status not in {
+        "reviewing",
+        "verifying",
+        "recovery-verification-required",
+        "fresh-boundary-authorized",
+    }:
         raise TaskReviewError("review gate has an unsupported state")
     if context.head_sha != run.execution.request.context.head_sha:
         recovery = _finalizing_resubmit_recovery(
@@ -2086,6 +2348,21 @@ def recover_finalizing_review(
             context_manifest=context_manifest,
             run=run,
         )
+    if (
+        state.get("status") in {"fresh-reevaluation", "reviewing", "verifying"}
+        and isinstance(state.get("context"), dict)
+        and state["context"].get("head_sha") == context.head_sha
+        and isinstance(state.get("fresh_boundary_authorization"), dict)
+    ):
+        return _receipt(
+            status="reviewing",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=run,
+        )
     if context.head_sha == run.execution.request.context.head_sha:
         raise TaskReviewError(
             "finalizing review recovery requires an exact repaired HEAD"
@@ -2138,54 +2415,21 @@ def _dispatched_review_is_quiescent(
     return True
 
 
-def restart_task_review_for_boundary(
-    worktree: Path,
+def _launch_authorized_task_review(
     *,
-    kind: str,
-    reason: str,
-    runtime_manager: object | None = None,
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    task_id: str,
+    gate: ReviewGateController,
+    run: ReviewGateRun,
+    context: ReviewContext,
+    context_manifest: Path,
+    boundary: ReviewScopeBoundary,
 ) -> dict[str, Any]:
-    """Start the one persisted fresh review allowed for a dispatched task."""
+    """Launch one pre-authorized fresh run after complete scratch preflight."""
 
-    worktree = worktree.expanduser().resolve()
-    meta, vault, task_id = _validate_task(worktree)
-    runtime_root = _runtime_root(vault, task_id)
-    store_root = vault / ".vault-meta" / "harness"
-    store = OperationStore(store_root)
-    runtime = runtime_manager or RuntimeSessionManager.for_root(
-        vault, store_root=store_root
-    )
-    gate = ReviewGateController(
-        _gate_root(vault, task_id),
-        runtime,
-        store,
-    )
-    if not gate.state_path.is_file() or gate.state_path.is_symlink():
-        raise TaskReviewError("fresh review gate is unavailable")
-    state = gate.read()
-    if (
-        state.get("status") != "attention-required"
-        or state.get("fresh_reevaluation_used") is True
-        or not _dispatched_review_is_quiescent(store, task_id)
-    ):
-        raise TaskReviewError(
-            "fresh review requires one quiescent attention boundary"
-        )
-    run = gate.rehydrate()
-    previous_context = run.execution.request.context
-    context, context_manifest = _context(
-        meta,
-        vault,
-        worktree,
-        runtime_root,
-        task_id,
-    )
-    boundary = ReviewScopeBoundary(
-        kind,
-        review_context_sha256(previous_context),
-        review_context_sha256(context),
-        reason,
-    )
     prompt_pointers = {
         axis: _prompt(
             vault=vault,
@@ -2244,6 +2488,87 @@ def restart_task_review_for_boundary(
         runtime_root=runtime_root,
         context_manifest=context_manifest,
         run=fresh,
+    )
+
+
+def restart_task_review_for_boundary(
+    worktree: Path,
+    *,
+    kind: str,
+    reason: str,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Start the one persisted fresh review allowed for a dispatched task."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    runtime_root = _runtime_root(vault, task_id)
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(
+        _gate_root(vault, task_id),
+        runtime,
+        store,
+    )
+    if not gate.state_path.is_file() or gate.state_path.is_symlink():
+        raise TaskReviewError("fresh review gate is unavailable")
+    state = gate.read()
+    run = gate.rehydrate()
+    context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+    )
+    stored_boundary = state.get("fresh_boundary")
+    if (
+        state.get("status") in {"fresh-reevaluation", "reviewing", "verifying"}
+        and state.get("fresh_reevaluation_used") is True
+        and isinstance(stored_boundary, dict)
+        and stored_boundary.get("kind") == kind
+        and stored_boundary.get("reason") == reason
+        and stored_boundary.get("next_context_sha256")
+        == review_context_sha256(context)
+    ):
+        return _receipt(
+            status="reviewing",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=run,
+        )
+    if (
+        state.get("status") != "fresh-boundary-authorized"
+        or state.get("fresh_reevaluation_used") is True
+        or not _dispatched_review_is_quiescent(store, task_id)
+    ):
+        raise TaskReviewError(
+            "fresh review requires one quiescent authorized boundary"
+        )
+    previous_context = run.execution.request.context
+    boundary = ReviewScopeBoundary(
+        kind,
+        review_context_sha256(previous_context),
+        review_context_sha256(context),
+        reason,
+    )
+    return _launch_authorized_task_review(
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        context=context,
+        context_manifest=context_manifest,
+        boundary=boundary,
     )
 
 

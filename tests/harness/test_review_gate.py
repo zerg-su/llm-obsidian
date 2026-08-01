@@ -690,6 +690,33 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         review_context_sha256(new_context),
         "approved context packet changed",
     )
+    boundary_authorization = {
+        "schema_version": 1,
+        "operation_id": "review-budget",
+        "kind": boundary.kind,
+        "previous_context_sha256": boundary.previous_context_sha256,
+        "next_context_sha256": boundary.next_context_sha256,
+        "reason": boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-test",
+        "verification_receipt_sha256": "a" * 64,
+        "status": "authorized",
+    }
+    boundary_authorization_path = (
+        controller.root / "fresh-boundary-authorization.json"
+    )
+    boundary_authorization_path.write_text(
+        json.dumps(boundary_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    controller.authorize_fresh_boundary(
+        run,
+        boundary=boundary,
+        authorization_pointer=boundary_authorization_path.name,
+        authorization_sha256=hashlib.sha256(
+            boundary_authorization_path.read_bytes()
+        ).hexdigest(),
+    )
     fresh = controller.restart_for_boundary(
         run,
         boundary=boundary,
@@ -714,8 +741,8 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         "one explicit scope/context boundary permits one fresh compact run",
         fresh is not None
         and len(runtime.started) == 2
-        and repeated is None
-        and controller.read()["status"] == "attention-required",
+        and repeated is not None
+        and controller.read()["status"] == "reviewing",
     )
 
 with tempfile.TemporaryDirectory(prefix="review-gate-deep.") as raw:
@@ -1576,48 +1603,26 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             )
         resolution_path.write_bytes(exact_resolution_bytes)
 
-        original_approve = ReviewGateController._approve
-
-        def interrupt_after_final_result(
-            *args: object, **kwargs: object
-        ) -> object:
-            raise OSError("simulated interruption after final result")
-
-        ReviewGateController._approve = interrupt_after_final_result
         try:
-            try:
-                recover_finalizing(product, runtime_manager=task_runtime)
-            except task_review_runner.TaskReviewError:
-                interrupted = True
-            else:
-                interrupted = False
-        finally:
-            ReviewGateController._approve = original_approve
-        staged_state = json.loads(
-            (gate_root / "review-gate.json").read_text(encoding="utf-8")
-        )
-        try:
-            replayed = recover_finalizing(
+            staged = recover_finalizing(
                 product, runtime_manager=task_runtime
             )
         except task_review_runner.TaskReviewError:
-            replayed = {"status": "error"}
+            staged = {"status": "error"}
+        staged_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
         accepted_response = (
             json.loads(response_receipt_path.read_text(encoding="utf-8"))
             if response_receipt_path.is_file()
             else {}
         )
-        try:
-            terminal_replay = recover_finalizing(
-                product, runtime_manager=task_runtime
-            )
-        except task_review_runner.TaskReviewError:
-            terminal_replay = {"status": "error"}
         if not (
-            interrupted
+            staged.get("status") == "verifying"
             and staged_state["context"]["head_sha"] == resolved_head
-            and replayed["status"] == "approved"
-            and terminal_replay["status"] == "approved"
+            and staged_state.get("status")
+            == "recovery-verification-required"
+            and staged_state.get("final_results") == {}
             and accepted_response.get("verification_operation_id")
             == verification_operation_id
             and accepted_response.get("resubmitted_head_sha")
@@ -1628,114 +1633,250 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             == "complete"
         ):
             regression_failures.append(
+                "HOL-001 repaired HEAD cannot inherit prior approval"
+            )
+
+        unauthorized_fresh_rejected = False
+        if staged.get("status") == "verifying":
+            dispatch_record = task_store.read(task_id, task_id)
+            if dispatch_record.state != "attention-required":
+                task_store.transition(
+                    task_id,
+                    task_id,
+                    "attention-required",
+                    reason=AttentionReason.ATTENTION_REQUIRED,
+                )
+            for terminal_record in task_store.list(task_id):
+                if (
+                    terminal_record.state in TERMINAL
+                    and terminal_record.resources != OwnedResources()
+                ):
+                    task_store.save(
+                        replace(
+                            terminal_record,
+                            resources=OwnedResources(),
+                            revision=terminal_record.revision + 1,
+                        ),
+                        expected_revision=terminal_record.revision,
+                    )
+            try:
+                task_review_runner.restart_task_review_for_boundary(
+                    product,
+                    kind="scope",
+                    reason="caller-manufactured scope expansion",
+                    runtime_manager=task_runtime,
+                )
+            except task_review_runner.TaskReviewError:
+                unauthorized_fresh_rejected = True
+        if not unauthorized_fresh_rejected:
+            regression_failures.append(
+                "HOL-002 coordinator-owned fresh-boundary authorization"
+            )
+
+        successful_verification_operation_id = ""
+        if staged.get("status") == "verifying":
+            successful_input_sha = hashlib.sha256(
+                b"successful repaired-head verification"
+            ).hexdigest()
+            (
+                successful_spec,
+                successful_lane_id,
+                successful_run_id,
+            ) = _pipeline_verify_identity(
+                task_dispatch_spec,
+                definition_sha256=meta["pipeline_policy"][
+                    "definition_sha256"
+                ],
+                input_sha256=successful_input_sha,
+                profile="scoped",
+            )
+            successful_verification_operation_id = (
+                successful_spec.operation_id
+            )
+            task_store.create(
+                successful_spec,
+                lane_id=successful_lane_id,
+                run_id=successful_run_id,
+            )
+            for successful_state in (
+                "preflight",
+                "starting",
+                "running",
+                "verifying",
+                "finalizing",
+                "exiting",
+                "complete",
+            ):
+                task_store.transition(
+                    task_id,
+                    successful_spec.operation_id,
+                    successful_state,
+                )
+            successful_record = task_store.read(
+                task_id, successful_spec.operation_id
+            )
+            successful_effect_id = (
+                f"pipeline-verify-{successful_input_sha[:32]}"
+            )
+            task_store.save(
+                replace(
+                    successful_record,
+                    effect_id=successful_effect_id,
+                    effect_outcome=EffectOutcome.SUCCEEDED,
+                    revision=successful_record.revision + 1,
+                ),
+                expected_revision=successful_record.revision,
+            )
+            successful_root = (
+                owner_runtime
+                / "pipeline-verification"
+                / successful_spec.operation_id
+            )
+            successful_evidence = []
+            for command_index in range(1, 4):
+                successful_output = (
+                    successful_root
+                    / f"evidence/scoped-{command_index}.log"
+                )
+                successful_output.parent.mkdir(
+                    parents=True, exist_ok=True
+                )
+                successful_output.write_text(
+                    "deterministic successful verification\n",
+                    encoding="utf-8",
+                )
+                successful_evidence.append(
+                    {
+                        "command_id": f"scoped-{command_index}",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "started_at": f"{command_index}.0",
+                        "finished_at": f"{command_index}.5",
+                        "head_sha": repaired_head,
+                        "profile": "scoped",
+                        "profile_sha256": profile_sha,
+                        "output_pointer": successful_output.relative_to(
+                            owner_runtime
+                        ).as_posix(),
+                    }
+                )
+            successful_receipt = {
+                "schema_version": 1,
+                "operation_id": successful_spec.operation_id,
+                "parent_operation_id": task_id,
+                "lane_id": successful_lane_id,
+                "run_id": successful_run_id,
+                "definition_sha256": meta["pipeline_policy"][
+                    "definition_sha256"
+                ],
+                "step_id": "verify",
+                "head_sha": repaired_head,
+                "input_sha256": successful_input_sha,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "effect_id": successful_effect_id,
+                "status": "complete",
+                "evidence": successful_evidence,
+            }
+            successful_receipt_path = successful_root / "receipt.json"
+            successful_receipt_path.parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            successful_receipt_path.write_text(
+                json.dumps(successful_receipt, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (owner_runtime / "pipeline-step-verify.json").write_text(
+                json.dumps(successful_receipt, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            authorize = getattr(
+                ReviewGateController, "authorize_fresh_boundary", None
+            )
+            if authorize is None:
+                interrupted = False
+                replayed = {"status": "error"}
+                terminal_replay = {"status": "error"}
+            else:
+                original_authorize = authorize
+
+                def interrupt_after_authorization(
+                    controller: ReviewGateController,
+                    *args: object,
+                    **kwargs: object,
+                ) -> object:
+                    original_authorize(controller, *args, **kwargs)
+                    raise OSError(
+                        "simulated interruption after boundary authorization"
+                    )
+
+                ReviewGateController.authorize_fresh_boundary = (
+                    interrupt_after_authorization
+                )
+                try:
+                    try:
+                        recover_finalizing(
+                            product, runtime_manager=task_runtime
+                        )
+                    except task_review_runner.TaskReviewError:
+                        interrupted = True
+                    else:
+                        interrupted = False
+                finally:
+                    ReviewGateController.authorize_fresh_boundary = (
+                        original_authorize
+                    )
+                try:
+                    replayed = recover_finalizing(
+                        product, runtime_manager=task_runtime
+                    )
+                except task_review_runner.TaskReviewError as exc:
+                    replayed = {"status": "error", "error": str(exc)}
+                try:
+                    terminal_replay = recover_finalizing(
+                        product, runtime_manager=task_runtime
+                    )
+                except task_review_runner.TaskReviewError as exc:
+                    terminal_replay = {
+                        "status": "error",
+                        "error": str(exc),
+                    }
+        else:
+            interrupted = False
+            replayed = {"status": "error"}
+            terminal_replay = {"status": "error"}
+
+        recovered_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        authorization_pointer = recovered_state.get(
+            "fresh_boundary_authorization", {}
+        ).get("pointer", "")
+        authorization_path = gate_root / authorization_pointer
+        authorization = (
+            json.loads(authorization_path.read_text(encoding="utf-8"))
+            if authorization_path.is_file()
+            else {}
+        )
+        if not (
+            interrupted
+            and replayed.get("status") == "reviewing"
+            and terminal_replay.get("status") == "reviewing"
+            and recovered_state.get("status") == "reviewing"
+            and recovered_state["context"]["head_sha"] == repaired_head
+            and recovered_state.get("final_results") == {}
+            and authorization.get("operation_id") == task_id
+            and authorization.get("kind") == "context"
+            and authorization.get("authorization_provenance")
+            == "pipeline-verification"
+            and authorization.get("verification_operation_id")
+            == successful_verification_operation_id
+        ):
+            regression_failures.append(
                 "HOL-R03 interruption-safe finalizing replay"
             )
 
-    fresh_entrypoint = getattr(
-        task_review_runner,
-        "restart_task_review_for_boundary",
-        None,
-    )
-    if fresh_entrypoint is None:
-        regression_failures.append(
-            "persistent dispatched-task fresh-boundary entrypoint"
-        )
-    else:
-        for record in task_store.list(task_id):
-            current = record
-            if current.spec.operation_id == task_id:
-                if current.state != "attention-required":
-                    task_store.transition(
-                        task_id,
-                        current.spec.operation_id,
-                        "attention-required",
-                        reason=AttentionReason.ATTENTION_REQUIRED,
-                    )
-                    current = task_store.read(
-                        task_id, current.spec.operation_id
-                    )
-            elif current.state not in TERMINAL:
-                if current.state != "cancelling":
-                    task_store.transition(
-                        task_id,
-                        current.spec.operation_id,
-                        "cancelling",
-                    )
-                task_store.transition(
-                    task_id,
-                    current.spec.operation_id,
-                    "exiting",
-                )
-                task_store.transition(
-                    task_id,
-                    current.spec.operation_id,
-                    "cancelled",
-                )
-                current = task_store.read(
-                    task_id, current.spec.operation_id
-                )
-            if current.resources != OwnedResources():
-                task_store.save(
-                    replace(
-                        current,
-                        resources=OwnedResources(),
-                        revision=current.revision + 1,
-                    ),
-                    expected_revision=current.revision,
-                )
-        fresh_gate_state = json.loads(
-            (gate_root / "review-gate.json").read_text(encoding="utf-8")
-        )
-        fresh_gate_state["status"] = "attention-required"
-        (gate_root / "review-gate.json").write_text(
-            json.dumps(fresh_gate_state, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        original_plan_bytes = plan.read_bytes()
-        original_meta_bytes = (product / ".task-meta.json").read_bytes()
-        plan.write_text(
-            "# Approved task\n\nExplicit bounded context expansion.\n",
-            encoding="utf-8",
-        )
-        expanded_meta = {
-            **meta,
-            "approved_plan_sha256": hashlib.sha256(
-                plan.read_bytes()
-            ).hexdigest(),
-        }
-        (product / ".task-meta.json").write_text(
-            json.dumps(expanded_meta, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        started_before_fresh = len(task_runtime.started)
-        try:
-            fresh_receipt = fresh_entrypoint(
-                product,
-                kind="context",
-                reason="approved bounded ContextPacket expansion",
-                runtime_manager=task_runtime,
-            )
-        except task_review_runner.TaskReviewError:
-            fresh_receipt = {"status": "error"}
-        finally:
-            plan.write_bytes(original_plan_bytes)
-            (product / ".task-meta.json").write_bytes(
-                original_meta_bytes
-            )
-        fresh_state = json.loads(
-            (gate_root / "review-gate.json").read_text(encoding="utf-8")
-        )
-        if not (
-            fresh_receipt.get("status") == "reviewing"
-            and fresh_receipt.get("task_id") == task_id
-            and fresh_state.get("fresh_reevaluation_used") is True
-            and fresh_state.get("fresh_boundary", {}).get("kind")
-            == "context"
-            and len(task_runtime.started) == started_before_fresh + 1
-        ):
-            regression_failures.append(
-                "persistent dispatched-task fresh-boundary entrypoint"
-            )
     recovery_id = str(uuid.uuid4())
     recovery_meta = {**meta, "task_id": recovery_id}
     (product / ".task-meta.json").write_text(
@@ -2436,6 +2577,36 @@ with tempfile.TemporaryDirectory(prefix="fresh-review-preflight.") as raw:
         review_context_sha256(context),
         review_context_sha256(next_context),
         "approved bounded ContextPacket expansion",
+    )
+    preflight_authorization = {
+        "schema_version": 1,
+        "operation_id": "fresh-preflight",
+        "kind": preflight_boundary.kind,
+        "previous_context_sha256": (
+            preflight_boundary.previous_context_sha256
+        ),
+        "next_context_sha256": preflight_boundary.next_context_sha256,
+        "reason": preflight_boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-preflight",
+        "verification_receipt_sha256": "b" * 64,
+        "status": "authorized",
+    }
+    preflight_authorization_path = (
+        preflight_gate.root / "fresh-boundary-authorization.json"
+    )
+    preflight_authorization_path.write_text(
+        json.dumps(preflight_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    preflight_gate._replace(status="attention-required")
+    preflight_gate.authorize_fresh_boundary(
+        preflight_run,
+        boundary=preflight_boundary,
+        authorization_pointer=preflight_authorization_path.name,
+        authorization_sha256=hashlib.sha256(
+            preflight_authorization_path.read_bytes()
+        ).hexdigest(),
     )
     state_before_preflight = preflight_gate.read()
     try:
