@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import shlex
 import subprocess
 import tempfile
 import uuid
+from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
+from io import StringIO
 from pathlib import Path
 
 
@@ -21,9 +24,11 @@ import sys
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker
+from harness import cli as harness_cli
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
+    EffectOutcome,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
@@ -32,7 +37,17 @@ from harness.contracts import (
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
-from harness.pipeline_builtins import compiled_builtin
+from harness.runtime_worker import _pipeline_verify_identity
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    ExplicitPipelineApproval,
+    FrozenPipelineStore,
+    compile_custom_spec,
+    freeze_custom_pipeline,
+    parse_pipeline_spec,
+    render_custom_approval,
+)
+from harness.pipeline_builtins import builtin_registry, compiled_builtin
 from harness.workflows.review import (
     ReviewContext,
     ReviewFinding,
@@ -55,6 +70,9 @@ def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+regression_failures: list[str] = []
 
 
 def resolution_evidence(
@@ -685,6 +703,33 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         review_context_sha256(new_context),
         "approved context packet changed",
     )
+    boundary_authorization = {
+        "schema_version": 1,
+        "operation_id": "review-budget",
+        "kind": boundary.kind,
+        "previous_context_sha256": boundary.previous_context_sha256,
+        "next_context_sha256": boundary.next_context_sha256,
+        "reason": boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-test",
+        "verification_receipt_sha256": "a" * 64,
+        "status": "authorized",
+    }
+    boundary_authorization_path = (
+        controller.root / "fresh-boundary-authorization.json"
+    )
+    boundary_authorization_path.write_text(
+        json.dumps(boundary_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    controller.authorize_fresh_boundary(
+        run,
+        boundary=boundary,
+        authorization_pointer=boundary_authorization_path.name,
+        authorization_sha256=hashlib.sha256(
+            boundary_authorization_path.read_bytes()
+        ).hexdigest(),
+    )
     fresh = controller.restart_for_boundary(
         run,
         boundary=boundary,
@@ -709,8 +754,8 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         "one explicit scope/context boundary permits one fresh compact run",
         fresh is not None
         and len(runtime.started) == 2
-        and repeated is None
-        and controller.read()["status"] == "attention-required",
+        and repeated is not None
+        and controller.read()["status"] == "reviewing",
     )
 
 with tempfile.TemporaryDirectory(prefix="review-gate-deep.") as raw:
@@ -1035,6 +1080,34 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)
     task_store = OperationStore(vault / ".vault-meta/harness")
+    task_dispatch_spec = OperationSpec(
+        operation_id=task_id,
+        idempotency_key="task-review-dispatch",
+        kind="dispatch",
+        owner_id=task_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=meta["pipeline_policy"]["definition_sha256"],
+    )
+    task_store.create(
+        task_dispatch_spec,
+        lane_id="task-review-dispatch-lane",
+        run_id="task-review-dispatch-run",
+    )
+    for dispatch_state in (
+        "preflight",
+        "starting",
+        "running",
+        "awaiting-callback",
+    ):
+        task_store.transition(task_id, task_id, dispatch_state)
     task_runtime = FakeRuntime(task_store)
     started = task_review_runner.run_task_review(
         product, runtime_manager=task_runtime
@@ -1241,6 +1314,936 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         {"resolution-evidence.json", "fix-delta.patch"}
         <= verification_inputs,
     )
+
+    # Recovery must consume coordinator-owned verification evidence and must
+    # preserve the exact reviewer-seen ruling across a verification repair.
+    finalizing = task_review_runner.load_active_round(
+        gate_root,
+        task_store,
+        task_runtime,
+        axis="holistic",
+    )
+    approved_result = ReviewResult(
+        "holistic",
+        "approve",
+        (),
+        verification_iteration=1,
+    )
+    approved_envelope = review_round_envelope(
+        finalizing.round,
+        approved_result,
+    )
+    callback_path.write_text(
+        json.dumps(to_dict(approved_envelope), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    task_runtime.accept_callback(approved_envelope)
+    interrupted_child = task_store.read(
+        task_id,
+        finalizing.round.operation_id,
+    )
+    (product / "verification-repair.txt").write_text(
+        "bounded verification repair\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "verification-repair.txt"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "repair verification"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    repaired_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    resolution_path = product / ".task-review-resolution.json"
+    exact_resolution = json.loads(
+        resolution_path.read_text(encoding="utf-8")
+    )
+    exact_resolution["resolved_head_sha"] = repaired_head
+    exact_resolution_bytes = (
+        json.dumps(exact_resolution, sort_keys=True) + "\n"
+    ).encode()
+    resolution_path.write_bytes(exact_resolution_bytes)
+    (product / ".task-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "type": "session",
+                "title": "automatic task review",
+                "session": "session-1",
+                "body": "Preserve exact accepted review evidence during recovery.",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    verification_input_sha = hashlib.sha256(
+        b"failed verification input"
+    ).hexdigest()
+    (
+        verification_spec,
+        verification_lane_id,
+        verification_run_id,
+    ) = _pipeline_verify_identity(
+        task_dispatch_spec,
+        definition_sha256=meta["pipeline_policy"]["definition_sha256"],
+        input_sha256=verification_input_sha,
+        profile="scoped",
+    )
+    verification_operation_id = verification_spec.operation_id
+    verification_effect_id = (
+        f"pipeline-verify-{verification_input_sha[:32]}"
+    )
+    task_store.create(
+        verification_spec,
+        lane_id=verification_lane_id,
+        run_id=verification_run_id,
+    )
+    for verification_state in (
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+    ):
+        task_store.transition(
+            task_id,
+            verification_operation_id,
+            verification_state,
+        )
+    task_store.transition(
+        task_id,
+        verification_operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    verification_record = task_store.read(
+        task_id, verification_operation_id
+    )
+    task_store.save(
+        replace(
+            verification_record,
+            effect_id=verification_effect_id,
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=verification_record.revision + 1,
+        ),
+        expected_revision=verification_record.revision,
+    )
+    owner_runtime = (
+        vault
+        / ".vault-meta/harness/owners"
+        / task_id
+        / "runtime"
+        / task_id
+    )
+    verification_root = (
+        owner_runtime
+        / "pipeline-verification"
+        / verification_operation_id
+    )
+    evidence_path = verification_root / "evidence/scoped-1.log"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text("deterministic failed verification\n", encoding="utf-8")
+    verification_receipt = {
+        "schema_version": 1,
+        "operation_id": verification_operation_id,
+        "parent_operation_id": task_id,
+        "lane_id": verification_lane_id,
+        "run_id": verification_run_id,
+        "definition_sha256": meta["pipeline_policy"]["definition_sha256"],
+        "step_id": "verify",
+        "head_sha": resolved_head,
+        "input_sha256": verification_input_sha,
+        "profile": "scoped",
+        "profile_sha256": profile_sha,
+        "effect_id": verification_effect_id,
+        "status": "failed",
+        "evidence": [
+            {
+                "command_id": "scoped-1",
+                "cwd": ".",
+                "exit_code": 2,
+                "started_at": "1.0",
+                "finished_at": "2.0",
+                "head_sha": resolved_head,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "output_pointer": (
+                    evidence_path.relative_to(owner_runtime).as_posix()
+                ),
+            }
+        ],
+    }
+    receipt_path = verification_root / "receipt.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(
+        json.dumps(verification_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (owner_runtime / "pipeline-step-verify.json").write_text(
+        json.dumps(verification_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    packet = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": verification_operation_id,
+        "verification_lane_id": verification_lane_id,
+        "verification_run_id": verification_run_id,
+        "definition_sha256": meta["pipeline_policy"]["definition_sha256"],
+        "step_id": "verify",
+        "head_sha": resolved_head,
+        "status": "attention-required",
+        "reason": "verification-failed",
+        "safe_boundary": "tdd-slices-complete",
+        "allowed_responses": ["fix-and-resubmit", "escalate"],
+        "response_pointer": ".task-verification-response.json",
+        "receipt_pointer": str(receipt_path.resolve()),
+        "evidence": [
+            {
+                "command_id": "scoped-1",
+                "exit_code": 2,
+                "output_pointer": str(evidence_path.resolve()),
+            }
+        ],
+    }
+
+    def write_resubmit(
+        packet_value: dict[str, object],
+    ) -> dict[str, object]:
+        (product / ".task-verification.json").write_text(
+            json.dumps(packet_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        packet_bytes = json.dumps(
+            packet_value, sort_keys=True, separators=(",", ":")
+        ).encode()
+        response_value = {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "verification_operation_id": packet_value[
+                "verification_operation_id"
+            ],
+            "failed_head_sha": resolved_head,
+            "packet_sha256": hashlib.sha256(packet_bytes).hexdigest(),
+            "response": "fix-and-resubmit",
+            "resubmitted_head_sha": repaired_head,
+        }
+        (product / ".task-verification-response.json").write_text(
+            json.dumps(response_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return response_value
+
+    recover_finalizing = getattr(
+        task_review_runner,
+        "recover_finalizing_review",
+        None,
+    )
+    response_receipt_path = verification_root / "response-receipt.json"
+    if recover_finalizing is None:
+        regression_failures.extend(
+            (
+                "HOL-R01 durable verification receipt binding",
+                "HOL-R02 exact reviewer-seen finding ruling",
+                "HOL-R03 interruption-safe finalizing replay",
+            )
+        )
+    else:
+        forged_packet = {
+            **packet,
+            "verification_operation_id": "forged-verification-child",
+            "verification_lane_id": "forged-verification-lane",
+            "verification_run_id": "forged-verification-run",
+            "receipt_pointer": str(
+                product / "missing-forged-verification-receipt.json"
+            ),
+        }
+        write_resubmit(forged_packet)
+        try:
+            recover_finalizing(product, runtime_manager=task_runtime)
+        except task_review_runner.TaskReviewError:
+            forged_rejected = True
+        else:
+            forged_rejected = False
+        if (
+            not forged_rejected
+            or response_receipt_path.exists()
+            or task_store.read(
+                task_id, finalizing.round.operation_id
+            ).state
+            != "finalizing"
+        ):
+            regression_failures.append(
+                "HOL-R01 durable verification receipt binding"
+            )
+
+        write_resubmit(packet)
+        drifted_resolution = json.loads(
+            exact_resolution_bytes.decode()
+        )
+        drifted_resolution["resolutions"][0].update(
+            {
+                "disposition": "rejected",
+                "rationale": "executor-rewritten rationale after review",
+                "follow_up": "",
+            }
+        )
+        resolution_path.write_text(
+            json.dumps(drifted_resolution, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            recover_finalizing(product, runtime_manager=task_runtime)
+        except task_review_runner.TaskReviewError:
+            ruling_rejected = True
+        else:
+            ruling_rejected = False
+        if not ruling_rejected:
+            regression_failures.append(
+                "HOL-R02 exact reviewer-seen finding ruling"
+            )
+        resolution_path.write_bytes(exact_resolution_bytes)
+
+        parent_record = task_store.read(task_id, task_id)
+        if parent_record.state != "attention-required":
+            task_store.transition(
+                task_id,
+                task_id,
+                "attention-required",
+                reason=AttentionReason.ATTENTION_REQUIRED,
+            )
+        session_path = (
+            task_store.root
+            / "owners"
+            / task_id
+            / "runtime"
+            / task_id
+            / "session.json"
+        )
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        session_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": task_id,
+                    "run_id": task_store.read(task_id, task_id).run_id,
+                    "cwd": str(product),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cli_output = StringIO()
+        if "review_runtime_manager" in inspect.signature(
+            harness_cli.main
+        ).parameters:
+            with redirect_stdout(cli_output):
+                cli_resume_rc = harness_cli.main(
+                    [
+                        "--store",
+                        str(task_store.root),
+                        "--owner",
+                        task_id,
+                        "--json",
+                        "resume",
+                        task_id,
+                    ],
+                    process_adapter=object(),
+                    cmux_adapter=object(),
+                    review_runtime_manager=task_runtime,
+                )
+        else:
+            cli_resume_rc = 2
+            try:
+                recover_finalizing(
+                    product, runtime_manager=task_runtime
+                )
+            except task_review_runner.TaskReviewError:
+                pass
+        staged_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        staged = {
+            "status": (
+                "verifying"
+                if staged_state.get("status")
+                == "recovery-verification-required"
+                else "error"
+            )
+        }
+        if not (
+            cli_resume_rc == 0
+            and task_store.read(task_id, task_id).state
+            == "awaiting-callback"
+        ):
+            regression_failures.append(
+                "HOL-003 dispatch resume accepts staged recovery"
+            )
+        accepted_response = (
+            json.loads(response_receipt_path.read_text(encoding="utf-8"))
+            if response_receipt_path.is_file()
+            else {}
+        )
+        if not (
+            staged.get("status") == "verifying"
+            and staged_state["context"]["head_sha"] == resolved_head
+            and staged_state.get("status")
+            == "recovery-verification-required"
+            and staged_state.get("final_results") == {}
+            and accepted_response.get("verification_operation_id")
+            == verification_operation_id
+            and accepted_response.get("resubmitted_head_sha")
+            == repaired_head
+            and task_store.read(
+                task_id, finalizing.round.operation_id
+            ).state
+            == "complete"
+        ):
+            regression_failures.append(
+                "HOL-001 repaired HEAD cannot inherit prior approval"
+            )
+
+        unauthorized_fresh_rejected = False
+        if staged.get("status") == "verifying":
+            dispatch_record = task_store.read(task_id, task_id)
+            if dispatch_record.state != "attention-required":
+                task_store.transition(
+                    task_id,
+                    task_id,
+                    "attention-required",
+                    reason=AttentionReason.ATTENTION_REQUIRED,
+                )
+            for terminal_record in task_store.list(task_id):
+                if (
+                    terminal_record.state in TERMINAL
+                    and terminal_record.resources != OwnedResources()
+                ):
+                    task_store.save(
+                        replace(
+                            terminal_record,
+                            resources=OwnedResources(),
+                            revision=terminal_record.revision + 1,
+                        ),
+                        expected_revision=terminal_record.revision,
+                    )
+            try:
+                task_review_runner.restart_task_review_for_boundary(
+                    product,
+                    kind="scope",
+                    reason="caller-manufactured scope expansion",
+                    runtime_manager=task_runtime,
+                )
+            except task_review_runner.TaskReviewError:
+                unauthorized_fresh_rejected = True
+        if not unauthorized_fresh_rejected:
+            regression_failures.append(
+                "HOL-002 coordinator-owned fresh-boundary authorization"
+            )
+
+        successful_verification_operation_id = ""
+        if staged.get("status") == "verifying":
+            successful_input_sha = hashlib.sha256(
+                b"successful repaired-head verification"
+            ).hexdigest()
+            (
+                successful_spec,
+                successful_lane_id,
+                successful_run_id,
+            ) = _pipeline_verify_identity(
+                task_dispatch_spec,
+                definition_sha256=meta["pipeline_policy"][
+                    "definition_sha256"
+                ],
+                input_sha256=successful_input_sha,
+                profile="scoped",
+            )
+            successful_verification_operation_id = (
+                successful_spec.operation_id
+            )
+            task_store.create(
+                successful_spec,
+                lane_id=successful_lane_id,
+                run_id=successful_run_id,
+            )
+            for successful_state in (
+                "preflight",
+                "starting",
+                "running",
+                "verifying",
+                "finalizing",
+                "exiting",
+                "complete",
+            ):
+                task_store.transition(
+                    task_id,
+                    successful_spec.operation_id,
+                    successful_state,
+                )
+            successful_record = task_store.read(
+                task_id, successful_spec.operation_id
+            )
+            successful_effect_id = (
+                f"pipeline-verify-{successful_input_sha[:32]}"
+            )
+            task_store.save(
+                replace(
+                    successful_record,
+                    effect_id=successful_effect_id,
+                    effect_outcome=EffectOutcome.SUCCEEDED,
+                    revision=successful_record.revision + 1,
+                ),
+                expected_revision=successful_record.revision,
+            )
+            successful_root = (
+                owner_runtime
+                / "pipeline-verification"
+                / successful_spec.operation_id
+            )
+            successful_evidence = []
+            for command_index in range(1, 4):
+                successful_output = (
+                    successful_root
+                    / f"evidence/scoped-{command_index}.log"
+                )
+                successful_output.parent.mkdir(
+                    parents=True, exist_ok=True
+                )
+                successful_output.write_text(
+                    "deterministic successful verification\n",
+                    encoding="utf-8",
+                )
+                successful_evidence.append(
+                    {
+                        "command_id": f"scoped-{command_index}",
+                        "cwd": ".",
+                        "exit_code": 0,
+                        "started_at": f"{command_index}.0",
+                        "finished_at": f"{command_index}.5",
+                        "head_sha": repaired_head,
+                        "profile": "scoped",
+                        "profile_sha256": profile_sha,
+                        "output_pointer": successful_output.relative_to(
+                            owner_runtime
+                        ).as_posix(),
+                    }
+                )
+            successful_receipt = {
+                "schema_version": 1,
+                "operation_id": successful_spec.operation_id,
+                "parent_operation_id": task_id,
+                "lane_id": successful_lane_id,
+                "run_id": successful_run_id,
+                "definition_sha256": meta["pipeline_policy"][
+                    "definition_sha256"
+                ],
+                "step_id": "verify",
+                "head_sha": repaired_head,
+                "input_sha256": successful_input_sha,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "effect_id": successful_effect_id,
+                "status": "complete",
+                "evidence": successful_evidence,
+            }
+            successful_receipt_path = successful_root / "receipt.json"
+            successful_receipt_path.parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            successful_receipt_path.write_text(
+                json.dumps(successful_receipt, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            (owner_runtime / "pipeline-step-verify.json").write_text(
+                json.dumps(successful_receipt, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            authorize = getattr(
+                ReviewGateController, "authorize_fresh_boundary", None
+            )
+            if authorize is None:
+                interrupted = False
+                replayed = {"status": "error"}
+                terminal_replay = {"status": "error"}
+            else:
+                original_authorize = authorize
+
+                def interrupt_after_authorization(
+                    controller: ReviewGateController,
+                    *args: object,
+                    **kwargs: object,
+                ) -> object:
+                    original_authorize(controller, *args, **kwargs)
+                    raise OSError(
+                        "simulated interruption after boundary authorization"
+                    )
+
+                ReviewGateController.authorize_fresh_boundary = (
+                    interrupt_after_authorization
+                )
+                try:
+                    try:
+                        recover_finalizing(
+                            product, runtime_manager=task_runtime
+                        )
+                    except task_review_runner.TaskReviewError:
+                        interrupted = True
+                    else:
+                        interrupted = False
+                finally:
+                    ReviewGateController.authorize_fresh_boundary = (
+                        original_authorize
+                    )
+                try:
+                    replayed = recover_finalizing(
+                        product, runtime_manager=task_runtime
+                    )
+                except task_review_runner.TaskReviewError as exc:
+                    replayed = {"status": "error", "error": str(exc)}
+                try:
+                    terminal_replay = recover_finalizing(
+                        product, runtime_manager=task_runtime
+                    )
+                except task_review_runner.TaskReviewError as exc:
+                    terminal_replay = {
+                        "status": "error",
+                        "error": str(exc),
+                    }
+        else:
+            interrupted = False
+            replayed = {"status": "error"}
+            terminal_replay = {"status": "error"}
+
+        recovered_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        authorization_pointer = recovered_state.get(
+            "fresh_boundary_authorization", {}
+        ).get("pointer", "")
+        authorization_path = gate_root / authorization_pointer
+        authorization = (
+            json.loads(authorization_path.read_text(encoding="utf-8"))
+            if authorization_path.is_file()
+            else {}
+        )
+        if not (
+            interrupted
+            and replayed.get("status") == "reviewing"
+            and terminal_replay.get("status") == "reviewing"
+            and recovered_state.get("status") == "reviewing"
+            and recovered_state["context"]["head_sha"] == repaired_head
+            and recovered_state.get("final_results") == {}
+            and authorization.get("operation_id") == task_id
+            and authorization.get("kind") == "context"
+            and authorization.get("authorization_provenance")
+            == "pipeline-verification"
+            and authorization.get("verification_operation_id")
+            == successful_verification_operation_id
+        ):
+            regression_failures.append(
+                "HOL-R03 interruption-safe finalizing replay"
+            )
+
+    custom_recovery_id = str(uuid.uuid4())
+    custom_pipeline_raw = {
+        "schema_version": 1,
+        "spec_id": "review-recovery-extra-check",
+        "version": "1.0.0",
+        "intent": "engineering-change",
+        "task_profile": "change",
+        "baseline_pipeline": "engineering/change",
+        "route_alias": "executor-default",
+        "required_capabilities": ["route:resolved"],
+        "input_schema": "approved-plan/v1",
+        "output_schema": "reap-ready/v1",
+        "steps": [
+            {
+                "step_id": "implement",
+                "primitive_id": "model_step",
+                "primitive_version": "1.0.0",
+                "input_schema": "approved-plan/v1",
+                "output_schema": "implementation-result/v1",
+                "session_mode": "worktree",
+                "semantic_skills": ["tdd"],
+            },
+            {
+                "step_id": "verify",
+                "primitive_id": "verify",
+                "primitive_version": "1.0.0",
+                "input_schema": "implementation-result/v1",
+                "output_schema": "verified-result/v1",
+                "session_mode": "verification",
+                "semantic_skills": [],
+            },
+            {
+                "step_id": "review",
+                "primitive_id": "review",
+                "primitive_version": "1.0.0",
+                "input_schema": "verified-result/v1",
+                "output_schema": "reap-ready/v1",
+                "session_mode": "review",
+                "semantic_skills": ["review"],
+            },
+        ],
+        "transitions": [
+            {
+                "from_step": "implement",
+                "outcome": "complete",
+                "target": "verify",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "verify",
+                "outcome": "complete",
+                "target": "review",
+                "max_traversals": 1,
+            },
+            {
+                "from_step": "review",
+                "outcome": "complete",
+                "target": "terminal:completed",
+                "max_traversals": 1,
+            },
+        ],
+        "controls": [],
+        "budget": {
+            "attempt_limit": 2,
+            "model_restart_limit": 1,
+            "time_budget_seconds": 900,
+            "token_limit": 50000,
+        },
+        "completion_policy": "attention",
+        "requested_permissions": ["git-write", "product-worktree"],
+        "requested_side_effects": ["git-write", "worktree"],
+        "context_pointers": [
+            {
+                "pointer_id": "approved-plan",
+                "content_sha256": "a" * 64,
+                "byte_limit": 65536,
+            }
+        ],
+        "verification_checks": ["diff-check"],
+        "review_mode": "simple",
+        "human_gates": ["initial-approval"],
+        "terminal_outcomes": ["completed", "attention-required"],
+    }
+    custom_policy = CustomPipelinePolicy.default()
+    custom_spec = parse_pipeline_spec(custom_pipeline_raw)
+    custom_compiled = compile_custom_spec(
+        custom_spec,
+        builtin_registry(),
+        policy=custom_policy,
+        capabilities=("route:resolved",),
+    )
+    custom_card = render_custom_approval(
+        custom_spec,
+        custom_compiled,
+        policy=custom_policy,
+    )
+    custom_approval = ExplicitPipelineApproval.for_card(
+        definition_sha256=custom_compiled.definition_sha256,
+        approval_card=custom_card,
+        actor="user",
+        decision="approve",
+    )
+    custom_frozen = freeze_custom_pipeline(
+        custom_spec,
+        custom_compiled,
+        custom_approval,
+        custom_card,
+    )
+    FrozenPipelineStore(
+        task_store.root
+        / "owners"
+        / custom_recovery_id
+        / "runtime"
+    ).save(
+        operation_id=custom_recovery_id,
+        spec=custom_spec,
+        frozen=custom_frozen,
+        approval=custom_approval,
+    )
+    custom_dispatch_spec = OperationSpec(
+        operation_id=custom_recovery_id,
+        idempotency_key="custom-review-recovery",
+        kind="dispatch",
+        owner_id=custom_recovery_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=custom_compiled.definition_sha256,
+    )
+    task_store.create(
+        custom_dispatch_spec,
+        lane_id="custom-recovery-dispatch-lane",
+        run_id="custom-recovery-dispatch-run",
+    )
+    custom_input_sha = hashlib.sha256(
+        b"custom repaired-head verification"
+    ).hexdigest()
+    (
+        custom_verification_spec,
+        custom_verification_lane,
+        custom_verification_run,
+    ) = _pipeline_verify_identity(
+        custom_dispatch_spec,
+        definition_sha256=custom_compiled.definition_sha256,
+        input_sha256=custom_input_sha,
+        profile="scoped",
+    )
+    task_store.create(
+        custom_verification_spec,
+        lane_id=custom_verification_lane,
+        run_id=custom_verification_run,
+    )
+    for custom_state in (
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+        "finalizing",
+        "exiting",
+        "complete",
+    ):
+        task_store.transition(
+            custom_recovery_id,
+            custom_verification_spec.operation_id,
+            custom_state,
+        )
+    custom_effect_id = f"pipeline-verify-{custom_input_sha[:32]}"
+    custom_record = task_store.read(
+        custom_recovery_id,
+        custom_verification_spec.operation_id,
+    )
+    task_store.save(
+        replace(
+            custom_record,
+            effect_id=custom_effect_id,
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=custom_record.revision + 1,
+        ),
+        expected_revision=custom_record.revision,
+    )
+    custom_owner_runtime = (
+        task_store.root
+        / "owners"
+        / custom_recovery_id
+        / "runtime"
+        / custom_recovery_id
+    )
+    custom_verification_root = (
+        custom_owner_runtime
+        / "pipeline-verification"
+        / custom_verification_spec.operation_id
+    )
+    custom_evidence = []
+    custom_command_count = len(
+        load_profiles(vault / "config/verification-profiles.toml")[
+            "scoped"
+        ].commands
+    ) + 1
+    for command_index in range(1, custom_command_count + 1):
+        custom_output = (
+            custom_verification_root
+            / f"evidence/scoped-{command_index}.log"
+        )
+        custom_output.parent.mkdir(parents=True, exist_ok=True)
+        custom_output.write_text(
+            "custom pipeline verification passed\n",
+            encoding="utf-8",
+        )
+        custom_evidence.append(
+            {
+                "command_id": f"scoped-{command_index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "started_at": f"{command_index}.0",
+                "finished_at": f"{command_index}.5",
+                "head_sha": repaired_head,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "output_pointer": custom_output.relative_to(
+                    custom_owner_runtime
+                ).as_posix(),
+            }
+        )
+    custom_receipt = {
+        "schema_version": 1,
+        "operation_id": custom_verification_spec.operation_id,
+        "parent_operation_id": custom_recovery_id,
+        "lane_id": custom_verification_lane,
+        "run_id": custom_verification_run,
+        "definition_sha256": custom_compiled.definition_sha256,
+        "step_id": "verify",
+        "head_sha": repaired_head,
+        "input_sha256": custom_input_sha,
+        "profile": "scoped",
+        "profile_sha256": profile_sha,
+        "effect_id": custom_effect_id,
+        "status": "complete",
+        "evidence": custom_evidence,
+    }
+    custom_receipt_path = custom_verification_root / "receipt.json"
+    custom_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    custom_receipt_path.write_text(
+        json.dumps(custom_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (custom_owner_runtime / "pipeline-step-verify.json").write_text(
+        json.dumps(custom_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    custom_meta = {
+        "pipeline_policy": {
+            "name": "custom",
+            "source": "custom",
+            "baseline": "engineering/change",
+            "definition_sha256": custom_compiled.definition_sha256,
+        },
+        "review_policy": {
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile_sha,
+        },
+    }
+    try:
+        custom_verified = (
+            task_review_runner._durable_successful_verification(
+                custom_meta,
+                vault,
+                task_store,
+                custom_recovery_id,
+                repaired_head,
+            )
+        )
+    except task_review_runner.TaskReviewError:
+        custom_verified = None
+    if custom_verified != (
+        custom_verification_spec.operation_id,
+        hashlib.sha256(custom_receipt_path.read_bytes()).hexdigest(),
+    ):
+        regression_failures.append(
+            "HOL-004 custom verification commands remain recoverable"
+        )
+
     recovery_id = str(uuid.uuid4())
     recovery_meta = {**meta, "task_id": recovery_id}
     (product / ".task-meta.json").write_text(
@@ -1916,5 +2919,92 @@ with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
         )
     else:
         raise AssertionError("dead raced reviewer must not become reviewing")
+
+with tempfile.TemporaryDirectory(prefix="fresh-review-preflight.") as raw:
+    preflight_root = Path(raw)
+    (preflight_root / "scratch").mkdir()
+    preflight_store = OperationStore(preflight_root / "store")
+    preflight_runtime = FakeRuntime(preflight_store)
+    preflight_gate = ReviewGateController(
+        preflight_root / "gate",
+        preflight_runtime,
+        preflight_store,
+    )
+    preflight_run = begin(
+        preflight_gate,
+        request_for("fresh-preflight", context=context),
+        preflight_root / "scratch",
+    )
+    next_context = replace(
+        context,
+        manifest="packets/review/expanded-manifest.json",
+    )
+    preflight_boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(context),
+        review_context_sha256(next_context),
+        "approved bounded ContextPacket expansion",
+    )
+    preflight_authorization = {
+        "schema_version": 1,
+        "operation_id": "fresh-preflight",
+        "kind": preflight_boundary.kind,
+        "previous_context_sha256": (
+            preflight_boundary.previous_context_sha256
+        ),
+        "next_context_sha256": preflight_boundary.next_context_sha256,
+        "reason": preflight_boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-preflight",
+        "verification_receipt_sha256": "b" * 64,
+        "status": "authorized",
+    }
+    preflight_authorization_path = (
+        preflight_gate.root / "fresh-boundary-authorization.json"
+    )
+    preflight_authorization_path.write_text(
+        json.dumps(preflight_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    preflight_gate._replace(status="attention-required")
+    preflight_gate.authorize_fresh_boundary(
+        preflight_run,
+        boundary=preflight_boundary,
+        authorization_pointer=preflight_authorization_path.name,
+        authorization_sha256=hashlib.sha256(
+            preflight_authorization_path.read_bytes()
+        ).hexdigest(),
+    )
+    state_before_preflight = preflight_gate.read()
+    try:
+        preflight_gate.restart_for_boundary(
+            preflight_run,
+            boundary=preflight_boundary,
+            context=next_context,
+            origin_surface="55555555-5555-4555-8555-555555555555",
+            cwd=ROOT,
+            product_root=ROOT,
+            prompt_pointer="prompts/compact.md",
+            callback_root="callbacks/fresh-preflight",
+        )
+    except Exception as exc:
+        isolation_rejected = (
+            "isolated from product root" in str(exc)
+        )
+    else:
+        isolation_rejected = False
+    if not (
+        isolation_rejected
+        and preflight_gate.read() == state_before_preflight
+    ):
+        regression_failures.append(
+            "scratch isolation preflight precedes fresh intent persistence"
+        )
+
+if regression_failures:
+    raise AssertionError(
+        "RED review recovery regressions: "
+        + "; ".join(regression_failures)
+    )
 
 print("\nAll review gate tests passed.")

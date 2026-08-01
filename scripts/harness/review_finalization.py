@@ -32,6 +32,8 @@ ACTIVE_GATE_STATUSES = {
     "reviewing",
     "verifying",
     "fresh-reevaluation",
+    "fresh-boundary-authorized",
+    "recovery-verification-required",
     "awaiting-resolution",
 }
 

@@ -18,6 +18,7 @@ from ..contracts import (
     AttentionReason,
     CallbackEnvelope,
     OperationRecord,
+    OwnedResources,
     to_dict,
 )
 from ..state_machine import TERMINAL
@@ -32,11 +33,13 @@ from .review import (
     ReviewRound,
     ReviewRoundStore,
     ReviewRuntimePort,
+    ReviewSessionRequest,
     accept_review_round,
     finish_review_lane,
     prepare_review_round,
     review_evidence_envelope,
     review_round_envelope,
+    review_session_specs,
     start_review,
     verify_review_lane,
 )
@@ -831,6 +834,7 @@ class ReviewGateController:
         digest = hashlib.sha256(callback_path.read_bytes()).hexdigest()
         self._replace(
             status="approved",
+            context=self._context(context),
             evidence={
                 "pointer": callback_path.relative_to(self.root).as_posix(),
                 "sha256": digest,
@@ -940,6 +944,179 @@ class ReviewGateController:
         return ReviewGateDecision(
             "approved", lane, evidence_path=evidence
         )
+
+    def stage_finalizing_reverification(
+        self,
+        run: ReviewGateRun,
+        lane: ReviewLaneSession,
+        round_: ReviewRound,
+        result: ReviewResult,
+        *,
+        recovery_pointer: str,
+        recovery_sha256: str,
+    ) -> ReviewGateDecision:
+        """Consume one accepted old-HEAD result without approving a new HEAD."""
+
+        state = self.read()
+        recovery_path = (self.root / recovery_pointer).resolve()
+        try:
+            recovery_path.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(
+                "review recovery evidence escapes the gate"
+            ) from exc
+        child = self.round_store.read(
+            round_.owner_id, round_.operation_id
+        )
+        expected = review_round_envelope(round_, result)
+        recovery_identity = {
+            "pointer": recovery_pointer,
+            "sha256": recovery_sha256,
+            "status": "staged",
+        }
+        stored_recovery = state.get("finalizing_recovery")
+        if (
+            state.get("status")
+            not in {
+                "verifying",
+                "recovery-verification-required",
+                "fresh-boundary-authorized",
+            }
+            or run.execution.request.policy.depth != "simple"
+            or run.execution.request.policy.axes != ("holistic",)
+            or lane.axis != "holistic"
+            or round_.axis != "holistic"
+            or result.verdict != "approve"
+            or child.state not in {"finalizing", "complete"}
+            or child.resources != OwnedResources()
+            or child.pending_effect
+            or child.accepted_callback_id != expected.callback_id
+            or child.accepted_callback_kind != expected.kind
+            or child.accepted_callback_sha256
+            != expected.payload_sha256
+            or not recovery_path.is_file()
+            or recovery_path.is_symlink()
+            or not SHA256.fullmatch(recovery_sha256)
+            or hashlib.sha256(recovery_path.read_bytes()).hexdigest()
+            != recovery_sha256
+            or (
+                stored_recovery is not None
+                and stored_recovery != recovery_identity
+            )
+        ):
+            raise ValueError(
+                "finalizing review recovery identity is invalid"
+            )
+        if state.get("status") == "verifying":
+            cleanup = accept_review_round(
+                self.runtime,
+                self.round_store,
+                lane,
+                round_,
+                review_round_envelope(round_, result),
+            )
+            if cleanup is None or cleanup.state != "complete":
+                self._mark_attention(run.execution.lanes)
+                return ReviewGateDecision("attention-required", lane, round_)
+            pointer = self._persist_result(
+                run.execution.request.policy.operation_id,
+                result,
+                final=False,
+            )
+            self._replace(
+                status="recovery-verification-required",
+                finalizing_recovery=recovery_identity,
+                round_results={result.axis: pointer},
+                final_results={},
+                evidence={},
+            )
+        return ReviewGateDecision("verifying", lane, round_)
+
+    def authorize_fresh_boundary(
+        self,
+        run: ReviewGateRun,
+        *,
+        boundary: ReviewScopeBoundary,
+        authorization_pointer: str,
+        authorization_sha256: str,
+    ) -> None:
+        """Bind a coordinator-owned authorization to one exact context change."""
+
+        state = self.read()
+        pointer = Path(authorization_pointer)
+        authorization_path = (self.root / pointer).resolve()
+        try:
+            authorization_path.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError(
+                "fresh review authorization escapes the gate"
+            ) from exc
+        expected_keys = {
+            "schema_version",
+            "operation_id",
+            "kind",
+            "previous_context_sha256",
+            "next_context_sha256",
+            "reason",
+            "authorization_provenance",
+            "verification_operation_id",
+            "verification_receipt_sha256",
+            "status",
+        }
+        authorization = (
+            _read_json(authorization_path)
+            if authorization_path.is_file()
+            and not authorization_path.is_symlink()
+            else None
+        )
+        identity = {
+            "pointer": pointer.as_posix(),
+            "sha256": authorization_sha256,
+            "status": "authorized",
+        }
+        if (
+            state.get("status")
+            not in {
+                "attention-required",
+                "recovery-verification-required",
+                "fresh-boundary-authorized",
+            }
+            or not isinstance(authorization, dict)
+            or set(authorization) != expected_keys
+            or authorization.get("schema_version") != 1
+            or authorization.get("operation_id")
+            != run.execution.request.policy.operation_id
+            or authorization.get("kind") != boundary.kind
+            or authorization.get("previous_context_sha256")
+            != boundary.previous_context_sha256
+            or authorization.get("next_context_sha256")
+            != boundary.next_context_sha256
+            or authorization.get("reason") != boundary.reason
+            or not str(
+                authorization.get("authorization_provenance") or ""
+            )
+            in {"coordinator-approved", "pipeline-verification"}
+            or not str(
+                authorization.get("verification_operation_id") or ""
+            ).strip()
+            or not SHA256.fullmatch(
+                str(authorization.get("verification_receipt_sha256") or "")
+            )
+            or authorization.get("status") != "authorized"
+            or not SHA256.fullmatch(authorization_sha256)
+            or hashlib.sha256(authorization_path.read_bytes()).hexdigest()
+            != authorization_sha256
+            or (
+                state.get("status") == "fresh-boundary-authorized"
+                and state.get("fresh_boundary_authorization") != identity
+            )
+        ):
+            raise ValueError("fresh review authorization is invalid")
+        if state.get("status") != "fresh-boundary-authorized":
+            self._replace(
+                status="fresh-boundary-authorized",
+                fresh_boundary_authorization=identity,
+            )
 
     def defer_round_for_resolution(
         self,
@@ -1157,9 +1334,39 @@ class ReviewGateController:
         ) = None,
     ) -> ReviewGateRun | None:
         state = self.read()
+        if (
+            state.get("fresh_reevaluation_used") is True
+            and state.get("status")
+            in {"fresh-reevaluation", "reviewing", "verifying"}
+            and state.get("fresh_boundary")
+            == {
+                "kind": boundary.kind,
+                "previous_context_sha256": (
+                    boundary.previous_context_sha256
+                ),
+                "next_context_sha256": boundary.next_context_sha256,
+                "reason": boundary.reason,
+            }
+        ):
+            return self.rehydrate()
         if state.get("fresh_reevaluation_used") is True:
             self._mark_attention(run.execution.lanes)
             return None
+        authorization = state.get("fresh_boundary_authorization")
+        if (
+            state.get("status") != "fresh-boundary-authorized"
+            or not isinstance(authorization, dict)
+            or authorization.get("status") != "authorized"
+        ):
+            raise ValueError(
+                "fresh review requires coordinator-owned authorization"
+            )
+        self.authorize_fresh_boundary(
+            run,
+            boundary=boundary,
+            authorization_pointer=str(authorization.get("pointer") or ""),
+            authorization_sha256=str(authorization.get("sha256") or ""),
+        )
         if (
             boundary.previous_context_sha256
             != review_context_sha256(run.execution.request.context)
@@ -1185,6 +1392,47 @@ class ReviewGateController:
             context=context,
             lane_ids=None,
         )
+        if prompt_pointers is not None and set(prompt_pointers) != set(
+            request.policy.axes
+        ):
+            raise ValueError(
+                "review prompt pointers must cover every exact axis"
+            )
+        if any(
+            request.route_for(axis).profile != "reviewer-callback"
+            for axis in request.policy.axes
+        ):
+            raise ValueError(
+                "provider review sessions require the reviewer-callback profile"
+            )
+        exact_cwd = cwd.expanduser().resolve()
+        exact_product = product_root.expanduser().resolve()
+        for identity in review_session_specs(request):
+            axis_name = (
+                "standards"
+                if identity.axis
+                == "standards-correctness-architecture-security"
+                else identity.axis
+            )
+            ReviewSessionRequest(
+                spec=identity.spec,
+                lane_id=identity.lane_id,
+                run_id=identity.run_id,
+                origin_surface=origin_surface,
+                cwd=exact_cwd,
+                product_root=exact_product,
+                prompt_pointer=(
+                    prompt_pointer
+                    if prompt_pointers is None
+                    else prompt_pointers[identity.axis]
+                ),
+                placement="workspace",
+                callback_pointer=(
+                    f"{callback_root.rstrip('/')}/{axis_name}/"
+                    ".review-callback.json"
+                ),
+                callback_wake=callback_wake,
+            )
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
@@ -1200,6 +1448,8 @@ class ReviewGateController:
             context=self._context(context),
             round_results={},
             final_results={},
+            awaiting_resolution={},
+            resolution_evidence={},
             evidence={},
         )
         try:
