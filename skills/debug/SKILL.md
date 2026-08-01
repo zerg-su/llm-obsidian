@@ -1,21 +1,21 @@
 ---
 name: debug
-description: Find reproducible bug root causes; fix only when authorized.
+description: Use for reproducible bug root causes; fix only when authorized.
 ---
 
 # Debug
 
 Deterministic repro command = red evidence.
-Without it: red-capable loop before hypotheses; record evidence gap; stop speculative fix/completion.
+Otherwise: red-capable loop before hypotheses; record evidence gap; stop speculative fix.
 
-1. Reproduce and record failure; minimize without changing its meaning.
-2. Falsify hypotheses; prove repro-backed root cause before product mutation.
-3. Diagnosis-only: report evidence; no product edits.
-4. Authorized fix: narrowest seam; add regression evidence; rerun minimized/original loops.
+1. Reproduce/record failure; minimize without changing meaning.
+2. Falsify; prove repro-backed root cause before product mutation.
+3. diagnosis-only: stop without product edits.
+4. Authorized fix: add regression evidence; rerun minimized/original loops.
 5. Failed fix attempt = product change + failed original repro rerun.
-6. Three failed product fixes: unconditional architecture stop; no fourth.
-7. Trace defect repair to declared outcome evidence; absence bars completion.
-8. Remove instrumentation; state uncertainty.
+6. Three failed fixes: unconditional architecture stop; no fourth.
+7. Defect repair needs declared outcome evidence; absence bars completion.
+8. Remove temporary instrumentation; rerun original feedback loops; report residual uncertainty.
 
-Escalate interface, migration, security, dependency, permission, or external effects.
-Never hide failures, pad timeouts, claim untested root cause.
+Escalate interfaces, migrations, security, dependencies, permissions, external effects.
+Never hide failure, pad timeouts, or claim untested root cause.
