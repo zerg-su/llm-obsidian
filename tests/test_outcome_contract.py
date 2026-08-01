@@ -163,15 +163,49 @@ with tempfile.TemporaryDirectory(prefix="outcome-task-meta.") as raw:
     plan_path.parent.mkdir(parents=True)
     original_plan = plan(compact)
     plan_path.write_text(original_plan, encoding="utf-8")
-    meta = json.loads((ROOT / ".task-meta.json").read_text(encoding="utf-8"))
-    meta.update(
-        {
-            "vault_root": str(vault),
-            "plan_file": str(plan_path),
-            "approved_plan_sha256": hashlib.sha256(original_plan.encode()).hexdigest(),
-            "outcome_contract_sha256": DIGEST,
-        }
-    )
+    meta = {
+        "version": 4,
+        "project_id": "11111111-1111-4111-8111-111111111111",
+        "task_id": "22222222-2222-4222-8222-222222222222",
+        "task_name": "outcome contract fixture",
+        "origin_session": "fixture-session",
+        "executor_runtime": "codex",
+        "vault_root": str(vault),
+        "plan_file": str(plan_path),
+        "approved_plan_sha256": hashlib.sha256(original_plan.encode()).hexdigest(),
+        "outcome_contract_sha256": DIGEST,
+        "interaction_policy": "unattended",
+        "pipeline_policy": {
+            "name": "engineering/change",
+            "definition_sha256": "a" * 64,
+            "completion_policy": "attention",
+            "total_pass_limit": 2,
+        },
+        "review_policy": {
+            "mode": "simple",
+            "cross_model": False,
+            "runtime": "",
+            "model": "",
+            "effort": "",
+            "max_verify_iterations": 1,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": "b" * 64,
+        },
+        "reap_policy": {
+            "mode": "shared",
+            "auto_file": True,
+            "allowed_types": ["repo-touch"],
+            "title": "Outcome contract fixture",
+        },
+        "surface_policy": {"auto_close": True},
+        "watchdog_policy": {
+            "enabled": True,
+            "poll_seconds": 30,
+            "warn_after_seconds": 900,
+            "alert_after_seconds": 1200,
+        },
+        "forbidden_actions": list(task_contract.FORBIDDEN_ACTIONS),
+    }
     normalized = task_contract.normalize(meta)
     assert normalized["outcome_contract_sha256"] == DIGEST
 
