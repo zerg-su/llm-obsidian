@@ -10,6 +10,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from time import time
 from typing import Callable, Mapping, Protocol, Sequence
 
 from model_routing import RoutingError, load_config, validate_effort
@@ -1508,6 +1509,24 @@ class RuntimeSessionManager:
                     "terminate-orphan",
                     process_status=process_status,
                     surface_status=surface_status,
+                )
+            if (
+                record.spec.kind == "research-fetch"
+                and record.accepted_callback_id
+                and record.effect_id == "request-exit"
+                and record.effect_outcome == EffectOutcome.SUCCEEDED
+                and record.deadline_at
+                and time() >= record.deadline_at
+            ):
+                self.process.request_guardian_signal(
+                    self._control_path(record),
+                    action="terminate",
+                    operation_id=record.spec.operation_id,
+                    run_id=record.run_id,
+                    process_group=resources.process_group,
+                    process_identity=resources.process_identity,
+                    supervisor_pid=resources.supervisor_pid,
+                    supervisor_identity=resources.supervisor_identity,
                 )
             return self._result(
                 record,

@@ -264,6 +264,14 @@ class FakeProcess:
                     "run-workspace-drift",
                 ),
                 ("generic-cleanup", "generic-cleanup-run"),
+                (
+                    "research-fetch-deadline",
+                    "research-fetch-deadline-run",
+                ),
+                (
+                    "research-fetch-deadline-mismatch",
+                    "research-fetch-deadline-mismatch-run",
+                ),
             }
             and process_group == 123
             and process_identity == PROCESS_IDENTITY
@@ -1190,6 +1198,149 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and process.exit_requests == [123],
         generic_exiting,
     )
+
+    deadline_events: list[str] = []
+    deadline_store = OperationStore(root / "research-fetch-deadline-store")
+    deadline_process = FakeProcess(deadline_events)
+    deadline_manager = RuntimeSessionManager(
+        deadline_store,
+        FakeCmux(deadline_events),
+        deadline_process,
+    )
+
+    def prepare_deadline_fetch(operation_id: str, run_id: str) -> None:
+        deadline_spec = OperationSpec(
+            operation_id,
+            f"{operation_id}-key",
+            "research-fetch",
+            "owner-deadline",
+            route,
+            "packets/research.json",
+            "research-cited-artifact",
+        )
+        deadline_store.create(
+            deadline_spec,
+            lane_id=f"{operation_id}-lane",
+            run_id=run_id,
+        )
+        deadline_supervisor = OperationSupervisor(
+            deadline_store, "owner-deadline", operation_id
+        )
+        deadline_supervisor.configure_budget(
+            attempt_limit=1,
+            model_restart_limit=0,
+            time_budget_seconds=1,
+            token_limit=100,
+            now=0.0,
+        )
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            deadline_supervisor.transition(state)
+        deadline_supervisor.bind_resources(
+            OwnedResources(
+                SURFACE,
+                123,
+                124,
+                PROCESS_IDENTITY,
+                SUPERVISOR_IDENTITY,
+            )
+        )
+        deadline_session_root = (
+            deadline_store.root
+            / "owners"
+            / "owner-deadline"
+            / "runtime"
+            / operation_id
+        )
+        deadline_session_root.mkdir(parents=True)
+        (deadline_session_root / "session.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": operation_id,
+                    "run_id": run_id,
+                    "placement": "split",
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        (deadline_session_root / "callback-target.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "generation": 1,
+                    "operation_id": operation_id,
+                    "run_id": run_id,
+                    "callback_pointer": "artifact.json",
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        deadline_payload = {"status": "complete"}
+        deadline_encoded = json.dumps(
+            deadline_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+        CallbackBroker(deadline_store, "owner-deadline").accept(
+            CallbackEnvelope(
+                f"{operation_id}-callback",
+                operation_id,
+                run_id,
+                "research",
+                deadline_payload,
+                hashlib.sha256(deadline_encoded).hexdigest(),
+            )
+        )
+        exiting_fetch = deadline_manager.request_exit(
+            "owner-deadline", operation_id
+        )
+        check(
+            "research fetch deadline fixture records successful exact exit request",
+            exiting_fetch.record.state == "exiting"
+            and exiting_fetch.record.effect_id == "request-exit"
+            and exiting_fetch.record.effect_outcome.value == "succeeded",
+            exiting_fetch,
+        )
+
+    prepare_deadline_fetch(
+        "research-fetch-deadline",
+        "research-fetch-deadline-run",
+    )
+    deadline_process.status_value = "unknown"
+    deadline_process.supervisor_status_value = "unknown"
+    deadline_cleanup = deadline_manager.cleanup(
+        "owner-deadline", "research-fetch-deadline"
+    )
+    check(
+        "accepted research fetch escalates exact cleanup after deadline",
+        deadline_cleanup.action == "wait-for-exit"
+        and deadline_cleanup.record.state == "exiting"
+        and deadline_process.terminations == [123],
+        deadline_cleanup,
+    )
+
+    deadline_process.status_value = "alive"
+    deadline_process.supervisor_status_value = "alive"
+    prepare_deadline_fetch(
+        "research-fetch-deadline-mismatch",
+        "research-fetch-deadline-mismatch-run",
+    )
+    deadline_process.status_value = "unknown"
+    deadline_process.supervisor_status_value = "unknown"
+    deadline_process.capture_identity = (  # type: ignore[method-assign]
+        lambda _pid, process_group=0: "c" * 64
+    )
+    mismatched_deadline = deadline_manager.cleanup(
+        "owner-deadline", "research-fetch-deadline-mismatch"
+    )
+    check(
+        "expired research fetch identity mismatch stays fail-closed",
+        mismatched_deadline.action == "wait-for-ownership"
+        and mismatched_deadline.record.state == "exiting"
+        and deadline_process.terminations == [123],
+        mismatched_deadline,
+    )
+
     process.status_value = "alive"
     process.supervisor_status_value = "alive"
 
