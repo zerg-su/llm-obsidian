@@ -27,6 +27,14 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt1-watchdog-design
+
+`c-000088` [[LLM Obsidian 2.6 dogfood RT1 callback watchdog architecture]]. ## Outcome
+
+Committed the RT1 ADR-style callback-watchdog decision in `docs/acceptance/v2.6-dogfood-rt1-callback-watchdog.md`, finalized at `59e347d603f66daeaef37d6160e06de122cf3858`.
+
+The selected callback fallback is passive deadline reconciliation through the existing runtime worker, OperationStore, CallbackBroker, and exact-owner reconcile path. It creates typed attention on expiry and adds no scheduler, model polling/calls, provider input, cancellation, surface closure, permission changes,
+
 ## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype
 
 `c-000086` [[LLM Obsidian 2.6 dogfood RT4 callback fallback prototype]]. ## RT4 callback fallback prototype
