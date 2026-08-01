@@ -88,6 +88,12 @@ with tempfile.TemporaryDirectory(prefix="improve-skills-verdicts.") as raw:
         "---\nname: fixture\ndescription: Verdict fixture.\n---\n\n# Fixture\n",
         encoding="utf-8",
     )
+    outside = skills / "outside"
+    outside.mkdir()
+    (outside / "SKILL.md").write_text(
+        "---\nname: outside\ndescription: Out-of-scope fixture.\n---\n\n# Outside\n",
+        encoding="utf-8",
+    )
     verdict_path = Path(raw) / "verdicts.json"
     verdict_path.write_text(json.dumps(valid_verdicts), encoding="utf-8")
     command = [
@@ -97,6 +103,8 @@ with tempfile.TemporaryDirectory(prefix="improve-skills-verdicts.") as raw:
         str(skills),
         "--verdicts",
         str(verdict_path),
+        "--scope",
+        "fixture",
         "--strict",
         "--json",
     ]

@@ -59,7 +59,8 @@ quality model. Validate the record set against the same inventory:
 
 ```bash
 python3 skills/improve-skills/scripts/audit_skills.py \
-  --verdicts <verdict-records.json> --strict
+  --verdicts <verdict-records.json> \
+  --scope <skill> [--scope <skill> ...] --strict
 ```
 
 Completion criterion: the validated verdict set and inventory contain the same
@@ -86,7 +87,8 @@ Run:
 ```bash
 python3 skills/improve-skills/scripts/audit_skills.py --strict
 python3 skills/improve-skills/scripts/audit_skills.py \
-  --verdicts <verdict-records.json> --strict
+  --verdicts <verdict-records.json> \
+  --scope <skill> [--scope <skill> ...] --strict
 make test-instruction-lint test-skill-budget test-codex-adapter
 python3 scripts/release-acceptance.py check
 ```

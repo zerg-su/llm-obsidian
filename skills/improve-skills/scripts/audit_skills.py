@@ -251,6 +251,13 @@ def main() -> int:
         type=Path,
         help="validate one schema-v1 five-pass verdict record per audited skill",
     )
+    parser.add_argument(
+        "--scope",
+        action="append",
+        default=[],
+        metavar="SKILL",
+        help="limit verdict records to this installed skill; repeat as needed",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--strict", action="store_true", help="fail on warnings as well as errors")
     args = parser.parse_args()
@@ -268,12 +275,21 @@ def main() -> int:
     )
     verdicts_validated = False
     verdicts_error = ""
+    if args.scope and args.verdicts is None:
+        parser.error("--scope requires --verdicts")
     if args.verdicts is not None:
         try:
+            installed = tuple(str(row["skill"]) for row in rows)
+            verdict_inventory = tuple(args.scope) if args.scope else installed
+            if (
+                len(verdict_inventory) != len(set(verdict_inventory))
+                or not set(verdict_inventory).issubset(set(installed))
+            ):
+                raise ValueError("verdict scope must contain unique installed skill names")
             verdict_payload = json.loads(args.verdicts.read_text(encoding="utf-8"))
             validate_verdict_records(
                 verdict_payload,
-                tuple(str(row["skill"]) for row in rows),
+                verdict_inventory,
             )
             verdicts_validated = True
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
@@ -289,6 +305,7 @@ def main() -> int:
     }
     if args.verdicts is not None:
         payload["verdicts_validated"] = verdicts_validated
+        payload["verdict_scope"] = args.scope or [str(row["skill"]) for row in rows]
         if verdicts_error:
             payload["verdicts_error"] = verdicts_error
 

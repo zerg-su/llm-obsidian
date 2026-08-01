@@ -116,6 +116,7 @@ change: <smallest correction, or none>
 behavior_proof: <why protected behavior is unchanged>
 ```
 
-Validate the record with `audit_skills.py --verdicts <file> --strict`. The audit is complete only
-when every installed skill has exactly one five-pass verdict record and the
-record inventory matches the audited inventory exactly.
+Validate the record with `audit_skills.py --verdicts <file> --scope <skill>
+--strict`, repeating `--scope` for the approved inventory. The audit is
+complete only when every in-scope skill has exactly one five-pass verdict
+record and every scoped name exists in the installed inventory.
