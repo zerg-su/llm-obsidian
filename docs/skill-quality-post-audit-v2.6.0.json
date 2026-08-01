@@ -62,8 +62,8 @@
       "local_subgoal": "Reproduce, minimize, falsify hypotheses, and repair the narrowest authorized seam.",
       "completion_proxies": ["The focused regression is green.", "The diff is clean.", "A callback was accepted."],
       "required_outcome_evidence": ["The minimized and original repro loops pass and the repaired defect is traced to declared outcome evidence."],
-      "evidence": "B-DBG-01 and HOL-003; skills/debug/SKILL.md; tests/test_skill_workstream_b.py",
-      "change": "none in post-audit; integrated correction closes B-DBG-01 and preserves the frozen debug loop",
+      "evidence": "B-DBG-01 and HOL-003; governance repair 0f9bb89; skills/debug/SKILL.md; tests/test_skill_workstream_b.py; tests/harness/test_engineering_skills.py",
+      "change": "post-audit mechanism repair restores the distinct trigger and explicit completion markers without changing the frozen debug loop",
       "behavior_proof": "Diagnosis-only remains non-mutating; root cause precedes fixes; regression, reruns, escalation, and the three-failure stop remain mandatory."
     },
     {
