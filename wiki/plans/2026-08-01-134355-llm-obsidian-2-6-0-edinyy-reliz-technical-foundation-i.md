@@ -119,6 +119,26 @@ Producer и `pipeline-stats` используют одну severity-конста
 
 ## 3. Skill intelligence workstreams
 
+### Обязательный meta-gate `improve-skills`
+
+Перед созданием веток A/B/C прогнать все шесть изменяемых skills — `clarify`, `design`, `prototype`, `debug`, `tdd`, `review` — через локальный `improve-skills`:
+
+Pre-branch запуск является строго audit-only: он фиксирует verdicts, baseline findings и behavioural expectations, но не изменяет skills. Каждый finding заранее назначается своей ветке-владельцу — A для `clarify`/`design`/`prototype`, B для `debug`/`tdd`, C для `review`; любые правки выполняются только внутри этой workstream. Frozen foundation SHA остаётся единым branch point и baseline для paired comparison.
+
+- выполнить строгий структурный аудит `python3 skills/improve-skills/scripts/audit_skills.py --strict`;
+- зафиксировать baseline findings и behavioural expectations до редактирования;
+- использовать pinned `writing-skills` из Superpowers и `writing-great-skills` Matt Pocock только как reference evidence;
+- исправлять только доказанные проблемы, не переносить чужую orchestration и не менять workflow semantics без отдельного решения.
+
+В каждой workstream findings `improve-skills` становятся входом для focused изменений и тестов. После интеграции выполнить единый post-audit тех же шести skills и принять изменение только если:
+
+- строгий аудит, instruction lint и skill-budget checks зелёные;
+- paired behavioural comparison не ухудшил completion, число вмешательств, rounds или lifecycle stability;
+- каждое изменение связано с исходным finding либо подтверждённым behavioural improvement;
+- недоказанные улучшения удалены или вынесены за пределы 2.6.
+
+`improve-skills` остаётся manual engineering meta-skill и не запускается автоматически в пользовательских workflow.
+
 Все три ветки создаются от одного foundation SHA и разрабатываются параллельно. На ветках выполняются self-review и focused deterministic tests; отдельных Fable/Sol review не запускать.
 
 ### Workstream A — clarify, design, prototype
