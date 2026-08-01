@@ -57,6 +57,9 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
+regression_failures: list[str] = []
+
+
 def resolution_evidence(
     operation_id: str,
     axis: str,
@@ -1241,6 +1244,449 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         {"resolution-evidence.json", "fix-delta.patch"}
         <= verification_inputs,
     )
+
+    # Recovery must consume coordinator-owned verification evidence and must
+    # preserve the exact reviewer-seen ruling across a verification repair.
+    finalizing = task_review_runner.load_active_round(
+        gate_root,
+        task_store,
+        task_runtime,
+        axis="holistic",
+    )
+    approved_result = ReviewResult(
+        "holistic",
+        "approve",
+        (),
+        verification_iteration=1,
+    )
+    approved_envelope = review_round_envelope(
+        finalizing.round,
+        approved_result,
+    )
+    callback_path.write_text(
+        json.dumps(to_dict(approved_envelope), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    task_runtime.accept_callback(approved_envelope)
+    interrupted_child = task_store.read(
+        task_id,
+        finalizing.round.operation_id,
+    )
+    (product / "verification-repair.txt").write_text(
+        "bounded verification repair\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "verification-repair.txt"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "repair verification"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    repaired_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    resolution_path = product / ".task-review-resolution.json"
+    exact_resolution = json.loads(
+        resolution_path.read_text(encoding="utf-8")
+    )
+    exact_resolution["resolved_head_sha"] = repaired_head
+    exact_resolution_bytes = (
+        json.dumps(exact_resolution, sort_keys=True) + "\n"
+    ).encode()
+    resolution_path.write_bytes(exact_resolution_bytes)
+    (product / ".task-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "type": "session",
+                "title": "automatic task review",
+                "session": "session-1",
+                "body": "Preserve exact accepted review evidence during recovery.",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    verification_input_sha = hashlib.sha256(
+        b"failed verification input"
+    ).hexdigest()
+    verification_operation_id = (
+        f"{task_id}-verify-{verification_input_sha[:16]}"
+    )
+    verification_lane_id = hashlib.sha256(
+        f"{verification_operation_id}:lane".encode()
+    ).hexdigest()[:32]
+    verification_run_id = hashlib.sha256(
+        f"{verification_operation_id}:run".encode()
+    ).hexdigest()[:32]
+    verification_effect_id = (
+        f"pipeline-verify-{verification_input_sha[:32]}"
+    )
+    verification_spec = OperationSpec(
+        operation_id=verification_operation_id,
+        idempotency_key=hashlib.sha256(
+            f"{verification_operation_id}:idempotency".encode()
+        ).hexdigest(),
+        kind="pipeline-verify",
+        owner_id=task_id,
+        route=RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            "f" * 64,
+        ),
+        context_manifest="wiki/plans/approved.md",
+        verification_profile="scoped",
+        contract_sha256=meta["pipeline_policy"]["definition_sha256"],
+    )
+    task_store.create(
+        verification_spec,
+        lane_id=verification_lane_id,
+        run_id=verification_run_id,
+    )
+    for verification_state in (
+        "preflight",
+        "starting",
+        "running",
+        "verifying",
+    ):
+        task_store.transition(
+            task_id,
+            verification_operation_id,
+            verification_state,
+        )
+    task_store.transition(
+        task_id,
+        verification_operation_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    owner_runtime = (
+        vault
+        / ".vault-meta/harness/owners"
+        / task_id
+        / "runtime"
+        / task_id
+    )
+    verification_root = (
+        owner_runtime
+        / "pipeline-verification"
+        / verification_operation_id
+    )
+    evidence_path = verification_root / "evidence/scoped-1.log"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text("deterministic failed verification\n", encoding="utf-8")
+    verification_receipt = {
+        "schema_version": 1,
+        "operation_id": verification_operation_id,
+        "parent_operation_id": task_id,
+        "lane_id": verification_lane_id,
+        "run_id": verification_run_id,
+        "definition_sha256": meta["pipeline_policy"]["definition_sha256"],
+        "step_id": "verify",
+        "head_sha": resolved_head,
+        "input_sha256": verification_input_sha,
+        "profile": "scoped",
+        "profile_sha256": profile_sha,
+        "effect_id": verification_effect_id,
+        "status": "failed",
+        "evidence": [
+            {
+                "command_id": "scoped-1",
+                "cwd": ".",
+                "exit_code": 2,
+                "started_at": "1.0",
+                "finished_at": "2.0",
+                "head_sha": resolved_head,
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "output_pointer": (
+                    evidence_path.relative_to(owner_runtime).as_posix()
+                ),
+            }
+        ],
+    }
+    receipt_path = verification_root / "receipt.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(
+        json.dumps(verification_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (owner_runtime / "pipeline-step-verify.json").write_text(
+        json.dumps(verification_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    packet = {
+        "schema_version": 1,
+        "operation_id": task_id,
+        "verification_operation_id": verification_operation_id,
+        "verification_lane_id": verification_lane_id,
+        "verification_run_id": verification_run_id,
+        "definition_sha256": meta["pipeline_policy"]["definition_sha256"],
+        "step_id": "verify",
+        "head_sha": resolved_head,
+        "status": "attention-required",
+        "reason": "verification-failed",
+        "safe_boundary": "tdd-slices-complete",
+        "allowed_responses": ["fix-and-resubmit", "escalate"],
+        "response_pointer": ".task-verification-response.json",
+        "receipt_pointer": str(receipt_path.resolve()),
+        "evidence": [
+            {
+                "command_id": "scoped-1",
+                "exit_code": 2,
+                "output_pointer": str(evidence_path.resolve()),
+            }
+        ],
+    }
+
+    def write_resubmit(
+        packet_value: dict[str, object],
+    ) -> dict[str, object]:
+        (product / ".task-verification.json").write_text(
+            json.dumps(packet_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        packet_bytes = json.dumps(
+            packet_value, sort_keys=True, separators=(",", ":")
+        ).encode()
+        response_value = {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "verification_operation_id": packet_value[
+                "verification_operation_id"
+            ],
+            "failed_head_sha": resolved_head,
+            "packet_sha256": hashlib.sha256(packet_bytes).hexdigest(),
+            "response": "fix-and-resubmit",
+            "resubmitted_head_sha": repaired_head,
+        }
+        (product / ".task-verification-response.json").write_text(
+            json.dumps(response_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return response_value
+
+    recover_finalizing = getattr(
+        task_review_runner,
+        "recover_finalizing_review",
+        None,
+    )
+    response_receipt_path = verification_root / "response-receipt.json"
+    if recover_finalizing is None:
+        regression_failures.extend(
+            (
+                "HOL-R01 durable verification receipt binding",
+                "HOL-R02 exact reviewer-seen finding ruling",
+                "HOL-R03 interruption-safe finalizing replay",
+            )
+        )
+    else:
+        forged_packet = {
+            **packet,
+            "verification_operation_id": "forged-verification-child",
+            "verification_lane_id": "forged-verification-lane",
+            "verification_run_id": "forged-verification-run",
+            "receipt_pointer": str(
+                product / "missing-forged-verification-receipt.json"
+            ),
+        }
+        write_resubmit(forged_packet)
+        try:
+            recover_finalizing(product, runtime_manager=task_runtime)
+        except task_review_runner.TaskReviewError:
+            forged_rejected = True
+        else:
+            forged_rejected = False
+        if (
+            not forged_rejected
+            or response_receipt_path.exists()
+            or task_store.read(
+                task_id, finalizing.round.operation_id
+            ).state
+            != "finalizing"
+        ):
+            regression_failures.append(
+                "HOL-R01 durable verification receipt binding"
+            )
+
+        write_resubmit(packet)
+        drifted_resolution = json.loads(
+            exact_resolution_bytes.decode()
+        )
+        drifted_resolution["resolutions"][0].update(
+            {
+                "disposition": "rejected",
+                "rationale": "executor-rewritten rationale after review",
+                "follow_up": "",
+            }
+        )
+        resolution_path.write_text(
+            json.dumps(drifted_resolution, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            recover_finalizing(product, runtime_manager=task_runtime)
+        except task_review_runner.TaskReviewError:
+            ruling_rejected = True
+        else:
+            ruling_rejected = False
+        if not ruling_rejected:
+            regression_failures.append(
+                "HOL-R02 exact reviewer-seen finding ruling"
+            )
+        resolution_path.write_bytes(exact_resolution_bytes)
+
+        original_complete_round = ReviewGateController.complete_round
+
+        def interrupt_after_staging(*args: object, **kwargs: object) -> object:
+            raise OSError("simulated interruption after recovery staging")
+
+        ReviewGateController.complete_round = interrupt_after_staging
+        try:
+            try:
+                recover_finalizing(product, runtime_manager=task_runtime)
+            except task_review_runner.TaskReviewError:
+                interrupted = True
+            else:
+                interrupted = False
+        finally:
+            ReviewGateController.complete_round = original_complete_round
+        staged_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        try:
+            replayed = recover_finalizing(
+                product, runtime_manager=task_runtime
+            )
+        except task_review_runner.TaskReviewError:
+            replayed = {"status": "error"}
+        accepted_response = (
+            json.loads(response_receipt_path.read_text(encoding="utf-8"))
+            if response_receipt_path.is_file()
+            else {}
+        )
+        if not (
+            interrupted
+            and staged_state["context"]["head_sha"] == resolved_head
+            and replayed["status"] == "approved"
+            and accepted_response.get("verification_operation_id")
+            == verification_operation_id
+            and accepted_response.get("resubmitted_head_sha")
+            == repaired_head
+            and task_store.read(
+                task_id, finalizing.round.operation_id
+            ).state
+            == "complete"
+        ):
+            regression_failures.append(
+                "HOL-R03 interruption-safe finalizing replay"
+            )
+
+    fresh_entrypoint = getattr(
+        task_review_runner,
+        "restart_task_review_for_boundary",
+        None,
+    )
+    if fresh_entrypoint is None:
+        regression_failures.append(
+            "persistent dispatched-task fresh-boundary entrypoint"
+        )
+    else:
+        for record in task_store.list(task_id):
+            current = record
+            if current.state not in TERMINAL:
+                if current.state != "cancelling":
+                    task_store.transition(
+                        task_id,
+                        current.spec.operation_id,
+                        "cancelling",
+                    )
+                task_store.transition(
+                    task_id,
+                    current.spec.operation_id,
+                    "exiting",
+                )
+                task_store.transition(
+                    task_id,
+                    current.spec.operation_id,
+                    "cancelled",
+                )
+                current = task_store.read(
+                    task_id, current.spec.operation_id
+                )
+            if current.resources != OwnedResources():
+                task_store.save(
+                    replace(
+                        current,
+                        resources=OwnedResources(),
+                        revision=current.revision + 1,
+                    ),
+                    expected_revision=current.revision,
+                )
+        ReviewGateController(
+            gate_root,
+            task_runtime,
+            task_store,
+        ).mark_pending_attention()
+        original_plan_bytes = plan.read_bytes()
+        original_meta_bytes = (product / ".task-meta.json").read_bytes()
+        plan.write_text(
+            "# Approved task\n\nExplicit bounded context expansion.\n",
+            encoding="utf-8",
+        )
+        expanded_meta = {
+            **meta,
+            "approved_plan_sha256": hashlib.sha256(
+                plan.read_bytes()
+            ).hexdigest(),
+        }
+        (product / ".task-meta.json").write_text(
+            json.dumps(expanded_meta, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        started_before_fresh = len(task_runtime.started)
+        try:
+            fresh_receipt = fresh_entrypoint(
+                product,
+                kind="context",
+                reason="approved bounded ContextPacket expansion",
+                runtime_manager=task_runtime,
+            )
+        except task_review_runner.TaskReviewError:
+            fresh_receipt = {"status": "error"}
+        finally:
+            plan.write_bytes(original_plan_bytes)
+            (product / ".task-meta.json").write_bytes(
+                original_meta_bytes
+            )
+        fresh_state = json.loads(
+            (gate_root / "review-gate.json").read_text(encoding="utf-8")
+        )
+        if not (
+            fresh_receipt.get("status") == "reviewing"
+            and fresh_receipt.get("task_id") == task_id
+            and fresh_state.get("fresh_reevaluation_used") is True
+            and fresh_state.get("fresh_boundary", {}).get("kind")
+            == "context"
+            and len(task_runtime.started) == started_before_fresh + 1
+        ):
+            regression_failures.append(
+                "persistent dispatched-task fresh-boundary entrypoint"
+            )
     recovery_id = str(uuid.uuid4())
     recovery_meta = {**meta, "task_id": recovery_id}
     (product / ".task-meta.json").write_text(
@@ -1916,5 +2362,62 @@ with tempfile.TemporaryDirectory(prefix="review-raced-parent.") as raw:
         )
     else:
         raise AssertionError("dead raced reviewer must not become reviewing")
+
+with tempfile.TemporaryDirectory(prefix="fresh-review-preflight.") as raw:
+    preflight_root = Path(raw)
+    (preflight_root / "scratch").mkdir()
+    preflight_store = OperationStore(preflight_root / "store")
+    preflight_runtime = FakeRuntime(preflight_store)
+    preflight_gate = ReviewGateController(
+        preflight_root / "gate",
+        preflight_runtime,
+        preflight_store,
+    )
+    preflight_run = begin(
+        preflight_gate,
+        request_for("fresh-preflight", context=context),
+        preflight_root / "scratch",
+    )
+    next_context = replace(
+        context,
+        manifest="packets/review/expanded-manifest.json",
+    )
+    preflight_boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(context),
+        review_context_sha256(next_context),
+        "approved bounded ContextPacket expansion",
+    )
+    state_before_preflight = preflight_gate.read()
+    try:
+        preflight_gate.restart_for_boundary(
+            preflight_run,
+            boundary=preflight_boundary,
+            context=next_context,
+            origin_surface="55555555-5555-4555-8555-555555555555",
+            cwd=ROOT,
+            product_root=ROOT,
+            prompt_pointer="prompts/compact.md",
+            callback_root="callbacks/fresh-preflight",
+        )
+    except Exception as exc:
+        isolation_rejected = (
+            "isolated from product root" in str(exc)
+        )
+    else:
+        isolation_rejected = False
+    if not (
+        isolation_rejected
+        and preflight_gate.read() == state_before_preflight
+    ):
+        regression_failures.append(
+            "scratch isolation preflight precedes fresh intent persistence"
+        )
+
+if regression_failures:
+    raise AssertionError(
+        "RED review recovery regressions: "
+        + "; ".join(regression_failures)
+    )
 
 print("\nAll review gate tests passed.")
