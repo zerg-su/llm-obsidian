@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple, Sequence
 
-from harness.context import ContextBuilder, ContextInput
+from harness.context import ContextBuilder, ContextInput, outcome_contract_input
 from harness.contracts import (
     AttentionReason,
     CallbackEnvelope,
@@ -467,6 +467,13 @@ def _context(
             role="head",
         ),
     ]
+    if meta.get("version") == 4 and meta.get("lifecycle") != "current-checkout":
+        inputs.append(
+            outcome_contract_input(
+                plan,
+                expected_sha256=str(meta.get("outcome_contract_sha256") or ""),
+            )
+        )
     instructions = worktree / "AGENTS.md"
     if instructions.is_file() and not instructions.is_symlink():
         inputs.append(

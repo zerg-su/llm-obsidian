@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/wiki-summary-v2.schema.json",
+  "title": "Wiki Summary v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "type", "title", "session", "body",
+    "outcome_disposition", "outcome_evidence_ids", "residual_gap_pointers"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "type": {"enum": ["session", "decision", "runbook", "incident", "service-update", "repo-touch"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 500},
+    "session": {"type": ["string", "null"], "maxLength": 200},
+    "body": {"type": "string", "minLength": 1, "maxLength": 200000},
+    "outcome_disposition": {"enum": ["achieved", "partially-achieved", "not-achieved"]},
+    "outcome_evidence_ids": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+      }
+    },
+    "residual_gap_pointers": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"outcome_disposition": {"const": "achieved"}}},
+      "then": {
+        "properties": {
+          "outcome_evidence_ids": {"minItems": 1},
+          "residual_gap_pointers": {"maxItems": 0}
+        }
+      },
+      "else": {"properties": {"residual_gap_pointers": {"minItems": 1}}}
+    }
+  ]
+}

@@ -88,7 +88,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
     plan.write_text(
-        "---\ntype: plan\nstatus: pending\nsession_id: unit-session\n---\n\n# Approved\n",
+        "---\ntype: plan\nstatus: pending\nsession_id: unit-session\n---\n\n"
+        "# Approved\n\n## Outcome Contract\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Complete the dispatched fixture.",'
+        '"success_evidence":[{"evidence_id":"fixture-green",'
+        '"observable":"The deterministic dispatch fixture passes."}],'
+        '"non_goals":["No external effects."]}\n```\n',
         encoding="utf-8",
     )
     target.mkdir()
@@ -128,6 +133,18 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     }
 
     request = runner.validate_request(raw_request)
+    missing_outcome = json.loads(json.dumps(raw_request))
+    missing_plan = vault / "wiki" / "plans" / "missing-outcome.md"
+    missing_plan.write_text(
+        "---\ntype: plan\nstatus: pending\n---\n\n# Missing\n",
+        encoding="utf-8",
+    )
+    missing_outcome["plan_file"] = str(missing_plan)
+    expect_error(
+        "dispatch rejects a missing Outcome Contract before effects",
+        lambda: runner.validate_request(missing_outcome),
+        "exactly one Outcome Contract",
+    )
     config = runner.load_dispatch_config(vault, target)
     session, effective = runner.resolved_routes(request, persist=False)
     prompt = runner.render_task_prompt(request, config)
@@ -232,9 +249,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "write `.task-summary.json` with exactly this canonical JSON shape"
         in prompt
         and (
-            '{"schema_version":1,"type":"repo-touch",'
+            '{"schema_version":2,"type":"repo-touch",'
             '"title":"Fast dispatch result","session":"unit-session",'
-            '"body":"<bounded Markdown summary>"}'
+            '"body":"<bounded Markdown summary>",'
+            '"outcome_disposition":"achieved",'
+            '"outcome_evidence_ids":["fixture-green"],'
+            '"residual_gap_pointers":[]}'
         )
         in prompt
         and "task-review-runner.py run" not in prompt,
@@ -793,6 +813,11 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and meta["worktree"] == str(request["worktree"]),
     )
     check(
+        "runner binds v4 metadata to the approved Outcome Contract",
+        meta["outcome_contract_sha256"] == request["outcome_contract_sha256"]
+        and len(meta["outcome_contract_sha256"]) == 64,
+    )
+    check(
         "runner binds automatic review to an exact verification profile",
         meta["review_policy"]["verification_profile"] == "scoped"
         and len(meta["review_policy"]["verification_profile_sha256"]) == 64
@@ -899,7 +924,19 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     summary = worktree / ".task-summary.json"
     summary.write_text(
-        json.dumps({"type": "repo-touch", "title": "Fast dispatch result"}) + "\n",
+        json.dumps(
+            {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "title": "Fast dispatch result",
+                "session": "unit-session",
+                "body": "The fixture outcome is established.",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": ["fixture-green"],
+                "residual_gap_pointers": [],
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     handoff = subprocess.run(
@@ -920,7 +957,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         check=False,
     )
     check(
-        "native task thread completes the exact v3 handoff",
+        "native task thread completes the exact v4 handoff",
         detected.returncode == 0
         and detected.stdout.strip() == "unit-session"
         and handoff.returncode == 0,
@@ -972,6 +1009,19 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     harness_raw["branch"] = "task/harness-start"
     harness_raw["worktree"] = str(tmp / "worktrees" / "harness-start")
     harness_request = runner.validate_request(harness_raw)
+    packet_request = runner.harness_request(harness_request, config, effective)
+    packet_manifest = vault / packet_request.context_manifest
+    packet_value = json.loads(packet_manifest.read_text(encoding="utf-8"))
+    check(
+        "built-in dispatch carries Outcome Contract through ContextPacket",
+        packet_manifest.is_file()
+        and any(
+            row.get("pointer_id") == "outcome-contract"
+            and row.get("role") == "outcome"
+            and row.get("sha256") == harness_request["outcome_contract_sha256"]
+            for row in packet_value["inputs"]
+        ),
+    )
     fix_harness_raw = json.loads(json.dumps(raw_request))
     fix_harness_raw["request_id"] = str(uuid.uuid4())
     fix_harness_raw["task_name"] = "harness-fix"

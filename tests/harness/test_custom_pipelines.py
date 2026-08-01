@@ -122,6 +122,25 @@ compiled = compile_custom_spec(
     policy=policy,
     capabilities=("route:resolved",),
 )
+reserved_pointer = deepcopy(VALID)
+reserved_pointer["context_pointers"][0]["pointer_id"] = "outcome-contract"
+try:
+    compile_custom_spec(
+        parse_pipeline_spec(reserved_pointer),
+        builtin_registry(),
+        policy=policy,
+        capabilities=("route:resolved",),
+    )
+except ValueError as exc:
+    check(
+        "model-authored custom spec cannot override reserved outcome pointer",
+        "reserved" in str(exc),
+    )
+else:
+    check(
+        "model-authored custom spec cannot override reserved outcome pointer",
+        False,
+    )
 fix_raw = json.loads(json.dumps(VALID))
 fix_raw.update(
     {

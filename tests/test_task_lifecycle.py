@@ -29,6 +29,7 @@ import cmux_agent_support as support_module
 import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
+from outcome_contract import extract_from_bytes
 from task_sessions import TaskSessionStore
 from harness.verification import load_profiles
 from harness.pipeline_builtins import compiled_builtin
@@ -165,7 +166,14 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         "  - id: origin-1\n"
         "    date: 2026-07-11\n"
         "---\n"
-        "# Approved plan\n"
+        "# Approved plan\n\n"
+        "## Outcome Contract\n\n"
+        "```json\n"
+        '{"schema_version":1,"desired_outcome":"Complete the lifecycle fixture.",'
+        '"success_evidence":[{"evidence_id":"lifecycle-green",'
+        '"observable":"The lifecycle contract validates."}],'
+        '"non_goals":["No external effects."]}\n'
+        "```\n"
     )
     plan.write_text(approved_plan_text, encoding="utf-8")
     plan_hash = hashlib.sha256(plan.read_bytes()).hexdigest()
@@ -339,6 +347,7 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     v4["version"] = 4
     v4["project_id"] = str(uuid.uuid4())
     v4["task_id"] = str(uuid.uuid4())
+    v4["outcome_contract_sha256"] = extract_from_bytes(plan.read_bytes()).sha256
     v4["pipeline_policy"] = {
         "name": "engineering/change",
         "definition_sha256": "a" * 64,

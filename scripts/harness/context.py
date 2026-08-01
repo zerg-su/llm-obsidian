@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .contracts import ContextPacketManifest, ContractError
+from outcome_contract import OutcomeContractError, extract_from_bytes
 
 
 CONTEXT_ROLES = frozenset(
@@ -29,8 +30,10 @@ CONTEXT_ROLES = frozenset(
         "route",
         "permissions",
         "verification",
+        "outcome",
     }
 )
+OUTCOME_POINTER_ID = "outcome-contract"
 _NAME_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}\Z")
 _RAW_SOURCES = frozenset(
     {"conversation", "raw-conversation", "chat-transcript", "session-transcript"}
@@ -45,12 +48,15 @@ class ContextInput:
     role: str = "reference"
     pointer_bytes: int = 0
     pointer_sha256: str = ""
+    pointer_id: str = ""
 
     def __post_init__(self) -> None:
         if not _NAME_RE.fullmatch(self.name):
             raise ContractError("ContextInput name must be a safe file token")
         if self.role not in CONTEXT_ROLES:
             raise ContractError(f"unknown ContextInput role: {self.role}")
+        if self.pointer_id and not _NAME_RE.fullmatch(self.pointer_id):
+            raise ContractError("ContextInput pointer_id must be a bounded identifier")
         if not self.source.strip() or "\0" in self.source:
             raise ContractError("ContextInput source must be non-empty")
         if self.source.strip().lower() in _RAW_SOURCES:
@@ -93,6 +99,29 @@ class ContextInput:
             if self.content is not None
             else self.pointer_sha256
         )
+
+
+def outcome_contract_input(
+    plan_path: Path | str,
+    *,
+    expected_sha256: str,
+) -> ContextInput:
+    """Materialize one digest-bound, code-owned semantic input."""
+
+    path = Path(plan_path).expanduser().resolve()
+    try:
+        contract = extract_from_bytes(path.read_bytes())
+    except (OSError, OutcomeContractError) as exc:
+        raise ContractError(f"Outcome Contract input is invalid: {exc}") from exc
+    if contract.sha256 != expected_sha256:
+        raise ContractError("Outcome Contract input digest changed")
+    return ContextInput(
+        "outcome-contract.json",
+        str(path),
+        contract.canonical,
+        role="outcome",
+        pointer_id=OUTCOME_POINTER_ID,
+    )
 
 
 class ContextBuilder:
@@ -141,6 +170,11 @@ class ContextBuilder:
                     "storage": "inline" if item.content is not None else "pointer",
                     "bytes": item.byte_count,
                     "sha256": item.content_sha256,
+                    **(
+                        {"pointer_id": item.pointer_id}
+                        if item.pointer_id
+                        else {}
+                    ),
                 }
                 for item in ordered
             ],

@@ -15,6 +15,7 @@ import research_contract
 import review_contract
 import review_resolution
 import wiki_summary_contract
+import outcome_contract
 import daily_contract
 import task_contract
 from harness.custom_pipelines import CUSTOM_SPEC_VERSION, REVIEW_MODES
@@ -32,6 +33,18 @@ for path in sorted((ROOT / "schemas").glob("*.schema.json")):
 
 summary = load("wiki-summary-v1.schema.json")
 assert set(summary["properties"]["type"]["enum"]) == wiki_summary_contract.TYPES
+summary_v2 = load("wiki-summary-v2.schema.json")
+assert summary_v2["additionalProperties"] is False
+assert set(summary_v2["properties"]["type"]["enum"]) == wiki_summary_contract.TYPES
+assert set(summary_v2["properties"]["outcome_disposition"]["enum"]) == (
+    wiki_summary_contract.OUTCOME_DISPOSITIONS
+)
+assert summary_v2["properties"]["outcome_evidence_ids"]["maxItems"] == (
+    wiki_summary_contract.MAX_OUTCOME_EVIDENCE_IDS
+)
+assert summary_v2["properties"]["residual_gap_pointers"]["maxItems"] == (
+    wiki_summary_contract.MAX_RESIDUAL_GAPS
+)
 review = load("review-v1.schema.json")
 assert set(review["properties"]["verdict"]["enum"]) == review_contract.VERDICTS
 assert set(review["properties"]["mode"]["enum"]) == review_contract.MODES
@@ -87,7 +100,11 @@ assert review_v3["allOf"] == [
 ]
 task_meta_v4 = load("task-meta-v4.schema.json")
 assert task_meta_v4["properties"]["version"] == {"const": 4}
-assert {"project_id", "task_id"} <= set(task_meta_v4["required"])
+assert {"project_id", "task_id", "outcome_contract_sha256"} <= set(task_meta_v4["required"])
+assert task_meta_v4["properties"]["outcome_contract_sha256"] == {
+    "type": "string",
+    "pattern": "^[0-9a-f]{64}$",
+}
 assert task_meta_v4["properties"]["forbidden_actions"]["const"] == task_contract.FORBIDDEN_ACTIONS
 assert task_meta_v4["additionalProperties"] is False
 review_v4 = task_meta_v4["properties"]["review_policy"]
@@ -97,6 +114,17 @@ assert "auto_resolve_severities" not in review_v4["properties"]
 assert "escalate_severities" not in review_v4["properties"]
 assert set(review_v4["properties"]["mode"]["enum"]) == task_contract.REVIEW_MODES
 assert review_v4["allOf"] == review_v3["allOf"]
+outcome_v1 = load("outcome-contract-v1.schema.json")
+assert outcome_v1["additionalProperties"] is False
+assert set(outcome_v1["required"]) == outcome_contract.REQUIRED_FIELDS
+assert set(outcome_v1["properties"]) == outcome_contract.FIELDS
+assert outcome_v1["maxProperties"] == len(outcome_contract.FIELDS)
+assert outcome_v1["properties"]["success_evidence"]["maxItems"] == (
+    outcome_contract.MAX_EVIDENCE_ITEMS
+)
+assert outcome_v1["properties"]["non_goals"]["maxItems"] == (
+    outcome_contract.MAX_NON_GOALS
+)
 review_resolution_v1 = load("review-resolution-v1.schema.json")
 resolution_items = review_resolution_v1["$defs"]["resolution"]
 assert set(resolution_items["properties"]["disposition"]["enum"]) == (

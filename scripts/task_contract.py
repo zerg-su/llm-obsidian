@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES
+from outcome_contract import OutcomeContractError, extract_from_bytes
 
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
@@ -74,6 +75,7 @@ V3_META_FIELDS = {
     "model",
     "effort",
 }
+V4_META_FIELDS = V3_META_FIELDS | {"outcome_contract_sha256"}
 FORBIDDEN_ACTIONS = [
     "push",
     "deploy",
@@ -169,7 +171,8 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         raise ContractError(f"unsupported task metadata version: {version!r}")
 
     if version in {3, 4}:
-        unknown = set(meta) - V3_META_FIELDS
+        expected_meta_fields = V4_META_FIELDS if version == 4 else V3_META_FIELDS
+        unknown = set(meta) - expected_meta_fields
         if unknown:
             raise ContractError(
                 f"v{version} task metadata has unknown fields: "
@@ -273,6 +276,24 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     plan = Path(plan_raw).expanduser().resolve()
     if not plan.is_file():
         raise ContractError(f"approved plan is missing: {plan}")
+    outcome_digest = ""
+    if version == 4:
+        raw_outcome_digest = meta.get("outcome_contract_sha256")
+        if not isinstance(raw_outcome_digest, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", raw_outcome_digest
+        ):
+            raise ContractError(
+                "v4 metadata requires lowercase outcome_contract_sha256"
+            )
+        try:
+            current_outcome_digest = extract_from_bytes(plan.read_bytes()).sha256
+        except (OSError, OutcomeContractError) as exc:
+            raise ContractError(f"approved plan Outcome Contract is invalid: {exc}") from exc
+        if current_outcome_digest != raw_outcome_digest:
+            raise ContractError(
+                "approved plan Outcome Contract digest changed after dispatch approval"
+            )
+        outcome_digest = raw_outcome_digest
     if verify_plan_hash and sha256_file(plan) != plan_hash:
         raise ContractError("approved plan hash changed after dispatch approval")
     vault_raw = meta.get("vault_root")
@@ -422,7 +443,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError("watchdog alert must follow the warning threshold")
     if meta.get("forbidden_actions") != FORBIDDEN_ACTIONS:
         raise ContractError("forbidden_actions must match the unattended safety boundary")
-    return {
+    result = {
         "version": version,
         "interaction_policy": policy,
         "review_policy": review,
@@ -430,6 +451,9 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         "surface_policy": surface,
         "watchdog_policy": watchdog,
     }
+    if version == 4:
+        result["outcome_contract_sha256"] = outcome_digest
+    return result
 
 
 def normalize_for_runtime(meta: dict[str, Any], worktree: Path) -> dict[str, Any]:
@@ -492,6 +516,11 @@ def validate_handoff(
     verify_plan_hash: bool = True,
 ) -> dict[str, Any]:
     policy = normalize(meta, verify_plan_hash=verify_plan_hash)
+    expected_summary_version = 2 if policy["version"] == 4 else 1
+    if summary.get("schema_version", 1) != expected_summary_version:
+        raise ContractError(
+            f"v{policy['version']} task requires Wiki Summary v{expected_summary_version}"
+        )
     if policy["interaction_policy"] != "unattended":
         raise ContractError("legacy/interactive task requires user confirmation")
     origin = str(meta.get("origin_session") or "")

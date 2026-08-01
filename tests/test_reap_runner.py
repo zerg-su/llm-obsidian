@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +24,7 @@ from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import DispatchRequest, run_dispatch
 from harness.workflows.reap import summary_callback
+from outcome_contract import extract_from_bytes
 
 failures: list[str] = []
 
@@ -64,6 +67,97 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     check("page records effective model", 'executor_model: "gpt-5.6-sol"' in page)
     check("page address is reusable by log and hot payload", runner.page_address(page) == "c-000123")
     check("page derives bounded related links", '"[[Dispatch safety]]"' in page)
+    outcome_summary = {
+        "schema_version": 2,
+        "type": "session",
+        "title": "Typed outcome result",
+        "session": "executor-session",
+        "body": "The bounded portion is complete.",
+        "outcome_disposition": "partially-achieved",
+        "outcome_evidence_ids": ["digest-stable"],
+        "residual_gap_pointers": ["[[Release verification follow-up]]"],
+    }
+    runner.run = lambda *_args, **_kwargs: "c-000124\n"
+    try:
+        outcome_page = runner.frontmatter_page(
+            vault,
+            {
+                "origin_session": "origin-session",
+                "executor_runtime": "codex",
+                "routing": {"effective": {"model": "gpt-5.6-sol"}},
+                "suggested_agents": [],
+            },
+            outcome_summary,
+            "reap-session",
+        )
+    finally:
+        runner.run = original_run
+    check(
+        "reap page preserves Wiki Summary v2 disposition and evidence",
+        "outcome_disposition: partially-achieved" in outcome_page
+        and "  - digest-stable" in outcome_page
+        and '  - "[[Release verification follow-up]]"' in outcome_page,
+    )
+    outcome_existing = vault / "wiki/meta/sessions/outcome-existing.md"
+    outcome_existing.write_text(
+        "---\nupdated: 2026-01-01\n---\n# Existing\n",
+        encoding="utf-8",
+    )
+    updated_outcome, _ = runner.update_page(
+        outcome_existing, outcome_summary, "outcome-task"
+    )
+    check(
+        "reap update archive preserves v2 outcome fields",
+        "Outcome disposition: `partially-achieved`" in updated_outcome
+        and "[[Release verification follow-up]]" in updated_outcome,
+    )
+    outcome_plan = vault / "wiki/plans/outcome.md"
+    outcome_plan.parent.mkdir(parents=True, exist_ok=True)
+    outcome_plan.write_text(
+        "# Plan\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Ship the typed summary.",'
+        '"success_evidence":[{"evidence_id":"digest-stable",'
+        '"observable":"The typed summary parser accepts declared evidence."}],'
+        '"non_goals":["No authority expansion."]}\n```\n',
+        encoding="utf-8",
+    )
+    outcome_meta = vault / ".task-meta.json"
+    outcome_meta.write_text(
+        json.dumps(
+            {
+                "version": 4,
+                "plan_file": str(outcome_plan),
+                "outcome_contract_sha256": extract_from_bytes(
+                    outcome_plan.read_bytes()
+                ).sha256,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    outcome_summary_path = vault / ".task-summary.json"
+    outcome_summary_path.write_text(
+        json.dumps(outcome_summary) + "\n", encoding="utf-8"
+    )
+    parsed_v2 = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "parse-wiki-summary.py"),
+            "--json-file",
+            str(outcome_summary_path),
+            "--task-meta",
+            str(outcome_meta),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "archive parser reads Wiki Summary v2 with exact task evidence binding",
+        parsed_v2.returncode == 0
+        and json.loads(parsed_v2.stdout)["outcome_disposition"]
+        == "partially-achieved",
+    )
     concepts = vault / "wiki/concepts"
     concepts.mkdir()
     (concepts / "Dispatch safety.md").write_text("# Dispatch safety\n", encoding="utf-8")
@@ -97,10 +191,9 @@ with tempfile.TemporaryDirectory(prefix="reap-runner-test.") as raw:
     else:
         check("unsafe title fails closed", False)
     plan = vault / "wiki/plans/approved.md"
-    plan.parent.mkdir(parents=True)
+    plan.parent.mkdir(parents=True, exist_ok=True)
     pending = "---\nstatus: pending\n---\n"
     plan.write_text(pending, encoding="utf-8")
-    import hashlib
     meta = {"plan_file": str(plan), "approved_plan_sha256": hashlib.sha256(pending.encode()).hexdigest()}
     check("pending plan hash validates", runner.approved_plan_state(meta)[1] == "pending")
     check(

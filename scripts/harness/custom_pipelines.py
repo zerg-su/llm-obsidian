@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
+from .context import OUTCOME_POINTER_ID
 from .pipelines import (
     PERMISSION_BINDINGS,
     SIDE_EFFECT_BINDINGS,
@@ -868,6 +869,12 @@ def compile_custom_spec(
         raise ContractError("PipelineSpec exceeds the code-owned control limit")
     if len(spec.context_pointers) > policy.max_context_pointers:
         raise ContractError("PipelineSpec exceeds the context pointer limit")
+    if any(
+        item.pointer_id == OUTCOME_POINTER_ID for item in spec.context_pointers
+    ):
+        raise ContractError(
+            "PipelineSpec cannot override the reserved outcome-contract context pointer"
+        )
     if len({item.pointer_id for item in spec.context_pointers}) != len(
         spec.context_pointers
     ):

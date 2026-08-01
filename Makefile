@@ -62,7 +62,7 @@ test-upgrade-preflight:
 	@echo "=== test_upgrade_preflight.py ==="
 	@python3 tests/test_upgrade_preflight.py
 
-.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
+.PHONY: test eval-smoke eval-live eval-regression acceptance-check acceptance-live acceptance-live-restart retrieval-experiment test-release-acceptance test-live-acceptance-runner test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-documents test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout bench-retrieval setup-dragonscale clean-test-state help
 
 help:
 	@echo "llm-obsidian developer targets:"
@@ -113,7 +113,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 
@@ -217,6 +217,10 @@ test-skill-budget:
 test-improve-skills:
 	@echo "=== test_improve_skills.py ==="
 	@python3 tests/test_improve_skills.py
+
+test-outcome-contract:
+	@echo "=== test_outcome_contract.py ==="
+	@python3 tests/test_outcome_contract.py
 
 test-contract-schemas:
 	@echo "=== test_contract_schemas.py ==="

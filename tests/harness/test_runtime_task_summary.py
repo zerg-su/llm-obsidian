@@ -37,6 +37,7 @@ from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
+from outcome_contract import extract_from_bytes
 
 
 ORIGIN = "11111111-1111-1111-1111-111111111111"
@@ -110,14 +111,15 @@ def task_meta(
     pipeline_name: str,
     completion_policy: str = "attention",
     total_pass_limit: int = 2,
+    version: int = 3,
 ) -> dict[str, object]:
     pipeline = compile_pipeline(
         builtin_definitions()[pipeline_name],
         builtin_registry(),
         capabilities=("route:resolved",),
     )
-    return {
-        "version": 3,
+    meta: dict[str, object] = {
+        "version": version,
         "project_id": PROJECT,
         "task_id": task_id,
         "task_name": "Runtime summary",
@@ -169,6 +171,13 @@ def task_meta(
         "task_surface": CHILD,
         "worktree": str(worktree),
     }
+    if version == 4:
+        meta["outcome_contract_sha256"] = extract_from_bytes(plan.read_bytes()).sha256
+        review = dict(meta["review_policy"])
+        review.pop("auto_resolve_severities")
+        review.pop("escalate_severities")
+        meta["review_policy"] = review
+    return meta
 
 
 def run_case(
@@ -192,6 +201,7 @@ def run_case(
     total_pass_limit: int = 2,
     verification_runner: Callable[..., subprocess.CompletedProcess[str]]
     | None = None,
+    task_version: int = 3,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -235,7 +245,14 @@ def run_case(
         check=True,
     )
     plan = vault / "wiki" / "plans" / "approved.md"
-    plan.write_text("# Approved\n", encoding="utf-8")
+    plan.write_text(
+        "# Approved\n\n```json\n"
+        '{"schema_version":1,"desired_outcome":"Complete the runtime fixture.",'
+        '"success_evidence":[{"evidence_id":"runtime-green",'
+        '"observable":"The runtime accepts the exact typed summary."}],'
+        '"non_goals":["No authority expansion."]}\n```\n',
+        encoding="utf-8",
+    )
     write_json(
         vault
         / ".vault-meta"
@@ -277,6 +294,7 @@ def run_case(
         pipeline_name,
         completion_policy,
         total_pass_limit,
+        task_version,
     )
     write_json(worktree / ".task-meta.json", meta)
     if review_state == "skipped":
@@ -610,6 +628,32 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         sent_marker["status"] == "sent"
         and sent_marker["callback_id"] == record.accepted_callback_id,
         sent_marker,
+    )
+
+    valid_v4_summary = {
+        "schema_version": 2,
+        "type": "session",
+        "title": "Runtime Result",
+        "session": "executor-session",
+        "body": "The declared runtime evidence is established.",
+        "outcome_disposition": "achieved",
+        "outcome_evidence_ids": ["runtime-green"],
+        "residual_gap_pointers": [],
+    }
+    v4_task = "12121212-1212-4212-8212-121212121212"
+    v4_store, _v4_cmux, _v4_state, v4_rc = run_case(
+        root,
+        v4_task,
+        valid_v4_summary,
+        task_version=4,
+    )
+    v4_record = v4_store.read("owner-1", v4_task)
+    check(
+        "valid canonical v4 summary binds declared outcome evidence",
+        v4_rc == 0
+        and v4_record.state == "finalizing"
+        and v4_record.accepted_callback_kind == "wiki-summary",
+        v4_record,
     )
 
     engineering_task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"

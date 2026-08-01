@@ -39,6 +39,7 @@ from model_routing import (  # noqa: E402
     routing_from_environment,
 )
 from task_contract import ContractError, normalize as normalize_task_contract  # noqa: E402
+from outcome_contract import OutcomeContractError, extract_from_bytes  # noqa: E402
 from lifecycle_telemetry import (  # noqa: E402
     emit_compiled_pipeline_event,
     emit_lifecycle_event,
@@ -47,6 +48,7 @@ from harness.contracts import (  # noqa: E402
     ContractError as HarnessContractError,
     RuntimeRoute,
 )
+from harness.context import ContextBuilder, outcome_contract_input  # noqa: E402
 from harness.git_ops import GitAdapter, GitError  # noqa: E402
 from harness.pipeline_builtins import (  # noqa: E402
     EXECUTABLE_BUILTINS,
@@ -294,6 +296,10 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     plan_text = plan_file.read_text(encoding="utf-8")
     if re.search(r"(?m)^status:\s*pending\s*$", plan_text) is None:
         raise DispatchError("approved plan status must be pending")
+    try:
+        outcome_contract_sha256 = extract_from_bytes(plan_file.read_bytes()).sha256
+    except (OSError, OutcomeContractError) as exc:
+        raise DispatchError(f"approved plan Outcome Contract is invalid: {exc}") from exc
     worktree = absolute_dir(raw.get("worktree"), "worktree", must_exist=False)
     if worktree.exists():
         raise DispatchError(f"worktree already exists: {worktree}")
@@ -509,6 +515,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "branch": branch,
         "base_branch": base_branch,
         "plan_file": plan_file,
+        "outcome_contract_sha256": outcome_contract_sha256,
         "origin_surface": origin_surface,
         "placement": placement,
         "pipeline": pipeline,
@@ -682,6 +689,13 @@ def approved_plan_sha256(request: dict[str, Any]) -> str:
     if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value):
         return value
     return sha256_file(request["plan_file"])
+
+
+def approved_outcome_contract_sha256(request: dict[str, Any]) -> str:
+    try:
+        return extract_from_bytes(approved_plan_file(request).read_bytes()).sha256
+    except (OSError, OutcomeContractError) as exc:
+        raise DispatchError(f"approved plan Outcome Contract is invalid: {exc}") from exc
 
 
 def _review_snapshot(review: ReviewPolicy) -> dict[str, Any]:
@@ -1160,6 +1174,7 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         if config.get("codex_home")
         else "inherited current Codex environment"
     )
+    outcome_contract = extract_from_bytes(request["plan_file"].read_bytes())
     replacements = {
         "<task_name>": request["task_name"],
         "<description from user, multi-line ok>": request["description"],
@@ -1173,11 +1188,14 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         "<absolute path to wiki/plans/<file>.md>": str(approved_plan_file(request)),
         "<canonical-task-summary-json>": json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "type": request["reap"]["type"],
                 "title": request["reap"]["title"],
                 "session": request["origin_session"],
                 "body": "<bounded Markdown summary>",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": list(outcome_contract.evidence_ids),
+                "residual_gap_pointers": [],
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -1457,6 +1475,7 @@ def write_task_files(
         atomic_text(worktree / name, value + "\n")
     atomic_text(worktree / ".task-prompt.md", render_task_prompt(request, config))
     plan_hash = approved_plan_sha256(request)
+    outcome_hash = approved_outcome_contract_sha256(request)
     review = review_policy(request, config)
     meta: dict[str, Any] = {
         "version": 4,
@@ -1497,6 +1516,7 @@ def write_task_files(
         },
         "plan_file": str(request["plan_file"]),
         "approved_plan_sha256": plan_hash,
+        "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",
         "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
@@ -1571,12 +1591,30 @@ def harness_request(
     config: dict[str, Any],
     effective: dict[str, Any],
 ) -> HarnessDispatchRequest:
-    try:
-        context_manifest = request["plan_file"].relative_to(
-            request["vault_root"]
-        ).as_posix()
-    except ValueError as exc:
-        raise DispatchError("approved plan escaped the coordinator vault") from exc
+    outcome_digest = approved_outcome_contract_sha256(request)
+    packet_root = (
+        request["vault_root"]
+        / ".vault-meta"
+        / "harness"
+        / "context-packets"
+    )
+    manifest = ContextBuilder(packet_root).build(
+        request["request_id"],
+        (
+            outcome_contract_input(
+                approved_plan_file(request),
+                expected_sha256=outcome_digest,
+            ),
+        ),
+        metadata={
+            "task_id": request["request_id"],
+            "approved_plan_sha256": approved_plan_sha256(request),
+            "outcome_contract_sha256": outcome_digest,
+        },
+    )
+    context_manifest = (
+        packet_root / manifest.packet_id / "manifest.json"
+    ).relative_to(request["vault_root"]).as_posix()
     route = RuntimeRoute(
         effective["runtime"],
         effective["model"],
