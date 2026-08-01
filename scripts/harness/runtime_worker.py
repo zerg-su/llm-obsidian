@@ -538,6 +538,45 @@ def _bounded_file_sha256(path: Path, *, limit: int = MAX_OUTBOX_BYTES) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _current_callback_receipt_sha256(runtime_root: Path) -> str:
+    """Return receipt evidence only for the currently bound callback target."""
+
+    values: list[tuple[dict[str, Any], bytes]] = []
+    for path in (
+        runtime_root / "callback-target.json",
+        runtime_root / "callback-receipt.json",
+    ):
+        try:
+            if path.is_symlink() or not path.is_file():
+                return ""
+            raw = path.read_bytes()
+            if not raw or len(raw) > MAX_OUTBOX_BYTES:
+                return ""
+            value = json.loads(raw)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return ""
+        if not isinstance(value, dict):
+            return ""
+        values.append((value, raw))
+    target, _target_raw = values[0]
+    receipt, receipt_raw = values[1]
+    generation = target.get("generation")
+    operation_id = target.get("operation_id")
+    if (
+        target.get("schema_version") != 1
+        or receipt.get("schema_version") != 1
+        or type(generation) is not int
+        or generation < 1
+        or not isinstance(operation_id, str)
+        or not operation_id
+        or receipt.get("generation") != generation
+        or receipt.get("operation_id") != operation_id
+        or receipt.get("status") != "accepted"
+    ):
+        return ""
+    return hashlib.sha256(receipt_raw).hexdigest()
+
+
 def _submit_failure_requires_attention(
     result: subprocess.CompletedProcess[str], callback_path: Path
 ) -> bool:
@@ -4847,8 +4886,8 @@ def run(
                     prompt_state=latest_prompt_state,
                     typed_result_sha256=typed_result_sha256,
                     callback_sha256=callback_sha256,
-                    receipt_sha256=_bounded_file_sha256(
-                        spec_path.parent / "callback-receipt.json"
+                    receipt_sha256=_current_callback_receipt_sha256(
+                        spec_path.parent
                     ),
                 ),
                 liveness_policy,

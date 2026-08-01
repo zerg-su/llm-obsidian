@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +20,9 @@ from harness.liveness import (  # noqa: E402
     LivenessPolicy,
     LivenessState,
     observe_liveness,
+)
+from harness.runtime_worker import (  # noqa: E402
+    _current_callback_receipt_sha256,
 )
 
 
@@ -149,6 +154,51 @@ with tempfile.TemporaryDirectory(prefix="liveness-state.") as raw:
         "liveness state and receipts remain owner-only",
         (Path(raw) / "state.json").stat().st_mode & 0o077 == 0
         and all(path.stat().st_mode & 0o077 == 0 for path in receipts),
+    )
+
+with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
+    runtime_root = Path(raw)
+    receipt_path = runtime_root / "callback-receipt.json"
+    target_path = runtime_root / "callback-target.json"
+    receipt = {
+        "schema_version": 1,
+        "generation": 2,
+        "operation_id": "review-round-initial",
+        "callback_id": "callback-initial",
+        "status": "accepted",
+    }
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    target_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 3,
+                "operation_id": "review-round-verification",
+                "run_id": "verification-run",
+                "callback_pointer": "callbacks/verification.json",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "receipt from an earlier review generation is not liveness progress",
+        _current_callback_receipt_sha256(runtime_root) == "",
+    )
+    receipt["generation"] = 3
+    receipt["operation_id"] = "review-round-verification"
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "receipt matching the current callback target is liveness progress",
+        _current_callback_receipt_sha256(runtime_root)
+        == hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
     )
 
 print("\nAll liveness tests passed.")
