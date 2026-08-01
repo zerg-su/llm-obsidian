@@ -27,6 +27,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-01] distill-runbook | RT10 Foundation Verification
+
+`c-000060` [[RT10 Foundation Verification]]. 5 commands; provenance 019fab00-3160-7380-8920-4b20183afb76; execution 019fbd70-fc93-7d12-a0ef-4ac8c2f837cf; 12 agent-executed + 1 user-attested: RT10 foundation adapter, gateway, snapshots, evidence, and runtime verification.
+
 ## [2026-08-01] research | Superpowers vs Matt Pocock Skills
 
 - Refreshed the upstream skill-library comparison against the byte-verified pins in `references/upstream-skills/`

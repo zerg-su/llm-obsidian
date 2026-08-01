@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,12 +21,19 @@ def check(label: str, condition: bool, detail: str = "") -> None:
     print(f"OK   {label}")
 
 
-def run(root: Path, command: list[str], payload: object | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    root: Path,
+    command: list[str],
+    payload: object | None = None,
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), *command],
         input=(json.dumps(payload) if payload is not None else None),
         text=True,
         capture_output=True,
+        env=env,
     )
 
 
@@ -136,7 +144,12 @@ with tempfile.TemporaryDirectory(prefix="command-evidence-test.") as raw:
         collected.returncode == 0
         and [item["origin"] for item in evidence["records"]]
         == ["agent-executed", "user-reported", "user-reported"]
-        and evidence["counts"] == {"agent_executed": 1, "user_reported": 2},
+        and evidence["counts"]
+        == {
+            "agent_executed": 1,
+            "user_reported": 2,
+            "validation_grade": 0,
+        },
         collected.stderr,
     )
 
@@ -156,5 +169,70 @@ with tempfile.TemporaryDirectory(prefix="command-evidence-test.") as raw:
             result.returncode == 2 and len(log.read_text(encoding="utf-8").splitlines()) == 4,
             result.stderr,
         )
+
+    (vault / ".task-origin-session").write_text("origin-a\n", encoding="utf-8")
+    runner_env = dict(os.environ, CODEX_THREAD_ID="exec-validation")
+    validation_success = run(
+        vault,
+        [
+            "run-validation",
+            "--run-id",
+            "validation-success",
+            "--cwd",
+            str(vault),
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(0)",
+        ],
+        env=runner_env,
+    )
+    validation_failure = run(
+        vault,
+        [
+            "run-validation",
+            "--run-id",
+            "validation-failure",
+            "--cwd",
+            str(vault),
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(7)",
+        ],
+        env=runner_env,
+    )
+    validation_records = [
+        record
+        for record in (
+            json.loads(line)
+            for line in log.read_text(encoding="utf-8").splitlines()
+        )
+        if record.get("validation_grade") is True
+    ]
+    check(
+        "validation runner records only its own explicit exit status",
+        validation_success.returncode == 0
+        and validation_failure.returncode == 7
+        and [record["outcome"] for record in validation_records]
+        == ["success", "error"]
+        and [record["exit_code"] for record in validation_records] == [0, 7]
+        and all(record["execution_session"] == "exec-validation" for record in validation_records)
+        and all(record["provenance_session"] == "origin-a" for record in validation_records)
+        and all("result_excerpt" not in record for record in validation_records),
+        validation_success.stderr + validation_failure.stderr,
+    )
+
+    sanitizer_self_test = run(vault, ["self-test-sanitization"])
+    check(
+        "sanitization self-test generates its fixture internally",
+        sanitizer_self_test.returncode == 0
+        and json.loads(sanitizer_self_test.stdout) == {
+            "redactions": 1,
+            "status": "ok",
+        }
+        and "abcdef123456" not in sanitizer_self_test.stdout,
+        sanitizer_self_test.stderr,
+    )
 
 print("\nAll command evidence tests passed.")

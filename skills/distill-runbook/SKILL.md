@@ -10,56 +10,57 @@ allowed-tools: Read Grep Glob Bash Write Edit AskUserQuestion
 # distill-runbook: Session Commands → Human-Executable Runbook
 
 Turn sanitized command evidence into a runbook a HUMAN can execute without AI.
-Records distinguish resumable wiki `provenance_session` from worker
-`execution_session`, label `origin` (`agent-executed` or `user-reported`), and
-carry `outcome` (`success`, `error`, or `unknown`).
+Records carry provenance/execution sessions, origin, and success/error/unknown.
 
 ## Phase 1 — Collect
 
-1. Resolve both identities. In task worktrees the helper intentionally returns
-   the task-origin ID for wiki provenance; the environment retains the worker ID:
+1. Resolve both IDs. The helper returns task-origin wiki provenance; the
+   environment retains the worker execution ID:
    ```bash
    PROVENANCE_SESSION=$(./scripts/current-session-id.sh)
    EXECUTION_SESSION=${CODEX_THREAD_ID:-${CLAUDE_CODE_SESSION_ID:-unknown}}
    python3 scripts/command_evidence.py sessions --provenance-session "$PROVENANCE_SESSION"
    python3 scripts/command_evidence.py collect --provenance-session "$PROVENANCE_SESSION" --execution-session "$EXECUTION_SESSION"
    ```
-   Zero direct matches for a valid provenance ID is not an empty session: use
-   its grouped execution IDs. If execution is `unknown`, choose the sole group;
-   ask once if several are ambiguous. Never infer evidence from prompt text.
+   Zero matches for a valid provenance ID is not empty: use its grouped worker
+   IDs. If execution is unknown, choose the sole group or ask once if ambiguous.
+   Never infer evidence from prompts.
 2. Accept user commands only through this typed path (one object per command):
    ```bash
    python3 scripts/command_evidence.py ingest-user <<'JSON'
    {"schema_version":1,"command":"<exact command>","cwd":"<absolute cwd>","provenance_session":"<provenance ID>","origin":"user-reported","outcome":"success|error|unknown","result_excerpt":"<optional bounded excerpt>"}
    JSON
    ```
-   It sanitizes, size-checks, rejects residual secrets, and deduplicates.
-   User-reported means user-attested, never agent-verified. `unknown` is not
-   proof; `error` is a gotcha.
-3. Drop navigation/inspection noise (`cd`, `ls`, `pwd`, `cat`, `head`, `tail`,
-   `grep`, `find`, `echo`, `which`, `wc`), retries except the final successful
-   form, and irrelevant probes. Keep state changes, checks that prove a step,
-   and instructive errors followed by corrections.
+   This path sanitizes, bounds, rejects residual secrets, and deduplicates.
+   User-reported is user-attested, never agent-verified; errors are gotchas.
+3. PostToolUse without explicit exit/status remains `unknown`: discovery only,
+   never validation. Prove checks with the code-owned runner and a unique ID:
+   ```bash
+   python3 scripts/command_evidence.py run-validation --run-id <id> --cwd "$PWD" -- <program> <args...>
+   ```
+   It runs argv without a shell, stores its exit code, and stores no output.
+   Run `self-test-sanitization` through it; never search logs for literal secrets.
+4. Drop navigation noise, irrelevant probes, and retries except the final good
+   form. Keep state changes, proof checks, and corrected instructive errors.
 
 ## Phase 2 — Draft (smart fast-path, /save-style)
 
 1. Group commands into ordered steps: intent, exact command, expected output.
-   PostToolUse stores no output. Use optional reported excerpts only when labeled
-   user-attested.
+   PostToolUse stores no output; label optional reported excerpts user-attested.
 2. Infer imperative Title Case title, tags, and related wiki pages.
 3. Show `Ранбук: wiki/runbooks/<Title>.md — N шагов, M команд, гочи: K`.
-   Proceed unless objected; ask once only for genuinely ambiguous scope.
+   Proceed unless objected; ask once only for ambiguous scope.
 
 ## Phase 3 — Write
 
 1. Allocate address: `./scripts/allocate-address.sh`.
-2. Draft frontmatter (`type: runbook`, `status: stable`,
-   `sessions: [<provenance ID>]`, `last_validated: <today>`). Body names both
-   IDs, uses copy-paste-ready commands/full paths/explicit hosts, gives a success
-   check per step, adds What NOT to do for errors, and has zero AI-dependent
-   steps. Include: “Validation evidence: N agent-executed commands from execution
-   session X; M user-attested commands for provenance session Y. User-attested
-   outcomes were not agent-verified.” Use IDs, never bare dates.
+2. Frontmatter: `type: runbook`, provenance `sessions`. Use `status: stable` and
+   `last_validated` only when successful `validation_grade` records prove the
+   checks; otherwise `status: draft` with no `last_validated`. Name both IDs,
+   keep commands copy-paste-ready, add per-step success checks and error gotchas,
+   and require no AI. State N validation-grade agent checks, D unknown discovery
+   commands from execution X, and M user-attested commands from provenance Y;
+   user-attested outcomes are not agent-verified. Use IDs, never bare dates.
 3. Write runbook and bookkeeping in one transaction:
    ```bash
    python3 scripts/vault-write.py <<'PAYLOAD'
@@ -69,17 +70,17 @@ carry `outcome` (`success`, `error`, or `unknown`).
     "hot_bullet":"YYYY-MM-DD: runbook [[<Title>]] — <essence> (`c-NNNNNN`)"}
    PAYLOAD
    ```
-4. Confirm: `Ранбук [[<Title>]] готов, N шагов. last_validated: <today>.`
+4. Confirm path, step count, status, and `last_validated` only when present.
 
 ## Panic tier (optional)
 
-For critical/panic restore procedures add `tier: panic`; lint then requires
-`last_validated` ≤ 180 days and forbids “ask Claude” steps.
+For critical restore add `tier: panic`; lint requires `last_validated` ≤180 days
+and forbids “ask Claude” steps.
 
 ## What NOT to do
 
-- Do not mix execution sessions without confirmation or lose their provenance.
-- Do not invent/paraphrase commands, mine prompts, present user reports as
-  agent-verified, or treat `unknown` as proof.
+- Do not mix execution sessions without confirmation or lose provenance.
+- Do not invent commands, mine prompts, label user reports agent-verified, or
+  treat `unknown` as proof/set `last_validated` from it.
 - Keep `REDACTED` placeholders with «см. secret store»; never inline secrets.
 - Decline trivial sessions with fewer than about five meaningful commands.

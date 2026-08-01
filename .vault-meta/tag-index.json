@@ -31,7 +31,8 @@
     "wiki/concepts/Unattended Pipeline.md"
   ],
   "codex": [
-    "wiki/concepts/Unattended Pipeline.md"
+    "wiki/concepts/Unattended Pipeline.md",
+    "wiki/runbooks/RT10 Foundation Verification.md"
   ],
   "comparison": [
     "wiki/comparisons/Superpowers vs Matt Pocock Skills.md"
@@ -94,6 +95,9 @@
   ],
   "fix": [
     "wiki/plans/2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache.md"
+  ],
+  "foundation": [
+    "wiki/runbooks/RT10 Foundation Verification.md"
   ],
   "fractal": [
     "wiki/concepts/DragonScale Memory.md"
@@ -290,6 +294,9 @@
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 03ced8bcc75e.md",
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c.md"
   ],
+  "rt10": [
+    "wiki/runbooks/RT10 Foundation Verification.md"
+  ],
   "session": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
@@ -330,5 +337,8 @@
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md"
+  ],
+  "verification": [
+    "wiki/runbooks/RT10 Foundation Verification.md"
   ]
 }

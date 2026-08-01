@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-01: runbook [[RT10 Foundation Verification]] — RT10 foundation verification checks (`c-000060`)
 - 2026-08-01: [[Superpowers vs Matt Pocock Skills]] — upstream comparison refreshed from pins; live drift unverified (`c-000058`)
 - 2026-08-01: [[2.5 real dogfood RT08 upstream skills research]] — finalized task result (`c-000057`)
 - 2026-08-01: [[2.5 real dogfood RT09 vault health audit]] — finalized task result (`c-000055`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-07-31: [[LLM Obsidian 2.4 typed pipeline composition result]] — 2.4 closed with explicit transitional real-task dogfood waiver (`c-000037`)
 - 2026-07-21: [[LLM Obsidian v2.1.2 semantic acceptance refactor]] — finalized task result (`c-000030`)
 - 2026-07-18: [[LLM Obsidian v2.0.8 RD upstream audit]] — подготовлен и проверен Fable/high локальный релиз-кандидат v2.0.8 (`c-000010`)
-- 2026-07-11: [[Unattended Pipeline]] — public v2 pipeline and strict contracts (c-000004)
 
 ## Active Threads
 

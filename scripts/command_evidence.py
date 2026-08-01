@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +28,7 @@ MAX_COMMAND_BYTES = 16_384
 MAX_CWD_BYTES = 4_096
 MAX_RESULT_BYTES = 4_096
 MAX_USER_PAYLOAD_BYTES = 24_576
+MAX_VALIDATION_ARGS = 128
 USER_REQUIRED = frozenset(
     {
         "schema_version",
@@ -158,6 +162,8 @@ def _commands(payload: dict[str, Any]) -> list[tuple[str, str]]:
         if not isinstance(command, str) or not isinstance(cwd, str):
             continue
         try:
+            if _literal_secret_search(command):
+                continue
             clean_command = _sanitize_text(command, "command", MAX_COMMAND_BYTES)
             clean_cwd = _bounded_text(cwd, "cwd", MAX_CWD_BYTES)
         except EvidenceError:
@@ -168,15 +174,63 @@ def _commands(payload: dict[str, Any]) -> list[tuple[str, str]]:
     return normalized
 
 
+def _opaque_literal(value: str) -> bool:
+    return (
+        len(value) >= 10
+        and re.fullmatch(r"[A-Za-z0-9_+/=-]+", value) is not None
+        and any(character.isalpha() for character in value)
+        and any(character.isdigit() for character in value)
+    )
+
+
+def _literal_secret_search(command: str) -> bool:
+    """Reject fixed-string searches whose pattern looks like an opaque token."""
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    separators = {";", "&&", "||", "|"}
+    search_tools = {"rg", "grep", "egrep", "fgrep"}
+    for index, token in enumerate(tokens):
+        if Path(token).name not in search_tools:
+            continue
+        segment = []
+        for value in tokens[index + 1 :]:
+            if value in separators:
+                break
+            segment.append(value)
+        fixed = any(
+            value in {"-F", "--fixed-strings"} or value.startswith("--fixed-strings=")
+            for value in segment
+        )
+        if not fixed:
+            continue
+        positional = False
+        for value in segment:
+            if value == "--":
+                positional = True
+                continue
+            if not positional and value.startswith("-"):
+                continue
+            return _opaque_literal(value)
+    return False
+
+
 def _outcome(response: object) -> str:
     if not isinstance(response, dict):
         return "unknown"
-    if response.get("is_error") or response.get("interrupted"):
+    if response.get("is_error") is True or response.get("interrupted") is True:
         return "error"
     exit_code = response.get("exit_code")
     if type(exit_code) is int:
         return "success" if exit_code == 0 else "error"
-    return "success"
+    status = response.get("status")
+    if status in {"success", "succeeded", "completed"}:
+        return "success"
+    if status in {"error", "failed", "interrupted"}:
+        return "error"
+    return "unknown"
 
 
 def _event_id(parts: dict[str, object]) -> str:
@@ -322,6 +376,88 @@ def ingest_user(root: Path, payload: object) -> str:
     return "recorded" if _append_unique(root, [record]) else "duplicate"
 
 
+def _execution_session() -> str:
+    for key in ("CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID"):
+        value = os.environ.get(key, "")
+        if value:
+            return _session(value, "execution_session")
+    raise EvidenceError("validation runner requires an execution session")
+
+
+def run_validation(
+    root: Path,
+    *,
+    cwd: Path,
+    run_id: str,
+    argv: list[str],
+) -> int:
+    execution = _execution_session()
+    provenance = _task_provenance(root, execution)
+    validation_run_id = _session(run_id, "validation_run_id")
+    if not argv or len(argv) > MAX_VALIDATION_ARGS:
+        raise EvidenceError("validation command argv is empty or oversized")
+    bounded_argv = [
+        _bounded_text(value, f"argv[{index}]", MAX_COMMAND_BYTES)
+        for index, value in enumerate(argv)
+    ]
+    resolved_cwd = cwd.expanduser().resolve()
+    try:
+        resolved_cwd.relative_to(root)
+    except ValueError as exc:
+        raise EvidenceError("validation cwd must be within the vault root") from exc
+    if not resolved_cwd.is_dir():
+        raise EvidenceError("validation cwd must be an existing directory")
+    command = shlex.join(bounded_argv)
+    clean_command = _sanitize_text(command, "command", MAX_COMMAND_BYTES)
+    if clean_command != command or _literal_secret_search(command):
+        raise EvidenceError("validation command contains unsafe secret material")
+    try:
+        result = subprocess.run(bounded_argv, cwd=resolved_cwd, check=False)
+        exit_code = int(result.returncode)
+    except OSError:
+        exit_code = 127
+        print("ERROR: validation command could not start", file=sys.stderr)
+    outcome = "success" if exit_code == 0 else "error"
+    identity = {
+        "origin": "agent-executed",
+        "execution_session": execution,
+        "provenance_session": provenance,
+        "validation_run_id": validation_run_id,
+        "cwd": str(resolved_cwd),
+        "command": command,
+        "exit_code": exit_code,
+    }
+    record = {
+        "schema_version": 2,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "session_id": execution,
+        "execution_session": execution,
+        "provenance_session": provenance,
+        "origin": "agent-executed",
+        "cwd": str(resolved_cwd),
+        "command": command,
+        "outcome": outcome,
+        "is_error": outcome == "error",
+        "validation_grade": True,
+        "validation_run_id": validation_run_id,
+        "exit_code": exit_code,
+        "event_id": _event_id(identity),
+    }
+    _append_unique(root, [record])
+    return exit_code
+
+
+def sanitization_self_test() -> bool:
+    fixture = "abcdef" + "123456"
+    clean, redactions = sanitize("token=" + fixture)
+    return (
+        fixture not in clean
+        and clean == "token=REDACTED"
+        and redactions == 1
+        and not residual_credential_kinds(clean)
+    )
+
+
 def _normalized(record: dict[str, Any]) -> dict[str, Any] | None:
     origin = record.get("origin")
     if origin not in {"agent-executed", "user-reported"}:
@@ -335,15 +471,29 @@ def _normalized(record: dict[str, Any]) -> dict[str, Any] | None:
         not isinstance(execution, str) or not SESSION_RE.fullmatch(execution)
     ):
         return None
+    outcome = (
+        record.get("outcome")
+        if record.get("outcome") in OUTCOMES
+        else ("error" if record.get("is_error") is True else "unknown")
+    )
+    exit_code = record.get("exit_code")
+    validation_run_id = record.get("validation_run_id")
+    validation_grade = (
+        origin == "agent-executed"
+        and record.get("validation_grade") is True
+        and type(exit_code) is int
+        and outcome == ("success" if exit_code == 0 else "error")
+        and isinstance(validation_run_id, str)
+        and SESSION_RE.fullmatch(validation_run_id) is not None
+    )
     value = dict(record)
     value.update(
         {
             "origin": origin,
             "execution_session": execution,
             "provenance_session": provenance,
-            "outcome": record.get("outcome")
-            if record.get("outcome") in OUTCOMES
-            else ("error" if record.get("is_error") else "success"),
+            "outcome": outcome,
+            "validation_grade": validation_grade,
         }
     )
     return value
@@ -378,6 +528,11 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("ingest-user")
+    sub.add_parser("self-test-sanitization")
+    validation = sub.add_parser("run-validation")
+    validation.add_argument("--run-id", required=True)
+    validation.add_argument("--cwd", type=Path, required=True)
+    validation.add_argument("argv", nargs=argparse.REMAINDER)
     sessions = sub.add_parser("sessions")
     sessions.add_argument("--provenance-session", required=True)
     collection = sub.add_parser("collect")
@@ -386,6 +541,19 @@ def main() -> int:
     args = parser.parse_args()
     root = args.root.expanduser().resolve()
     try:
+        if args.command == "self-test-sanitization":
+            if not sanitization_self_test():
+                raise EvidenceError("sanitization self-test failed")
+            print(json.dumps({"redactions": 1, "status": "ok"}, sort_keys=True))
+            return 0
+        if args.command == "run-validation":
+            argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+            return run_validation(
+                root,
+                cwd=args.cwd,
+                run_id=args.run_id,
+                argv=argv,
+            )
         if args.command == "ingest-user":
             raw = sys.stdin.read(MAX_USER_PAYLOAD_BYTES + 1)
             if len(raw.encode("utf-8")) > MAX_USER_PAYLOAD_BYTES:
@@ -432,6 +600,9 @@ def main() -> int:
                         ),
                         "user_reported": sum(
                             item["origin"] == "user-reported" for item in selected
+                        ),
+                        "validation_grade": sum(
+                            item["validation_grade"] is True for item in selected
                         ),
                     },
                     "records": selected,

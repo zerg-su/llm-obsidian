@@ -263,7 +263,7 @@ class FakeProcess:
                     "runtime-workspace-drift",
                     "run-workspace-drift",
                 ),
-                ("research-cleanup", "research-cleanup-run"),
+                ("generic-cleanup", "generic-cleanup-run"),
             }
             and process_group == 123
             and process_identity == PROCESS_IDENTITY
@@ -1033,26 +1033,26 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     process.status_value = "alive"
 
-    research_spec = OperationSpec(
-        "research-cleanup",
-        "research-cleanup-key",
-        "research-fetch",
+    mismatch_spec = OperationSpec(
+        "generic-cleanup-mismatch",
+        "generic-cleanup-mismatch-key",
+        "task-split",
         "owner-1",
         route,
-        "packets/research.json",
-        "research-cited-artifact",
+        "packets/generic-mismatch.json",
+        "typed-result",
     )
     store.create(
-        research_spec,
-        lane_id="research-cleanup-lane",
-        run_id="research-cleanup-run",
+        mismatch_spec,
+        lane_id="generic-cleanup-mismatch-lane",
+        run_id="generic-cleanup-mismatch-run",
     )
-    research_supervisor = OperationSupervisor(
-        store, "owner-1", "research-cleanup"
+    mismatch_supervisor = OperationSupervisor(
+        store, "owner-1", "generic-cleanup-mismatch"
     )
     for state in ("preflight", "starting", "running", "awaiting-callback"):
-        research_supervisor.transition(state)
-    research_supervisor.bind_resources(
+        mismatch_supervisor.transition(state)
+    mismatch_supervisor.bind_resources(
         OwnedResources(
             SURFACE,
             123,
@@ -1061,35 +1061,93 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             SUPERVISOR_IDENTITY,
         )
     )
-    research_payload = {"stage": "fetch"}
-    research_payload_sha = hashlib.sha256(
+    mismatch_payload = {"status": "complete"}
+    mismatch_payload_sha = hashlib.sha256(
         json.dumps(
-            research_payload,
+            mismatch_payload,
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
     ).hexdigest()
     CallbackBroker(store, "owner-1").accept(
         CallbackEnvelope(
-            "research-cleanup-callback",
-            "research-cleanup",
-            "research-cleanup-run",
-            "research",
-            research_payload,
-            research_payload_sha,
+            "generic-cleanup-mismatch-callback",
+            "generic-cleanup-mismatch",
+            "generic-cleanup-mismatch-run",
+            "result",
+            mismatch_payload,
+            mismatch_payload_sha,
         )
     )
     process.status_value = "unknown"
     process.supervisor_status_value = "unknown"
-    research_exiting = manager.request_exit(
-        "owner-1", "research-cleanup"
+    exact_capture = process.capture_identity
+    process.capture_identity = lambda pid, process_group=0: "c" * 64  # type: ignore[method-assign]
+    mismatch_result = manager.request_exit(
+        "owner-1", "generic-cleanup-mismatch"
     )
     check(
-        "accepted research cleanup re-probes exact identities before exit",
-        research_exiting.record.state == "exiting"
-        and research_exiting.process_status == "alive"
+        "callback cleanup fails closed when exact identities do not match",
+        mismatch_result.record.state == "attention-required"
+        and mismatch_result.process_status == "unknown"
+        and process.exit_requests == [],
+        mismatch_result,
+    )
+    process.capture_identity = exact_capture  # type: ignore[method-assign]
+
+    generic_spec = OperationSpec(
+        "generic-cleanup",
+        "generic-cleanup-key",
+        "task-split",
+        "owner-1",
+        route,
+        "packets/generic.json",
+        "typed-result",
+    )
+    store.create(
+        generic_spec,
+        lane_id="generic-cleanup-lane",
+        run_id="generic-cleanup-run",
+    )
+    generic_supervisor = OperationSupervisor(
+        store, "owner-1", "generic-cleanup"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        generic_supervisor.transition(state)
+    generic_supervisor.bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    generic_payload = {"status": "complete"}
+    generic_payload_sha = hashlib.sha256(
+        json.dumps(
+            generic_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    CallbackBroker(store, "owner-1").accept(
+        CallbackEnvelope(
+            "generic-cleanup-callback",
+            "generic-cleanup",
+            "generic-cleanup-run",
+            "result",
+            generic_payload,
+            generic_payload_sha,
+        )
+    )
+    generic_exiting = manager.request_exit("owner-1", "generic-cleanup")
+    check(
+        "any accepted callback cleanup re-probes exact identities before exit",
+        generic_exiting.record.state == "exiting"
+        and generic_exiting.process_status == "alive"
         and process.exit_requests == [123],
-        research_exiting,
+        generic_exiting,
     )
     process.status_value = "alive"
     process.supervisor_status_value = "alive"
@@ -1102,12 +1160,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and cmux.closed == []
         and events.index("process-exit") < len(events),
     )
+    process.status_value = "unknown"
+    process.supervisor_status_value = "unknown"
     still_alive = manager.cleanup("owner-1", "runtime-1")
     check(
-        "cleanup cannot close while provider remains alive",
-        still_alive.action == "wait-for-exit" and cmux.closed == [],
+        "accepted callback exiting cleanup re-probes exact identities",
+        still_alive.action == "wait-for-exit"
+        and still_alive.process_status == "alive"
+        and cmux.closed == [],
     )
     process.status_value = "dead"
+    process.supervisor_status_value = "alive"
     waiting_supervisor = manager.cleanup("owner-1", "runtime-1")
     check(
         "cleanup also waits for the owned supervisor process",

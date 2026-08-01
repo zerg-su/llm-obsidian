@@ -303,6 +303,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
         and all(record["execution_session"] == "task-session" for record in task_records)
         and all(record["provenance_session"] == "task-origin" for record in task_records)
         and all(record["origin"] == "agent-executed" for record in task_records)
+        and all(record["outcome"] == "unknown" for record in task_records)
         and command_log.read_text(encoding="utf-8") == command_log_before,
         task_capture.stderr if task_capture is not None else "missing capture result",
     )
@@ -324,6 +325,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
                 + "); text(r.output);"
             },
             "secret-call",
+        ),
+        (
+            "unified_exec",
+            {
+                "source": "const r = await tools.exec_command("
+                + json.dumps(
+                    {
+                        "cmd": "rg --fixed-strings 'abcdef123456' .vault-meta/command-log.jsonl",
+                        "workdir": str(task),
+                    },
+                    separators=(",", ":"),
+                )
+                + "); text(r.output);"
+            },
+            "literal-secret-search",
         ),
         ("unified_exec", {"source": replay_source}, "codex-call-1"),
     ):
@@ -347,10 +363,57 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
             env=task_env,
         )
     check(
-        "task capture ignores non-shell tools, rejects secrets, and deduplicates replay",
+        "task capture ignores non-shell tools, rejects secret searches, and deduplicates replay",
         [json.loads(line) for line in task_command_log.read_text(encoding="utf-8").splitlines()]
         == task_records
         and command_log.read_text(encoding="utf-8") == command_log_before,
+    )
+    explicit_outcomes = []
+    for index, response in enumerate(
+        (
+            {"exit_code": 0},
+            {"status": "completed"},
+            {"status": "failed"},
+        ),
+        start=1,
+    ):
+        command = f"python3 explicit-{index}.py"
+        source = (
+            "const r = await tools.exec_command("
+            + json.dumps(
+                {"cmd": command, "workdir": str(task)},
+                separators=(",", ":"),
+            )
+            + "); text(r.output);"
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                str(vault / "hooks" / "run-hook.py"),
+                "command-capture",
+            ],
+            input=json.dumps(
+                {
+                    **task_payload,
+                    "tool_name": "unified_exec",
+                    "tool_use_id": f"explicit-outcome-{index}",
+                    "tool_input": {"source": source},
+                    "tool_response": response,
+                }
+            ),
+            text=True,
+            capture_output=True,
+            env=task_env,
+        )
+        explicit_outcomes.append(
+            json.loads(
+                task_command_log.read_text(encoding="utf-8").splitlines()[-1]
+            )["outcome"]
+        )
+    check(
+        "only explicit Codex exit or status evidence sets an outcome",
+        explicit_outcomes == ["success", "success", "error"],
+        explicit_outcomes,
     )
     subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "router"],

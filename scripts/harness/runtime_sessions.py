@@ -760,7 +760,7 @@ class RuntimeSessionManager:
             )
         )
 
-    def _accepted_research_cleanup_statuses(
+    def _accepted_callback_cleanup_statuses(
         self,
         record: OperationRecord,
         process_status: str,
@@ -769,10 +769,9 @@ class RuntimeSessionManager:
         """Re-probe exact identities when signal-less liveness is unavailable."""
 
         if (
-            record.spec.kind not in {"research-fetch", "research-synth"}
-            or record.state not in {"finalizing", "exiting"}
-            or record.accepted_callback_kind != "research"
+            record.state not in {"finalizing", "exiting"}
             or not record.accepted_callback_id
+            or not record.accepted_callback_kind
             or not record.accepted_callback_sha256
         ):
             return process_status, supervisor_status
@@ -1407,7 +1406,7 @@ class RuntimeSessionManager:
         )
         supervisor_status = self._supervisor_status(record)
         process_status, supervisor_status = (
-            self._accepted_research_cleanup_statuses(
+            self._accepted_callback_cleanup_statuses(
                 record,
                 process_status,
                 supervisor_status,
@@ -1478,7 +1477,7 @@ class RuntimeSessionManager:
             else "dead"
         )
         process_status, supervisor_status = (
-            self._accepted_research_cleanup_statuses(
+            self._accepted_callback_cleanup_statuses(
                 record,
                 process_status,
                 supervisor_status,
