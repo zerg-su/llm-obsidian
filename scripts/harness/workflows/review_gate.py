@@ -902,6 +902,16 @@ class ReviewGateController:
                 "reviewed_head_sha": (
                     run.execution.request.context.head_sha
                 ),
+                "review_operation_id": (
+                    run.execution.request.policy.operation_id
+                ),
+                "round_operation_id": round_.operation_id,
+                "round_run_id": round_.run_id,
+                "callback_id": envelope.callback_id,
+                "callback_sha256": envelope.payload_sha256,
+                "material_finding_ids": [
+                    finding.finding_id for finding in material
+                ],
             }
             self._replace(
                 status="awaiting-resolution",
@@ -1188,11 +1198,24 @@ class ReviewGateController:
             self._mark_attention(run.execution.lanes)
             return ReviewGateDecision("attention-required", lane, round_)
         awaiting = dict(state.get("awaiting_resolution") or {})
+        material_finding_ids = [
+            finding.finding_id
+            for finding in result.findings
+            if finding.severity in MATERIAL_SEVERITIES
+        ]
         awaiting[result.axis] = {
             "pointer": pointer,
             "reviewed_head_sha": (
                 run.execution.request.context.head_sha
             ),
+            "review_operation_id": (
+                run.execution.request.policy.operation_id
+            ),
+            "round_operation_id": round_.operation_id,
+            "round_run_id": round_.run_id,
+            "callback_id": envelope.callback_id,
+            "callback_sha256": envelope.payload_sha256,
+            "material_finding_ids": material_finding_ids,
         }
         self._replace(
             status="awaiting-resolution",
@@ -1356,6 +1379,23 @@ class ReviewGateController:
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
     ) -> ReviewGateRun | None:
+        exact_product = product_root.expanduser().resolve()
+
+        def invalidate_executor_transport() -> None:
+            paths = (
+                exact_product / ".task-review.json",
+                exact_product / ".task-review-resolution.json",
+            )
+            if any(
+                path.is_symlink()
+                or path.exists()
+                and not path.is_file()
+                for path in paths
+            ):
+                raise ValueError("fresh review executor transport is invalid")
+            for path in paths:
+                path.unlink(missing_ok=True)
+
         if (
             max_verify_iterations is not None
             and (
@@ -1392,6 +1432,7 @@ class ReviewGateController:
                 raise ValueError(
                     "fresh review verification budget changed across replay"
                 )
+            invalidate_executor_transport()
             return replay
         if state.get("fresh_reevaluation_used") is True:
             self._mark_attention(run.execution.lanes)
@@ -1455,7 +1496,6 @@ class ReviewGateController:
                 "provider review sessions require the reviewer-callback profile"
             )
         exact_cwd = cwd.expanduser().resolve()
-        exact_product = product_root.expanduser().resolve()
         for identity in review_session_specs(request):
             axis_name = (
                 "standards"
@@ -1482,6 +1522,7 @@ class ReviewGateController:
                 ),
                 callback_wake=callback_wake,
             )
+        invalidate_executor_transport()
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
