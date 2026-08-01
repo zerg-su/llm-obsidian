@@ -321,15 +321,17 @@ invocation, and a second goal artifact remain out of scope.
 
 ## Gate evidence
 
-The final task gate must record these commands on the report-only diff:
+The report-only worktree passed the required gate:
 
-```text
-python3 skills/improve-skills/scripts/audit_skills.py --strict
-make test-instruction-lint test-skill-budget test-codex-adapter
-python3 scripts/codex-adapter.py --check
-python3 scripts/release-acceptance.py check
-git diff --check
-```
+| Check | Result |
+|---|---|
+| `python3 skills/improve-skills/scripts/audit_skills.py --strict` | PASS — 32 audited, 0 errors, 0 warnings |
+| `make test-instruction-lint` | PASS — all instruction-lint tests |
+| `make test-skill-budget` | PASS — repository and negative budget fixtures |
+| `make test-codex-adapter` | PASS — 22 passed, 0 failed |
+| `python3 scripts/codex-adapter.py --check` | PASS — no changes |
+| `python3 scripts/release-acceptance.py check` | PASS — 4 harness cells valid |
+| `git diff --check` | PASS |
 
 The 2.6 release plan remains pending because this is a shared-plan pre-branch
 audit, not completion of the release.
