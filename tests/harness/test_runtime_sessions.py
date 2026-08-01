@@ -1587,16 +1587,19 @@ review_submit = shlex.join(
     )
 )
 quoted_product = shlex.quote(str(product))
-reviewer_readonly_probes = {
-    f"Bash(git -C {quoted_product} --no-pager log --oneline -20)",
+review_inspect = shlex.join(
     (
-        f"Bash(git -C {quoted_product} --no-pager show "
-        "--stat --oneline HEAD)"
-    ),
+        str(Path(sys.executable).resolve()),
+        str(product / "scripts" / "review-inspect.py"),
+        "--worktree",
+        str(product),
+    )
+)
+reviewer_readonly_probes = {
+    f"Bash({review_inspect}:*)",
     f"Bash(python3 {quoted_product}/scripts/check-skill-budget.py)",
     f"Bash(make -C {quoted_product} test-harness)",
     f"Bash(make -C {quoted_product} test-model-routing)",
-    f"Bash(git -C {quoted_product} diff --check)",
 }
 try:
     callback_instruction = claude_callback[
@@ -1633,9 +1636,8 @@ check(
     and "absolute path verbatim" in callback_instruction
     and "input file's exact session-relative alias" in callback_instruction
     and f"Bash({review_submit})" in claude_callback
-    and f"Bash(git -C {shlex.quote(str(product))} rev-parse HEAD)"
-    in claude_callback
     and reviewer_readonly_probes.issubset(claude_callback)
+    and not any(item.startswith("Bash(git ") for item in claude_callback)
     and "Bash(*)" not in claude_callback
     and not any(
         token in item

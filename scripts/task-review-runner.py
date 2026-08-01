@@ -579,6 +579,10 @@ def _prompt(
                 "",
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
+                (
+                    "Use the product's scripts/review-inspect.py facade for every "
+                    "Git query; direct Git or shell composition is not permitted."
+                ),
                 "Do not run cd or copy packet files; they are readable in place.",
                 *round_schema_lines(),
                 f"Write that exact JSON to `{review_input}`.",

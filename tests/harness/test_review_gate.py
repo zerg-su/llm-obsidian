@@ -1040,6 +1040,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         f"`{submit}`" in prompt_text
         and f"Bash({submit})" in claude_command
         and "Read, Glob, and Grep with absolute paths" in prompt_text
+        and "review-inspect.py" in prompt_text
         and "Do not run cd or copy packet files" in prompt_text,
     )
     round_ = task_review_runner.load_active_round(
