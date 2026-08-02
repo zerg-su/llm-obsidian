@@ -63,6 +63,12 @@ Local success remains subordinate to the release Outcome Contract. A green focus
 
 ## Behavioral acceptance boundary
 
-The static post-audit is complete. Final acceptance still requires the frozen paired post-change comparison to report no regression, followed by four real-task dogfood runs. The paired sessions must use the ordinary-repo Codex plugin bytes, immutable integrated HEAD, unchanged contract and fixture digests, shared reap, and the same route, verification profile, and review budget as baseline.
+The static post-audit and frozen paired post-change comparison are complete.
+`docs/acceptance/v2.6-paired-comparison.json` reports no regression: both cases
+remain achieved with all four evidence items established, zero interventions,
+unchanged model/review rounds, zero duplicate effects, and no increase in
+callback failures. Four real-task dogfood classes and the negative semantic-
+drift smoke are recorded separately in
+`docs/acceptance/v2.6-real-task-dogfood.md`.
 
 Workstream B's emergency fresh-review boundary exhausted its intentionally zero verification budget after identifying `HOL-003`. The finding was fixed and deterministically proven, but that task has no terminal reap receipt; exact integrated behavior therefore remains subject to the single final deep release review rather than being represented as task-level approval.
