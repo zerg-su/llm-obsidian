@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from ..contracts import AttentionReason
 from ..state_machine import TERMINAL
 from .review import (
     ReviewContext,
@@ -29,6 +30,39 @@ from review_resolution import (
 
 class ReviewGateResolutionMixin:
     """Bind material findings to resolution evidence and exact continuation."""
+
+    def _rearm_accepted_resolution_parent(
+        self,
+        lane: ReviewLaneSession,
+        boundary: dict[str, object],
+    ) -> bool:
+        """Rearm only a timed-out parent whose exact round is already accepted."""
+
+        parent = self.round_store.read(lane.owner_id, lane.operation_id)
+        if parent.state != "attention-required":
+            return True
+        child_operation_id = str(boundary.get("round_operation_id") or "")
+        if (
+            parent.attention_reason != AttentionReason.CALLBACK_TIMEOUT
+            or not child_operation_id
+        ):
+            return False
+        child = self.round_store.read(lane.owner_id, child_operation_id)
+        if (
+            child.state != "complete"
+            or child.run_id != str(boundary.get("round_run_id") or "")
+            or child.accepted_callback_id
+            != str(boundary.get("callback_id") or "")
+            or child.accepted_callback_sha256
+            != str(boundary.get("callback_sha256") or "")
+        ):
+            return False
+        self.round_store.transition(
+            lane.owner_id,
+            lane.operation_id,
+            "awaiting-callback",
+        )
+        return True
 
     def defer_round_for_resolution(
         self,
@@ -229,6 +263,9 @@ class ReviewGateResolutionMixin:
             raise ValueError(
                 "review resolution evidence does not cover the exact material findings"
             )
+        if not self._rearm_accepted_resolution_parent(lane, boundary):
+            self._replace(status="attention-required")
+            return ReviewGateDecision("attention-required", lane)
         resolution_pointer = self._persist_resolution(
             run.execution.request.policy.operation_id,
             resolution,

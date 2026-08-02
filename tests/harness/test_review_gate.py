@@ -492,6 +492,12 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         "controller rejects prior-boundary review identity",
         controller.read()["status"] == "awaiting-resolution",
     )
+    store.transition(
+        lane.owner_id,
+        lane.operation_id,
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
     first = controller.continue_after_resolution(
         run,
         lane,
@@ -514,6 +520,11 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         and first.lane.verification_iteration == 1
         and len(runtime.started) == 1
         and len(runtime.continued) == 1,
+    )
+    check(
+        "accepted material round rearms its exact timed-out parent before verification",
+        store.read(lane.owner_id, lane.operation_id).state
+        == "awaiting-callback",
     )
     resolution_pointer = controller.read()["resolution_evidence"]["holistic:0"]
     check(
