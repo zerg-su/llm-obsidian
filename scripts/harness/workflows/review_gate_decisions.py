@@ -74,7 +74,17 @@ class ReviewGateDecisionMixin:
         )
         payload = resolution.payload()
         if path.exists() and _read_json(path) != payload:
-            raise ValueError("review resolution evidence changed across replay")
+            state = self.read()
+            published = state.get("resolution_evidence")
+            pointer = path.relative_to(self.root).as_posix()
+            if (
+                state.get("status") != "awaiting-resolution"
+                or not isinstance(published, dict)
+                or pointer in published.values()
+            ):
+                raise ValueError(
+                    "review resolution evidence changed across replay"
+                )
         _atomic_json(path, payload)
         return path.relative_to(self.root).as_posix()
 

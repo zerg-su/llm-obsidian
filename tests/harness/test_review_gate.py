@@ -498,6 +498,24 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         "attention-required",
         reason=AttentionReason.CALLBACK_TIMEOUT,
     )
+    orphan_resolution = (
+        base / "gate" / "review-auto" / "resolution-holistic-0.json"
+    )
+    orphan_resolution.parent.mkdir(parents=True, exist_ok=True)
+    orphan_resolution.write_text(
+        json.dumps(
+            resolution_evidence(
+                "review-auto",
+                "holistic",
+                context.head_sha,
+                "e" * 40,
+                "F-gate-1",
+            ).payload(),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     first = controller.continue_after_resolution(
         run,
         lane,
@@ -525,6 +543,13 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         "accepted material round rearms its exact timed-out parent before verification",
         store.read(lane.owner_id, lane.operation_id).state
         == "awaiting-callback",
+    )
+    check(
+        "unpublished resolution crash residue is replaced before durable publication",
+        json.loads(orphan_resolution.read_text(encoding="utf-8"))[
+            "resolved_head_sha"
+        ]
+        == resolved_context.head_sha,
     )
     resolution_pointer = controller.read()["resolution_evidence"]["holistic:0"]
     check(
