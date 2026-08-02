@@ -153,11 +153,14 @@ def _stopped_release_enters_implementation(
     requested: Mapping[str, Any],
     boundary: ReviewBoundaryInput | None,
     *,
+    bound_head: str,
     current_head: str,
 ) -> bool:
     if (
         not isinstance(stored, Mapping)
         or boundary is None
+        or not bound_head
+        or bound_head == current_head
         or boundary.purpose != "implementation"
         or boundary.product_head_sha != current_head
     ):
@@ -275,6 +278,7 @@ def run_current_review(
                     stored_policy,
                     requested_policy,
                     boundary_input,
+                    bound_head=bound_head,
                     current_head=current_head,
                 )
             ) or (

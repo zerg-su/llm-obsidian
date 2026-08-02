@@ -3345,6 +3345,41 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             "stopped release review rejects a policy-only retry",
             policy_only_guarded,
         )
+        same_head_implementation_path = (
+            base / "same-head-implementation-boundary.json"
+        )
+        same_head_implementation = replace(
+            current_boundary,
+            product_head_sha=release_boundary.integration_head_sha,
+        )
+        same_head_implementation_path.write_text(
+            json.dumps(same_head_implementation.payload(), sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        same_head_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                deep=True,
+                purpose="implementation",
+                boundary_input_file=same_head_implementation_path,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            same_head_implementation_guarded = (
+                "another preset or override" in str(exc)
+            )
+        else:
+            same_head_implementation_guarded = False
+        check(
+            "stopped release rejects a same-HEAD implementation checkpoint",
+            same_head_implementation_guarded
+            and len(current_runtime.started) == same_head_started_count,
+        )
         (product / "product.py").write_text("VALUE = 3\n", encoding="utf-8")
         subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
         subprocess.run(
@@ -3373,6 +3408,43 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             + "\n",
             encoding="utf-8",
         )
+        post_stop_boundary = replace(
+            release_boundary,
+            integration_head_sha=post_stop_head,
+        )
+        post_stop_boundary_path = base / "post-stop-release-boundary.json"
+        post_stop_boundary_path.write_text(
+            json.dumps(post_stop_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        direct_post_stop_review = task_review_runner.run_current_review(
+            product,
+            purpose="release",
+            boundary_input_file=post_stop_boundary_path,
+            plan_file=review_plan,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "stopped release directly permits a changed HEAD and boundary",
+            direct_post_stop_review["status"] == "reviewing"
+            and direct_post_stop_review["task_id"]
+            != release_started["task_id"],
+        )
+        quiesce_operations(
+            current_store, direct_post_stop_review["task_id"]
+        )
+        (
+            product / ".vault-meta/harness/current-review/active.json"
+        ).write_text(
+            json.dumps(active_post_stop, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        (release_gate_root / "review-gate.json").write_text(
+            json.dumps(release_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         implementation_cycle = task_review_runner.run_current_review(
             product,
             deep=True,
@@ -3390,15 +3462,6 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             != release_started["task_id"],
         )
         quiesce_operations(current_store, implementation_cycle["task_id"])
-        post_stop_boundary = replace(
-            release_boundary,
-            integration_head_sha=post_stop_head,
-        )
-        post_stop_boundary_path = base / "post-stop-release-boundary.json"
-        post_stop_boundary_path.write_text(
-            json.dumps(post_stop_boundary.payload(), sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
         post_stop_review = task_review_runner.run_current_review(
             product,
             purpose="release",
@@ -3409,7 +3472,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             runtime_manager=current_runtime,
         )
         check(
-            "stopped stale release review permits a changed HEAD and boundary",
+            "implementation checkpoint permits the final release boundary",
             post_stop_review["status"] == "reviewing"
             and post_stop_review["task_id"] != release_started["task_id"],
         )
