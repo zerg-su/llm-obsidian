@@ -275,9 +275,11 @@ Verification имеет два честных denominator: 100% declared determi
 - verification классифицирует finding как addressed или not-addressed;
 - новый material regression в fix delta присоединяется к открытому набору;
 - наблюдение вне scope получает durable follow-up, но не расширяет текущий loop;
-- simple review остаётся одной holistic session: проверка Outcome Contract является первым разделом этой же сессии;
-- deep review сохраняет независимые Fable/spec и Sol/standards-correctness-architecture-security lanes; Outcome Contract плюс approved plan входят в существующую Fable/spec lane;
-- новая lane, дополнительная review surface или дополнительный model call не создаются;
+- каждый review boundary имеет явный purpose `intent`, `implementation` или `release`; внутри одного boundary simple review остаётся одной holistic session, а deep review сохраняет независимые Fable/spec и Sol/standards-correctness-architecture-security lanes;
+- `intent` до дорогой реализации проверяет exact Outcome Contract, design/plan digests, capability dispositions и карту success evidence;
+- `implementation` после implementation batch проверяет exact product HEAD, verification evidence и соответствие outcome через существующие simple/deep axes;
+- `release` после интеграции проверяет exact merge HEAD, полный outcome-evidence map, принятые deviations и merge/refactor drift; этот boundary только approve или stop;
+- внутри одного boundary не создаются дополнительные axes, surfaces или model calls сверх выбранного simple/deep preset; разные purpose-boundaries являются разными digest-bound lifecycle checkpoints, а не повторением одной проверки;
 - axes не сливаются и не rerank’ятся;
 - reviewer классифицирует каждый `success_evidence` как established, missing или contradicted и отдельно проверяет `non_goals` на scope creep;
 - `reap` принимает только approved review evidence, пишет Wiki Summary v2 disposition и residual gaps и никогда молча не переписывает desired outcome.
@@ -294,7 +296,20 @@ Verification имеет два честных denominator: 100% declared determi
 - требовать evidence именно для approved outcome, не добавляя новый model call в code-owned переход;
 - выдавать `fix`, `no-change` или `defer` по существующей verdict discipline.
 
-Полный semantic flow 2.6: `clarify` создаёт контракт → `design`/`save-plan` сохраняют → `dispatch` валидирует и bind’ит digest → semantic steps получают общий outcome и локальный subgoal → существующая review lane проверяет достижение → `reap` фиксирует typed disposition. Ни один этап не имеет права менять контракт; изменение цели требует нового пользовательского решения и нового approved digest.
+Полный semantic flow 2.6: `clarify` создаёт контракт → `design`/`save-plan` сохраняют → `intent` review подтверждает направление для дорогой задачи → `dispatch` валидирует и bind’ит digest → semantic steps получают общий outcome и локальный subgoal → `implementation` review проверяет exact product HEAD → `release` review проверяет exact integration HEAD → `reap` фиксирует typed disposition. Ни один этап не имеет права менять контракт; изменение цели требует нового пользовательского решения и нового approved digest.
+
+### Outcome-preserving multi-stage review — approved amendment
+
+Fable xhigh plan-only review одобрил amendment без findings на exact HEAD `4696e33`.
+
+- Три purpose являются минимальным полезным набором: intent, implementation, release.
+- Малые обратимые задачи могут схлопнуть intent в implementation. Architecture, migration, release и skill-integration обязаны пройти все три boundary.
+- Harness выбирает обязательный профиль по approved task risk; модель может рекомендовать escalation, но не пропускать required boundary.
+- Каждый boundary имеет отдельные ContextPacket, operation/receipt identity, input digest, вопрос и budget. Intent bind’ит Outcome Contract и plan/design digests; implementation — product HEAD и verification evidence; release — integration HEAD и полный outcome-evidence map.
+- Результаты additive: прежний boundary не заменяет следующий и становится stale при изменении своего bound digest.
+- Material finding на release не открывает поздний скрытый fix loop: релиз останавливается, а исправление начинает новый bounded implementation cycle.
+- Low-risk migration сохраняет текущий terminal review как implementation boundary для существующих compiled tasks; новые purpose checkpoints добавляются schema/compiler/state-machine контрактами.
+- Дешёвые policy, compiler, transition-matrix, mocked-adapter и crash-window checks предшествуют единственному bounded live release review.
 
 ## 4. Интеграция и циклы исправлений
 
