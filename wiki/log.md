@@ -27,6 +27,12 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02 00:02] backlog | normalize — llm-obsidian-2-7-project-memory-layout
+
+## [2026-08-02 00:01] backlog | repair — llm-obsidian-2-7-project-memory-layout formatting
+
+## [2026-08-02 00:00] backlog | add — llm-obsidian-2-7-project-memory-layout
+
 ## [2026-08-02] reap | llm-obsidian-2-6-paired-design-post-rollback-validation
 
 `c-000094` [[LLM Obsidian 2.6 paired design rollback validation]]. ## Result
