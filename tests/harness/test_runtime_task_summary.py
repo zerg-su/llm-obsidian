@@ -2196,6 +2196,148 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
             threading.Thread(target=resolve_after_packet).start()
             return
+        if len(asynchronous_calls) == 4:
+            result_pointer = (
+                gate_root / asynchronous_task / "round-spec-1.json"
+            )
+            write_json(
+                result_pointer,
+                {
+                    "axis": "spec",
+                    "verdict": "changes-requested",
+                    "verification_iteration": 1,
+                    "findings": [
+                        {
+                            "axis": "spec",
+                            "finding_id": "F-material-verified",
+                            "severity": "important",
+                            "file": "resolution.txt",
+                            "line": 1,
+                            "summary": "Verification found a second issue",
+                            "evidence": (
+                                "The first correction needs one bounded "
+                                "follow-up."
+                            ),
+                            "recommendation": "Commit the follow-up.",
+                        }
+                    ],
+                },
+            )
+            gate_state = json.loads(
+                (gate_root / "review-gate.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            gate_state["status"] = "awaiting-resolution"
+            gate_state["active_review_operation_id"] = (
+                "review-operation-current"
+            )
+            gate_state["awaiting_resolution"] = {
+                "spec": {
+                    "pointer": result_pointer.relative_to(
+                        gate_root
+                    ).as_posix(),
+                    "reviewed_head_sha": head,
+                    "review_operation_id": "review-operation-current",
+                    "round_operation_id": "round-operation-verified",
+                    "round_run_id": "round-run-verified",
+                    "callback_id": "callback-verified",
+                    "callback_sha256": "d" * 64,
+                    "material_finding_ids": ["F-material-verified"],
+                }
+            }
+            write_json(gate_root / "review-gate.json", gate_state)
+
+            def resolve_verified_packet() -> None:
+                import time
+
+                packet_path = worktree / ".task-review.json"
+                for _ in range(100):
+                    if packet_path.is_file():
+                        decision_packet = json.loads(
+                            packet_path.read_text(encoding="utf-8")
+                        )
+                        if decision_packet.get("material_finding_ids") == [
+                            "F-material-verified"
+                        ]:
+                            break
+                    time.sleep(0.02)
+                else:
+                    return
+                (worktree / "verified-resolution.txt").write_text(
+                    "resolved\n", encoding="utf-8"
+                )
+                subprocess.run(
+                    ["git", "add", "verified-resolution.txt"],
+                    cwd=worktree,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "resolve verified review"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                resolved_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                write_json(
+                    worktree / ".task-review-resolution.json",
+                    {
+                        "schema_version": 1,
+                        "operation_id": asynchronous_task,
+                        "review_identity_sha256": decision_packet[
+                            "review_identity_sha256"
+                        ],
+                        "reviewed_head_sha": head,
+                        "resolved_head_sha": resolved_head,
+                        "resolutions": [
+                            {
+                                "finding_id": "F-material-verified",
+                                "disposition": "applied",
+                                "rationale": (
+                                    "The verified follow-up is committed."
+                                ),
+                                "follow_up": "",
+                            }
+                        ],
+                    },
+                )
+                refresh = (
+                    root
+                    / f"state-{asynchronous_task}"
+                    / "pipeline-summary-refresh-notify.json"
+                )
+                for _ in range(100):
+                    if refresh.is_file():
+                        refresh_payload = json.loads(
+                            refresh.read_text(encoding="utf-8")
+                        )
+                        if (
+                            refresh_payload.get("approved_head_sha")
+                            == resolved_head
+                        ):
+                            break
+                    time.sleep(0.02)
+                else:
+                    return
+                summary_path = worktree / ".task-summary.json"
+                refreshed = json.loads(
+                    summary_path.read_text(encoding="utf-8")
+                )
+                refreshed["body"] += (
+                    "\n\nResolved the verified material finding at final "
+                    "HEAD."
+                )
+                write_json(summary_path, refreshed)
+
+            threading.Thread(target=resolve_verified_packet).start()
+            return
         asynchronous_review_summary_shas.append(
             hashlib.sha256(
                 (worktree / ".task-summary.json").read_bytes()
@@ -2241,10 +2383,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "summary-only refresh reuses the exact-HEAD verification identity and effect",
         asynchronous_rc == 0
-        and len(asynchronous_calls) == 4
-        and len(asynchronous_verification_heads) == 2
-        and len(set(asynchronous_verification_heads)) == 2
-        and len(asynchronous_verification_calls) == 6
+        and len(asynchronous_calls) == 5
+        and len(asynchronous_verification_heads) == 3
+        and len(set(asynchronous_verification_heads)) == 3
+        and len(asynchronous_verification_calls) == 9
         and asynchronous_review_summary_shas
         == [
             hashlib.sha256(
@@ -2255,7 +2397,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 ).read_bytes()
             ).hexdigest()
         ]
-        and len(asynchronous_verification_children) == 2
+        and len(asynchronous_verification_children) == 3
         and all(
             child.state == "complete"
             and child.resources.process_group == 0
@@ -2264,12 +2406,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         )
         and asynchronous_record.state == "finalizing"
         and asynchronous_record.accepted_callback_kind == "wiki-summary"
-        and len(asynchronous_cmux.sent) == 3
+        and len(asynchronous_cmux.sent) == 5
         and asynchronous_cmux.sent[0][0] == CHILD
         and "Typed review findings" in asynchronous_cmux.sent[0][1]
         and asynchronous_cmux.sent[1][0] == CHILD
         and "Refresh .task-summary.json" in asynchronous_cmux.sent[1][1]
-        and asynchronous_cmux.sent[2][0] == ORIGIN,
+        and asynchronous_cmux.sent[2][0] == CHILD
+        and "Typed review findings" in asynchronous_cmux.sent[2][1]
+        and asynchronous_cmux.sent[3][0] == CHILD
+        and "Refresh .task-summary.json" in asynchronous_cmux.sent[3][1]
+        and asynchronous_cmux.sent[4][0] == ORIGIN,
         (
             asynchronous_calls,
             asynchronous_verification_heads,
@@ -2288,21 +2434,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             asynchronous_packet_payload := json.loads(
                 asynchronous_packet.read_text(encoding="utf-8")
             )
-        )["findings"][0]["finding_id"] == "F-material"
+        )["findings"][0]["finding_id"] == "F-material-verified"
         and asynchronous_packet_payload["allowed_dispositions"]
         == ["applied", "out-of-scope", "rejected"]
         and asynchronous_packet_payload["material_finding_ids"]
-        == ["F-material"]
+        == ["F-material-verified"]
         and asynchronous_packet_payload["review_operation_id"]
         == "review-operation-current"
         and asynchronous_packet_payload["review_callbacks"]
         == [
             {
                 "axis": "spec",
-                "round_operation_id": "round-operation-current",
-                "round_run_id": "round-run-current",
-                "callback_id": "callback-current",
-                "callback_sha256": "c" * 64,
+                "round_operation_id": "round-operation-verified",
+                "round_run_id": "round-run-verified",
+                "callback_id": "callback-verified",
+                "callback_sha256": "d" * 64,
             }
         ]
         and asynchronous_packet_payload["review_identity_sha256"]

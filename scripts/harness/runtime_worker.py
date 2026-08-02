@@ -3253,6 +3253,24 @@ def run(
                     )
                 packet_sha256 = hashlib.sha256(encoded).hexdigest()
                 packet_path = spec["cwd"] / ".task-review.json"
+                notify_path = (
+                    spec_path.parent
+                    / "pipeline-review-resolution-notify.json"
+                )
+                notified = None
+                if notify_path.is_file() and not notify_path.is_symlink():
+                    notified = json.loads(
+                        notify_path.read_text(encoding="utf-8")
+                    )
+                    if (
+                        not isinstance(notified, dict)
+                        or notified.get("schema_version") != 1
+                        or notified.get("operation_id")
+                        != spec["operation_id"]
+                    ):
+                        raise RuntimeWorkerError(
+                            "review resolution notification is invalid"
+                        )
                 if packet_path.is_symlink():
                     raise RuntimeWorkerError(
                         "review decision packet cannot be a symlink"
@@ -3261,15 +3279,41 @@ def run(
                     current = json.loads(
                         packet_path.read_text(encoding="utf-8")
                     )
-                    if (
-                        not isinstance(current, dict)
-                        or current.get("schema_version") != 1
-                        or current.get("operation_id")
-                        != spec["operation_id"]
-                        or current.get("review_operation_id")
-                        != active_review_operation_id
-                        or current.get("review_callbacks")
+                    stable_identity = (
+                        isinstance(current, dict)
+                        and current.get("schema_version") == 1
+                        and current.get("operation_id")
+                        == spec["operation_id"]
+                        and current.get("review_operation_id")
+                        == active_review_operation_id
+                    )
+                    callbacks_changed = (
+                        isinstance(current, dict)
+                        and current.get("review_callbacks")
                         != review_callbacks
+                    )
+                    prior_packet_sha256 = ""
+                    if isinstance(current, dict):
+                        prior_packet_sha256 = hashlib.sha256(
+                            json.dumps(
+                                current,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest()
+                    prior_generation_is_durable = (
+                        callbacks_changed
+                        and isinstance(notified, dict)
+                        and notified.get("status") == "sent"
+                        and notified.get("packet_sha256")
+                        == prior_packet_sha256
+                        and notified.get("reviewed_head_sha")
+                        == current.get("reviewed_head_sha")
+                    )
+                    if (
+                        not stable_identity
+                        or callbacks_changed
+                        and not prior_generation_is_durable
                     ):
                         raise RuntimeWorkerError(
                             "review decision packet identity changed"
@@ -3328,24 +3372,7 @@ def run(
                             ],
                         },
                     )
-                notify_path = (
-                    spec_path.parent
-                    / "pipeline-review-resolution-notify.json"
-                )
-                notified = None
-                if notify_path.is_file() and not notify_path.is_symlink():
-                    notified = json.loads(
-                        notify_path.read_text(encoding="utf-8")
-                    )
-                    if (
-                        not isinstance(notified, dict)
-                        or notified.get("schema_version") != 1
-                        or notified.get("operation_id")
-                        != spec["operation_id"]
-                    ):
-                        raise RuntimeWorkerError(
-                            "review resolution notification is invalid"
-                        )
+                if isinstance(notified, dict):
                     if (
                         notified.get("packet_sha256") == packet_sha256
                         and notified.get("status") == "sent"
