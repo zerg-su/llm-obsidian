@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -59,6 +60,80 @@ def _head(value: Any, field: str) -> str:
     if not GIT_HEAD.fullmatch(normalized):
         raise ResolutionError(f"{field} must be an exact Git object id")
     return normalized
+
+
+def review_transport_identity_sha256(
+    review_operation_id: str,
+    callbacks: Sequence[Mapping[str, Any]],
+) -> str:
+    """Hash one ordered review operation and its exact accepted callbacks."""
+
+    operation_id = _identifier(
+        review_operation_id, "review_operation_id"
+    )
+    normalized: list[dict[str, str]] = []
+    for index, callback in enumerate(callbacks):
+        if not isinstance(callback, Mapping):
+            raise ResolutionError(
+                f"review_callbacks[{index}] must be an object"
+            )
+        _exact_fields(
+            callback,
+            {
+                "axis",
+                "round_operation_id",
+                "round_run_id",
+                "callback_id",
+                "callback_sha256",
+            },
+            f"review_callbacks[{index}]",
+        )
+        axis = _text(
+            callback.get("axis"),
+            f"review_callbacks[{index}].axis",
+            limit=64,
+        )
+        if axis not in AXES:
+            raise ResolutionError("review callback axis is invalid")
+        callback_sha256 = _text(
+            callback.get("callback_sha256"),
+            f"review_callbacks[{index}].callback_sha256",
+            limit=64,
+        )
+        if re.fullmatch(r"[0-9a-f]{64}", callback_sha256) is None:
+            raise ResolutionError("review callback digest is invalid")
+        normalized.append(
+            {
+                "axis": axis,
+                "round_operation_id": _identifier(
+                    callback.get("round_operation_id"),
+                    f"review_callbacks[{index}].round_operation_id",
+                ),
+                "round_run_id": _identifier(
+                    callback.get("round_run_id"),
+                    f"review_callbacks[{index}].round_run_id",
+                ),
+                "callback_id": _identifier(
+                    callback.get("callback_id"),
+                    f"review_callbacks[{index}].callback_id",
+                ),
+                "callback_sha256": callback_sha256,
+            }
+        )
+    axes = [callback["axis"] for callback in normalized]
+    if not axes or axes != sorted(axes) or len(axes) != len(set(axes)):
+        raise ResolutionError(
+            "review callbacks must cover unique axes in canonical order"
+        )
+    payload = {
+        "review_operation_id": operation_id,
+        "review_callbacks": normalized,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
 
 
 def _follow_up(value: Any, field: str) -> str:
@@ -123,6 +198,7 @@ class ReviewResolution:
     reviewed_head_sha: str
     resolved_head_sha: str
     resolutions: tuple[FindingResolution, ...]
+    review_identity_sha256: str = ""
 
     def __post_init__(self) -> None:
         if not IDENTIFIER.fullmatch(self.operation_id):
@@ -136,6 +212,10 @@ class ReviewResolution:
         ids = [item.finding_id for item in self.resolutions]
         if not ids or len(ids) > MAX_RESOLUTIONS or len(ids) != len(set(ids)):
             raise ResolutionError("review resolutions must be non-empty and unique")
+        if self.review_identity_sha256 and re.fullmatch(
+            r"[0-9a-f]{64}", self.review_identity_sha256
+        ) is None:
+            raise ResolutionError("review resolution identity digest is invalid")
 
 
 @dataclass(frozen=True)
@@ -199,20 +279,20 @@ def validate_resolution(
     expected_reviewed_head_sha: str,
     expected_resolved_head_sha: str,
     expected_finding_ids: Sequence[str],
+    expected_review_identity_sha256: str = "",
 ) -> ReviewResolution:
     if not isinstance(raw, dict):
         raise ResolutionError("review resolution must be an object")
-    _exact_fields(
-        raw,
-        {
-            "schema_version",
-            "operation_id",
-            "reviewed_head_sha",
-            "resolved_head_sha",
-            "resolutions",
-        },
-        "review resolution",
-    )
+    expected_fields = {
+        "schema_version",
+        "operation_id",
+        "reviewed_head_sha",
+        "resolved_head_sha",
+        "resolutions",
+    }
+    if "review_identity_sha256" in raw:
+        expected_fields.add("review_identity_sha256")
+    _exact_fields(raw, expected_fields, "review resolution")
     if raw.get("schema_version") != SCHEMA_VERSION:
         raise ResolutionError("review resolution schema is unsupported")
     operation_id = _identifier(raw.get("operation_id"), "operation_id")
@@ -226,6 +306,18 @@ def validate_resolution(
         raise ResolutionError("review resolution resolved HEAD changed")
     if reviewed_head == resolved_head:
         raise ResolutionError("review resolution requires a new HEAD")
+    review_identity_sha256 = str(
+        raw.get("review_identity_sha256") or ""
+    )
+    if review_identity_sha256 and re.fullmatch(
+        r"[0-9a-f]{64}", review_identity_sha256
+    ) is None:
+        raise ResolutionError("review resolution identity digest is invalid")
+    if (
+        expected_review_identity_sha256
+        and review_identity_sha256 != expected_review_identity_sha256
+    ):
+        raise ResolutionError("review resolution boundary identity changed")
     rows = raw.get("resolutions")
     if not isinstance(rows, list) or not rows or len(rows) > MAX_RESOLUTIONS:
         raise ResolutionError("review resolutions must be a bounded non-empty list")
@@ -276,7 +368,13 @@ def validate_resolution(
         raise ResolutionError(
             "review resolution must cover every material finding in exact order"
         )
-    return ReviewResolution(operation_id, reviewed_head, resolved_head, tuple(items))
+    return ReviewResolution(
+        operation_id,
+        reviewed_head,
+        resolved_head,
+        tuple(items),
+        review_identity_sha256,
+    )
 
 
 def build_resolution_evidence(

@@ -44,7 +44,11 @@ from .review import (
     verify_review_lane,
 )
 from review_contract import MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
-from review_resolution import ReviewResolutionEvidence
+from review_resolution import (
+    ResolutionError,
+    ReviewResolutionEvidence,
+    review_transport_identity_sha256,
+)
 
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -902,10 +906,21 @@ class ReviewGateController:
                 "reviewed_head_sha": (
                     run.execution.request.context.head_sha
                 ),
+                "review_operation_id": (
+                    run.execution.request.policy.operation_id
+                ),
+                "round_operation_id": round_.operation_id,
+                "round_run_id": round_.run_id,
+                "callback_id": envelope.callback_id,
+                "callback_sha256": envelope.payload_sha256,
+                "material_finding_ids": [
+                    finding.finding_id for finding in material
+                ],
             }
             self._replace(
                 status="awaiting-resolution",
                 awaiting_resolution=awaiting,
+                resolution_transport_identity_sha256="",
                 lanes=[
                     self._lane(item)
                     for item in run.execution.lanes
@@ -1188,16 +1203,30 @@ class ReviewGateController:
             self._mark_attention(run.execution.lanes)
             return ReviewGateDecision("attention-required", lane, round_)
         awaiting = dict(state.get("awaiting_resolution") or {})
+        material_finding_ids = [
+            finding.finding_id
+            for finding in result.findings
+            if finding.severity in MATERIAL_SEVERITIES
+        ]
         awaiting[result.axis] = {
             "pointer": pointer,
             "reviewed_head_sha": (
                 run.execution.request.context.head_sha
             ),
+            "review_operation_id": (
+                run.execution.request.policy.operation_id
+            ),
+            "round_operation_id": round_.operation_id,
+            "round_run_id": round_.run_id,
+            "callback_id": envelope.callback_id,
+            "callback_sha256": envelope.payload_sha256,
+            "material_finding_ids": material_finding_ids,
         }
         self._replace(
             status="awaiting-resolution",
             round_results=rounds,
             awaiting_resolution=awaiting,
+            resolution_transport_identity_sha256="",
             lanes=[self._lane(item) for item in run.execution.lanes],
         )
         return ReviewGateDecision(
@@ -1211,6 +1240,7 @@ class ReviewGateController:
         *,
         context: ReviewContext,
         resolution: ReviewResolutionEvidence,
+        review_identity_sha256: str,
         verification_prompt_pointer: str,
         callback_pointer: str,
         prepare_round: (
@@ -1258,6 +1288,53 @@ class ReviewGateController:
                 or state.get("dispatch_operation_id")
                 or ""
             )
+        expected_review_identity_sha256 = str(
+            state.get("resolution_transport_identity_sha256") or ""
+        )
+        if not expected_review_identity_sha256:
+            review_operation_ids: set[str] = set()
+            review_callbacks: list[dict[str, object]] = []
+            for axis in sorted(awaiting):
+                raw_boundary = awaiting[axis]
+                if not isinstance(raw_boundary, dict):
+                    raise ValueError(
+                        "review resolution boundary identity is invalid"
+                    )
+                review_operation_ids.add(
+                    str(raw_boundary.get("review_operation_id") or "")
+                )
+                review_callbacks.append(
+                    {
+                        "axis": axis,
+                        "round_operation_id": str(
+                            raw_boundary.get("round_operation_id") or ""
+                        ),
+                        "round_run_id": str(
+                            raw_boundary.get("round_run_id") or ""
+                        ),
+                        "callback_id": str(
+                            raw_boundary.get("callback_id") or ""
+                        ),
+                        "callback_sha256": str(
+                            raw_boundary.get("callback_sha256") or ""
+                        ),
+                    }
+                )
+            if len(review_operation_ids) != 1:
+                raise ValueError(
+                    "review resolution operation identity is invalid"
+                )
+            try:
+                expected_review_identity_sha256 = (
+                    review_transport_identity_sha256(
+                        next(iter(review_operation_ids)),
+                        review_callbacks,
+                    )
+                )
+            except ResolutionError as exc:
+                raise ValueError(
+                    "review resolution callback identity is invalid"
+                ) from exc
         if (
             context.head_sha == previous_head
             or context.verification_profile
@@ -1271,6 +1348,8 @@ class ReviewGateController:
         if (
             resolution.operation_id
             != expected_resolution_operation_id
+            or review_identity_sha256
+            != expected_review_identity_sha256
             or resolution.axis != lane.axis
             or resolution.reviewed_head_sha != previous_head
             or resolution.resolved_head_sha != context.head_sha
@@ -1334,6 +1413,9 @@ class ReviewGateController:
                 **dict(state.get("resolution_evidence") or {}),
                 f"{lane.axis}:{lane.verification_iteration}": resolution_pointer,
             },
+            resolution_transport_identity_sha256=(
+                expected_review_identity_sha256
+            ),
             lanes=lanes,
         )
         return ReviewGateDecision("verify", continued, captured[0])
@@ -1356,6 +1438,23 @@ class ReviewGateController:
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
     ) -> ReviewGateRun | None:
+        exact_product = product_root.expanduser().resolve()
+
+        def invalidate_executor_transport() -> None:
+            paths = (
+                exact_product / ".task-review.json",
+                exact_product / ".task-review-resolution.json",
+            )
+            if any(
+                path.is_symlink()
+                or path.exists()
+                and not path.is_file()
+                for path in paths
+            ):
+                raise ValueError("fresh review executor transport is invalid")
+            for path in paths:
+                path.unlink(missing_ok=True)
+
         if (
             max_verify_iterations is not None
             and (
@@ -1392,6 +1491,7 @@ class ReviewGateController:
                 raise ValueError(
                     "fresh review verification budget changed across replay"
                 )
+            invalidate_executor_transport()
             return replay
         if state.get("fresh_reevaluation_used") is True:
             self._mark_attention(run.execution.lanes)
@@ -1455,7 +1555,6 @@ class ReviewGateController:
                 "provider review sessions require the reviewer-callback profile"
             )
         exact_cwd = cwd.expanduser().resolve()
-        exact_product = product_root.expanduser().resolve()
         for identity in review_session_specs(request):
             axis_name = (
                 "standards"
@@ -1482,6 +1581,7 @@ class ReviewGateController:
                 ),
                 callback_wake=callback_wake,
             )
+        invalidate_executor_transport()
         self._replace(
             status="fresh-reevaluation",
             fresh_reevaluation_used=True,
@@ -1508,6 +1608,7 @@ class ReviewGateController:
             final_results={},
             awaiting_resolution={},
             resolution_evidence={},
+            resolution_transport_identity_sha256="",
             evidence={},
         )
         try:

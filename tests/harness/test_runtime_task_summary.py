@@ -39,6 +39,7 @@ from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 from outcome_contract import extract_from_bytes
+from review_resolution import review_transport_identity_sha256
 
 
 ORIGIN = "11111111-1111-1111-1111-111111111111"
@@ -596,9 +597,31 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     handoff.mkdir()
     reviewed_head = "a" * 40
     resolved_head = "b" * 40
+    handoff_review_operation = "review-operation-current"
+    handoff_callbacks = [
+        {
+            "axis": "holistic",
+            "round_operation_id": "round-operation-current",
+            "round_run_id": "round-run-current",
+            "callback_id": "callback-current",
+            "callback_sha256": "c" * 64,
+        }
+    ]
+    handoff_identity = review_transport_identity_sha256(
+        handoff_review_operation, handoff_callbacks
+    )
     handoff_gate = {
+        "active_review_operation_id": handoff_review_operation,
         "awaiting_resolution": {
-            "holistic": {"reviewed_head_sha": reviewed_head}
+            "holistic": {
+                "reviewed_head_sha": reviewed_head,
+                "material_finding_ids": ["F-material"],
+                "review_operation_id": handoff_review_operation,
+                "round_operation_id": "round-operation-current",
+                "round_run_id": "round-run-current",
+                "callback_id": "callback-current",
+                "callback_sha256": "c" * 64,
+            }
         }
     }
     write_json(
@@ -606,6 +629,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         {
             "schema_version": 1,
             "operation_id": TASK,
+            "review_identity_sha256": handoff_identity,
             "reviewed_head_sha": reviewed_head,
             "resolved_head_sha": "",
             "resolutions": [
@@ -632,6 +656,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         {
             "schema_version": 1,
             "operation_id": TASK,
+            "review_identity_sha256": handoff_identity,
             "reviewed_head_sha": reviewed_head,
             "resolved_head_sha": resolved_head,
             "resolutions": [
@@ -647,6 +672,22 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "automatic review drive resumes after the exact durable handoff",
         _review_resolution_handoff_ready(
+            worktree=handoff,
+            operation_id=TASK,
+            gate_state=handoff_gate,
+            current_head=resolved_head,
+        ),
+    )
+    stale_handoff = json.loads(
+        (handoff / ".task-review-resolution.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    stale_handoff["review_identity_sha256"] = "f" * 64
+    write_json(handoff / ".task-review-resolution.json", stale_handoff)
+    check(
+        "automatic review drive rejects a prior-boundary callback identity",
+        not _review_resolution_handoff_ready(
             worktree=handoff,
             operation_id=TASK,
             gate_state=handoff_gate,
@@ -2032,12 +2073,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 )
             )
             gate_state["status"] = "awaiting-resolution"
+            gate_state["active_review_operation_id"] = (
+                "review-operation-current"
+            )
             gate_state["awaiting_resolution"] = {
                 "spec": {
                     "pointer": result_pointer.relative_to(
                         gate_root
                     ).as_posix(),
                     "reviewed_head_sha": head,
+                    "review_operation_id": "review-operation-current",
+                    "round_operation_id": "round-operation-current",
+                    "round_run_id": "round-run-current",
+                    "callback_id": "callback-current",
+                    "callback_sha256": "c" * 64,
+                    "material_finding_ids": ["F-material"],
                 }
             }
             write_json(gate_root / "review-gate.json", gate_state)
@@ -2054,6 +2104,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     time.sleep(0.02)
                 if not packets:
                     return
+                decision_packet = json.loads(
+                    packets[0].read_text(encoding="utf-8")
+                )
                 (worktree / "resolution.txt").write_text(
                     "resolved\n", encoding="utf-8"
                 )
@@ -2081,6 +2134,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     {
                         "schema_version": 1,
                         "operation_id": asynchronous_task,
+                        "review_identity_sha256": decision_packet[
+                            "review_identity_sha256"
+                        ],
                         "reviewed_head_sha": head,
                         "resolved_head_sha": resolved_head,
                         "resolutions": [
@@ -2200,6 +2256,23 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         == ["applied", "out-of-scope", "rejected"]
         and asynchronous_packet_payload["material_finding_ids"]
         == ["F-material"]
+        and asynchronous_packet_payload["review_operation_id"]
+        == "review-operation-current"
+        and asynchronous_packet_payload["review_callbacks"]
+        == [
+            {
+                "axis": "spec",
+                "round_operation_id": "round-operation-current",
+                "round_run_id": "round-run-current",
+                "callback_id": "callback-current",
+                "callback_sha256": "c" * 64,
+            }
+        ]
+        and asynchronous_packet_payload["review_identity_sha256"]
+        == review_transport_identity_sha256(
+            "review-operation-current",
+            asynchronous_packet_payload["review_callbacks"],
+        )
         and asynchronous_packet_payload["resolution_path"]
         == ".task-review-resolution.json",
         asynchronous_packet,

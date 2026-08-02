@@ -83,7 +83,12 @@ from research_contract import (
     validate_result_artifact,
 )
 from lifecycle_telemetry import emit_compiled_pipeline_event, emit_lifecycle_event
-from review_resolution import DISPOSITIONS, MATERIAL_SEVERITIES
+from review_resolution import (
+    DISPOSITIONS,
+    MATERIAL_SEVERITIES,
+    ResolutionError,
+    review_transport_identity_sha256,
+)
 from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary_for_task
 
@@ -122,7 +127,57 @@ def _review_resolution_handoff_ready(
         for boundary in awaiting.values()
         if isinstance(boundary, dict)
     }
-    if len(reviewed_heads) != 1 or "" in reviewed_heads:
+    expected_finding_ids: list[str] = []
+    review_operation_ids: set[str] = set()
+    review_callbacks: list[dict[str, object]] = []
+    for axis in sorted(awaiting):
+        boundary = awaiting[axis]
+        if not isinstance(boundary, dict):
+            return False
+        material_ids = boundary.get("material_finding_ids")
+        if (
+            not isinstance(material_ids, list)
+            or not material_ids
+            or any(
+                not isinstance(finding_id, str) or not finding_id
+                for finding_id in material_ids
+            )
+        ):
+            return False
+        expected_finding_ids.extend(material_ids)
+        review_operation_ids.add(
+            str(boundary.get("review_operation_id") or "")
+        )
+        review_callbacks.append(
+            {
+                "axis": axis,
+                "round_operation_id": str(
+                    boundary.get("round_operation_id") or ""
+                ),
+                "round_run_id": str(
+                    boundary.get("round_run_id") or ""
+                ),
+                "callback_id": str(boundary.get("callback_id") or ""),
+                "callback_sha256": str(
+                    boundary.get("callback_sha256") or ""
+                ),
+            }
+        )
+    active_review_operation_id = str(
+        gate_state.get("active_review_operation_id") or ""
+    )
+    try:
+        review_identity_sha256 = review_transport_identity_sha256(
+            active_review_operation_id, review_callbacks
+        )
+    except ResolutionError:
+        return False
+    if (
+        len(reviewed_heads) != 1
+        or "" in reviewed_heads
+        or len(expected_finding_ids) != len(set(expected_finding_ids))
+        or review_operation_ids != {active_review_operation_id}
+    ):
         return False
     resolution_path = worktree / ".task-review-resolution.json"
     if not resolution_path.is_file() or resolution_path.is_symlink():
@@ -137,8 +192,16 @@ def _review_resolution_handoff_ready(
         or resolution.get("operation_id") != operation_id
         or resolution.get("reviewed_head_sha") != next(iter(reviewed_heads))
         or resolution.get("resolved_head_sha") != current_head
+        or resolution.get("review_identity_sha256")
+        != review_identity_sha256
         or not isinstance(items, list)
         or not items
+        or [
+            item.get("finding_id")
+            for item in items
+            if isinstance(item, dict)
+        ]
+        != expected_finding_ids
     ):
         return False
     return all(
@@ -3041,6 +3104,8 @@ def run(
                     )
                 findings: list[dict[str, object]] = []
                 reviewed_heads: set[str] = set()
+                review_operation_ids: set[str] = set()
+                review_callbacks: list[dict[str, object]] = []
                 for axis in sorted(awaiting):
                     evidence = awaiting[axis]
                     if not isinstance(evidence, dict):
@@ -3074,6 +3139,43 @@ def run(
                         raise RuntimeWorkerError(
                             "review result evidence is invalid"
                         )
+                    material_ids = [
+                        str(finding.get("finding_id") or "")
+                        for finding in rows
+                        if isinstance(finding, dict)
+                        and finding.get("severity") in MATERIAL_SEVERITIES
+                    ]
+                    callback = {
+                        "axis": axis,
+                        "round_operation_id": str(
+                            evidence.get("round_operation_id") or ""
+                        ),
+                        "round_run_id": str(
+                            evidence.get("round_run_id") or ""
+                        ),
+                        "callback_id": str(
+                            evidence.get("callback_id") or ""
+                        ),
+                        "callback_sha256": str(
+                            evidence.get("callback_sha256") or ""
+                        ),
+                    }
+                    if (
+                        evidence.get("material_finding_ids") != material_ids
+                        or any(not str(value) for value in callback.values())
+                        or re.fullmatch(
+                            r"[0-9a-f]{64}",
+                            str(callback["callback_sha256"]),
+                        )
+                        is None
+                    ):
+                        raise RuntimeWorkerError(
+                            "review callback identity is invalid"
+                        )
+                    review_operation_ids.add(
+                        str(evidence.get("review_operation_id") or "")
+                    )
+                    review_callbacks.append(callback)
                     for finding in rows:
                         if not isinstance(finding, dict):
                             raise RuntimeWorkerError(
@@ -3083,15 +3185,32 @@ def run(
                     reviewed_heads.add(
                         str(evidence.get("reviewed_head_sha") or "")
                     )
+                active_review_operation_id = str(
+                    gate_state.get("active_review_operation_id") or ""
+                )
                 if (
                     not findings
                     or len(findings) > 50
                     or len(reviewed_heads) != 1
                     or "" in reviewed_heads
+                    or review_operation_ids
+                    != {active_review_operation_id}
+                    or not active_review_operation_id
                 ):
                     raise RuntimeWorkerError(
                         "review decision packet is invalid"
                     )
+                try:
+                    review_identity_sha256 = (
+                        review_transport_identity_sha256(
+                            active_review_operation_id,
+                            review_callbacks,
+                        )
+                    )
+                except ResolutionError as exc:
+                    raise RuntimeWorkerError(
+                        "review decision packet identity is invalid"
+                    ) from exc
                 material_findings = [
                     finding
                     for finding in findings
@@ -3116,6 +3235,9 @@ def run(
                 packet = {
                     "schema_version": 1,
                     "operation_id": spec["operation_id"],
+                    "review_operation_id": active_review_operation_id,
+                    "review_callbacks": review_callbacks,
+                    "review_identity_sha256": review_identity_sha256,
                     "reviewed_head_sha": reviewed_head,
                     "allowed_dispositions": sorted(DISPOSITIONS),
                     "resolution_path": ".task-review-resolution.json",
@@ -3144,6 +3266,10 @@ def run(
                         or current.get("schema_version") != 1
                         or current.get("operation_id")
                         != spec["operation_id"]
+                        or current.get("review_operation_id")
+                        != active_review_operation_id
+                        or current.get("review_callbacks")
+                        != review_callbacks
                     ):
                         raise RuntimeWorkerError(
                             "review decision packet identity changed"
@@ -3173,6 +3299,10 @@ def run(
                     write_resolution_template = (
                         current_resolution.get("reviewed_head_sha")
                         != reviewed_head
+                        or current_resolution.get(
+                            "review_identity_sha256"
+                        )
+                        != review_identity_sha256
                     )
                 if write_resolution_template:
                     _atomic_json(
@@ -3180,6 +3310,9 @@ def run(
                         {
                             "schema_version": 1,
                             "operation_id": spec["operation_id"],
+                            "review_identity_sha256": (
+                                review_identity_sha256
+                            ),
                             "reviewed_head_sha": reviewed_head,
                             "resolved_head_sha": "",
                             "resolutions": [

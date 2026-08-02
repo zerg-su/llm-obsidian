@@ -72,6 +72,7 @@ from review_resolution import (
     ReviewResolution,
     ReviewResolutionEvidence,
     build_resolution_evidence,
+    review_transport_identity_sha256,
     validate_resolution,
     validate_resolution_evidence,
 )
@@ -101,6 +102,7 @@ class ResolutionBundle(NamedTuple):
     resolution: ReviewResolution
     fix_delta: bytes
     by_axis: Mapping[str, ReviewResolutionEvidence]
+    review_identity_sha256: str
 
 
 class FinalizingRecovery(NamedTuple):
@@ -195,6 +197,8 @@ def _resolution_bundle(
     reviewed_heads: set[str] = set()
     finding_ids_by_axis: dict[str, tuple[str, ...]] = {}
     all_finding_ids: list[str] = []
+    review_operation_ids: set[str] = set()
+    review_callbacks: list[dict[str, object]] = []
     for axis in sorted(awaiting):
         raw_boundary = awaiting[axis]
         if not isinstance(raw_boundary, dict):
@@ -223,10 +227,40 @@ def _resolution_bundle(
         finding_ids_by_axis[str(axis)] = material
         all_finding_ids.extend(material)
         reviewed_heads.add(str(raw_boundary.get("reviewed_head_sha") or ""))
+        review_operation_ids.add(
+            str(raw_boundary.get("review_operation_id") or "")
+        )
+        review_callbacks.append(
+            {
+                "axis": axis,
+                "round_operation_id": str(
+                    raw_boundary.get("round_operation_id") or ""
+                ),
+                "round_run_id": str(
+                    raw_boundary.get("round_run_id") or ""
+                ),
+                "callback_id": str(
+                    raw_boundary.get("callback_id") or ""
+                ),
+                "callback_sha256": str(
+                    raw_boundary.get("callback_sha256") or ""
+                ),
+            }
+        )
     if len(all_finding_ids) != len(set(all_finding_ids)):
         raise TaskReviewError("material finding identities repeat across axes")
     if len(reviewed_heads) != 1 or "" in reviewed_heads:
         raise TaskReviewError("review resolution heads are inconsistent")
+    if len(review_operation_ids) != 1 or "" in review_operation_ids:
+        raise TaskReviewError("review resolution operation is inconsistent")
+    try:
+        review_identity_sha256 = review_transport_identity_sha256(
+            next(iter(review_operation_ids)), review_callbacks
+        )
+    except ResolutionError as exc:
+        raise TaskReviewError(
+            f"review resolution boundary identity is invalid: {exc}"
+        ) from exc
     reviewed_head = next(iter(reviewed_heads))
     resolution_path = worktree / ".task-review-resolution.json"
     if not resolution_path.is_file() or resolution_path.is_symlink():
@@ -239,6 +273,7 @@ def _resolution_bundle(
             expected_reviewed_head_sha=reviewed_head,
             expected_resolved_head_sha=resolved_head,
             expected_finding_ids=tuple(all_finding_ids),
+            expected_review_identity_sha256=review_identity_sha256,
         )
     except ResolutionError as exc:
         raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
@@ -283,7 +318,12 @@ def _resolution_bundle(
         }
     except ResolutionError as exc:
         raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
-    return ResolutionBundle(resolution, fix_delta, by_axis)
+    return ResolutionBundle(
+        resolution,
+        fix_delta,
+        by_axis,
+        review_identity_sha256,
+    )
 
 
 def _recovery_resolution_bundle(
@@ -291,6 +331,7 @@ def _recovery_resolution_bundle(
     task_id: str,
     persisted: ReviewResolutionEvidence,
     resolved_head: str,
+    review_identity_sha256: str = "",
 ) -> ResolutionBundle:
     """Rebuild recovery evidence from the durable reviewer-seen finding set."""
 
@@ -304,6 +345,7 @@ def _recovery_resolution_bundle(
             expected_reviewed_head_sha=persisted.reviewed_head_sha,
             expected_resolved_head_sha=resolved_head,
             expected_finding_ids=persisted.previous_finding_ids,
+            expected_review_identity_sha256=review_identity_sha256,
         )
     except ResolutionError as exc:
         raise TaskReviewError(
@@ -353,6 +395,7 @@ def _recovery_resolution_bundle(
         resolution,
         fix_delta,
         {persisted.axis: evidence},
+        resolution.review_identity_sha256,
     )
 
 
@@ -1546,6 +1589,7 @@ def _finalizing_resubmit_recovery(
         task_id,
         persisted_resolution,
         current_context.head_sha,
+        str(state.get("resolution_transport_identity_sha256") or ""),
     )
     rebuilt_resolution = bundle.by_axis.get("holistic")
     if (
@@ -2211,6 +2255,9 @@ def _run_review(
                 lane,
                 context=context,
                 resolution=bundle.by_axis[lane.axis],
+                review_identity_sha256=(
+                    bundle.review_identity_sha256
+                ),
                 verification_prompt_pointer=pointer,
                 callback_pointer=(
                     _callback_path(runtime_root, lane.axis)
