@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 
@@ -34,6 +35,7 @@ from harness.runtime_worker import (
     _review_resolution_handoff_ready,
     run as run_worker,
 )
+from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
@@ -67,6 +69,51 @@ class FakeCmux:
 
     def send_key(self, surface_id: str, key: str) -> None:
         self.keys.append((surface_id, key))
+
+
+def assert_summary_refresh_notification_replays_without_effect(root: Path) -> None:
+    """Cover the durable replay branch without relying on worker-thread timing."""
+
+    operation_id = "91919191-9191-4191-8191-919191919191"
+    state = root / "summary-refresh-replay"
+    state.mkdir()
+    digest = "b" * 64
+    approved_head = "c" * 40
+    write_json(
+        state / "pipeline-review-resolution-notify.json",
+        {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "reviewed_head_sha": "a" * 40,
+            "summary_sha256": digest,
+            "status": "sent",
+        },
+    )
+    write_json(
+        state / "pipeline-summary-refresh-notify.json",
+        {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "approved_head_sha": approved_head,
+            "summary_sha256": digest,
+            "status": "sent",
+        },
+    )
+    cmux = FakeCmux()
+    worker = SimpleNamespace(
+        spec_path=state / "runtime.json",
+        spec={"operation_id": operation_id, "surface_id": CHILD},
+        digest=digest,
+        cmux_adapter=cmux,
+    )
+    replayed = RuntimeWorkerReviewBridgeMixin.wait_for_summary_refresh_after_resolution(
+        worker,
+        {"context": {"head_sha": approved_head}},
+    )
+    check(
+        "durable summary refresh replay performs no duplicate cmux effect",
+        replayed and cmux.sent == [] and cmux.keys == [],
+    )
 
 
 def write_json(path: Path, value: object) -> None:
@@ -607,6 +654,7 @@ def run_case(
 
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
+    assert_summary_refresh_notification_replays_without_effect(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40
