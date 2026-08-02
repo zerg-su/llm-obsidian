@@ -30,17 +30,19 @@ and upstream subagent orchestration. The pinned sources are:
 
 ## Capability coverage matrix
 
-| Capability | Upstream evidence | Local carrier at `9ff18a9` | Verdict |
+| Capability | Upstream evidence | Local carrier at `9ff18a9` | Transfer / verdict |
 |---|---|---|---|
-| Clarify purpose, constraints, evidence, and non-goals before code | Superpowers `brainstorming`; Matt `to-spec` | `clarify` plus Outcome Contract | **adapted** — stronger outcome identity and minimal user loop |
-| Present alternatives and obtain approval before material architecture changes | Superpowers `brainstorming`; Matt `codebase-design` | `design` | **adapted**, but module-shape vocabulary is missing |
-| Deep modules: small interface, hidden complexity, locality, leverage, explicit seam and adapter | Matt `codebase-design` and `DEEPENING.md` | no independently invokable local skill; `design` only says ownership/test seams | **missing / important** |
-| Detect and safely deepen shallow, tangled, or oversized existing code | Matt `improve-codebase-architecture`; Superpowers design isolation guidance | no local architecture-improvement mode or measurable signal | **missing / important** |
-| Map files to one clear responsibility before task decomposition | Superpowers `writing-plans` | no implementation-plan skill; `save-plan` only persists already-discussed prose | **missing / important** |
-| Declare task interfaces (`consumes`/`produces`) and vertical independently reviewable slices | Superpowers `writing-plans`; Matt `implement` | partial in `design`; not required in executable plans | **missing / important** |
+| Clarify purpose, constraints, evidence, and non-goals before code | Superpowers `brainstorming`; Matt `to-spec` | `clarify` plus Outcome Contract | **adapt** — stronger outcome identity and minimal user loop |
+| Present alternatives and obtain approval before material architecture changes | Superpowers `brainstorming`; Matt `codebase-design` | `design` | **adapt / partial** — module-shape vocabulary is missing |
+| YAGNI/scope minimality: remove unrequired features and speculative extension points | Superpowers `brainstorming`, `writing-plans`, and `receiving-code-review` | minimal production change exists in `tdd`, but no design/plan carrier rejects unnecessary scope | **adapt / missing / important** |
+| Domain modeling: shared language, identity/lifecycle, values, invariants, services, and domain errors/events only where the domain needs them | Matt `domain-modeling` | `design` names domain boundaries and invariants but supplies no modeling decision vocabulary | **adapt / partial / important** |
+| Deep modules: small interface, hidden complexity, locality, leverage, explicit seam and adapter | Matt `codebase-design` and `DEEPENING.md` | no independently invokable local skill; `design` only says ownership/test seams | **adapt / missing / important** |
+| Detect and safely deepen shallow, tangled, or oversized existing code | Matt `improve-codebase-architecture`; Superpowers design isolation guidance | no local architecture-improvement mode or measurable signal | **adapt / missing / important** |
+| Map files to one clear responsibility before task decomposition | Superpowers `writing-plans` | no implementation-plan skill; `save-plan` only persists already-discussed prose | **adapt / missing / important** |
+| Declare task interfaces (`consumes`/`produces`) and vertical independently reviewable slices | Superpowers `writing-plans`; Matt `implement` | partial in `design`; not required in executable plans | **adapt / missing / important** |
 | Red before green, minimal implementation, refactor only while green | both upstream TDD skills | `tdd`; restored and guarded by `9ff18a9` | **adapted**, subject to the compression findings below |
-| Stateful work inventories states/transitions and exhausts a cheap matrix | local 2.6 extension consistent with upstream feedback-loop discipline | `tdd` says matrix is an invariant but dropped the directive to exhaust it | **weakened / important** |
-| Exempt artifacts receive proportional checks without weakening gates | Superpowers TDD exemptions and verification discipline | `tdd` lists exemptions but dropped `never weaken gates` | **weakened / important** |
+| Stateful work inventories states/transitions and exhausts a cheap matrix | local 2.6 extension consistent with upstream feedback-loop discipline | B-TDD-01 and the workstream test claim an exhaustive matrix, but the skill never stated `exhaust` | **adapt / missing / important** |
+| Exempt artifacts receive proportional checks without weakening gates | Superpowers TDD exemptions and verification discipline | `tdd` lists exemptions but omits `never weaken gates` | **adapt / weakened / important** |
 | Tests assert behavior through agreed interfaces and survive refactors | Matt `tdd`/`codebase-design`; Superpowers `writing-good-tests` | `tdd` says observable seam/source-text is not evidence | **partial** — no interface-selection or refactor-survival contract |
 | Expected values are independent; tests reject tautologies/change detectors | Matt TDD; Superpowers `writing-good-tests` | absent | **missing / important** |
 | Mocks isolate slow/external adapters, preserve real side effects, and earn no assertions | Matt `DEEPENING.md`/TDD; Superpowers `writing-good-tests` | only `Mock provider/transport; keep state transitions real` | **partial / important** |
@@ -52,8 +54,8 @@ and upstream subagent orchestration. The pinned sources are:
 | Review verifies feedback against code reality and supports reasoned rejection | Superpowers `receiving-code-review` | typed `applied`/`rejected`/`out-of-scope` resolution | **adapted**, but skill should point to technical-evidence criteria |
 | Evidence before completion claims | Superpowers `verification-before-completion` | Outcome Contract, verification profiles, review and reap | **adapted and stronger** |
 | Skill edits use behavioral RED/GREEN/REFACTOR pressure scenarios | Superpowers `writing-skills`; system skill creator | mostly source-text/structural tests plus two paired workflows | **partial / important** |
-| Skill audit detects missing upstream capability, not only drift in installed semantics | Matt `writing-great-skills`; release integration goal | `improve-skills` explicitly defers every semantic expansion | **missing / critical to this integration** |
-| Mechanical quality signals are automated; judgment remains in skills | Superpowers `writing-skills`; Matt deep-module model | coverage ratchet exists, but no file/function responsibility or complexity ratchet | **missing / important** |
+| Skill audit detects missing upstream capability, not only drift in installed semantics | Matt `writing-great-skills`; release integration goal | `improve-skills` explicitly defers every semantic expansion | **adapt / missing / critical to this integration** |
+| Mechanical quality signals are automated; judgment remains in skills | Superpowers `writing-skills`; Matt deep-module model | coverage ratchet exists, but no file/function responsibility or complexity ratchet | **adapt / missing / important** |
 
 ## Why the previous audit gave a false complete result
 
@@ -164,8 +166,13 @@ The 5,541-line `runtime_worker.py` contains a roughly 4,460-line `run()` with
 callback, fix transport, custom pipeline, research, summary, and liveness
 responsibilities. Extract pure policy/validation/receipt/transition logic first
 under characterization tests, then thin provider/process/callback adapters.
-Apply the same cohesion audit to `review_gate.py`, `runtime_sessions.py`,
-`review.py`, `custom_pipelines.py`, `research.py`, and `engineering_fix.py`.
+Apply the same cohesion audit to
+`scripts/harness/workflows/review_gate.py`,
+`scripts/harness/runtime_sessions.py`,
+`scripts/harness/workflows/review.py`,
+`scripts/harness/custom_pipelines.py`,
+`scripts/harness/workflows/research.py`, and
+`scripts/harness/workflows/engineering_fix.py`.
 
 Stop conditions:
 
@@ -195,8 +202,9 @@ Stop conditions:
 
 ## Audit disposition
 
-The previous statement “all retained edits map to frozen findings and no further
-evidenced skill edit is required” is superseded. It remains true only for the
-old behavior-preserving audit boundary. Relative to the release's clarified
-engineering-quality outcome, the important and critical gaps above are in
-scope for 2.6 and must be resolved before final deep review.
+The earlier conclusions “Every retained edit maps to one frozen finding” and
+“no further evidenced skill edit is required at this boundary” in
+`docs/skill-quality-post-audit-v2.6.0.md` are superseded. They remain true only
+for the old behavior-preserving audit boundary. Relative to the release's
+clarified engineering-quality outcome, the important and critical gaps above
+are in scope for 2.6 and must be resolved before final deep review.

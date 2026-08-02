@@ -34,6 +34,13 @@ verdict/findings; callbacks, clean diffs, and local green are not outcome proof.
 The standards axis stays independent. Add no lane, surface, model call,
 severity cap, reranking, or loop.
 
+For standards/correctness/architecture review, read
+[`engineering-quality-contract.md`](../../docs/skill-references/engineering-quality-contract.md)
+completely. Repository-specific standards override its heuristics, but their
+absence never suppresses maintainability or test-quality judgment. Verify each
+finding against code reality; reasoned rejection requires technical evidence,
+not deference or wording preference.
+
 ## Flow
 
 1. Run the state facade. For a dispatched v3/v4 task:

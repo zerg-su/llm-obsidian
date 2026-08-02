@@ -6,6 +6,8 @@ description: Implement approved behavior through red-green slices. Use for clear
 # TDD
 
 Confirm edit authorization. Red→green; refactor only when green.
+Read [test-quality.md](references/test-quality.md) completely whenever writing
+or changing tests, fakes, or mocks.
 
 vertical slice:
 1. Before test, name production change to fail.

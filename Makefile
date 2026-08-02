@@ -234,6 +234,8 @@ test-skill-workstreams:
 	@python3 tests/test_skill_workstream_b.py
 	@echo "=== test_workstream_c_review_reap.py ==="
 	@python3 tests/test_workstream_c_review_reap.py
+	@echo "=== test_engineering_quality_skills.py ==="
+	@python3 tests/test_engineering_quality_skills.py
 
 test-skill-budget:
 	@echo "=== test_skill_budget.py ==="

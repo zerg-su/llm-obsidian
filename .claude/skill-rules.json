@@ -100,6 +100,25 @@
       "hint": "Read-only alternatives and invariants before implementation"
     },
     {
+      "skill": "codebase-design",
+      "patterns": [
+        "(?i)\\b(codebase|module) design\\b",
+        "(?i)\\b(deep module|module boundar(?:y|ies)|test seam)\\b",
+        "(?i)\\b(refactor|extract|split)\\b.{0,45}\\b(oversized|tangled|monolith|orchestrator|module)\\b",
+        "(?i)\\b(границ\\w* модул|глубок\\w* модул|разбить|выделить)\\b.{0,45}\\b(код|модул|оркестратор|монолит)\\b"
+      ],
+      "hint": "Read-only deep-module boundaries, durable interfaces, and owned test seams"
+    },
+    {
+      "skill": "implementation-plan",
+      "patterns": [
+        "(?i)\\bimplementation plan\\b.{0,50}\\b(files?|ownership|slices?|interfaces?|consumes|produces|tdd)\\b",
+        "(?i)\\b(plan|break down)\\b.{0,40}\\b(vertical slices?|file ownership|consumes|produces)\\b",
+        "(?i)\\bплан реализац\\w*\\b.{0,50}\\b(файл\\w*|ответственност\\w*|слайс\\w*|интерфейс\\w*|тест\\w*)\\b"
+      ],
+      "hint": "Read-only file ownership and consumes/produces TDD slices bound to outcome evidence"
+    },
+    {
       "skill": "prototype",
       "patterns": [
         "(?i)(?:^|\\s)/prototype(?:\\s|$)",

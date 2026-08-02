@@ -28,7 +28,17 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
-names = ("debug", "tdd", "design", "prototype", "resolve-conflict", "review", "research")
+names = (
+    "debug",
+    "tdd",
+    "design",
+    "codebase-design",
+    "implementation-plan",
+    "prototype",
+    "resolve-conflict",
+    "review",
+    "research",
+)
 descriptions: set[str] = set()
 skill_text: dict[str, str] = {}
 for name in names:
@@ -75,6 +85,8 @@ completion_markers = {
     "debug": "report residual uncertainty",
     "tdd": "Commit a runnable slice",
     "design": "testable acceptance criteria",
+    "codebase-design": "approved module map",
+    "implementation-plan": "every requirement/evidence item maps",
     "prototype": "decision is durably captured",
     "resolve-conflict": "Report the proposed exact stage list",
     "review": "archive",
@@ -107,6 +119,8 @@ check(
             "debug-EN",
             "tdd-EN",
             "design-EN",
+            "codebase-design-EN",
+            "implementation-plan-EN",
             "prototype-EN",
             "conflict-EN",
             "fp-debug-symbols",

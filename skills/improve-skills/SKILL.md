@@ -27,6 +27,12 @@ boundaries, tools, scripts, schemas, lifecycle, writer paths, and runtime
 orchestration. A quality edit may clarify or compress these contracts; changing
 one is a separate product change and stays deferred.
 
+For an explicit capability-integration audit against named references, also
+read [capability-gap-model.md](references/capability-gap-model.md) completely.
+Classify the reference denominator before judging the installed inventory. No
+relevant reference capability remains unclassified; this integration mode may
+propose bounded new carriers, but it does not silently authorize implementation.
+
 Completion criterion: every in-scope `skills/*/SKILL.md` is in the inventory
 and every protected behavior is named before a file is changed.
 

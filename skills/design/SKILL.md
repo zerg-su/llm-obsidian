@@ -19,6 +19,8 @@ Separate fact/assumption/decision; distinguish Unresolved fog from explicit
 out-of-scope. No placeholders/undefined interfaces; name owners/contracts.
 
 Default to vertical slices; use expand-contract only for wide migration.
+Apply YAGNI: choose the smallest design that establishes declared evidence;
+leave unrequired features, compatibility, and extension points as non-goals.
 
 Get approval before implementation or interface/migration/dependency/security/
 external-effect change.

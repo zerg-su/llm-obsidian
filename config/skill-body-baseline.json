@@ -37,6 +37,13 @@
       "closure_token_estimate": 434,
       "token_estimate": 434
     },
+    "codebase-design": {
+      "body_bytes": 1731,
+      "body_lines": 33,
+      "closure_bytes": 1731,
+      "closure_token_estimate": 433,
+      "token_estimate": 433
+    },
     "daily": {
       "body_bytes": 3839,
       "body_lines": 98,
@@ -45,11 +52,11 @@
       "token_estimate": 960
     },
     "debug": {
-      "body_bytes": 860,
-      "body_lines": 16,
-      "closure_bytes": 860,
-      "closure_token_estimate": 215,
-      "token_estimate": 215
+      "body_bytes": 931,
+      "body_lines": 17,
+      "closure_bytes": 931,
+      "closure_token_estimate": 233,
+      "token_estimate": 233
     },
     "defuddle": {
       "body_bytes": 2665,
@@ -59,11 +66,11 @@
       "token_estimate": 667
     },
     "design": {
-      "body_bytes": 791,
-      "body_lines": 19,
-      "closure_bytes": 791,
-      "closure_token_estimate": 198,
-      "token_estimate": 198
+      "body_bytes": 944,
+      "body_lines": 21,
+      "closure_bytes": 944,
+      "closure_token_estimate": 236,
+      "token_estimate": 236
     },
     "dispatch": {
       "body_bytes": 8031,
@@ -93,12 +100,19 @@
       "closure_token_estimate": 1687,
       "token_estimate": 1687
     },
+    "implementation-plan": {
+      "body_bytes": 1706,
+      "body_lines": 31,
+      "closure_bytes": 1706,
+      "closure_token_estimate": 427,
+      "token_estimate": 427
+    },
     "improve-skills": {
-      "body_bytes": 3929,
-      "body_lines": 94,
-      "closure_bytes": 9379,
-      "closure_token_estimate": 2345,
-      "token_estimate": 983
+      "body_bytes": 4322,
+      "body_lines": 100,
+      "closure_bytes": 11008,
+      "closure_token_estimate": 2752,
+      "token_estimate": 1081
     },
     "journal": {
       "body_bytes": 2464,
@@ -157,11 +171,11 @@
       "token_estimate": 185
     },
     "review": {
-      "body_bytes": 3416,
-      "body_lines": 62,
-      "closure_bytes": 3416,
-      "closure_token_estimate": 854,
-      "token_estimate": 854
+      "body_bytes": 3837,
+      "body_lines": 69,
+      "closure_bytes": 3837,
+      "closure_token_estimate": 960,
+      "token_estimate": 960
     },
     "save": {
       "body_bytes": 11970,
@@ -178,11 +192,11 @@
       "token_estimate": 1217
     },
     "tdd": {
-      "body_bytes": 863,
-      "body_lines": 16,
-      "closure_bytes": 863,
-      "closure_token_estimate": 216,
-      "token_estimate": 216
+      "body_bytes": 1009,
+      "body_lines": 18,
+      "closure_bytes": 2850,
+      "closure_token_estimate": 713,
+      "token_estimate": 253
     },
     "unsafe-research": {
       "body_bytes": 1497,
