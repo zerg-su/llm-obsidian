@@ -5,17 +5,17 @@ description: Implement approved behavior through red-green slices. Use for clear
 
 # TDD
 
-Confirm edit authorization.
+Confirm edit authorization. Red→green; refactor only when green.
 
 vertical slice:
-1. Before test, name production change that should fail.
-2. Add test that fails at observable seam; source-text is not behavior evidence.
-3. Regression red: pre-fix disposable worktree/saved base; never destructive reset.
-4. Smallest change that makes it pass; run affected integration checks.
-5. Bind green to declared success evidence, not task completion; gaps explicit.
+1. Before test, name production change to fail.
+2. Write test that fails at observable seam; source-text is not behavior evidence.
+3. Regression red: pre-fix saved base/disposable worktree; no destructive reset.
+4. Minimal change makes it pass; run affected integration checks.
+5. Bind green to declared success evidence, not task completion; explicit gaps.
 6. Commit a runnable slice.
 
-Stateful/workflow-heavy: inventory states/transitions; exhaust a fast deterministic matrix as release invariant.
+Stateful/workflow-heavy: inventory states/transitions; fast deterministic matrix is release invariant.
 Coverage denominator includes never-executed lines; observed-only is not coverage evidence. Mock provider/transport; keep state transitions real.
 
-Exempt pure documentation, deterministic generated output, disposable prototypes, mechanical moves: record proportional check; never weaken gates
+Exempt with recorded proportional check: pure documentation, deterministic generated output, disposable prototypes, mechanical moves.

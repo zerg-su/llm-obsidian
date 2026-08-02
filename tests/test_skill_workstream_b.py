@@ -135,6 +135,11 @@ def main() -> int:
         failures,
     )
     check(
+        "TDD preserves the red-green-refactor safety boundary",
+        has_clause(tdd, r"red", r"green", r"refactor", r"only", r"green"),
+        failures,
+    )
+    check(
         "regression red uses preserved pre-fix state without destructive reset",
         has_clause(tdd, r"regression", r"red", r"pre-fix", r"disposable|saved base|preserved base", r"destructive reset"),
         failures,
