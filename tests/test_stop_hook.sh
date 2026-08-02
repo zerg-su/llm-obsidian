@@ -25,6 +25,11 @@ mkdir -p "$SANDBOX/wiki" "$SANDBOX/.raw" "$SANDBOX/.vault-meta" \
   "$SANDBOX/.claude-memory" "$SANDBOX/scripts"
 cp "$ROOT/scripts/stop-hook.py" "$ROOT/scripts/reindex.py" \
    "$ROOT/scripts/vault_schema.py" "$ROOT/scripts/vault-write.py" \
+   "$ROOT/scripts/vault_write_contract.py" \
+   "$ROOT/scripts/vault_write_mutations.py" \
+   "$ROOT/scripts/vault_write_pages.py" \
+   "$ROOT/scripts/vault_write_rendering.py" \
+   "$ROOT/scripts/vault_write_transaction.py" \
    "$ROOT/scripts/plan_lifecycle.py" \
    "$ROOT/scripts/validate-vault.py" "$ROOT/scripts/bm25-index.py" \
    "$ROOT/scripts/retrieve.py" "$ROOT/scripts/memory-backup.py" \

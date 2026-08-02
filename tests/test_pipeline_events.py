@@ -334,7 +334,10 @@ def run() -> None:
         check("Claude-only section explicit", "## Claude-only skill telemetry" in result.stdout)
 
         for filename in (
-            "vault-write.py", "plan_lifecycle.py", "vault_schema.py", "pipeline_events.py"
+            "vault-write.py", "vault_write_contract.py", "vault_write_mutations.py",
+            "vault_write_pages.py", "vault_write_rendering.py",
+            "vault_write_transaction.py", "plan_lifecycle.py", "vault_schema.py",
+            "pipeline_events.py",
         ):
             shutil.copy2(ROOT / "scripts" / filename, root / "scripts" / filename)
         report_run = subprocess.run(

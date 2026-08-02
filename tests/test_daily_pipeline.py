@@ -78,6 +78,8 @@ def copy_runtime(root: Path) -> None:
     for name in (
         "daily_contract.py", "daily_timing.py", "daily-apply.py", "daily-collect.py",
         "daily-summary-save.py", "journal-write.py", "vault-write.py",
+        "vault_write_contract.py", "vault_write_mutations.py", "vault_write_pages.py",
+        "vault_write_rendering.py", "vault_write_transaction.py",
         "plan_lifecycle.py", "vault_schema.py", "pipeline_events.py", "session-map.py",
     ):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)

@@ -10,6 +10,11 @@ mkdir -p "$TMP/.claude/hooks" "$TMP/scripts" "$TMP/wiki" "$TMP/.vault-meta"
 cp "$ROOT/.claude/hooks/plan-capture.sh" "$TMP/.claude/hooks/"
 cp "$ROOT/scripts/allocate-address.sh" "$ROOT/scripts/allocate-address.py" \
    "$ROOT/scripts/vault-write.py" "$ROOT/scripts/vault_schema.py" \
+   "$ROOT/scripts/vault_write_contract.py" \
+   "$ROOT/scripts/vault_write_mutations.py" \
+   "$ROOT/scripts/vault_write_pages.py" \
+   "$ROOT/scripts/vault_write_rendering.py" \
+   "$ROOT/scripts/vault_write_transaction.py" \
    "$ROOT/scripts/plan_lifecycle.py" \
    "$ROOT/scripts/pipeline_events.py" "$TMP/scripts/"
 chmod +x "$TMP/.claude/hooks/plan-capture.sh" "$TMP/scripts/"*.py "$TMP/scripts/"*.sh

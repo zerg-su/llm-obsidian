@@ -35,6 +35,8 @@ with tempfile.TemporaryDirectory(prefix="journal-write-test.") as raw:
     (root / ".vault-meta").mkdir()
     for name in (
         "agenda.py", "daily_contract.py", "journal-write.py", "vault-write.py",
+        "vault_write_contract.py", "vault_write_mutations.py", "vault_write_pages.py",
+        "vault_write_rendering.py", "vault_write_transaction.py",
         "plan_lifecycle.py", "vault_schema.py", "pipeline_events.py",
     ):
         shutil.copy2(ROOT / "scripts" / name, root / "scripts" / name)

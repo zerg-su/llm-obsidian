@@ -17,6 +17,11 @@ trap 'rm -rf "$SANDBOX"' EXIT
 
 mkdir -p "$SANDBOX/scripts" "$SANDBOX/wiki/plans" "$SANDBOX/wiki/questions" "$SANDBOX/.vault-meta"
 cp "$REPO_ROOT/scripts/vault-write.py" \
+   "$REPO_ROOT/scripts/vault_write_contract.py" \
+   "$REPO_ROOT/scripts/vault_write_mutations.py" \
+   "$REPO_ROOT/scripts/vault_write_pages.py" \
+   "$REPO_ROOT/scripts/vault_write_rendering.py" \
+   "$REPO_ROOT/scripts/vault_write_transaction.py" \
    "$REPO_ROOT/scripts/plan_lifecycle.py" \
    "$REPO_ROOT/scripts/pipeline_events.py" \
    "$REPO_ROOT/scripts/validate-vault.py" \
