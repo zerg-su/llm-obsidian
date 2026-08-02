@@ -3323,7 +3323,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and stopped_fixture_status == "stopped",
         )
         try:
-            post_stop_review = task_review_runner.run_current_review(
+            task_review_runner.run_current_review(
                 product,
                 deep=True,
                 cross_model=True,
@@ -3338,15 +3338,50 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 runtime_manager=current_runtime,
             )
         except task_review_runner.TaskReviewError as exc:
-            post_stop_review = None
-            post_stop_error = str(exc)
+            policy_only_guarded = "another preset or override" in str(exc)
         else:
-            post_stop_error = ""
+            policy_only_guarded = False
         check(
-            "stopped stale release review permits a new exact boundary"
-            + (f": {post_stop_error}" if post_stop_error else ""),
-            post_stop_review is not None
-            and post_stop_review["status"] == "reviewing"
+            "stopped release review rejects a policy-only retry",
+            policy_only_guarded,
+        )
+        (product / "product.py").write_text("VALUE = 3\n", encoding="utf-8")
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "advance after stopped release review"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        post_stop_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        post_stop_boundary = replace(
+            release_boundary,
+            integration_head_sha=post_stop_head,
+        )
+        post_stop_boundary_path = base / "post-stop-release-boundary.json"
+        post_stop_boundary_path.write_text(
+            json.dumps(post_stop_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        post_stop_review = task_review_runner.run_current_review(
+            product,
+            purpose="release",
+            boundary_input_file=post_stop_boundary_path,
+            plan_file=review_plan,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "stopped stale release review permits a changed HEAD and boundary",
+            post_stop_review["status"] == "reviewing"
             and post_stop_review["task_id"] != release_started["task_id"],
         )
         if post_stop_review is not None:
@@ -3356,7 +3391,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         stale_boundary_path.write_text(
             json.dumps(
                 replace(
-                    release_boundary,
+                    post_stop_boundary,
                     accepted_deviations_sha256="f" * 64,
                 ).payload(),
                 sort_keys=True,

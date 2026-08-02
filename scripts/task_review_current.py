@@ -122,6 +122,29 @@ def _same_requested_policy(
     )
 
 
+def _stopped_release_boundary_changed(
+    stored: Mapping[str, Any] | object,
+    requested: Mapping[str, Any],
+    *,
+    bound_head: str,
+    current_head: str,
+) -> bool:
+    if not isinstance(stored, Mapping) or bound_head == current_head:
+        return False
+    if (
+        str(stored.get("purpose") or "implementation") != "release"
+        or str(requested.get("purpose") or "implementation") != "release"
+    ):
+        return False
+    stored_boundary = str(stored.get("boundary_input_sha256") or "")
+    requested_boundary = str(requested.get("boundary_input_sha256") or "")
+    return bool(
+        stored_boundary
+        and requested_boundary
+        and stored_boundary != requested_boundary
+    )
+
+
 def run_current_review(
     worktree: Path,
     *,
@@ -199,11 +222,20 @@ def run_current_review(
                 if isinstance(bound, dict)
                 else ""
             )
+            current_head = _git(worktree, "rev-parse", "HEAD")
             terminal_stale = (
-                status in {"approved", "skipped", "stopped"}
+                status in {"approved", "skipped"}
                 and (
-                    bound_head != _git(worktree, "rev-parse", "HEAD")
+                    bound_head != current_head
                     or not same_policy
+                )
+            ) or (
+                status == "stopped"
+                and _stopped_release_boundary_changed(
+                    stored_policy,
+                    requested_policy,
+                    bound_head=bound_head,
+                    current_head=current_head,
                 )
             ) or (
                 status == "attention-required"
