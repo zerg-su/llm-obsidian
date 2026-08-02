@@ -25,52 +25,12 @@ from live_acceptance_runtime import (
     _read_callback,
     _result_record,
 )
-
-
-def _axis_directory(axis: str) -> str:
-    return (
-        "standards"
-        if axis == "standards-correctness-architecture-security"
-        else axis
-    )
-
-
-def _review_probe_prompt(callback_root: str, product_root: Path) -> str:
-    return (
-        "This is a bounded product-read-only review transport probe. "
-        "Do not edit tracked repository files and do not start another model. "
-        "Use only the owner-scoped reviewer callback scratch below. Copy the "
-        "exact contents of expected.json atomically to its sibling "
-        ".review-callback.json, then wait for coordinator cleanup.\n\n"
-        f"Callback scratch root: {callback_root}\n"
-        f"Reviewed product root (read-only): {product_root}\n"
-        "For a holistic session use holistic/expected.json. For the deep "
-        "Claude spec session use spec/expected.json. For the deep Codex "
-        "correctness session use standards/expected.json.\n"
-    )
-
-
-def _review_scratch(root: Path, commit_sha: str, cell_id: str) -> Path:
-    scratch_base = (
-        Path(tempfile.gettempdir())
-        / f"llm-obsidian-live-review-{os.getuid()}"
-    )
-    if scratch_base.is_symlink():
-        raise LiveDriverError("review callback scratch cannot be a symlink")
-    scratch_base.mkdir(parents=True, exist_ok=True)
-    scratch_base.chmod(0o700)
-    scratch = scratch_base
-    for component in (
-        _stable_id(str(root), length=32),
-        commit_sha,
-        cell_id,
-    ):
-        scratch = scratch / component
-        if scratch.is_symlink():
-            raise LiveDriverError("review callback scratch cannot contain symlinks")
-        scratch.mkdir(exist_ok=True)
-        scratch.chmod(0o700)
-    return scratch.resolve()
+from live_acceptance_review_probe import (
+    axis_directory as _axis_directory,
+    prepare_review_probe_lane,
+    review_probe_prompt as _review_probe_prompt,
+    review_scratch as _review_scratch,
+)
 
 
 def _dispatch_ack(operation_id: str) -> dict[str, object]:
@@ -171,14 +131,6 @@ def _run_review_sessions(
         directory = scratch / callback_root / _axis_directory(axis)
         directory.mkdir(parents=True, exist_ok=True)
         directory.chmod(0o700)
-    _atomic_text(
-        scratch / prompt_pointer,
-        _review_probe_prompt(
-            (scratch / callback_root).resolve().as_posix(),
-            root,
-        ),
-    )
-
     if deep:
         planned = {
             "spec": _PlannedOperation(
@@ -194,6 +146,14 @@ def _run_review_sessions(
                 "simple-review", "claude", "composition"
             )
         }
+    _atomic_text(
+        scratch / prompt_pointer,
+        _review_probe_prompt(
+            (scratch / callback_root).resolve(),
+            root,
+            axes,
+        ),
+    )
     axis_routes = {
         axis: _route(root, operation) for axis, operation in planned.items()
     }
@@ -223,20 +183,20 @@ def _run_review_sessions(
     def prepare_lane(
         axis: str,
         session_request: object,
-        _result: object,
+        result: object,
         round_: object,
     ) -> None:
-        result = ReviewResult(axis, "approve", verification_iteration=0)
-        envelope = review_round_envelope(round_, result)
-        callback_path = scratch / str(session_request.callback_pointer)
-        _atomic_text(
-            callback_path.with_name("expected.json"),
-            json.dumps(
-                to_dict(envelope),
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            + "\n",
+        prepare_review_probe_lane(
+            scratch=scratch,
+            callback_pointer=str(session_request.callback_pointer),
+            runtime_result=result,
+            round_=round_,
+            axis=axis,
+            base_id=base_id,
+            deep=deep,
+            root=root,
+            commit_sha=commit_sha,
+            fingerprint=fingerprint,
         )
 
     gate_root = scratch / base_id / "gate"

@@ -467,6 +467,37 @@ class FakeRuntimeSessions:
                 Path(declared_root).is_absolute()
                 and Path(declared_root) == callback_root,
             )
+            callback_dir = (request.cwd / request.callback_pointer).parent
+            check(
+                "review probe materializes code-owned submit metadata",
+                (callback_dir / ".review-meta.json").is_file(),
+            )
+            check(
+                "review probe materializes a bounded round input template",
+                json.loads(
+                    (callback_dir / "input-template.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                == {
+                    "schema_version": 1,
+                    "axis": json.loads(
+                        (callback_dir / ".review-meta.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )["axis"],
+                    "verdict": "approve",
+                    "verification_iteration": 0,
+                    "findings": [],
+                },
+            )
+            check(
+                "review probe uses the code-owned submit boundary",
+                "input-template.json" in prompt
+                and ".review-input.json" in prompt
+                and "review_submit.py" in prompt
+                and "Never write .review-callback.json directly" in prompt,
+            )
         target = self.callback_targets.get(key)
         if target is None:
             if spec.kind == "dispatch":
@@ -484,8 +515,24 @@ class FakeRuntimeSessions:
         else:
             _child_id, _child_run, pointer = target
             callback_pointer = request.cwd / pointer
-            expected = callback_pointer.with_name("expected.json")
-            callback_pointer.write_bytes(expected.read_bytes())
+            from harness.review_submit import (
+                FileCallbackPort,
+                submit_review,
+            )
+
+            callback_dir = callback_pointer.parent
+            submit_review(
+                (callback_dir / "input-template.json").read_text(
+                    encoding="utf-8"
+                ),
+                meta=json.loads(
+                    (callback_dir / ".review-meta.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+                worktree=request.product_root,
+                port=FileCallbackPort(callback_pointer),
+            )
         return result
 
     def register_callback_target(
