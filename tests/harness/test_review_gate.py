@@ -3361,6 +3361,35 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             capture_output=True,
             text=True,
         ).stdout.strip()
+        post_stop_implementation = replace(
+            current_boundary,
+            product_head_sha=post_stop_head,
+        )
+        post_stop_implementation_path = (
+            base / "post-stop-implementation-boundary.json"
+        )
+        post_stop_implementation_path.write_text(
+            json.dumps(post_stop_implementation.payload(), sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        implementation_cycle = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            purpose="implementation",
+            boundary_input_file=post_stop_implementation_path,
+            plan_file=review_plan,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "stopped release permits one exact implementation checkpoint",
+            implementation_cycle["status"] == "reviewing"
+            and implementation_cycle["task_id"]
+            != release_started["task_id"],
+        )
+        quiesce_operations(current_store, implementation_cycle["task_id"])
         post_stop_boundary = replace(
             release_boundary,
             integration_head_sha=post_stop_head,

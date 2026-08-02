@@ -7,7 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from harness.review_program import PURPOSES as REVIEW_PURPOSES
+from harness.review_program import (
+    PURPOSES as REVIEW_PURPOSES,
+    ReviewBoundaryInput,
+)
 from harness.review_program_authority import stale_resolution_boundary
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
@@ -145,6 +148,35 @@ def _stopped_release_boundary_changed(
     )
 
 
+def _stopped_release_enters_implementation(
+    stored: Mapping[str, Any] | object,
+    requested: Mapping[str, Any],
+    boundary: ReviewBoundaryInput | None,
+    *,
+    current_head: str,
+) -> bool:
+    if (
+        not isinstance(stored, Mapping)
+        or boundary is None
+        or boundary.purpose != "implementation"
+        or boundary.product_head_sha != current_head
+    ):
+        return False
+    if (
+        str(stored.get("purpose") or "implementation") != "release"
+        or str(requested.get("purpose") or "implementation")
+        != "implementation"
+    ):
+        return False
+    stored_boundary = str(stored.get("boundary_input_sha256") or "")
+    requested_boundary = str(requested.get("boundary_input_sha256") or "")
+    return bool(
+        stored_boundary
+        and requested_boundary
+        and stored_boundary != requested_boundary
+    )
+
+
 def run_current_review(
     worktree: Path,
     *,
@@ -235,6 +267,14 @@ def run_current_review(
                     stored_policy,
                     requested_policy,
                     bound_head=bound_head,
+                    current_head=current_head,
+                )
+            ) or (
+                status == "stopped"
+                and _stopped_release_enters_implementation(
+                    stored_policy,
+                    requested_policy,
+                    boundary_input,
                     current_head=current_head,
                 )
             ) or (
