@@ -15,7 +15,7 @@ vertical slice:
 5. Bind green to declared success evidence, not task completion; explicit gaps.
 6. Commit a runnable slice.
 
-Stateful/workflow-heavy: inventory states/transitions; fast deterministic matrix is release invariant.
+Stateful/workflow-heavy: inventory states/transitions; exhaust a fast deterministic matrix as a release invariant.
 Coverage denominator includes never-executed lines; observed-only is not coverage evidence. Mock provider/transport; keep state transitions real.
 
-Exempt with recorded proportional check: pure documentation, deterministic generated output, disposable prototypes, mechanical moves.
+Exempt with recorded proportional check: pure documentation, deterministic generated output, disposable prototypes, mechanical moves; never weaken gates.

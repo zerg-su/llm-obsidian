@@ -46,6 +46,7 @@ test-harness:
 
 test-harness-coverage:
 	@echo "=== hermetic harness statement-line coverage ==="
+	@python3 tests/test_harness_coverage_audit.py
 	@python3 scripts/harness-coverage-audit.py
 
 test-task-sessions:

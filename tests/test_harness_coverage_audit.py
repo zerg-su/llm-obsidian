@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Unit contracts for the hermetic harness coverage audit."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "harness_coverage_audit",
+    ROOT / "scripts" / "harness-coverage-audit.py",
+)
+assert SPEC and SPEC.loader
+audit = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(audit)
+
+
+assert audit.coverage_percent(0, 0) == 100.0
+assert audit.coverage_percent(3, 4) == 75.0
+assert round(audit.coverage_percent(1, 3), 2) == 33.33
+
+missing_lines = audit.critical_report_lines({})
+assert len(missing_lines) == len(audit.CRITICAL_FLOORS)
+assert all("missing from report" in line for line in missing_lines)
+
+matrix_output = "\n".join(
+    (
+        "OK   operation state matrix covers every source/target pair",
+        "release transition matrix passed: 4370 cases",
+    )
+)
+assert audit.transition_matrix_case_count(matrix_output) == 4370
+
+try:
+    audit.transition_matrix_case_count("release transition matrix passed")
+except ValueError as exc:
+    assert "case count" in str(exc)
+else:
+    raise AssertionError("missing matrix case count was accepted")
+
+print("harness coverage audit unit contracts passed")

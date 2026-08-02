@@ -136,7 +136,7 @@ def main() -> int:
     )
     check(
         "TDD preserves the red-green-refactor safety boundary",
-        has_clause(tdd, r"red", r"green", r"refactor", r"only", r"green"),
+        has_clause(tdd, r"refactor[^.;]*only[^.;]*green"),
         failures,
     )
     check(
@@ -145,8 +145,17 @@ def main() -> int:
         failures,
     )
     check(
-        "non-executable exemptions receive a recorded proportional check",
-        has_clause(tdd, r"exempt", r"proportional", r"check", r"record"),
+        "non-executable exemptions receive a recorded proportional check without weakening gates",
+        has_clause(
+            tdd,
+            r"exempt",
+            r"proportional",
+            r"check",
+            r"record",
+            r"never",
+            r"weaken",
+            r"gate",
+        ),
         failures,
     )
     check(
@@ -163,6 +172,7 @@ def main() -> int:
             r"inventory",
             r"states",
             r"transitions",
+            r"exhaust",
             r"fast deterministic matrix",
             r"release invariant",
         ),

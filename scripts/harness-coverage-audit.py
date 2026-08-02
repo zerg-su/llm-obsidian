@@ -14,6 +14,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,35 @@ CRITICAL_FLOORS = {
 }
 
 
+def coverage_percent(covered: int, executable: int) -> float:
+    """Return a stable percentage; an empty module has no missed statements."""
+    if executable == 0:
+        return 100.0
+    return covered * 100 / executable
+
+
+def transition_matrix_case_count(output: str) -> int:
+    """Read the executed matrix count from its own terminal contract."""
+    match = re.search(r"^release transition matrix passed: (\d+) cases$", output, re.M)
+    if match is None:
+        raise ValueError("transition matrix output has no case count")
+    return int(match.group(1))
+
+
+def critical_report_lines(rows: dict[str, dict[str, object]]) -> list[str]:
+    """Format critical module coverage without assuming every row exists."""
+    lines: list[str] = []
+    for module, floor in sorted(CRITICAL_FLOORS.items()):
+        row = rows.get(module)
+        if row is None:
+            lines.append(f"  {module}: missing from report (floor {floor:.1f}%)")
+        else:
+            lines.append(
+                f"  {module}: {float(row['percent']):.1f}% (floor {floor:.1f}%)"
+            )
+    return lines
+
+
 def source_modules() -> set[str]:
     modules: set[str] = set()
     for path in HARNESS.rglob("*.py"):
@@ -56,7 +86,7 @@ def test_files() -> list[Path]:
     return files
 
 
-def run_trace() -> dict[str, dict[str, object]]:
+def run_trace() -> tuple[dict[str, dict[str, object]], int]:
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
         part
@@ -67,6 +97,7 @@ def run_trace() -> dict[str, dict[str, object]]:
         scratch = Path(raw)
         counts = scratch / "counts.dat"
         report_dir = scratch / "reports"
+        matrix_cases: int | None = None
         for test_path in test_files():
             result = subprocess.run(
                 [
@@ -83,12 +114,17 @@ def run_trace() -> dict[str, dict[str, object]]:
                 cwd=ROOT,
                 env=env,
                 text=True,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             if result.returncode:
                 detail = result.stderr.strip() or "test failed without stderr"
                 raise RuntimeError(f"{test_path.relative_to(ROOT)}: {detail}")
+            if test_path.name == "test_release_transition_matrix.py":
+                try:
+                    matrix_cases = transition_matrix_case_count(result.stdout)
+                except ValueError as exc:
+                    raise RuntimeError(str(exc)) from exc
 
         measured = trace.CoverageResults(infile=str(counts)).counts
         hit_by_path: dict[str, set[int]] = {}
@@ -105,14 +141,18 @@ def run_trace() -> dict[str, dict[str, object]]:
         }
         hit_lines = statement_lines & hit_by_path.get(str(path.resolve()), set())
         module = ".".join(path.relative_to(ROOT).with_suffix("").parts)
+        executable = len(statement_lines)
+        covered = len(hit_lines)
         rows[module] = {
-            "executable_lines": len(statement_lines),
-            "covered_lines": len(hit_lines),
+            "executable_lines": executable,
+            "covered_lines": covered,
             "missing_lines": sorted(statement_lines - hit_lines),
-            "percent": round(len(hit_lines) * 100 / len(statement_lines), 1),
+            "percent": round(coverage_percent(covered, executable), 1),
             "path": str(path.relative_to(ROOT)),
         }
-    return rows
+    if matrix_cases is None:
+        raise RuntimeError("transition matrix test was not executed")
+    return rows, matrix_cases
 
 
 def validate(rows: dict[str, dict[str, object]]) -> list[str]:
@@ -122,7 +162,7 @@ def validate(rows: dict[str, dict[str, object]]) -> list[str]:
         | {
             module
             for module, row in rows.items()
-            if int(row["covered_lines"]) == 0
+            if int(row["executable_lines"]) > 0 and int(row["covered_lines"]) == 0
         }
     )
     if missing_modules:
@@ -144,7 +184,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        rows = run_trace()
+        rows, matrix_cases = run_trace()
     except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"harness coverage audit failed: {exc}", file=sys.stderr)
         return 2
@@ -157,8 +197,9 @@ def main() -> int:
         "module_count": len(rows),
         "executable_lines": executable,
         "covered_lines": covered,
-        "weighted_percent": round(covered * 100 / executable, 2),
+        "weighted_percent": round(coverage_percent(covered, executable), 2),
         "transition_matrix": "tests/harness/test_release_transition_matrix.py",
+        "transition_matrix_cases": matrix_cases,
         "critical_floors": CRITICAL_FLOORS,
         "minimum_weighted_percent": MIN_WEIGHTED_PERCENT,
         "modules": dict(sorted(rows.items())),
@@ -177,9 +218,12 @@ def main() -> int:
             f"{payload['weighted_percent']:.2f}% across {len(rows)} modules "
             f"({covered}/{executable} lines)"
         )
-        for module, floor in sorted(CRITICAL_FLOORS.items()):
-            print(f"  {module}: {float(rows[module]['percent']):.1f}% (floor {floor:.1f}%)")
-        print("transition completeness: 4,370 deterministic matrix cases")
+        for line in critical_report_lines(rows):
+            print(line)
+        print(
+            "transition completeness: "
+            f"{matrix_cases:,} deterministic matrix cases"
+        )
     if errors:
         for error in errors:
             print(f"ERROR {error}", file=sys.stderr)
