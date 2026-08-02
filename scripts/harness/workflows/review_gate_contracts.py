@@ -95,7 +95,13 @@ class ReviewPreset:
             effort=effort,
         )
 
-    def request(self, operation_id: str) -> ReviewRequest:
+    def request(
+        self,
+        operation_id: str,
+        *,
+        purpose: str = "implementation",
+        max_verify_iterations: int | None = None,
+    ) -> ReviewRequest:
         if not self.enabled:
             raise ValueError("no-review has no provider review request")
         return ReviewRequest(
@@ -105,7 +111,12 @@ class ReviewPreset:
             runtime=self.runtime,
             model=self.model,
             effort=self.effort,
-            max_verify_iterations=self.max_verify_iterations,
+            max_verify_iterations=(
+                self.max_verify_iterations
+                if max_verify_iterations is None
+                else max_verify_iterations
+            ),
+            purpose=purpose,
         )
 
 
@@ -177,6 +188,9 @@ def review_context_sha256(context: ReviewContext) -> str:
         identity["implementer_summary_sha256"] = (
             context.implementer_summary_sha256
         )
+    if context.boundary_input_sha256:
+        identity["purpose"] = context.purpose
+        identity["boundary_input_sha256"] = context.boundary_input_sha256
     raw = json.dumps(
         identity,
         sort_keys=True,

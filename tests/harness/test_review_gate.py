@@ -38,6 +38,7 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.review_program import ReviewBoundaryInput
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
     ExplicitPipelineApproval,
@@ -331,7 +332,18 @@ def request_for(
         "a" * 64,
     )
     preset = ReviewPreset.from_flags(deep=depth == "deep")
-    policy = preset.request(operation_id)
+    max_verify_iterations = (
+        0
+        if context.purpose == "release"
+        else min(preset.max_verify_iterations, 1)
+        if context.purpose == "intent"
+        else preset.max_verify_iterations
+    )
+    policy = preset.request(
+        operation_id,
+        purpose=context.purpose,
+        max_verify_iterations=max_verify_iterations,
+    )
     axes = (
         {
             "spec": primary,
@@ -373,6 +385,50 @@ context = ReviewContext(
     verification_profile="scoped",
     verification_profile_sha256="d" * 64,
 )
+
+with tempfile.TemporaryDirectory(prefix="release-review-gate.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = FakeRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    release_context = replace(
+        context,
+        purpose="release",
+        boundary_input_sha256="9" * 64,
+    )
+    run = begin(
+        controller,
+        request_for("review-release-stop", context=release_context),
+        scratch,
+    )
+    lane = run.execution.lanes[0]
+    stopped = controller.complete_round(
+        run,
+        lane,
+        run.rounds["holistic"],
+        ReviewResult(
+            "holistic",
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "F-release-stop",
+                    "holistic",
+                    "important",
+                    "release evidence is incomplete",
+                    "the required evidence map has a material gap",
+                ),
+            ),
+        ),
+    )
+    check(
+        "release finding stops the boundary without a fix loop",
+        stopped.action == "stopped"
+        and controller.read()["status"] == "stopped"
+        and controller.read().get("awaiting_resolution") in ({}, None)
+        and run.execution.request.policy.max_verify_iterations == 0,
+    )
 
 with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     base = Path(raw)
@@ -3010,6 +3066,78 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             superseded["status"] == "reviewing"
             and superseded["task_id"] != restarted["task_id"]
             and len(superseded["lanes"]) == 2,
+        )
+        quiesce_operations(current_store, superseded["task_id"])
+        release_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        release_boundary = ReviewBoundaryInput(
+            purpose="release",
+            outcome_contract_sha256="1" * 64,
+            integration_head_sha=release_head,
+            outcome_evidence_map_sha256="2" * 64,
+            accepted_deviations_sha256="3" * 64,
+        )
+        release_boundary_path = base / "release-boundary.json"
+        release_boundary_path.write_text(
+            json.dumps(release_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        release_started = task_review_runner.run_current_review(
+            product,
+            purpose="release",
+            boundary_input_file=release_boundary_path,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        release_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / release_started["task_id"]
+            / release_started["task_id"]
+        )
+        release_state = json.loads(
+            (release_gate_root / "review-gate.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        release_manifest = json.loads(
+            Path(release_started["context_manifest"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        release_wake = current_runtime.started[-1].callback_wake
+        started_count = len(current_runtime.started)
+        release_replay = task_review_runner.run_current_review(
+            product,
+            purpose="release",
+            boundary_input_file=release_boundary_path,
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "current release review binds its manifest, purpose, and zero fix budget",
+            release_started["review_purpose"] == "release"
+            and release_started["review_boundary_input_sha256"]
+            == release_boundary.input_sha256
+            and release_state["policy"]["purpose"] == "release"
+            and release_state["policy"]["max_verify_iterations"] == 0
+            and any(
+                item["name"] == "review-boundary-input.json"
+                for item in release_manifest["inputs"]
+            )
+            and "--purpose release" in release_wake
+            and "--boundary-input" in release_wake,
+        )
+        check(
+            "purpose-bound current review replays without a duplicate provider effect",
+            release_replay["task_id"] == release_started["task_id"]
+            and len(current_runtime.started) == started_count,
         )
     finally:
         for name, value in old_environment.items():

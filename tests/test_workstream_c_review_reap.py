@@ -287,6 +287,20 @@ check(
     "dispatched v3/v4 task" in review_skill,
 )
 check(
+    "review skill exposes purpose-bound outcome checkpoints",
+    all(
+        marker in review_skill
+        for marker in (
+            "intent",
+            "implementation",
+            "release",
+            "review-program.py",
+            "--boundary-input",
+            "approval-or-stop",
+        )
+    ),
+)
+check(
     "reap names normal v4 and frozen unattended v3 runner paths",
     "Normal v4 unattended path" in reap_skill
     and "Active unattended" in reap_skill

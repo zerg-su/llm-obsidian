@@ -33,6 +33,11 @@ from harness.custom_pipelines import (
 )
 from harness.pipeline_builtins import builtin_registry
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.review_program import (
+    PURPOSES as REVIEW_PURPOSES,
+    QUESTIONS as REVIEW_QUESTIONS,
+    ReviewBoundaryInput,
+)
 from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
@@ -160,6 +165,20 @@ def _read_json(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TaskReviewError(f"{label} must be an object")
     return value
+
+
+def _load_review_boundary_input(
+    path: Path, *, purpose: str
+) -> ReviewBoundaryInput:
+    path = path.expanduser().resolve()
+    if not path.is_file() or path.is_symlink():
+        raise TaskReviewError("review boundary input is unavailable")
+    boundary = ReviewBoundaryInput.from_mapping(
+        _read_json(path, "review boundary input")
+    )
+    if boundary.purpose != purpose:
+        raise TaskReviewError("review boundary purpose does not match the request")
+    return boundary
 
 
 def _git(worktree: Path, *args: str) -> str:
@@ -630,6 +649,11 @@ def _context(
     resolution_bundle: ResolutionBundle | None = None,
 ) -> tuple[ReviewContext, Path]:
     head = _git(worktree, "rev-parse", "HEAD")
+    policy = meta["review_policy"]
+    purpose = str(policy.get("purpose") or "implementation")
+    boundary_input_sha256 = str(
+        policy.get("boundary_input_sha256") or ""
+    )
     plan = Path(str(meta["plan_file"])).expanduser().resolve()
     inputs = [
         _bounded_input(
@@ -667,6 +691,42 @@ def _context(
             role="head",
         ),
     ]
+    if boundary_input_sha256:
+        boundary_path = Path(
+            str(meta.get("review_boundary_input_file") or "")
+        )
+        boundary = _load_review_boundary_input(
+            boundary_path, purpose=purpose
+        )
+        if boundary.input_sha256 != boundary_input_sha256:
+            raise TaskReviewError("review boundary input digest is stale")
+        if (
+            purpose == "implementation"
+            and boundary.product_head_sha != head
+        ) or (
+            purpose == "release" and boundary.integration_head_sha != head
+        ):
+            raise TaskReviewError("review boundary input targets another HEAD")
+        inputs.append(
+            ContextInput(
+                "review-boundary-input.json",
+                str(boundary_path),
+                (
+                    json.dumps(
+                        boundary.payload(),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode(),
+                role="outcome",
+            )
+        )
+    elif purpose != "implementation":
+        raise TaskReviewError(
+            "non-legacy review purpose requires a boundary input"
+        )
     implementer_summary_sha256 = ""
     if meta.get("version") == 4 and meta.get("lifecycle") != "current-checkout":
         summary_path = worktree / ".task-summary.json"
@@ -777,7 +837,6 @@ def _context(
         / manifest.packet_id
         / "manifest.json"
     )
-    policy = meta["review_policy"]
     return (
         ReviewContext(
             manifest_path.relative_to(runtime_root).as_posix(),
@@ -785,6 +844,8 @@ def _context(
             str(policy["verification_profile"]),
             str(policy["verification_profile_sha256"]),
             implementer_summary_sha256,
+            purpose,
+            boundary_input_sha256,
         ),
         manifest_path,
     )
@@ -817,6 +878,11 @@ def _request(
     )
     if not preset.enabled:
         return preset, None
+    review_request = preset.request(
+        task_id,
+        purpose=str(raw.get("purpose") or "implementation"),
+        max_verify_iterations=int(raw["max_verify_iterations"]),
+    )
     config = load_config(vault)
     profiles = load_profiles(vault / "config/verification-profiles.toml")
     profile = profiles.get(context.verification_profile)
@@ -842,7 +908,7 @@ def _request(
     axis_routes: dict[str, RuntimeRoute] | None = None
     if preset.depth == "deep":
         if any((raw["runtime"], raw["model"], raw["effort"])):
-            axis_routes = {axis: primary for axis in preset.request(task_id).axes}
+            axis_routes = {axis: primary for axis in review_request.axes}
         else:
             axis_routes = {
                 "spec": _route(
@@ -869,7 +935,7 @@ def _request(
     return (
         preset,
         ReviewOperationRequest(
-            preset.request(task_id),
+            review_request,
             task_id,
             primary,
             context,
@@ -926,6 +992,10 @@ def _write_round_meta(
             "worktree": str(worktree),
             "task_name": task_id,
             "head_sha": context.head_sha,
+            "review_purpose": context.purpose,
+            "review_boundary_input_sha256": (
+                context.boundary_input_sha256
+            ),
             "verification_profile": {
                 "name": context.verification_profile,
                 "sha256": context.verification_profile_sha256,
@@ -1014,6 +1084,8 @@ def _prompt(
                 else "# Harness-owned review",
                 "",
                 f"Axis: `{axis}`.",
+                f"Purpose: `{context.purpose}`.",
+                f"Boundary question: {REVIEW_QUESTIONS[context.purpose]}",
                 f"Exact product HEAD: `{context.head_sha}`.",
                 f"Product worktree (read-only): `{worktree}`.",
                 f"ContextPacket: `{runtime_root / context.manifest}`.",
@@ -1021,6 +1093,14 @@ def _prompt(
                 "",
                 *outcome_instructions,
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
+                *(
+                    (
+                        "This release boundary is approval-or-stop only. Do not "
+                        "open or recommend a hidden fix loop inside this review.",
+                    )
+                    if context.purpose == "release"
+                    else ()
+                ),
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
                 (
                     "Use the product's scripts/review-inspect.py facade for every "
@@ -2002,6 +2082,17 @@ def _receipt(
     return {
         "schema_version": 1,
         "status": status,
+        "review_purpose": str(
+            meta.get("review_policy", {}).get("purpose")
+            if isinstance(meta.get("review_policy"), Mapping)
+            else "implementation"
+        )
+        or "implementation",
+        "review_boundary_input_sha256": str(
+            meta.get("review_policy", {}).get("boundary_input_sha256")
+            if isinstance(meta.get("review_policy"), Mapping)
+            else ""
+        ),
         "task_id": meta["task_id"],
         "worktree": str(worktree),
         "vault_root": str(vault),
@@ -2048,6 +2139,14 @@ def _run_review(
             value = str(raw_policy.get(option) or "")
             if value:
                 wake_argv.extend((f"--{option}", value))
+        purpose = str(raw_policy.get("purpose") or "implementation")
+        boundary_file = str(
+            meta.get("review_boundary_input_file") or ""
+        )
+        if purpose != "implementation" or boundary_file:
+            wake_argv.extend(("--purpose", purpose))
+        if boundary_file:
+            wake_argv.extend(("--boundary-input", boundary_file))
         wake_argv.extend(("--plan", str(meta["plan_file"])))
         callback_wake = (
             "Typed current-review callback is ready. Run this exact command: "
@@ -2210,10 +2309,15 @@ def _run_review(
             gate.resume_bound_attention()
             state = gate.read()
             status = str(state.get("status") or "")
-    if status in {"approved", "skipped", "attention-required"}:
+    if status in {
+        "approved",
+        "skipped",
+        "stopped",
+        "attention-required",
+    }:
         bound = state.get("context")
         if (
-            status in {"approved", "skipped"}
+            status in {"approved", "skipped", "stopped"}
             and (
                 not isinstance(bound, dict)
                 or bound.get("head_sha") != context.head_sha
@@ -2424,13 +2528,17 @@ def _run_review(
             context_manifest=context_manifest,
             run=run,
         )
-    if preset.depth == "deep" and any(
-        result.verdict == "changes-requested"
+    if (
+        context.purpose != "release"
+        and preset.depth == "deep"
         and any(
-            finding.severity in MATERIAL_SEVERITIES
-            for finding in result.findings
+            result.verdict == "changes-requested"
+            and any(
+                finding.severity in MATERIAL_SEVERITIES
+                for finding in result.findings
+            )
+            for _lane, _round, result in ready
         )
-        for _lane, _round, result in ready
     ):
         for lane, round_, result in ready:
             decision = gate.defer_round_for_resolution(
@@ -2458,7 +2566,12 @@ def _run_review(
             if decision.action == "attention-required":
                 break
     else:
-        for lane, round_, result in ready:
+        ordered_ready = (
+            sorted(ready, key=lambda item: item[2].verdict != "approve")
+            if context.purpose == "release"
+            else ready
+        )
+        for lane, round_, result in ordered_ready:
             decision = gate.complete_round(
                 run,
                 lane,
@@ -3114,7 +3227,13 @@ def _current_policy(
     effort: str,
     no_review: bool,
     profile_sha256: str,
+    purpose: str = "implementation",
+    boundary_input_sha256: str = "",
 ) -> dict[str, Any]:
+    if purpose not in REVIEW_PURPOSES:
+        raise TaskReviewError("current review purpose is invalid")
+    if no_review and (purpose != "implementation" or boundary_input_sha256):
+        raise TaskReviewError("a purpose-bound review cannot be skipped")
     preset = ReviewPreset.from_flags(
         deep=deep,
         cross_model=cross_model,
@@ -3124,19 +3243,24 @@ def _current_policy(
         no_review=no_review,
     )
     mode = preset.depth if preset.enabled else "skip"
+    max_verify_iterations = (
+        0
+        if mode == "skip" or purpose == "release"
+        else min(preset.max_verify_iterations, 1)
+        if purpose == "intent"
+        else preset.max_verify_iterations
+    )
     return {
         "mode": mode,
         "cross_model": cross_model,
         "runtime": runtime,
         "model": model,
         "effort": effort,
-        "max_verify_iterations": {
-            "simple": 1,
-            "deep": 2,
-            "skip": 0,
-        }[mode],
+        "max_verify_iterations": max_verify_iterations,
         "verification_profile": "scoped",
         "verification_profile_sha256": profile_sha256,
+        "purpose": purpose,
+        "boundary_input_sha256": boundary_input_sha256,
     }
 
 
@@ -3144,7 +3268,7 @@ def _same_requested_policy(
     stored: Mapping[str, Any],
     requested: Mapping[str, Any],
 ) -> bool:
-    return all(
+    base_matches = all(
         stored.get(name) == requested.get(name)
         for name in (
             "mode",
@@ -3156,6 +3280,13 @@ def _same_requested_policy(
             "verification_profile",
             "verification_profile_sha256",
         )
+    )
+    return (
+        base_matches
+        and str(stored.get("purpose") or "implementation")
+        == str(requested.get("purpose") or "implementation")
+        and str(stored.get("boundary_input_sha256") or "")
+        == str(requested.get("boundary_input_sha256") or "")
     )
 
 
@@ -3256,6 +3387,8 @@ def run_current_review(
     model: str = "",
     effort: str = "",
     no_review: bool = False,
+    purpose: str = "implementation",
+    boundary_input_file: Path | None = None,
     plan_file: Path | None = None,
     origin_surface: str = "",
     scratch_root: Path | None = None,
@@ -3267,6 +3400,15 @@ def run_current_review(
     profile = profiles.get("scoped")
     if profile is None:
         raise TaskReviewError("scoped verification profile is unavailable")
+    boundary_input = (
+        _load_review_boundary_input(boundary_input_file, purpose=purpose)
+        if boundary_input_file is not None
+        else None
+    )
+    if boundary_input is None and purpose != "implementation":
+        raise TaskReviewError(
+            "intent and release review require --boundary-input"
+        )
     requested_policy = _current_policy(
         deep=deep,
         cross_model=cross_model,
@@ -3275,6 +3417,10 @@ def run_current_review(
         effort=effort,
         no_review=no_review,
         profile_sha256=profile.sha256,
+        purpose=purpose,
+        boundary_input_sha256=(
+            boundary_input.input_sha256 if boundary_input else ""
+        ),
     )
     active_path = (
         vault
@@ -3392,6 +3538,12 @@ def run_current_review(
             "review_policy": requested_policy,
             "runtime_root": str(runtime_root),
         }
+        if boundary_input is not None:
+            stored_boundary = (
+                runtime_root / "inputs" / "review-boundary-input.json"
+            )
+            _atomic_json(stored_boundary, boundary_input.payload())
+            meta["review_boundary_input_file"] = str(stored_boundary)
         _request(
             meta,
             vault,
@@ -3401,6 +3553,9 @@ def run_current_review(
                 _git(worktree, "rev-parse", "HEAD"),
                 "scoped",
                 profile.sha256,
+                "",
+                purpose,
+                boundary_input.input_sha256 if boundary_input else "",
             ),
         )
         _atomic_json(runtime_root / "current-review.json", meta)
@@ -3451,6 +3606,10 @@ def parser() -> argparse.ArgumentParser:
     current.add_argument("--model", default="")
     current.add_argument("--effort", default="")
     current.add_argument("--no-review", action="store_true")
+    current.add_argument(
+        "--purpose", choices=REVIEW_PURPOSES, default="implementation"
+    )
+    current.add_argument("--boundary-input", type=Path)
     current.add_argument("--plan", type=Path)
     current.add_argument("--origin-surface", default="")
     return result
@@ -3488,6 +3647,8 @@ def main(
                 model=args.model,
                 effort=args.effort,
                 no_review=args.no_review,
+                purpose=args.purpose,
+                boundary_input_file=args.boundary_input,
                 plan_file=args.plan,
                 origin_surface=args.origin_surface,
                 runtime_manager=runtime_manager,

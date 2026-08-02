@@ -20,6 +20,7 @@ from ..contracts import (
 )
 from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
+from ..review_program import PURPOSES
 from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
@@ -43,13 +44,20 @@ class ReviewRequest:
     runtime: str = ""
     effort: str = ""
     max_verify_iterations: int = 1
+    purpose: str = "implementation"
 
     def __post_init__(self) -> None:
         if self.depth not in AXES:
             raise ValueError("review depth must be simple or deep")
+        if self.purpose not in PURPOSES:
+            raise ValueError("review purpose is invalid")
         expected = VERIFY_BUDGETS[self.depth]
         if self.max_verify_iterations < 0 or self.max_verify_iterations > expected:
             raise ValueError("verification count exceeds review depth budget")
+        if self.purpose == "release" and self.max_verify_iterations != 0:
+            raise ValueError("release review cannot open a verification fix loop")
+        if self.purpose == "intent" and self.max_verify_iterations > 1:
+            raise ValueError("intent review verification budget exceeds one")
         if self.runtime and self.runtime not in {"claude", "codex"}:
             raise ValueError("review runtime must be claude or codex")
 
@@ -67,6 +75,8 @@ class ReviewContext:
     verification_profile: str
     verification_profile_sha256: str
     implementer_summary_sha256: str = ""
+    purpose: str = "implementation"
+    boundary_input_sha256: str = ""
 
     def __post_init__(self) -> None:
         path = PurePosixPath(self.manifest)
@@ -88,6 +98,14 @@ class ReviewContext:
             r"[0-9a-f]{64}", self.implementer_summary_sha256
         ):
             raise ValueError("review implementer summary digest must be a sha256")
+        if self.purpose not in PURPOSES:
+            raise ValueError("review context purpose is invalid")
+        if self.boundary_input_sha256 and not re.fullmatch(
+            r"[0-9a-f]{64}", self.boundary_input_sha256
+        ):
+            raise ValueError("review boundary input digest must be a sha256")
+        if self.purpose != "implementation" and not self.boundary_input_sha256:
+            raise ValueError("non-legacy review purpose requires a boundary digest")
 
 
 @dataclass(frozen=True)
@@ -100,6 +118,8 @@ class ReviewOperationRequest:
     lane_ids: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
+        if self.policy.purpose != self.context.purpose:
+            raise ValueError("review policy and context purposes must match")
         profiles = {"reviewer-readonly", "reviewer-callback"}
         if self.route.profile not in profiles:
             raise ValueError("review operation requires a review-only route")
@@ -190,6 +210,14 @@ def operation_spec(request: ReviewOperationRequest) -> OperationSpec:
                     )
                 }
                 if request.context.implementer_summary_sha256
+                else {}
+            ),
+            **(
+                {
+                    "purpose": request.context.purpose,
+                    "boundary_input_sha256": request.context.boundary_input_sha256,
+                }
+                if request.context.boundary_input_sha256
                 else {}
             ),
         },
@@ -506,6 +534,5 @@ def _runtime_lane(
         max_verify_iterations=max_verify_iterations,
         state=record.state,
     )
-
 
 

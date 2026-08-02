@@ -179,7 +179,12 @@ class ReviewGateController(ReviewGateRecoveryMixin):
         self._replace(status=status)
 
     @staticmethod
-    def _policy(preset: ReviewPreset) -> dict[str, object]:
+    def _policy(
+        preset: ReviewPreset,
+        *,
+        purpose: str = "implementation",
+        max_verify_iterations: int | None = None,
+    ) -> dict[str, object]:
         return {
             "enabled": preset.enabled,
             "depth": preset.depth,
@@ -187,7 +192,12 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             "runtime": preset.runtime,
             "model": preset.model,
             "effort": preset.effort,
-            "max_verify_iterations": preset.max_verify_iterations,
+            "max_verify_iterations": (
+                preset.max_verify_iterations
+                if max_verify_iterations is None
+                else max_verify_iterations
+            ),
+            "purpose": purpose,
         }
 
     @staticmethod
@@ -205,6 +215,9 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             value["implementer_summary_sha256"] = (
                 context.implementer_summary_sha256
             )
+        if context.boundary_input_sha256:
+            value["purpose"] = context.purpose
+            value["boundary_input_sha256"] = context.boundary_input_sha256
         return value
 
     @staticmethod
@@ -234,10 +247,15 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             model=request.policy.model,
             effort=request.policy.effort,
         )
-        if (
-            request.policy.max_verify_iterations
-            != preset.max_verify_iterations
-        ):
+        expected_budget = (
+            0
+            if request.policy.purpose == "release"
+            else min(
+                preset.max_verify_iterations,
+                1 if request.policy.purpose == "intent" else 2,
+            )
+        )
+        if request.policy.max_verify_iterations != expected_budget:
             raise ValueError(
                 "automatic review must use the deterministic preset budget"
             )
@@ -246,7 +264,11 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             "dispatch_operation_id": dispatch_operation_id,
             "owner_id": request.owner_id,
             "status": "pending",
-            "policy": self._policy(preset),
+            "policy": self._policy(
+                preset,
+                purpose=request.policy.purpose,
+                max_verify_iterations=request.policy.max_verify_iterations,
+            ),
             "product_root": str(product_root),
             "active_review_operation_id": request.policy.operation_id,
             "context": self._context(request.context),
@@ -354,6 +376,7 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             max_verify_iterations=int(
                 policy.get("max_verify_iterations", -1)
             ),
+            purpose=str(policy.get("purpose") or "implementation"),
         )
         review_context = ReviewContext(
             manifest=str(context.get("manifest") or ""),
@@ -366,6 +389,10 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             ),
             implementer_summary_sha256=str(
                 context.get("implementer_summary_sha256") or ""
+            ),
+            purpose=str(context.get("purpose") or "implementation"),
+            boundary_input_sha256=str(
+                context.get("boundary_input_sha256") or ""
             ),
         )
         lanes: list[ReviewLaneSession] = []
@@ -621,6 +648,10 @@ class ReviewGateController(ReviewGateRecoveryMixin):
                 "review_id": execution.request.policy.operation_id,
                 "run_id": envelope.run_id,
                 "review_mode": execution.request.policy.depth,
+                "review_purpose": context.purpose,
+                "review_boundary_input_sha256": (
+                    context.boundary_input_sha256
+                ),
                 "worktree": str(self.read()["product_root"]),
                 "task_name": execution.request.policy.operation_id,
                 "head_sha": context.head_sha,
@@ -687,6 +718,22 @@ class ReviewGateController(ReviewGateRecoveryMixin):
             for finding in result.findings
             if finding.severity in MATERIAL_SEVERITIES
         )
+        if (
+            run.execution.request.policy.purpose == "release"
+            and result.verdict != "approve"
+        ):
+            cleanup = finish_review_lane(self.runtime, lane)
+            if cleanup is None or cleanup.state != "complete":
+                self._mark_attention(run.execution.lanes)
+                return ReviewGateDecision("attention-required", lane)
+            stopped = dict(state.get("stopped_results") or {})
+            stopped[result.axis] = pointer
+            self._replace(
+                status="stopped",
+                stopped_results=stopped,
+                lanes=[self._lane(item) for item in run.execution.lanes],
+            )
+            return ReviewGateDecision("stopped", lane, round_)
         if result.verdict == "blocked":
             self._mark_attention(run.execution.lanes)
             return ReviewGateDecision("attention-required", lane)

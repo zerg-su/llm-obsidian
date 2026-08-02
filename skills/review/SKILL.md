@@ -1,6 +1,6 @@
 ---
 name: review
-description: Run harness-owned simple/deep review, same-model or cross-model. Use after implementation for code, architecture, security, or spec review.
+description: Harness-owned intent, implementation, or release review with simple/deep and same/cross-model presets. Use for outcome, code, architecture, security, or specs.
 ---
 
 # Review
@@ -22,6 +22,25 @@ reviewed implementer-summary bytes. Only `--no-review` persists a typed bypass.
 
 Deep mode uses `review_profiles.deep`. Model overrides accept only
 `config/model-routing.toml` aliases; mismatches fail closed.
+
+## Purpose boundaries
+
+For approved multi-stage work, keep simple/deep inside one explicit purpose:
+
+- `intent`: Outcome Contract, plan/design digests, dispositions and evidence;
+- `implementation`: exact product HEAD plus independent verification;
+- `release`: integration HEAD, evidence map, deviations and merge drift;
+  approval-or-stop, never a hidden late fix loop.
+
+`scripts/review-program.py status` selects ordered purposes from approved risk.
+Small reversible work collapses intent; standard uses intent+implementation;
+architecture, migration, release and skill-integration require all three.
+Receipts are additive and stale after bound digest drift.
+
+For current review add `--purpose <intent|implementation|release>
+--boundary-input <json>` to `task-review-runner.py current`. ContextPacket,
+identity, question and budget bind the input. No flags preserves legacy
+implementation-review behavior for compiled tasks.
 
 ## Outcome-first judgment
 
