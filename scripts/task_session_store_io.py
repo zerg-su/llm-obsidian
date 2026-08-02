@@ -99,7 +99,7 @@ def remove_owned_research_scratch(path: Path, vault_root: Path) -> bool:
     """Remove only a coordinator-created fetch/synth temp directory."""
     try:
         resolved = path.expanduser().resolve()
-        resolved.relative_to(vault_root)
+        resolved.relative_to(vault_root.expanduser().resolve())
     except ValueError:
         pass
     else:
