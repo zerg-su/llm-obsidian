@@ -14,6 +14,7 @@ from harness.audit_manifest import AuditManifestError, load_audit_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_BASELINE = ROOT / "config" / "code-quality-baseline.json"
 FILE_REVIEW_LINES = 200
 FILE_HARD_LINES = 1_000
 FUNCTION_REVIEW_LINES = 60
@@ -176,6 +177,16 @@ def ratchet_failures(
     return failures
 
 
+def effective_baseline_path(*, scan: Path | None, baseline: Path | None) -> Path | None:
+    """Use the release ratchet for the canonical manifest, not ad-hoc scans."""
+
+    if baseline is not None:
+        return baseline.resolve()
+    if scan is None:
+        return DEFAULT_BASELINE
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scan", type=Path)
@@ -196,9 +207,10 @@ def main() -> int:
     signals = blocking_signals(rows)
     baseline = None
     errors = blockers
-    if args.baseline is not None:
+    baseline_path = effective_baseline_path(scan=args.scan, baseline=args.baseline)
+    if baseline_path is not None:
         try:
-            baseline = load_baseline(args.baseline.resolve())
+            baseline = load_baseline(baseline_path)
         except ValueError as exc:
             errors = [str(exc)]
         else:

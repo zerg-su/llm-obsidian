@@ -20,6 +20,13 @@ audit = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = audit
 SPEC.loader.exec_module(audit)
 
+assert audit.effective_baseline_path(scan=None, baseline=None) == (
+    ROOT / "config" / "code-quality-baseline.json"
+)
+assert audit.effective_baseline_path(
+    scan=ROOT / "scripts" / "harness", baseline=None
+) is None
+
 
 with tempfile.TemporaryDirectory(prefix="code-quality-audit.") as raw:
     root = Path(raw)
