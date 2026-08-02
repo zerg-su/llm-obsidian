@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -71,6 +72,19 @@ class FakeCmux:
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def read_json_eventually(path: Path, *, timeout: float = 2.0) -> object:
+    """Read one worker artifact after its bounded atomic-publication window."""
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 def dispatch_record(
@@ -1203,13 +1217,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         for record in retry_store.list("owner-1")
         if record.spec.kind == "pipeline-verify"
     ]
-    retry_intent = json.loads(
-        (
-            retry_state
-            / "pipeline-fix"
-            / "pass-1"
-            / "retry-intent.json"
-        ).read_text(encoding="utf-8")
+    retry_intent = read_json_eventually(
+        retry_state / "pipeline-fix" / "pass-1" / "retry-intent.json"
     )
     check(
         "engineering fix retries once from the original reproduction receipt",
