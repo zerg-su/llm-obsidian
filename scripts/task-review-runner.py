@@ -2685,8 +2685,146 @@ def recover_task_review_for_mechanism(
             vault=vault,
             worktree=worktree,
             runtime_root=_runtime_root(vault, task_id),
-            context_manifest=context_manifest,
+            context_manifest=(
+                _runtime_root(vault, task_id)
+                / run.execution.request.context.manifest
+            ),
             run=run,
+        )
+    previous_context = run.execution.request.context
+    if (
+        state.get("status") == "approved"
+        and state.get("fresh_reevaluation_used") is not True
+        and state.get("final_results") not in ({}, None)
+        and run.execution.request.policy.depth == "simple"
+        and run.execution.request.policy.axes == ("holistic",)
+        and previous_context.head_sha == current_context.head_sha
+        and previous_context.verification_profile
+        == current_context.verification_profile
+        and previous_context.verification_profile_sha256
+        == current_context.verification_profile_sha256
+        and bool(previous_context.implementer_summary_sha256)
+        and previous_context.implementer_summary_sha256
+        != current_context.implementer_summary_sha256
+    ):
+        raw_resolution_evidence = state.get("resolution_evidence")
+        if (
+            not isinstance(raw_resolution_evidence, dict)
+            or len(raw_resolution_evidence) != 1
+        ):
+            raise TaskReviewError(
+                "approved summary recovery resolution boundary is invalid"
+            )
+        persisted_pointer = Path(
+            str(next(iter(raw_resolution_evidence.values())))
+        )
+        persisted_path = (gate.root / persisted_pointer).resolve()
+        if (
+            persisted_pointer.is_absolute()
+            or gate.root not in persisted_path.parents
+            or not persisted_path.is_file()
+            or persisted_path.is_symlink()
+        ):
+            raise TaskReviewError(
+                "approved summary recovery resolution evidence is unavailable"
+            )
+        try:
+            persisted_resolution = validate_resolution_evidence(
+                _read_json(
+                    persisted_path, "persisted review resolution"
+                )
+            )
+        except ResolutionError as exc:
+            raise TaskReviewError(
+                "approved summary recovery resolution evidence is invalid"
+            ) from exc
+        if (
+            persisted_resolution.operation_id != task_id
+            or persisted_resolution.axis != "holistic"
+            or persisted_resolution.resolved_head_sha
+            != current_context.head_sha
+        ):
+            raise TaskReviewError(
+                "approved summary recovery resolution identity changed"
+            )
+        bundle = _recovery_resolution_bundle(
+            worktree,
+            task_id,
+            persisted_resolution,
+            current_context.head_sha,
+            str(state.get("resolution_transport_identity_sha256") or ""),
+        )
+        current_context, context_manifest = _context(
+            meta,
+            vault,
+            worktree,
+            _runtime_root(vault, task_id),
+            task_id,
+            resolution_bundle=bundle,
+        )
+        boundary = ReviewScopeBoundary(
+            "context",
+            review_context_sha256(previous_context),
+            review_context_sha256(current_context),
+            (
+                "resolved mechanism escalation "
+                f"{attention.get('id')}: review refreshed summary bytes only"
+            ),
+        )
+        authorization = {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "kind": boundary.kind,
+            "previous_context_sha256": boundary.previous_context_sha256,
+            "next_context_sha256": boundary.next_context_sha256,
+            "reason": boundary.reason,
+            "authorization_provenance": "coordinator-approved",
+            "verification_operation_id": str(attention.get("id") or ""),
+            "verification_receipt_sha256": hashlib.sha256(
+                attention_path.read_bytes()
+            ).hexdigest(),
+            "status": "authorized",
+        }
+        authorization_name = (
+            "fresh-boundary-authorization-"
+            f"{_canonical_sha256(authorization)[:16]}.json"
+        )
+        authorization_path = gate.root / authorization_name
+        if authorization_path.exists():
+            if (
+                authorization_path.is_symlink()
+                or _read_json(
+                    authorization_path,
+                    "fresh summary boundary authorization",
+                )
+                != authorization
+            ):
+                raise TaskReviewError(
+                    "approved summary recovery authorization changed"
+                )
+        else:
+            _atomic_json(authorization_path, authorization)
+        gate.authorize_fresh_summary_boundary(
+            run,
+            boundary=boundary,
+            context=current_context,
+            authorization_pointer=authorization_name,
+            authorization_sha256=hashlib.sha256(
+                authorization_path.read_bytes()
+            ).hexdigest(),
+        )
+        return _launch_authorized_task_review(
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=_runtime_root(vault, task_id),
+            task_id=task_id,
+            gate=gate,
+            run=run,
+            context=current_context,
+            context_manifest=context_manifest,
+            boundary=boundary,
+            max_verify_iterations=0,
         )
     if (
         state.get("status")
@@ -2715,7 +2853,6 @@ def recover_task_review_for_mechanism(
             raise TaskReviewError(
                 "review mechanism recovery still has live review ownership"
             )
-    previous_context = run.execution.request.context
     boundary = ReviewScopeBoundary(
         "context",
         review_context_sha256(previous_context),

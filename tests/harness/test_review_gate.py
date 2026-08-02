@@ -530,6 +530,126 @@ with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
         and bounded["evidence"] == "full evidence remains available",
     )
 
+with tempfile.TemporaryDirectory(prefix="review-summary-refresh.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    product = base / "product"
+    scratch.mkdir()
+    product.mkdir()
+    store = OperationStore(base / "store")
+    runtime = FakeRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    reviewed_context = replace(
+        context,
+        manifest="packets/reviewed-summary/manifest.json",
+        implementer_summary_sha256="a" * 64,
+    )
+    summary_request = request_for(
+        "review-summary-refresh", context=reviewed_context
+    )
+    run = controller.begin(
+        dispatch_operation_id="dispatch-1",
+        request=summary_request,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-summary-refresh",
+    )
+    lane = run.execution.lanes[0]
+    approved = controller.complete_round(
+        run,
+        lane,
+        run.rounds["holistic"],
+        ReviewResult("holistic", "approve"),
+    )
+    for terminal_record in store.list("owner-1"):
+        if terminal_record.state in TERMINAL:
+            store.save(
+                replace(
+                    terminal_record,
+                    resources=OwnedResources(),
+                    revision=terminal_record.revision + 1,
+                ),
+                expected_revision=terminal_record.revision,
+            )
+    refreshed_context = replace(
+        reviewed_context,
+        manifest="packets/refreshed-summary/manifest.json",
+        implementer_summary_sha256="b" * 64,
+    )
+    boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(reviewed_context),
+        review_context_sha256(refreshed_context),
+        "approved summary bytes changed after resolution",
+    )
+    boundary_authorization = {
+        "schema_version": 1,
+        "operation_id": "review-summary-refresh",
+        "kind": boundary.kind,
+        "previous_context_sha256": boundary.previous_context_sha256,
+        "next_context_sha256": boundary.next_context_sha256,
+        "reason": boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "summary-refresh-test",
+        "verification_receipt_sha256": "b" * 64,
+        "status": "authorized",
+    }
+    authorization_path = controller.root / "summary-authorization.json"
+    authorization_path.write_text(
+        json.dumps(boundary_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (product / ".task-review.json").write_text("{}\n", encoding="utf-8")
+    preserved_resolution = product / ".task-review-resolution.json"
+    preserved_resolution.write_text(
+        '{"schema_version":1,"preserved":true}\n',
+        encoding="utf-8",
+    )
+    controller.authorize_fresh_summary_boundary(
+        run,
+        boundary=boundary,
+        context=refreshed_context,
+        authorization_pointer=authorization_path.name,
+        authorization_sha256=hashlib.sha256(
+            authorization_path.read_bytes()
+        ).hexdigest(),
+    )
+    fresh = controller.restart_for_boundary(
+        run,
+        boundary=boundary,
+        context=refreshed_context,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer="prompts/summary-only.md",
+        callback_root="callbacks/review-summary-refresh",
+        max_verify_iterations=0,
+    )
+    summary_state = controller.read()
+    check(
+        "approved summary refresh launches one zero-verification boundary and preserves prior evidence",
+        approved.action == "approved"
+        and fresh is not None
+        and len(runtime.started) == 2
+        and fresh.execution.request.policy.max_verify_iterations == 0
+        and summary_state["status"] == "reviewing"
+        and summary_state["context"]["head_sha"] == reviewed_context.head_sha
+        and summary_state["context"]["implementer_summary_sha256"] == "b" * 64
+        and summary_state["fresh_reevaluation_used"] is True
+        and len(summary_state["prior_approved_boundaries"]) == 1
+        and summary_state["prior_approved_boundaries"][0]["context"]
+        ["implementer_summary_sha256"]
+        == "a" * 64
+        and not (product / ".task-review.json").exists()
+        and preserved_resolution.is_file()
+        and json.loads(preserved_resolution.read_text(encoding="utf-8"))[
+            "preserved"
+        ]
+        is True,
+    )
+
 with tempfile.TemporaryDirectory(prefix="review-cleanup-attention.") as raw:
     base = Path(raw)
     scratch = base / "scratch"
