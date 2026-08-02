@@ -27,6 +27,11 @@ the effect but before its durable receipt, and prove replay does not duplicate
 the effect. Any persisted budget or idempotency fact survives unrelated later
 effects; a replaceable last-effect slot is not durable history. Acceptance
 also covers interleaving an unrelated effect before the next recovery decision.
+When a decision spans multiple durable records or identities, map each record
+separately, including resource ownership, durable history, current target,
+revision, and generation. Under the owning lock, re-read every participating
+record before reservation; never collapse them into one identity or keep
+session-wide budgets on a retargetable child.
 
 Get approval before implementation or interface/migration/dependency/security/
 external-effect change.

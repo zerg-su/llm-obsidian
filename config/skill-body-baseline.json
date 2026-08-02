@@ -59,11 +59,11 @@
       "token_estimate": 667
     },
     "design": {
-      "body_bytes": 1411,
-      "body_lines": 27,
-      "closure_bytes": 1411,
-      "closure_token_estimate": 353,
-      "token_estimate": 353
+      "body_bytes": 1760,
+      "body_lines": 32,
+      "closure_bytes": 1760,
+      "closure_token_estimate": 440,
+      "token_estimate": 440
     },
     "dispatch": {
       "body_bytes": 8031,

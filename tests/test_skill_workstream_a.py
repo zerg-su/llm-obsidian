@@ -69,6 +69,11 @@ require(
     "survives unrelated later effects",
     "replaceable last-effect slot is not durable history",
     "interleaving an unrelated effect",
+    "multiple durable records or identities",
+    "map each record separately",
+    "resource ownership, durable history, current target, revision, and generation",
+    "re-read every participating record",
+    "session-wide budgets on a retargetable child",
 )
 normalized_design = " ".join(design.split())
 assert normalized_design.index(
