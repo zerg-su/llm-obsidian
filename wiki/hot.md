@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-02: [[LLM Obsidian 2.6 dogfood RT2 fresh review packet identity]] — finalized task result (`c-000090`)
 - 2026-08-02: [[LLM Obsidian 2.6 dogfood RT1 callback watchdog architecture]] — finalized task result (`c-000088`)
 - 2026-08-02: [[LLM Obsidian 2.6 dogfood RT4 callback fallback prototype]] — finalized task result (`c-000086`)
 - 2026-08-02: [[LLM Obsidian 2.6 paired fix post-change final]] — finalized task result (`c-000084`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[Superpowers vs Matt Pocock Skills]] — upstream comparison refreshed from pins; live drift unverified (`c-000058`)
 - 2026-08-01: [[2.5 real dogfood RT08 upstream skills research]] — finalized task result (`c-000057`)
 - 2026-08-01: [[2.5 real dogfood RT09 vault health audit]] — finalized task result (`c-000055`)
-- 2026-08-01: [[2.5 real dogfood RT07 stale identity diagnostic]] — finalized task result (`c-000053`)
 
 ## Active Threads
 

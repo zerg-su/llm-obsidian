@@ -27,6 +27,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt2-fresh-review-packet
+
+`c-000090` [[LLM Obsidian 2.6 dogfood RT2 fresh review packet identity]]. Reproduced the stale `.task-review.json` symptom on the preserved base and traced it to fresh review transport retaining only the stable dispatch identity. Added committed red regressions, then fixed the boundary narrowly: authorized fresh review invalidates prior transient decision/response files; accepted resolution state and the executor packet bind the exact review operation, round/run, callback digest, findings, and reviewed HEAD; pre-intake rejects stale identities. Automatic review findin
+
 ## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt1-watchdog-design
 
 `c-000088` [[LLM Obsidian 2.6 dogfood RT1 callback watchdog architecture]]. ## Outcome
