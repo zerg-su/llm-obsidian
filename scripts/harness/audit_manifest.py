@@ -83,4 +83,3 @@ def load_audit_manifest(root: Path, path: Path | None = None) -> AuditManifest:
         if not candidate.is_file() or root.resolve() not in candidate.parents:
             raise AuditManifestError("harness audit manifest path is unavailable")
     return manifest
-

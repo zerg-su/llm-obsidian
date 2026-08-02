@@ -185,4 +185,3 @@ def validate_trusted_receipts(
         trusted = trusted_review_receipt(worktree, boundary, receipt.operation_id)
         if trusted != receipt:
             raise ReviewProgramError("review receipt does not match trusted review gate")
-
