@@ -197,6 +197,7 @@ class FakeRuntime:
         self.started: list[object] = []
         self.continued: list[tuple[str, str, str, str]] = []
         self.registered: list[tuple[str, str, str, str, str]] = []
+        self.rearmed: list[tuple[str, str]] = []
         self.exits: list[tuple[str, str]] = []
         self.cleanups: list[tuple[str, str]] = []
         self.cleanup_attention = False
@@ -264,6 +265,17 @@ class FakeRuntime:
                 callback_pointer,
             )
         )
+
+    def rearm_callback_timeout(
+        self, owner_id: str, operation_id: str
+    ) -> FakeSessionResult:
+        self.rearmed.append((owner_id, operation_id))
+        record = self.store.rearm_callback_timeout(
+            owner_id,
+            operation_id,
+            deadline_at=10**20,
+        )
+        return FakeSessionResult(record, "checkpoint-live")
 
     def accept_callback(self, envelope: object) -> object:
         matches = [
@@ -492,6 +504,15 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         "controller rejects prior-boundary review identity",
         controller.read()["status"] == "awaiting-resolution",
     )
+    parent_before_timeout = store.read(lane.owner_id, lane.operation_id)
+    store.save(
+        replace(
+            parent_before_timeout,
+            deadline_at=1.0,
+            revision=parent_before_timeout.revision + 1,
+        ),
+        expected_revision=parent_before_timeout.revision,
+    )
     store.transition(
         lane.owner_id,
         lane.operation_id,
@@ -542,7 +563,9 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     check(
         "accepted material round rearms its exact timed-out parent before verification",
         store.read(lane.owner_id, lane.operation_id).state
-        == "awaiting-callback",
+        == "awaiting-callback"
+        and store.read(lane.owner_id, lane.operation_id).deadline_at == 10**20
+        and runtime.rearmed == [(lane.owner_id, lane.operation_id)],
     )
     check(
         "unpublished resolution crash residue is replaced before durable publication",

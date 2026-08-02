@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import replace
 from pathlib import Path
+from time import time
 from typing import Callable
 
 from .callbacks import CallbackBroker
@@ -417,6 +418,32 @@ class RuntimeSessionLaunchMixin:
             current = supervisor.transition("running")
         self._notify()
         return self._result(current, "continued", checkpoint=checkpoint)
+
+    def rearm_callback_timeout(
+        self,
+        owner_id: str,
+        operation_id: str,
+    ) -> RuntimeSessionResult:
+        """Atomically restore a proven accepted reviewer callback boundary."""
+
+        record = self.store.read(owner_id, operation_id)
+        metadata = self._metadata(record)
+        time_budget_seconds = metadata.get("time_budget_seconds")
+        if (
+            not isinstance(time_budget_seconds, (int, float))
+            or isinstance(time_budget_seconds, bool)
+            or time_budget_seconds <= 0
+        ):
+            raise RuntimeSessionError(
+                "callback timeout rearm has no valid time budget"
+            )
+        updated = self.store.rearm_callback_timeout(
+            owner_id,
+            operation_id,
+            deadline_at=time() + float(time_budget_seconds),
+        )
+        self._notify()
+        return self._result(updated, "callback-timeout-rearmed")
 
     def register_callback_target(
         self,

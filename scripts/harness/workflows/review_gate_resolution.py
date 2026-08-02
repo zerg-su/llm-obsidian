@@ -57,10 +57,9 @@ class ReviewGateResolutionMixin:
             != str(boundary.get("callback_sha256") or "")
         ):
             return False
-        self.round_store.transition(
+        self.runtime.rearm_callback_timeout(
             lane.owner_id,
             lane.operation_id,
-            "awaiting-callback",
         )
         return True
 

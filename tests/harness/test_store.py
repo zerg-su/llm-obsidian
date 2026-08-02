@@ -168,6 +168,55 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
     )
     check("attention reason round-trips", store.read("owner-1", "op-1").attention_reason == AttentionReason.CAPABILITY_MISMATCH)
 
+    timeout_spec = OperationSpec(
+        "op-timeout",
+        "key-timeout",
+        "review-session",
+        "owner-timeout",
+        route,
+        "packet.json",
+        "scoped",
+    )
+    timeout_record = store.create(
+        timeout_spec,
+        lane_id="lane-timeout",
+        run_id="run-timeout",
+    )
+    timeout_record = replace(
+        timeout_record,
+        deadline_at=1.0,
+        revision=timeout_record.revision + 1,
+    )
+    store.save(timeout_record, expected_revision=0)
+    store.transition(
+        "owner-timeout",
+        "op-timeout",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    rearmed = store.rearm_callback_timeout(
+        "owner-timeout",
+        "op-timeout",
+        deadline_at=500.0,
+    )
+    check(
+        "callback timeout rearm restores state and deadline atomically",
+        rearmed.state == "awaiting-callback"
+        and rearmed.attention_reason is None
+        and rearmed.deadline_at == 500.0
+        and rearmed.revision == 3,
+    )
+    try:
+        store.rearm_callback_timeout(
+            "owner-1",
+            "op-1",
+            deadline_at=500.0,
+        )
+    except StoreError:
+        check("callback timeout rearm rejects unrelated attention", True)
+    else:
+        check("callback timeout rearm rejects unrelated attention", False)
+
     terminal_spec = OperationSpec(
         "op-terminal",
         "key-terminal",

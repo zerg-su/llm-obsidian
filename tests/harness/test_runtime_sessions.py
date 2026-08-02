@@ -954,6 +954,31 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     (cwd / "callbacks" / "result.json").unlink()
     callback_target.unlink()
+    timed_out_parent = store.read("owner-1", "runtime-1")
+    store.save(
+        replace(
+            timed_out_parent,
+            deadline_at=1.0,
+            revision=timed_out_parent.revision + 1,
+        ),
+        expected_revision=timed_out_parent.revision,
+    )
+    store.transition(
+        "owner-1",
+        "runtime-1",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    with patch("harness.runtime_session_launch.time", return_value=10.0):
+        rearmed_parent = manager.rearm_callback_timeout(
+            "owner-1", "runtime-1"
+        )
+    check(
+        "runtime rearms accepted callback state and budget in one boundary",
+        rearmed_parent.record.state == "awaiting-callback"
+        and rearmed_parent.record.deadline_at
+        == 10.0 + request.time_budget_seconds,
+    )
     before_continuation = store.read("owner-1", "runtime-1")
     continuation_started = before_continuation.deadline_at + 5.0
     with patch(

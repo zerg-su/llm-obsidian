@@ -7,6 +7,8 @@ import fcntl
 import json
 import os
 import tempfile
+import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
 
@@ -159,6 +161,46 @@ class OperationStore:
             if result.changed:
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
             return result
+
+    def rearm_callback_timeout(
+        self,
+        owner_id: str,
+        operation_id: str,
+        *,
+        deadline_at: float,
+    ) -> OperationRecord:
+        """Atomically restore one exact timed-out callback wait.
+
+        The state and replacement deadline must be published together so a
+        concurrent runtime worker cannot observe an awaiting callback with the
+        already-expired deadline and immediately return it to attention.
+        """
+
+        if (
+            not isinstance(deadline_at, (int, float))
+            or isinstance(deadline_at, bool)
+            or not math.isfinite(float(deadline_at))
+            or deadline_at <= 0
+        ):
+            raise StoreError("callback timeout rearm deadline is invalid")
+        with self.locked(owner_id):
+            record = self.read(owner_id, operation_id)
+            if (
+                record.state != "attention-required"
+                or record.attention_reason != AttentionReason.CALLBACK_TIMEOUT
+                or not record.deadline_at
+                or deadline_at <= record.deadline_at
+            ):
+                raise StoreError("operation is not an exact expired callback wait")
+            updated, result = transition(record, "awaiting-callback")
+            if not result.changed:
+                raise StoreError("callback timeout rearm made no state transition")
+            updated = replace(updated, deadline_at=float(deadline_at))
+            self._write(
+                self._operation_path(owner_id, operation_id),
+                to_dict(updated),
+            )
+            return updated
 
     def begin_effect(self, owner_id: str, operation_id: str, effect: str) -> OperationRecord:
         with self.locked(owner_id):
