@@ -25,7 +25,7 @@ GENERATED_RUNTIME_ARGV = re.compile(
     r"""\[\s*["'](cmux|claude|codex)["']\s*,"""
 )
 PRODUCTION_SEAMS = {
-    "scripts/dispatch-runner.py": "harness.workflows.dispatch.start_dispatch",
+    "scripts/dispatch_execution.py": "harness.workflows.dispatch.start_dispatch",
     "scripts/reap-runner.py": "harness.workflows.reap.run_reap",
     "scripts/research-isolation.py": "harness.workflows.research.start_research",
 }

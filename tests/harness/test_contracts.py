@@ -103,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-harness-lint.") as raw:
         '{"schema_version":1,"temporary_direct_callers":{}}\n',
         encoding="utf-8",
     )
-    (fake / "scripts/dispatch-runner.py").write_text(
+    (fake / "scripts/dispatch_execution.py").write_text(
         'MARKER = "harness.workflows.dispatch.start_dispatch"\n'
         "def start():\n"
         "    return None\n",
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-harness-lint.") as raw:
         semantic.returncode == 1
         and set(semantic_value["lifecycle_seam_violations"])
         == {
-            "scripts/dispatch-runner.py",
+            "scripts/dispatch_execution.py",
             "scripts/reap-runner.py",
             "scripts/research-isolation.py",
         }

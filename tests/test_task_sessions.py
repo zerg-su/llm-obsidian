@@ -353,7 +353,9 @@ with tempfile.TemporaryDirectory() as raw:
         project, interrupted_transition_task, interrupted_lane,
         str(interrupted_operation["operation_id"]),
     )
-    real_atomic_write = task_sessions_module.atomic_write
+    import task_session_store
+
+    real_atomic_write = task_session_store.atomic_write
     failed_terminal_lane_write = False
 
     def fail_terminal_lane_write(path: Path, value: dict[str, object]) -> None:
@@ -367,7 +369,7 @@ with tempfile.TemporaryDirectory() as raw:
             raise OSError("injected terminal lane write failure")
         real_atomic_write(path, value)
 
-    task_sessions_module.atomic_write = fail_terminal_lane_write
+    task_session_store.atomic_write = fail_terminal_lane_write
     try:
         try:
             store.transition_operation(
@@ -379,7 +381,7 @@ with tempfile.TemporaryDirectory() as raw:
         else:
             raise AssertionError("injected terminal lane write failure was accepted")
     finally:
-        task_sessions_module.atomic_write = real_atomic_write
+        task_session_store.atomic_write = real_atomic_write
     interrupted_before_retry = store.lane_state(
         project, interrupted_transition_task, interrupted_lane
     )
@@ -473,7 +475,7 @@ with tempfile.TemporaryDirectory() as raw:
     store.transition_operation(
         project, partial_task, partial_lane, str(partial_op["operation_id"]), "complete"
     )
-    real_atomic_write = task_sessions_module.atomic_write
+    real_atomic_write = task_session_store.atomic_write
     failed_once = False
 
     def fail_first_lane_archive(path: Path, value: dict[str, object]) -> None:
@@ -483,7 +485,7 @@ with tempfile.TemporaryDirectory() as raw:
             raise OSError("injected lane archive failure")
         real_atomic_write(path, value)
 
-    task_sessions_module.atomic_write = fail_first_lane_archive
+    task_session_store.atomic_write = fail_first_lane_archive
     try:
         try:
             store.archive_task(project, partial_task)
@@ -492,7 +494,7 @@ with tempfile.TemporaryDirectory() as raw:
         else:
             raise AssertionError("injected archive failure was accepted")
     finally:
-        task_sessions_module.atomic_write = real_atomic_write
+        task_session_store.atomic_write = real_atomic_write
     partial_state = json.loads(store.task_path(project, partial_task).read_text(encoding="utf-8"))
     check(
         "archive failure returns task to a retryable contained state",

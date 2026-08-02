@@ -8,6 +8,7 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -1442,13 +1443,21 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         "task review runner is a public code-owned lifecycle facade",
         module_spec is not None and module_spec.loader is not None,
     )
-    runner_source = (ROOT / "scripts/task-review-runner.py").read_text(
-        encoding="utf-8"
+    runner_source = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "scripts/task-review-runner.py",
+            "scripts/task_review_flow.py",
+            "scripts/task_review_resolution_flow.py",
+        )
     )
     check(
         "deep resolution stops after the first exhausted lane",
-        'if decision.action == "attention-required":\n                break'
-        in runner_source,
+        re.search(
+            r'if decision\.action == "attention-required":\n\s+break',
+            runner_source,
+        )
+        is not None,
     )
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)

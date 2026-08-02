@@ -93,6 +93,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         ROOT / "scripts" / "task_session_cmux_layout.py",
         vault / "scripts" / "task_session_cmux_layout.py",
     )
+    shutil.copyfile(
+        ROOT / "scripts" / "task_session_store.py",
+        vault / "scripts" / "task_session_store.py",
+    )
+    shutil.copyfile(
+        ROOT / "scripts" / "task_session_store_io.py",
+        vault / "scripts" / "task_session_store_io.py",
+    )
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
     plan.write_text(
@@ -1117,8 +1125,10 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             )
 
     fake_runtime = FakeRuntime(vault / ".vault-meta" / "harness")
-    original_sync = runner.sync_codex_profile
-    original_log = runner.dispatch_log
+    import dispatch_execution
+
+    original_sync = dispatch_execution.sync_codex_profile
+    original_log = dispatch_execution.dispatch_log
     sync_failure_raw = json.loads(json.dumps(raw_request))
     sync_failure_raw["request_id"] = str(uuid.uuid4())
     sync_failure_raw["task_name"] = "runtime-sync-failure"
@@ -1127,7 +1137,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         tmp / "worktrees" / "runtime-sync-failure"
     )
     sync_failure_request = runner.validate_request(sync_failure_raw)
-    runner.sync_codex_profile = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    dispatch_execution.sync_codex_profile = lambda *_args, **_kwargs: (_ for _ in ()).throw(
         runner.DispatchError("fixture runtime sync failed")
     )
     expect_error(
@@ -1140,8 +1150,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         not Path(sync_failure_request["worktree"]).exists(),
         sync_failure_request["worktree"],
     )
-    runner.sync_codex_profile = lambda *_args, **_kwargs: None
-    runner.dispatch_log = lambda *_args, **_kwargs: None
+    dispatch_execution.sync_codex_profile = lambda *_args, **_kwargs: None
+    dispatch_execution.dispatch_log = lambda *_args, **_kwargs: None
     try:
         harness_result = runner.start(
             harness_request, "c" * 64, runtime_manager=fake_runtime
@@ -1153,8 +1163,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             fix_harness_request, "d" * 64, runtime_manager=fake_runtime
         )
     finally:
-        runner.sync_codex_profile = original_sync
-        runner.dispatch_log = original_log
+        dispatch_execution.sync_codex_profile = original_sync
+        dispatch_execution.dispatch_log = original_log
     harness_record = OperationStore(vault / ".vault-meta/harness").read(
         harness_request["request_id"], harness_request["request_id"]
     )

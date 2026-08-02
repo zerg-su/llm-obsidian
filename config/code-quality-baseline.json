@@ -1,25 +1,4 @@
 {
   "schema_version": 1,
-  "hotspots": {
-    "file-lines:scripts/task-review-runner.py": {
-      "max_value": 3756,
-      "owner": "harness-entrypoint-decomposition",
-      "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
-    },
-    "function-branches:scripts/task-review-runner.py:_durable_successful_verification": {
-      "max_value": 64,
-      "owner": "review-recovery-decomposition",
-      "evidence": "pre-existing recovery hotspot exposed by the honest 2.6 denominator"
-    },
-    "function-branches:scripts/task-review-runner.py:_run_review": {
-      "max_value": 97,
-      "owner": "review-facade-decomposition",
-      "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
-    },
-    "function-lines:scripts/task-review-runner.py:_run_review": {
-      "max_value": 508,
-      "owner": "review-facade-decomposition",
-      "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
-    }
-  }
+  "hotspots": {}
 }

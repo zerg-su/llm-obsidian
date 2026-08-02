@@ -94,8 +94,10 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
             "verification_profile_sha256": PROFILE_SHA,
         },
     }
-    original_git = task_review._git
-    task_review._git = lambda _root, *args: (
+    import task_review_context
+
+    original_git = task_review_context._git
+    task_review_context._git = lambda _root, *args: (
         HEAD if args == ("rev-parse", "HEAD") else "bounded HEAD diff"
     )
     try:
@@ -103,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
             meta, vault, worktree, runtime, "workstream-c"
         )
     finally:
-        task_review._git = original_git
+        task_review_context._git = original_git
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     packet_files = {

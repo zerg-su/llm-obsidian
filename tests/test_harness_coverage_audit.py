@@ -26,8 +26,37 @@ assert "scripts.task-review-runner" in audit.source_modules()
 assert "scripts.dispatch-runner" in audit.source_modules()
 assert "scripts.dispatch_contracts" in audit.source_modules()
 assert "scripts.dispatch_setup" in audit.source_modules()
+for module in (
+    "approval",
+    "custom_contracts",
+    "execution",
+    "io",
+    "lifecycle",
+    "workspace",
+):
+    assert f"scripts.dispatch_{module}" in audit.source_modules()
 assert "scripts.task_session_contracts" in audit.source_modules()
 assert "scripts.task_session_cmux_layout" in audit.source_modules()
+assert "scripts.task_session_store" in audit.source_modules()
+assert "scripts.task_session_store_io" in audit.source_modules()
+for module in (
+    "context",
+    "current",
+    "finalizing",
+    "flow",
+    "identity",
+    "mechanism_recovery",
+    "replay",
+    "request",
+    "resolution_bundle",
+    "resolution_flow",
+    "shared",
+    "transport",
+    "verification",
+    "verification_recovery",
+    "verification_resubmit",
+):
+    assert f"scripts.task_review_{module}" in audit.source_modules()
 assert any(
     path == "scripts/review-runner.py" and reason
     for path, reason in audit.MANIFEST.excluded_entrypoints
