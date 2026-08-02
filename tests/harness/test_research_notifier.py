@@ -22,8 +22,9 @@ def check(label: str, value: bool) -> None:
 runner_source = (ROOT / "scripts/research-isolation.py").read_text(
     encoding="utf-8"
 )
-worker_source = (ROOT / "scripts/harness/runtime_worker.py").read_text(
-    encoding="utf-8"
+worker_source = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted((ROOT / "scripts/harness").glob("runtime_worker*.py"))
 )
 
 for token in (
