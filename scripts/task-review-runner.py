@@ -3252,6 +3252,11 @@ def run_current_review(
             ) or (
                 status == "attention-required"
                 and _current_review_is_quiescent(vault, task_id)
+            ) or (
+                status in {"pending", "reviewing", "verifying"}
+                and not gate_state.get("round_results")
+                and not gate_state.get("final_results")
+                and _current_review_is_quiescent(vault, task_id)
             )
         elif gate_state_path.exists():
             raise TaskReviewError("current review gate is not a regular file")

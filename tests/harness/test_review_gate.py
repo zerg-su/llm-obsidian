@@ -2959,6 +2959,53 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             restarted["status"] == "reviewing"
             and restarted["task_id"] != started["task_id"],
         )
+        for record in current_store.list(restarted["task_id"]):
+            if record.state in TERMINAL:
+                continue
+            current_store.transition(
+                restarted["task_id"],
+                record.spec.operation_id,
+                "cancelling",
+            )
+            current_store.transition(
+                restarted["task_id"],
+                record.spec.operation_id,
+                "exiting",
+            )
+            current_store.transition(
+                restarted["task_id"],
+                record.spec.operation_id,
+                "cancelled",
+            )
+            cancelled = current_store.read(
+                restarted["task_id"], record.spec.operation_id
+            )
+            if cancelled.resources != OwnedResources():
+                current_store.save(
+                    replace(
+                        cancelled,
+                        resources=OwnedResources(),
+                        revision=cancelled.revision + 1,
+                    ),
+                    expected_revision=cancelled.revision,
+                )
+        superseded = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            cross_model=True,
+            runtime="claude",
+            model="fable",
+            effort="xhigh",
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        check(
+            "resource-free result-free review permits a new current preset",
+            superseded["status"] == "reviewing"
+            and superseded["task_id"] != restarted["task_id"]
+            and len(superseded["lanes"]) == 2,
+        )
     finally:
         for name, value in old_environment.items():
             if value is None:
