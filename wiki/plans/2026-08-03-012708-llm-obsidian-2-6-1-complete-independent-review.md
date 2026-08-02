@@ -23,251 +23,198 @@ tags:
 ```json
 {
   "schema_version": 1,
-  "purpose": "Устранить слепые зоны split-axis review и сохранить работоспособность инженерного pipeline при доступности только одной разрешённой модели.",
-  "desired_outcome": "LLM Obsidian предоставляет simple, deep и явно запрашиваемый full review: каждая независимая reviewer-сессия проверяет полный outcome и инженерный контракт, а code-owned routing вызывает только модели, разрешённые пользователем в начале задачи, без скрытого fallback или расширения pipeline authority.",
+  "purpose": "Минимально скорректировать существующую review topology без создания нового lifecycle или policy subsystem.",
+  "desired_outcome": "LLM Obsidian сохраняет Simple review, использует в default Deep две независимые holistic sessions Fable и Sol, при single-model Deep разделяет review одной модели на intent и engineering sessions, а явно запрашиваемый Full объединяет обе модели и обе специализации в четыре sessions; Full single-model отсутствует и fail-fast предлагает Deep.",
   "success_evidence": [
     {
-      "evidence_id": "deep-complete-independent",
-      "observable": "Deep review создаёт две независимые identity-bound сессии; каждая получает полный review contract, а не только spec или standards половину."
+      "evidence_id": "deep-adaptive-topology",
+      "observable": "Default Deep создаёт две независимые holistic sessions Fable и Sol, каждая проверяет всё; single-model Deep создаёт intent и engineering specialist sessions выбранной модели и не вызывает другой runtime."
     },
     {
-      "evidence_id": "full-explicit-cross-product",
-      "observable": "Full review запускается только по явному запросу и создаёт точный cross-product разрешённых моделей и intent-first/engineering-first perspectives."
+      "evidence_id": "full-explicit-dual-model-grid",
+      "observable": "Full запускается только по явному запросу и создаёт ровно четыре lanes: intent и engineering отдельно для Fable и Sol; single-model Full не существует."
     },
     {
-      "evidence_id": "single-model-safe-routing",
-      "observable": "Sol-only и Fable-only policies завершают simple/deep/full без обращения к запрещённому runtime; недоступность единственной модели создаёт typed attention, а не скрытый fallback."
+      "evidence_id": "single-model-safe-topology",
+      "observable": "При доступности одной модели Simple создаёт одну holistic session, Deep — две specialist sessions intent и engineering; Full отклоняется до provider effect с предложением использовать Deep."
     },
     {
-      "evidence_id": "review-contract-integrity",
-      "observable": "Каждая lane проверяет Outcome Contract, specification, scope/non-goals, correctness, architecture, maintainability, test quality, security и применимые release risks; material finding любой lane блокирует approval и остаётся независимо атрибутированным."
+      "evidence_id": "aggregate-findings-preserved",
+      "observable": "Material finding любой Deep или Full lane блокирует aggregate approval; findings остаются независимо атрибутированными без голосования и усреднения."
     },
     {
-      "evidence_id": "lifecycle-no-regression",
-      "observable": "Exact-HEAD binding, callbacks, bounded verification, typed resolution, cleanup, telemetry, expert aliases и purpose-bound intent/implementation/release review остаются зелёными."
-    },
-    {
-      "evidence_id": "bounded-live-proof",
-      "observable": "После полной hermetic matrix один live Deep и один явно запрошенный live Full подтверждают provider wiring без большой дорогой live-матрицы."
+      "evidence_id": "existing-lifecycle-reused",
+      "observable": "Exact-HEAD binding, same-session verification, callbacks, resolution, archive и cleanup проходят через существующий review gate без нового scheduler, store или FSM."
     }
   ],
   "non_goals": [
-    "General parallel/join в model-authored pipeline DSL.",
-    "Новый scheduler, store, FSM, supervisor или lifecycle engine.",
-    "Автоматический выбор Full review по risk profile без явного запроса пользователя.",
-    "Скрытый вызов модели вне разрешённой task model-policy.",
-    "Broad refactor или механическое дробление cohesive-файлов по универсальному line-count limit.",
-    "Переписывание engineering skills без нового доказанного semantic gap.",
-    "Импорт technology-specific tracker, GitHub/GitLab или upstream orchestration mechanics."
+    "Новая task model-policy, fallback pools или automatic provider substitution.",
+    "Автоматический выбор Full по risk profile или любому другому сигналу.",
+    "Новый review lifecycle, scheduler, store, FSM, migration framework или telemetry vocabulary.",
+    "General parallel/join в PipelineSpec или custom pipeline DSL.",
+    "Broad refactor, file decomposition или переработка engineering skills.",
+    "Большая combinatorial live matrix или повторение уже зелёных provider effects."
   ]
 }
 ```
 
-## 1. Результат релиза
+## 1. Существующий baseline
 
-Выпустить небольшой `2.6.1` из `/Users/zak/Projects/llm-obsidian`. Релиз меняет только полноту и маршрутизацию review; существующие harness, pipeline execution, engineering skills и task decomposition остаются основой.
+Релиз делается в `/Users/zak/Projects/llm-obsidian` как небольшой patch поверх 2.6.0.
 
-Пользовательские режимы:
+Уже существуют и не перепроектируются:
 
-| Режим | Сессии | Выбор |
-|---|---:|---|
-| `simple` | одна holistic reviewer-сессия | существующий default |
-| `deep` | две независимые complete-contract сессии | существующий `--deep` |
-| `full` | `allowed models × 2 perspectives` | только явный `--full` или эквивалентный явный запрос |
+- `simple` и `deep` presets;
+- alias-backed `--runtime`, `--model`, `--effort` override;
+- alias-backed выбор одного review route и существующие default Fable/Sol routes;
+- независимые reviewer sessions, aggregate verdict, exact-HEAD verification, callbacks, resolution и cleanup;
+- purpose-bound intent, implementation и release review.
 
-`full` никогда не включается автоматически по risk profile. Architecture, migration или release risk могут рекомендовать его пользователю до запуска, но не расширяют review topology без явного согласия.
+Следовательно, 2.6.1 меняет только compiled topology, reviewer responsibility и явный пользовательский флаг `--full`. Default Deep использует model diversity, single-model Deep — specialist depth, Full объединяет оба свойства. В этом плане single-model означает только существующий явный alias-backed override `--runtime`/`--model`, который ограничивает review одной зарегистрированной моделью; это не новый persisted policy object.
 
-## 2. Review topology
+## 2. Public review modes
 
-### 2.1 Общий полный контракт каждой lane
+| Режим | Default Fable + Sol | Single-model policy | Ответственность |
+|---|---:|---:|---|
+| `simple` | 1 session | 1 session | одна holistic-проверка |
+| `deep` | 2 holistic sessions | 2 specialist sessions | diversity двух моделей либо intent/engineering depth одной |
+| `full` | 4 specialist sessions | недоступен | diversity двух моделей × intent/engineering depth |
 
-Каждая initial и verification lane обязана независимо проверить:
+`--full` запускается только явно и никогда не выводится из risk profile. Если разрешена только одна модель, Full отклоняется до provider effect с понятным предложением использовать Deep single-model. Автоматически превращать Full в Deep запрещено.
 
-1. исходный Outcome Contract и его `success_evidence`;
-2. specification, plan/design и declared scope;
-3. каждый `non_goal` на scope creep;
-4. correctness и failure behavior;
-5. architecture, ownership, dependency direction и maintainability;
-6. test quality, честность coverage denominator и verification gaps;
-7. security и permission boundaries;
-8. применимые reliability, recovery, operability, compatibility, migration и release risks.
+### 2.1 Deep
 
-Lane не может пропустить категорию как «чужую ось». Perspective определяет порядок и основной adversarial угол, но не урезает denominator.
+Default Deep запускает две независимые holistic sessions:
 
-### 2.2 Deep
+- Fable holistic;
+- Sol holistic.
 
-Deep создаёт две независимые сессии:
+Каждая модель самостоятельно проверяет полный Outcome Contract и engineering contract. Модели не делят ответственность, не голосуют и не усредняют findings.
 
-- `intent-first`: начинает с outcome/spec/scope, затем проходит весь engineering contract;
-- `engineering-first`: начинает с code/test/architecture/security, затем независимо доказывает достижение outcome и отсутствие scope drift.
+При single-model policy Deep вместо дублирования одной holistic prompt разделяет review на две specialist sessions выбранной модели:
 
-Default routing:
+- `intent`: Outcome Contract, success evidence, specification, scope и non-goals;
+- `engineering`: correctness, failure behavior, architecture, ownership, maintainability, tests, security и применимые recovery/compatibility/release risks.
 
-- `intent-first` → Fable `xhigh`;
-- `engineering-first` → Sol `xhigh`.
+Обе specialist sessions получают общий ContextPacket и вместе покрывают полный denominator. Другой runtime не вызывается.
 
-Findings остаются раздельно атрибутированными. Для отображения допустима evidence-preserving группировка дубликатов, но запрещены голосование, усреднение severity и удаление material finding одной модели решением другой.
+### 2.2 Full
 
-### 2.3 Full
-
-Full строит cross-product:
+Full объединяет model diversity и specialist depth:
 
 ```text
-allowed review models × {intent-first, engineering-first}
+{Fable, Sol} × {intent, engineering}
 ```
 
-При default `{Fable, Sol}` создаются четыре независимые сессии. При `Sol-only` или `Fable-only` создаются две. В single-model policy Deep и Full могут иметь одинаковое число сессий; runner обязан честно показать это до запуска, а не создавать дубли ради числа четыре.
+Точная topology:
 
-## 3. Task model-policy
+1. Fable — intent;
+2. Fable — engineering;
+3. Sol — intent;
+4. Sol — engineering.
 
-Model-policy фиксируется до первого provider effect и входит в immutable task/review identity.
+Каждая session отвечает только за назначенную ось. Все четыре результата обязательны; material finding любой lane блокирует approval. Findings разных моделей не голосуются и не усредняются.
 
-Она содержит:
+Full single-model отсутствует: его полезная topology уже представлена Deep single-model. При недостатке второй модели preflight fail-fast, не создавая provider effects.
 
-- разрешённые model aliases из `config/model-routing.toml`;
-- назначение alias на reviewer roles/perspectives;
-- ordered fallback pool, если пользователь его явно разрешил;
-- `fallback=none` для строгого single-model режима.
-
-Правила:
-
-1. `Sol-only` никогда не вызывает Claude/Fable/Opus.
-2. `Fable-only` никогда не вызывает Codex/Sol/Terra.
-3. Отсутствующий или exhausted единственный route создаёт typed attention.
-4. Автоматическая замена допустима только внутри заранее разрешённого ordered pool.
-5. Expert override использует только зарегистрированные aliases; mismatch fail-closed.
-6. Preview до запуска показывает режим, точные aliases, perspectives, число сессий, verification budget и fallback policy.
-7. Same-session verification сохраняет исходную model-policy и не расширяет её.
-
-## 4. Pipeline boundary
-
-Не добавлять `parallel` или `join` в custom pipeline DSL.
-
-Параллелизм достигается до исполнения pipeline:
-
-```text
-approved plan
-  ├─ independent task A → complete sequential pipeline A
-  ├─ independent task B → complete sequential pipeline B
-  └─ independent task C → complete sequential pipeline C
-```
-
-Каждая задача получает отдельные worktree, identity, session и полный последовательный pipeline. Существующих registered model steps, typed decisions, bounded loops, verification, review, attention/stop и reap достаточно для утверждённой задачи. Review fan-out/fan-in остаётся code-owned `ReviewProgram`, а не model-authored общей capability.
-
-## 5. Contract и migration boundary
-
-Новые review profiles и axis identities внедрить атомарно:
-
-- `scripts/review_contract.py`: modes, ordered lane identities и budgets;
-- `scripts/model_routing_config.py` и `config/model-routing.toml`: `full` profile и role routes;
-- task/review metadata schemas и parsers: captured model-policy и explicit-full intent;
-- review request, prompt, callback, resolution, archive, telemetry и finalization contracts;
-- CLI/facades и `skills/review/SKILL.md`;
-- exhaustive axis-keyed tests.
-
-Нельзя допустить промежуточный HEAD, где schema принимает `full`, но routing validator или lifecycle его отвергает.
-
-Смена axis identities намеренно делает старые open review receipts непригодными для нового profile. Перед upgrade активные 2.6 review operations завершаются или останавливаются штатно. Historical archives остаются читаемыми; in-place migration и compatibility branches для продолжения старого review новым topology не добавляются.
-
-## 6. Implementation slices
+## 3. Минимальный implementation delta
 
 ### Slice A — topology contract
 
-**Responsibility:** versioned modes, lane roles, perspectives, budgets и aggregation invariants.
+Добавить `full` в существующий review preset и compile точных ordered lane identities:
 
-**Red evidence:** contract tests отклоняют `full`, complete-contract lane identities и single-model topology.
+- Simple: `<selected-alias>-holistic`;
+- Deep default: `fable-holistic`, `sol-holistic`;
+- Deep single-model: `<alias>-intent`, `<alias>-engineering`;
+- Full default: `fable-intent`, `fable-engineering`, `sol-intent`, `sol-engineering`.
 
-**Green:** pure topology compiler выдаёт точные ordered lanes для simple/deep/full и не выполняет provider effects.
+Не добавлять отдельный model-policy object. Использовать существующие aliases и explicit override.
 
-### Slice B — routing policy
+### Slice B — prompts и responsibility
 
-**Responsibility:** immutable allowed aliases, explicit fallback и role routing.
+**Default Deep:**
 
-**Red evidence:** default resolver вызывает запрещённый runtime или silently expands single-model policy.
+- Fable получает holistic prompt и проверяет весь review contract: outcome, specification, scope, correctness, architecture, maintainability, tests и security.
+- Sol получает такой же полный holistic scope и независимо проверяет те же категории.
 
-**Green:** route selection остаётся внутри captured policy; exhaustion создаёт typed attention.
+**Deep single-model:**
 
-### Slice C — complete reviewer packet
+- `<alias>-intent` проверяет только Outcome Contract, success evidence, specification, scope и non-goals.
+- `<alias>-engineering` проверяет только correctness, failure behavior, architecture, ownership, maintainability, tests, security и применимые recovery/release risks.
 
-**Responsibility:** одинаковый полный review denominator и разные perspective ordering.
+**Full:**
 
-**Red evidence:** mutation test удаляет outcome или engineering category из одной lane, и deterministic assertion падает.
+- Fable получает отдельные `intent` и `engineering` prompts из Deep single-model.
+- Sol получает те же две отдельные prompts.
+- В результате работают четыре specialist sessions с одинаковыми границами ответственности у обеих моделей.
 
-**Green:** каждый prompt/ContextPacket содержит все категории, exact purpose question и evidence pointers.
+Каждый prompt с engineering responsibility — Simple holistic, обе default Deep holistic prompts, Deep single-model engineering и обе Full engineering prompts — содержит authoritative pointer на `docs/skill-references/engineering-quality-contract.md` и правило repository-specific overrides. Intent-only prompts этот checklist не дублируют. Все sessions получают один общий ContextPacket; prompt определяет, какую часть этого контекста reviewer обязан оценивать.
 
-### Slice D — lifecycle integration
+### Slice C — routing и user surface
 
-**Responsibility:** independent sessions, callbacks, finding attribution, common resolved HEAD verification, cleanup и archive.
+- добавить явный `--full` в current review и dispatch review preset;
+- запретить комбинацию `--deep --full`;
+- Default Deep запускает `fable-holistic` и `sol-holistic`;
+- single-model Deep запускает `<alias>-intent` и `<alias>-engineering`;
+- Full компилирует intent и engineering lanes для Fable и Sol;
+- Full при существующем explicit alias-backed `--runtime`/`--model` override отклоняется до provider effect и предлагает Deep;
+- preview показывает mode, exact aliases, responsibilities и точное число sessions.
 
-**Red evidence:** duplicate identities, hidden rerouting, lost material finding, stale callback или orphaned surface.
+Никакого implicit Full, Full single-model, нового routing profile, fallback или скрытой дополнительной модели.
 
-**Green:** existing review gate владеет всеми lanes без второго scheduler/store/FSM.
+### Slice D — focused tests и документация
 
-### Slice E — user surface и skills
+Обновить только review skill, preset table и тесты изменённых seams. Не проводить общий skill rewrite.
 
-**Responsibility:** explicit `full`, model-policy preview, expert aliases и concise review instructions.
+## 4. Acceptance matrix
 
-**Red evidence:** router/CLI принимает implicit Full либо documentation обещает topology, не совпадающий с compiled plan.
+Обязательные дешёвые проверки:
 
-**Green:** one authoritative preset table; `improve-skills` scoped audit для `review` подтверждает invocation, hierarchy, steering, pruning и goal preservation.
+1. Simple остаётся одной holistic lane выбранной модели.
+2. Default Deep компилирует ровно `fable-holistic` и `sol-holistic`.
+3. Simple holistic и обе default Deep holistic prompts содержат полный outcome checklist, engineering checklist, authoritative pointer на `docs/skill-references/engineering-quality-contract.md` и правило repository-specific overrides.
+4. Single-model Deep компилирует `<alias>-intent` и `<alias>-engineering`; другой runtime имеет ноль launch effects.
+5. Intent и engineering prompts имеют непересекающуюся ответственность и вместе покрывают полный denominator.
+6. Full без explicit flag не компилируется и не запускается.
+7. Full компилирует ровно четыре specialist lanes: intent и engineering для Fable и Sol.
+8. Full при существующем explicit alias-backed `--runtime`/`--model` override отклоняется до provider effect с typed рекомендацией Deep и не создаёт сокращённую Full topology.
+9. Material finding любой Deep или Full lane блокирует aggregate approval.
+10. Duplicate/stale callback, verification budget, exact HEAD и cleanup сохраняют существующее поведение.
+11. Existing Simple lifecycle regressions остаются зелёными; изменённые Deep/Full topology покрыты focused contract tests без compatibility branches.
+12. Single-model branch активируется только существующим explicit alias-backed override; новый persisted model-policy object, fallback pool или routing profile не создаётся.
 
-### Slice F — release evidence
+Provider runtime замокан во всех topology tests. После зелёных unit/harness suites достаточно одного видимого explicit Full smoke; повторять большую live matrix не нужно.
 
-**Responsibility:** deterministic matrix, bounded provider smokes, version/docs и exact-HEAD release gate.
+## 5. Вероятный ограниченный набор файлов
 
-**Green:** все evidence IDs Outcome Contract имеют точные durable pointers.
+Точный список подтверждается red tests, но ожидаемый seam ограничен:
 
-## 7. Дешёвая verification matrix
+- `scripts/review_contract.py`;
+- `scripts/harness/workflows/review_gate_contracts.py` и review request contracts;
+- `scripts/task_review_request.py`;
+- current/dispatch flag parsing и review-mode validation;
+- `skills/review/SKILL.md`;
+- focused review contract, routing, prompt и lifecycle regression tests.
 
-До любого live review исчерпать hermetic combinations:
+Если реализация требует нового scheduler/store/FSM, отдельной migration subsystem или широкого изменения task lifecycle, остановиться: это означает, что выбран не минимальный seam.
 
-- mode: simple / deep / full;
-- model-policy: default dual / Sol-only / Fable-only / explicit ordered fallback;
-- perspective: holistic / intent-first / engineering-first;
-- purpose: intent / implementation / release;
-- stage: initial / shared resolved-HEAD verification / terminal;
-- verdict: approve / minor-only / material finding / blocked;
-- route state: available / unavailable / exhausted / forbidden fallback;
-- callback state: valid / stale identity / duplicate / missing;
-- cleanup: every lane complete / partial exit / exact owned recovery.
+## 6. Release gate
 
-Обязательные свойства:
-
-- каждый supported topology combination перечислен и проверен;
-- provider/transport замокан, policy/state/resolution остаются реальными;
-- любой material finding любой lane блокирует aggregate approval;
-- forbidden runtime имеет ноль launch effects;
-- `full` без explicit intent отклоняется до provider effect;
-- exact HEAD, model-policy и profile digest входят в receipt identity;
-- verification не создаёт новую модель или perspective вне исходного topology.
-
-## 8. Live acceptance
-
-После полной hermetic matrix:
-
-1. Один видимый Deep на Fable + Sol подтверждает две полные независимые lanes и cleanup.
-2. Один явно запрошенный Full подтверждает четыре default lanes и finding attribution.
-3. Single-model paths доказываются deterministic adapter tests; дополнительный live smoke нужен только при реальном routing gap.
-
-Не запускать большую provider matrix и не повторять green effects ради количества.
-
-## 9. Release gate
-
-- focused topology/routing/prompt tests;
-- exhaustive review transition matrix;
-- существующие harness, review-program, task contract, telemetry, archive, cleanup и model-routing suites;
-- scoped `improve-skills` verdict и behavioral pressure для `review`;
+- focused topology, prompt, routing и aggregation tests;
+- существующие review gate, callback, resolution, cleanup и model-routing suites;
 - `make test` и `make test-harness-coverage`;
 - `make acceptance-check`;
-- vault validation, Codex adapter/MCP sync, upstream pin verification и `git diff --check`;
-- один Opus intent-review этого плана;
-- после implementation — independent implementation review и zero-fix release review на exact integration HEAD.
+- vault validation и `git diff --check`;
+- один explicit Full live smoke;
+- implementation review на exact integration HEAD;
+- zero-fix release review.
 
-## 10. Stop conditions
+## 7. Stop conditions
 
-- Не расширять релиз общим parallel DSL, новым scheduler или broad refactor.
-- Если topology нельзя выразить через существующий review gate без второго lifecycle owner, остановиться и пересмотреть design.
-- После трёх failed behavior-preserving fixes одного seam — architecture stop.
-- Недоступная разрешённая модель не разрешает скрытый provider switch.
 - Full без явного user intent не запускается.
-- Green unit test, callback или отдельная approved lane не закрывают Outcome Contract без aggregate evidence.
+- Single-model Simple/Deep не обращаются к другой модели.
+- Default Deep остаётся двумя независимыми holistic reviews; single-model Deep остаётся intent/engineering split.
+- Full существует только как явный dual-model specialist grid.
+- Ни одна specialist session не расширяет responsibility до holistic verdict.
+- Нельзя создавать второй lifecycle owner ради новой topology.
+- После трёх неудачных behavior-preserving fixes одного seam — architecture stop.
