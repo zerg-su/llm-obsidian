@@ -199,7 +199,6 @@ def _resolution_bundle(
 ) -> ResolutionBundle:
     reviewed_heads: set[str] = set()
     finding_ids_by_axis: dict[str, tuple[str, ...]] = {}
-    all_finding_ids: list[str] = []
     review_operation_ids: set[str] = set()
     review_callbacks: list[dict[str, object]] = []
     persisted_evidence: list[ReviewResolutionEvidence] = []
@@ -234,9 +233,7 @@ def _resolution_bundle(
         if evidence.axis in finding_ids_by_axis or evidence.axis in awaiting:
             raise TaskReviewError("review resolution axis is staged more than once")
         finding_ids_by_axis[evidence.axis] = evidence.previous_finding_ids
-        all_finding_ids.extend(evidence.previous_finding_ids)
         reviewed_heads.add(evidence.reviewed_head_sha)
-        review_operation_ids.add(evidence.operation_id)
         persisted_evidence.append(evidence)
     for axis in sorted(awaiting):
         raw_boundary = awaiting[axis]
@@ -264,7 +261,6 @@ def _resolution_bundle(
         if "" in material:
             raise TaskReviewError("material finding identity is invalid")
         finding_ids_by_axis[str(axis)] = material
-        all_finding_ids.extend(material)
         reviewed_heads.add(str(raw_boundary.get("reviewed_head_sha") or ""))
         review_operation_ids.add(
             str(raw_boundary.get("review_operation_id") or "")
@@ -286,6 +282,11 @@ def _resolution_bundle(
                 ),
             }
         )
+    all_finding_ids = tuple(
+        finding_id
+        for axis in sorted(finding_ids_by_axis)
+        for finding_id in finding_ids_by_axis[axis]
+    )
     if len(all_finding_ids) != len(set(all_finding_ids)):
         raise TaskReviewError("material finding identities repeat across axes")
     if len(reviewed_heads) != 1 or "" in reviewed_heads:
@@ -318,7 +319,7 @@ def _resolution_bundle(
             expected_operation_id=task_id,
             expected_reviewed_head_sha=reviewed_head,
             expected_resolved_head_sha=resolved_head,
-            expected_finding_ids=tuple(all_finding_ids),
+            expected_finding_ids=all_finding_ids,
             expected_review_identity_sha256=review_identity_sha256,
         )
     except ResolutionError as exc:
@@ -370,6 +371,12 @@ def _resolution_bundle(
         }
     except ResolutionError as exc:
         raise TaskReviewError(f"review resolution evidence is invalid: {exc}") from exc
+    for evidence in persisted_evidence:
+        rebuilt = by_axis.get(evidence.axis)
+        if rebuilt is None or rebuilt.payload() != evidence.payload():
+            raise TaskReviewError(
+                "persisted review resolution finding rulings changed"
+            )
     return ResolutionBundle(
         resolution,
         fix_delta,
