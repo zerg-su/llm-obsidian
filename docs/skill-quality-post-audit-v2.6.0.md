@@ -3,7 +3,7 @@
 ## Scope and identity
 
 - Frozen baseline: `d50990dc9c76b659c82978a0c8644b9bdbd99b29`.
-- Integrated skill audit HEAD: `0f9bb89c75baeabb6c828257afd698c644f23bf3` (includes the post-audit governance repair).
+- Integrated skill audit HEAD: `a33be75` (includes the paired-behavior repair).
 - Inventory: `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`, `review`, `reap`, `improve-skills`.
 - Verdict evidence: `docs/skill-quality-post-audit-v2.6.0.json`.
 - Upstream references remain the pinned Superpowers `writing-skills` and Matt Pocock `writing-great-skills` snapshots; no foreign orchestration was imported.
@@ -13,7 +13,7 @@
 | Skill | Integrated SHA-256 |
 |---|---|
 | `clarify` | `485b26a4ece6c3e41876da61b6682dfd85cd86421531b3116c5c3bb49387d57f` |
-| `design` | `ab7f8feb78515b41e2085e4543f7af1e96993d9c0b095bd6170b613484e4b7e0` |
+| `design` | `0708036db3b26e440715975fdb6afa4643a33316ea0d43aea2d38946d07f8486` |
 | `prototype` | `a32d59df117271297db363fba291a26b8ec4b64d780e632cf709f372deefc19d` |
 | `save-plan` | `598ecb6e34a1398981964029ca750cc7466ee335b094827929bf0898c6da0b74` |
 | `debug` | `44df10a5f7063d0631c45e7f4929eea4b5684d2d0043254ecac86ff76dee14cb` |
@@ -27,7 +27,7 @@
 | Baseline finding | Integrated evidence | Post-audit disposition |
 |---|---|---|
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
+| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; paired finding `HOL-002`; repair `a33be75` | resolved; durable budget/idempotency evidence must survive unrelated effects |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |
