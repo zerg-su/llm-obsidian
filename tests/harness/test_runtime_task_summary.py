@@ -758,6 +758,27 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and v4_record.accepted_callback_kind == "wiki-summary",
         v4_record,
     )
+    partial_v4_summary = {
+        **valid_v4_summary,
+        "outcome_disposition": "partially-achieved",
+        "outcome_evidence_ids": [],
+        "residual_gap_pointers": ["[[Runtime summary follow-up]]"],
+    }
+    partial_v4_task = "13131313-1313-4313-8313-131313131313"
+    partial_store, _partial_cmux, _partial_state, partial_rc = run_case(
+        root,
+        partial_v4_task,
+        partial_v4_summary,
+        task_version=4,
+    )
+    partial_record = partial_store.read("owner-1", partial_v4_task)
+    check(
+        "partially-achieved v4 summary remains callback-eligible",
+        partial_rc == 0
+        and partial_record.state == "finalizing"
+        and partial_record.accepted_callback_kind == "wiki-summary",
+        partial_record,
+    )
 
     engineering_task = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
     verification_calls: list[tuple[str, ...]] = []

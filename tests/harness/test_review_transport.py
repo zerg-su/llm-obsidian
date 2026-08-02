@@ -266,6 +266,109 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         "review submit rejects every non-canonical input file",
         result.returncode != 0 and unexpected_input.exists(),
     )
+    stale_resolution = {
+        **resolution_payload,
+        "resolved_head_sha": "1" * 40,
+    }
+    resolution_path.write_text(
+        json.dumps(stale_resolution, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    meta["resolution_evidence"][0]["sha256"] = hashlib.sha256(
+        resolution_path.read_bytes()
+    ).hexdigest()
+    (operation / ".review-meta.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    stale_archive = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "archive rejects stale ruling terminal HEAD",
+        stale_archive.returncode != 0,
+    )
+    historical_resolution = {
+        **resolution_payload,
+        "resolved_head_sha": "1" * 40,
+    }
+    resolution_path.write_text(
+        json.dumps(historical_resolution, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    terminal_resolution_path = operation / "resolution-holistic-1.json"
+    broken_terminal_resolution = {
+        **resolution_payload,
+        "reviewed_head_sha": "2" * 40,
+        "fix_delta_sha256": "e" * 64,
+    }
+    terminal_resolution_path.write_text(
+        json.dumps(broken_terminal_resolution, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    meta["resolution_evidence"] = [
+        {
+            "pointer": resolution_path.relative_to(operation).as_posix(),
+            "sha256": hashlib.sha256(resolution_path.read_bytes()).hexdigest(),
+        },
+        {
+            "pointer": terminal_resolution_path.relative_to(operation).as_posix(),
+            "sha256": hashlib.sha256(
+                terminal_resolution_path.read_bytes()
+            ).hexdigest(),
+        },
+    ]
+    (operation / ".review-meta.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    broken_chain_archive = subprocess.run(
+        [
+            sys.executable,
+            str(ARCHIVE),
+            "--worktree",
+            str(worktree),
+            "--operation-dir",
+            str(operation),
+            "--vault-root",
+            str(vault),
+            "--dry-run",
+            "--json",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "archive rejects a broken same-axis ruling chain",
+        broken_chain_archive.returncode != 0,
+    )
+    terminal_resolution = {
+        **broken_terminal_resolution,
+        "reviewed_head_sha": "1" * 40,
+    }
+    terminal_resolution_path.write_text(
+        json.dumps(terminal_resolution, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    meta["resolution_evidence"][1]["sha256"] = hashlib.sha256(
+        terminal_resolution_path.read_bytes()
+    ).hexdigest()
+    (operation / ".review-meta.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
     (worktree / "config" / "verification-profiles.toml").unlink()
     result = subprocess.run(
         [
@@ -291,6 +394,10 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         and archive["status"] == "dry-run"
         and archive["review_id"] == "operation-1"
         and archive["verdict"] == "approve",
+    )
+    check(
+        "archive preserves an ordered multi-iteration ruling chain",
+        len(meta["resolution_evidence"]) == 2,
     )
     check(
         "archive validates coordinator config for a generic product root",

@@ -19,5 +19,12 @@ Separate fact/assumption/decision; distinguish Unresolved fog from explicit
 out-of-scope. No placeholders/undefined interfaces; name owners/contracts.
 
 Default to vertical slices; use expand-contract only for wide migration.
+When a design authorizes restart, recovery, or another effectful action, bind
+that authorization to one immutable decision snapshot/identity and place an
+atomic reservation boundary before the effect. Acceptance must cover crash
+before reservation, crash after reservation but before the effect, crash after
+the effect but before its durable receipt, and prove replay does not duplicate
+the effect.
+
 Get approval before implementation or interface/migration/dependency/security/
 external-effect change.
