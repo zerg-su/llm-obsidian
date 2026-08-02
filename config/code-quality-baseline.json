@@ -1,11 +1,6 @@
 {
   "schema_version": 1,
   "hotspots": {
-    "file-lines:scripts/harness/runtime_sessions.py": {
-      "max_value": 1609,
-      "owner": "release/2.6.0 maintainable-harness-core",
-      "evidence": "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md"
-    },
     "file-lines:scripts/harness/runtime_worker.py": {
       "max_value": 5541,
       "owner": "release/2.6.0 maintainable-harness-core",
@@ -15,11 +10,6 @@
       "max_value": 1856,
       "owner": "release/2.6.0 maintainable-harness-core",
       "evidence": "docs/skill-semantic-gap-audit-v2.6.0.md"
-    },
-    "function-branches:scripts/harness/runtime_sessions.py:__post_init__": {
-      "max_value": 69,
-      "owner": "release/2.6.0 maintainable-harness-core",
-      "evidence": "RuntimeSessionRequest validation extraction"
     },
     "function-branches:scripts/harness/runtime_worker.py:drive_fix_transport": {
       "max_value": 76,
