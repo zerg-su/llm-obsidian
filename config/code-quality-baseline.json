@@ -6,11 +6,6 @@
       "owner": "release/2.6.0 maintainable-harness-core",
       "evidence": "docs/skill-semantic-gap-audit-v2.6.0.md"
     },
-    "file-lines:scripts/harness/workflows/review_gate.py": {
-      "max_value": 1856,
-      "owner": "release/2.6.0 maintainable-harness-core",
-      "evidence": "docs/skill-semantic-gap-audit-v2.6.0.md"
-    },
     "function-branches:scripts/harness/runtime_worker.py:drive_fix_transport": {
       "max_value": 76,
       "owner": "release/2.6.0 maintainable-harness-core",
