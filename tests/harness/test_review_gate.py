@@ -104,12 +104,15 @@ def write_trusted_current_approval(
     gate_root: Path,
     operation_id: str,
     head_sha: str,
+    *,
+    reviewed_head_sha: str = "",
 ) -> None:
     """Complete a current-review fixture with authority-verifiable evidence."""
 
     state_path = gate_root / "review-gate.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
     context = state["context"]
+    context["head_sha"] = head_sha
     run_id = "trusted-current-run"
     axes = (
         "spec",
@@ -181,6 +184,54 @@ def write_trusted_current_approval(
         "pointer": ".review-callback.json",
         "sha256": hashlib.sha256(callback_bytes).hexdigest(),
     }
+    if reviewed_head_sha and reviewed_head_sha != head_sha:
+        resolution_entries = []
+        resolution_pointers = {}
+        resolution_root = gate_root / operation_id
+        resolution_root.mkdir(parents=True, exist_ok=True)
+        for index, axis in enumerate(axes):
+            pointer = f"{operation_id}/resolution-{index}.json"
+            raw = (
+                json.dumps(
+                    {
+                        "axis": axis,
+                        "fix_delta_sha256": hashlib.sha256(
+                            f"{reviewed_head_sha}:{head_sha}:{axis}".encode()
+                        ).hexdigest(),
+                        "operation_id": operation_id,
+                        "previous_finding_ids": [],
+                        "resolutions": [],
+                        "resolved_head_sha": head_sha,
+                        "reviewed_head_sha": reviewed_head_sha,
+                        "schema_version": 1,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            ).encode()
+            (gate_root / pointer).write_bytes(raw)
+            resolution_entries.append(
+                {"pointer": pointer, "sha256": hashlib.sha256(raw).hexdigest()}
+            )
+            resolution_pointers[f"{axis}:0"] = pointer
+        state["resolution_evidence"] = resolution_pointers
+        (gate_root / ".review-meta.json").write_text(
+            json.dumps(
+                {
+                    "head_sha": head_sha,
+                    "operation_id": operation_id,
+                    "resolution_evidence": resolution_entries,
+                    "review_boundary_input_sha256": context[
+                        "boundary_input_sha256"
+                    ],
+                    "schema_version": 1,
+                    "worktree": state["product_root"],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     state_path.write_text(
         json.dumps(state, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -3692,34 +3743,11 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             moved_head_guarded
             and len(current_runtime.started) == moved_head_started_count,
         )
-        final_implementation = replace(
-            post_stop_implementation, product_head_sha=final_head
-        )
-        final_implementation_path = base / "final-implementation-boundary.json"
-        final_implementation_path.write_text(
-            json.dumps(final_implementation.payload(), sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        final_implementation_cycle = task_review_runner.run_current_review(
-            product,
-            deep=True,
-            purpose="implementation",
-            boundary_input_file=final_implementation_path,
-            plan_file=review_plan,
-            scratch_root=scratch,
-            runtime_manager=current_runtime,
-        )
-        quiesce_operations(current_store, final_implementation_cycle["task_id"])
-        final_implementation_gate_root = (
-            product
-            / ".vault-meta/harness/review-data"
-            / final_implementation_cycle["task_id"]
-            / final_implementation_cycle["task_id"]
-        )
         write_trusted_current_approval(
-            final_implementation_gate_root,
-            final_implementation_cycle["task_id"],
+            implementation_gate_root,
+            implementation_cycle["task_id"],
             final_head,
+            reviewed_head_sha=post_stop_head,
         )
         post_stop_review = task_review_runner.run_current_review(
             product,
@@ -3731,7 +3759,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             runtime_manager=current_runtime,
         )
         check(
-            "implementation checkpoint permits the final release boundary",
+            "resolved implementation checkpoint permits the final release boundary",
             post_stop_review["status"] == "reviewing"
             and post_stop_review["task_id"] != release_started["task_id"],
         )

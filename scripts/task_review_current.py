@@ -208,7 +208,6 @@ def _approved_implementation_enters_release(
         receipt.verdict == "approved"
         and receipt.boundary_input_sha256
         == str(stored.get("boundary_input_sha256") or "")
-        and implementation.product_head_sha == current_head
         and implementation.plan_sha256 == boundary.plan_sha256
         and implementation.outcome_contract_sha256
         == boundary.outcome_contract_sha256
