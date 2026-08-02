@@ -361,15 +361,43 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         and initial_payload["action"] == "start"
         and initial_payload["risk_profile"] == "architecture",
     )
-    callback = {
+    cli_run_id = "review-intent-cli-run"
+    cli_profile_sha256 = "5" * 64
+    cli_payload = {
         "schema_version": 1,
         "operation_id": "review-intent-cli",
-        "payload": {
-            "schema_version": 1,
-            "operation_id": "review-intent-cli",
-            "head_sha": SHA["head"][:40],
-            "verdict": "approve",
+        "run_id": cli_run_id,
+        "mode": "simple",
+        "head_sha": SHA["head"][:40],
+        "verification_profile": {
+            "name": "scoped",
+            "sha256": cli_profile_sha256,
         },
+        "verdict": "approve",
+        "axes": [
+            {
+                "axis": "holistic",
+                "findings": [],
+                "verdict": "approve",
+                "verification_iteration": 0,
+            }
+        ],
+        "verification_gaps": [],
+        "notes_for_executor": [],
+        "residual_risks": [],
+    }
+    cli_payload_bytes = json.dumps(
+        cli_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    cli_payload_sha256 = hashlib.sha256(cli_payload_bytes).hexdigest()
+    callback = {
+        "schema_version": 1,
+        "callback_id": f"review-{cli_payload_sha256[:24]}",
+        "operation_id": "review-intent-cli",
+        "run_id": cli_run_id,
+        "kind": "review",
+        "payload": cli_payload,
+        "payload_sha256": cli_payload_sha256,
     }
     gate_root = (
         worktree
@@ -380,7 +408,8 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
     callback_path.write_bytes(callback_bytes)
     (gate_root / "final-holistic.json").write_text(
-        '{"axis":"holistic","findings":[],"verdict":"approve"}\n',
+        '{"axis":"holistic","findings":[],"verdict":"approve",'
+        '"verification_iteration":0}\n',
         encoding="utf-8",
     )
     callback_sha256 = hashlib.sha256(callback_bytes).hexdigest()
@@ -390,15 +419,19 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
                 "schema_version": 1,
                 "status": "approved",
                 "active_review_operation_id": "review-intent-cli",
+                "dispatch_operation_id": "review-intent-cli",
                 "product_root": str(worktree.resolve()),
                 "context": {
                     "purpose": "intent",
                     "boundary_input_sha256": cli_boundaries[0].input_sha256,
                     "head_sha": SHA["head"][:40],
+                    "verification_profile": "scoped",
+                    "verification_profile_sha256": cli_profile_sha256,
                 },
-                "policy": {"purpose": "intent"},
+                "policy": {"depth": "simple", "purpose": "intent"},
                 "evidence": {
                     "operation_id": "review-intent-cli",
+                    "run_id": cli_run_id,
                     "pointer": ".review-callback.json",
                     "sha256": callback_sha256,
                 },
@@ -527,6 +560,7 @@ def write_approved_gate(
     operation_id: str,
     *,
     resolved_head: str = "",
+    mode: str = "simple",
 ) -> None:
     gate_root = (
         worktree
@@ -539,41 +573,96 @@ def write_approved_gate(
     terminal_head = resolved_head or expected_head or git(
         worktree, "rev-parse", "HEAD"
     )
-    callback = {
+    run_id = "trusted-review-run"
+    profile_sha256 = "5" * 64
+    axes = (
+        ("holistic",)
+        if mode == "simple"
+        else ("spec", "standards-correctness-architecture-security")
+    )
+    payload = {
         "schema_version": 1,
         "operation_id": operation_id,
-        "payload": {
-            "schema_version": 1,
-            "operation_id": operation_id,
-            "head_sha": terminal_head,
-            "verdict": "approve",
+        "run_id": run_id,
+        "mode": mode,
+        "head_sha": terminal_head,
+        "verification_profile": {
+            "name": "scoped",
+            "sha256": profile_sha256,
         },
+        "verdict": "approve",
+        "axes": [
+            {
+                "axis": axis,
+                "findings": [],
+                "verdict": "approve",
+                "verification_iteration": 0,
+            }
+            for axis in axes
+        ],
+        "verification_gaps": [],
+        "notes_for_executor": [],
+        "residual_risks": [],
+    }
+    payload_bytes = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
+    callback = {
+        "schema_version": 1,
+        "callback_id": f"review-{payload_sha256[:24]}",
+        "operation_id": operation_id,
+        "run_id": run_id,
+        "kind": "review",
+        "payload": payload,
+        "payload_sha256": payload_sha256,
     }
     callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
     (gate_root / ".review-callback.json").write_bytes(callback_bytes)
-    (gate_root / "final-holistic.json").write_text(
-        '{"axis":"holistic","findings":[],"verdict":"approve"}\n',
-        encoding="utf-8",
-    )
+    final_results = {}
+    for axis in axes:
+        short = "standards" if axis.startswith("standards-") else axis
+        pointer = f"final-{short}.json"
+        (gate_root / pointer).write_text(
+            json.dumps(
+                {
+                    "axis": axis,
+                    "findings": [],
+                    "verdict": "approve",
+                    "verification_iteration": 0,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        final_results[axis] = pointer
     (gate_root / "review-gate.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "status": "approved",
                 "active_review_operation_id": operation_id,
+                "dispatch_operation_id": operation_id,
                 "product_root": str(worktree.resolve()),
                 "context": {
                     "purpose": boundary.purpose,
                     "boundary_input_sha256": boundary.input_sha256,
                     "head_sha": terminal_head,
+                    "verification_profile": "scoped",
+                    "verification_profile_sha256": profile_sha256,
                 },
-                "policy": {"purpose": boundary.purpose},
+                "policy": {
+                    "depth": mode,
+                    "purpose": boundary.purpose,
+                },
                 "evidence": {
                     "operation_id": operation_id,
+                    "run_id": run_id,
                     "pointer": ".review-callback.json",
                     "sha256": hashlib.sha256(callback_bytes).hexdigest(),
                 },
-                "final_results": {"holistic": "final-holistic.json"},
+                "final_results": final_results,
                 "resolution_evidence": (
                     {"holistic:0": f"{operation_id}/resolution-holistic-0.json"}
                     if resolved_head
@@ -693,6 +782,74 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
         authority_receipts[purpose] = trusted_review_receipt(
             worktree, boundary, operations[purpose]
         )
+
+    deep_operation = "review-authority-deep-implementation"
+    deep_boundary = authority_boundaries["implementation"]
+    write_approved_gate(
+        worktree,
+        deep_boundary,
+        deep_operation,
+        mode="deep",
+    )
+    deep_root = (
+        worktree
+        / ".vault-meta/harness/review-data"
+        / deep_operation
+        / deep_operation
+    )
+    deep_gate_path = deep_root / "review-gate.json"
+    deep_callback_path = deep_root / ".review-callback.json"
+    original_gate = deep_gate_path.read_bytes()
+    original_callback = deep_callback_path.read_bytes()
+
+    missing_axis = json.loads(original_gate)
+    missing_axis["final_results"].pop(
+        "standards-correctness-architecture-security"
+    )
+    deep_gate_path.write_text(
+        json.dumps(missing_axis, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    rejected(
+        "trusted deep approval rejects a missing final axis",
+        lambda: trusted_review_receipt(
+            worktree, deep_boundary, deep_operation
+        ),
+    )
+    deep_gate_path.write_bytes(original_gate)
+
+    for label, mutate in (
+        ("truncated callback envelope", lambda raw: raw.pop("callback_id")),
+        ("wrong callback run", lambda raw: raw.__setitem__("run_id", "wrong-run")),
+        ("wrong callback kind", lambda raw: raw.__setitem__("kind", "result")),
+        (
+            "mismatched payload digest",
+            lambda raw: raw.__setitem__("payload_sha256", "f" * 64),
+        ),
+    ):
+        callback_value = json.loads(original_callback)
+        mutate(callback_value)
+        callback_bytes = (
+            json.dumps(callback_value, sort_keys=True) + "\n"
+        ).encode()
+        deep_callback_path.write_bytes(callback_bytes)
+        gate_value = json.loads(original_gate)
+        gate_value["evidence"]["sha256"] = hashlib.sha256(
+            callback_bytes
+        ).hexdigest()
+        if label == "wrong callback run":
+            gate_value["evidence"]["run_id"] = "wrong-run"
+        deep_gate_path.write_text(
+            json.dumps(gate_value, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        rejected(
+            f"trusted approval rejects a {label}",
+            lambda: trusted_review_receipt(
+                worktree, deep_boundary, deep_operation
+            ),
+        )
+        deep_callback_path.write_bytes(original_callback)
+        deep_gate_path.write_bytes(original_gate)
 
     bound_sources = (
         ("intent design", "intent", "design_path"),

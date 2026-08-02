@@ -20,6 +20,7 @@ from .review_program_contracts import (
     require_sha256,
 )
 from .review_program_results import ReviewBoundaryReceipt
+from .workflows.review_gate import authorize_task_finalization
 
 
 _BOUNDARY_SOURCES = {
@@ -342,14 +343,23 @@ def _trusted_review_receipt(
         if evidence["sha256"] != digest:
             raise ReviewProgramError("trusted review callback digest is stale")
         callback = _object(callback_path, "trusted review callback")
-        payload = callback.get("payload")
-        if (
-            callback.get("operation_id") != operation_id
-            or not isinstance(payload, dict)
-            or payload.get("operation_id") != operation_id
-            or payload.get("verdict") != "approve"
-            or payload.get("head_sha") != context.get("head_sha")
-        ):
+        if callback.get("operation_id") != operation_id:
+            raise ReviewProgramError("trusted review callback is not terminal approval")
+        try:
+            authorization = authorize_task_finalization(
+                gate_root,
+                dispatch_operation_id=operation_id,
+                expected_head_sha=str(context.get("head_sha") or ""),
+                expected_profile=str(context.get("verification_profile") or ""),
+                expected_profile_sha256=str(
+                    context.get("verification_profile_sha256") or ""
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ReviewProgramError(
+                f"trusted review callback is not terminal approval: {exc}"
+            ) from exc
+        if not authorization.approved:
             raise ReviewProgramError("trusted review callback is not terminal approval")
         return ReviewBoundaryReceipt.approved(
             operation_id=operation_id,

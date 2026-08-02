@@ -107,28 +107,77 @@ def write_trusted_current_approval(
 ) -> None:
     """Complete a current-review fixture with authority-verifiable evidence."""
 
-    callback = {
+    state_path = gate_root / "review-gate.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    context = state["context"]
+    run_id = "trusted-current-run"
+    axes = (
+        "spec",
+        "standards-correctness-architecture-security",
+    )
+    aggregate_axes = []
+    final_results = {}
+    for axis in axes:
+        short = "standards" if axis.startswith("standards-") else axis
+        pointer = f"final-{short}.json"
+        (gate_root / pointer).write_text(
+            json.dumps(
+                {
+                    "axis": axis,
+                    "findings": [],
+                    "verdict": "approve",
+                    "verification_iteration": 0,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        final_results[axis] = pointer
+        aggregate_axes.append(
+            {
+                "axis": axis,
+                "findings": [],
+                "verdict": "approve",
+                "verification_iteration": 0,
+            }
+        )
+    payload = {
         "schema_version": 1,
         "operation_id": operation_id,
-        "payload": {
-            "schema_version": 1,
-            "operation_id": operation_id,
-            "head_sha": head_sha,
-            "verdict": "approve",
+        "run_id": run_id,
+        "mode": "deep",
+        "head_sha": head_sha,
+        "verification_profile": {
+            "name": context["verification_profile"],
+            "sha256": context["verification_profile_sha256"],
         },
+        "verdict": "approve",
+        "axes": aggregate_axes,
+        "verification_gaps": [],
+        "notes_for_executor": [],
+        "residual_risks": [],
+    }
+    payload_bytes = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
+    callback = {
+        "schema_version": 1,
+        "callback_id": f"review-{payload_sha256[:24]}",
+        "operation_id": operation_id,
+        "run_id": run_id,
+        "kind": "review",
+        "payload": payload,
+        "payload_sha256": payload_sha256,
     }
     callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
     (gate_root / ".review-callback.json").write_bytes(callback_bytes)
-    (gate_root / "final-spec.json").write_text(
-        '{"axis":"spec","findings":[],"verdict":"approve"}\n',
-        encoding="utf-8",
-    )
-    state_path = gate_root / "review-gate.json"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
     state["status"] = "approved"
-    state["final_results"] = {"spec": "final-spec.json"}
+    state["final_results"] = final_results
     state["evidence"] = {
         "operation_id": operation_id,
+        "run_id": run_id,
         "pointer": ".review-callback.json",
         "sha256": hashlib.sha256(callback_bytes).hexdigest(),
     }

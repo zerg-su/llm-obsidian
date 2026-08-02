@@ -43,7 +43,7 @@ from .review import (
     start_review,
     verify_review_lane,
 )
-from review_contract import MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
+from review_contract import AXES, MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
 from review_resolution import (
     ResolutionError,
     ReviewResolutionEvidence,
@@ -276,6 +276,16 @@ def authorize_task_finalization(
     ):
         raise ValueError("approved review evidence is unavailable")
     raw = _read_json(path)
+    if set(raw) != {
+        "schema_version",
+        "callback_id",
+        "operation_id",
+        "run_id",
+        "kind",
+        "payload",
+        "payload_sha256",
+    }:
+        raise ValueError("review callback envelope has invalid fields")
     envelope = CallbackEnvelope(
         callback_id=raw.get("callback_id", ""),
         operation_id=raw.get("operation_id", ""),
@@ -285,6 +295,12 @@ def authorize_task_finalization(
         payload_sha256=raw.get("payload_sha256", ""),
         schema_version=raw.get("schema_version", 0),
     )
+    if (
+        envelope.kind != "review"
+        or evidence.get("operation_id") != envelope.operation_id
+        or evidence.get("run_id") != envelope.run_id
+    ):
+        raise ValueError("approved review callback identity is invalid")
     review = validate_review(
         dict(envelope.payload),
         expected_operation_id=envelope.operation_id,
@@ -295,4 +311,37 @@ def authorize_task_finalization(
     )
     if review["verdict"] != "approve":
         raise ValueError("only approved review evidence unlocks finalization")
+    policy = state.get("policy")
+    mode = str(review.get("mode") or "")
+    if (
+        not isinstance(policy, dict)
+        or policy.get("depth") != mode
+        or mode not in AXES
+    ):
+        raise ValueError("approved review mode does not match its gate policy")
+    pointers = state.get("final_results")
+    if not isinstance(pointers, dict) or set(pointers) != set(AXES[mode]):
+        raise ValueError("approved review final axes are incomplete")
+    axes = {
+        str(item.get("axis") or ""): item
+        for item in review.get("axes", [])
+        if isinstance(item, dict)
+    }
+    for axis in AXES[mode]:
+        result_path = (root / str(pointers[axis])).resolve()
+        try:
+            result_path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("review result pointer escapes the gate") from exc
+        if not result_path.is_file() or result_path.is_symlink():
+            raise ValueError("approved review result is unavailable")
+        result = _result_payload(_result_from_payload(_read_json(result_path)))
+        aggregate_axis = dict(axes.get(axis) or {})
+        aggregate_axis["findings"] = [
+            {**finding, "axis": axis}
+            for finding in aggregate_axis.get("findings", [])
+            if isinstance(finding, dict)
+        ]
+        if result != aggregate_axis:
+            raise ValueError("approved review result disagrees with its callback")
     return ReviewGateAuthorization(True, False, review)
