@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-harness test-harness-coverage test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+.PHONY: test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
@@ -48,6 +48,13 @@ test-harness-coverage:
 	@echo "=== hermetic harness statement-line coverage ==="
 	@python3 tests/test_harness_coverage_audit.py
 	@python3 scripts/harness-coverage-audit.py
+
+test-code-quality:
+	@echo "=== code quality audit unit contracts ==="
+	@python3 tests/test_code_quality_audit.py
+
+code-quality-audit: test-code-quality
+	@python3 scripts/code-quality-audit.py
 
 test-task-sessions:
 	@echo "=== test_task_sessions.py ==="
@@ -123,7 +130,7 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-code-quality test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
 

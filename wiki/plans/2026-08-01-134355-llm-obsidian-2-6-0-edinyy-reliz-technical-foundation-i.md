@@ -9,7 +9,7 @@ sessions:
 source_cwd: "/Users/zak/Projects/llm-obsidian"
 status: pending
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 tags:
   - plan
   - manual-save
@@ -32,19 +32,23 @@ tags:
 ```json
 {
   "schema_version": 1,
-  "purpose": "Предотвратить потерю пользовательской цели при декомпозиции больших планов и автономном выполнении pipeline.",
-  "desired_outcome": "Каждая новая v4-задача сохраняет утверждённый пользователем outcome до независимо проверенного результата и typed reap disposition без добавления второго orchestration или stop authority.",
+  "purpose": "Предотвратить потерю пользовательской цели и инженерного качества при декомпозиции больших планов, генерации кода и автономном выполнении pipeline.",
+  "desired_outcome": "Каждая новая v4-задача сохраняет утверждённый пользователем outcome до независимо проверенного результата и typed reap disposition, а engineering skills и code-owned harness направляют реализацию к поддерживаемому коду, честным тестам и глубоким модулям без добавления второго orchestration или stop authority.",
   "success_evidence": [
     {"evidence_id": "paired-contract-stability", "observable": "Baseline и post-change paired fixtures используют один и тот же outcome-contract digest, route и verification budget."},
     {"evidence_id": "semantic-drift-detection", "observable": "Review отклоняет реализацию, которая локально зелёная, но не достигает desired_outcome или выходит за non_goals."},
     {"evidence_id": "typed-reap-disposition", "observable": "Wiki Summary v2 сохраняет achieved, partially-achieved или not-achieved вместе с bounded evidence IDs и residual-gap pointers."},
+    {"evidence_id": "engineering-skill-completeness", "observable": "Exhaustive Matt/Superpowers capability matrix классифицирована; codebase-design, implementation-plan, TDD test quality, debug и review standards имеют router, semantic и pressure-scenario evidence."},
+    {"evidence_id": "maintainable-harness-core", "observable": "Крупные mixed-responsibility harness-модули разделены по глубоким seams без изменения public contracts; code-quality audit не имеет release blockers."},
+    {"evidence_id": "honest-cheap-verification", "observable": "Declared deterministic policy/state/validation core и поддерживаемые transition/decision matrices покрыты на 100%; whole-harness denominator остаётся честным, а provider/OS проверки ограничены минимальным live набором."},
     {"evidence_id": "legacy-isolation", "observable": "Активные v1-v3 операции не конвертируются и завершаются по прежнему frozen contract."}
   ],
   "non_goals": [
     "Отдельный пользовательский goal-скилл.",
     "Новый scheduler, pipeline engine или model-owned lifecycle authority.",
     "Импорт tracker, GitHub, subagent или orchestration механики upstream-репозиториев.",
-    "Автоматическая миграция активных v1-v3 операций."
+    "Автоматическая миграция активных v1-v3 операций.",
+    "Механическое дробление cohesive-кода, pass-through модули или coverage exclusions ради красивой метрики."
   ]
 }
 ```
@@ -199,6 +203,16 @@ Pre-branch запуск является строго audit-only: он фикс�
 `improve-skills` остаётся manual engineering meta-skill и не запускается автоматически в пользовательских workflow.
 
 Все три ветки создаются от одного foundation SHA и разрабатываются параллельно. На ветках выполняются self-review и focused deterministic tests; отдельных Fable/Sol review не запускать.
+
+### Engineering-quality closure — явное расширение 2.6
+
+После behavior-preserving workstreams выполнить capability-gap аудит относительно pinned Matt Pocock Skills и Superpowers. Классифицировать каждую релевантную general-engineering capability как adopted, equivalent, missing, rejected или deferred; отдельно зафиксировать transfer decision adopt/adapt/reject. Technology-specific tracker, GitHub/GitLab, installer и upstream orchestration mechanics остаются non-goals.
+
+Добавить model-invoked `codebase-design` и `implementation-plan`, общий technology-agnostic engineering-quality contract и progressive-disclosure test-quality reference. Обязательные semantics: YAGNI, domain modeling по необходимости, deep modules, locality, dependency direction, один change reason, consumes/produces slices, independent expectations, mutation sensitivity, mock only external adapters, ranked falsifiable debug hypotheses и независимый standards review. Structural text checks подтверждают wiring, а pressure scenarios подтверждают поведение.
+
+Кодовый harness проходит cohesion audit. Примерно 200 строк является review signal, а не универсальным лимитом; multi-thousand-line functions и mixed policy/transport/orchestration являются release blockers. Extraction должна скрывать решения за маленькими durable interfaces, сохранять identity/effects и не создавать pass-through modules. После трёх неудачных behavior-preserving extraction attempts на одном seam обязателен architecture stop.
+
+Verification имеет два честных denominator: 100% declared deterministic policy/state/validation core и всех поддерживаемых transition/decision combinations; отдельно whole-harness statement coverage с never-executed lines, явными adapter gaps и без exclusions ради метрики. Сначала выполняются дешёвые unit/matrix/mocked-adapter checks, затем один минимальный integration/live набор.
 
 ### Workstream A — clarify, design, prototype, save-plan
 

@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-07-30
+updated: 2026-08-02
 tags:
   - meta
   - guide
@@ -63,6 +63,8 @@ sessions:
 ### Инженерная работа
 
 - **design** — уточнить домен и выбрать минимальный дизайн до реализации.
+- **codebase-design** — спроектировать или углубить границы модулей, durable interfaces и test seams без pass-through дробления.
+- **implementation-plan** — разложить утверждённый outcome/design на owned `consumes`/`produces` TDD-слайсы и evidence.
 - **tdd** — вести изменение коротким red → green → regression циклом.
 - **debug** — локализовать root cause и проверить исходный failing loop.
 - **prototype** — проверить риск в disposable worktree, не смешивая прототип с production.
@@ -82,4 +84,4 @@ sessions:
 
 - Новый материал: `ingest <источник>` → `lint the wiki` (раз в неделю) → `/wiki-fold` (по нуджу).
 - Рабочий день: `/journal` утром → `agenda scan` и при необходимости `agenda collect` → работа с `/save` → `/daily` вечером.
-- Большая задача: `/clarify` → план → `/dispatch` → автоматический `/review` → `/reap` результата.
+- Большая задача: `/clarify` → `/design`/`codebase-design` → `implementation-plan` → `/dispatch` → автоматический `/review` → `/reap` результата.
