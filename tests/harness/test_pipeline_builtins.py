@@ -99,6 +99,19 @@ check(
     )[0]
     == "engineering/fix",
 )
+for label, call in (
+    ("unknown built-in name fails closed", lambda: compiled_builtin("unknown/profile")),
+    (
+        "unknown executable contract hash fails closed",
+        lambda: compiled_executable_for_contract("0" * 64),
+    ),
+):
+    try:
+        call()
+    except ValueError:
+        check(label, True)
+    else:
+        check(label, False)
 try:
     compile_pipeline(
         replace(

@@ -3,11 +3,12 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-harness test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+.PHONY: test-harness test-harness-coverage test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
 	@python3 tests/harness/test_contracts.py
+	@python3 tests/harness/test_contract_boundaries.py
 	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_custom_pipelines.py
 	@python3 tests/harness/test_custom_sequence.py
@@ -20,6 +21,7 @@ test-harness:
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
 	@python3 tests/harness/test_callbacks.py
+	@python3 tests/harness/test_release_transition_matrix.py
 	@python3 tests/harness/test_context_verification.py
 	@python3 tests/harness/test_workflows.py
 	@python3 tests/harness/test_engineering_fix_workflow.py
@@ -41,6 +43,10 @@ test-harness:
 	@python3 tests/harness/test_release_blocker_runtime.py
 	@python3 tests/harness/test_status_segment.py
 	@python3 tests/harness/test_diagnostics.py
+
+test-harness-coverage:
+	@echo "=== hermetic harness statement-line coverage ==="
+	@python3 scripts/harness-coverage-audit.py
 
 test-task-sessions:
 	@echo "=== test_task_sessions.py ==="
@@ -67,6 +73,7 @@ test-upgrade-preflight:
 help:
 	@echo "llm-obsidian developer targets:"
 	@echo "  make test              Run all vault + retrieval + hook tests"
+	@echo "  make test-harness-coverage  Audit statement-line coverage and ratchet critical floors"
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"

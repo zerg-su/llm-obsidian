@@ -29,9 +29,9 @@
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; `docs/acceptance/v2.6-paired-design-architecture-stop.md` | resolved at the general skill boundary; fixture-specific recovery prescriptions were removed after they failed the frozen no-regression gate |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` is closed by deterministic valid/invalid `not-achieved` Wiki Summary v2 coverage and recorded in the release ledger |
+| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` is closed by the explicit pre-allocation and pre-writer contract-validation order assertions in `tests/test_skill_workstream_a.py` |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |
-| `B-TDD-01` | `skills/tdd/SKILL.md`; `tests/test_skill_workstream_b.py` | resolved |
+| `B-TDD-01` | `skills/tdd/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_release_transition_matrix.py`; `scripts/harness-coverage-audit.py` | resolved; stateful work now requires a transition inventory, fast exhaustive matrix, complete coverage denominator, and external-adapter-only mocks |
 | `C-REV-01` | `skills/review/SKILL.md`; outcome-aware review harness; `tests/test_workstream_c_review_reap.py` | resolved |
 | `C-REA-01` | `skills/reap/SKILL.md`; Wiki Summary v2 harness; `tests/test_workstream_c_review_reap.py` | resolved |
 | `I-IMP-01` | fifth `goal_preservation` pass, strict verdict schema, `tests/test_improve_skills.py` | resolved |

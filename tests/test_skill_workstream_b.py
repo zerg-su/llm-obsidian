@@ -150,6 +150,37 @@ def main() -> int:
         and has_clause(tdd, r"missing|gap", r"explicit"),
         failures,
     )
+    check(
+        "stateful TDD inventories transitions and exhausts a cheap release matrix",
+        has_clause(
+            tdd,
+            r"stateful|workflow-heavy",
+            r"inventory",
+            r"states",
+            r"transitions",
+            r"fast deterministic matrix",
+            r"release invariant",
+        ),
+        failures,
+    )
+    check(
+        "coverage uses a complete denominator and mocks only external adapters",
+        has_clause(
+            tdd,
+            r"coverage denominator",
+            r"never-executed",
+            r"not coverage evidence",
+        )
+        and has_clause(
+            tdd,
+            r"mock",
+            r"provider",
+            r"transport",
+            r"state transitions",
+            r"real",
+        ),
+        failures,
+    )
 
     if failures:
         print(f"\n{len(failures)} workstream-B contract(s) failed.")
