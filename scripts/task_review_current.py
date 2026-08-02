@@ -200,7 +200,7 @@ def run_current_review(
                 else ""
             )
             terminal_stale = (
-                status in {"approved", "skipped"}
+                status in {"approved", "skipped", "stopped"}
                 and (
                     bound_head != _git(worktree, "rev-parse", "HEAD")
                     or not same_policy

@@ -3298,6 +3298,60 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(current_runtime.started) == started_count,
         )
         quiesce_operations(current_store, release_started["task_id"])
+        release_state["status"] = "stopped"
+        release_state["round_results"] = {
+            "spec": f'{release_started["task_id"]}/round-spec-0.json'
+        }
+        (release_gate_root / "review-gate.json").write_text(
+            json.dumps(release_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        active_post_stop = json.loads(
+            (
+                product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )
+        stopped_fixture_status = json.loads(
+            (release_gate_root / "review-gate.json").read_text(
+                encoding="utf-8"
+            )
+        )["status"]
+        check(
+            "stopped release fixture binds the active current review",
+            active_post_stop["task_id"] == release_started["task_id"]
+            and stopped_fixture_status == "stopped",
+        )
+        try:
+            post_stop_review = task_review_runner.run_current_review(
+                product,
+                deep=True,
+                cross_model=True,
+                runtime="claude",
+                model="fable",
+                effort="xhigh",
+                purpose="release",
+                boundary_input_file=release_boundary_path,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            post_stop_review = None
+            post_stop_error = str(exc)
+        else:
+            post_stop_error = ""
+        check(
+            "stopped stale release review permits a new exact boundary"
+            + (f": {post_stop_error}" if post_stop_error else ""),
+            post_stop_review is not None
+            and post_stop_review["status"] == "reviewing"
+            and post_stop_review["task_id"] != release_started["task_id"],
+        )
+        if post_stop_review is not None:
+            quiesce_operations(current_store, post_stop_review["task_id"])
+        post_stop_started_count = len(current_runtime.started)
         stale_boundary_path = base / "stale-release-boundary.json"
         stale_boundary_path.write_text(
             json.dumps(
@@ -3325,7 +3379,8 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             stale_rejected = False
         check(
             "purpose-bound current review rejects stale artifact bytes before launch",
-            stale_rejected and len(current_runtime.started) == started_count,
+            stale_rejected
+            and len(current_runtime.started) == post_stop_started_count,
         )
         intent_boundary = ReviewBoundaryInput(
             purpose="intent",
