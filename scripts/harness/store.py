@@ -169,28 +169,25 @@ class OperationStore:
         *,
         deadline_at: float,
     ) -> OperationRecord:
-        """Atomically restore one exact timed-out callback wait.
-
-        The state and replacement deadline must be published together so a
-        concurrent runtime worker cannot observe an awaiting callback with the
-        already-expired deadline and immediately return it to attention.
-        """
-
-        if (
+        # Publish state and deadline together: the runtime worker must never
+        # observe an awaiting callback with its already-expired deadline.
+        invalid_deadline = (
             not isinstance(deadline_at, (int, float))
             or isinstance(deadline_at, bool)
             or not math.isfinite(float(deadline_at))
             or deadline_at <= 0
-        ):
+        )
+        if invalid_deadline:
             raise StoreError("callback timeout rearm deadline is invalid")
         with self.locked(owner_id):
             record = self.read(owner_id, operation_id)
-            if (
+            invalid_timeout = (
                 record.state != "attention-required"
                 or record.attention_reason != AttentionReason.CALLBACK_TIMEOUT
                 or not record.deadline_at
                 or deadline_at <= record.deadline_at
-            ):
+            )
+            if invalid_timeout:
                 raise StoreError("operation is not an exact expired callback wait")
             updated, _result = transition(record, "awaiting-callback")
             updated = replace(updated, deadline_at=float(deadline_at))
