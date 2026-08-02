@@ -179,13 +179,36 @@ def _context(
         )
         if boundary.input_sha256 != boundary_input_sha256:
             raise TaskReviewError("review boundary input digest is stale")
+        rebound_reviewed_head = (
+            resolution_bundle.resolution.reviewed_head_sha
+            if resolution_bundle is not None
+            else ""
+        )
+        rebound_resolved_head = (
+            resolution_bundle.resolution.resolved_head_sha
+            if resolution_bundle is not None
+            else ""
+        )
+        boundary_head = (
+            boundary.product_head_sha
+            if purpose == "implementation"
+            else boundary.integration_head_sha
+            if purpose == "release"
+            else ""
+        )
+        exact_resolution_rebind = (
+            bool(boundary_head)
+            and boundary_head == rebound_reviewed_head
+            and head == rebound_resolved_head
+        )
         if (
             purpose == "implementation"
             and boundary.product_head_sha != head
         ) or (
             purpose == "release" and boundary.integration_head_sha != head
         ):
-            raise TaskReviewError("review boundary input targets another HEAD")
+            if not exact_resolution_rebind:
+                raise TaskReviewError("review boundary input targets another HEAD")
         inputs.append(
             ContextInput(
                 "review-boundary-input.json",

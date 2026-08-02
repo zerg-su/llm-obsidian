@@ -13,8 +13,47 @@ from harness.workflows.review_gate import (
 )
 from task_review_context import _callback_path, _context, _prompt
 from task_review_resolution_bundle import _resolution_bundle
-from task_review_shared import TaskReviewError
+from task_review_shared import ResolutionBundle, TaskReviewError, _git
 from task_review_transport import _receipt, _write_round_meta
+
+
+def _preload_resolution_bundle(
+    *,
+    worktree: Path,
+    gate_root: Path,
+    task_id: str,
+    state: Mapping[str, Any],
+) -> ResolutionBundle | None:
+    """Bind a moved current HEAD to its exact awaiting-resolution evidence."""
+
+    if state.get("status") != "awaiting-resolution":
+        return None
+    awaiting = state.get("awaiting_resolution")
+    if not isinstance(awaiting, dict) or not awaiting:
+        return None
+    reviewed_heads = {
+        str(value.get("reviewed_head_sha") or "")
+        for value in awaiting.values()
+        if isinstance(value, dict)
+    }
+    resolved_head = _git(worktree, "rev-parse", "HEAD")
+    if reviewed_heads == {resolved_head}:
+        return None
+    return _resolution_bundle(
+        worktree,
+        gate_root,
+        task_id,
+        awaiting,
+        resolved_head,
+        persisted_identity_sha256=str(
+            state.get("resolution_transport_identity_sha256") or ""
+        ),
+        persisted_resolution_pointers=(
+            state.get("resolution_evidence")
+            if isinstance(state.get("resolution_evidence"), dict)
+            else {}
+        ),
+    )
 
 
 def _continue_resolution(

@@ -45,7 +45,10 @@ from task_review_shared import (
 )
 from task_review_verification import _finalizing_resubmit_recovery
 from task_review_replay import _pending_replay_is_safe
-from task_review_resolution_flow import _continue_resolution
+from task_review_resolution_flow import (
+    _continue_resolution,
+    _preload_resolution_bundle,
+)
 from task_review_transport import (
     _callback_wake,
     _collect_ready_results,
@@ -55,20 +58,6 @@ from task_review_transport import (
     _write_round_meta,
     load_active_round,
 )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _pending_gate_replay(
     gate: ReviewGateController, store: OperationStore, task_id: str
 ) -> bool:
@@ -366,12 +355,24 @@ def _run_review(
         vault, store_root=store_root
     )
     gate_root = _gate_root(vault, task_id)
-    context, context_manifest = _context(
-        meta, vault, worktree, runtime_root, task_id
-    )
-    preset, request = _request(meta, vault, task_id, context)
     gate = ReviewGateController(gate_root, runtime, store)
     gate_exists = gate.state_path.exists()
+    initial_state = gate.read() if gate_exists else {}
+    resolution_bundle = _preload_resolution_bundle(
+        worktree=worktree,
+        gate_root=gate_root,
+        task_id=task_id,
+        state=initial_state,
+    )
+    context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+        resolution_bundle=resolution_bundle,
+    )
+    preset, request = _request(meta, vault, task_id, context)
     pending_replay = _pending_gate_replay(gate, store, task_id)
     if not gate_exists or pending_replay:
         return _start_review(

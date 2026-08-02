@@ -2805,6 +2805,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         "design": product / "wiki/design.md",
         "capability-dispositions": product / "wiki/capability-dispositions.json",
         "success-evidence": product / "wiki/success-evidence.md",
+        "verification": product / "wiki/verification.md",
         "outcome-evidence": product / "wiki/outcome-evidence.md",
         "accepted-deviations": product / "wiki/accepted-deviations.md",
     }
@@ -2835,6 +2836,31 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         check=True,
         capture_output=True,
         text=True,
+    )
+
+    initial_current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    current_boundary = ReviewBoundaryInput(
+        purpose="implementation",
+        outcome_contract_sha256=extract_from_bytes(
+            review_plan.read_bytes()
+        ).sha256,
+        plan_sha256=hashlib.sha256(review_plan.read_bytes()).hexdigest(),
+        product_head_sha=initial_current_head,
+        verification_evidence_sha256=hashlib.sha256(
+            boundary_artifacts["verification"].read_bytes()
+        ).hexdigest(),
+        verification_evidence_path="wiki/verification.md",
+    )
+    current_boundary_path = base / "implementation-boundary.json"
+    current_boundary_path.write_text(
+        json.dumps(current_boundary.payload(), sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
     class FailOnceCurrentRuntime(FakeRuntime):
@@ -2879,6 +2905,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         try:
             task_review_runner.run_current_review(
                 product,
+                purpose="implementation",
+                boundary_input_file=current_boundary_path,
+                plan_file=review_plan,
                 origin_surface="33333333-3333-4333-8333-333333333333",
                 scratch_root=scratch,
                 runtime_manager=current_runtime,
@@ -2891,6 +2920,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             )
         started = task_review_runner.run_current_review(
             product,
+            purpose="implementation",
+            boundary_input_file=current_boundary_path,
+            plan_file=review_plan,
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
@@ -2958,6 +2990,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         )
         waiting = task_review_runner.run_current_review(
             product,
+            purpose="implementation",
+            boundary_input_file=current_boundary_path,
+            plan_file=review_plan,
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
@@ -3017,11 +3052,14 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         )
         verifying = task_review_runner.run_current_review(
             product,
+            purpose="implementation",
+            boundary_input_file=current_boundary_path,
+            plan_file=review_plan,
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
         check(
-            "current checkout review reuses its durable gate and parent session",
+            "purpose-bound current review rebinds the exact resolution HEAD in its durable parent session",
             waiting["status"] == "awaiting-resolution"
             and verifying["status"] == "verifying"
             and verifying["task_id"] == started["task_id"]
