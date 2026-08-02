@@ -166,8 +166,22 @@ def main() -> int:
         raise RuntimeError("could not load document normalizer")
     normalizer = importlib.util.module_from_spec(normalizer_spec)
     normalizer_spec.loader.exec_module(normalizer)
+    from document_normalize_cache import status_exit_code
+    from document_normalize_conversion import builtin_markdown
+    from document_normalize_quality import deterministic_cleanup
+    from document_normalize_runtime import needs_docling_payload
+
+    suite.check(
+        "runtime collaborator preserves actionable repair contract",
+        needs_docling_payload("missing")["action"]["install_command"]
+        == "python3 scripts/install-docling.py install",
+    )
+    suite.check(
+        "cache collaborator preserves typed semantic-cleanup exit",
+        status_exit_code("needs_semantic_cleanup") == 5,
+    )
     boundary_fixture = "Высокая\n\nскорость .\n\n![Фото](image.png)\n\nследующая подпись"
-    boundary_clean = normalizer.deterministic_cleanup(boundary_fixture)
+    boundary_clean = deterministic_cleanup(boundary_fixture)
     suite.check("safe lowercase paragraph continuation joins", "Высокая скорость." in boundary_clean)
     suite.check("cleanup never joins across pictures", "image.png)\n\nследующая" in boundary_clean)
     fenced_fixture = "До блока\n\n```python\nvalue = 1\n\nother = value - 1\n```\n\nпосле блока\n"
@@ -258,6 +272,11 @@ def main() -> int:
 
         markdown = root / "notes.md"
         markdown.write_text("# Пример\n\nТекстовый документ без тяжёлого парсера.\n", encoding="utf-8")
+        suite.check(
+            "conversion collaborator preserves builtin Markdown",
+            builtin_markdown(markdown)
+            == "# Пример\n\nТекстовый документ без тяжёлого парсера.\n",
+        )
         first, first_payload = run_normalizer(markdown, cache, env)
         suite.check("builtin markdown succeeds", first.returncode == 0, first.stderr)
         suite.check("builtin processor recorded", first_payload.get("processor", {}).get("processor") == "builtin")
