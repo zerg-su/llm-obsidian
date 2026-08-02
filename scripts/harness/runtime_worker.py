@@ -83,7 +83,12 @@ from research_contract import (
     validate_result_artifact,
 )
 from lifecycle_telemetry import emit_compiled_pipeline_event, emit_lifecycle_event
-from review_resolution import DISPOSITIONS, MATERIAL_SEVERITIES
+from review_resolution import (
+    DISPOSITIONS,
+    MATERIAL_SEVERITIES,
+    ResolutionError,
+    review_transport_identity_sha256,
+)
 from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary_for_task
 
@@ -123,6 +128,8 @@ def _review_resolution_handoff_ready(
         if isinstance(boundary, dict)
     }
     expected_finding_ids: list[str] = []
+    review_operation_ids: set[str] = set()
+    review_callbacks: list[dict[str, object]] = []
     for axis in sorted(awaiting):
         boundary = awaiting[axis]
         if not isinstance(boundary, dict):
@@ -138,10 +145,38 @@ def _review_resolution_handoff_ready(
         ):
             return False
         expected_finding_ids.extend(material_ids)
+        review_operation_ids.add(
+            str(boundary.get("review_operation_id") or "")
+        )
+        review_callbacks.append(
+            {
+                "axis": axis,
+                "round_operation_id": str(
+                    boundary.get("round_operation_id") or ""
+                ),
+                "round_run_id": str(
+                    boundary.get("round_run_id") or ""
+                ),
+                "callback_id": str(boundary.get("callback_id") or ""),
+                "callback_sha256": str(
+                    boundary.get("callback_sha256") or ""
+                ),
+            }
+        )
+    active_review_operation_id = str(
+        gate_state.get("active_review_operation_id") or ""
+    )
+    try:
+        review_identity_sha256 = review_transport_identity_sha256(
+            active_review_operation_id, review_callbacks
+        )
+    except ResolutionError:
+        return False
     if (
         len(reviewed_heads) != 1
         or "" in reviewed_heads
         or len(expected_finding_ids) != len(set(expected_finding_ids))
+        or review_operation_ids != {active_review_operation_id}
     ):
         return False
     resolution_path = worktree / ".task-review-resolution.json"
@@ -157,6 +192,8 @@ def _review_resolution_handoff_ready(
         or resolution.get("operation_id") != operation_id
         or resolution.get("reviewed_head_sha") != next(iter(reviewed_heads))
         or resolution.get("resolved_head_sha") != current_head
+        or resolution.get("review_identity_sha256")
+        != review_identity_sha256
         or not isinstance(items, list)
         or not items
         or [
@@ -3163,6 +3200,17 @@ def run(
                     raise RuntimeWorkerError(
                         "review decision packet is invalid"
                     )
+                try:
+                    review_identity_sha256 = (
+                        review_transport_identity_sha256(
+                            active_review_operation_id,
+                            review_callbacks,
+                        )
+                    )
+                except ResolutionError as exc:
+                    raise RuntimeWorkerError(
+                        "review decision packet identity is invalid"
+                    ) from exc
                 material_findings = [
                     finding
                     for finding in findings
@@ -3189,6 +3237,7 @@ def run(
                     "operation_id": spec["operation_id"],
                     "review_operation_id": active_review_operation_id,
                     "review_callbacks": review_callbacks,
+                    "review_identity_sha256": review_identity_sha256,
                     "reviewed_head_sha": reviewed_head,
                     "allowed_dispositions": sorted(DISPOSITIONS),
                     "resolution_path": ".task-review-resolution.json",
@@ -3250,6 +3299,10 @@ def run(
                     write_resolution_template = (
                         current_resolution.get("reviewed_head_sha")
                         != reviewed_head
+                        or current_resolution.get(
+                            "review_identity_sha256"
+                        )
+                        != review_identity_sha256
                     )
                 if write_resolution_template:
                     _atomic_json(
@@ -3257,6 +3310,9 @@ def run(
                         {
                             "schema_version": 1,
                             "operation_id": spec["operation_id"],
+                            "review_identity_sha256": (
+                                review_identity_sha256
+                            ),
                             "reviewed_head_sha": reviewed_head,
                             "resolved_head_sha": "",
                             "resolutions": [

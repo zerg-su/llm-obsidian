@@ -63,7 +63,11 @@ from harness.workflows.review_gate import (
     authorize_task_finalization,
     review_context_sha256,
 )
-from review_resolution import FindingResolution, ReviewResolutionEvidence
+from review_resolution import (
+    FindingResolution,
+    ReviewResolutionEvidence,
+    review_transport_identity_sha256,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -98,6 +102,36 @@ def resolution_evidence(
         hashlib.sha256(b"bounded fix delta").hexdigest(),
         tuple(finding_ids),
         rows,
+    )
+
+
+def resolution_transport_identity(
+    controller: ReviewGateController,
+) -> str:
+    state = controller.read()
+    persisted = str(
+        state.get("resolution_transport_identity_sha256") or ""
+    )
+    if persisted:
+        return persisted
+    awaiting = state["awaiting_resolution"]
+    review_operation_ids = {
+        str(boundary["review_operation_id"])
+        for boundary in awaiting.values()
+    }
+    assert len(review_operation_ids) == 1
+    callbacks = [
+        {
+            "axis": axis,
+            "round_operation_id": boundary["round_operation_id"],
+            "round_run_id": boundary["round_run_id"],
+            "callback_id": boundary["callback_id"],
+            "callback_sha256": boundary["callback_sha256"],
+        }
+        for axis, boundary in sorted(awaiting.items())
+    ]
+    return review_transport_identity_sha256(
+        next(iter(review_operation_ids)), callbacks
     )
 
 
@@ -354,6 +388,31 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         ),
     )
     resolved_context = replace(context, head_sha="f" * 40)
+    try:
+        controller.continue_after_resolution(
+            run,
+            lane,
+            context=resolved_context,
+            resolution=resolution_evidence(
+                "review-auto", "holistic", context.head_sha,
+                resolved_context.head_sha, "F-gate-1",
+            ),
+            review_identity_sha256="0" * 64,
+            verification_prompt_pointer="prompts/verify.md",
+            callback_pointer=(
+                "callbacks/review-auto/holistic/.review-callback.json"
+            ),
+        )
+    except ValueError:
+        pass
+    else:
+        regression_failures.append(
+            "controller accepted a prior-boundary review identity"
+        )
+    check(
+        "controller rejects prior-boundary review identity",
+        controller.read()["status"] == "awaiting-resolution",
+    )
     first = controller.continue_after_resolution(
         run,
         lane,
@@ -362,6 +421,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
             "review-auto", "holistic", context.head_sha,
             resolved_context.head_sha, "F-gate-1",
         ),
+        review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify.md",
         callback_pointer="callbacks/review-auto/holistic/.review-callback.json",
     )
@@ -656,6 +716,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
             "review-budget", "holistic", context.head_sha,
             "1" * 40, "F-budget-1",
         ),
+        review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify.md",
         callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
     )
@@ -692,6 +753,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
             "review-budget", "holistic", "1" * 40,
             "2" * 40, "F-budget-2",
         ),
+        review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify-2.md",
         callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
     )
@@ -860,6 +922,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
             "3" * 40,
             "F-fresh-1",
         ),
+        review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/fresh-verify.md",
         callback_pointer="callbacks/review-budget-fresh/holistic/.review-callback.json",
     )
@@ -1040,6 +1103,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
                     else ()
                 ),
             ),
+            review_identity_sha256=resolution_transport_identity(controller),
             verification_prompt_pointer=f"prompts/{lane.axis}.md",
             callback_pointer=(
                 f"callbacks/deep/{lane.axis}/.review-callback.json"
@@ -1375,6 +1439,9 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
             {
                 "schema_version": 1,
                 "operation_id": task_id,
+                "review_identity_sha256": resolution_transport_identity(
+                    ReviewGateController(gate_root, task_runtime, task_store)
+                ),
                 "reviewed_head_sha": reviewed_head,
                 "resolved_head_sha": resolved_head,
                 "resolutions": [
@@ -2681,6 +2748,13 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 {
                     "schema_version": 1,
                     "operation_id": started["task_id"],
+                    "review_identity_sha256": resolution_transport_identity(
+                        ReviewGateController(
+                            current_gate_root,
+                            current_runtime,
+                            current_store,
+                        )
+                    ),
                     "reviewed_head_sha": current_reviewed_head,
                     "resolved_head_sha": current_resolved_head,
                     "resolutions": [
