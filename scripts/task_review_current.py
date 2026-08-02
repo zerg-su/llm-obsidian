@@ -125,29 +125,6 @@ def _same_requested_policy(
     )
 
 
-def _stopped_release_boundary_changed(
-    stored: Mapping[str, Any] | object,
-    requested: Mapping[str, Any],
-    *,
-    bound_head: str,
-    current_head: str,
-) -> bool:
-    if not isinstance(stored, Mapping) or bound_head == current_head:
-        return False
-    if (
-        str(stored.get("purpose") or "implementation") != "release"
-        or str(requested.get("purpose") or "implementation") != "release"
-    ):
-        return False
-    stored_boundary = str(stored.get("boundary_input_sha256") or "")
-    requested_boundary = str(requested.get("boundary_input_sha256") or "")
-    return bool(
-        stored_boundary
-        and requested_boundary
-        and stored_boundary != requested_boundary
-    )
-
-
 def _stopped_release_enters_implementation(
     stored: Mapping[str, Any] | object,
     requested: Mapping[str, Any],
@@ -178,6 +155,15 @@ def _stopped_release_enters_implementation(
         and requested_boundary
         and stored_boundary != requested_boundary
     )
+
+
+def _same_review_purpose(
+    stored: Mapping[str, Any] | object,
+    requested: Mapping[str, Any],
+) -> bool:
+    return isinstance(stored, Mapping) and str(
+        stored.get("purpose") or "implementation"
+    ) == str(requested.get("purpose") or "implementation")
 
 
 def run_current_review(
@@ -266,14 +252,6 @@ def run_current_review(
                 )
             ) or (
                 status == "stopped"
-                and _stopped_release_boundary_changed(
-                    stored_policy,
-                    requested_policy,
-                    bound_head=bound_head,
-                    current_head=current_head,
-                )
-            ) or (
-                status == "stopped"
                 and _stopped_release_enters_implementation(
                     stored_policy,
                     requested_policy,
@@ -288,6 +266,7 @@ def run_current_review(
                 status in {"pending", "reviewing", "verifying"}
                 and not gate_state.get("round_results")
                 and not gate_state.get("final_results")
+                and _same_review_purpose(stored_policy, requested_policy)
                 and _current_review_is_quiescent(vault, task_id)
             ) or stale_resolution_boundary(status, same_policy, bound_head, _git(worktree, "rev-parse", "HEAD"), _current_review_is_quiescent(vault, task_id))
         elif gate_state_path.exists():

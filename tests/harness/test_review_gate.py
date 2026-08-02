@@ -3209,6 +3209,25 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(superseded["lanes"]) == 2,
         )
         quiesce_operations(current_store, superseded["task_id"])
+        superseded_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / superseded["task_id"]
+            / superseded["task_id"]
+        )
+        superseded_state = json.loads(
+            (superseded_gate_root / "review-gate.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        superseded_state["status"] = "approved"
+        superseded_state["final_results"] = {
+            "spec": f'{superseded["task_id"]}/final-spec.json'
+        }
+        (superseded_gate_root / "review-gate.json").write_text(
+            json.dumps(superseded_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         release_head = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=product,
@@ -3417,33 +3436,25 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             json.dumps(post_stop_boundary.payload(), sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        direct_post_stop_review = task_review_runner.run_current_review(
-            product,
-            purpose="release",
-            boundary_input_file=post_stop_boundary_path,
-            plan_file=review_plan,
-            origin_surface="33333333-3333-4333-8333-333333333333",
-            scratch_root=scratch,
-            runtime_manager=current_runtime,
-        )
+        direct_release_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=post_stop_boundary_path,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            direct_release_guarded = "another preset or override" in str(exc)
+        else:
+            direct_release_guarded = False
         check(
-            "stopped release directly permits a changed HEAD and boundary",
-            direct_post_stop_review["status"] == "reviewing"
-            and direct_post_stop_review["task_id"]
-            != release_started["task_id"],
-        )
-        quiesce_operations(
-            current_store, direct_post_stop_review["task_id"]
-        )
-        (
-            product / ".vault-meta/harness/current-review/active.json"
-        ).write_text(
-            json.dumps(active_post_stop, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        (release_gate_root / "review-gate.json").write_text(
-            json.dumps(release_state, sort_keys=True) + "\n",
-            encoding="utf-8",
+            "stopped release rejects a direct changed-HEAD release retry",
+            direct_release_guarded
+            and len(current_runtime.started) == direct_release_started_count,
         )
         implementation_cycle = task_review_runner.run_current_review(
             product,
@@ -3462,6 +3473,48 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             != release_started["task_id"],
         )
         quiesce_operations(current_store, implementation_cycle["task_id"])
+        unapproved_release_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=post_stop_boundary_path,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            unapproved_release_guarded = (
+                "another preset or override" in str(exc)
+            )
+        else:
+            unapproved_release_guarded = False
+        check(
+            "release waits for exact implementation checkpoint approval",
+            unapproved_release_guarded
+            and len(current_runtime.started)
+            == unapproved_release_started_count,
+        )
+        implementation_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / implementation_cycle["task_id"]
+            / implementation_cycle["task_id"]
+        )
+        implementation_state = json.loads(
+            (implementation_gate_root / "review-gate.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        implementation_state["status"] = "approved"
+        implementation_state["final_results"] = {
+            "spec": f'{implementation_cycle["task_id"]}/final-spec.json'
+        }
+        (implementation_gate_root / "review-gate.json").write_text(
+            json.dumps(implementation_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         post_stop_review = task_review_runner.run_current_review(
             product,
             purpose="release",
