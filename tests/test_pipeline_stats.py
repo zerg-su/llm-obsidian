@@ -46,11 +46,15 @@ def build_vault(
 ) -> Path:
     """A throwaway vault root: copied script, three skills, isolated Claude home."""
     (tmp / "scripts").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(STATS, tmp / "scripts" / "pipeline-stats.py")
-    shutil.copy2(
-        ROOT / "scripts" / "review_contract.py",
-        tmp / "scripts" / "review_contract.py",
-    )
+    for filename in (
+        "pipeline-stats.py",
+        "pipeline_stats_model.py",
+        "pipeline_stats_sources.py",
+        "pipeline_stats_render.py",
+        "pipeline_stats_report.py",
+        "review_contract.py",
+    ):
+        shutil.copy2(ROOT / "scripts" / filename, tmp / "scripts" / filename)
     for name in ("alpha", "beta", "gamma"):
         skill = tmp / "skills" / name
         skill.mkdir(parents=True, exist_ok=True)

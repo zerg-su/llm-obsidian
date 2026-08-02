@@ -206,19 +206,12 @@ def check_report_counts_invalid_callbacks() -> None:
             environ={},
         )
         (root / "scripts").mkdir()
-        shutil.copy2(
-            ROOT / "scripts/pipeline-stats.py", root / "scripts/pipeline-stats.py"
-        )
-        shutil.copy2(
-            ROOT / "scripts/review_contract.py", root / "scripts/review_contract.py"
-        )
-        env = dict(os.environ)
-        env["HOME"] = str(root / "home")
+        for filename in ("pipeline-stats.py", "pipeline_stats_model.py", "pipeline_stats_sources.py", "pipeline_stats_render.py", "pipeline_stats_report.py", "review_contract.py"):
+            shutil.copy2(ROOT / "scripts" / filename, root / "scripts" / filename)
+        env = {**os.environ, "HOME": str(root / "home")}
         result = subprocess.run(
             [sys.executable, str(root / "scripts/pipeline-stats.py"), "--days", "1"],
-            text=True,
-            capture_output=True,
-            env=env,
+            text=True, capture_output=True, env=env,
         )
         check("report exit 0 with an invalid callback", result.returncode == 0, result.stderr)
         check(
