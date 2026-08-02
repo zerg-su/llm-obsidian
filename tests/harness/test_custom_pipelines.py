@@ -26,6 +26,8 @@ from harness.custom_pipelines import (  # noqa: E402
     resolve_custom_executable,
     select_builtin_baseline,
 )
+from harness import custom_pipeline_contracts as custom_contracts  # noqa: E402
+from harness import custom_pipelines as custom_facade  # noqa: E402
 from harness.pipeline_builtins import builtin_registry  # noqa: E402
 from harness.contracts import RuntimeRoute  # noqa: E402
 from harness.workflows.dispatch import (  # noqa: E402
@@ -39,6 +41,14 @@ def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+check(
+    "custom pipeline facade preserves contract identities after extraction",
+    custom_facade.PipelineSpec is custom_contracts.PipelineSpec
+    and custom_facade.CustomPipelinePolicy is custom_contracts.CustomPipelinePolicy
+    and custom_facade.parse_pipeline_spec is custom_contracts.parse_pipeline_spec,
+)
 
 
 VALID = {
