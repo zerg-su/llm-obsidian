@@ -1,20 +1,10 @@
 {
   "schema_version": 1,
   "hotspots": {
-    "file-lines:scripts/dispatch-runner.py": {
-      "max_value": 2177,
-      "owner": "harness-entrypoint-decomposition",
-      "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
-    },
     "file-lines:scripts/task-review-runner.py": {
       "max_value": 3756,
       "owner": "harness-entrypoint-decomposition",
       "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
-    },
-    "function-branches:scripts/dispatch-runner.py:validate_request": {
-      "max_value": 90,
-      "owner": "dispatch-contract-decomposition",
-      "evidence": "pre-existing validation hotspot exposed by the honest 2.6 denominator"
     },
     "function-branches:scripts/task-review-runner.py:_durable_successful_verification": {
       "max_value": 64,
