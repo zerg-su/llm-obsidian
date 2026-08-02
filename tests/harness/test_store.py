@@ -194,6 +194,20 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "attention-required",
         reason=AttentionReason.CALLBACK_TIMEOUT,
     )
+    for invalid_deadline in (None, True, float("nan"), 0.0):
+        try:
+            store.rearm_callback_timeout(
+                "owner-timeout",
+                "op-timeout",
+                deadline_at=invalid_deadline,
+            )
+        except StoreError:
+            pass
+        else:
+            raise AssertionError(
+                "callback timeout rearm accepted an invalid deadline"
+            )
+    check("callback timeout rearm rejects invalid deadlines", True)
     rearmed = store.rearm_callback_timeout(
         "owner-timeout",
         "op-timeout",

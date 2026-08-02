@@ -192,9 +192,7 @@ class OperationStore:
                 or deadline_at <= record.deadline_at
             ):
                 raise StoreError("operation is not an exact expired callback wait")
-            updated, result = transition(record, "awaiting-callback")
-            if not result.changed:
-                raise StoreError("callback timeout rearm made no state transition")
+            updated, _result = transition(record, "awaiting-callback")
             updated = replace(updated, deadline_at=float(deadline_at))
             self._write(
                 self._operation_path(owner_id, operation_id),
