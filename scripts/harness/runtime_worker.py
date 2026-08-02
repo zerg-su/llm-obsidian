@@ -3398,6 +3398,8 @@ def run(
 
             def wait_for_summary_refresh_after_resolution(
                 gate_state: dict[str, object],
+                *,
+                target_head: str = "",
             ) -> bool:
                 resolution_path = (
                     spec_path.parent
@@ -3419,7 +3421,7 @@ def run(
                     resolution.get("summary_sha256") or ""
                 )
                 context = gate_state.get("context")
-                approved_head = (
+                approved_head = target_head or (
                     str(context.get("head_sha") or "")
                     if isinstance(context, dict)
                     else ""
@@ -3463,7 +3465,7 @@ def run(
                         return True
                 _atomic_json(notify_path, {**marker, "status": "pending"})
                 message = (
-                    "Refresh .task-summary.json before finalization: its body "
+                    "Refresh .task-summary.json before review finalization: its body "
                     "still describes the pre-resolution HEAD. Preserve the "
                     "exact schema/type/title/session, cover every applied or "
                     "rejected finding, and summarize final HEAD "
@@ -4685,6 +4687,11 @@ def run(
                             operation_id=spec["operation_id"],
                             gate_state=gate_state,
                             current_head=verification_head,
+                        ):
+                            return
+                        if wait_for_summary_refresh_after_resolution(
+                            gate_state,
+                            target_head=verification_head,
                         ):
                             return
                         drive_review()

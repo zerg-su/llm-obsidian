@@ -1979,6 +1979,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     asynchronous_calls: list[str] = []
     asynchronous_verification_heads: list[str] = []
     asynchronous_verification_calls: list[tuple[str, ...]] = []
+    asynchronous_review_summary_shas: list[str] = []
 
     def record_asynchronous_verification(
         argv: list[str], **kwargs: object
@@ -2195,6 +2196,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
             threading.Thread(target=resolve_after_packet).start()
             return
+        asynchronous_review_summary_shas.append(
+            hashlib.sha256(
+                (worktree / ".task-summary.json").read_bytes()
+            ).hexdigest()
+        )
         (gate_root / "review-gate.json").unlink()
         ReviewGateController.skip(
             gate_root,
@@ -2239,6 +2245,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and len(asynchronous_verification_heads) == 2
         and len(set(asynchronous_verification_heads)) == 2
         and len(asynchronous_verification_calls) == 6
+        and asynchronous_review_summary_shas
+        == [
+            hashlib.sha256(
+                (
+                    root
+                    / f"worktree-{asynchronous_task}"
+                    / ".task-summary.json"
+                ).read_bytes()
+            ).hexdigest()
+        ]
         and len(asynchronous_verification_children) == 2
         and all(
             child.state == "complete"
