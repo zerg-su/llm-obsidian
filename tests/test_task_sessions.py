@@ -208,6 +208,29 @@ with tempfile.TemporaryDirectory() as raw:
         ),
     )
 
+    queued_archive_task = str(uuid.uuid4())
+    store.create_task(project, queued_archive_task, worktree=repo)
+    store.enqueue_operation(
+        project,
+        queued_archive_task,
+        domain="review",
+        runtime="claude",
+        model="fable",
+        effort="high",
+        operation_type="review",
+        coordinator_surface="surface-queued-archive",
+        operation_id=str(uuid.uuid4()),
+    )
+    try:
+        store.archive_task(project, queued_archive_task)
+    except TaskSessionError as exc:
+        check(
+            "archive deterministically rejects a queued operation",
+            str(exc) == "task has active or queued operations",
+        )
+    else:
+        raise AssertionError("task with a queued operation was archived")
+
     review_lane = lane_id_for(project, task, "review", "claude", "fable")
     review_lane_xhigh = lane_id_for(project, task, "review", "claude", "fable")
     other_model_lane = lane_id_for(project, task, "review", "claude", "opus")
