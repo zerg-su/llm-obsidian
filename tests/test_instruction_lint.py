@@ -69,16 +69,18 @@ print("OK   defuddle fallback requires actual cleanup")
 
 dispatch = (ROOT / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8")
 dispatch_runner = (ROOT / "scripts" / "dispatch-runner.py").read_text(encoding="utf-8")
+dispatch_execution = (ROOT / "scripts" / "dispatch_execution.py").read_text(encoding="utf-8")
+dispatch_workspace = (ROOT / "scripts" / "dispatch_workspace.py").read_text(encoding="utf-8")
 assert "dispatch-runner.py start --spec" in dispatch
 assert "CMUX_SURFACE_ID" in dispatch
 assert "materialize_current_context" in dispatch_runner
-assert 'origin_surface=request["origin_surface"]' in dispatch_runner
+assert 'origin_surface=request["origin_surface"]' in dispatch_execution
 assert "identify --surface \"$CMUX_SURFACE_ID\" --no-caller" not in dispatch
 assert "never inspects the globally focused surface" in dispatch
 assert "awk '/^\\*/" not in dispatch
 assert "verify that its exact target exists under `wiki/`" in dispatch
 assert "reap type/title/`plan_mode`" in dispatch
-assert '"sync-config", "--apply"' in dispatch_runner
+assert '"sync-config", "--apply"' in dispatch_workspace
 assert dispatch.count("\n") + 1 <= 500
 print("OK   dispatch delegates anchored mechanics to typed runner")
 
