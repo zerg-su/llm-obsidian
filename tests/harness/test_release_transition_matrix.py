@@ -32,6 +32,18 @@ from review_resolution import review_transport_identity_sha256
 from wiki_summary_contract import WikiSummaryError, validate_summary
 
 
+def transition_oracle() -> dict[str, frozenset[str]]:
+    raw = json.loads(
+        (Path(__file__).with_name("state_transition_oracle.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    return {source: frozenset(targets) for source, targets in raw.items()}
+
+
+EXPECTED_TRANSITIONS = transition_oracle()
+
+
 def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
@@ -62,11 +74,36 @@ def operation(state: str) -> OperationRecord:
     )
 
 
-states = tuple(sorted(TRANSITIONS))
+def require_transition_contract(actual: dict[str, set[str]]) -> None:
+    normalized = {source: frozenset(targets) for source, targets in actual.items()}
+    if normalized != EXPECTED_TRANSITIONS:
+        raise AssertionError("production transition table drifted from test oracle")
+
+
+require_transition_contract(TRANSITIONS)
+for label, mutation in (
+    (
+        "added edge",
+        {**TRANSITIONS, "created": {*TRANSITIONS["created"], "complete"}},
+    ),
+    (
+        "removed edge",
+        {**TRANSITIONS, "created": TRANSITIONS["created"] - {"preflight"}},
+    ),
+):
+    try:
+        require_transition_contract(mutation)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"transition oracle missed {label}")
+check("operation transition oracle is independent and mutation-sensitive", True)
+
+states = tuple(sorted(EXPECTED_TRANSITIONS))
 state_cases = 0
 for source, target in itertools.product(states, repeat=2):
     record = operation(source)
-    allowed = target == source or target in TRANSITIONS[source]
+    allowed = target == source or target in EXPECTED_TRANSITIONS[source]
     reason = (
         AttentionReason.ATTENTION_REQUIRED
         if target == "attention-required" and target != source

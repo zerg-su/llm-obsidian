@@ -55,6 +55,16 @@ SPEC = OperationSpec(
 )
 
 
+EXPECTED_TRANSITIONS = {
+    source: frozenset(targets)
+    for source, targets in json.loads(
+        (Path(__file__).with_name("state_transition_oracle.json")).read_text(
+            encoding="utf-8"
+        )
+    ).items()
+}
+
+
 def record(state: str = "running", **changes: object) -> OperationRecord:
     base = OperationRecord(SPEC, state, 2, "edge-lane", "edge-run")
     return replace(base, **changes)
@@ -285,7 +295,10 @@ def state_machine_matrix() -> None:
     assert unchanged is same and not result.changed
     assert result.attention_reason == AttentionReason.CALLBACK_TIMEOUT
 
-    for source, targets in TRANSITIONS.items():
+    assert {
+        source: frozenset(targets) for source, targets in TRANSITIONS.items()
+    } == EXPECTED_TRANSITIONS
+    for source, targets in EXPECTED_TRANSITIONS.items():
         for target in targets:
             reason = AttentionReason.ATTENTION_REQUIRED if target == "attention-required" else None
             updated, result = transition(record(source), target, reason=reason)

@@ -1,0 +1,46 @@
+{
+  "attention-required": [
+    "awaiting-callback",
+    "cancelling",
+    "created",
+    "exiting",
+    "failed",
+    "finalizing",
+    "preflight",
+    "running",
+    "starting",
+    "verifying"
+  ],
+  "awaiting-callback": [
+    "attention-required",
+    "cancelling",
+    "failed",
+    "finalizing",
+    "running",
+    "verifying"
+  ],
+  "cancelled": [],
+  "cancelling": ["attention-required", "exiting", "failed"],
+  "complete": [],
+  "created": ["attention-required", "cancelling", "failed", "preflight"],
+  "exiting": ["attention-required", "cancelled", "complete", "failed"],
+  "failed": [],
+  "finalizing": ["attention-required", "cancelling", "exiting", "failed"],
+  "preflight": ["attention-required", "cancelling", "failed", "starting"],
+  "running": [
+    "attention-required",
+    "awaiting-callback",
+    "cancelling",
+    "failed",
+    "finalizing",
+    "verifying"
+  ],
+  "starting": ["attention-required", "cancelling", "failed", "running"],
+  "verifying": [
+    "attention-required",
+    "cancelling",
+    "failed",
+    "finalizing",
+    "running"
+  ]
+}
