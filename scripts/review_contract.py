@@ -7,6 +7,7 @@ import base64
 import json
 import re
 import zlib
+from collections.abc import Iterable
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -21,7 +22,12 @@ AXES = {
     "deep": ("spec", "standards-correctness-architecture-security"),
 }
 VERIFY_BUDGETS = {"simple": 1, "deep": 2}
-IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+IDENTIFIER_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]*"
+IDENTIFIER_RE = re.compile(rf"{IDENTIFIER_PATTERN}\Z")
+FINDING_ID_LIMIT = 100
+FINDING_FILE_LIMIT = 1000
+FINDING_SUMMARY_LIMIT = 300
+FINDING_DETAIL_LIMIT = 4000
 
 
 class ReviewContractError(ValueError):
@@ -64,8 +70,8 @@ def string_list(value: Any, field: str, *, limit: int = 50) -> list[str]:
     return [text(item, f"{field}[{index}]", limit=2000) for index, item in enumerate(value)]
 
 
-def safe_file(value: Any, field: str) -> str:
-    path = text(value, field, limit=1000)
+def safe_file(value: Any, field: str, *, limit: int = FINDING_FILE_LIMIT) -> str:
+    path = text(value, field, limit=limit)
     pure = PurePosixPath(path)
     if "\\" in path or pure.is_absolute() or ".." in pure.parts or pure.as_posix() == ".":
         raise ReviewContractError(f"{field} must be a repository-relative path")
@@ -86,7 +92,9 @@ def git_head(value: Any, field: str = "head_sha") -> str:
     return value
 
 
-def _validate_finding(item: Any, field: str) -> dict[str, Any]:
+def validate_finding(item: Any, field: str = "finding") -> dict[str, Any]:
+    """Validate and normalize one finding at every review trust boundary."""
+
     if not isinstance(item, dict):
         raise ReviewContractError(f"{field} must be an object")
     exact_keys(
@@ -109,14 +117,60 @@ def _validate_finding(item: Any, field: str) -> dict[str, Any]:
     if line is not None and (not isinstance(line, int) or isinstance(line, bool) or line < 1):
         raise ReviewContractError(f"{field}.line must be a positive integer or null")
     return {
-        "finding_id": identifier(item.get("finding_id"), f"{field}.finding_id"),
+        "finding_id": identifier(
+            item.get("finding_id"),
+            f"{field}.finding_id",
+            limit=FINDING_ID_LIMIT,
+        ),
         "severity": severity,
-        "file": safe_file(item.get("file"), f"{field}.file"),
+        "file": safe_file(
+            item.get("file"),
+            f"{field}.file",
+            limit=FINDING_FILE_LIMIT,
+        ),
         "line": line,
-        "summary": text(item.get("summary"), f"{field}.summary", limit=300),
-        "evidence": text(item.get("evidence"), f"{field}.evidence"),
-        "recommendation": text(item.get("recommendation"), f"{field}.recommendation"),
+        "summary": text(
+            item.get("summary"),
+            f"{field}.summary",
+            limit=FINDING_SUMMARY_LIMIT,
+        ),
+        "evidence": text(
+            item.get("evidence"),
+            f"{field}.evidence",
+            limit=FINDING_DETAIL_LIMIT,
+        ),
+        "recommendation": text(
+            item.get("recommendation"),
+            f"{field}.recommendation",
+            limit=FINDING_DETAIL_LIMIT,
+        ),
     }
+
+
+def finding_constraint_lines() -> tuple[str, ...]:
+    """Render reviewer-facing constraints from canonical validator values."""
+
+    return (
+        f"`finding_id` must match `{IDENTIFIER_PATTERN}`, contain at most "
+        f"{FINDING_ID_LIMIT} characters, and be unique within the review round.",
+        "`file` must be a repository-relative POSIX path (not absolute, `.`, or "
+        f"containing `..` or `\\`) of at most {FINDING_FILE_LIMIT} characters.",
+        f"`summary` is at most {FINDING_SUMMARY_LIMIT} characters; `evidence` and "
+        f"`recommendation` are at most {FINDING_DETAIL_LIMIT} characters each.",
+        "All finding string fields must be non-empty after trimming surrounding "
+        "whitespace.",
+    )
+
+
+def require_unique_finding_ids(
+    finding_ids: Iterable[str],
+    field: str = "finding_id values",
+) -> None:
+    """Reject duplicate canonical finding identities."""
+
+    values = list(finding_ids)
+    if len(values) != len(set(values)):
+        raise ReviewContractError(f"{field} must be unique")
 
 
 def validate_review(
@@ -211,7 +265,7 @@ def validate_review(
         if not isinstance(raw_findings, list) or len(raw_findings) > 50:
             raise ReviewContractError(f"{field}.findings must be a list with at most 50 items")
         findings = [
-            _validate_finding(finding, f"{field}.findings[{finding_index}]")
+            validate_finding(finding, f"{field}.findings[{finding_index}]")
             for finding_index, finding in enumerate(raw_findings)
         ]
         if axis_verdict == "approve" and any(
@@ -237,8 +291,10 @@ def validate_review(
         for axis_result in axes
         for finding in axis_result["findings"]
     ]
-    if len(finding_ids) != len(set(finding_ids)):
-        raise ReviewContractError("finding_id values must be unique across review axes")
+    require_unique_finding_ids(
+        finding_ids,
+        "finding_id values across review axes",
+    )
     expected_verdict = (
         "blocked"
         if any(item["verdict"] == "blocked" for item in axes)

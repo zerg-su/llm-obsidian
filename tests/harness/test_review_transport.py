@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from review_contract import ReviewContractError, validate_review
 from review_resolution import validate_resolution_evidence
 from harness.review_archive import render_page
-from harness.review_submit import ReviewCallbackPort, submit_review
+from harness.review_submit import ReviewCallbackPort, ReviewSubmitError, submit_review
 from harness.verification import load_profiles
 
 
@@ -202,6 +202,49 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         == "operation-1"
         and round_envelope.payload["axis"] == "holistic",
     )
+
+    def check_round_finding_rejected(label: str, candidate: dict[str, Any]) -> None:
+        rejected_port: ReviewCallbackPort = CapturePort()
+        try:
+            submit_review(
+                json.dumps(candidate),
+                meta=round_meta,
+                worktree=worktree,
+                port=rejected_port,
+            )
+        except ReviewSubmitError:
+            check(label, rejected_port.envelope is None)
+        else:
+            check(label, False)
+
+    finding = round_result["findings"][0]
+    assert isinstance(finding, dict)
+    invalid_id = {**finding, "finding_id": "not a bounded id"}
+    check_round_finding_rejected(
+        "review round rejects a canonically invalid finding",
+        {**round_result, "findings": [invalid_id]},
+    )
+    duplicate = {**finding, "summary": "a second issue with the same id"}
+    check_round_finding_rejected(
+        "review round rejects duplicate finding ids",
+        {**round_result, "findings": [finding, duplicate]},
+    )
+    for field in ("finding_id", "file", "summary", "evidence", "recommendation"):
+        check_round_finding_rejected(
+            f"review round rejects whitespace-only finding {field}",
+            {**round_result, "findings": [{**finding, field: " \t "}]},
+        )
+    for field, value in (
+        ("finding_id", "F" + "x" * 100),
+        ("file", "x" * 1001),
+        ("summary", "x" * 301),
+        ("evidence", "x" * 4001),
+        ("recommendation", "x" * 4001),
+    ):
+        check_round_finding_rejected(
+            f"review round rejects oversized finding {field}",
+            {**round_result, "findings": [{**finding, field: value}]},
+        )
     result = subprocess.run(
         [
             sys.executable,

@@ -46,6 +46,7 @@ from harness.review_submit import (  # noqa: E402
     FINDING_FIELDS as SUBMIT_FINDING_FIELDS,
     ROUND_FIELDS as SUBMIT_ROUND_FIELDS,
     ReviewSubmitError,
+    round_schema_lines,
     submit_review,
 )
 from harness.workflows.review import ReviewContext  # noqa: E402
@@ -88,6 +89,16 @@ NON_STRING_JSON_VALUES = {
     "list": ["text"],
     "object": {"value": "text"},
 }
+EXPECTED_FINDING_CONSTRAINT_LINES = (
+    "`finding_id` must match `[A-Za-z0-9][A-Za-z0-9._:-]*`, contain at most "
+    "100 characters, and be unique within the review round.",
+    "`file` must be a repository-relative POSIX path (not absolute, `.`, or "
+    "containing `..` or `\\`) of at most 1000 characters.",
+    "`summary` is at most 300 characters; `evidence` and `recommendation` are "
+    "at most 4000 characters each.",
+    "All finding string fields must be non-empty after trimming surrounding "
+    "whitespace.",
+)
 
 
 def _meta(worktree: Path) -> dict[str, object]:
@@ -314,6 +325,11 @@ def check_prompt_schema_round_trips(worktree: Path) -> None:
 def check_gate_prompt_states_enforced_values() -> None:
     """Key names alone are not the contract: values are enforced too."""
 
+    check(
+        "round schema renders the exact canonical finding constraint block",
+        round_schema_lines()[-len(EXPECTED_FINDING_CONSTRAINT_LINES) :]
+        == EXPECTED_FINDING_CONSTRAINT_LINES,
+    )
     runner = load_runner()
     with tempfile.TemporaryDirectory(prefix="rt04-values.") as raw:
         prompt = _generate_gate_prompt(runner, Path(raw))
@@ -332,6 +348,14 @@ def check_gate_prompt_states_enforced_values() -> None:
         "approve" in prompt and "critical" in prompt and "important" in prompt,
     )
     check("gate prompt states the line rule", "`line`" in prompt)
+    missing_constraints = [
+        line for line in EXPECTED_FINDING_CONSTRAINT_LINES if line not in prompt
+    ]
+    check(
+        "gate prompt states the exact canonical finding constraints",
+        not missing_constraints,
+        f"prompt omits or changes {missing_constraints}",
+    )
 
 
 def check_every_named_value_is_accepted(worktree: Path) -> None:

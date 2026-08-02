@@ -587,7 +587,7 @@ with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
                     "F-long-summary",
                     "holistic",
                     "minor",
-                    "s" * 376,
+                    "s" * 300,
                     "full evidence remains available",
                 ),
             ),
@@ -602,10 +602,10 @@ with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
     )
     bounded = authorization.evidence["axes"][0]["findings"][0]
     check(
-        "model-authored finding summaries are bounded before final evidence",
+        "canonical maximum finding summaries are preserved in final evidence",
         decision.action == "approved"
         and len(bounded["summary"]) == 300
-        and bounded["summary"].endswith("…")
+        and bounded["summary"] == "s" * 300
         and bounded["evidence"] == "full evidence remains available",
     )
 

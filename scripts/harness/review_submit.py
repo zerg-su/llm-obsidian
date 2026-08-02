@@ -8,9 +8,8 @@ import hashlib
 import json
 import os
 import sys
-from pathlib import Path
-from pathlib import PurePosixPath
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -24,7 +23,10 @@ from review_contract import (
     SEVERITIES,
     VERDICTS,
     ReviewContractError,
+    finding_constraint_lines,
     parse_review_json,
+    require_unique_finding_ids,
+    validate_finding,
 )
 
 
@@ -48,9 +50,6 @@ FINDING_FIELDS: tuple[str, ...] = (
     "recommendation",
 )
 ROUND_STRING_FIELDS: tuple[str, ...] = ("axis", "verdict")
-FINDING_STRING_FIELDS: tuple[str, ...] = tuple(
-    field for field in FINDING_FIELDS if field != "line"
-)
 
 
 def round_schema_lines() -> tuple[str, ...]:
@@ -71,9 +70,7 @@ def round_schema_lines() -> tuple[str, ...]:
         f"`severity` is exactly one of {names(sorted(SEVERITIES))}.",
         "`line` is null or a positive integer, and `schema_version` is `1`.",
         "A `verdict` of `approve` cannot carry a `critical` or `important` finding.",
-        "Every other finding field is a non-empty string, and `file` is a "
-        "repository-relative path.",
-    )
+    ) + finding_constraint_lines()
 
 
 class ReviewSubmitError(ValueError):
@@ -151,45 +148,36 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
     raw_findings = value.get("findings")
     if not isinstance(raw_findings, list) or len(raw_findings) > 50:
         raise ReviewSubmitError("review round findings must be bounded")
-    fields = set(FINDING_FIELDS)
     findings: list[ReviewFinding] = []
-    for item in raw_findings:
-        if not isinstance(item, dict) or set(item) != fields:
-            raise ReviewSubmitError("review round finding has invalid fields")
-        _require_string_fields(
-            item,
-            FINDING_STRING_FIELDS,
-            label="review round finding field",
-        )
-        file = item["file"]
-        path = PurePosixPath(file)
-        if (
-            not file
-            or "\\" in file
-            or path.is_absolute()
-            or ".." in path.parts
-            or path.as_posix() == "."
-        ):
-            raise ReviewSubmitError(
-                "review round finding file must be repository-relative"
-            )
+    for index, item in enumerate(raw_findings):
         try:
+            finding = validate_finding(
+                item,
+                f"review round findings[{index}]",
+            )
             findings.append(
                 ReviewFinding(
-                    finding_id=item["finding_id"],
+                    finding_id=finding["finding_id"],
                     axis=axis,
-                    severity=item["severity"],
-                    summary=item["summary"],
-                    evidence=item["evidence"],
-                    file=file,
-                    line=item.get("line"),
-                    recommendation=item["recommendation"],
+                    severity=finding["severity"],
+                    summary=finding["summary"],
+                    evidence=finding["evidence"],
+                    file=finding["file"],
+                    line=finding["line"],
+                    recommendation=finding["recommendation"],
                 )
             )
-        except ValueError as exc:
+        except (ReviewContractError, ValueError) as exc:
             raise ReviewSubmitError(
                 f"review round finding is invalid: {exc}"
             ) from exc
+    try:
+        require_unique_finding_ids(
+            (finding.finding_id for finding in findings),
+            "review round finding_id values",
+        )
+    except ReviewContractError as exc:
+        raise ReviewSubmitError(f"review round findings are invalid: {exc}") from exc
     try:
         return ReviewResult(
             axis=axis,

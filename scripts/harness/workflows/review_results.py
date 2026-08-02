@@ -20,14 +20,19 @@ from ..contracts import (
 )
 from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
-from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
-
-
-from .review_contracts import (
-    ReviewRequest,
-    ReviewSessionIdentity,
-    _bounded_finding_summary,
+from review_contract import (
+    AXES,
+    MATERIAL_SEVERITIES,
+    SEVERITIES,
+    VERIFY_BUDGETS,
+    ReviewContractError,
+    require_unique_finding_ids,
+    validate_finding,
 )
+
+
+from .review_contracts import ReviewRequest, ReviewSessionIdentity
+
 
 @dataclass(frozen=True)
 class ReviewFinding:
@@ -98,11 +103,34 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
         row.verification_iteration > request.max_verify_iterations for row in ordered
     ):
         raise ValueError("review result exceeds the verification iteration budget")
-    finding_ids = [
-        finding.finding_id for row in ordered for finding in row.findings
-    ]
-    if len(finding_ids) != len(set(finding_ids)):
-        raise ValueError("review finding ids must be unique across axes")
+    canonical_findings: dict[str, list[dict[str, object]]] = {}
+    try:
+        for row in ordered:
+            canonical_findings[row.axis] = [
+                validate_finding(
+                    {
+                        "finding_id": finding.finding_id,
+                        "severity": finding.severity,
+                        "file": finding.file,
+                        "line": finding.line,
+                        "summary": finding.summary,
+                        "evidence": finding.evidence,
+                        "recommendation": finding.recommendation,
+                    },
+                    f"review result {row.axis} findings[{index}]",
+                )
+                for index, finding in enumerate(row.findings)
+            ]
+        require_unique_finding_ids(
+            (
+                finding["finding_id"]
+                for findings in canonical_findings.values()
+                for finding in findings
+            ),
+            "review finding_id values across axes",
+        )
+    except ReviewContractError as exc:
+        raise ValueError(f"review findings are invalid: {exc}") from exc
     verdict = (
         "blocked" if any(row.verdict == "blocked" for row in ordered)
         else "changes-requested" if any(row.verdict == "changes-requested" for row in ordered)
@@ -114,20 +142,7 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
             {
                 "axis": row.axis,
                 "verdict": row.verdict,
-                "findings": [
-                    {
-                        "finding_id": finding.finding_id,
-                        "severity": finding.severity,
-                        "file": finding.file,
-                        "line": finding.line,
-                        "summary": _bounded_finding_summary(
-                            finding.summary
-                        ),
-                        "evidence": finding.evidence,
-                        "recommendation": finding.recommendation,
-                    }
-                    for finding in row.findings
-                ],
+                "findings": canonical_findings[row.axis],
                 "verification_iteration": row.verification_iteration,
             }
             for row in ordered

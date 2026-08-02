@@ -99,6 +99,72 @@ standards_result = ReviewResult("standards-correctness-architecture-security", "
 aggregate_result = aggregate(deep, {"spec": spec_result, "standards-correctness-architecture-security": standards_result})
 check("deep aggregation preserves axes and material verdict", aggregate_result["verdict"] == "changes-requested" and len(aggregate_result["axes"]) == 2)
 check("important findings require same-session resolution", resolution_required(spec_result))
+
+
+def check_aggregate_finding_rejected(label: str, **changes: object) -> None:
+    values: dict[str, object] = {
+        "finding_id": "F-canonical",
+        "axis": "holistic",
+        "severity": "important",
+        "summary": "canonical issue",
+        "evidence": "the failing path is reachable",
+        "file": "scripts/example.py",
+        "line": 1,
+        "recommendation": "fix the reachable path",
+    }
+    values.update(changes)
+    finding = ReviewFinding(**values)  # type: ignore[arg-type]
+    result = ReviewResult("holistic", "changes-requested", (finding,))
+    try:
+        aggregate(ReviewRequest("finding-validation"), {"holistic": result})
+    except ValueError:
+        check(label, True)
+    else:
+        check(label, False)
+
+
+check_aggregate_finding_rejected(
+    "terminal aggregation rejects a canonically invalid finding",
+    finding_id="not a bounded id",
+)
+for field in ("finding_id", "file", "summary", "evidence", "recommendation"):
+    check_aggregate_finding_rejected(
+        f"terminal aggregation rejects whitespace-only finding {field}",
+        **{field: " \t "},
+    )
+for field, value in (
+    ("finding_id", "F" + "x" * 100),
+    ("file", "x" * 1001),
+    ("summary", "x" * 301),
+    ("evidence", "x" * 4001),
+    ("recommendation", "x" * 4001),
+):
+    check_aggregate_finding_rejected(
+        f"terminal aggregation rejects oversized finding {field}",
+        **{field: value},
+    )
+duplicate_finding = ReviewFinding(
+    "F-duplicate",
+    "holistic",
+    "important",
+    "duplicate issue",
+    "the same issue was emitted twice",
+)
+try:
+    aggregate(
+        ReviewRequest("finding-duplicate"),
+        {
+            "holistic": ReviewResult(
+                "holistic",
+                "changes-requested",
+                (duplicate_finding, duplicate_finding),
+            )
+        },
+    )
+except ValueError:
+    check("terminal aggregation rejects duplicate finding ids", True)
+else:
+    check("terminal aggregation rejects duplicate finding ids", False)
 try:
     verify_lane("surface-1", "surface-2")
 except ValueError:

@@ -29,6 +29,10 @@ from harness.review_program import (  # noqa: E402
     compile_review_program,
     reconcile_review_program,
 )
+from harness.review_program_authority import (  # noqa: E402
+    trusted_review_receipt,
+    validate_trusted_receipts,
+)
 from harness.workflows.review import ReviewContext, ReviewRequest  # noqa: E402
 from harness.workflows.review_gate import review_context_sha256  # noqa: E402
 
@@ -62,6 +66,16 @@ def rejected(label: str, callback) -> None:
         print(f"OK   {label}")
         return
     raise AssertionError(label)
+
+
+def git(worktree: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(worktree), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 intent = ReviewBoundaryInput(
@@ -263,10 +277,56 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         "---\ntype: plan\nreview_risk_profile: architecture\n---\n# Plan\n",
         encoding="utf-8",
     )
+    cli_sources = {
+        "docs/design.md": b"approved design\n",
+        "docs/capabilities.json": b'{"approved":true}\n',
+        "docs/success-evidence.md": b"success evidence\n",
+        "docs/verification.md": b"verification evidence\n",
+        "docs/outcome-evidence.md": b"outcome evidence\n",
+        "docs/deviations.md": b"accepted deviations\n",
+    }
+    for relative, content in cli_sources.items():
+        source = worktree / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(content)
+    git(worktree, "init", "-q")
+    git(worktree, "config", "user.name", "Review Program Test")
+    git(worktree, "config", "user.email", "review-program@example.invalid")
+    git(worktree, "add", "docs", "wiki")
+    git(worktree, "commit", "-q", "-m", "review candidate")
+    cli_head = git(worktree, "rev-parse", "HEAD")
     plan_sha256 = hashlib.sha256(plan.read_bytes()).hexdigest()
-    cli_boundaries = tuple(
-        replace(boundary, plan_sha256=plan_sha256)
-        for boundary in (intent, implementation, release)
+    cli_boundaries = (
+        replace(
+            intent,
+            plan_sha256=plan_sha256,
+            design_sha256=hashlib.sha256(cli_sources["docs/design.md"]).hexdigest(),
+            capability_dispositions_sha256=hashlib.sha256(
+                cli_sources["docs/capabilities.json"]
+            ).hexdigest(),
+            success_evidence_map_sha256=hashlib.sha256(
+                cli_sources["docs/success-evidence.md"]
+            ).hexdigest(),
+        ),
+        replace(
+            implementation,
+            plan_sha256=plan_sha256,
+            product_head_sha=cli_head,
+            verification_evidence_sha256=hashlib.sha256(
+                cli_sources["docs/verification.md"]
+            ).hexdigest(),
+        ),
+        replace(
+            release,
+            plan_sha256=plan_sha256,
+            integration_head_sha=cli_head,
+            outcome_evidence_map_sha256=hashlib.sha256(
+                cli_sources["docs/outcome-evidence.md"]
+            ).hexdigest(),
+            accepted_deviations_sha256=hashlib.sha256(
+                cli_sources["docs/deviations.md"]
+            ).hexdigest(),
+        ),
     )
     input_paths = []
     for boundary in cli_boundaries:
@@ -459,6 +519,245 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     check(
         "tampered terminal result bytes cannot mint a review receipt",
         tampered.returncode == 3 and "digest is stale" in tampered.stderr,
+    )
+
+def write_approved_gate(
+    worktree: Path,
+    boundary: ReviewBoundaryInput,
+    operation_id: str,
+) -> None:
+    gate_root = (
+        worktree
+        / ".vault-meta/harness/review-data"
+        / operation_id
+        / operation_id
+    )
+    gate_root.mkdir(parents=True)
+    expected_head = boundary.product_head_sha or boundary.integration_head_sha
+    callback = {
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "payload": {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "head_sha": expected_head or git(worktree, "rev-parse", "HEAD"),
+            "verdict": "approve",
+        },
+    }
+    callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
+    (gate_root / ".review-callback.json").write_bytes(callback_bytes)
+    (gate_root / "final-holistic.json").write_text(
+        '{"axis":"holistic","findings":[],"verdict":"approve"}\n',
+        encoding="utf-8",
+    )
+    (gate_root / "review-gate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "approved",
+                "active_review_operation_id": operation_id,
+                "product_root": str(worktree.resolve()),
+                "context": {
+                    "purpose": boundary.purpose,
+                    "boundary_input_sha256": boundary.input_sha256,
+                    "head_sha": expected_head or callback["payload"]["head_sha"],
+                },
+                "policy": {"purpose": boundary.purpose},
+                "evidence": {
+                    "operation_id": operation_id,
+                    "pointer": ".review-callback.json",
+                    "sha256": hashlib.sha256(callback_bytes).hexdigest(),
+                },
+                "final_results": {"holistic": "final-holistic.json"},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
+    directory = Path(raw)
+    worktree = directory / "worktree"
+    worktree.mkdir()
+    sources = {
+        "wiki/plan.md": b"approved plan\n",
+        "docs/design.md": b"approved design\n",
+        "docs/capabilities.json": b'{"approved":true}\n',
+        "docs/success-evidence.md": b"success evidence\n",
+        "docs/verification.md": b"verification evidence\n",
+        "docs/outcome-evidence.md": b"outcome evidence\n",
+        "docs/deviations.md": b"accepted deviations\n",
+    }
+    for relative, content in sources.items():
+        source = worktree / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(content)
+    git(worktree, "init", "-q")
+    git(worktree, "config", "user.name", "Review Program Test")
+    git(worktree, "config", "user.email", "review-program@example.invalid")
+    git(worktree, "add", "docs", "wiki")
+    git(worktree, "commit", "-q", "-m", "candidate A")
+    head_a = git(worktree, "rev-parse", "HEAD")
+
+    def source_digest(relative: str) -> str:
+        return hashlib.sha256((worktree / relative).read_bytes()).hexdigest()
+
+    plan_digest = source_digest("wiki/plan.md")
+    authority_boundaries = {
+        "intent": ReviewBoundaryInput(
+            purpose="intent",
+            outcome_contract_sha256=SHA["outcome"],
+            plan_sha256=plan_digest,
+            design_sha256=source_digest("docs/design.md"),
+            design_path="docs/design.md",
+            capability_dispositions_sha256=source_digest("docs/capabilities.json"),
+            capability_dispositions_path="docs/capabilities.json",
+            success_evidence_map_sha256=source_digest("docs/success-evidence.md"),
+            success_evidence_map_path="docs/success-evidence.md",
+        ),
+        "implementation": ReviewBoundaryInput(
+            purpose="implementation",
+            outcome_contract_sha256=SHA["outcome"],
+            plan_sha256=plan_digest,
+            product_head_sha=head_a,
+            verification_evidence_sha256=source_digest("docs/verification.md"),
+            verification_evidence_path="docs/verification.md",
+        ),
+        "release": ReviewBoundaryInput(
+            purpose="release",
+            outcome_contract_sha256=SHA["outcome"],
+            plan_sha256=plan_digest,
+            integration_head_sha=head_a,
+            outcome_evidence_map_sha256=source_digest("docs/outcome-evidence.md"),
+            outcome_evidence_map_path="docs/outcome-evidence.md",
+            accepted_deviations_sha256=source_digest("docs/deviations.md"),
+            accepted_deviations_path="docs/deviations.md",
+        ),
+    }
+    operations = {
+        purpose: f"review-authority-{purpose}"
+        for purpose in authority_boundaries
+    }
+    authority_receipts = {}
+    for purpose, boundary in authority_boundaries.items():
+        write_approved_gate(worktree, boundary, operations[purpose])
+        authority_receipts[purpose] = trusted_review_receipt(
+            worktree, boundary, operations[purpose]
+        )
+
+    bound_sources = (
+        ("intent design", "intent", "design_path"),
+        ("intent capability dispositions", "intent", "capability_dispositions_path"),
+        ("intent success evidence", "intent", "success_evidence_map_path"),
+        ("implementation verification evidence", "implementation", "verification_evidence_path"),
+        ("release outcome evidence", "release", "outcome_evidence_map_path"),
+        ("release accepted deviations", "release", "accepted_deviations_path"),
+    )
+    for label, purpose, path_field in bound_sources:
+        boundary = authority_boundaries[purpose]
+        source = worktree / str(getattr(boundary, path_field))
+        original = source.read_bytes()
+        source.write_bytes(original + b"drift")
+        rejected(
+            f"{label} drift makes trusted authority stale",
+            lambda boundary=boundary, purpose=purpose: trusted_review_receipt(
+                worktree, boundary, operations[purpose]
+            ),
+        )
+        source.write_bytes(original)
+
+        outside = directory / f"outside-{path_field}"
+        outside.write_bytes(original)
+        source.unlink()
+        source.symlink_to(outside)
+        rejected(
+            f"{label} symlink escape fails closed",
+            lambda boundary=boundary, purpose=purpose: trusted_review_receipt(
+                worktree, boundary, operations[purpose]
+            ),
+        )
+        source.unlink()
+        source.write_bytes(original)
+
+    validate_trusted_receipts(
+        worktree,
+        (authority_boundaries["intent"], authority_boundaries["implementation"]),
+        (authority_receipts["intent"],),
+    )
+    check(
+        "intent receipt accepts the exact immediate implementation HEAD",
+        git(worktree, "rev-parse", "HEAD") == head_a,
+    )
+    verification_source = worktree / "docs/verification.md"
+    verification_bytes = verification_source.read_bytes()
+    verification_source.write_bytes(verification_bytes + b"drift")
+    rejected(
+        "intent receipt rejects drifted next implementation evidence",
+        lambda: validate_trusted_receipts(
+            worktree,
+            (
+                authority_boundaries["intent"],
+                authority_boundaries["implementation"],
+            ),
+            (authority_receipts["intent"],),
+        ),
+    )
+    verification_source.write_bytes(verification_bytes)
+
+    (worktree / "later-stage.txt").write_text("release stage\n", encoding="utf-8")
+    git(worktree, "add", "later-stage.txt")
+    git(worktree, "commit", "-q", "-m", "candidate B")
+    head_b = git(worktree, "rev-parse", "HEAD")
+    rejected(
+        "intent receipt rejects a mismatched next implementation HEAD",
+        lambda: validate_trusted_receipts(
+            worktree,
+            (
+                authority_boundaries["intent"],
+                authority_boundaries["implementation"],
+            ),
+            (authority_receipts["intent"],),
+        ),
+    )
+    rejected(
+        "actual candidate HEAD mismatch blocks implementation receipt minting",
+        lambda: trusted_review_receipt(
+            worktree,
+            authority_boundaries["implementation"],
+            operations["implementation"],
+        ),
+    )
+
+    later_release = replace(
+        authority_boundaries["release"], integration_head_sha=head_b
+    )
+    later_release_operation = "review-authority-release-later"
+    write_approved_gate(worktree, later_release, later_release_operation)
+    later_release_receipt = trusted_review_receipt(
+        worktree, later_release, later_release_operation
+    )
+    validate_trusted_receipts(
+        worktree,
+        (authority_boundaries["implementation"], later_release),
+        (authority_receipts["implementation"], later_release_receipt),
+    )
+    check(
+        "an explicit later release boundary authorizes its exact newer HEAD",
+        git(worktree, "rev-parse", "HEAD") == head_b,
+    )
+
+    (worktree / "unreviewed.txt").write_text("unreviewed\n", encoding="utf-8")
+    git(worktree, "add", "unreviewed.txt")
+    git(worktree, "commit", "-q", "-m", "candidate C")
+    rejected(
+        "actual candidate HEAD mismatch blocks release completion",
+        lambda: validate_trusted_receipts(
+            worktree,
+            (authority_boundaries["implementation"], later_release),
+            (authority_receipts["implementation"], later_release_receipt),
+        ),
     )
 
 print("\nReview program policy tests passed.")
