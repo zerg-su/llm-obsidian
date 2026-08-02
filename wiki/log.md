@@ -27,6 +27,16 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-paired-design-post-rollback-validation
+
+`c-000094` [[LLM Obsidian 2.6 paired design rollback validation]]. ## Result
+
+Committed `docs/acceptance/v2.6-paired-design-result.md` at `f5d024ee85701c81fc41b5f9b4395594d398176b`. The bounded decision derives ownership from inspected code: `runtime_worker.py` owns the live provider handle and executes the existing exact-surface nudge and identity/checkpoint-bound restart; `RuntimeSessionManager` remains the generic setup/control facade; `OperationStore`, `OperationSupervisor`, the pure liveness seam, and `CallbackBroker` retain their existing authorities. The
+
+## [2026-08-02 06:01] dispatch | llm-obsidian-2-6-paired-design-post-rollback-validation
+
+Spawned an approved unattended task session (cmux `644C8BD3-2FC7-4C08-A42A-1C15514960AE`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-rollback-validation`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-rollback-validation` from `08c10fbf5668ae931326e4e206b54daa777ed638`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-08-02 05:36] dispatch | llm-obsidian-2-6-paired-design-post-third
 
 Spawned an approved unattended task session (cmux `0B64BF5F-CA32-41C5-B516-361688D11D20`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-third`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-third` from `0149572893d24e4378aec921e520c565d2e0cb1c`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
