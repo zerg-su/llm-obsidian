@@ -178,25 +178,14 @@ def _result_files(
     return result
 
 
-def _resolved_terminal_head(
+def _resolution_entries(
     root: Path,
     gate_root: Path,
     gate: Mapping[str, object],
     boundary: ReviewBoundaryInput,
     operation_id: str,
-) -> str:
-    """Trust a moved implementation HEAD only through exact resolution evidence."""
-
-    context = gate.get("context")
-    if not isinstance(context, dict):
-        raise ReviewProgramError("trusted review gate identity is stale")
-    terminal_head = str(context.get("head_sha") or "")
-    reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
-    if not reviewed_head or terminal_head == reviewed_head:
-        return terminal_head
-    if boundary.purpose != "implementation":
-        raise ReviewProgramError("trusted review gate HEAD is stale")
-
+    terminal_head: str,
+) -> tuple[list[object], dict[object, object]]:
     meta = _object(gate_root / ".review-meta.json", "trusted review metadata")
     entries = meta.get("resolution_evidence")
     gate_entries = gate.get("resolution_evidence")
@@ -212,7 +201,15 @@ def _resolved_terminal_head(
         or not isinstance(gate_entries, dict)
     ):
         raise ReviewProgramError("trusted review resolution evidence is invalid")
+    return entries, gate_entries
 
+
+def _resolution_chain(
+    gate_root: Path,
+    entries: list[object],
+    operation_id: str,
+    reviewed_head: str,
+) -> tuple[set[str], dict[str, str]]:
     pointers: set[str] = set()
     terminal_by_axis: dict[str, str] = {}
     for entry in entries:
@@ -246,6 +243,34 @@ def _resolved_terminal_head(
         if evidence.reviewed_head_sha != previous_head:
             raise ReviewProgramError("trusted review resolution chain is stale")
         terminal_by_axis[evidence.axis] = evidence.resolved_head_sha
+    return pointers, terminal_by_axis
+
+
+def _resolved_terminal_head(
+    root: Path,
+    gate_root: Path,
+    gate: Mapping[str, object],
+    boundary: ReviewBoundaryInput,
+    operation_id: str,
+) -> str:
+    """Trust a moved implementation HEAD only through exact resolution evidence."""
+
+    context = gate.get("context")
+    if not isinstance(context, dict):
+        raise ReviewProgramError("trusted review gate identity is stale")
+    terminal_head = str(context.get("head_sha") or "")
+    reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
+    if not reviewed_head or terminal_head == reviewed_head:
+        return terminal_head
+    if boundary.purpose != "implementation":
+        raise ReviewProgramError("trusted review gate HEAD is stale")
+
+    entries, gate_entries = _resolution_entries(
+        root, gate_root, gate, boundary, operation_id, terminal_head
+    )
+    pointers, terminal_by_axis = _resolution_chain(
+        gate_root, entries, operation_id, reviewed_head
+    )
 
     gate_pointers = {
         str(pointer) for pointer in gate_entries.values() if isinstance(pointer, str)
