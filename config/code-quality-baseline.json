@@ -16,11 +16,6 @@
       "owner": "release/2.6.0 maintainable-harness-core",
       "evidence": "summary/review/verification extraction"
     },
-    "function-branches:scripts/harness/runtime_worker.py:load_spec": {
-      "max_value": 75,
-      "owner": "release/2.6.0 maintainable-harness-core",
-      "evidence": "launch-spec parser extraction"
-    },
     "function-branches:scripts/harness/runtime_worker.py:notify_review_resolution": {
       "max_value": 75,
       "owner": "release/2.6.0 maintainable-harness-core",

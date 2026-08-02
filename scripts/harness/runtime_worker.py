@@ -52,6 +52,12 @@ from .review_finalization import task_review_status
 from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
 from .supervisor import OperationSupervisor, SupervisorError
+from .runtime_worker_contracts import (
+    IDENTIFIER,
+    SURFACE_UUID,
+    RuntimeWorkerError,
+)
+from .runtime_worker_spec import load_spec
 from .verification import (
     VerificationError,
     compose_commands,
@@ -93,10 +99,6 @@ from task_contract import ContractError, validate_handoff
 from wiki_summary_contract import WikiSummaryError, validate_summary_for_task
 
 
-IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-SURFACE_UUID = re.compile(
-    r"[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\Z"
-)
 MAX_OUTBOX_BYTES = 70_000
 MAX_SCREEN_BYTES = 70_000
 MAX_PIPELINE_VERIFY_RESUBMITS = 1
@@ -104,10 +106,6 @@ RESEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 CALLBACK_WAIT_STATES = frozenset(
     {"running", "awaiting-callback", "verifying"}
 )
-
-
-class RuntimeWorkerError(RuntimeError):
-    pass
 
 
 def _review_resolution_handoff_ready(
@@ -776,205 +774,8 @@ def _research_input_provenance(
     return artifact_sha256
 
 
-def _absolute(value: object, label: str) -> Path:
-    if not isinstance(value, str):
-        raise RuntimeWorkerError(f"{label} must be an absolute path")
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        raise RuntimeWorkerError(f"{label} must be an absolute path")
-    return path.resolve()
 
 
-def load_spec(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeWorkerError("runtime launch spec is unreadable") from exc
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise RuntimeWorkerError("runtime launch spec schema is invalid")
-    for field in ("owner_id", "operation_id", "run_id"):
-        if not IDENTIFIER.fullmatch(str(value.get(field) or "")):
-            raise RuntimeWorkerError(f"runtime launch {field} is invalid")
-    if not SURFACE_UUID.fullmatch(str(value.get("surface_id") or "")):
-        raise RuntimeWorkerError("runtime launch surface identity is invalid")
-    if value.get("runtime") not in {"claude", "codex"}:
-        raise RuntimeWorkerError("runtime launch provider is invalid")
-    callback_mode = str(value.get("callback_mode") or "envelope")
-    if callback_mode not in {
-        "envelope",
-        "task-summary",
-        "research-fetch",
-        "research-synth",
-    }:
-        raise RuntimeWorkerError("runtime callback mode is invalid")
-    argv = value.get("argv")
-    if (
-        not isinstance(argv, list)
-        or not argv
-        or any(not isinstance(part, str) or "\0" in part for part in argv)
-        or not Path(argv[0]).is_absolute()
-    ):
-        raise RuntimeWorkerError("runtime launch argv is invalid")
-    cwd = _absolute(value.get("cwd"), "cwd")
-    callback = _absolute(value.get("callback_pointer"), "callback_pointer")
-    registration = _absolute(
-        value.get("callback_registration"), "callback_registration"
-    )
-    task_summary: Path | None = None
-    runtime_home: Path | None = None
-    runtime_interpreter: Path | None = None
-    research_request_sha256 = str(
-        value.get("research_request_sha256") or ""
-    )
-    callback_wake = str(value.get("callback_wake") or "")
-    origin_surface = str(value.get("origin_surface") or "")
-    if callback_mode == "task-summary":
-        task_summary = _absolute(
-            value.get("task_summary_pointer"), "task_summary_pointer"
-        )
-        if (
-            task_summary.name != ".task-summary.json"
-            or not SURFACE_UUID.fullmatch(origin_surface)
-        ):
-            raise RuntimeWorkerError(
-                "task-summary source or origin identity is invalid"
-            )
-    if callback_mode in {"research-fetch", "research-synth"}:
-        raw_runtime_home = value.get("runtime_home")
-        if (
-            value.get("runtime") != "codex"
-            or not isinstance(raw_runtime_home, str)
-            or not raw_runtime_home
-            or Path(raw_runtime_home).expanduser().is_symlink()
-            or not SURFACE_UUID.fullmatch(origin_surface)
-            or not callback_wake
-            or callback_wake != callback_wake.strip()
-            or "\0" in callback_wake
-            or "\n" in callback_wake
-            or "\r" in callback_wake
-            or len(callback_wake.encode()) > 4096
-        ):
-            raise RuntimeWorkerError("research launch identity is invalid")
-        runtime_home = _absolute(raw_runtime_home, "runtime_home")
-        raw_runtime_interpreter = value.get("runtime_interpreter")
-        if raw_runtime_interpreter:
-            runtime_interpreter = _absolute(
-                raw_runtime_interpreter, "runtime_interpreter"
-            )
-            try:
-                interpreter_stat = runtime_interpreter.stat()
-            except OSError as exc:
-                raise RuntimeWorkerError(
-                    "research runtime interpreter is unavailable"
-                ) from exc
-            if (
-                not runtime_interpreter.is_file()
-                or not os.access(runtime_interpreter, os.X_OK)
-                or interpreter_stat.st_mode & 0o022
-            ):
-                raise RuntimeWorkerError(
-                    "research runtime interpreter is untrusted"
-                )
-        try:
-            runtime_stat = runtime_home.stat()
-        except OSError as exc:
-            raise RuntimeWorkerError(
-                "research runtime home is unavailable"
-            ) from exc
-        if (
-            not runtime_home.is_dir()
-            or runtime_stat.st_uid != os.getuid()
-            or runtime_stat.st_mode & 0o077
-            or runtime_home == cwd
-            or runtime_home in cwd.parents
-            or cwd in runtime_home.parents
-        ):
-            raise RuntimeWorkerError(
-                "research runtime home must be owner-only and disjoint"
-            )
-        expected_name = (
-            "artifact.json"
-            if callback_mode == "research-fetch"
-            else "complete.json"
-        )
-        if callback.name != expected_name:
-            raise RuntimeWorkerError(
-                "research callback pointer is not canonical"
-            )
-        if callback_mode == "research-fetch":
-            if not re.fullmatch(r"[0-9a-f]{64}", research_request_sha256):
-                raise RuntimeWorkerError(
-                    "research request digest is invalid"
-                )
-        elif research_request_sha256:
-            raise RuntimeWorkerError(
-                "research synth request digest must be derived"
-            )
-    elif callback_mode == "envelope" and callback_wake:
-        if (
-            not SURFACE_UUID.fullmatch(origin_surface)
-            or callback_wake != callback_wake.strip()
-            or "\0" in callback_wake
-            or "\n" in callback_wake
-            or "\r" in callback_wake
-            or len(callback_wake.encode()) > 4096
-        ):
-            raise RuntimeWorkerError("review callback wake is invalid")
-        if (
-            value.get("runtime_home")
-            or value.get("runtime_interpreter")
-            or research_request_sha256
-        ):
-            raise RuntimeWorkerError(
-                "research runtime fields require research callback mode"
-            )
-    elif (
-        value.get("runtime_home")
-        or value.get("runtime_interpreter")
-        or research_request_sha256
-        or callback_wake
-    ):
-        raise RuntimeWorkerError(
-            "research launch fields require research callback mode"
-        )
-    store_root = _absolute(value.get("store_root"), "store_root")
-    ready = _absolute(value.get("ready_path"), "ready_path")
-    exit_path = _absolute(value.get("exit_path"), "exit_path")
-    if (
-        ready.parent != path.parent
-        or exit_path.parent != path.parent
-        or registration.parent != path.parent
-    ):
-        raise RuntimeWorkerError("runtime worker markers escape launch state")
-    try:
-        callback.relative_to(cwd)
-    except ValueError as exc:
-        raise RuntimeWorkerError("runtime callback pointer escapes cwd") from exc
-    if task_summary is not None:
-        try:
-            task_summary.relative_to(cwd)
-        except ValueError as exc:
-            raise RuntimeWorkerError("task summary pointer escapes cwd") from exc
-    if not cwd.is_dir() or not store_root.is_dir():
-        raise RuntimeWorkerError("runtime launch roots are unavailable")
-    value.update(
-        {
-            "cwd": cwd,
-            "callback_pointer": callback,
-            "callback_registration": registration,
-            "callback_mode": callback_mode,
-            "task_summary_pointer": task_summary,
-            "runtime_home": runtime_home,
-            "runtime_interpreter": runtime_interpreter,
-            "research_request_sha256": research_request_sha256,
-            "callback_wake": callback_wake,
-            "origin_surface": origin_surface,
-            "store_root": store_root,
-            "ready_path": ready,
-            "exit_path": exit_path,
-        }
-    )
-    return value
 
 
 def _callback_target(spec: dict[str, Any]) -> tuple[int, str, str, Path]:
