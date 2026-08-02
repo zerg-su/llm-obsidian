@@ -85,6 +85,56 @@ def _load_persisted_resolution_evidence(
     return finding_ids_by_axis, reviewed_heads, evidence_batch
 
 
+def _resolution_origin_head(
+    gate_root: Path,
+    task_id: str,
+    pointers: Mapping[str, object],
+    reviewed_head: str,
+) -> str:
+    """Walk the unique persisted resolution chain back to its first HEAD."""
+
+    predecessors: dict[str, str] = {}
+    for raw_pointer in pointers.values():
+        if not isinstance(raw_pointer, str):
+            raise TaskReviewError("persisted review resolution pointer is invalid")
+        pointer = Path(raw_pointer)
+        evidence_path = (gate_root / pointer).resolve()
+        if (
+            pointer.is_absolute()
+            or gate_root not in evidence_path.parents
+            or not evidence_path.is_file()
+            or evidence_path.is_symlink()
+        ):
+            raise TaskReviewError(
+                "persisted review resolution evidence is unavailable"
+            )
+        try:
+            evidence = validate_resolution_evidence(
+                _read_json(
+                    evidence_path, "persisted review resolution evidence"
+                )
+            )
+        except ResolutionError as exc:
+            raise TaskReviewError(
+                f"persisted review resolution evidence is invalid: {exc}"
+            ) from exc
+        if evidence.operation_id != task_id:
+            raise TaskReviewError("persisted review resolution operation changed")
+        previous = predecessors.setdefault(
+            evidence.resolved_head_sha, evidence.reviewed_head_sha
+        )
+        if previous != evidence.reviewed_head_sha:
+            raise TaskReviewError("persisted review resolution chain forks")
+    cursor = reviewed_head
+    seen: set[str] = set()
+    while cursor in predecessors:
+        if cursor in seen:
+            raise TaskReviewError("persisted review resolution chain cycles")
+        seen.add(cursor)
+        cursor = predecessors[cursor]
+    return cursor
+
+
 def _resolution_bundle(
     worktree: Path,
     gate_root: Path,
@@ -252,11 +302,18 @@ def _resolution_bundle(
             raise TaskReviewError(
                 "persisted review resolution finding rulings changed"
             )
+    origin_reviewed_head_sha = _resolution_origin_head(
+        gate_root,
+        task_id,
+        persisted_resolution_pointers or {},
+        resolution.reviewed_head_sha,
+    )
     return ResolutionBundle(
         resolution,
         fix_delta,
         by_axis,
         review_identity_sha256,
+        origin_reviewed_head_sha,
     )
 
 

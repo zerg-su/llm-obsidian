@@ -180,7 +180,8 @@ def _context(
         if boundary.input_sha256 != boundary_input_sha256:
             raise TaskReviewError("review boundary input digest is stale")
         rebound_reviewed_head = (
-            resolution_bundle.resolution.reviewed_head_sha
+            resolution_bundle.origin_reviewed_head_sha
+            or resolution_bundle.resolution.reviewed_head_sha
             if resolution_bundle is not None
             else ""
         )

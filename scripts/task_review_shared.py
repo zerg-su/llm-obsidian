@@ -36,6 +36,7 @@ class ResolutionBundle(NamedTuple):
     fix_delta: bytes
     by_axis: Mapping[str, ReviewResolutionEvidence]
     review_identity_sha256: str
+    origin_reviewed_head_sha: str = ""
 
 
 class FinalizingRecovery(NamedTuple):

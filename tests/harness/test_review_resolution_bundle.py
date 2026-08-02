@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         review_identity: str,
         resolved_head: str,
         *,
+        reviewed_head: str = reviewed,
         spec_rationale: str = "The exact repair is present.",
     ) -> None:
         (worktree / ".task-review-resolution.json").write_text(
@@ -118,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
                 {
                     "schema_version": 1,
                     "operation_id": task_id,
-                    "reviewed_head_sha": reviewed,
+                    "reviewed_head_sha": reviewed_head,
                     "resolved_head_sha": resolved_head,
                     "review_identity_sha256": review_identity,
                     "resolutions": [
@@ -290,6 +291,29 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
     second_resolved = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=worktree, text=True
     ).strip()
+    sequential_boundaries = {
+        axis: {**boundary, "reviewed_head_sha": resolved}
+        for axis, boundary in boundaries.items()
+    }
+    write_resolution(identity, second_resolved, reviewed_head=resolved)
+    sequential = runner._resolution_bundle(
+        worktree,
+        gate_root,
+        task_id,
+        sequential_boundaries,
+        second_resolved,
+        persisted_resolution_pointers={
+            "spec:0": persisted_pointer,
+            "standards-correctness-architecture-security:0": (
+                persisted_standards_pointer
+            ),
+        },
+    )
+    check(
+        "a second verification fix preserves the original boundary HEAD",
+        sequential.resolution.reviewed_head_sha == resolved
+        and sequential.origin_reviewed_head_sha == reviewed,
+    )
     write_resolution(identity, second_resolved)
     second_initial = runner._resolution_bundle(
         worktree,
