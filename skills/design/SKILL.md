@@ -24,7 +24,9 @@ that authorization to one immutable decision snapshot/identity and place an
 atomic reservation boundary before the effect. Acceptance must cover crash
 before reservation, crash after reservation but before the effect, crash after
 the effect but before its durable receipt, and prove replay does not duplicate
-the effect.
+the effect. Any persisted budget or idempotency fact survives unrelated later
+effects; a replaceable last-effect slot is not durable history. Acceptance
+also covers interleaving an unrelated effect before the next recovery decision.
 
 Get approval before implementation or interface/migration/dependency/security/
 external-effect change.

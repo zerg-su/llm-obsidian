@@ -66,6 +66,9 @@ require(
     "crash after reservation but before the effect",
     "crash after the effect but before its durable receipt",
     "replay does not duplicate the effect",
+    "survives unrelated later effects",
+    "replaceable last-effect slot is not durable history",
+    "interleaving an unrelated effect",
 )
 normalized_design = " ".join(design.split())
 assert normalized_design.index(
