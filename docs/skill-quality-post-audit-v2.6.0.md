@@ -3,7 +3,7 @@
 ## Scope and identity
 
 - Frozen baseline: `d50990dc9c76b659c82978a0c8644b9bdbd99b29`.
-- Integrated skill audit HEAD: `430b31f` (includes both paired-behavior repairs).
+- Integrated skill audit HEAD: `6dc9128` (includes all paired-behavior repairs).
 - Inventory: `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`, `review`, `reap`, `improve-skills`.
 - Verdict evidence: `docs/skill-quality-post-audit-v2.6.0.json`.
 - Upstream references remain the pinned Superpowers `writing-skills` and Matt Pocock `writing-great-skills` snapshots; no foreign orchestration was imported.
@@ -13,7 +13,7 @@
 | Skill | Integrated SHA-256 |
 |---|---|
 | `clarify` | `485b26a4ece6c3e41876da61b6682dfd85cd86421531b3116c5c3bb49387d57f` |
-| `design` | `4e94680a243450ce9ebe5055858b890a5f34b68a12b80a9cf0e1605071cb4897` |
+| `design` | `deccbe7052e075ad92e488c4887fd47bccdde797289093aa1ad196eaa6446329` |
 | `prototype` | `a32d59df117271297db363fba291a26b8ec4b64d780e632cf709f372deefc19d` |
 | `save-plan` | `598ecb6e34a1398981964029ca750cc7466ee335b094827929bf0898c6da0b74` |
 | `debug` | `44df10a5f7063d0631c45e7f4929eea4b5684d2d0043254ecac86ff76dee14cb` |
@@ -27,7 +27,7 @@
 | Baseline finding | Integrated evidence | Post-audit disposition |
 |---|---|---|
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; paired findings `HOL-002` and `HOL-001`; repairs `a33be75` and `430b31f` | resolved; durable budget evidence survives unrelated effects and multi-record decisions retain separate owner/target identities |
+| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; paired findings `HOL-002`, `HOL-001`, and verification `HOL-002`; repairs `a33be75`, `430b31f`, and `6dc9128` | resolved; durable budgets survive unrelated effects, multi-record decisions retain separate identities, and mutable effect inputs are identity-bound and revalidated |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |

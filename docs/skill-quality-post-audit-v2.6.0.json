@@ -23,9 +23,9 @@
       "local_subgoal": "Shape owned boundaries, alternatives, flows, recovery, and vertical slices without implementation mutation.",
       "completion_proxies": ["A design document exists.", "Local acceptance criteria are listed."],
       "required_outcome_evidence": ["The design traces each slice and acceptance seam to the unchanged contract and closes or records all material fog."],
-      "evidence": "A-DES-01; paired findings HOL-002 and HOL-001; skills/design/SKILL.md; tests/test_skill_workstream_a.py",
-      "change": "none after paired repairs a33be75 and 430b31f; integrated corrections require durable budget evidence and separate identities for every participating record",
-      "behavior_proof": "Design remains read-only and preserves ownership, alternatives, recovery, rollout, rollback, and approval boundaries; effectful acceptance now covers unrelated-effect interleaving plus multi-record identity and atomicity."
+      "evidence": "A-DES-01; paired findings HOL-002, HOL-001, and verification HOL-002; skills/design/SKILL.md; tests/test_skill_workstream_a.py",
+      "change": "none after paired repairs a33be75, 430b31f, and 6dc9128; integrated corrections require durable budgets, separate participating-record identities, and immutable mutable-input bindings",
+      "behavior_proof": "Design remains read-only and preserves ownership, alternatives, recovery, rollout, rollback, and approval boundaries; effectful acceptance covers interleaving, multi-record atomicity, mutable-input identity, and recovered-reservation reconciliation."
     },
     {
       "skill": "prototype",
