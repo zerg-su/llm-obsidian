@@ -27,6 +27,64 @@ from task_review_shared import (
 )
 
 
+def _load_persisted_resolution_evidence(
+    gate_root: Path,
+    task_id: str,
+    awaiting: Mapping[str, object],
+    resolved_head: str,
+    pointers: Mapping[str, object],
+) -> tuple[
+    dict[str, tuple[str, ...]],
+    set[str],
+    list[ReviewResolutionEvidence],
+]:
+    """Validate and select the persisted axes for one exact resolution HEAD."""
+
+    finding_ids_by_axis: dict[str, tuple[str, ...]] = {}
+    reviewed_heads: set[str] = set()
+    evidence_batch: list[ReviewResolutionEvidence] = []
+    for key, raw_pointer in sorted(pointers.items()):
+        if not isinstance(key, str) or not isinstance(raw_pointer, str):
+            raise TaskReviewError(
+                "persisted review resolution pointer is invalid"
+            )
+        pointer = Path(raw_pointer)
+        evidence_path = (gate_root / pointer).resolve()
+        if (
+            pointer.is_absolute()
+            or gate_root not in evidence_path.parents
+            or not evidence_path.is_file()
+            or evidence_path.is_symlink()
+        ):
+            raise TaskReviewError(
+                "persisted review resolution evidence is unavailable"
+            )
+        try:
+            evidence = validate_resolution_evidence(
+                _read_json(
+                    evidence_path, "persisted review resolution evidence"
+                )
+            )
+        except ResolutionError as exc:
+            raise TaskReviewError(
+                f"persisted review resolution evidence is invalid: {exc}"
+            ) from exc
+        if evidence.resolved_head_sha != resolved_head:
+            continue
+        if evidence.operation_id != task_id:
+            raise TaskReviewError(
+                "persisted review resolution operation changed"
+            )
+        if evidence.axis in finding_ids_by_axis or evidence.axis in awaiting:
+            raise TaskReviewError(
+                "review resolution axis is staged more than once"
+            )
+        finding_ids_by_axis[evidence.axis] = evidence.previous_finding_ids
+        reviewed_heads.add(evidence.reviewed_head_sha)
+        evidence_batch.append(evidence)
+    return finding_ids_by_axis, reviewed_heads, evidence_batch
+
+
 def _resolution_bundle(
     worktree: Path,
     gate_root: Path,
@@ -37,44 +95,17 @@ def _resolution_bundle(
     persisted_identity_sha256: str = "",
     persisted_resolution_pointers: Mapping[str, object] | None = None,
 ) -> ResolutionBundle:
-    reviewed_heads: set[str] = set()
-    finding_ids_by_axis: dict[str, tuple[str, ...]] = {}
+    finding_ids_by_axis, reviewed_heads, persisted_evidence = (
+        _load_persisted_resolution_evidence(
+            gate_root,
+            task_id,
+            awaiting,
+            resolved_head,
+            persisted_resolution_pointers or {},
+        )
+    )
     review_operation_ids: set[str] = set()
     review_callbacks: list[dict[str, object]] = []
-    persisted_evidence: list[ReviewResolutionEvidence] = []
-    for key, raw_pointer in sorted(
-        (persisted_resolution_pointers or {}).items()
-    ):
-        if not isinstance(key, str) or not isinstance(raw_pointer, str):
-            raise TaskReviewError("persisted review resolution pointer is invalid")
-        pointer = Path(raw_pointer)
-        evidence_path = (gate_root / pointer).resolve()
-        if (
-            pointer.is_absolute()
-            or gate_root not in evidence_path.parents
-            or not evidence_path.is_file()
-            or evidence_path.is_symlink()
-        ):
-            raise TaskReviewError("persisted review resolution evidence is unavailable")
-        try:
-            evidence = validate_resolution_evidence(
-                _read_json(evidence_path, "persisted review resolution evidence")
-            )
-        except ResolutionError as exc:
-            raise TaskReviewError(
-                f"persisted review resolution evidence is invalid: {exc}"
-            ) from exc
-        # Historical iterations remain durable in the map. Only evidence for
-        # this exact resolved HEAD belongs to the partially staged batch.
-        if evidence.resolved_head_sha != resolved_head:
-            continue
-        if evidence.operation_id != task_id:
-            raise TaskReviewError("persisted review resolution operation changed")
-        if evidence.axis in finding_ids_by_axis or evidence.axis in awaiting:
-            raise TaskReviewError("review resolution axis is staged more than once")
-        finding_ids_by_axis[evidence.axis] = evidence.previous_finding_ids
-        reviewed_heads.add(evidence.reviewed_head_sha)
-        persisted_evidence.append(evidence)
     for axis in sorted(awaiting):
         raw_boundary = awaiting[axis]
         if not isinstance(raw_boundary, dict):
