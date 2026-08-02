@@ -32,6 +32,11 @@ separately, including resource ownership, durable history, current target,
 revision, and generation. Under the owning lock, re-read every participating
 record before reservation; never collapse them into one identity or keep
 session-wide budgets on a retargetable child.
+If an effect consumes mutable effect input outside those records, bind its
+immutable identity or digest into the decision and reservation, then revalidate
+it immediately before execution. Hand only a newly reserved action to the
+executor; a crash-recovered pending reservation is reconciliation-only until
+its prior effect outcome is proven.
 
 Get approval before implementation or interface/migration/dependency/security/
 external-effect change.

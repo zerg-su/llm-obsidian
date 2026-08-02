@@ -74,6 +74,11 @@ require(
     "resource ownership, durable history, current target, revision, and generation",
     "re-read every participating record",
     "session-wide budgets on a retargetable child",
+    "mutable effect input outside those records",
+    "immutable identity or digest",
+    "revalidate it immediately before execution",
+    "newly reserved action",
+    "crash-recovered pending reservation",
 )
 normalized_design = " ".join(design.split())
 assert normalized_design.index(
