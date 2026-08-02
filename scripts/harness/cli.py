@@ -59,7 +59,8 @@ def _emit(value: object, *, json_mode: bool) -> None:
         print(json.dumps(value, ensure_ascii=False, sort_keys=True))
     elif isinstance(value, list):
         for row in value:
-            print(f"{row['operation_id']}\t{row['state']}\t{row['kind']}")
+            detail = row.get("kind", row.get("action", ""))
+            print(f"{row['operation_id']}\t{row['state']}\t{detail}")
     elif isinstance(value, dict):
         for key, item in value.items():
             print(f"{key}: {item}")

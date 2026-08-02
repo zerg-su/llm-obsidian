@@ -671,6 +671,29 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         ),
     )
 
+    create_cli_operation("op-plain-reconcile-cli", state="cancelling")
+    plain_reconcile = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/harness-cli.py"),
+            "--store",
+            str(root / "state"),
+            "--owner",
+            "owner-cli",
+            "reconcile",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    check(
+        "CLI plain reconcile renders action rows without a kind field",
+        plain_reconcile.returncode == 0
+        and "op-plain-reconcile-cli\tcancelled\tcancel-complete"
+        in plain_reconcile.stdout,
+    )
+
     create_cli_operation("op-healthy-cli", state="awaiting-callback")
     bind_owned_resources(
         "op-healthy-cli",
