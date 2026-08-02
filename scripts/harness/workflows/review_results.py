@@ -1,0 +1,234 @@
+"""Typed review findings, aggregation, evidence, and lane verification."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import time
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
+from types import MappingProxyType
+from typing import Callable, Mapping, Protocol
+
+from ..contracts import (
+    AttentionReason,
+    CallbackEnvelope,
+    OperationRecord,
+    OperationSpec,
+    RuntimeRoute,
+)
+from ..runtime_sessions import RuntimeSessionRequest
+from ..state_machine import TERMINAL
+from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
+
+
+from .review_contracts import (
+    ReviewRequest,
+    ReviewSessionIdentity,
+    _bounded_finding_summary,
+)
+
+@dataclass(frozen=True)
+class ReviewFinding:
+    finding_id: str
+    axis: str
+    severity: str
+    summary: str
+    evidence: str
+    file: str = "unknown"
+    line: int | None = None
+    recommendation: str = "Resolve this finding before approval."
+
+    def __post_init__(self) -> None:
+        if self.severity not in SEVERITIES:
+            raise ValueError("review severity must be critical, important, or minor")
+        if not all(
+            (
+                self.finding_id,
+                self.axis,
+                self.summary,
+                self.evidence,
+                self.file,
+                self.recommendation,
+            )
+        ):
+            raise ValueError("review finding fields are required")
+        if self.line is not None and (
+            not isinstance(self.line, int)
+            or isinstance(self.line, bool)
+            or self.line < 1
+        ):
+            raise ValueError("review finding line must be positive or null")
+
+
+@dataclass(frozen=True)
+class ReviewResult:
+    axis: str
+    verdict: str
+    findings: tuple[ReviewFinding, ...] = ()
+    verification_iteration: int = 0
+
+    def __post_init__(self) -> None:
+        if self.verdict not in {"approve", "changes-requested", "blocked"}:
+            raise ValueError("invalid review verdict")
+        if any(row.axis != self.axis for row in self.findings):
+            raise ValueError("review findings cannot cross axes")
+        if (
+            self.verdict == "approve"
+            and any(
+                finding.severity in MATERIAL_SEVERITIES
+                for finding in self.findings
+            )
+        ):
+            raise ValueError("review axis cannot approve with material findings")
+        if (
+            not isinstance(self.verification_iteration, int)
+            or isinstance(self.verification_iteration, bool)
+            or self.verification_iteration < 0
+        ):
+            raise ValueError("verification iteration must be a non-negative integer")
+
+
+def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> dict[str, object]:
+    if set(results) != set(request.axes):
+        raise ValueError("review aggregation requires every independent axis")
+    ordered = tuple(results[axis] for axis in request.axes)
+    if any(
+        row.verification_iteration > request.max_verify_iterations for row in ordered
+    ):
+        raise ValueError("review result exceeds the verification iteration budget")
+    finding_ids = [
+        finding.finding_id for row in ordered for finding in row.findings
+    ]
+    if len(finding_ids) != len(set(finding_ids)):
+        raise ValueError("review finding ids must be unique across axes")
+    verdict = (
+        "blocked" if any(row.verdict == "blocked" for row in ordered)
+        else "changes-requested" if any(row.verdict == "changes-requested" for row in ordered)
+        else "approve"
+    )
+    return {
+        "verdict": verdict,
+        "axes": [
+            {
+                "axis": row.axis,
+                "verdict": row.verdict,
+                "findings": [
+                    {
+                        "finding_id": finding.finding_id,
+                        "severity": finding.severity,
+                        "file": finding.file,
+                        "line": finding.line,
+                        "summary": _bounded_finding_summary(
+                            finding.summary
+                        ),
+                        "evidence": finding.evidence,
+                        "recommendation": finding.recommendation,
+                    }
+                    for finding in row.findings
+                ],
+                "verification_iteration": row.verification_iteration,
+            }
+            for row in ordered
+        ],
+    }
+
+
+def aggregate_review_evidence(
+    execution: ReviewExecution,
+    results: Mapping[str, ReviewResult],
+    *,
+    verification_gaps: tuple[str, ...] = (),
+    notes_for_executor: tuple[str, ...] = (),
+    residual_risks: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Build the canonical review-v1 evidence after every lane has completed."""
+
+    combined = aggregate(execution.request.policy, results)
+    run_id = hashlib.sha256(
+        (
+            execution.request.policy.operation_id
+            + ":"
+            + ":".join(lane.run_id for lane in execution.lanes)
+        ).encode()
+    ).hexdigest()[:32]
+    context = execution.request.context
+    return {
+        "schema_version": 1,
+        "operation_id": execution.request.policy.operation_id,
+        "run_id": run_id,
+        "mode": execution.request.policy.depth,
+        "head_sha": context.head_sha,
+        "verification_profile": {
+            "name": context.verification_profile,
+            "sha256": context.verification_profile_sha256,
+        },
+        "verdict": combined["verdict"],
+        "axes": combined["axes"],
+        "verification_gaps": list(verification_gaps),
+        "notes_for_executor": list(notes_for_executor),
+        "residual_risks": list(residual_risks),
+    }
+
+
+def review_evidence_envelope(
+    execution: ReviewExecution,
+    results: Mapping[str, ReviewResult],
+    **notes: tuple[str, ...],
+) -> CallbackEnvelope:
+    """Wrap final aggregate evidence for the existing archive transport."""
+
+    payload = aggregate_review_evidence(execution, results, **notes)
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    return CallbackEnvelope(
+        callback_id=f"review-{digest[:24]}",
+        operation_id=str(payload["operation_id"]),
+        run_id=str(payload["run_id"]),
+        kind="review",
+        payload=payload,
+        payload_sha256=digest,
+    )
+
+
+def verify_lane(original_surface: str, verification_surface: str) -> None:
+    if original_surface != verification_surface:
+        raise ValueError("same-session verification cannot open a second surface")
+
+
+@dataclass(frozen=True)
+class ReviewLaneIdentity:
+    axis: str
+    lane_id: str
+    surface_id: str
+
+    def __post_init__(self) -> None:
+        if self.axis not in {
+            "holistic",
+            "spec",
+            "standards-correctness-architecture-security",
+        }:
+            raise ValueError("invalid review axis")
+        if not self.lane_id or not self.surface_id:
+            raise ValueError("review lane and surface identity are required")
+
+
+def verify_session(
+    original: ReviewLaneIdentity, verification: ReviewLaneIdentity
+) -> None:
+    """Fail closed unless verification reuses the exact axis/lane/surface."""
+
+    if original != verification:
+        raise ValueError(
+            "same-session verification must reuse the exact axis, lane, and surface"
+        )
+
+
+def resolution_required(result: ReviewResult) -> bool:
+    return result.verdict == "changes-requested" and any(
+        finding.severity in MATERIAL_SEVERITIES for finding in result.findings
+    )
+

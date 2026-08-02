@@ -21,6 +21,8 @@ from harness.callbacks import CallbackBroker
 from harness.contracts import RuntimeRoute
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.store import OperationStore
+from harness.workflows import review as review_facade
+from harness.workflows import review_contracts, review_results
 from harness.workflows.review import (
     ReviewContext,
     ReviewExecution,
@@ -55,6 +57,18 @@ def check(label: str, value: bool) -> None:
 check(
     "review uses the generic runtime session request contract",
     ReviewSessionRequest is RuntimeSessionRequest,
+)
+check(
+    "review facade preserves contract type identity",
+    review_facade.ReviewContext is review_contracts.ReviewContext,
+)
+check(
+    "review facade preserves result type identity",
+    review_facade.ReviewResult is review_results.ReviewResult,
+)
+check(
+    "review facade preserves aggregate callable identity",
+    review_facade.aggregate is review_results.aggregate,
 )
 
 
