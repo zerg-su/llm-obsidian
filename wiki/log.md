@@ -27,6 +27,18 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02 05:36] dispatch | llm-obsidian-2-6-paired-design-post-third
+
+Spawned an approved unattended task session (cmux `0B64BF5F-CA32-41C5-B516-361688D11D20`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-third`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-third` from `0149572893d24e4378aec921e520c565d2e0cb1c`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 04:55] dispatch | llm-obsidian-2-6-paired-design-post-clean
+
+Spawned an approved unattended task session (cmux `188AB034-789B-4275-999F-4E81A875A9CF`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-clean`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-clean` from `3232c431dffdc2649dde1d20ac34ba24f673159f`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-02 03:44] dispatch | llm-obsidian-2-6-paired-design-post-rerun
+
+Spawned an approved unattended task session (cmux `41942122-EEAD-4F7E-AA2E-D50812719D53`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-paired-design-post-rerun`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-paired-design-post-rerun` from `e5d50c906f355c032ef8cea747134e38aba6650f`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
 ## [2026-08-02] reap | llm-obsidian-2-6-common-dogfood-fixes
 
 `c-000092` [[LLM Obsidian 2.6 common dogfood fixes]]. Committed `b42cff664352ca81d8124af590288a749243ae34`. RT3 archive finalization now rejects stale terminal resolution HEADs and broken ordered per-axis chains while preserving valid history; v4 `partially-achieved` summaries remain callback eligible under explicit regression coverage. The general design skill now requires immutable decision identity, atomic effect reservation, and crash/replay acceptance seams for restart, recovery, or other effectful actions. RT1 acceptance wording now states th

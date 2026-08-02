@@ -59,36 +59,11 @@ require(
     "Default to vertical slices",
     "expand-contract only for wide migration",
     "testable acceptance criteria per evidence ID/seam",
-    "When a design authorizes restart, recovery, or another effectful action",
-    "one immutable decision snapshot/identity",
-    "atomic reservation boundary before the effect",
-    "crash before reservation",
-    "crash after reservation but before the effect",
-    "crash after the effect but before its durable receipt",
-    "replay does not duplicate the effect",
-    "survives unrelated later effects",
-    "replaceable last-effect slot is not durable history",
-    "interleaving an unrelated effect",
-    "multiple durable records or identities",
-    "map each record separately",
-    "resource ownership, durable history, current target, revision, and generation",
-    "re-read every participating record",
-    "session-wide budgets on a retargetable child",
-    "mutable effect input outside those records",
-    "immutable identity or digest",
-    "revalidate it immediately before execution",
-    "newly reserved action",
-    "crash-recovered pending reservation",
 )
 normalized_design = " ".join(design.split())
 assert normalized_design.index(
     "Start with ownership boundaries and owned test seams"
 ) < normalized_design.index("Produce "), "Owned seams must shape the design before output"
-assert normalized_design.index(
-    "one immutable decision snapshot/identity"
-) < normalized_design.index(
-    "atomic reservation boundary before the effect"
-), "Effect reservation must bind the immutable decision identity"
 print("OK   design preserves the contract through owned, testable vertical slices")
 
 

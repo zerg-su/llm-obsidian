@@ -3,7 +3,7 @@
 ## Scope and identity
 
 - Frozen baseline: `d50990dc9c76b659c82978a0c8644b9bdbd99b29`.
-- Integrated skill audit HEAD: `6dc9128` (includes all paired-behavior repairs).
+- Integrated skill audit boundary: release 2.6.0 after the paired architecture stop.
 - Inventory: `clarify`, `design`, `prototype`, `save-plan`, `debug`, `tdd`, `review`, `reap`, `improve-skills`.
 - Verdict evidence: `docs/skill-quality-post-audit-v2.6.0.json`.
 - Upstream references remain the pinned Superpowers `writing-skills` and Matt Pocock `writing-great-skills` snapshots; no foreign orchestration was imported.
@@ -13,7 +13,7 @@
 | Skill | Integrated SHA-256 |
 |---|---|
 | `clarify` | `485b26a4ece6c3e41876da61b6682dfd85cd86421531b3116c5c3bb49387d57f` |
-| `design` | `deccbe7052e075ad92e488c4887fd47bccdde797289093aa1ad196eaa6446329` |
+| `design` | `d0ccae8b24ed011e635b445b225903654ea5dfe84bc5c6e8ecde7e0b45d69e4b` |
 | `prototype` | `a32d59df117271297db363fba291a26b8ec4b64d780e632cf709f372deefc19d` |
 | `save-plan` | `598ecb6e34a1398981964029ca750cc7466ee335b094827929bf0898c6da0b74` |
 | `debug` | `44df10a5f7063d0631c45e7f4929eea4b5684d2d0043254ecac86ff76dee14cb` |
@@ -27,7 +27,7 @@
 | Baseline finding | Integrated evidence | Post-audit disposition |
 |---|---|---|
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; paired findings `HOL-002`, `HOL-001`, and verification `HOL-002`; repairs `a33be75`, `430b31f`, and `6dc9128` | resolved; durable budgets survive unrelated effects, multi-record decisions retain separate identities, and mutable effect inputs are identity-bound and revalidated |
+| `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; `docs/acceptance/v2.6-paired-design-architecture-stop.md` | resolved at the general skill boundary; fixture-specific recovery prescriptions were removed after they failed the frozen no-regression gate |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |
@@ -36,7 +36,12 @@
 | `C-REA-01` | `skills/reap/SKILL.md`; Wiki Summary v2 harness; `tests/test_workstream_c_review_reap.py` | resolved |
 | `I-IMP-01` | fifth `goal_preservation` pass, strict verdict schema, `tests/test_improve_skills.py` | resolved |
 
-Every integrated edit maps to one frozen finding or a reviewer-confirmed preservation repair. No unsupported wording-only improvement was retained. Protected invocation, tool, writer, permission, routing, lifecycle, callback, and cleanup boundaries remain in force.
+Every retained edit maps to one frozen finding. Recovery-specific additions from
+`b42cff6`, `a33be75`, `430b31f`, and `6dc9128` were not retained: the third
+frozen forward test showed that they steered the design toward an executor
+boundary contradicted by the inspected runtime. Protected invocation, tool,
+writer, permission, routing, lifecycle, callback, and cleanup boundaries remain
+in force.
 
 ## Goal preservation
 
