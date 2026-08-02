@@ -100,6 +100,43 @@ def quiesce_operations(store: OperationStore, task_id: str) -> None:
             )
 
 
+def write_trusted_current_approval(
+    gate_root: Path,
+    operation_id: str,
+    head_sha: str,
+) -> None:
+    """Complete a current-review fixture with authority-verifiable evidence."""
+
+    callback = {
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "payload": {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "head_sha": head_sha,
+            "verdict": "approve",
+        },
+    }
+    callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
+    (gate_root / ".review-callback.json").write_bytes(callback_bytes)
+    (gate_root / "final-spec.json").write_text(
+        '{"axis":"spec","findings":[],"verdict":"approve"}\n',
+        encoding="utf-8",
+    )
+    state_path = gate_root / "review-gate.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["status"] = "approved"
+    state["final_results"] = {"spec": "final-spec.json"}
+    state["evidence"] = {
+        "operation_id": operation_id,
+        "pointer": ".review-callback.json",
+        "sha256": hashlib.sha256(callback_bytes).hexdigest(),
+    }
+    state_path.write_text(
+        json.dumps(state, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
 regression_failures: list[str] = []
 
 
@@ -3209,25 +3246,11 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(superseded["lanes"]) == 2,
         )
         quiesce_operations(current_store, superseded["task_id"])
-        superseded_gate_root = (
-            product
-            / ".vault-meta/harness/review-data"
-            / superseded["task_id"]
-            / superseded["task_id"]
-        )
-        superseded_state = json.loads(
-            (superseded_gate_root / "review-gate.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        superseded_state["status"] = "approved"
-        superseded_state["final_results"] = {
-            "spec": f'{superseded["task_id"]}/final-spec.json'
-        }
-        (superseded_gate_root / "review-gate.json").write_text(
-            json.dumps(superseded_state, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        # The next assertions exercise a fresh purpose-bound release chain,
+        # not authority inherited from this generic preset fixture.
+        (
+            product / ".vault-meta/harness/current-review/active.json"
+        ).unlink()
         release_head = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=product,
@@ -3502,23 +3525,157 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             / implementation_cycle["task_id"]
             / implementation_cycle["task_id"]
         )
+        implementation_state_path = implementation_gate_root / "review-gate.json"
         implementation_state = json.loads(
-            (implementation_gate_root / "review-gate.json").read_text(
-                encoding="utf-8"
-            )
+            implementation_state_path.read_text(encoding="utf-8")
         )
         implementation_state["status"] = "approved"
-        implementation_state["final_results"] = {
-            "spec": f'{implementation_cycle["task_id"]}/final-spec.json'
-        }
-        (implementation_gate_root / "review-gate.json").write_text(
+        implementation_state["final_results"] = {"spec": "final-spec.json"}
+        implementation_state_path.write_text(
             json.dumps(implementation_state, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+        forged_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=post_stop_boundary_path,
+                plan_file=review_plan,
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            forged_guarded = "another preset or override" in str(exc)
+        else:
+            forged_guarded = False
+        check(
+            "release rejects an incomplete forged implementation approval",
+            forged_guarded and len(current_runtime.started) == forged_started_count,
+        )
+        write_trusted_current_approval(
+            implementation_gate_root,
+            implementation_cycle["task_id"],
+            post_stop_head,
+        )
+        changed_plan = product / "wiki/plans/changed-review-plan.md"
+        changed_plan.parent.mkdir(parents=True, exist_ok=True)
+        changed_plan.write_text("# Changed review plan\n", encoding="utf-8")
+        changed_plan_boundary = replace(
+            post_stop_boundary,
+            plan_sha256=hashlib.sha256(changed_plan.read_bytes()).hexdigest(),
+        )
+        changed_plan_path = base / "changed-plan-release-boundary.json"
+        changed_plan_path.write_text(
+            json.dumps(changed_plan_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        changed_outcome_boundary = replace(
+            post_stop_boundary,
+            outcome_contract_sha256="f" * 64,
+        )
+        changed_outcome_path = base / "changed-outcome-release-boundary.json"
+        changed_outcome_path.write_text(
+            json.dumps(changed_outcome_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        for label, boundary_path, plan_path in (
+            ("plan", changed_plan_path, changed_plan),
+            ("outcome", changed_outcome_path, review_plan),
+        ):
+            mismatch_started_count = len(current_runtime.started)
+            try:
+                task_review_runner.run_current_review(
+                    product,
+                    purpose="release",
+                    boundary_input_file=boundary_path,
+                    plan_file=plan_path,
+                    scratch_root=scratch,
+                    runtime_manager=current_runtime,
+                )
+            except task_review_runner.TaskReviewError as exc:
+                mismatch_guarded = "another preset or override" in str(exc)
+            else:
+                mismatch_guarded = False
+            check(
+                f"release rejects changed {label} checkpoint identity",
+                mismatch_guarded
+                and len(current_runtime.started) == mismatch_started_count,
+            )
+        (product / "product.py").write_text("VALUE = 4\n", encoding="utf-8")
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "advance after implementation approval"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        final_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        final_boundary = replace(post_stop_boundary, integration_head_sha=final_head)
+        final_boundary_path = base / "final-release-boundary.json"
+        final_boundary_path.write_text(
+            json.dumps(final_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        moved_head_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=final_boundary_path,
+                plan_file=review_plan,
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            moved_head_guarded = "another preset or override" in str(exc)
+        else:
+            moved_head_guarded = False
+        check(
+            "release rejects a HEAD moved after implementation approval",
+            moved_head_guarded
+            and len(current_runtime.started) == moved_head_started_count,
+        )
+        final_implementation = replace(
+            post_stop_implementation, product_head_sha=final_head
+        )
+        final_implementation_path = base / "final-implementation-boundary.json"
+        final_implementation_path.write_text(
+            json.dumps(final_implementation.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        final_implementation_cycle = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            purpose="implementation",
+            boundary_input_file=final_implementation_path,
+            plan_file=review_plan,
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        quiesce_operations(current_store, final_implementation_cycle["task_id"])
+        final_implementation_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / final_implementation_cycle["task_id"]
+            / final_implementation_cycle["task_id"]
+        )
+        write_trusted_current_approval(
+            final_implementation_gate_root,
+            final_implementation_cycle["task_id"],
+            final_head,
         )
         post_stop_review = task_review_runner.run_current_review(
             product,
             purpose="release",
-            boundary_input_file=post_stop_boundary_path,
+            boundary_input_file=final_boundary_path,
             plan_file=review_plan,
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=scratch,
@@ -3536,7 +3693,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         stale_boundary_path.write_text(
             json.dumps(
                 replace(
-                    post_stop_boundary,
+                    final_boundary,
                     accepted_deviations_sha256="f" * 64,
                 ).payload(),
                 sort_keys=True,

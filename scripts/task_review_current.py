@@ -10,8 +10,12 @@ from typing import Any, Callable, Mapping
 from harness.review_program import (
     PURPOSES as REVIEW_PURPOSES,
     ReviewBoundaryInput,
+    ReviewProgramError,
 )
-from harness.review_program_authority import stale_resolution_boundary
+from harness.review_program_authority import (
+    stale_resolution_boundary,
+    trusted_review_receipt,
+)
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewPreset
@@ -166,6 +170,51 @@ def _same_review_purpose(
     ) == str(requested.get("purpose") or "implementation")
 
 
+def _approved_implementation_enters_release(
+    worktree: Path,
+    candidate: Mapping[str, Any],
+    stored: Mapping[str, Any] | object,
+    requested: Mapping[str, Any],
+    boundary: ReviewBoundaryInput | None,
+    *,
+    operation_id: str,
+    bound_head: str,
+    current_head: str,
+) -> bool:
+    """Trust only the exact approved implementation checkpoint for release."""
+
+    if (
+        not isinstance(stored, Mapping)
+        or boundary is None
+        or boundary.purpose != "release"
+        or str(stored.get("purpose") or "implementation") != "implementation"
+        or str(requested.get("purpose") or "implementation") != "release"
+        or not bound_head
+        or bound_head != current_head
+        or boundary.integration_head_sha != current_head
+    ):
+        return False
+    source = Path(str(candidate.get("review_boundary_input_file") or ""))
+    try:
+        implementation = _load_review_boundary_input(
+            source, purpose="implementation"
+        )
+        receipt = trusted_review_receipt(
+            worktree, implementation, operation_id
+        )
+    except (OSError, ReviewProgramError, TaskReviewError):
+        return False
+    return bool(
+        receipt.verdict == "approved"
+        and receipt.boundary_input_sha256
+        == str(stored.get("boundary_input_sha256") or "")
+        and implementation.product_head_sha == current_head
+        and implementation.plan_sha256 == boundary.plan_sha256
+        and implementation.outcome_contract_sha256
+        == boundary.outcome_contract_sha256
+    )
+
+
 def run_current_review(
     worktree: Path,
     *,
@@ -244,13 +293,29 @@ def run_current_review(
                 else ""
             )
             current_head = _git(worktree, "rev-parse", "HEAD")
-            terminal_stale = (
-                status in {"approved", "skipped"}
-                and (
-                    bound_head != current_head
-                    or not same_policy
+            requested_purpose = str(
+                requested_policy.get("purpose") or "implementation"
+            )
+            approved_stale = status == "approved" and (
+                _approved_implementation_enters_release(
+                    worktree,
+                    candidate,
+                    stored_policy,
+                    requested_policy,
+                    boundary_input,
+                    operation_id=task_id,
+                    bound_head=bound_head,
+                    current_head=current_head,
                 )
-            ) or (
+                if requested_purpose == "release"
+                else bound_head != current_head or not same_policy
+            )
+            skipped_stale = (
+                status == "skipped"
+                and requested_purpose != "release"
+                and (bound_head != current_head or not same_policy)
+            )
+            terminal_stale = approved_stale or skipped_stale or (
                 status == "stopped"
                 and _stopped_release_enters_implementation(
                     stored_policy,
