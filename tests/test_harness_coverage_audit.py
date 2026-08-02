@@ -24,6 +24,8 @@ assert audit.coverage_percent(3, 4) == 75.0
 assert round(audit.coverage_percent(1, 3), 2) == 33.33
 assert "scripts.task-review-runner" in audit.source_modules()
 assert "scripts.dispatch-runner" in audit.source_modules()
+assert "scripts.task_session_contracts" in audit.source_modules()
+assert "scripts.task_session_cmux_layout" in audit.source_modules()
 assert any(
     path == "scripts/review-runner.py" and reason
     for path, reason in audit.MANIFEST.excluded_entrypoints

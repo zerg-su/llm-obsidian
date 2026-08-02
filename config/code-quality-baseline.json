@@ -11,11 +11,6 @@
       "owner": "harness-entrypoint-decomposition",
       "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
     },
-    "file-lines:scripts/task_sessions.py": {
-      "max_value": 1208,
-      "owner": "harness-entrypoint-decomposition",
-      "evidence": "canonical 2.6 audit manifest; frozen no-growth session facade"
-    },
     "function-branches:scripts/dispatch-runner.py:validate_request": {
       "max_value": 90,
       "owner": "dispatch-contract-decomposition",

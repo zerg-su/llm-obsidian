@@ -85,6 +85,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         vault / "config" / "harness.toml",
     )
     shutil.copyfile(ROOT / "scripts" / "task_sessions.py", vault / "scripts" / "task_sessions.py")
+    shutil.copyfile(
+        ROOT / "scripts" / "task_session_contracts.py",
+        vault / "scripts" / "task_session_contracts.py",
+    )
+    shutil.copyfile(
+        ROOT / "scripts" / "task_session_cmux_layout.py",
+        vault / "scripts" / "task_session_cmux_layout.py",
+    )
     (vault / "wiki" / "context" / "Dispatch Context.md").write_text("# Context\n", encoding="utf-8")
     plan = vault / "wiki" / "plans" / "approved.md"
     plan.write_text(

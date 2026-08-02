@@ -14,6 +14,8 @@
     "scripts/review_resolution.py",
     "scripts/review_telemetry.py",
     "scripts/task_contract.py",
+    "scripts/task_session_cmux_layout.py",
+    "scripts/task_session_contracts.py",
     "scripts/task_sessions.py",
     "scripts/wiki_summary_contract.py"
   ],
