@@ -76,6 +76,27 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
+def quiesce_operations(store: OperationStore, task_id: str) -> None:
+    """Release one test review using the same exact terminal procedure."""
+
+    for record in store.list(task_id):
+        if record.state in TERMINAL:
+            continue
+        store.transition(task_id, record.spec.operation_id, "cancelling")
+        store.transition(task_id, record.spec.operation_id, "exiting")
+        store.transition(task_id, record.spec.operation_id, "cancelled")
+        cancelled = store.read(task_id, record.spec.operation_id)
+        if cancelled.resources != OwnedResources():
+            store.save(
+                replace(
+                    cancelled,
+                    resources=OwnedResources(),
+                    revision=cancelled.revision + 1,
+                ),
+                expected_revision=cancelled.revision,
+            )
+
+
 regression_failures: list[str] = []
 
 
@@ -2918,36 +2939,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             json.dumps(current_gate_state, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        for record in current_store.list(started["task_id"]):
-            if record.state in TERMINAL:
-                continue
-            current_store.transition(
-                started["task_id"],
-                record.spec.operation_id,
-                "cancelling",
-            )
-            current_store.transition(
-                started["task_id"],
-                record.spec.operation_id,
-                "exiting",
-            )
-            current_store.transition(
-                started["task_id"],
-                record.spec.operation_id,
-                "cancelled",
-            )
-            cancelled = current_store.read(
-                started["task_id"], record.spec.operation_id
-            )
-            if cancelled.resources != OwnedResources():
-                current_store.save(
-                    replace(
-                        cancelled,
-                        resources=OwnedResources(),
-                        revision=cancelled.revision + 1,
-                    ),
-                    expected_revision=cancelled.revision,
-                )
+        quiesce_operations(current_store, started["task_id"])
         restarted = task_review_runner.run_current_review(
             product,
             origin_surface="33333333-3333-4333-8333-333333333333",
@@ -2959,36 +2951,49 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             restarted["status"] == "reviewing"
             and restarted["task_id"] != started["task_id"],
         )
-        for record in current_store.list(restarted["task_id"]):
-            if record.state in TERMINAL:
-                continue
-            current_store.transition(
-                restarted["task_id"],
-                record.spec.operation_id,
-                "cancelling",
+        quiesce_operations(current_store, restarted["task_id"])
+        restarted_gate_path = (
+            product
+            / ".vault-meta/harness/review-data"
+            / restarted["task_id"]
+            / restarted["task_id"]
+            / "review-gate.json"
+        )
+        guarded_state = json.loads(
+            restarted_gate_path.read_text(encoding="utf-8")
+        )
+        guarded_state["round_results"] = {
+            "holistic": f'{restarted["task_id"]}/round-holistic-0.json'
+        }
+        restarted_gate_path.write_text(
+            json.dumps(guarded_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            task_review_runner.run_current_review(
+                product,
+                deep=True,
+                cross_model=True,
+                runtime="claude",
+                model="fable",
+                effort="xhigh",
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
             )
-            current_store.transition(
-                restarted["task_id"],
-                record.spec.operation_id,
-                "exiting",
-            )
-            current_store.transition(
-                restarted["task_id"],
-                record.spec.operation_id,
-                "cancelled",
-            )
-            cancelled = current_store.read(
-                restarted["task_id"], record.spec.operation_id
-            )
-            if cancelled.resources != OwnedResources():
-                current_store.save(
-                    replace(
-                        cancelled,
-                        resources=OwnedResources(),
-                        revision=cancelled.revision + 1,
-                    ),
-                    expected_revision=cancelled.revision,
-                )
+        except task_review_runner.TaskReviewError as exc:
+            guarded = "another preset or override" in str(exc)
+        else:
+            guarded = False
+        check(
+            "quiescent review with persisted results cannot be superseded",
+            guarded,
+        )
+        guarded_state["round_results"] = {}
+        restarted_gate_path.write_text(
+            json.dumps(guarded_state, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         superseded = task_review_runner.run_current_review(
             product,
             deep=True,

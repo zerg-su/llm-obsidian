@@ -8,6 +8,7 @@ import ast
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,14 +112,83 @@ def classify(rows: tuple[FileSignal, ...]) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def blocking_signals(rows: tuple[FileSignal, ...]) -> dict[str, int]:
+    """Return stable hotspot identities for the no-growth ratchet."""
+
+    signals: dict[str, int] = {}
+    for row in rows:
+        if row.lines > FILE_HARD_LINES:
+            signals[f"file-lines:{row.path}"] = row.lines
+        for function in row.functions:
+            if function.lines > FUNCTION_HARD_LINES:
+                signals[f"function-lines:{row.path}:{function.name}"] = function.lines
+            if function.branch_points > FUNCTION_HARD_BRANCHES:
+                signals[
+                    f"function-branches:{row.path}:{function.name}"
+                ] = function.branch_points
+    return signals
+
+
+def load_baseline(path: Path) -> dict[str, Mapping[str, Any]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("code-quality baseline is unavailable or invalid") from exc
+    hotspots = value.get("hotspots") if isinstance(value, dict) else None
+    if value.get("schema_version") != 1 or not isinstance(hotspots, dict):
+        raise ValueError("code-quality baseline schema is invalid")
+    for identity, entry in hotspots.items():
+        if (
+            not isinstance(identity, str)
+            or not isinstance(entry, dict)
+            or type(entry.get("max_value")) is not int
+            or entry["max_value"] < 1
+            or not isinstance(entry.get("owner"), str)
+            or not entry["owner"].strip()
+            or not isinstance(entry.get("evidence"), str)
+            or not entry["evidence"].strip()
+        ):
+            raise ValueError("code-quality baseline hotspot is invalid")
+    return hotspots
+
+
+def ratchet_failures(
+    signals: Mapping[str, int],
+    baseline: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    failures = []
+    for identity in sorted(set(signals) - set(baseline)):
+        failures.append(f"new unowned blocker: {identity}={signals[identity]}")
+    for identity in sorted(set(baseline) - set(signals)):
+        failures.append(f"stale blocker baseline must be removed: {identity}")
+    for identity in sorted(set(signals) & set(baseline)):
+        maximum = int(baseline[identity]["max_value"])
+        if signals[identity] > maximum:
+            failures.append(
+                f"blocker grew: {identity}={signals[identity]} exceeds {maximum}"
+            )
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scan", type=Path, default=DEFAULT_SCAN)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     scan_root = args.scan.resolve()
     rows = inspect_tree(scan_root)
-    errors, warnings = classify(rows)
+    blockers, warnings = classify(rows)
+    signals = blocking_signals(rows)
+    baseline = None
+    errors = blockers
+    if args.baseline is not None:
+        try:
+            baseline = load_baseline(args.baseline.resolve())
+        except ValueError as exc:
+            errors = [str(exc)]
+        else:
+            errors = ratchet_failures(signals, baseline)
     payload = {
         "schema_version": 1,
         "thresholds": {
@@ -130,13 +200,17 @@ def main() -> int:
         },
         "files": [asdict(row) for row in rows],
         "errors": errors,
+        "release_blockers": blockers,
+        "blocking_signals": signals,
+        "ratchet_mode": baseline is not None,
         "warnings": warnings,
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(
-            f"code quality audit: {len(rows)} files, {len(errors)} blockers, "
+            f"code quality audit: {len(rows)} files, {len(blockers)} release blockers, "
+            f"{len(errors)} active gate errors, "
             f"{len(warnings)} review signals"
         )
         for message in errors:

@@ -31,13 +31,37 @@ with tempfile.TemporaryDirectory(prefix="agent-evals-test.") as raw:
     result = run("--cases", str(CASES), "--report", str(report), "smoke")
     check("smoke exit", result.returncode == 0, result.stderr)
     data = json.loads(report.read_text(encoding="utf-8"))
-    check("smoke cases", data["summary"]["total"] >= 8)
+    check("smoke cases", data["summary"]["total"] >= 13)
     check("smoke all pass", data["summary"]["failed"] == 0)
 
     bad = tmp / "bad.jsonl"
     bad.write_text('{"schema_version":2}\n', encoding="utf-8")
     result = run("--cases", str(bad), "smoke")
     check("invalid schema exit", result.returncode == 3)
+
+    invalid_vocabulary = tmp / "invalid-vocabulary.jsonl"
+    invalid_vocabulary.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "id": "engineering.invalid-vocabulary",
+                "capability": "codebase-design",
+                "input": {"scenario": "choose"},
+                "response_contract": {"decision": ["only-one-choice"]},
+                "assertions": [
+                    {"kind": "equals", "path": "artifacts.decision", "value": "only-one-choice"}
+                ],
+                "fixture_result": {
+                    "output": "choice",
+                    "artifacts": {"decision": "only-one-choice"},
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = run("--cases", str(invalid_vocabulary), "smoke")
+    check("single-choice response vocabulary fails closed", result.returncode == 3)
 
     runner = tmp / "runner.py"
     runner.write_text(
@@ -65,5 +89,22 @@ with tempfile.TemporaryDirectory(prefix="agent-evals-test.") as raw:
     live_data = json.loads(live_report.read_text(encoding="utf-8"))
     check("live trials", live_data["trials"] == 2)
     check("live rows", live_data["summary"]["total"] == 3)
+
+    engineering = tmp / "engineering.json"
+    result = run(
+        "--cases",
+        str(CASES),
+        "--capability",
+        "codebase-design",
+        "--report",
+        str(engineering),
+        "smoke",
+    )
+    engineering_data = json.loads(engineering.read_text(encoding="utf-8"))
+    check(
+        "engineering pressure cases are first-class evals",
+        result.returncode == 0
+        and engineering_data["summary"] == {"total": 2, "passed": 2, "failed": 0},
+    )
 
 print("\nAll agent eval tests passed.")

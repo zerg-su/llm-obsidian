@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-02T06:20:54.626494+00:00",
+  "mode": "live",
+  "trials": 1,
+  "summary": {
+    "total": 5,
+    "passed": 4,
+    "failed": 1
+  },
+  "cases": [
+    {
+      "id": "engineering.monolith-extraction-plan",
+      "passed": true,
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "failures": []
+        }
+      ]
+    },
+    {
+      "id": "engineering.tdd-tautology-pressure",
+      "passed": false,
+      "trials": [
+        {
+          "trial": 1,
+          "passed": false,
+          "failures": [
+            "artifacts.red_proven: expected True, got False",
+            "artifacts.expectation_independent: expected True, got False",
+            "artifacts.state_machine_mocked: expected False, got True",
+            "artifacts.mock_call_only: expected False, got True",
+            "artifacts.refactor_only_while_green: expected True, got False"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "engineering.review-independent-axes",
+      "passed": true,
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "failures": []
+        }
+      ]
+    },
+    {
+      "id": "engineering.cohesive-small-negative",
+      "passed": true,
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "failures": []
+        }
+      ]
+    },
+    {
+      "id": "engineering.deep-module-negative",
+      "passed": true,
+      "trials": [
+        {
+          "trial": 1,
+          "passed": true,
+          "failures": []
+        }
+      ]
+    }
+  ]
+}

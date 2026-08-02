@@ -208,3 +208,20 @@ The earlier conclusions “Every retained edit maps to one frozen finding” and
 for the old behavior-preserving audit boundary. Relative to the release's
 clarified engineering-quality outcome, the important and critical gaps above
 are in scope for 2.6 and must be resolved before final deep review.
+
+## Closure evidence
+
+- Five bounded model pressure scenarios are registered in
+  `evals/cases/engineering-quality.jsonl` and exercised by the read-only
+  code-owned `scripts/engineering-eval-runner.py`.
+- `docs/acceptance/v2.6-engineering-skill-pressure.md` binds exact skill,
+  reference, runner, and corpus hashes and records the honest 4/5 aggregate
+  plus corrected TDD-orientation rerun, yielding five established cases.
+- `config/code-quality-baseline.json` and `make test-code-quality` reject every
+  new, stale, or growing hard blocker. `make acceptance-check` remains strict
+  and intentionally fails until all thirteen owned release blockers are
+  decomposed; the ratchet is not a waiver.
+- The shared engineering quality contract now treats an unnameable
+  responsibility as a design signal, and debug records a missing correct
+  regression seam as architecture evidence instead of accepting a shallow
+  proxy.

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "hotspots": {
+    "file-lines:scripts/harness/runtime_sessions.py": {
+      "max_value": 1609,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md"
+    },
+    "file-lines:scripts/harness/runtime_worker.py": {
+      "max_value": 5541,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "docs/skill-semantic-gap-audit-v2.6.0.md"
+    },
+    "file-lines:scripts/harness/workflows/review_gate.py": {
+      "max_value": 1856,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "docs/skill-semantic-gap-audit-v2.6.0.md"
+    },
+    "function-branches:scripts/harness/runtime_sessions.py:__post_init__": {
+      "max_value": 69,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "RuntimeSessionRequest validation extraction"
+    },
+    "function-branches:scripts/harness/runtime_worker.py:drive_fix_transport": {
+      "max_value": 76,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "engineering fix transport extraction"
+    },
+    "function-branches:scripts/harness/runtime_worker.py:finish_task_summary": {
+      "max_value": 370,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "summary/review/verification extraction"
+    },
+    "function-branches:scripts/harness/runtime_worker.py:load_spec": {
+      "max_value": 75,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "launch-spec parser extraction"
+    },
+    "function-branches:scripts/harness/runtime_worker.py:notify_review_resolution": {
+      "max_value": 75,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "review bridge extraction"
+    },
+    "function-branches:scripts/harness/runtime_worker.py:run": {
+      "max_value": 735,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "runtime composition-root extraction"
+    },
+    "function-lines:scripts/harness/runtime_worker.py:drive_fix_transport": {
+      "max_value": 518,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "engineering fix transport extraction"
+    },
+    "function-lines:scripts/harness/runtime_worker.py:finish_task_summary": {
+      "max_value": 2045,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "summary/review/verification extraction"
+    },
+    "function-lines:scripts/harness/runtime_worker.py:notify_review_resolution": {
+      "max_value": 328,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "review bridge extraction"
+    },
+    "function-lines:scripts/harness/runtime_worker.py:run": {
+      "max_value": 4465,
+      "owner": "release/2.6.0 maintainable-harness-core",
+      "evidence": "runtime composition-root extraction"
+    }
+  }
+}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -43,5 +44,33 @@ with tempfile.TemporaryDirectory(prefix="code-quality-audit.") as raw:
     )
     errors, _warnings = audit.classify(audit.inspect_tree(package))
     assert any("giant.py:1:run" in error and "hard limit" in error for error in errors)
+    signals = audit.blocking_signals(audit.inspect_tree(package))
+    baseline_path = root / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "hotspots": {
+                    identity: {
+                        "max_value": value,
+                        "owner": "test-owner",
+                        "evidence": "test fixture",
+                    }
+                    for identity, value in signals.items()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    baseline = audit.load_baseline(baseline_path)
+    assert audit.ratchet_failures(signals, baseline) == []
+    identity = next(iter(signals))
+    assert "blocker grew" in audit.ratchet_failures(
+        {**signals, identity: signals[identity] + 1}, baseline
+    )[0]
+    assert "new unowned blocker" in audit.ratchet_failures(
+        {**signals, "file-lines:scripts/harness/new.py": 1001}, baseline
+    )[0]
+    assert "stale blocker baseline" in audit.ratchet_failures({}, baseline)[0]
 
 print("code quality audit unit contracts passed")

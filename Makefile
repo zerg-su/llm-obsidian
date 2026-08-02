@@ -52,6 +52,7 @@ test-harness-coverage:
 test-code-quality:
 	@echo "=== code quality audit unit contracts ==="
 	@python3 tests/test_code_quality_audit.py
+	@python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json
 
 code-quality-audit: test-code-quality
 	@python3 scripts/code-quality-audit.py
@@ -147,6 +148,7 @@ paired-eval-verify:
 	@python3 scripts/paired-evals.py verify
 
 acceptance-check:
+	@python3 scripts/code-quality-audit.py
 	@python3 scripts/release-acceptance.py check
 
 acceptance-live:
@@ -181,6 +183,7 @@ retrieval-experiment:
 test-agent-evals:
 	@echo "=== test_agent_evals.py ==="
 	@python3 tests/test_agent_evals.py
+	@python3 tests/test_engineering_eval_runner.py
 
 test-paired-evals:
 	@echo "=== test_paired_evals.py ==="

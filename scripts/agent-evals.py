@@ -34,7 +34,10 @@ CAPABILITIES = {
     "hooks",
     "retrieval",
     "config",
+    "codebase-design",
     "daily",
+    "implementation-plan",
+    "tdd",
 }
 ASSERTIONS = {"equals", "contains", "not_contains", "regex", "empty"}
 
@@ -84,6 +87,33 @@ def validate_case(case: Any, source: str) -> dict[str, Any]:
             raise EvalConfigError(f"{label}: path must be a string")
         if assertion["kind"] not in {"empty"} and "value" not in assertion:
             raise EvalConfigError(f"{label}: value is required")
+    response_contract = case.get("response_contract", {})
+    if not isinstance(response_contract, dict):
+        raise EvalConfigError(f"{source}: response_contract must be an object")
+    asserted_fields = {
+        assertion["path"].split(".", 1)[1]
+        for assertion in assertions
+        if assertion["path"].startswith("artifacts.")
+        and assertion["path"].count(".") == 1
+    }
+    for field, choices in response_contract.items():
+        label = f"{source}: response_contract {field!r}"
+        if not isinstance(field, str) or not field or field not in asserted_fields:
+            raise EvalConfigError(f"{label}: field must have a flat artifact assertion")
+        if not isinstance(choices, list) or len(choices) < 2:
+            raise EvalConfigError(f"{label}: at least two choices are required")
+        if any(type(choice) not in {str, bool, int, float} for choice in choices):
+            raise EvalConfigError(f"{label}: choices must be scalar JSON values")
+        if len({json.dumps(choice, sort_keys=True) for choice in choices}) != len(choices):
+            raise EvalConfigError(f"{label}: choices must be unique")
+        expected = [
+            assertion.get("value")
+            for assertion in assertions
+            if assertion["path"] == f"artifacts.{field}"
+            and assertion["kind"] == "equals"
+        ]
+        if len(expected) != 1 or expected[0] not in choices:
+            raise EvalConfigError(f"{label}: exactly one expected choice must be asserted")
     return case
 
 

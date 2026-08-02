@@ -55,16 +55,16 @@
     },
     {
       "skill": "debug",
-      "verdict": "no-change",
-      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "pass", "pruning": "pass", "goal_preservation": "pass"},
+      "verdict": "fix",
+      "passes": {"invocation": "pass", "hierarchy": "pass", "steering": "SPEC-004", "pruning": "pass", "goal_preservation": "pass"},
       "overall_input": "A reproducible defect and the approved outcome evidence it blocks.",
       "overall_outcome": "A root-cause repair that establishes the declared outcome evidence without speculative mutation.",
       "local_subgoal": "Reproduce, minimize, falsify hypotheses, and repair the narrowest authorized seam.",
       "completion_proxies": ["The focused regression is green.", "The diff is clean.", "A callback was accepted."],
       "required_outcome_evidence": ["The minimized and original repro loops pass and the repaired defect is traced to declared outcome evidence."],
-      "evidence": "B-DBG-01 and HOL-003; governance repair 0f9bb89; skills/debug/SKILL.md; tests/test_skill_workstream_b.py; tests/harness/test_engineering_skills.py",
-      "change": "post-audit mechanism repair restores the distinct trigger and explicit completion markers without changing the frozen debug loop",
-      "behavior_proof": "Diagnosis-only remains non-mutating; root cause precedes fixes; regression, reruns, escalation, and the three-failure stop remain mandatory."
+      "evidence": "B-DBG-01, HOL-003, and Fable SPEC-004; skills/debug/SKILL.md; tests/test_skill_workstream_b.py; tests/harness/test_engineering_skills.py",
+      "change": "When no correct regression seam exists, record an architecture finding/evidence gap and use the architecture-stop path instead of substituting a shallow test.",
+      "behavior_proof": "Diagnosis-only remains non-mutating; root cause precedes fixes; regression, reruns, escalation, and the three-failure stop remain mandatory. The correction strengthens evidence quality without changing workflow authority."
     },
     {
       "skill": "tdd",

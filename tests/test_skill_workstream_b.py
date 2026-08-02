@@ -108,6 +108,17 @@ def main() -> int:
         failures,
     )
     check(
+        "missing real regression seam becomes architecture evidence rather than a shallow test",
+        has_clause(
+            debug,
+            r"no correct seam",
+            r"architecture finding|architecture.*gap",
+            r"instead of",
+            r"shallow test",
+        ),
+        failures,
+    )
+    check(
         "a failed fix attempt requires product mutation and the original repro rerun",
         has_clause(debug, r"failed fix attempt", r"product", r"chang|mutat", r"original", r"repro"),
         failures,

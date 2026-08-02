@@ -52,11 +52,11 @@
       "token_estimate": 960
     },
     "debug": {
-      "body_bytes": 931,
-      "body_lines": 17,
-      "closure_bytes": 931,
-      "closure_token_estimate": 233,
-      "token_estimate": 233
+      "body_bytes": 1163,
+      "body_lines": 20,
+      "closure_bytes": 1163,
+      "closure_token_estimate": 291,
+      "token_estimate": 291
     },
     "defuddle": {
       "body_bytes": 2665,

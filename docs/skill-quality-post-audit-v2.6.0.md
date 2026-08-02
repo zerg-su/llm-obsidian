@@ -13,14 +13,14 @@
 | Skill | Integrated SHA-256 |
 |---|---|
 | `clarify` | `485b26a4ece6c3e41876da61b6682dfd85cd86421531b3116c5c3bb49387d57f` |
-| `design` | `d0ccae8b24ed011e635b445b225903654ea5dfe84bc5c6e8ecde7e0b45d69e4b` |
+| `design` | `22a7e33f03b961461e497266930add09d86d334af2e2c1aca27633ab4ba7d254` |
 | `prototype` | `a32d59df117271297db363fba291a26b8ec4b64d780e632cf709f372deefc19d` |
 | `save-plan` | `598ecb6e34a1398981964029ca750cc7466ee335b094827929bf0898c6da0b74` |
-| `debug` | `44df10a5f7063d0631c45e7f4929eea4b5684d2d0043254ecac86ff76dee14cb` |
-| `tdd` | `f34ba45fafe2ccf165a728b39851bdff0c98a4d3d7f423617945e18cd92fded8` |
-| `review` | `86241ce8cdff977b876b2491aa6e91d867ffd2a00aa86bb90774f8a262fa4cd8` |
+| `debug` | `a9974bd61add686a7ab4e242a6629a1feb66e999e8ad5b10ef96a118b16157ad` |
+| `tdd` | `6a55bd2eaedbc57cfd5fe49b1a9e737b43df515c2ed4494b5046bb05f9ba592c` |
+| `review` | `38b024033f8f084669fdf67dba74ff0efbf5ed90878afc9533b7fa8cd2bad36c` |
 | `reap` | `a71a177a71ca57711521b0557e9d0f84a65dacd1b98323530d98baf848738a65` |
-| `improve-skills` | `03317d948396a964ec71ad5ec2eca2b83f6293478439afb1cbac225cb20665f2` |
+| `improve-skills` | `6502e6be4d8e35d1a35e7a3d47f829d6a021454de153124ac05059a026eede8b` |
 
 ## Finding closure
 
@@ -30,7 +30,7 @@
 | `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; `docs/acceptance/v2.6-paired-design-architecture-stop.md` | resolved at the general skill boundary; fixture-specific recovery prescriptions were removed after they failed the frozen no-regression gate |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` is closed by the explicit pre-allocation and pre-writer contract-validation order assertions in `tests/test_skill_workstream_a.py` |
-| `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |
+| `B-DBG-01` / Fable `SPEC-004` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003` | resolved; a missing correct regression seam is architecture evidence and cannot be replaced by a shallow test |
 | `B-TDD-01` | `skills/tdd/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_release_transition_matrix.py`; `scripts/harness-coverage-audit.py` | resolved; stateful work now requires a transition inventory, fast exhaustive matrix, complete coverage denominator, and external-adapter-only mocks |
 | `C-REV-01` | `skills/review/SKILL.md`; outcome-aware review harness; `tests/test_workstream_c_review_reap.py` | resolved |
 | `C-REA-01` | `skills/reap/SKILL.md`; Wiki Summary v2 harness; `tests/test_workstream_c_review_reap.py` | resolved |
@@ -45,7 +45,7 @@ in force.
 
 ## Goal preservation
 
-The exhaustive schema-v1 verdict set names, for every in-scope skill, the approved input and outcome, the permitted local subgoal, completion proxies that cannot close the user outcome, and required outcome evidence. All nine post-audit verdicts are `no-change` with five passing quality passes: the integrated correction is present and no further evidenced skill edit is required at this boundary.
+The exhaustive schema-v1 verdict set names, for every in-scope skill, the approved input and outcome, the permitted local subgoal, completion proxies that cannot close the user outcome, and required outcome evidence. Eight post-audit verdicts are `no-change`; `debug` is `fix` for the later Fable `SPEC-004` evidence-seam finding. All five quality passes remain green.
 
 Local success remains subordinate to the release Outcome Contract. A green focused test, clean diff, accepted callback, written page, task summary, or successful reap cannot by itself establish the desired outcome.
 
@@ -60,6 +60,7 @@ Local success remains subordinate to the release Outcome Contract. A green focus
 | `python3 tests/harness/test_engineering_skills.py` | PASS — trigger, completion marker, authorization and loop contracts restored |
 | `make test-router test-codex-adapter` | PASS — router 56/56; adapter 22/22 |
 | `python3 scripts/codex-adapter.py --check` | PASS — no drift |
+| five engineering pressure scenarios | PASS — four in the aggregate run plus the corrected TDD orientation rerun; see `docs/acceptance/v2.6-engineering-skill-pressure.md` |
 
 ## Behavioral acceptance boundary
 

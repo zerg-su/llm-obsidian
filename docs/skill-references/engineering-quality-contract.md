@@ -37,9 +37,11 @@ approved Outcome Contract or evidence requirements.
 
 Investigate divergent change, shotgun surgery, feature envy, speculative
 generality, long mixed-responsibility functions, hidden temporal coupling,
-parallel conditionals, and duplicated validation. A smell triggers judgment,
-not automatic splitting. Record why the chosen boundary improves locality and
-which interface/test seam proves it.
+parallel conditionals, duplicated validation, and names that do not reveal what
+a module, function, or value does or holds. If no honest name fits, treat that
+as a design signal rather than cosmetic wording. A smell triggers judgment, not
+automatic splitting. Record why the chosen boundary improves locality and which
+interface/test seam proves it.
 
 ## Test quality
 
