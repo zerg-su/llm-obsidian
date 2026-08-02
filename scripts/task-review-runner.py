@@ -498,6 +498,93 @@ def _bounded_input(
     )
 
 
+_BOUNDARY_ARTIFACTS = {
+    "intent": (
+        ("review-design", "design_path", "design_sha256"),
+        (
+            "review-capability-dispositions",
+            "capability_dispositions_path",
+            "capability_dispositions_sha256",
+        ),
+        (
+            "review-success-evidence-map",
+            "success_evidence_map_path",
+            "success_evidence_map_sha256",
+        ),
+    ),
+    "implementation": (
+        (
+            "review-verification-evidence",
+            "verification_evidence_path",
+            "verification_evidence_sha256",
+        ),
+    ),
+    "release": (
+        (
+            "review-outcome-evidence",
+            "outcome_evidence_map_path",
+            "outcome_evidence_map_sha256",
+        ),
+        (
+            "review-accepted-deviations",
+            "accepted_deviations_path",
+            "accepted_deviations_sha256",
+        ),
+    ),
+}
+
+
+def _purpose_boundary_inputs(
+    worktree: Path,
+    plan: Path,
+    boundary: ReviewBoundaryInput,
+    *,
+    pointer_root: Path,
+) -> tuple[ContextInput, ...]:
+    """Validate and materialize every exact artifact named by a purpose boundary."""
+
+    try:
+        contract = outcome_contract_input(
+            plan,
+            expected_sha256=boundary.outcome_contract_sha256,
+        )
+        plan_bytes = plan.read_bytes()
+    except (OSError, HarnessContractError) as exc:
+        raise TaskReviewError(f"review Outcome Contract is invalid: {exc}") from exc
+    if (
+        boundary.purpose == "intent"
+        and hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256
+    ):
+        raise TaskReviewError("intent review plan digest is stale")
+    inputs = [contract]
+    for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:
+        relative = Path(str(getattr(boundary, path_field)))
+        candidate = worktree / relative
+        target = candidate.resolve()
+        if (
+            target == worktree
+            or worktree not in target.parents
+            or not target.is_file()
+            or candidate.is_symlink()
+        ):
+            raise TaskReviewError(f"review boundary artifact is unavailable: {relative}")
+        try:
+            item = _bounded_input(
+                name,
+                target,
+                role="outcome",
+                pointer_root=pointer_root,
+            )
+        except OSError as exc:
+            raise TaskReviewError(
+                f"review boundary artifact is unavailable: {relative}"
+            ) from exc
+        if item.content_sha256 != getattr(boundary, digest_field):
+            raise TaskReviewError(f"review boundary artifact digest is stale: {relative}")
+        inputs.append(item)
+    return tuple(inputs)
+
+
 def _validate_task(worktree: Path) -> tuple[dict[str, Any], Path, str]:
     worktree = worktree.expanduser().resolve()
     if not worktree.is_dir():
@@ -721,6 +808,14 @@ def _context(
                     + "\n"
                 ).encode(),
                 role="outcome",
+            )
+        )
+        inputs.extend(
+            _purpose_boundary_inputs(
+                worktree,
+                plan,
+                boundary,
+                pointer_root=runtime_root / "pointers",
             )
         )
     elif purpose != "implementation":

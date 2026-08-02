@@ -60,21 +60,27 @@ intent = ReviewBoundaryInput(
     outcome_contract_sha256=SHA["outcome"],
     plan_sha256=SHA["plan"],
     design_sha256=SHA["design"],
+    design_path="docs/design.md",
     capability_dispositions_sha256=SHA["capabilities"],
+    capability_dispositions_path="docs/capabilities.json",
     success_evidence_map_sha256=SHA["success"],
+    success_evidence_map_path="docs/success-evidence.md",
 )
 implementation = ReviewBoundaryInput(
     purpose="implementation",
     outcome_contract_sha256=SHA["outcome"],
     product_head_sha=SHA["head"],
     verification_evidence_sha256=SHA["verification"],
+    verification_evidence_path="docs/verification.md",
 )
 release = ReviewBoundaryInput(
     purpose="release",
     outcome_contract_sha256=SHA["outcome"],
     integration_head_sha=SHA["head"],
     outcome_evidence_map_sha256=SHA["evidence"],
+    outcome_evidence_map_path="docs/outcome-evidence.md",
     accepted_deviations_sha256=SHA["deviations"],
+    accepted_deviations_path="docs/deviations.md",
 )
 
 small = compile_review_program("small-reversible", (implementation,))
@@ -116,12 +122,27 @@ rejected(
     lambda: replace(intent, design_sha256=""),
 )
 rejected(
+    "intent digest requires an exact artifact path",
+    lambda: replace(intent, design_path=""),
+)
+rejected(
+    "review evidence paths stay repository-relative",
+    lambda: replace(intent, design_path="../outside.md"),
+)
+rejected(
     "implementation requires exact HEAD and verification evidence",
     lambda: replace(implementation, verification_evidence_sha256=""),
 )
 rejected(
     "release requires integration HEAD and complete evidence map",
     lambda: replace(release, outcome_evidence_map_sha256=""),
+)
+rejected(
+    "review program preserves one Outcome Contract across boundaries",
+    lambda: compile_review_program(
+        "architecture",
+        (intent, replace(implementation, outcome_contract_sha256="9" * 64), release),
+    ),
 )
 check(
     "review boundary input round-trips through an exact typed mapping",

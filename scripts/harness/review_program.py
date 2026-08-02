@@ -82,6 +82,10 @@ def compile_review_program(
         raise ReviewProgramError(
             "review boundaries are missing, duplicated, or out of order"
         )
+    if len({item.outcome_contract_sha256 for item in inputs}) != 1:
+        raise ReviewProgramError(
+            "review boundaries must preserve one Outcome Contract digest"
+        )
     collapsed = risk_profile == "small-reversible"
     boundaries = tuple(
         ReviewBoundary(

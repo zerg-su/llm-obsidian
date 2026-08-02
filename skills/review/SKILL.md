@@ -5,13 +5,13 @@ description: Harness-owned intent, implementation, or release review with simple
 
 # Review
 
-Use after self-review, before finalization. The harness owns routing, provider
-sessions, OperationSpec identity, callbacks, and budgets. The reviewer is
-product read-only; only the executor resolves findings.
+Use after self-review, before finalization. The harness owns routing, sessions,
+identity, callbacks, and budgets. Reviewers are product read-only; only the
+executor resolves findings.
 
-Completed dispatch tasks enter simple review automatically. Summary/reap stay
-locked until durable approval matches the exact HEAD/profile and, for v4, the
-reviewed implementer-summary bytes. Only `--no-review` persists a typed bypass.
+Dispatch completion enters simple review. Summary/reap stay locked until
+approval matches exact HEAD/profile and v4 summary bytes. Only `--no-review`
+persists a typed bypass.
 
 ## Presets
 
@@ -35,7 +35,7 @@ For approved multi-stage work, keep simple/deep inside one explicit purpose:
 `scripts/review-program.py status` selects ordered purposes from approved risk.
 Small reversible work collapses intent; standard uses intent+implementation;
 architecture, migration, release and skill-integration require all three.
-Receipts are additive and stale after bound digest drift.
+Receipts are additive; digest drift stales them. Evidence paths are repo-relative; the runner verifies and packets exact bytes.
 
 For current review add `--purpose <intent|implementation|release>
 --boundary-input <json>` to `task-review-runner.py current`. ContextPacket,

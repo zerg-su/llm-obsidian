@@ -69,6 +69,7 @@ from review_resolution import (
     ReviewResolutionEvidence,
     review_transport_identity_sha256,
 )
+from outcome_contract import extract_from_bytes
 
 
 def check(label: str, value: bool) -> None:
@@ -2766,6 +2767,25 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     (product / "AGENTS.md").write_text(
         "# Product instructions\n", encoding="utf-8"
     )
+    review_plan = product / "wiki/review-plan.md"
+    review_plan.write_text(
+        """# Review plan
+
+```json
+{"schema_version":1,"desired_outcome":"Preserve the approved outcome through release review.","success_evidence":[{"evidence_id":"release-proof","observable":"Exact evidence is present in the review packet."}],"non_goals":["Changing product behavior during release review."]}
+```
+""",
+        encoding="utf-8",
+    )
+    boundary_artifacts = {
+        "design": product / "wiki/design.md",
+        "capability-dispositions": product / "wiki/capability-dispositions.json",
+        "success-evidence": product / "wiki/success-evidence.md",
+        "outcome-evidence": product / "wiki/outcome-evidence.md",
+        "accepted-deviations": product / "wiki/accepted-deviations.md",
+    }
+    for label, path in boundary_artifacts.items():
+        path.write_text(f"# {label}\n\nExact bounded evidence.\n", encoding="utf-8")
     (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
     subprocess.run(
         ["git", "init", "-b", "main"],
@@ -3077,10 +3097,18 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         ).stdout.strip()
         release_boundary = ReviewBoundaryInput(
             purpose="release",
-            outcome_contract_sha256="1" * 64,
+            outcome_contract_sha256=extract_from_bytes(
+                review_plan.read_bytes()
+            ).sha256,
             integration_head_sha=release_head,
-            outcome_evidence_map_sha256="2" * 64,
-            accepted_deviations_sha256="3" * 64,
+            outcome_evidence_map_sha256=hashlib.sha256(
+                boundary_artifacts["outcome-evidence"].read_bytes()
+            ).hexdigest(),
+            outcome_evidence_map_path="wiki/outcome-evidence.md",
+            accepted_deviations_sha256=hashlib.sha256(
+                boundary_artifacts["accepted-deviations"].read_bytes()
+            ).hexdigest(),
+            accepted_deviations_path="wiki/accepted-deviations.md",
         )
         release_boundary_path = base / "release-boundary.json"
         release_boundary_path.write_text(
@@ -3091,6 +3119,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             product,
             purpose="release",
             boundary_input_file=release_boundary_path,
+            plan_file=review_plan,
             origin_surface="33333333-3333-4333-8333-333333333333",
             scratch_root=scratch,
             runtime_manager=current_runtime,
@@ -3117,6 +3146,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             product,
             purpose="release",
             boundary_input_file=release_boundary_path,
+            plan_file=review_plan,
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
@@ -3131,6 +3161,12 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 item["name"] == "review-boundary-input.json"
                 for item in release_manifest["inputs"]
             )
+            and {
+                "outcome-contract.json",
+                "review-outcome-evidence",
+                "review-accepted-deviations",
+            }
+            <= {item["name"] for item in release_manifest["inputs"]}
             and "--purpose release" in release_wake
             and "--boundary-input" in release_wake,
         )
@@ -3138,6 +3174,88 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             "purpose-bound current review replays without a duplicate provider effect",
             release_replay["task_id"] == release_started["task_id"]
             and len(current_runtime.started) == started_count,
+        )
+        quiesce_operations(current_store, release_started["task_id"])
+        stale_boundary_path = base / "stale-release-boundary.json"
+        stale_boundary_path.write_text(
+            json.dumps(
+                replace(
+                    release_boundary,
+                    accepted_deviations_sha256="f" * 64,
+                ).payload(),
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=stale_boundary_path,
+                plan_file=review_plan,
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            stale_rejected = "artifact digest is stale" in str(exc)
+        else:
+            stale_rejected = False
+        check(
+            "purpose-bound current review rejects stale artifact bytes before launch",
+            stale_rejected and len(current_runtime.started) == started_count,
+        )
+        intent_boundary = ReviewBoundaryInput(
+            purpose="intent",
+            outcome_contract_sha256=extract_from_bytes(
+                review_plan.read_bytes()
+            ).sha256,
+            plan_sha256=hashlib.sha256(review_plan.read_bytes()).hexdigest(),
+            design_sha256=hashlib.sha256(
+                boundary_artifacts["design"].read_bytes()
+            ).hexdigest(),
+            design_path="wiki/design.md",
+            capability_dispositions_sha256=hashlib.sha256(
+                boundary_artifacts["capability-dispositions"].read_bytes()
+            ).hexdigest(),
+            capability_dispositions_path="wiki/capability-dispositions.json",
+            success_evidence_map_sha256=hashlib.sha256(
+                boundary_artifacts["success-evidence"].read_bytes()
+            ).hexdigest(),
+            success_evidence_map_path="wiki/success-evidence.md",
+        )
+        intent_inputs = task_review_runner._purpose_boundary_inputs(
+            product.resolve(),
+            review_plan,
+            intent_boundary,
+            pointer_root=scratch / "pointers",
+        )
+        intent_started_count = len(current_runtime.started)
+        check(
+            "current intent review materializes exact outcome evidence",
+            {
+                "outcome-contract.json",
+                "review-design",
+                "review-capability-dispositions",
+                "review-success-evidence-map",
+            }
+            == {item.name for item in intent_inputs},
+        )
+        try:
+            task_review_runner._purpose_boundary_inputs(
+                product.resolve(),
+                review_plan,
+                replace(intent_boundary, plan_sha256="f" * 64),
+                pointer_root=scratch / "pointers",
+            )
+        except task_review_runner.TaskReviewError as exc:
+            stale_intent_rejected = "plan digest is stale" in str(exc)
+        else:
+            stale_intent_rejected = False
+        check(
+            "current intent review rejects stale plan bytes before launch",
+            stale_intent_rejected
+            and len(current_runtime.started) == intent_started_count,
         )
     finally:
         for name, value in old_environment.items():
