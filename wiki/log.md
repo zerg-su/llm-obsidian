@@ -27,6 +27,14 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-02] reap | llm-obsidian-2-6-common-dogfood-fixes
+
+`c-000092` [[LLM Obsidian 2.6 common dogfood fixes]]. Committed `b42cff664352ca81d8124af590288a749243ae34`. RT3 archive finalization now rejects stale terminal resolution HEADs and broken ordered per-axis chains while preserving valid history; v4 `partially-achieved` summaries remain callback eligible under explicit regression coverage. The general design skill now requires immutable decision identity, atomic effect reservation, and crash/replay acceptance seams for restart, recovery, or other effectful actions. RT1 acceptance wording now states th
+
+## [2026-08-02 03:19] dispatch | llm-obsidian-2-6-common-dogfood-fixes
+
+Spawned an approved unattended task session (cmux `6703F53D-065D-4B1A-8EF0-6A63C60381F1`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-common-dogfood-fixes`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-common-dogfood-fixes` from `3231018668d7c5fc35d8dbda864dcd7ba2990349`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i.md`. Pre-loaded context: [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]]. Awaiting typed review and final reap.
+
 ## [2026-08-02] reap | llm-obsidian-2-6-dogfood-rt2-fresh-review-packet
 
 `c-000090` [[LLM Obsidian 2.6 dogfood RT2 fresh review packet identity]]. Reproduced the stale `.task-review.json` symptom on the preserved base and traced it to fresh review transport retaining only the stable dispatch identity. Added committed red regressions, then fixed the boundary narrowly: authorized fresh review invalidates prior transient decision/response files; accepted resolution state and the executor packet bind the exact review operation, round/run, callback digest, findings, and reviewed HEAD; pre-intake rejects stale identities. Automatic review findin
