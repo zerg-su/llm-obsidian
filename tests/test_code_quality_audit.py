@@ -27,6 +27,48 @@ assert audit.effective_baseline_path(
     scan=ROOT / "scripts" / "harness", baseline=None
 ) is None
 
+owned = audit.owned_source_paths(ROOT)
+assert ROOT / "scripts" / "code-quality-audit.py" in owned
+assert ROOT / "hooks" / "run-hook.py" in owned
+assert ROOT / "scripts" / "review-runner.py" in owned
+assert ROOT / "scripts" / "live-acceptance-runner.py" in owned
+assert ROOT / "skills" / "tdd" / "agents" / "openai.yaml" not in owned
+assert (
+    ROOT / "evals" / "paired-v2.6.0" / "fix" / "test_label_normalizer.py"
+    not in owned
+)
+assert not any("references/upstream-skills" in str(path) for path in owned)
+assert {
+    path.relative_to(ROOT).parts[0] for path in owned
+} == set(audit.OWNED_PYTHON_ROOTS)
+
+
+with tempfile.TemporaryDirectory(prefix="code-quality-owned.") as raw:
+    root = Path(raw)
+    included = {
+        root / ".claude" / "hooks" / "capture.py",
+        root / "evals" / "case" / "runner.py",
+        root / "hooks" / "run.py",
+        root / "prototypes" / "spike.py",
+        root / "scripts" / "tool.py",
+        root / "skills" / "demo" / "scripts" / "helper.py",
+    }
+    excluded = {
+        root / "evals" / "case" / "test_runner.py",
+        root / "hooks" / "run_test.py",
+        root / "scripts" / "tests" / "helper.py",
+        root / "scripts" / "conftest.py",
+        root / "skills" / "demo" / "references" / "pinned.py",
+        root / "references" / "upstream-skills" / "verify.py",
+    }
+    for path in included | excluded:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("VALUE = 1\n", encoding="utf-8")
+    first = audit.owned_source_paths(root)
+    second = audit.owned_source_paths(root)
+    assert first == tuple(sorted(included))
+    assert second == first
+
 
 with tempfile.TemporaryDirectory(prefix="code-quality-audit.") as raw:
     root = Path(raw)

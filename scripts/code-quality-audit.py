@@ -10,9 +10,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from harness.audit_manifest import AuditManifestError, load_audit_manifest
-
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "config" / "code-quality-baseline.json"
 FILE_REVIEW_LINES = 200
@@ -20,6 +17,17 @@ FILE_HARD_LINES = 1_000
 FUNCTION_REVIEW_LINES = 60
 FUNCTION_HARD_LINES = 300
 FUNCTION_HARD_BRANCHES = 60
+OWNED_PYTHON_ROOTS = (
+    ".claude",
+    "evals",
+    "hooks",
+    "prototypes",
+    "scripts",
+    "skills",
+)
+NON_PRODUCTION_DIRECTORIES = frozenset(
+    {"__pycache__", "references", "tests"}
+)
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,41 @@ def inspect_tree(scan_root: Path) -> tuple[FileSignal, ...]:
 
 def inspect_paths(paths: tuple[Path, ...], repo_root: Path) -> tuple[FileSignal, ...]:
     return tuple(inspect_file(path, repo_root) for path in sorted(paths))
+
+
+def owned_source_paths(repo_root: Path = ROOT) -> tuple[Path, ...]:
+    """Return repository-owned production Python, excluding pinned references.
+
+    Skills may contain their own executable helpers, so they belong to the same
+    maintainability gate as top-level scripts. Tests and byte-pinned upstream
+    snapshots have separate ownership/evidence contracts.
+    """
+
+    roots = tuple(repo_root / name for name in OWNED_PYTHON_ROOTS)
+
+    def is_production(path: Path, root: Path) -> bool:
+        relative = path.relative_to(root)
+        return (
+            path.is_file()
+            and not path.is_symlink()
+            and not any(
+                part in NON_PRODUCTION_DIRECTORIES
+                for part in relative.parts[:-1]
+            )
+            and relative.name != "conftest.py"
+            and not relative.name.startswith("test_")
+            and not relative.name.endswith("_test.py")
+        )
+
+    return tuple(
+        sorted(
+            path
+            for root in roots
+            if root.is_dir() and not root.is_symlink()
+            for path in root.rglob("*.py")
+            if is_production(path, root)
+        )
+    )
 
 
 def classify(rows: tuple[FileSignal, ...]) -> tuple[list[str], list[str]]:
@@ -193,14 +236,12 @@ def main() -> int:
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    manifest = None
     try:
         if args.scan is None:
-            manifest = load_audit_manifest(ROOT)
-            rows = inspect_paths(manifest.source_paths(ROOT), ROOT)
+            rows = inspect_paths(owned_source_paths(ROOT), ROOT)
         else:
             rows = inspect_tree(args.scan.resolve())
-    except (AuditManifestError, OSError, SyntaxError) as exc:
+    except (OSError, SyntaxError) as exc:
         print(f"code quality audit: {exc}")
         return 1
     blockers, warnings = classify(rows)
@@ -231,16 +272,11 @@ def main() -> int:
         "blocking_signals": signals,
         "ratchet_mode": baseline is not None,
         "manifest": (
-            "config/harness-audit-manifest.json" if manifest is not None else ""
+            "repository-owned production Python roots"
+            if args.scan is None
+            else ""
         ),
-        "excluded_entrypoints": (
-            [
-                {"path": path, "reason": reason}
-                for path, reason in manifest.excluded_entrypoints
-            ]
-            if manifest is not None
-            else []
-        ),
+        "excluded_entrypoints": [],
         "warnings": warnings,
     }
     if args.json:
