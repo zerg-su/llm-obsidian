@@ -43,4 +43,3 @@ Foundation уже поддерживает `applied`, `rejected` и `out-of-scop
 - Exact-HEAD review packet и resolution receipt.
 - Ноль duplicate effects и ноль дополнительных review surfaces.
 - Wiki Summary v2 честно отражает `achieved` или `partially-achieved`.
-

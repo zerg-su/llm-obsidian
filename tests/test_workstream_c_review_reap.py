@@ -106,6 +106,21 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
         task_review._git = original_git
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    packet_files = {
+        path.name
+        for path in manifest_path.parent.iterdir()
+        if path.is_file()
+    }
+    check(
+        "review packet materializes readable plan, instructions, HEAD, and diff",
+        any(name.endswith("-plan-approved-plan.md") for name in packet_files)
+        and any(
+            name.endswith("-instructions-review-skill.md")
+            for name in packet_files
+        )
+        and any(name.endswith("-head-exact-head.txt") for name in packet_files)
+        and any(name.endswith("-diff-head-diff.patch") for name in packet_files),
+    )
     summary_inputs = [
         item for item in manifest["inputs"]
         if item["name"] == "implementer-summary.json"

@@ -137,7 +137,6 @@ def _review_resolution_handoff_ready(
         material_ids = boundary.get("material_finding_ids")
         if (
             not isinstance(material_ids, list)
-            or not material_ids
             or any(
                 not isinstance(finding_id, str) or not finding_id
                 for finding_id in material_ids
@@ -175,6 +174,7 @@ def _review_resolution_handoff_ready(
     if (
         len(reviewed_heads) != 1
         or "" in reviewed_heads
+        or not expected_finding_ids
         or len(expected_finding_ids) != len(set(expected_finding_ids))
         or review_operation_ids != {active_review_operation_id}
     ):
@@ -3553,25 +3553,23 @@ def run(
                 raise RuntimeWorkerError(
                     "task verification profile binding is stale"
                 )
-            verification_head = ""
-            if verify_step is not None:
-                head_result = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=spec["cwd"],
-                    text=True,
-                    capture_output=True,
-                    check=False,
+            head_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=spec["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            verification_head = head_result.stdout.strip()
+            if (
+                head_result.returncode
+                or not re.fullmatch(
+                    r"[0-9a-f]{40,64}", verification_head
                 )
-                verification_head = head_result.stdout.strip()
-                if (
-                    head_result.returncode
-                    or not re.fullmatch(
-                        r"[0-9a-f]{40,64}", verification_head
-                    )
-                ):
-                    raise RuntimeWorkerError(
-                        "pipeline verification HEAD is unavailable"
-                    )
+            ):
+                raise RuntimeWorkerError(
+                    "pipeline product HEAD is unavailable"
+                )
             verification_input_sha256 = hashlib.sha256(
                 json.dumps(
                     {

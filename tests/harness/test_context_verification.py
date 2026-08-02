@@ -42,6 +42,10 @@ with tempfile.TemporaryDirectory(prefix="harness-context.") as raw:
     inputs = (
         ContextInput("plan", "wiki/plan.md", b"approved plan", role="plan"),
         ContextInput("instructions", "AGENTS.md", b"repo rules", role="instructions"),
+        ContextInput("exact-head.txt", "git:HEAD", b"abc\n", role="head"),
+        ContextInput(
+            "head-diff.patch", "git:show:HEAD", b"diff --git\n", role="diff"
+        ),
         ContextInput.pointer(
             "diff",
             ".vault-meta/context/diff.patch",
@@ -58,12 +62,22 @@ with tempfile.TemporaryDirectory(prefix="harness-context.") as raw:
     check(
         "ContextPacket carries typed deterministic roles",
         [row["role"] for row in manifest["inputs"]]
-        == ["diff", "instructions", "plan"],
+        == ["diff", "diff", "head", "instructions", "plan"],
     )
     check(
         "large ContextPacket inputs remain pointers",
         manifest["inputs"][0]["storage"] == "pointer"
-        and not any("diff" in name for name in one.files if name.endswith(".bin")),
+        and not any("000-diff-diff" in name for name in one.files),
+    )
+    check(
+        "text ContextPacket inputs keep readable validated extensions",
+        any(name.endswith("-plan-plan.md") for name in one.files)
+        and any(
+            name.endswith("-instructions-instructions.md")
+            for name in one.files
+        )
+        and any(name.endswith("-head-exact-head.txt") for name in one.files)
+        and any(name.endswith("-diff-head-diff.patch") for name in one.files),
     )
     check(
         "ContextPacket role vocabulary covers the approved handoff",

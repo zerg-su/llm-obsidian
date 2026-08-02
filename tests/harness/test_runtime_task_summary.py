@@ -694,6 +694,76 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             current_head=resolved_head,
         ),
     )
+    for material_axis in (
+        "spec",
+        "standards-correctness-architecture-security",
+    ):
+        mixed_callbacks = [
+            {
+                "axis": axis,
+                "round_operation_id": f"round-{axis}",
+                "round_run_id": f"run-{axis}",
+                "callback_id": f"callback-{axis}",
+                "callback_sha256": (
+                    "d" * 64 if axis == "spec" else "e" * 64
+                ),
+            }
+            for axis in (
+                "spec",
+                "standards-correctness-architecture-security",
+            )
+        ]
+        mixed_gate = {
+            "active_review_operation_id": handoff_review_operation,
+            "awaiting_resolution": {
+                callback["axis"]: {
+                    "reviewed_head_sha": reviewed_head,
+                    "material_finding_ids": (
+                        ["F-mixed"]
+                        if callback["axis"] == material_axis
+                        else []
+                    ),
+                    "review_operation_id": handoff_review_operation,
+                    **{
+                        key: value
+                        for key, value in callback.items()
+                        if key != "axis"
+                    },
+                }
+                for callback in mixed_callbacks
+            },
+        }
+        write_json(
+            handoff / ".task-review-resolution.json",
+            {
+                "schema_version": 1,
+                "operation_id": TASK,
+                "review_identity_sha256": (
+                    review_transport_identity_sha256(
+                        handoff_review_operation, mixed_callbacks
+                    )
+                ),
+                "reviewed_head_sha": reviewed_head,
+                "resolved_head_sha": resolved_head,
+                "resolutions": [
+                    {
+                        "finding_id": "F-mixed",
+                        "disposition": "applied",
+                        "rationale": "The mixed-axis defect is fixed.",
+                        "follow_up": "",
+                    }
+                ],
+            },
+        )
+        check(
+            f"automatic review drive accepts one material {material_axis} axis",
+            _review_resolution_handoff_ready(
+                worktree=handoff,
+                operation_id=TASK,
+                gate_state=mixed_gate,
+                current_head=resolved_head,
+            ),
+        )
     valid_summary = {
         "schema_version": 1,
         "type": "session",
@@ -1973,6 +2043,203 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         automatic_marker["status"] == "started"
         and automatic_marker["operation_id"] == automatic_task,
         automatic_marker,
+    )
+
+    default_resolution_task = "78787878-7878-4787-8787-787878787878"
+    default_resolution_calls: list[str] = []
+
+    def resolve_default_review(vault: Path, worktree: Path) -> None:
+        default_resolution_calls.append(str(worktree))
+        meta = json.loads(
+            (worktree / ".task-meta.json").read_text(encoding="utf-8")
+        )
+        profile_sha = meta["review_policy"][
+            "verification_profile_sha256"
+        ]
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        gate_root = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / default_resolution_task
+            / default_resolution_task
+        )
+        if len(default_resolution_calls) == 1:
+            result_pointer = gate_root / "round-holistic-0.json"
+            write_json(
+                result_pointer,
+                {
+                    "axis": "holistic",
+                    "verdict": "changes-requested",
+                    "verification_iteration": 0,
+                    "findings": [
+                        {
+                            "axis": "holistic",
+                            "finding_id": "F-default-material",
+                            "severity": "important",
+                            "file": "product.txt",
+                            "line": 1,
+                            "summary": "Default pipeline finding",
+                            "evidence": "The fixture needs one correction.",
+                            "recommendation": "Commit the correction.",
+                        }
+                    ],
+                },
+            )
+            write_json(
+                gate_root / "review-gate.json",
+                {
+                    "schema_version": 1,
+                    "dispatch_operation_id": default_resolution_task,
+                    "owner_id": default_resolution_task,
+                    "status": "awaiting-resolution",
+                    "active_review_operation_id": "review-default",
+                    "product_root": str(worktree),
+                    "context": {
+                        "head_sha": head,
+                        "verification_profile": "scoped",
+                        "verification_profile_sha256": profile_sha,
+                    },
+                    "awaiting_resolution": {
+                        "holistic": {
+                            "pointer": result_pointer.relative_to(
+                                gate_root
+                            ).as_posix(),
+                            "reviewed_head_sha": head,
+                            "review_operation_id": "review-default",
+                            "round_operation_id": "round-default",
+                            "round_run_id": "run-default",
+                            "callback_id": "callback-default",
+                            "callback_sha256": "f" * 64,
+                            "material_finding_ids": [
+                                "F-default-material"
+                            ],
+                        }
+                    },
+                },
+            )
+
+            def publish_default_resolution() -> None:
+                import time
+
+                packet_path = worktree / ".task-review.json"
+                for _ in range(200):
+                    if packet_path.is_file():
+                        break
+                    time.sleep(0.01)
+                else:
+                    return
+                packet = json.loads(
+                    packet_path.read_text(encoding="utf-8")
+                )
+                (worktree / "product.txt").write_text(
+                    "ready\nresolved\n", encoding="utf-8"
+                )
+                subprocess.run(
+                    ["git", "add", "product.txt"],
+                    cwd=worktree,
+                    check=True,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "resolve default review"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                resolved_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=worktree,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip()
+                write_json(
+                    worktree / ".task-review-resolution.json",
+                    {
+                        "schema_version": 1,
+                        "operation_id": default_resolution_task,
+                        "review_identity_sha256": packet[
+                            "review_identity_sha256"
+                        ],
+                        "reviewed_head_sha": head,
+                        "resolved_head_sha": resolved_head,
+                        "resolutions": [
+                            {
+                                "finding_id": "F-default-material",
+                                "disposition": "applied",
+                                "rationale": "The correction is committed.",
+                                "follow_up": "",
+                            }
+                        ],
+                    },
+                )
+                refresh = (
+                    root
+                    / f"state-{default_resolution_task}"
+                    / "pipeline-summary-refresh-notify.json"
+                )
+                for _ in range(200):
+                    if refresh.is_file():
+                        break
+                    time.sleep(0.01)
+                else:
+                    return
+                summary_path = worktree / ".task-summary.json"
+                refreshed = json.loads(
+                    summary_path.read_text(encoding="utf-8")
+                )
+                refreshed["body"] += " Resolved on the final HEAD."
+                write_json(summary_path, refreshed)
+
+            threading.Thread(target=publish_default_resolution).start()
+            return
+        (gate_root / "review-gate.json").unlink()
+        ReviewGateController.skip(
+            gate_root,
+            dispatch_operation_id=default_resolution_task,
+            owner_id=default_resolution_task,
+            preset=ReviewPreset.from_flags(no_review=True),
+            context=ReviewContext(
+                "packets/task/manifest.json",
+                head,
+                "scoped",
+                profile_sha,
+            ),
+            product_root=worktree,
+        )
+
+    (
+        default_resolution_store,
+        _default_resolution_cmux,
+        _default_resolution_state,
+        default_resolution_rc,
+    ) = run_case(
+        root,
+        default_resolution_task,
+        valid_summary,
+        review_state="missing",
+        review_launcher=resolve_default_review,
+        pipeline_name="lifecycle/default",
+    )
+    default_resolution_record = default_resolution_store.read(
+        "owner-1", default_resolution_task
+    )
+    check(
+        "default pipeline resolves a material finding without a verify primitive",
+        default_resolution_rc == 0
+        and len(default_resolution_calls) == 2
+        and default_resolution_record.state == "finalizing"
+        and default_resolution_record.accepted_callback_kind
+        == "wiki-summary",
+        (default_resolution_calls, default_resolution_record),
     )
 
     asynchronous_task = "99999999-9999-4999-8999-999999999999"

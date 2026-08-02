@@ -38,6 +38,21 @@ _NAME_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}\Z")
 _RAW_SOURCES = frozenset(
     {"conversation", "raw-conversation", "chat-transcript", "session-transcript"}
 )
+_READABLE_EXTENSIONS = frozenset(
+    {".diff", ".json", ".md", ".patch", ".txt", ".yaml", ".yml"}
+)
+
+
+def _materialized_name(item: "ContextInput") -> str:
+    """Keep validated text packets readable; retain .bin for opaque bytes."""
+
+    name_suffix = Path(item.name).suffix.lower()
+    if name_suffix in _READABLE_EXTENSIONS:
+        return item.name
+    source_suffix = Path(item.source).suffix.lower()
+    if source_suffix in _READABLE_EXTENSIONS:
+        return item.name + source_suffix
+    return item.name + ".bin"
 
 
 @dataclass(frozen=True)
@@ -204,7 +219,8 @@ class ContextBuilder:
         for index, item in enumerate(ordered):
             if item.content is not None:
                 self._atomic(
-                    target / f"{index:03d}-{item.role}-{item.name}.bin",
+                    target
+                    / f"{index:03d}-{item.role}-{_materialized_name(item)}",
                     item.content,
                 )
         files = tuple(

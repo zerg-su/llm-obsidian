@@ -29,7 +29,7 @@
 | `A-CLA-01` | `skills/clarify/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
 | `A-DES-01` | `skills/design/SKILL.md`; `tests/test_skill_workstream_a.py`; `docs/acceptance/v2.6-paired-design-architecture-stop.md` | resolved at the general skill boundary; fixture-specific recovery prescriptions were removed after they failed the frozen no-regression gate |
 | `A-PRO-01` | `skills/prototype/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved |
-| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` stays in the release ledger for final disposition |
+| `A-SVP-01` | `skills/save-plan/SKILL.md`; `tests/test_skill_workstream_a.py` | resolved; review minor `HOL-004` is closed by deterministic valid/invalid `not-achieved` Wiki Summary v2 coverage and recorded in the release ledger |
 | `B-DBG-01` | `skills/debug/SKILL.md`; `tests/test_skill_workstream_b.py`; `tests/harness/test_engineering_skills.py`; applied review findings `HOL-001` and `HOL-003`; governance repair `0f9bb89` | resolved |
 | `B-TDD-01` | `skills/tdd/SKILL.md`; `tests/test_skill_workstream_b.py` | resolved |
 | `C-REV-01` | `skills/review/SKILL.md`; outcome-aware review harness; `tests/test_workstream_c_review_reap.py` | resolved |

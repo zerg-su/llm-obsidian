@@ -250,6 +250,19 @@ assert validate_summary(
     declared_evidence_ids=declared,
     require_schema=True,
 ) == summary_v2
+not_achieved = dict(summary_v2)
+not_achieved.update(
+    {
+        "outcome_disposition": "not-achieved",
+        "outcome_evidence_ids": [],
+        "residual_gap_pointers": ["[[Release blocker]]"],
+    }
+)
+assert validate_summary(
+    not_achieved,
+    declared_evidence_ids=declared,
+    require_schema=True,
+) == not_achieved
 assert validate_summary(
     {
         "schema_version": 1,
@@ -281,6 +294,13 @@ expect_summary_error("undeclared evidence", undeclared, "not declared")
 missing_gap = dict(summary_v2)
 missing_gap["residual_gap_pointers"] = []
 expect_summary_error("partial without residual gap", missing_gap, "residual")
+not_achieved_without_gap = dict(not_achieved)
+not_achieved_without_gap["residual_gap_pointers"] = []
+expect_summary_error(
+    "not-achieved without residual gap",
+    not_achieved_without_gap,
+    "residual",
+)
 achieved_gap = dict(summary_v2)
 achieved_gap.update(
     {
