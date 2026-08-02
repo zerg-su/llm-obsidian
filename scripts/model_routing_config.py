@@ -199,7 +199,7 @@ def _validate_role_efforts(roles: dict[str, Any]) -> None:
             or not isinstance(item["effort"], str)
         ):
             raise RoutingError(f"roles.{role} must contain one effort")
-        for runtime in RUNTIMES:
+        for runtime in sorted(RUNTIMES):
             validate_effort(runtime, item["effort"])
 
 

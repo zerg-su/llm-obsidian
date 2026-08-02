@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
         ),
         (
             "role effort invariant fails closed",
-            "codex effort must be one of",
+            "claude effort must be one of",
             lambda value: value["roles"]["daily"].__setitem__(
                 "effort", "ultra"
             ),
