@@ -33,8 +33,22 @@ from harness.review_program_authority import (  # noqa: E402
     trusted_review_receipt,
     validate_trusted_receipts,
 )
-from harness.workflows.review import ReviewContext, ReviewRequest  # noqa: E402
+from harness.callbacks import CallbackBroker  # noqa: E402
+from harness.contracts import (  # noqa: E402
+    CallbackEnvelope,
+    OperationSpec,
+    RuntimeRoute,
+)
+from harness.store import OperationStore  # noqa: E402
+from harness.workflows.review import (  # noqa: E402
+    ReviewContext,
+    ReviewRequest,
+    review_round_payload,
+)
 from harness.workflows.review_gate import review_context_sha256  # noqa: E402
+from harness.workflows.review_gate_contracts import (  # noqa: E402
+    _result_from_payload,
+)
 
 SHA = {
     name: char * 64
@@ -50,6 +64,11 @@ SHA = {
         "deviations": "2",
         "result": "3",
     }.items()
+}
+AXIS_SHORT = {
+    "holistic": "holistic",
+    "spec": "spec",
+    "standards-correctness-architecture-security": "standards",
 }
 
 
@@ -562,6 +581,7 @@ def write_approved_gate(
     resolved_head: str = "",
     mode: str = "simple",
     valid_resolution_proof: bool = True,
+    accepted_rounds: bool = True,
 ) -> None:
     gate_root = (
         worktree
@@ -582,6 +602,27 @@ def write_approved_gate(
         else ("spec", "standards-correctness-architecture-security")
     )
     terminal_iteration = 1 if resolved_head and valid_resolution_proof else 0
+    parent_ids = {
+        axis: (
+            operation_id
+            if axis == "holistic"
+            else f"{operation_id[:96]}-{_short}"
+        )
+        for axis, _short in (
+            ("holistic", "holistic"),
+            ("spec", "spec"),
+            ("standards-correctness-architecture-security", "standards"),
+        )
+        if axis in axes
+    }
+    lane_ids = {
+        axis: hashlib.sha256(f"{parent_ids[axis]}:lane".encode()).hexdigest()[:32]
+        for axis in axes
+    }
+    parent_run_ids = {
+        axis: hashlib.sha256(f"{parent_ids[axis]}:run".encode()).hexdigest()[:32]
+        for axis in axes
+    }
     payload = {
         "schema_version": 1,
         "operation_id": operation_id,
@@ -665,6 +706,24 @@ def write_approved_gate(
                     "sha256": hashlib.sha256(callback_bytes).hexdigest(),
                 },
                 "final_results": final_results,
+                "lanes": [
+                    {
+                        "axis": axis,
+                        "checkpoint": f"checkpoint-{_short}",
+                        "lane_id": lane_ids[axis],
+                        "operation_id": parent_ids[axis],
+                        "run_id": parent_run_ids[axis],
+                        "state": "complete",
+                        "surface_id": "",
+                        "verification_iteration": terminal_iteration,
+                    }
+                    for axis, _short in (
+                        ("holistic", "holistic"),
+                        ("spec", "spec"),
+                        ("standards-correctness-architecture-security", "standards"),
+                    )
+                    if axis in axes
+                ],
                 "resolution_evidence": (
                     {"holistic:0": f"{operation_id}/resolution-holistic-0.json"}
                     if resolved_head
@@ -771,6 +830,89 @@ def write_approved_gate(
             + "\n",
             encoding="utf-8",
         )
+
+    if resolved_head and valid_resolution_proof and accepted_rounds:
+        store = OperationStore(worktree / ".vault-meta/harness")
+        route = RuntimeRoute(
+            "codex", "gpt-5.6-terra", "medium", "reviewer-callback", "6" * 64
+        )
+        result_root = gate_root / operation_id
+        for axis in axes:
+            parent_id = parent_ids[axis]
+            parent_spec = OperationSpec(
+                parent_id,
+                hashlib.sha256(f"{parent_id}:parent".encode()).hexdigest(),
+                (
+                    "simple-review-holistic"
+                    if axis == "holistic"
+                    else f"deep-review-{AXIS_SHORT[axis]}"
+                ),
+                operation_id,
+                route,
+                "packets/review/manifest.json",
+                "scoped",
+            )
+            store.create(
+                parent_spec,
+                lane_id=lane_ids[axis],
+                run_id=parent_run_ids[axis],
+            )
+            for state in ("preflight", "starting", "running", "awaiting-callback"):
+                store.transition(operation_id, parent_id, state)
+            for iteration, result_path in (
+                (0, result_root / f"round-{AXIS_SHORT[axis]}-0.json"),
+                (terminal_iteration, gate_root / f"final-{AXIS_SHORT[axis]}.json"),
+            ):
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                role = f"round-{iteration}"
+                suffix = f"-round-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
+                child_id = f"{parent_id[: 128 - len(suffix)]}{suffix}"
+                child_key = hashlib.sha256(
+                    (
+                        f"{parent_spec.idempotency_key}:{axis}:{role}:"
+                        f"{child_id}"
+                    ).encode()
+                ).hexdigest()
+                child_spec = OperationSpec(
+                    child_id,
+                    child_key,
+                    "review-round",
+                    operation_id,
+                    route,
+                    "packets/review/manifest.json",
+                    "scoped",
+                )
+                child_run_id = hashlib.sha256(
+                    f"{child_key}:run".encode()
+                ).hexdigest()[:32]
+                store.create(child_spec, lane_id=lane_ids[axis], run_id=child_run_id)
+                for state in ("preflight", "starting", "running", "awaiting-callback"):
+                    store.transition(operation_id, child_id, state)
+                payload = review_round_payload(
+                    parent_id, _result_from_payload(result)
+                )
+                encoded = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":")
+                ).encode()
+                digest = hashlib.sha256(encoded).hexdigest()
+                CallbackBroker(store, operation_id).accept(
+                    CallbackEnvelope(
+                        f"review-{digest[:24]}",
+                        child_id,
+                        child_run_id,
+                        "review",
+                        payload,
+                        digest,
+                    )
+                )
+                child = store.read(operation_id, child_id)
+                if child.state == "verifying":
+                    store.transition(operation_id, child_id, "finalizing")
+                store.transition(operation_id, child_id, "exiting")
+                store.transition(operation_id, child_id, "complete")
+            store.transition(operation_id, parent_id, "finalizing")
+            store.transition(operation_id, parent_id, "exiting")
+            store.transition(operation_id, parent_id, "complete")
 
 
 with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
@@ -1008,6 +1150,23 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
             worktree,
             authority_boundaries["implementation"],
             forged_operation,
+        ),
+    )
+
+    synthetic_operation = "review-authority-implementation-synthetic-history"
+    write_approved_gate(
+        worktree,
+        authority_boundaries["implementation"],
+        synthetic_operation,
+        resolved_head=head_b,
+        accepted_rounds=False,
+    )
+    rejected(
+        "synthetic round history without accepted callbacks cannot rebind authority",
+        lambda: trusted_review_receipt(
+            worktree,
+            authority_boundaries["implementation"],
+            synthetic_operation,
         ),
     )
 

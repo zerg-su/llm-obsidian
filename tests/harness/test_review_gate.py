@@ -29,6 +29,7 @@ from harness import cli as harness_cli
 from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
+    CallbackEnvelope,
     EffectOutcome,
     OperationSpec,
     OwnedResources,
@@ -40,6 +41,7 @@ from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.review_program import ReviewBoundaryInput
+from harness.review_program_authority import trusted_review_receipt
 from harness.custom_pipelines import (
     CustomPipelinePolicy,
     ExplicitPipelineApproval,
@@ -56,6 +58,7 @@ from harness.workflows.review import (
     ReviewOperationRequest,
     ReviewResult,
     review_round_envelope,
+    review_round_payload,
     start_review,
 )
 from harness.workflows.review_gate import (
@@ -65,6 +68,7 @@ from harness.workflows.review_gate import (
     authorize_task_finalization,
     review_context_sha256,
 )
+from harness.workflows.review_gate_contracts import _result_from_payload
 from review_resolution import (
     FindingResolution,
     ReviewResolutionEvidence,
@@ -308,6 +312,132 @@ def write_trusted_current_approval(
             + "\n",
             encoding="utf-8",
         )
+        if valid_resolution_proof:
+            store = OperationStore(product_root / ".vault-meta/harness")
+            route = RuntimeRoute(
+                "codex",
+                "gpt-5.6-terra",
+                "medium",
+                "reviewer-callback",
+                "6" * 64,
+            )
+            proof_lanes = []
+            for axis in axes:
+                short = "standards" if axis.startswith("standards-") else axis
+                parent_id = f"{operation_id[:96]}-proof-{short}"
+                lane_id = hashlib.sha256(
+                    f"{parent_id}:lane".encode()
+                ).hexdigest()[:32]
+                parent_run_id = hashlib.sha256(
+                    f"{parent_id}:run".encode()
+                ).hexdigest()[:32]
+                parent_spec = OperationSpec(
+                    parent_id,
+                    hashlib.sha256(
+                        f"{parent_id}:parent".encode()
+                    ).hexdigest(),
+                    (
+                        "deep-review-spec"
+                        if axis == "spec"
+                        else "deep-review-correctness"
+                    ),
+                    operation_id,
+                    route,
+                    "packets/review/manifest.json",
+                    "scoped",
+                )
+                store.create(
+                    parent_spec,
+                    lane_id=lane_id,
+                    run_id=parent_run_id,
+                )
+                for parent_state in (
+                    "preflight",
+                    "starting",
+                    "running",
+                    "awaiting-callback",
+                ):
+                    store.transition(operation_id, parent_id, parent_state)
+                for iteration, result_path in (
+                    (0, resolution_root / f"round-{short}-0.json"),
+                    (terminal_iteration, gate_root / f"final-{short}.json"),
+                ):
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                    role = f"round-{iteration}"
+                    suffix = (
+                        f"-round-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
+                    )
+                    child_id = f"{parent_id[: 128 - len(suffix)]}{suffix}"
+                    child_key = hashlib.sha256(
+                        (
+                            f"{parent_spec.idempotency_key}:{axis}:{role}:"
+                            f"{child_id}"
+                        ).encode()
+                    ).hexdigest()
+                    child_run_id = hashlib.sha256(
+                        f"{child_key}:run".encode()
+                    ).hexdigest()[:32]
+                    child_spec = OperationSpec(
+                        child_id,
+                        child_key,
+                        "review-round",
+                        operation_id,
+                        route,
+                        "packets/review/manifest.json",
+                        "scoped",
+                    )
+                    store.create(
+                        child_spec,
+                        lane_id=lane_id,
+                        run_id=child_run_id,
+                    )
+                    for child_state in (
+                        "preflight",
+                        "starting",
+                        "running",
+                        "awaiting-callback",
+                    ):
+                        store.transition(operation_id, child_id, child_state)
+                    payload = review_round_payload(
+                        parent_id, _result_from_payload(result)
+                    )
+                    encoded = json.dumps(
+                        payload, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                    digest = hashlib.sha256(encoded).hexdigest()
+                    CallbackBroker(store, operation_id).accept(
+                        CallbackEnvelope(
+                            f"review-{digest[:24]}",
+                            child_id,
+                            child_run_id,
+                            "review",
+                            payload,
+                            digest,
+                        )
+                    )
+                    child = store.read(operation_id, child_id)
+                    if child.state == "verifying":
+                        store.transition(
+                            operation_id, child_id, "finalizing"
+                        )
+                    store.transition(operation_id, child_id, "exiting")
+                    store.transition(operation_id, child_id, "complete")
+                store.transition(operation_id, parent_id, "finalizing")
+                store.transition(operation_id, parent_id, "exiting")
+                store.transition(operation_id, parent_id, "complete")
+                proof_lanes.append(
+                    {
+                        "axis": axis,
+                        "checkpoint": f"checkpoint-{short}",
+                        "lane_id": lane_id,
+                        "operation_id": parent_id,
+                        "run_id": parent_run_id,
+                        "state": "complete",
+                        "surface_id": "",
+                        "verification_iteration": terminal_iteration,
+                    }
+                )
+            state["lanes"] = proof_lanes
     state_path.write_text(
         json.dumps(state, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -542,6 +672,16 @@ class FakeRuntime:
             )
         else:
             self.store.transition(owner_id, operation_id, "complete")
+        completed = self.store.read(owner_id, operation_id)
+        if completed.state == "complete" and completed.resources != OwnedResources():
+            self.store.save(
+                replace(
+                    completed,
+                    resources=OwnedResources(),
+                    revision=completed.revision + 1,
+                ),
+                expected_revision=completed.revision,
+            )
         return self.store.read(owner_id, operation_id)
 
 
@@ -833,6 +973,165 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         check("stale review evidence never unlocks finalization", True)
     else:
         check("stale review evidence never unlocks finalization", False)
+
+with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as raw:
+    container = Path(raw)
+    product = container / "product"
+    scratch = container / "scratch"
+    product.mkdir()
+    scratch.mkdir()
+    verification_path = product / "docs/verification.json"
+    verification_path.parent.mkdir()
+    verification_path.write_text('{"status":"passed"}\n', encoding="utf-8")
+    product_file = product / "product.py"
+    product_file.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Review Gate Test"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "review-gate@example.invalid"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(["git", "add", "docs", "product.py"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "reviewed candidate"],
+        cwd=product,
+        check=True,
+    )
+    reviewed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    boundary = ReviewBoundaryInput(
+        purpose="implementation",
+        outcome_contract_sha256="a" * 64,
+        plan_sha256="b" * 64,
+        product_head_sha=reviewed_head,
+        verification_evidence_sha256=hashlib.sha256(
+            verification_path.read_bytes()
+        ).hexdigest(),
+        verification_evidence_path="docs/verification.json",
+    )
+    operation_id = "review-program-real-resolution"
+    gate_root = (
+        product
+        / ".vault-meta/harness/review-data"
+        / operation_id
+        / operation_id
+    )
+    store = OperationStore(product / ".vault-meta/harness")
+    runtime = FakeRuntime(store)
+    controller = ReviewGateController(gate_root, runtime, store)
+    real_context = ReviewContext(
+        manifest="packets/review/manifest.json",
+        head_sha=reviewed_head,
+        verification_profile="scoped",
+        verification_profile_sha256="d" * 64,
+        purpose="implementation",
+        boundary_input_sha256=boundary.input_sha256,
+    )
+    request = replace(
+        request_for(operation_id, context=real_context),
+        owner_id=operation_id,
+    )
+    run = controller.begin(
+        dispatch_operation_id=operation_id,
+        request=request,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer="prompts/review.md",
+        callback_root=f"callbacks/{operation_id}",
+    )
+    lane = run.execution.lanes[0]
+    controller.defer_round_for_resolution(
+        run,
+        lane,
+        run.rounds["holistic"],
+        ReviewResult(
+            "holistic",
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "F-real-resolution",
+                    "holistic",
+                    "important",
+                    "the reviewed candidate needs one exact fix",
+                    "the initial production value is incorrect",
+                ),
+            ),
+        ),
+    )
+    product_file.write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "resolve review finding"],
+        cwd=product,
+        check=True,
+    )
+    resolved_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    fix_delta = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            reviewed_head,
+            resolved_head,
+            "--",
+        ],
+        cwd=product,
+        check=True,
+        capture_output=True,
+    ).stdout
+    controller.continue_after_resolution(
+        run,
+        lane,
+        context=replace(real_context, head_sha=resolved_head),
+        resolution=ReviewResolutionEvidence(
+            operation_id,
+            "holistic",
+            reviewed_head,
+            resolved_head,
+            hashlib.sha256(fix_delta).hexdigest(),
+            ("F-real-resolution",),
+            {
+                "F-real-resolution": FindingResolution(
+                    "F-real-resolution",
+                    "applied",
+                    "The exact fix is committed and ready for same-session verification.",
+                )
+            },
+        ),
+        review_identity_sha256=resolution_transport_identity(controller),
+        verification_prompt_pointer="prompts/verify.md",
+        callback_pointer=f"callbacks/{operation_id}/holistic/.review-callback.json",
+    )
+    run = controller.rehydrate()
+    terminal = controller.complete_round(
+        run,
+        run.execution.lanes[0],
+        run.rounds["holistic"],
+        ReviewResult("holistic", "approve", verification_iteration=1),
+    )
+    receipt = trusted_review_receipt(product, boundary, operation_id)
+    check(
+        "real controller resolution and same-session approval mint moved-HEAD authority",
+        terminal.action == "approved" and receipt.verdict == "approved",
+    )
 
 with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
     base = Path(raw)

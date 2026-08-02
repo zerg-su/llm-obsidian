@@ -16,6 +16,9 @@ from review_resolution import (
 )
 
 from .review_program_contracts import ReviewBoundaryInput, ReviewProgramError
+from .store import OperationStore, StoreError
+from .workflows.review import review_round_payload
+from .workflows.review_gate_contracts import _result_from_payload
 
 
 _AXIS_SHORT = {
@@ -24,6 +27,11 @@ _AXIS_SHORT = {
     "standards-correctness-architecture-security": "standards",
 }
 _MATERIAL = frozenset({"critical", "important"})
+_PARENT_KIND = {
+    "holistic": "simple-review-holistic",
+    "spec": "deep-review-spec",
+    "standards-correctness-architecture-security": "deep-review-correctness",
+}
 
 
 def _object(path: Path, label: str) -> dict[str, object]:
@@ -52,9 +60,142 @@ def _bound_object(root: Path, pointer: str, label: str) -> dict[str, object]:
     return _object(target, label)
 
 
+def _lane_identities(
+    gate: Mapping[str, object],
+    operation_id: str,
+) -> dict[str, dict[str, object]]:
+    raw_lanes = gate.get("lanes")
+    if not isinstance(raw_lanes, list) or not raw_lanes:
+        raise ReviewProgramError("trusted review lane identity is unavailable")
+    lanes: dict[str, dict[str, object]] = {}
+    for raw in raw_lanes:
+        if not isinstance(raw, dict):
+            raise ReviewProgramError("trusted review lane identity is invalid")
+        axis = raw.get("axis")
+        if (
+            axis not in _AXIS_SHORT
+            or axis in lanes
+            or not isinstance(raw.get("operation_id"), str)
+            or not isinstance(raw.get("lane_id"), str)
+            or not isinstance(raw.get("run_id"), str)
+            or raw.get("verification_iteration") is None
+        ):
+            raise ReviewProgramError("trusted review lane identity is invalid")
+        lanes[str(axis)] = raw
+    if set(lanes) not in (
+        {"holistic"},
+        {"spec", "standards-correctness-architecture-security"},
+    ):
+        raise ReviewProgramError("trusted review lane identity is invalid")
+    if gate.get("active_review_operation_id") != operation_id:
+        raise ReviewProgramError("trusted review lane identity is stale")
+    return lanes
+
+
+def _round_operation_id(parent_operation_id: str, iteration: int) -> str:
+    role = f"round-{iteration}"
+    suffix = f"-round-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
+    return f"{parent_operation_id[: 128 - len(suffix)]}{suffix}"
+
+
+def _accepted_round_result(
+    store: OperationStore,
+    owner_id: str,
+    lane: Mapping[str, object],
+    raw_result: dict[str, object],
+    axis: str,
+    iteration: int,
+) -> None:
+    """Bind persisted result bytes to the exact accepted child callback."""
+
+    parent_operation_id = str(lane.get("operation_id") or "")
+    lane_id = str(lane.get("lane_id") or "")
+    parent_run_id = str(lane.get("run_id") or "")
+    child_operation_id = _round_operation_id(parent_operation_id, iteration)
+    try:
+        parent = store.read(owner_id, parent_operation_id)
+        child = store.read(owner_id, child_operation_id)
+        result = _result_from_payload(raw_result)
+    except (StoreError, TypeError, ValueError) as exc:
+        raise ReviewProgramError("trusted review round receipt is unavailable") from exc
+    try:
+        payload = review_round_payload(parent_operation_id, result)
+    except ValueError as exc:
+        raise ReviewProgramError("trusted review round receipt is invalid") from exc
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    role = f"round-{iteration}"
+    expected_idempotency_key = hashlib.sha256(
+        (
+            f"{parent.spec.idempotency_key}:{axis}:{role}:"
+            f"{child_operation_id}"
+        ).encode()
+    ).hexdigest()
+    expected_run_id = hashlib.sha256(
+        f"{expected_idempotency_key}:run".encode()
+    ).hexdigest()[:32]
+    if (
+        result.axis != axis
+        or result.verification_iteration != iteration
+        or parent.spec.owner_id != owner_id
+        or parent.spec.operation_id != parent_operation_id
+        or parent.spec.kind != _PARENT_KIND[axis]
+        or parent.lane_id != lane_id
+        or parent.run_id != parent_run_id
+    ):
+        raise ReviewProgramError("trusted review round parent identity is stale")
+    if (
+        parent.state != "complete"
+        or any(
+            (
+                parent.resources.surface_id,
+                parent.resources.process_group,
+                parent.resources.supervisor_pid,
+                parent.resources.process_identity,
+                parent.resources.supervisor_identity,
+            )
+        )
+    ):
+        raise ReviewProgramError("trusted review round parent is not terminal")
+    resources = child.resources
+    if (
+        child.spec.owner_id != owner_id
+        or child.spec.operation_id != child_operation_id
+        or child.spec.kind != "review-round"
+        or child.spec.idempotency_key != expected_idempotency_key
+        or child.spec.route != parent.spec.route
+        or child.spec.context_manifest != parent.spec.context_manifest
+        or child.spec.verification_profile != parent.spec.verification_profile
+        or child.spec.contract_sha256 != parent.spec.contract_sha256
+        or child.spec.keep_open
+        or child.lane_id != lane_id
+        or child.run_id != expected_run_id
+        or child.state != "complete"
+        or any(
+            (
+                resources.surface_id,
+                resources.process_group,
+                resources.supervisor_pid,
+                resources.process_identity,
+                resources.supervisor_identity,
+            )
+        )
+    ):
+        raise ReviewProgramError("trusted review round child identity is stale")
+    if child.accepted_callback_kind != "review":
+        raise ReviewProgramError("trusted review round callback kind is stale")
+    if child.accepted_callback_id != f"review-{digest[:24]}":
+        raise ReviewProgramError("trusted review round callback id is stale")
+    if child.accepted_callback_sha256 != digest:
+        raise ReviewProgramError("trusted review round callback digest is stale")
+
+
 def _material_ids(
     gate_root: Path,
+    store: OperationStore,
     operation_id: str,
+    lanes: Mapping[str, Mapping[str, object]],
     axis: str,
     iteration: int,
 ) -> tuple[str, ...]:
@@ -68,10 +209,13 @@ def _material_ids(
     if (
         result.get("axis") != axis
         or result.get("verification_iteration") != iteration
-        or result.get("verdict") not in {"approve", "changes-requested", "blocked"}
+        or result.get("verdict") not in {"approve", "changes-requested"}
         or not isinstance(findings, list)
     ):
         raise ReviewProgramError("trusted pre-resolution round is invalid")
+    _accepted_round_result(
+        store, operation_id, lanes[axis], result, axis, iteration
+    )
     material: list[str] = []
     for finding in findings:
         if not isinstance(finding, dict):
@@ -118,7 +262,10 @@ def _fix_delta_sha256(root: Path, reviewed_head: str, resolved_head: str) -> str
 
 def _require_final_iterations(
     gate_root: Path,
+    store: OperationStore,
+    operation_id: str,
     gate: Mapping[str, object],
+    lanes: Mapping[str, Mapping[str, object]],
     iterations: Mapping[str, int],
 ) -> None:
     pointers = gate.get("final_results")
@@ -135,6 +282,9 @@ def _require_final_iterations(
             or result.get("verification_iteration") != count
         ):
             raise ReviewProgramError("trusted review verification evidence is invalid")
+        _accepted_round_result(
+            store, operation_id, lanes[axis], result, axis, count
+        )
 
 
 def resolved_terminal_head(
@@ -155,6 +305,9 @@ def resolved_terminal_head(
         return terminal_head
     if boundary.purpose != "implementation":
         raise ReviewProgramError("trusted review gate HEAD is stale")
+
+    lanes = _lane_identities(gate, operation_id)
+    store = OperationStore(root / ".vault-meta/harness")
 
     meta = _object(gate_root / ".review-meta.json", "trusted review metadata")
     entries = meta.get("resolution_evidence")
@@ -217,7 +370,11 @@ def resolved_terminal_head(
             != terminal_by_axis.get(axis, reviewed_head)
         ):
             raise ReviewProgramError("trusted review resolution chain is stale")
-        material_ids = _material_ids(gate_root, operation_id, axis, iteration)
+        if axis not in lanes:
+            raise ReviewProgramError("trusted review resolution chain is stale")
+        material_ids = _material_ids(
+            gate_root, store, operation_id, lanes, axis, iteration
+        )
         if evidence.previous_finding_ids != material_ids:
             raise ReviewProgramError("trusted review resolution findings are stale")
         if evidence.fix_delta_sha256 != _fix_delta_sha256(
@@ -245,7 +402,10 @@ def resolved_terminal_head(
         raise ReviewProgramError("trusted review resolution chain is stale")
     _require_final_iterations(
         gate_root,
+        store,
+        operation_id,
         gate,
+        lanes,
         {axis: len(chain) for axis, chain in chains.items()},
     )
     return terminal_head
