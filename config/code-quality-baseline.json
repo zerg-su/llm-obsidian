@@ -26,20 +26,10 @@
       "owner": "review-facade-decomposition",
       "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
     },
-    "function-branches:scripts/task_contract.py:normalize": {
-      "max_value": 102,
-      "owner": "task-contract-decomposition",
-      "evidence": "pre-existing contract hotspot exposed by the honest 2.6 denominator"
-    },
     "function-lines:scripts/task-review-runner.py:_run_review": {
       "max_value": 508,
       "owner": "review-facade-decomposition",
       "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
-    },
-    "function-lines:scripts/task_contract.py:normalize": {
-      "max_value": 310,
-      "owner": "task-contract-decomposition",
-      "evidence": "pre-existing contract hotspot exposed by the honest 2.6 denominator"
     }
   }
 }

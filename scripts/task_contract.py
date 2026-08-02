@@ -144,60 +144,7 @@ def v3_session_is_bound(meta: dict[str, Any], session_id: str) -> bool:
     return False
 
 
-def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
-    version = meta.get("version", 1)
-    if isinstance(version, bool) or not isinstance(version, int):
-        raise ContractError("task metadata version must be an integer")
-    if version == 1:
-        return {
-            "version": 1,
-            "interaction_policy": "interactive",
-            "review_policy": {
-                "mode": "deep",
-                "max_verify_iterations": 0,
-                "auto_resolve_severities": [],
-                "escalate_severities": ["blocking"],
-            },
-            "reap_policy": {
-                "mode": "interim",
-                "auto_file": False,
-                "allowed_types": [],
-                "title": "",
-            },
-            "surface_policy": {"auto_close": False},
-            "watchdog_policy": dict(DEFAULT_WATCHDOG_POLICY),
-        }
-    if version not in {2, 3, 4}:
-        raise ContractError(f"unsupported task metadata version: {version!r}")
-
-    if version in {3, 4}:
-        expected_meta_fields = V4_META_FIELDS if version == 4 else V3_META_FIELDS
-        unknown = set(meta) - expected_meta_fields
-        if unknown:
-            raise ContractError(
-                f"v{version} task metadata has unknown fields: "
-                + ", ".join(sorted(unknown))
-            )
-        for field in ("project_id", "task_id"):
-            value = meta.get(field)
-            try:
-                normalized = str(uuid.UUID(str(value)))
-            except (ValueError, TypeError, AttributeError):
-                raise ContractError(f"v{version} {field} must be a UUID") from None
-            if normalized != value:
-                raise ContractError(
-                    f"v{version} {field} must be a canonical lowercase UUID"
-                )
-
-    for field in ("task_name", "origin_session"):
-        if not isinstance(meta.get(field), str) or not meta[field].strip():
-            raise ContractError(f"{field} must be a non-empty string")
-    if meta.get("executor_runtime") not in {"claude", "codex"}:
-        raise ContractError("executor_runtime must be claude or codex")
-
-    policy = meta.get("interaction_policy")
-    if policy not in {"interactive", "unattended"}:
-        raise ContractError("interaction_policy must be interactive or unattended")
+def _validate_pipeline_policy(meta: dict[str, Any], version: int) -> None:
     if version in {3, 4}:
         pipeline = meta.get("pipeline_policy")
         base_pipeline_fields = {
@@ -267,52 +214,9 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError(
                 f"v{version} autonomous completion requires engineering/fix or custom"
             )
-    plan_value = meta.get("plan_file")
-    hash_value = meta.get("approved_plan_sha256")
-    plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""
-    plan_hash = hash_value.strip() if isinstance(hash_value, str) else ""
-    if not plan_raw or len(plan_hash) != 64 or any(c not in "0123456789abcdef" for c in plan_hash):
-        raise ContractError(f"v{version} metadata requires plan_file and lowercase approved_plan_sha256")
-    plan = Path(plan_raw).expanduser().resolve()
-    if not plan.is_file():
-        raise ContractError(f"approved plan is missing: {plan}")
-    outcome_digest = ""
-    if version == 4:
-        raw_outcome_digest = meta.get("outcome_contract_sha256")
-        if not isinstance(raw_outcome_digest, str) or not re.fullmatch(
-            r"[0-9a-f]{64}", raw_outcome_digest
-        ):
-            raise ContractError(
-                "v4 metadata requires lowercase outcome_contract_sha256"
-            )
-        try:
-            current_outcome_digest = extract_from_bytes(plan.read_bytes()).sha256
-        except (OSError, OutcomeContractError) as exc:
-            raise ContractError(f"approved plan Outcome Contract is invalid: {exc}") from exc
-        if current_outcome_digest != raw_outcome_digest:
-            raise ContractError(
-                "approved plan Outcome Contract digest changed after dispatch approval"
-            )
-        outcome_digest = raw_outcome_digest
-    if verify_plan_hash and sha256_file(plan) != plan_hash:
-        raise ContractError("approved plan hash changed after dispatch approval")
-    vault_raw = meta.get("vault_root")
-    if vault_raw is not None:
-        if not isinstance(vault_raw, str) or not vault_raw.strip():
-            raise ContractError("vault_root must be a non-empty absolute path")
-        declared_vault = Path(vault_raw).expanduser()
-        if not declared_vault.is_absolute():
-            raise ContractError("vault_root must be a non-empty absolute path")
-        declared_vault = declared_vault.resolve()
-        if not (declared_vault / "wiki").is_dir():
-            raise ContractError("vault_root must contain the coordinator wiki")
-        if (
-            plan.parent.name != "plans"
-            or plan.parent.parent.name != "wiki"
-            or plan.parents[2] != declared_vault
-        ):
-            raise ContractError("plan_file must belong to vault_root/wiki/plans")
 
+
+def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any]:
     review = meta.get("review_policy")
     if not isinstance(review, dict) or review.get("mode") not in REVIEW_MODES:
         raise ContractError("review_policy.mode must be simple, deep, or skip")
@@ -396,6 +300,111 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError("auto_resolve_severities must be unique")
         if escalate != ["blocking"]:
             raise ContractError("blocking must be the sole escalate severity")
+    return review
+
+
+def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
+    version = meta.get("version", 1)
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ContractError("task metadata version must be an integer")
+    if version == 1:
+        return {
+            "version": 1,
+            "interaction_policy": "interactive",
+            "review_policy": {
+                "mode": "deep",
+                "max_verify_iterations": 0,
+                "auto_resolve_severities": [],
+                "escalate_severities": ["blocking"],
+            },
+            "reap_policy": {
+                "mode": "interim",
+                "auto_file": False,
+                "allowed_types": [],
+                "title": "",
+            },
+            "surface_policy": {"auto_close": False},
+            "watchdog_policy": dict(DEFAULT_WATCHDOG_POLICY),
+        }
+    if version not in {2, 3, 4}:
+        raise ContractError(f"unsupported task metadata version: {version!r}")
+
+    if version in {3, 4}:
+        expected_meta_fields = V4_META_FIELDS if version == 4 else V3_META_FIELDS
+        unknown = set(meta) - expected_meta_fields
+        if unknown:
+            raise ContractError(
+                f"v{version} task metadata has unknown fields: "
+                + ", ".join(sorted(unknown))
+            )
+        for field in ("project_id", "task_id"):
+            value = meta.get(field)
+            try:
+                normalized = str(uuid.UUID(str(value)))
+            except (ValueError, TypeError, AttributeError):
+                raise ContractError(f"v{version} {field} must be a UUID") from None
+            if normalized != value:
+                raise ContractError(
+                    f"v{version} {field} must be a canonical lowercase UUID"
+                )
+
+    for field in ("task_name", "origin_session"):
+        if not isinstance(meta.get(field), str) or not meta[field].strip():
+            raise ContractError(f"{field} must be a non-empty string")
+    if meta.get("executor_runtime") not in {"claude", "codex"}:
+        raise ContractError("executor_runtime must be claude or codex")
+
+    policy = meta.get("interaction_policy")
+    if policy not in {"interactive", "unattended"}:
+        raise ContractError("interaction_policy must be interactive or unattended")
+    _validate_pipeline_policy(meta, version)
+    plan_value = meta.get("plan_file")
+    hash_value = meta.get("approved_plan_sha256")
+    plan_raw = plan_value.strip() if isinstance(plan_value, str) else ""
+    plan_hash = hash_value.strip() if isinstance(hash_value, str) else ""
+    if not plan_raw or len(plan_hash) != 64 or any(c not in "0123456789abcdef" for c in plan_hash):
+        raise ContractError(f"v{version} metadata requires plan_file and lowercase approved_plan_sha256")
+    plan = Path(plan_raw).expanduser().resolve()
+    if not plan.is_file():
+        raise ContractError(f"approved plan is missing: {plan}")
+    outcome_digest = ""
+    if version == 4:
+        raw_outcome_digest = meta.get("outcome_contract_sha256")
+        if not isinstance(raw_outcome_digest, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", raw_outcome_digest
+        ):
+            raise ContractError(
+                "v4 metadata requires lowercase outcome_contract_sha256"
+            )
+        try:
+            current_outcome_digest = extract_from_bytes(plan.read_bytes()).sha256
+        except (OSError, OutcomeContractError) as exc:
+            raise ContractError(f"approved plan Outcome Contract is invalid: {exc}") from exc
+        if current_outcome_digest != raw_outcome_digest:
+            raise ContractError(
+                "approved plan Outcome Contract digest changed after dispatch approval"
+            )
+        outcome_digest = raw_outcome_digest
+    if verify_plan_hash and sha256_file(plan) != plan_hash:
+        raise ContractError("approved plan hash changed after dispatch approval")
+    vault_raw = meta.get("vault_root")
+    if vault_raw is not None:
+        if not isinstance(vault_raw, str) or not vault_raw.strip():
+            raise ContractError("vault_root must be a non-empty absolute path")
+        declared_vault = Path(vault_raw).expanduser()
+        if not declared_vault.is_absolute():
+            raise ContractError("vault_root must be a non-empty absolute path")
+        declared_vault = declared_vault.resolve()
+        if not (declared_vault / "wiki").is_dir():
+            raise ContractError("vault_root must contain the coordinator wiki")
+        if (
+            plan.parent.name != "plans"
+            or plan.parent.parent.name != "wiki"
+            or plan.parents[2] != declared_vault
+        ):
+            raise ContractError("plan_file must belong to vault_root/wiki/plans")
+
+    review = _validate_review_policy(meta, version)
 
     reap = meta.get("reap_policy")
     if not isinstance(reap, dict):
