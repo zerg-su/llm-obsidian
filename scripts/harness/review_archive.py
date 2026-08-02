@@ -159,8 +159,10 @@ def validated_resolutions(
     raw_entries = meta.get("resolution_evidence", [])
     if not isinstance(raw_entries, list) or len(raw_entries) > 10:
         raise ArchiveError("review resolution evidence list is invalid")
+    resolved_head_sha = required_text(meta, "head_sha")
     evidence: list[ReviewResolutionEvidence] = []
     pointers: set[str] = set()
+    terminal_heads: dict[str, str] = {}
     for entry in raw_entries:
         if not isinstance(entry, dict) or set(entry) != {"pointer", "sha256"}:
             raise ArchiveError("review resolution evidence pointer is invalid")
@@ -186,7 +188,13 @@ def validated_resolutions(
             ) from exc
         if item.operation_id != operation_id:
             raise ArchiveError("review resolution evidence operation changed")
+        previous_head = terminal_heads.get(item.axis)
+        if previous_head is not None and item.reviewed_head_sha != previous_head:
+            raise ArchiveError("review resolution evidence chain changed")
+        terminal_heads[item.axis] = item.resolved_head_sha
         evidence.append(item)
+    if any(head != resolved_head_sha for head in terminal_heads.values()):
+        raise ArchiveError("review resolution evidence terminal HEAD changed")
     return tuple(evidence)
 
 
