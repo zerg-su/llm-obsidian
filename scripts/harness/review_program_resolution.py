@@ -302,6 +302,28 @@ def resolved_terminal_head(
     terminal_head = str(context.get("head_sha") or "")
     reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
     if not reviewed_head or terminal_head == reviewed_head:
+        if gate.get("status") != "approved":
+            return terminal_head
+        lanes = _lane_identities(gate, operation_id)
+        store = OperationStore(root / ".vault-meta/harness")
+        iterations: dict[str, int] = {}
+        for axis, lane in lanes.items():
+            raw_iteration = lane.get("verification_iteration")
+            if (
+                isinstance(raw_iteration, bool)
+                or not isinstance(raw_iteration, int)
+                or raw_iteration < 0
+            ):
+                raise ReviewProgramError("trusted review lane identity is invalid")
+            iterations[axis] = raw_iteration
+        _require_final_iterations(
+            gate_root,
+            store,
+            operation_id,
+            gate,
+            lanes,
+            iterations,
+        )
         return terminal_head
     if boundary.purpose != "implementation":
         raise ReviewProgramError("trusted review gate HEAD is stale")

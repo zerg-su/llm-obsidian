@@ -431,6 +431,78 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         '"verification_iteration":0}\n',
         encoding="utf-8",
     )
+    cli_lane_id = hashlib.sha256(b"review-intent-cli:lane").hexdigest()[:32]
+    cli_parent_run_id = hashlib.sha256(b"review-intent-cli:run").hexdigest()[:32]
+    cli_route = RuntimeRoute(
+        "codex", "gpt-5.6-terra", "medium", "reviewer-callback", "6" * 64
+    )
+    cli_parent_spec = OperationSpec(
+        "review-intent-cli",
+        hashlib.sha256(b"review-intent-cli:parent").hexdigest(),
+        "simple-review-holistic",
+        "review-intent-cli",
+        cli_route,
+        "packets/review/manifest.json",
+        "scoped",
+    )
+    cli_store = OperationStore(worktree / ".vault-meta/harness")
+    cli_store.create(
+        cli_parent_spec,
+        lane_id=cli_lane_id,
+        run_id=cli_parent_run_id,
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        cli_store.transition("review-intent-cli", "review-intent-cli", state)
+    cli_role = "round-0"
+    cli_suffix = f"-round-{hashlib.sha256(cli_role.encode()).hexdigest()[:8]}"
+    cli_child_id = f"{'review-intent-cli'[: 128 - len(cli_suffix)]}{cli_suffix}"
+    cli_child_key = hashlib.sha256(
+        (
+            f"{cli_parent_spec.idempotency_key}:holistic:{cli_role}:"
+            f"{cli_child_id}"
+        ).encode()
+    ).hexdigest()
+    cli_child_run_id = hashlib.sha256(
+        f"{cli_child_key}:run".encode()
+    ).hexdigest()[:32]
+    cli_child_spec = OperationSpec(
+        cli_child_id,
+        cli_child_key,
+        "review-round",
+        "review-intent-cli",
+        cli_route,
+        "packets/review/manifest.json",
+        "scoped",
+    )
+    cli_store.create(
+        cli_child_spec,
+        lane_id=cli_lane_id,
+        run_id=cli_child_run_id,
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        cli_store.transition("review-intent-cli", cli_child_id, state)
+    cli_round = _result_from_payload(
+        json.loads((gate_root / "final-holistic.json").read_text(encoding="utf-8"))
+    )
+    cli_round_payload = review_round_payload("review-intent-cli", cli_round)
+    cli_round_bytes = json.dumps(
+        cli_round_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    cli_round_digest = hashlib.sha256(cli_round_bytes).hexdigest()
+    CallbackBroker(cli_store, "review-intent-cli").accept(
+        CallbackEnvelope(
+            f"review-{cli_round_digest[:24]}",
+            cli_child_id,
+            cli_child_run_id,
+            "review",
+            cli_round_payload,
+            cli_round_digest,
+        )
+    )
+    for state in ("finalizing", "exiting", "complete"):
+        cli_store.transition("review-intent-cli", cli_child_id, state)
+    for state in ("finalizing", "exiting", "complete"):
+        cli_store.transition("review-intent-cli", "review-intent-cli", state)
     callback_sha256 = hashlib.sha256(callback_bytes).hexdigest()
     (gate_root / "review-gate.json").write_text(
         json.dumps(
@@ -455,6 +527,18 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
                     "sha256": callback_sha256,
                 },
                 "final_results": {"holistic": "final-holistic.json"},
+                "lanes": [
+                    {
+                        "axis": "holistic",
+                        "checkpoint": "checkpoint-holistic",
+                        "lane_id": cli_lane_id,
+                        "operation_id": "review-intent-cli",
+                        "run_id": cli_parent_run_id,
+                        "state": "complete",
+                        "surface_id": "",
+                        "verification_iteration": 0,
+                    }
+                ],
             },
             sort_keys=True,
         )
@@ -831,7 +915,7 @@ def write_approved_gate(
             encoding="utf-8",
         )
 
-    if resolved_head and valid_resolution_proof and accepted_rounds:
+    if accepted_rounds and (not resolved_head or valid_resolution_proof):
         store = OperationStore(worktree / ".vault-meta/harness")
         route = RuntimeRoute(
             "codex", "gpt-5.6-terra", "medium", "reviewer-callback", "6" * 64
@@ -842,11 +926,13 @@ def write_approved_gate(
             parent_spec = OperationSpec(
                 parent_id,
                 hashlib.sha256(f"{parent_id}:parent".encode()).hexdigest(),
-                (
-                    "simple-review-holistic"
-                    if axis == "holistic"
-                    else f"deep-review-{AXIS_SHORT[axis]}"
-                ),
+                {
+                    "holistic": "simple-review-holistic",
+                    "spec": "deep-review-spec",
+                    "standards-correctness-architecture-security": (
+                        "deep-review-correctness"
+                    ),
+                }[axis],
                 operation_id,
                 route,
                 "packets/review/manifest.json",
@@ -859,10 +945,21 @@ def write_approved_gate(
             )
             for state in ("preflight", "starting", "running", "awaiting-callback"):
                 store.transition(operation_id, parent_id, state)
-            for iteration, result_path in (
-                (0, result_root / f"round-{AXIS_SHORT[axis]}-0.json"),
-                (terminal_iteration, gate_root / f"final-{AXIS_SHORT[axis]}.json"),
-            ):
+            rounds = [
+                (
+                    terminal_iteration,
+                    gate_root / f"final-{AXIS_SHORT[axis]}.json",
+                )
+            ]
+            if resolved_head and valid_resolution_proof:
+                rounds.insert(
+                    0,
+                    (
+                        0,
+                        result_root / f"round-{AXIS_SHORT[axis]}-0.json",
+                    ),
+                )
+            for iteration, result_path in rounds:
                 result = json.loads(result_path.read_text(encoding="utf-8"))
                 role = f"round-{iteration}"
                 suffix = f"-round-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
@@ -984,6 +1081,25 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
         authority_receipts[purpose] = trusted_review_receipt(
             worktree, boundary, operations[purpose]
         )
+
+    for purpose, boundary in authority_boundaries.items():
+        for mode in ("simple", "deep"):
+            operation = f"review-authority-{purpose}-{mode}-synthetic-same-head"
+            write_approved_gate(
+                worktree,
+                boundary,
+                operation,
+                mode=mode,
+                accepted_rounds=False,
+            )
+            rejected(
+                f"synthetic same-HEAD {mode} {purpose} approval without accepted callbacks fails closed",
+                lambda boundary=boundary, operation=operation: trusted_review_receipt(
+                    worktree,
+                    boundary,
+                    operation,
+                ),
+            )
 
     deep_operation = "review-authority-deep-implementation"
     deep_boundary = authority_boundaries["implementation"]

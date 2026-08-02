@@ -66,6 +66,7 @@ def _git_binary() -> str:
 def _run_git(worktree: Path, args: Sequence[str], *, limit: int) -> GitResult:
     command = (
         _git_binary(),
+        "--literal-pathspecs",
         "--no-optional-locks",
         "-C",
         str(worktree),
@@ -143,6 +144,8 @@ def _path(value: str) -> str:
     path = PurePosixPath(value)
     if (
         not value
+        or value.startswith(":")
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
         or "\\" in value
         or any(token in value for token in ("*", "?", "[", "]", "|", ";", ">", "<", "`", "$"))
         or path.is_absolute()
@@ -150,7 +153,9 @@ def _path(value: str) -> str:
         or path.as_posix() == "."
         or any(part in {"", "."} for part in path.parts)
     ):
-        raise InspectError("--path must be repository-relative without traversal")
+        raise InspectError(
+            "--path must be a literal repository-relative path without traversal"
+        )
     return path.as_posix()
 
 
