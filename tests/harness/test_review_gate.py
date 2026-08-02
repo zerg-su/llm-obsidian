@@ -3100,6 +3100,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             outcome_contract_sha256=extract_from_bytes(
                 review_plan.read_bytes()
             ).sha256,
+            plan_sha256=hashlib.sha256(review_plan.read_bytes()).hexdigest(),
             integration_head_sha=release_head,
             outcome_evidence_map_sha256=hashlib.sha256(
                 boundary_artifacts["outcome-evidence"].read_bytes()

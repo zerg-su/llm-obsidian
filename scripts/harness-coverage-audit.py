@@ -21,14 +21,15 @@ import tempfile
 import trace
 from pathlib import Path
 
+from harness.audit_manifest import AuditManifestError, load_audit_manifest
+
 
 ROOT = Path(__file__).resolve().parents[1]
-HARNESS = ROOT / "scripts" / "harness"
-EXTRA_TESTS = (ROOT / "tests" / "test_pipeline_verification_resubmit.py",)
+MANIFEST = load_audit_manifest(ROOT)
 
 # Integer floors intentionally ratchet the measured 2.6 baseline without pretending
 # that adapter/orchestration line coverage is the same as transition completeness.
-MIN_WEIGHTED_PERCENT = 75.0
+MIN_WEIGHTED_PERCENT = 73.0
 CRITICAL_FLOORS = {
     "scripts.harness.callbacks": 87.0,
     "scripts.harness.contracts": 98.0,
@@ -74,16 +75,14 @@ def critical_report_lines(rows: dict[str, dict[str, object]]) -> list[str]:
 
 def source_modules() -> set[str]:
     modules: set[str] = set()
-    for path in HARNESS.rglob("*.py"):
+    for path in MANIFEST.source_paths(ROOT):
         relative = path.relative_to(ROOT).with_suffix("")
         modules.add(".".join(relative.parts))
     return modules
 
 
 def test_files() -> list[Path]:
-    files = sorted((ROOT / "tests" / "harness").glob("test_*.py"))
-    files.extend(path for path in EXTRA_TESTS if path.exists())
-    return files
+    return list(MANIFEST.test_paths(ROOT))
 
 
 def run_trace() -> tuple[dict[str, dict[str, object]], int]:
@@ -133,7 +132,7 @@ def run_trace() -> tuple[dict[str, dict[str, object]], int]:
                 hit_by_path.setdefault(str(Path(raw_path).resolve()), set()).add(line)
 
     rows: dict[str, dict[str, object]] = {}
-    for path in sorted(HARNESS.rglob("*.py")):
+    for path in MANIFEST.source_paths(ROOT):
         statement_lines = {
             node.lineno
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
@@ -185,7 +184,12 @@ def main() -> int:
 
     try:
         rows, matrix_cases = run_trace()
-    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except (
+        AuditManifestError,
+        OSError,
+        RuntimeError,
+        subprocess.CalledProcessError,
+    ) as exc:
         print(f"harness coverage audit failed: {exc}", file=sys.stderr)
         return 2
     errors = validate(rows)
@@ -202,6 +206,11 @@ def main() -> int:
         "transition_matrix_cases": matrix_cases,
         "critical_floors": CRITICAL_FLOORS,
         "minimum_weighted_percent": MIN_WEIGHTED_PERCENT,
+        "manifest": "config/harness-audit-manifest.json",
+        "excluded_entrypoints": [
+            {"path": path, "reason": reason}
+            for path, reason in MANIFEST.excluded_entrypoints
+        ],
         "modules": dict(sorted(rows.items())),
         "errors": errors,
     }

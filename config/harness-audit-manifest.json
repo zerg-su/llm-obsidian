@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "source_roots": [
+    "scripts/harness"
+  ],
+  "entrypoints": [
+    "scripts/dispatch-runner.py",
+    "scripts/reap-runner.py",
+    "scripts/review-inspect.py",
+    "scripts/review-program.py",
+    "scripts/task-review-runner.py",
+    "scripts/outcome_contract.py",
+    "scripts/review_contract.py",
+    "scripts/review_resolution.py",
+    "scripts/review_telemetry.py",
+    "scripts/task_contract.py",
+    "scripts/task_sessions.py",
+    "scripts/wiki_summary_contract.py"
+  ],
+  "coverage_test_roots": [
+    "tests/harness"
+  ],
+  "coverage_tests": [
+    "tests/test_dispatch_runner.py",
+    "tests/test_harness_coverage_audit.py",
+    "tests/test_outcome_contract.py",
+    "tests/test_pipeline_verification_resubmit.py",
+    "tests/test_reap_runner.py",
+    "tests/test_task_lifecycle.py",
+    "tests/test_task_sessions.py",
+    "tests/test_workstream_c_review_reap.py"
+  ],
+  "excluded_entrypoints": [
+    {
+      "path": "scripts/review-runner.py",
+      "reason": "provider-launch adapter; verified by bounded review integration rather than stdlib in-process trace"
+    },
+    {
+      "path": "scripts/live-acceptance-runner.py",
+      "reason": "provider/OS acceptance adapter; covered by the separate four-cell live release gate"
+    }
+  ]
+}

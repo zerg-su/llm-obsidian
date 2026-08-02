@@ -551,11 +551,8 @@ def _purpose_boundary_inputs(
         plan_bytes = plan.read_bytes()
     except (OSError, HarnessContractError) as exc:
         raise TaskReviewError(f"review Outcome Contract is invalid: {exc}") from exc
-    if (
-        boundary.purpose == "intent"
-        and hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256
-    ):
-        raise TaskReviewError("intent review plan digest is stale")
+    if hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256:
+        raise TaskReviewError("review program plan digest is stale")
     inputs = [contract]
     for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:
         relative = Path(str(getattr(boundary, path_field)))

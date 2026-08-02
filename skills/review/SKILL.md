@@ -32,7 +32,7 @@ For approved multi-stage work, keep simple/deep inside one explicit purpose:
 - `release`: integration HEAD, evidence map, deviations and merge drift;
   approval-or-stop, never a hidden late fix loop.
 
-`scripts/review-program.py status` selects ordered purposes from approved risk.
+`review-program.py` derives risk from plan metadata and receipts from terminal gate bytes.
 Small reversible work collapses intent; standard uses intent+implementation;
 architecture, migration, release and skill-integration require all three.
 Receipts are additive; digest drift stales them. Evidence paths are repo-relative; the runner verifies and packets exact bytes.

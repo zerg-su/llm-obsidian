@@ -10,9 +10,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from harness.audit_manifest import AuditManifestError, load_audit_manifest
+
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SCAN = ROOT / "scripts" / "harness"
 FILE_REVIEW_LINES = 200
 FILE_HARD_LINES = 1_000
 FUNCTION_REVIEW_LINES = 60
@@ -59,7 +60,7 @@ def branch_points(node: ast.AST) -> int:
     return total
 
 
-def inspect_file(path: Path, scan_root: Path) -> FileSignal:
+def inspect_file(path: Path, repo_root: Path) -> FileSignal:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     functions = []
@@ -76,14 +77,19 @@ def inspect_file(path: Path, scan_root: Path) -> FileSignal:
             )
         )
     return FileSignal(
-        path=str(path.relative_to(scan_root.parent.parent)),
+        path=str(path.relative_to(repo_root)),
         lines=len(source.splitlines()),
         functions=tuple(sorted(functions, key=lambda item: (item.line, item.name))),
     )
 
 
 def inspect_tree(scan_root: Path) -> tuple[FileSignal, ...]:
-    return tuple(inspect_file(path, scan_root) for path in sorted(scan_root.rglob("*.py")))
+    repo_root = scan_root.parent.parent
+    return tuple(inspect_file(path, repo_root) for path in sorted(scan_root.rglob("*.py")))
+
+
+def inspect_paths(paths: tuple[Path, ...], repo_root: Path) -> tuple[FileSignal, ...]:
+    return tuple(inspect_file(path, repo_root) for path in sorted(paths))
 
 
 def classify(rows: tuple[FileSignal, ...]) -> tuple[list[str], list[str]]:
@@ -172,12 +178,20 @@ def ratchet_failures(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scan", type=Path, default=DEFAULT_SCAN)
+    parser.add_argument("--scan", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    scan_root = args.scan.resolve()
-    rows = inspect_tree(scan_root)
+    manifest = None
+    try:
+        if args.scan is None:
+            manifest = load_audit_manifest(ROOT)
+            rows = inspect_paths(manifest.source_paths(ROOT), ROOT)
+        else:
+            rows = inspect_tree(args.scan.resolve())
+    except (AuditManifestError, OSError, SyntaxError) as exc:
+        print(f"code quality audit: {exc}")
+        return 1
     blockers, warnings = classify(rows)
     signals = blocking_signals(rows)
     baseline = None
@@ -200,17 +214,29 @@ def main() -> int:
         },
         "files": [asdict(row) for row in rows],
         "errors": errors,
-        "release_blockers": blockers,
+        "release_blockers": errors,
+        "owned_hotspots": blockers if baseline is not None else [],
         "blocking_signals": signals,
         "ratchet_mode": baseline is not None,
+        "manifest": (
+            "config/harness-audit-manifest.json" if manifest is not None else ""
+        ),
+        "excluded_entrypoints": (
+            [
+                {"path": path, "reason": reason}
+                for path, reason in manifest.excluded_entrypoints
+            ]
+            if manifest is not None
+            else []
+        ),
         "warnings": warnings,
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(
-            f"code quality audit: {len(rows)} files, {len(blockers)} release blockers, "
-            f"{len(errors)} active gate errors, "
+            f"code quality audit: {len(rows)} files, {len(errors)} release blockers, "
+            f"{len(blockers) if baseline is not None else 0} owned hotspots, "
             f"{len(warnings)} review signals"
         )
         for message in errors:

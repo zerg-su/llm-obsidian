@@ -534,5 +534,3 @@ def _runtime_lane(
         max_verify_iterations=max_verify_iterations,
         state=record.state,
     )
-
-

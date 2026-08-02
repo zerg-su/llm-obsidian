@@ -231,4 +231,3 @@ def resolution_required(result: ReviewResult) -> bool:
     return result.verdict == "changes-requested" and any(
         finding.severity in MATERIAL_SEVERITIES for finding in result.findings
     )
-

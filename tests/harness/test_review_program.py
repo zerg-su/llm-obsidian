@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -12,6 +14,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+
+CLI_SPEC = importlib.util.spec_from_file_location(
+    "review_program_cli", ROOT / "scripts/review-program.py"
+)
+assert CLI_SPEC and CLI_SPEC.loader
+review_program_cli = importlib.util.module_from_spec(CLI_SPEC)
+CLI_SPEC.loader.exec_module(review_program_cli)
 
 from harness.review_program import (  # noqa: E402
     ReviewBoundaryInput,
@@ -69,6 +78,7 @@ intent = ReviewBoundaryInput(
 implementation = ReviewBoundaryInput(
     purpose="implementation",
     outcome_contract_sha256=SHA["outcome"],
+    plan_sha256=SHA["plan"],
     product_head_sha=SHA["head"],
     verification_evidence_sha256=SHA["verification"],
     verification_evidence_path="docs/verification.md",
@@ -76,6 +86,7 @@ implementation = ReviewBoundaryInput(
 release = ReviewBoundaryInput(
     purpose="release",
     outcome_contract_sha256=SHA["outcome"],
+    plan_sha256=SHA["plan"],
     integration_head_sha=SHA["head"],
     outcome_evidence_map_sha256=SHA["evidence"],
     outcome_evidence_map_path="docs/outcome-evidence.md",
@@ -245,8 +256,20 @@ rejected(
 
 with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     directory = Path(raw)
+    worktree = directory / "worktree"
+    plan = worktree / "wiki/plan.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text(
+        "---\ntype: plan\nreview_risk_profile: architecture\n---\n# Plan\n",
+        encoding="utf-8",
+    )
+    plan_sha256 = hashlib.sha256(plan.read_bytes()).hexdigest()
+    cli_boundaries = tuple(
+        replace(boundary, plan_sha256=plan_sha256)
+        for boundary in (intent, implementation, release)
+    )
     input_paths = []
-    for boundary in (intent, implementation, release):
+    for boundary in cli_boundaries:
         path = directory / f"{boundary.purpose}.json"
         path.write_text(
             json.dumps(boundary.payload(), sort_keys=True) + "\n",
@@ -257,8 +280,10 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         sys.executable,
         str(ROOT / "scripts/review-program.py"),
         "status",
-        "--risk-profile",
-        "architecture",
+        "--worktree",
+        str(worktree),
+        "--plan",
+        str(plan),
     ]
     for path in input_paths:
         base_command.extend(("--input", str(path)))
@@ -274,21 +299,67 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         "code-owned CLI selects the intent checkpoint from approved risk",
         initial_payload["purpose"] == "intent"
         and initial_payload["action"] == "start"
-        and initial_payload["definition_sha256"] == program.definition_sha256,
+        and initial_payload["risk_profile"] == "architecture",
+    )
+    callback = {
+        "schema_version": 1,
+        "operation_id": "review-intent-cli",
+        "payload": {
+            "schema_version": 1,
+            "operation_id": "review-intent-cli",
+            "head_sha": SHA["head"][:40],
+            "verdict": "approve",
+        },
+    }
+    gate_root = (
+        worktree
+        / ".vault-meta/harness/review-data/review-intent-cli/review-intent-cli"
+    )
+    gate_root.mkdir(parents=True)
+    callback_path = gate_root / ".review-callback.json"
+    callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
+    callback_path.write_bytes(callback_bytes)
+    (gate_root / "final-holistic.json").write_text(
+        '{"axis":"holistic","findings":[],"verdict":"approve"}\n',
+        encoding="utf-8",
+    )
+    callback_sha256 = hashlib.sha256(callback_bytes).hexdigest()
+    (gate_root / "review-gate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "approved",
+                "active_review_operation_id": "review-intent-cli",
+                "product_root": str(worktree.resolve()),
+                "context": {
+                    "purpose": "intent",
+                    "boundary_input_sha256": cli_boundaries[0].input_sha256,
+                    "head_sha": SHA["head"][:40],
+                },
+                "policy": {"purpose": "intent"},
+                "evidence": {
+                    "operation_id": "review-intent-cli",
+                    "pointer": ".review-callback.json",
+                    "sha256": callback_sha256,
+                },
+                "final_results": {"holistic": "final-holistic.json"},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
     receipt_result = subprocess.run(
         [
             sys.executable,
             str(ROOT / "scripts/review-program.py"),
             "receipt",
+            "--worktree",
+            str(worktree),
             "--input",
             str(input_paths[0]),
             "--operation-id",
             "review-intent-cli",
-            "--verdict",
-            "approved",
-            "--result-sha256",
-            SHA["result"],
         ],
         cwd=ROOT,
         check=True,
@@ -309,6 +380,85 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         "code-owned CLI advances only after an exact typed receipt",
         advanced_payload["purpose"] == "implementation"
         and advanced_payload["receipt_count"] == 1,
+    )
+    fabricated_path = directory / "fabricated-receipt.json"
+    fabricated_path.write_text(
+        json.dumps(
+            {
+                **json.loads(receipt_result.stdout),
+                "operation_id": "fabricated-review",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fabricated = subprocess.run(
+        [*base_command, "--receipt", str(fabricated_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    check(
+        "fabricated receipt cannot advance the trusted review program",
+        fabricated.returncode == 3 and "trusted review gate" in fabricated.stderr,
+    )
+    downgraded = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/review-program.py"),
+            "status",
+            "--worktree",
+            str(worktree),
+            "--plan",
+            str(plan),
+            "--input",
+            str(input_paths[1]),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    check(
+        "approved architecture risk cannot be caller-downgraded",
+        downgraded.returncode == 3
+        and "missing, duplicated, or out of order" in downgraded.stderr,
+    )
+    gate_path = gate_root / "review-gate.json"
+    nonterminal_gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    nonterminal_gate["status"] = "reviewing"
+    gate_path.write_text(
+        json.dumps(nonterminal_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    receipt_command = [
+        sys.executable,
+        str(ROOT / "scripts/review-program.py"),
+        "receipt",
+        "--worktree",
+        str(worktree),
+        "--input",
+        str(input_paths[0]),
+        "--operation-id",
+        "review-intent-cli",
+    ]
+    nonterminal = subprocess.run(
+        receipt_command, cwd=ROOT, capture_output=True, text=True
+    )
+    check(
+        "non-terminal gate cannot mint a review receipt",
+        nonterminal.returncode == 3 and "not terminal" in nonterminal.stderr,
+    )
+    nonterminal_gate["status"] = "approved"
+    gate_path.write_text(
+        json.dumps(nonterminal_gate, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    callback_path.write_bytes(callback_bytes + b" ")
+    tampered = subprocess.run(
+        receipt_command, cwd=ROOT, capture_output=True, text=True
+    )
+    check(
+        "tampered terminal result bytes cannot mint a review receipt",
+        tampered.returncode == 3 and "digest is stale" in tampered.stderr,
     )
 
 print("\nReview program policy tests passed.")

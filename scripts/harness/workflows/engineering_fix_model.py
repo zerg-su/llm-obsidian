@@ -663,6 +663,3 @@ def reconcile_retry_fix(
     return FixProgress(
         "start", RETRY_PHASES[len(receipts)], completed, prior
     )
-
-
-

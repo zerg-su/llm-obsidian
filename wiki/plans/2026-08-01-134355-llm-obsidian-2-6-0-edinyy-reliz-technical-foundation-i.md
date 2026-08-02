@@ -8,6 +8,7 @@ sessions:
     date: 2026-08-01
 source_cwd: "/Users/zak/Projects/llm-obsidian"
 status: pending
+review_risk_profile: release
 created: 2026-08-01
 updated: 2026-08-02
 tags:

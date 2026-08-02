@@ -140,7 +140,6 @@ class ReviewBoundaryInput:
 
 def _validate_boundary_evidence(boundary: ReviewBoundaryInput) -> None:
     intent = (
-        boundary.plan_sha256,
         boundary.design_sha256,
         boundary.design_path,
         boundary.capability_dispositions_sha256,
@@ -165,7 +164,7 @@ def _validate_boundary_evidence(boundary: ReviewBoundaryInput) -> None:
         "implementation": implementation,
         "release": release,
     }[boundary.purpose]
-    if not all(required):
+    if not boundary.plan_sha256 or not all(required):
         raise ReviewProgramError(
             f"{boundary.purpose} review boundary is missing required evidence"
         )

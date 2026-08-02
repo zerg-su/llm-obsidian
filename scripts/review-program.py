@@ -10,12 +10,16 @@ from pathlib import Path
 from typing import Sequence
 
 from harness.review_program import (
-    RISK_PURPOSES,
     ReviewBoundaryInput,
     ReviewBoundaryReceipt,
     ReviewProgramError,
     compile_review_program,
     reconcile_review_program,
+)
+from harness.review_program_authority import (
+    approved_risk_from_plan,
+    trusted_review_receipt,
+    validate_trusted_receipts,
 )
 
 
@@ -46,14 +50,14 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
     status = sub.add_parser("status")
-    status.add_argument("--risk-profile", choices=tuple(RISK_PURPOSES), required=True)
+    status.add_argument("--worktree", type=Path, required=True)
+    status.add_argument("--plan", type=Path, required=True)
     status.add_argument("--input", type=Path, action="append", required=True)
     status.add_argument("--receipt", type=Path, action="append", default=[])
     receipt = sub.add_parser("receipt")
+    receipt.add_argument("--worktree", type=Path, required=True)
     receipt.add_argument("--input", type=Path, required=True)
     receipt.add_argument("--operation-id", required=True)
-    receipt.add_argument("--verdict", choices=("approved", "stopped"), required=True)
-    receipt.add_argument("--result-sha256", required=True)
     return result
 
 
@@ -64,15 +68,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             boundary = ReviewBoundaryInput.from_mapping(
                 _object(args.input, "review boundary input")
             )
-            factory = (
-                ReviewBoundaryReceipt.approved
-                if args.verdict == "approved"
-                else ReviewBoundaryReceipt.stopped
-            )
-            value = factory(
-                operation_id=args.operation_id,
-                boundary=boundary,
-                result_sha256=args.result_sha256,
+            value = trusted_review_receipt(
+                args.worktree,
+                boundary,
+                args.operation_id,
             )
             _emit(value.payload())
             return 0
@@ -84,7 +83,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ReviewBoundaryReceipt.from_mapping(_object(path, "review boundary receipt"))
             for path in args.receipt
         )
-        program = compile_review_program(args.risk_profile, inputs)
+        risk_profile = approved_risk_from_plan(args.worktree, args.plan, inputs)
+        program = compile_review_program(risk_profile, inputs)
+        validate_trusted_receipts(args.worktree, inputs, receipts)
         decision = reconcile_review_program(program, receipts)
         _emit(
             {

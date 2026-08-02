@@ -13,4 +13,3 @@ SURFACE_UUID = re.compile(
 
 class RuntimeWorkerError(RuntimeError):
     """The worker cannot advance without violating its launch contract."""
-

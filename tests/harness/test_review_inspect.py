@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -14,6 +15,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INSPECT = ROOT / "scripts" / "review-inspect.py"
+INSPECT_SPEC = importlib.util.spec_from_file_location("review_inspect", INSPECT)
+assert INSPECT_SPEC and INSPECT_SPEC.loader
+review_inspect = importlib.util.module_from_spec(INSPECT_SPEC)
+sys.modules[INSPECT_SPEC.name] = review_inspect
+INSPECT_SPEC.loader.exec_module(review_inspect)
 
 
 def check(label: str, value: bool, detail: object = "") -> None:

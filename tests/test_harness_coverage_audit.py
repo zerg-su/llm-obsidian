@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "harness_coverage_audit",
     ROOT / "scripts" / "harness-coverage-audit.py",
@@ -20,6 +22,12 @@ SPEC.loader.exec_module(audit)
 assert audit.coverage_percent(0, 0) == 100.0
 assert audit.coverage_percent(3, 4) == 75.0
 assert round(audit.coverage_percent(1, 3), 2) == 33.33
+assert "scripts.task-review-runner" in audit.source_modules()
+assert "scripts.dispatch-runner" in audit.source_modules()
+assert any(
+    path == "scripts/review-runner.py" and reason
+    for path, reason in audit.MANIFEST.excluded_entrypoints
+)
 
 missing_lines = audit.critical_report_lines({})
 assert len(missing_lines) == len(audit.CRITICAL_FLOORS)

@@ -843,4 +843,3 @@ class ReviewGateRecoveryMixin:
         except Exception:
             self._mark_attention(run.execution.lanes)
             raise
-

@@ -1,4 +1,50 @@
 {
   "schema_version": 1,
-  "hotspots": {}
+  "hotspots": {
+    "file-lines:scripts/dispatch-runner.py": {
+      "max_value": 2177,
+      "owner": "harness-entrypoint-decomposition",
+      "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
+    },
+    "file-lines:scripts/task-review-runner.py": {
+      "max_value": 3756,
+      "owner": "harness-entrypoint-decomposition",
+      "evidence": "canonical 2.6 audit manifest; frozen no-growth compatibility facade"
+    },
+    "file-lines:scripts/task_sessions.py": {
+      "max_value": 1208,
+      "owner": "harness-entrypoint-decomposition",
+      "evidence": "canonical 2.6 audit manifest; frozen no-growth session facade"
+    },
+    "function-branches:scripts/dispatch-runner.py:validate_request": {
+      "max_value": 90,
+      "owner": "dispatch-contract-decomposition",
+      "evidence": "pre-existing validation hotspot exposed by the honest 2.6 denominator"
+    },
+    "function-branches:scripts/task-review-runner.py:_durable_successful_verification": {
+      "max_value": 64,
+      "owner": "review-recovery-decomposition",
+      "evidence": "pre-existing recovery hotspot exposed by the honest 2.6 denominator"
+    },
+    "function-branches:scripts/task-review-runner.py:_run_review": {
+      "max_value": 97,
+      "owner": "review-facade-decomposition",
+      "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
+    },
+    "function-branches:scripts/task_contract.py:normalize": {
+      "max_value": 102,
+      "owner": "task-contract-decomposition",
+      "evidence": "pre-existing contract hotspot exposed by the honest 2.6 denominator"
+    },
+    "function-lines:scripts/task-review-runner.py:_run_review": {
+      "max_value": 508,
+      "owner": "review-facade-decomposition",
+      "evidence": "pre-existing orchestration hotspot exposed by the honest 2.6 denominator"
+    },
+    "function-lines:scripts/task_contract.py:normalize": {
+      "max_value": 310,
+      "owner": "task-contract-decomposition",
+      "evidence": "pre-existing contract hotspot exposed by the honest 2.6 denominator"
+    }
+  }
 }

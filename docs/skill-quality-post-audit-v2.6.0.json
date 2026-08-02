@@ -24,7 +24,7 @@
       "completion_proxies": ["A design document exists.", "Local acceptance criteria are listed."],
       "required_outcome_evidence": ["The design traces each slice and acceptance seam to the unchanged contract and closes or records all material fog."],
       "evidence": "A-DES-01; skills/design/SKILL.md; tests/test_skill_workstream_a.py; docs/acceptance/v2.6-paired-design-architecture-stop.md",
-      "change": "retain the general Workstream A correction; remove fixture-specific recovery prescriptions after the frozen third forward test exposed an executor-ownership regression",
+      "change": "none in post-audit; integrated Workstream A correction retained while the frozen third forward test remains separate architecture-stop evidence",
       "behavior_proof": "Design remains read-only, starts from owned seams, preserves the Outcome Contract, names interfaces, and traces acceptance evidence without prescribing an unverified runtime architecture."
     },
     {
