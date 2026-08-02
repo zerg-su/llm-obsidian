@@ -18,7 +18,7 @@
 | `save-plan` | `598ecb6e34a1398981964029ca750cc7466ee335b094827929bf0898c6da0b74` |
 | `debug` | `a9974bd61add686a7ab4e242a6629a1feb66e999e8ad5b10ef96a118b16157ad` |
 | `tdd` | `6a55bd2eaedbc57cfd5fe49b1a9e737b43df515c2ed4494b5046bb05f9ba592c` |
-| `review` | `38b024033f8f084669fdf67dba74ff0efbf5ed90878afc9533b7fa8cd2bad36c` |
+| `review` | `80157872e9a4bc63eabd1b612f135382ffe11386ba292e81552e084b88d35240` |
 | `reap` | `a71a177a71ca57711521b0557e9d0f84a65dacd1b98323530d98baf848738a65` |
 | `improve-skills` | `6502e6be4d8e35d1a35e7a3d47f829d6a021454de153124ac05059a026eede8b` |
 
@@ -53,14 +53,14 @@ Local success remains subordinate to the release Outcome Contract. A green focus
 
 | Gate | Result |
 |---|---|
-| `audit_skills.py --strict` | PASS — 32 audited, 0 errors, 0 warnings |
+| `audit_skills.py --strict` | PASS — 34 audited, 0 errors, 0 warnings |
 | exhaustive nine-skill verdict validation | PASS |
 | `make test-skill-workstreams test-improve-skills` | PASS |
 | `make test-instruction-lint test-skill-budget` | PASS |
 | `python3 tests/harness/test_engineering_skills.py` | PASS — trigger, completion marker, authorization and loop contracts restored |
-| `make test-router test-codex-adapter` | PASS — router 56/56; adapter 22/22 |
+| `make test-router test-codex-adapter` | PASS — router 62/62; adapter 22/22 |
 | `python3 scripts/codex-adapter.py --check` | PASS — no drift |
-| five engineering pressure scenarios | PASS — four in the aggregate run plus the corrected TDD orientation rerun; see `docs/acceptance/v2.6-engineering-skill-pressure.md` |
+| five engineering pressure scenarios | PASS — all five in one current exact-byte aggregate run; see `docs/acceptance/v2.6-engineering-skill-pressure.md` |
 
 ## Behavioral acceptance boundary
 
