@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -37,6 +38,96 @@ with tempfile.TemporaryDirectory(prefix="model-routing-test.") as raw:
         shutil.copy2(ROOT / rel, target)
 
     config = routing.load_config(root)
+
+    def reject_invalid_config(
+        label: str, expected: str, mutate: object
+    ) -> None:
+        candidate = copy.deepcopy(config.data)
+        mutate(candidate)
+        try:
+            routing._validate(candidate)
+        except routing.RoutingError as exc:
+            check(label, expected in str(exc))
+        else:
+            check(label, False)
+
+    validation_cases = (
+        (
+            "routing schema invariant fails closed",
+            "schema_version must be 1",
+            lambda value: value.__setitem__("schema_version", 2),
+        ),
+        (
+            "runtime table invariant fails closed",
+            "define exactly codex and claude runtimes",
+            lambda value: value["runtimes"].pop("claude"),
+        ),
+        (
+            "registry presence invariant fails closed",
+            "model_registry must be a non-empty table",
+            lambda value: value["model_registry"].clear(),
+        ),
+        (
+            "runtime default registration invariant fails closed",
+            "default model 'unregistered' is not registered for codex",
+            lambda value: value["runtimes"]["codex"].__setitem__(
+                "model", "unregistered"
+            ),
+        ),
+        (
+            "role table invariant fails closed",
+            "roles must define exactly",
+            lambda value: value["roles"].pop("review"),
+        ),
+        (
+            "role effort invariant fails closed",
+            "codex effort must be one of",
+            lambda value: value["roles"]["daily"].__setitem__(
+                "effort", "ultra"
+            ),
+        ),
+        (
+            "review role registration invariant fails closed",
+            "review model 'fable' is not registered for codex",
+            lambda value: value["roles"]["review"]["codex"].__setitem__(
+                "model", "fable"
+            ),
+        ),
+        (
+            "registry entry invariant fails closed",
+            "model_registry entries must map non-empty model names",
+            lambda value: value["model_registry"].__setitem__("", "codex"),
+        ),
+        (
+            "release alias set invariant fails closed",
+            "model_aliases must define exactly four release aliases",
+            lambda value: value["model_aliases"].pop("sol"),
+        ),
+        (
+            "diagnostic model invariant fails closed",
+            "diagnostic-fast.model must be a registered model or alias",
+            lambda value: value["roles"]["diagnostic-fast"].__setitem__(
+                "model", "unregistered"
+            ),
+        ),
+        (
+            "review profile runtime invariant fails closed",
+            "review profile alias/runtime mismatch: simple.codex",
+            lambda value: value["review_profiles"]["simple"][
+                "codex"
+            ].__setitem__("model", "opus"),
+        ),
+        (
+            "legacy review default invariant fails closed",
+            "legacy review model 'fable' is not registered for codex",
+            lambda value: value["legacy_review_defaults"][
+                "codex"
+            ].__setitem__("model", "fable"),
+        ),
+    )
+    for validation_case in validation_cases:
+        reject_invalid_config(*validation_case)
+
     codex = {"runtime": "codex", "model": "gpt-5.6-sol", "effort": "high"}
     claude = {
         "runtime": "claude",
