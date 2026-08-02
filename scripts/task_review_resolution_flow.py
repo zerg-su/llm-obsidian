@@ -26,10 +26,20 @@ def _preload_resolution_bundle(
 ) -> ResolutionBundle | None:
     """Bind a moved current HEAD to its exact awaiting-resolution evidence."""
 
-    if state.get("status") != "awaiting-resolution":
+    status = str(state.get("status") or "")
+    if status not in {"awaiting-resolution", "verifying"}:
         return None
     awaiting = state.get("awaiting_resolution")
-    if not isinstance(awaiting, dict) or not awaiting:
+    if not isinstance(awaiting, dict):
+        return None
+    persisted_pointers = (
+        state.get("resolution_evidence")
+        if isinstance(state.get("resolution_evidence"), dict)
+        else {}
+    )
+    if status == "awaiting-resolution" and not awaiting:
+        return None
+    if status == "verifying" and not persisted_pointers:
         return None
     reviewed_heads = {
         str(value.get("reviewed_head_sha") or "")
@@ -37,8 +47,17 @@ def _preload_resolution_bundle(
         if isinstance(value, dict)
     }
     resolved_head = _git(worktree, "rev-parse", "HEAD")
-    if reviewed_heads == {resolved_head}:
+    if status == "awaiting-resolution" and reviewed_heads == {resolved_head}:
         return None
+    if status == "verifying":
+        bound = state.get("context")
+        if (
+            not isinstance(bound, dict)
+            or str(bound.get("head_sha") or "") != resolved_head
+        ):
+            raise TaskReviewError(
+                "verifying review resolution context targets another HEAD"
+            )
     return _resolution_bundle(
         worktree,
         gate_root,
@@ -48,11 +67,7 @@ def _preload_resolution_bundle(
         persisted_identity_sha256=str(
             state.get("resolution_transport_identity_sha256") or ""
         ),
-        persisted_resolution_pointers=(
-            state.get("resolution_evidence")
-            if isinstance(state.get("resolution_evidence"), dict)
-            else {}
-        ),
+        persisted_resolution_pointers=persisted_pointers,
     )
 
 

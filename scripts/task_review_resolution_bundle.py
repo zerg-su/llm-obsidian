@@ -131,7 +131,11 @@ def _resolution_bundle(
         raise TaskReviewError("material finding identities repeat across axes")
     if len(reviewed_heads) != 1 or "" in reviewed_heads:
         raise TaskReviewError("review resolution heads are inconsistent")
-    if len(review_operation_ids) != 1 or "" in review_operation_ids:
+    if (
+        (review_operation_ids and len(review_operation_ids) != 1)
+        or "" in review_operation_ids
+        or (not review_operation_ids and not persisted_identity_sha256)
+    ):
         raise TaskReviewError("review resolution operation is inconsistent")
     if persisted_identity_sha256:
         if not persisted_evidence:

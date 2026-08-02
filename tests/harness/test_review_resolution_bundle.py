@@ -25,6 +25,9 @@ runner = importlib.util.module_from_spec(module_spec)
 module_spec.loader.exec_module(runner)
 
 from review_resolution import review_transport_identity_sha256  # noqa: E402
+from task_review_resolution_flow import (  # noqa: E402
+    _preload_resolution_bundle,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -198,6 +201,47 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             for item in reverse_resumed.resolution.resolutions
         )
         == ("SPEC-001", "STD-001"),
+    )
+    persisted_only = runner._resolution_bundle(
+        worktree,
+        gate_root,
+        task_id,
+        {},
+        resolved,
+        persisted_identity_sha256=identity,
+        persisted_resolution_pointers={
+            "spec:0": persisted_pointer,
+            "standards-correctness-architecture-security:0": (
+                persisted_standards_pointer
+            ),
+        },
+    )
+    check(
+        "verifying replay rebuilds the fully persisted resolution batch",
+        persisted_only.resolution.resolved_head_sha == resolved
+        and set(persisted_only.by_axis) == set(axes),
+    )
+    preloaded = _preload_resolution_bundle(
+        worktree=worktree,
+        gate_root=gate_root,
+        task_id=task_id,
+        state={
+            "status": "verifying",
+            "context": {"head_sha": resolved},
+            "awaiting_resolution": {},
+            "resolution_transport_identity_sha256": identity,
+            "resolution_evidence": {
+                "spec:0": persisted_pointer,
+                "standards-correctness-architecture-security:0": (
+                    persisted_standards_pointer
+                ),
+            },
+        },
+    )
+    check(
+        "verifying current review preloads its durable resolution context",
+        preloaded is not None
+        and preloaded.resolution.resolved_head_sha == resolved,
     )
 
     fresh_operation_id = f"{task_id}-fresh-deadbeef"
