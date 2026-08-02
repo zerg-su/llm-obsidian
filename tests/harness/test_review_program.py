@@ -525,6 +525,8 @@ def write_approved_gate(
     worktree: Path,
     boundary: ReviewBoundaryInput,
     operation_id: str,
+    *,
+    resolved_head: str = "",
 ) -> None:
     gate_root = (
         worktree
@@ -534,13 +536,16 @@ def write_approved_gate(
     )
     gate_root.mkdir(parents=True)
     expected_head = boundary.product_head_sha or boundary.integration_head_sha
+    terminal_head = resolved_head or expected_head or git(
+        worktree, "rev-parse", "HEAD"
+    )
     callback = {
         "schema_version": 1,
         "operation_id": operation_id,
         "payload": {
             "schema_version": 1,
             "operation_id": operation_id,
-            "head_sha": expected_head or git(worktree, "rev-parse", "HEAD"),
+            "head_sha": terminal_head,
             "verdict": "approve",
         },
     }
@@ -560,7 +565,7 @@ def write_approved_gate(
                 "context": {
                     "purpose": boundary.purpose,
                     "boundary_input_sha256": boundary.input_sha256,
-                    "head_sha": expected_head or callback["payload"]["head_sha"],
+                    "head_sha": terminal_head,
                 },
                 "policy": {"purpose": boundary.purpose},
                 "evidence": {
@@ -569,12 +574,54 @@ def write_approved_gate(
                     "sha256": hashlib.sha256(callback_bytes).hexdigest(),
                 },
                 "final_results": {"holistic": "final-holistic.json"},
+                "resolution_evidence": (
+                    {"holistic:0": f"{operation_id}/resolution-holistic-0.json"}
+                    if resolved_head
+                    else {}
+                ),
             },
             sort_keys=True,
         )
         + "\n",
         encoding="utf-8",
     )
+    if resolved_head:
+        resolution = {
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "axis": "holistic",
+            "reviewed_head_sha": expected_head,
+            "resolved_head_sha": resolved_head,
+            "fix_delta_sha256": "4" * 64,
+            "previous_finding_ids": [],
+            "resolutions": [],
+        }
+        resolution_bytes = (
+            json.dumps(resolution, sort_keys=True) + "\n"
+        ).encode()
+        resolution_path = gate_root / operation_id / "resolution-holistic-0.json"
+        resolution_path.parent.mkdir()
+        resolution_path.write_bytes(resolution_bytes)
+        (gate_root / ".review-meta.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": operation_id,
+                    "worktree": str(worktree.resolve()),
+                    "head_sha": resolved_head,
+                    "review_boundary_input_sha256": boundary.input_sha256,
+                    "resolution_evidence": [
+                        {
+                            "pointer": f"{operation_id}/resolution-holistic-0.json",
+                            "sha256": hashlib.sha256(resolution_bytes).hexdigest(),
+                        }
+                    ],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
 
 with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
@@ -728,6 +775,48 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
             authority_boundaries["implementation"],
             operations["implementation"],
         ),
+    )
+
+    resolved_operation = "review-authority-implementation-resolved"
+    write_approved_gate(
+        worktree,
+        authority_boundaries["implementation"],
+        resolved_operation,
+        resolved_head=head_b,
+    )
+    resolved_receipt = trusted_review_receipt(
+        worktree,
+        authority_boundaries["implementation"],
+        resolved_operation,
+    )
+    check(
+        "trusted resolution evidence authorizes the exact terminal implementation HEAD",
+        resolved_receipt.verdict == "approved",
+    )
+    resolved_gate_root = (
+        worktree
+        / ".vault-meta/harness/review-data"
+        / resolved_operation
+        / resolved_operation
+    )
+    resolved_meta_path = resolved_gate_root / ".review-meta.json"
+    resolved_meta = json.loads(resolved_meta_path.read_text(encoding="utf-8"))
+    original_digest = resolved_meta["resolution_evidence"][0]["sha256"]
+    resolved_meta["resolution_evidence"][0]["sha256"] = "5" * 64
+    resolved_meta_path.write_text(
+        json.dumps(resolved_meta, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    rejected(
+        "tampered resolution evidence cannot rebind an implementation receipt",
+        lambda: trusted_review_receipt(
+            worktree,
+            authority_boundaries["implementation"],
+            resolved_operation,
+        ),
+    )
+    resolved_meta["resolution_evidence"][0]["sha256"] = original_digest
+    resolved_meta_path.write_text(
+        json.dumps(resolved_meta, sort_keys=True) + "\n", encoding="utf-8"
     )
 
     later_release = replace(
