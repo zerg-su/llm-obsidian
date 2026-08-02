@@ -22,6 +22,7 @@ SPEC.loader.exec_module(audit)
 assert audit.coverage_percent(0, 0) == 100.0
 assert audit.coverage_percent(3, 4) == 75.0
 assert round(audit.coverage_percent(1, 3), 2) == 33.33
+assert audit.trace_environment()["PYTHONHASHSEED"] == "0"
 assert "scripts.task-review-runner" in audit.source_modules()
 assert "scripts.dispatch-runner" in audit.source_modules()
 assert "scripts.dispatch_contracts" in audit.source_modules()

@@ -85,13 +85,19 @@ def test_files() -> list[Path]:
     return list(MANIFEST.test_paths(ROOT))
 
 
-def run_trace() -> tuple[dict[str, dict[str, object]], int]:
+def trace_environment() -> dict[str, str]:
     env = os.environ.copy()
+    env["PYTHONHASHSEED"] = "0"
     env["PYTHONPATH"] = os.pathsep.join(
         part
         for part in (str(ROOT / "scripts"), env.get("PYTHONPATH", ""))
         if part
     )
+    return env
+
+
+def run_trace() -> tuple[dict[str, dict[str, object]], int]:
+    env = trace_environment()
     with tempfile.TemporaryDirectory(prefix="llm-obsidian-harness-coverage.") as raw:
         scratch = Path(raw)
         counts = scratch / "counts.dat"
