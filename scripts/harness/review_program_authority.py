@@ -185,3 +185,21 @@ def validate_trusted_receipts(
         trusted = trusted_review_receipt(worktree, boundary, receipt.operation_id)
         if trusted != receipt:
             raise ReviewProgramError("review receipt does not match trusted review gate")
+
+
+def stale_resolution_boundary(
+    status: str,
+    same_policy: bool,
+    bound_head: str,
+    current_head: str,
+    quiescent: bool,
+) -> bool:
+    """Allow replacement only after the reviewed HEAD and policy both moved."""
+
+    return (
+        status == "awaiting-resolution"
+        and not same_policy
+        and bool(bound_head)
+        and bound_head != current_head
+        and quiescent
+    )

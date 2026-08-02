@@ -38,6 +38,7 @@ from harness.review_program import (
     QUESTIONS as REVIEW_QUESTIONS,
     ReviewBoundaryInput,
 )
+from harness.review_program_authority import stale_resolution_boundary
 from harness.review_submit import round_schema_lines
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
@@ -3470,25 +3471,6 @@ def _pending_replay_is_safe(
     return True
 
 
-def _stale_resolution_can_be_superseded(
-    *,
-    status: str,
-    same_policy: bool,
-    bound_head: str,
-    current_head: str,
-    quiescent: bool,
-) -> bool:
-    """Allow replacement only after the reviewed HEAD and policy both moved."""
-
-    return (
-        status == "awaiting-resolution"
-        and not same_policy
-        and bool(bound_head)
-        and bound_head != current_head
-        and quiescent
-    )
-
-
 def run_current_review(
     worktree: Path,
     *,
@@ -3554,9 +3536,7 @@ def run_current_review(
             raise TaskReviewError("current review identity is invalid") from exc
         gate_state_path = _gate_root(vault, task_id) / "review-gate.json"
         stored_policy = candidate.get("review_policy")
-        same_policy = isinstance(stored_policy, dict) and _same_requested_policy(
-            stored_policy, requested_policy
-        )
+        same_policy = isinstance(stored_policy, dict) and _same_requested_policy(stored_policy, requested_policy)
         terminal_stale = False
         if gate_state_path.is_file() and not gate_state_path.is_symlink():
             gate_state = _read_json(gate_state_path, "current review gate")
@@ -3567,11 +3547,10 @@ def run_current_review(
                 if isinstance(bound, dict)
                 else ""
             )
-            current_head = _git(worktree, "rev-parse", "HEAD")
             terminal_stale = (
                 status in {"approved", "skipped"}
                 and (
-                    bound_head != current_head
+                    bound_head != _git(worktree, "rev-parse", "HEAD")
                     or not same_policy
                 )
             ) or (
@@ -3582,13 +3561,7 @@ def run_current_review(
                 and not gate_state.get("round_results")
                 and not gate_state.get("final_results")
                 and _current_review_is_quiescent(vault, task_id)
-            ) or _stale_resolution_can_be_superseded(
-                status=status,
-                same_policy=same_policy,
-                bound_head=bound_head,
-                current_head=current_head,
-                quiescent=_current_review_is_quiescent(vault, task_id),
-            )
+            ) or stale_resolution_boundary(status, same_policy, bound_head, _git(worktree, "rev-parse", "HEAD"), _current_review_is_quiescent(vault, task_id))
         elif gate_state_path.exists():
             raise TaskReviewError("current review gate is not a regular file")
         if not terminal_stale:
