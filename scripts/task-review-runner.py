@@ -3470,6 +3470,25 @@ def _pending_replay_is_safe(
     return True
 
 
+def _stale_resolution_can_be_superseded(
+    *,
+    status: str,
+    same_policy: bool,
+    bound_head: str,
+    current_head: str,
+    quiescent: bool,
+) -> bool:
+    """Allow replacement only after the reviewed HEAD and policy both moved."""
+
+    return (
+        status == "awaiting-resolution"
+        and not same_policy
+        and bool(bound_head)
+        and bound_head != current_head
+        and quiescent
+    )
+
+
 def run_current_review(
     worktree: Path,
     *,
@@ -3548,10 +3567,11 @@ def run_current_review(
                 if isinstance(bound, dict)
                 else ""
             )
+            current_head = _git(worktree, "rev-parse", "HEAD")
             terminal_stale = (
                 status in {"approved", "skipped"}
                 and (
-                    bound_head != _git(worktree, "rev-parse", "HEAD")
+                    bound_head != current_head
                     or not same_policy
                 )
             ) or (
@@ -3562,6 +3582,12 @@ def run_current_review(
                 and not gate_state.get("round_results")
                 and not gate_state.get("final_results")
                 and _current_review_is_quiescent(vault, task_id)
+            ) or _stale_resolution_can_be_superseded(
+                status=status,
+                same_policy=same_policy,
+                bound_head=bound_head,
+                current_head=current_head,
+                quiescent=_current_review_is_quiescent(vault, task_id),
             )
         elif gate_state_path.exists():
             raise TaskReviewError("current review gate is not a regular file")

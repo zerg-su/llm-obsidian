@@ -1452,6 +1452,33 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     )
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)
+    check(
+        "quiescent stale-HEAD resolution permits a stricter replacement boundary",
+        task_review_runner._stale_resolution_can_be_superseded(
+            status="awaiting-resolution",
+            same_policy=False,
+            bound_head="a" * 40,
+            current_head="b" * 40,
+            quiescent=True,
+        ),
+    )
+    check(
+        "same-HEAD or live resolution cannot be silently superseded",
+        not task_review_runner._stale_resolution_can_be_superseded(
+            status="awaiting-resolution",
+            same_policy=False,
+            bound_head="a" * 40,
+            current_head="a" * 40,
+            quiescent=True,
+        )
+        and not task_review_runner._stale_resolution_can_be_superseded(
+            status="awaiting-resolution",
+            same_policy=False,
+            bound_head="a" * 40,
+            current_head="b" * 40,
+            quiescent=False,
+        ),
+    )
     task_store = OperationStore(vault / ".vault-meta/harness")
     task_dispatch_spec = OperationSpec(
         operation_id=task_id,
