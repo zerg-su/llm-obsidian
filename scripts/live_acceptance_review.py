@@ -362,12 +362,9 @@ def _run_cross_runtime_composition(
             f"llm-obsidian-live:{commit_sha}:cross-runtime-composition",
         )
     )
-    scratch = _review_scratch(
-        root, commit_sha, "cross-runtime-composition-dispatch"
-    )
-    prompt_path = scratch / ".task-prompt.md"
-    ack_path = scratch / ".live-dispatch-ack.json"
-    summary_path = scratch / ".task-summary.json"
+    prompt_path = root / ".task-prompt.md"
+    ack_path = root / ".live-dispatch-ack.json"
+    summary_path = root / ".task-summary.json"
     try:
         existing = manager.store.read(owner_id, operation_id)
     except Exception:
@@ -391,7 +388,7 @@ def _run_cross_runtime_composition(
         request,
         manager,
         origin_surface=origin_surface,
-        cwd=scratch,
+        cwd=root,
     )
     opened = _result_record(result)
     if (
@@ -457,4 +454,8 @@ def _run_cross_runtime_composition(
         sleep=sleep,
     )
     final = _result_record(manager.status(owner_id, operation_id))
-    return [_operation_evidence(final), *review_evidence]
+    evidence = [_operation_evidence(final), *review_evidence]
+    prompt_path.unlink(missing_ok=True)
+    ack_path.unlink(missing_ok=True)
+    summary_path.unlink(missing_ok=True)
+    return evidence

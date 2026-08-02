@@ -749,6 +749,27 @@ with tempfile.TemporaryDirectory(prefix="live-cell-driver.") as raw:
             for record in manager.records.values()
             if "review" in record.spec.kind
         ]
+        dispatch_records = [
+            record
+            for record in manager.records.values()
+            if record.spec.kind == "dispatch"
+        ]
+        if contract_cell["cell_id"] == "cross-runtime-composition":
+            check(
+                "composition dispatch uses the exact Git product root",
+                len(dispatch_records) == 1
+                and manager.cwds[
+                    (
+                        dispatch_records[0].spec.owner_id,
+                        dispatch_records[0].spec.operation_id,
+                    )
+                ].resolve()
+                == live_root.resolve(),
+            )
+            check(
+                "composition removes its transient product-root acknowledgement",
+                not (live_root / ".live-dispatch-ack.json").exists(),
+            )
         check(
             f"{contract_cell['cell_id']} keeps product read-only with owner scratch",
             len(review_records) == expected_review_lanes
