@@ -27,6 +27,8 @@ from harness.workflows.engineering_fix import (
     reconcile_fix,
     reconcile_retry_fix,
 )
+from harness.workflows import engineering_fix as fix_facade
+from harness.workflows import engineering_fix_model as fix_model
 
 
 failures: list[str] = []
@@ -38,6 +40,14 @@ def check(name: str, condition: bool, detail: object = "") -> None:
     else:
         failures.append(name)
         print(f"not ok - {name}: {detail}")
+
+
+check(
+    "engineering/fix facade preserves pure model identities after extraction",
+    fix_facade.FixStepReceipt is fix_model.FixStepReceipt
+    and fix_facade.reconcile_fix is fix_model.reconcile_fix
+    and fix_facade.reconcile_retry_fix is fix_model.reconcile_retry_fix,
+)
 
 
 def expect_error(name: str, action, needle: str) -> None:
