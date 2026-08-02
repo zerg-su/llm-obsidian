@@ -561,6 +561,7 @@ def write_approved_gate(
     *,
     resolved_head: str = "",
     mode: str = "simple",
+    valid_resolution_proof: bool = True,
 ) -> None:
     gate_root = (
         worktree
@@ -580,6 +581,7 @@ def write_approved_gate(
         if mode == "simple"
         else ("spec", "standards-correctness-architecture-security")
     )
+    terminal_iteration = 1 if resolved_head and valid_resolution_proof else 0
     payload = {
         "schema_version": 1,
         "operation_id": operation_id,
@@ -596,7 +598,7 @@ def write_approved_gate(
                 "axis": axis,
                 "findings": [],
                 "verdict": "approve",
-                "verification_iteration": 0,
+                "verification_iteration": terminal_iteration,
             }
             for axis in axes
         ],
@@ -629,7 +631,7 @@ def write_approved_gate(
                     "axis": axis,
                     "findings": [],
                     "verdict": "approve",
-                    "verification_iteration": 0,
+                    "verification_iteration": terminal_iteration,
                 },
                 sort_keys=True,
             )
@@ -675,15 +677,48 @@ def write_approved_gate(
         encoding="utf-8",
     )
     if resolved_head:
+        finding_id = "authority-terminal-head-rebind"
+        fix_delta = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                expected_head,
+                resolved_head,
+                "--",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+        material_ids = [finding_id] if valid_resolution_proof else []
+        resolutions = (
+            [
+                {
+                    "disposition": "applied",
+                    "finding_id": finding_id,
+                    "follow_up": "",
+                    "rationale": "The exact terminal HEAD was verified after the material finding was resolved.",
+                }
+            ]
+            if valid_resolution_proof
+            else []
+        )
         resolution = {
             "schema_version": 1,
             "operation_id": operation_id,
             "axis": "holistic",
             "reviewed_head_sha": expected_head,
             "resolved_head_sha": resolved_head,
-            "fix_delta_sha256": "4" * 64,
-            "previous_finding_ids": [],
-            "resolutions": [],
+            "fix_delta_sha256": (
+                hashlib.sha256(fix_delta).hexdigest()
+                if valid_resolution_proof
+                else "4" * 64
+            ),
+            "previous_finding_ids": material_ids,
+            "resolutions": resolutions,
         }
         resolution_bytes = (
             json.dumps(resolution, sort_keys=True) + "\n"
@@ -691,6 +726,31 @@ def write_approved_gate(
         resolution_path = gate_root / operation_id / "resolution-holistic-0.json"
         resolution_path.parent.mkdir()
         resolution_path.write_bytes(resolution_bytes)
+        if valid_resolution_proof:
+            (gate_root / operation_id / "round-holistic-0.json").write_text(
+                json.dumps(
+                    {
+                        "axis": "holistic",
+                        "findings": [
+                            {
+                                "axis": "holistic",
+                                "evidence": "The terminal HEAD differs from the reviewed boundary HEAD.",
+                                "file": "product.py",
+                                "finding_id": finding_id,
+                                "line": 1,
+                                "recommendation": "Resolve and verify the exact new HEAD.",
+                                "severity": "important",
+                                "summary": "The changed HEAD requires same-session verification.",
+                            }
+                        ],
+                        "verdict": "changes-requested",
+                        "verification_iteration": 0,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
         (gate_root / ".review-meta.json").write_text(
             json.dumps(
                 {
@@ -934,6 +994,23 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
         ),
     )
 
+    forged_operation = "review-authority-implementation-forged-resolution"
+    write_approved_gate(
+        worktree,
+        authority_boundaries["implementation"],
+        forged_operation,
+        resolved_head=head_b,
+        valid_resolution_proof=False,
+    )
+    rejected(
+        "empty post-approval resolution injection cannot rebind implementation authority",
+        lambda: trusted_review_receipt(
+            worktree,
+            authority_boundaries["implementation"],
+            forged_operation,
+        ),
+    )
+
     resolved_operation = "review-authority-implementation-resolved"
     write_approved_gate(
         worktree,
@@ -958,6 +1035,34 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
     )
     resolved_meta_path = resolved_gate_root / ".review-meta.json"
     resolved_meta = json.loads(resolved_meta_path.read_text(encoding="utf-8"))
+    resolved_pointer = resolved_meta["resolution_evidence"][0]["pointer"]
+    resolved_evidence_path = resolved_gate_root / resolved_pointer
+    resolved_evidence_bytes = resolved_evidence_path.read_bytes()
+    wrong_delta = json.loads(resolved_evidence_bytes)
+    wrong_delta["fix_delta_sha256"] = "4" * 64
+    wrong_delta_bytes = (json.dumps(wrong_delta, sort_keys=True) + "\n").encode()
+    resolved_evidence_path.write_bytes(wrong_delta_bytes)
+    resolved_meta["resolution_evidence"][0]["sha256"] = hashlib.sha256(
+        wrong_delta_bytes
+    ).hexdigest()
+    resolved_meta_path.write_text(
+        json.dumps(resolved_meta, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    rejected(
+        "arbitrary fix-delta digest cannot rebind implementation authority",
+        lambda: trusted_review_receipt(
+            worktree,
+            authority_boundaries["implementation"],
+            resolved_operation,
+        ),
+    )
+    resolved_evidence_path.write_bytes(resolved_evidence_bytes)
+    resolved_meta["resolution_evidence"][0]["sha256"] = hashlib.sha256(
+        resolved_evidence_bytes
+    ).hexdigest()
+    resolved_meta_path.write_text(
+        json.dumps(resolved_meta, sort_keys=True) + "\n", encoding="utf-8"
+    )
     original_digest = resolved_meta["resolution_evidence"][0]["sha256"]
     resolved_meta["resolution_evidence"][0]["sha256"] = "5" * 64
     resolved_meta_path.write_text(

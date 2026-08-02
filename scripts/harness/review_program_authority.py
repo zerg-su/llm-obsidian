@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import subprocess
 from pathlib import Path
 from typing import Mapping
 
-from review_resolution import ResolutionError, validate_resolution_evidence
 from vault_schema import parse_frontmatter, split_frontmatter
 
 from .review_program_contracts import (
@@ -20,6 +18,7 @@ from .review_program_contracts import (
     require_sha256,
 )
 from .review_program_results import ReviewBoundaryReceipt
+from .review_program_resolution import resolved_terminal_head
 from .workflows.review_gate import authorize_task_finalization
 
 
@@ -179,113 +178,6 @@ def _result_files(
     return result
 
 
-def _resolution_entries(
-    root: Path,
-    gate_root: Path,
-    gate: Mapping[str, object],
-    boundary: ReviewBoundaryInput,
-    operation_id: str,
-    terminal_head: str,
-) -> tuple[list[object], dict[object, object]]:
-    meta = _object(gate_root / ".review-meta.json", "trusted review metadata")
-    entries = meta.get("resolution_evidence")
-    gate_entries = gate.get("resolution_evidence")
-    if (
-        meta.get("schema_version") != 1
-        or meta.get("operation_id") != operation_id
-        or meta.get("worktree") != str(root)
-        or meta.get("head_sha") != terminal_head
-        or meta.get("review_boundary_input_sha256") != boundary.input_sha256
-        or not isinstance(entries, list)
-        or not entries
-        or len(entries) > 10
-        or not isinstance(gate_entries, dict)
-    ):
-        raise ReviewProgramError("trusted review resolution evidence is invalid")
-    return entries, gate_entries
-
-
-def _resolution_chain(
-    gate_root: Path,
-    entries: list[object],
-    operation_id: str,
-    reviewed_head: str,
-) -> tuple[set[str], dict[str, str]]:
-    pointers: set[str] = set()
-    terminal_by_axis: dict[str, str] = {}
-    for entry in entries:
-        if not isinstance(entry, dict) or set(entry) != {"pointer", "sha256"}:
-            raise ReviewProgramError("trusted review resolution evidence is invalid")
-        pointer = Path(str(entry.get("pointer") or ""))
-        digest = str(entry.get("sha256") or "")
-        path = (gate_root / pointer).resolve()
-        if (
-            pointer.is_absolute()
-            or pointer.as_posix() in pointers
-            or gate_root not in path.parents
-            or not path.is_file()
-            or path.is_symlink()
-            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-            or hashlib.sha256(path.read_bytes()).hexdigest() != digest
-        ):
-            raise ReviewProgramError("trusted review resolution evidence is invalid")
-        pointers.add(pointer.as_posix())
-        try:
-            evidence = validate_resolution_evidence(
-                _object(path, "trusted review resolution evidence")
-            )
-        except ResolutionError as exc:
-            raise ReviewProgramError(
-                "trusted review resolution evidence is invalid"
-            ) from exc
-        if evidence.operation_id != operation_id:
-            raise ReviewProgramError("trusted review resolution evidence is invalid")
-        previous_head = terminal_by_axis.get(evidence.axis, reviewed_head)
-        if evidence.reviewed_head_sha != previous_head:
-            raise ReviewProgramError("trusted review resolution chain is stale")
-        terminal_by_axis[evidence.axis] = evidence.resolved_head_sha
-    return pointers, terminal_by_axis
-
-
-def _resolved_terminal_head(
-    root: Path,
-    gate_root: Path,
-    gate: Mapping[str, object],
-    boundary: ReviewBoundaryInput,
-    operation_id: str,
-) -> str:
-    """Trust a moved implementation HEAD only through exact resolution evidence."""
-
-    context = gate.get("context")
-    if not isinstance(context, dict):
-        raise ReviewProgramError("trusted review gate identity is stale")
-    terminal_head = str(context.get("head_sha") or "")
-    reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
-    if not reviewed_head or terminal_head == reviewed_head:
-        return terminal_head
-    if boundary.purpose != "implementation":
-        raise ReviewProgramError("trusted review gate HEAD is stale")
-
-    entries, gate_entries = _resolution_entries(
-        root, gate_root, gate, boundary, operation_id, terminal_head
-    )
-    pointers, terminal_by_axis = _resolution_chain(
-        gate_root, entries, operation_id, reviewed_head
-    )
-
-    gate_pointers = {
-        str(pointer) for pointer in gate_entries.values() if isinstance(pointer, str)
-    }
-    if (
-        gate_pointers != pointers
-        or len(gate_pointers) != len(gate_entries)
-        or not terminal_by_axis
-        or any(head != terminal_head for head in terminal_by_axis.values())
-    ):
-        raise ReviewProgramError("trusted review resolution chain is stale")
-    return terminal_head
-
-
 def _trusted_review_receipt(
     worktree: Path,
     boundary: ReviewBoundaryInput,
@@ -323,7 +215,7 @@ def _trusted_review_receipt(
         or context.get("boundary_input_sha256") != boundary.input_sha256
     ):
         raise ReviewProgramError("trusted review gate identity is stale")
-    terminal_head = _resolved_terminal_head(
+    terminal_head = resolved_terminal_head(
         root, gate_root, gate, boundary, operation_id
     )
     if require_candidate_head and expected_head and terminal_head:

@@ -106,6 +106,7 @@ def write_trusted_current_approval(
     head_sha: str,
     *,
     reviewed_head_sha: str = "",
+    valid_resolution_proof: bool = True,
 ) -> None:
     """Complete a current-review fixture with authority-verifiable evidence."""
 
@@ -118,6 +119,13 @@ def write_trusted_current_approval(
         "spec",
         "standards-correctness-architecture-security",
     )
+    terminal_iteration = (
+        1
+        if reviewed_head_sha
+        and reviewed_head_sha != head_sha
+        and valid_resolution_proof
+        else 0
+    )
     aggregate_axes = []
     final_results = {}
     for axis in axes:
@@ -129,7 +137,7 @@ def write_trusted_current_approval(
                     "axis": axis,
                     "findings": [],
                     "verdict": "approve",
-                    "verification_iteration": 0,
+                    "verification_iteration": terminal_iteration,
                 },
                 sort_keys=True,
             )
@@ -142,7 +150,7 @@ def write_trusted_current_approval(
                 "axis": axis,
                 "findings": [],
                 "verdict": "approve",
-                "verification_iteration": 0,
+                "verification_iteration": terminal_iteration,
             }
         )
     payload = {
@@ -189,18 +197,55 @@ def write_trusted_current_approval(
         resolution_pointers = {}
         resolution_root = gate_root / operation_id
         resolution_root.mkdir(parents=True, exist_ok=True)
-        for index, axis in enumerate(axes):
-            pointer = f"{operation_id}/resolution-{index}.json"
+        product_root = Path(state["product_root"])
+        fix_delta = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(product_root),
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                reviewed_head_sha,
+                head_sha,
+                "--",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+        for axis in axes:
+            short = "standards" if axis.startswith("standards-") else axis
+            pointer = f"{operation_id}/resolution-{short}-0.json"
+            finding_id = "authority-terminal-head-rebind"
+            material_ids = (
+                [finding_id]
+                if valid_resolution_proof and short == "standards"
+                else []
+            )
+            resolutions = (
+                [
+                    {
+                        "disposition": "applied",
+                        "finding_id": finding_id,
+                        "follow_up": "",
+                        "rationale": "The exact changed HEAD was verified in the same review boundary.",
+                    }
+                ]
+                if material_ids
+                else []
+            )
             raw = (
                 json.dumps(
                     {
                         "axis": axis,
-                        "fix_delta_sha256": hashlib.sha256(
-                            f"{reviewed_head_sha}:{head_sha}:{axis}".encode()
-                        ).hexdigest(),
+                        "fix_delta_sha256": (
+                            hashlib.sha256(fix_delta).hexdigest()
+                            if valid_resolution_proof
+                            else "4" * 64
+                        ),
                         "operation_id": operation_id,
-                        "previous_finding_ids": [],
-                        "resolutions": [],
+                        "previous_finding_ids": material_ids,
+                        "resolutions": resolutions,
                         "resolved_head_sha": head_sha,
                         "reviewed_head_sha": reviewed_head_sha,
                         "schema_version": 1,
@@ -214,6 +259,37 @@ def write_trusted_current_approval(
                 {"pointer": pointer, "sha256": hashlib.sha256(raw).hexdigest()}
             )
             resolution_pointers[f"{axis}:0"] = pointer
+            if valid_resolution_proof:
+                (resolution_root / f"round-{short}-0.json").write_text(
+                    json.dumps(
+                        {
+                            "axis": axis,
+                            "findings": (
+                                [
+                                    {
+                                        "axis": axis,
+                                        "evidence": "The implementation HEAD changed after the initial round.",
+                                        "file": "product.py",
+                                        "finding_id": finding_id,
+                                        "line": 1,
+                                        "recommendation": "Resolve and verify the exact changed HEAD.",
+                                        "severity": "important",
+                                        "summary": "The terminal HEAD needs verified resolution authority.",
+                                    }
+                                ]
+                                if material_ids
+                                else []
+                            ),
+                            "verdict": (
+                                "changes-requested" if material_ids else "approve"
+                            ),
+                            "verification_iteration": 0,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
         state["resolution_evidence"] = resolution_pointers
         (gate_root / ".review-meta.json").write_text(
             json.dumps(
@@ -3742,6 +3818,32 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             "release rejects a HEAD moved after implementation approval",
             moved_head_guarded
             and len(current_runtime.started) == moved_head_started_count,
+        )
+        write_trusted_current_approval(
+            implementation_gate_root,
+            implementation_cycle["task_id"],
+            final_head,
+            reviewed_head_sha=post_stop_head,
+            valid_resolution_proof=False,
+        )
+        forged_resolution_started_count = len(current_runtime.started)
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="release",
+                boundary_input_file=final_boundary_path,
+                plan_file=review_plan,
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            forged_resolution_guarded = "another preset or override" in str(exc)
+        else:
+            forged_resolution_guarded = False
+        check(
+            "release rejects an empty post-approval resolution injection",
+            forged_resolution_guarded
+            and len(current_runtime.started) == forged_resolution_started_count,
         )
         write_trusted_current_approval(
             implementation_gate_root,
