@@ -21,6 +21,7 @@ The machine-readable allowlist is empty, and
 |---|---|
 | `scripts/cmux_agent_support.py` | provider argv moved to `adapters.claude`, `adapters.codex`, and `adapters.process` |
 | `scripts/cmux_agent_supervisor.py` | live provider supervision moved to `runtime_sessions` and `runtime_worker`; the old file is not a production launch seam |
+| `scripts/cmux_supervisor_contracts.py` | extracted trust/spec compatibility for the same non-production migration evidence; no public route invokes it |
 | `scripts/cmux_surface_lifecycle.py` | provider exit/close moved to `RuntimeSessionManager.request_exit/cleanup`; reap-only contract markers remain |
 | `scripts/cmux_workspace_lifecycle.py` | exact container identity moved to `adapters.cmux.Surface` |
 | `scripts/cmux_task_watchdog.py` | bounded liveness policy moved to `supervisor` and `runtime_worker` |

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FROZEN = (
     "scripts/cmux_agent_support.py",
     "scripts/cmux_agent_supervisor.py",
+    "scripts/cmux_supervisor_contracts.py",
     "scripts/cmux_surface_lifecycle.py",
     "scripts/cmux_workspace_lifecycle.py",
     "scripts/cmux_task_watchdog.py",

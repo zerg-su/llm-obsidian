@@ -18,6 +18,7 @@ RUNTIME_BINARY_ENV = {
     "CODEX_BINARY": "codex",
 }
 NON_PRODUCTION_MIGRATION_SOURCES = {
+    "scripts/cmux_supervisor_contracts.py",
     "scripts/cmux_agent_supervisor.py",
 }
 SHELL_CALL = re.compile(r"(?m)^[^#\n]*(?:^|[;&|(\"])\s*(cmux|claude|codex)\s+")
