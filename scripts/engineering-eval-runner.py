@@ -19,6 +19,10 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from model_routing import RoutingError, load_config
+
+
 TIMEOUT = ROOT / "scripts" / "with-timeout"
 SOURCES = {
     "codebase-design": (
@@ -212,16 +216,17 @@ def run(case: dict[str, Any], *, model: str, effort: str, timeout: float) -> dic
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default="gpt-5.6-terra")
+    parser.add_argument("--model", default="terra")
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--timeout", type=float, default=240.0)
     args = parser.parse_args()
     try:
         if args.timeout <= 0:
             raise RunnerError("timeout must be positive")
+        model = load_config(ROOT).resolve_alias(args.model, "codex")["model"]
         case = load_case()
-        result = run(case, model=args.model, effort=args.effort, timeout=args.timeout)
-    except RunnerError as exc:
+        result = run(case, model=model, effort=args.effort, timeout=args.timeout)
+    except (RoutingError, RunnerError) as exc:
         print(f"engineering-eval-runner: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
