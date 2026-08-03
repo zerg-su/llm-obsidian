@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from review_contract import review_parent_kind
+from review_contract import REVIEW_PARENT_KINDS
 
 from .adapters.cmux import (
     UUID_RE,
@@ -25,15 +25,11 @@ from .store import OperationStore, StoreError
 LEGACY_STATUS_KEY = "llm-obsidian-harness"
 CMUX_STATUS_TIMEOUT_SECONDS = 2.0
 Runner = Callable[..., subprocess.CompletedProcess[str]]
-REVIEW_CONTROLLER_KINDS = frozenset(
-    review_parent_kind(f"anthropic-{responsibility}")
-    for responsibility in ("holistic", "intent", "engineering")
-)
 CONTROLLER_KINDS = frozenset(
     {
         "dispatch",
         "research",
-        *REVIEW_CONTROLLER_KINDS,
+        *REVIEW_PARENT_KINDS,
     }
 )
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
@@ -241,9 +237,12 @@ def _controller_is_current(
     *,
     workspace_id: str,
     trigger_owner: str,
+    trigger_operation: str,
     inventory: LiveInventory,
 ) -> tuple[bool, bool]:
     if controller.state in TERMINAL:
+        return False, False
+    if controller.state == "created":
         return False, False
     origin_surface, invalid = _runtime_origin(store, controller)
     live_surface = controller.resources.surface_id
@@ -267,6 +266,13 @@ def _controller_is_current(
     elif controller.spec.owner_id != trigger_owner:
         return False, False
 
+    if (
+        not live_surface
+        and controller.state in {"preflight", "starting"}
+        and controller.spec.operation_id != trigger_operation
+    ):
+        return False, False
+
     if live_surface:
         if inventory.ambiguous(live_surface):
             return False, True
@@ -281,12 +287,14 @@ def _collect(
     state_root: Path | str,
     *,
     trigger_owner: str | None = None,
+    trigger_operation: str | None = None,
     workspace_id: str = "",
     inventory: LiveInventory | None = None,
 ) -> CollectionResult | None:
     """Select exact current programs without mutating durable lifecycle state."""
 
     trigger = trigger_owner or ""
+    trigger_op = trigger_operation or ""
     store, records_by_owner, invalid_by_owner = _records(state_root)
     if inventory is None or not UUID_RE.fullmatch(workspace_id):
         return None
@@ -319,6 +327,7 @@ def _collect(
                 program_records,
                 workspace_id=workspace_id,
                 trigger_owner=trigger,
+                trigger_operation=trigger_op,
                 inventory=inventory,
             )
             if broken:
@@ -361,6 +370,7 @@ def collect(
     state_root: Path | str,
     *,
     trigger_owner: str | None = None,
+    trigger_operation: str | None = None,
     workspace_id: str = "",
     inventory: LiveInventory | None = None,
 ) -> HarnessStatus | None:
@@ -369,6 +379,7 @@ def collect(
     result = _collect(
         state_root,
         trigger_owner=trigger_owner,
+        trigger_operation=trigger_operation,
         workspace_id=workspace_id,
         inventory=inventory,
     )
@@ -390,6 +401,7 @@ def publish(
     state_root: Path | str,
     *,
     trigger_owner: str | None = None,
+    trigger_operation: str | None = None,
     workspace_id: str | None = None,
     runner: Runner | None = None,
     binary: str | None = None,
@@ -412,6 +424,7 @@ def publish(
     collection = _collect(
         state_root,
         trigger_owner=trigger_owner,
+        trigger_operation=trigger_operation,
         workspace_id=workspace,
         inventory=inventory,
     )

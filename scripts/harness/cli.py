@@ -633,7 +633,13 @@ def main(
             value = to_dict(result)
         _emit(value, json_mode=args.json)
         if args.command in {"resume", "cancel", "close", "reconcile"}:
-            publish_status(args.store, trigger_owner=args.owner)
+            publish_status(
+                args.store,
+                trigger_owner=args.owner,
+                trigger_operation=(
+                    operation_id if args.command != "reconcile" else ""
+                ),
+            )
         return 0
     except (ContractError, RuntimeSessionError, StoreError) as exc:
         _emit({"status": "error", "reason": str(exc)}, json_mode=True)

@@ -1324,9 +1324,10 @@ with tempfile.TemporaryDirectory() as raw:
             store.transition("owner-start", "controller-start", state)
         check(
             f"{state} controller is visible before surface binding",
-        publish(
-            state_root,
-            trigger_owner="owner-start",
+            publish(
+                state_root,
+                trigger_owner="owner-start",
+                trigger_operation="controller-start",
                 workspace_id=workspace,
                 runner=topology_runner(
                     boundary_calls,
@@ -1346,6 +1347,103 @@ with tempfile.TemporaryDirectory() as raw:
             ],
             boundary_calls,
         )
+
+
+with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "stale-presurface-controller"
+    store = OperationStore(state_root)
+    owner = "owner-presurface"
+    stale_created = "controller-created-stale"
+    stale_preflight = "controller-preflight-stale"
+    current = "controller-preflight-current"
+    origin = "acacacac-acac-acac-acac-acacacacacac"
+    workspace = "bdbdbdbd-bdbd-bdbd-bdbd-bdbdbdbdbdbd"
+    window = "cececece-cece-cece-cece-cececececece"
+
+    store.create(
+        spec(owner, stale_created),
+        lane_id="lane-created-stale",
+        run_id="run-created-stale",
+    )
+    bind_runtime(store, owner, stale_created, origin_surface=origin)
+    store.create(
+        spec(owner, stale_preflight),
+        lane_id="lane-preflight-stale",
+        run_id="run-preflight-stale",
+    )
+    store.transition(owner, stale_preflight, "preflight")
+    bind_runtime(store, owner, stale_preflight, origin_surface=origin)
+    store.create(
+        spec(owner, current),
+        lane_id="lane-preflight-current",
+        run_id="run-preflight-current",
+    )
+    store.transition(owner, current, "preflight")
+    bind_runtime(store, owner, current, origin_surface=origin)
+
+    current_calls: list[list[str]] = []
+    check(
+        "exact preflight trigger excludes stale created and preflight peers",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            trigger_operation=current,
+            workspace_id=workspace,
+            runner=topology_runner(
+                current_calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(current_calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "0/1 · 1▶",
+            "--workspace",
+            workspace,
+        ],
+        current_calls,
+    )
+
+    store.transition(owner, current, "failed")
+    terminal_calls: list[list[str]] = []
+    check(
+        "same-owner terminal trigger clears abandoned pre-surface peers",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            trigger_operation=current,
+            workspace_id=workspace,
+            runner=topology_runner(
+                terminal_calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(terminal_calls)[-1]
+        == ["/opt/cmux", "clear-progress", "--workspace", workspace],
+        terminal_calls,
+    )
+
+    session_calls: list[list[str]] = []
+    check(
+        "SessionStart ignores abandoned pre-surface controllers",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                session_calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(session_calls)[-1]
+        == ["/opt/cmux", "clear-progress", "--workspace", workspace],
+        session_calls,
+    )
 
 
 with tempfile.TemporaryDirectory() as raw:

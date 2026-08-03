@@ -98,7 +98,7 @@ class ProcessPort(Protocol):
 
 Preflight = Callable[[RuntimeRoute, Path], CapabilityReport]
 SurfacePrepared = Callable[["RuntimeSessionResult"], None]
-StatusNotifier = Callable[[Path, str], object]
+StatusNotifier = Callable[[Path, str, str], object]
 
 
 def _relative(value: str, label: str) -> str:

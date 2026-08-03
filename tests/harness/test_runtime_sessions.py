@@ -688,7 +688,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     events: list[str] = []
-    status_notifications: list[tuple[Path, str, str]] = []
+    status_notifications: list[tuple[Path, str, str, str]] = []
     store = OperationStore(root / "store")
     cmux = FakeCmux(events)
     process = FakeProcess(events)
@@ -700,11 +700,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         preflight=lambda _route, _callback_dir: CapabilityReport(
             route, True, ("provider:profile-valid",)
         ),
-        status_notifier=lambda state_root, trigger_owner: (
+        status_notifier=lambda state_root, trigger_owner, trigger_operation: (
             status_notifications.append(
                 (
                     state_root,
                     trigger_owner,
+                    trigger_operation,
                     store.read(trigger_owner, "runtime-1").state,
                 )
             )
@@ -1006,16 +1007,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "status notifications publish preflight starting and final exact owner states",
         status_notifications
         == [
-            (store.root, "owner-1", "preflight"),
-            (store.root, "owner-1", "starting"),
-            (store.root, "owner-1", "awaiting-callback"),
+            (store.root, "owner-1", "runtime-1", "preflight"),
+            (store.root, "owner-1", "runtime-1", "starting"),
+            (store.root, "owner-1", "runtime-1", "awaiting-callback"),
         ]
         and all(
             state_root == store.root
-            for state_root, _trigger_owner, _state in status_notifications
+            for (
+                state_root,
+                _trigger_owner,
+                _trigger_operation,
+                _state,
+            ) in status_notifications
         )
         and status_notifications[-1]
-        == (store.root, "owner-1", "awaiting-callback"),
+        == (store.root, "owner-1", "runtime-1", "awaiting-callback"),
         status_notifications,
     )
     checkpoint_root = (
