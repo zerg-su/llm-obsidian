@@ -31,6 +31,7 @@ test-harness:
 	@python3 tests/harness/test_review_inspect.py
 	@python3 tests/harness/test_review_resolution.py
 	@python3 tests/harness/test_review_resolution_bundle.py
+	@python3 tests/harness/test_review_delta_packet.py
 	@python3 tests/harness/test_review_telemetry.py
 	@python3 tests/harness/test_review_transport.py
 	@python3 tests/harness/test_review_program.py

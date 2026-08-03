@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Mapping
 
 from review_resolution import (
-    MAX_FIX_DELTA_BYTES,
+    MAX_FIX_DELTA_TOTAL_BYTES,
     ResolutionError,
     validate_resolution_evidence,
 )
@@ -250,7 +250,7 @@ def _fix_delta_sha256(root: Path, reviewed_head: str, resolved_head: str) -> str
     if (
         result.returncode != 0
         or not result.stdout
-        or len(result.stdout) > MAX_FIX_DELTA_BYTES
+        or len(result.stdout) > MAX_FIX_DELTA_TOTAL_BYTES
     ):
         raise ReviewProgramError("trusted review fix delta is unavailable")
     return hashlib.sha256(result.stdout).hexdigest()

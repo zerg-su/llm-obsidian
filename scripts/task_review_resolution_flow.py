@@ -12,9 +12,41 @@ from harness.workflows.review_gate import (
     ReviewPreset,
 )
 from task_review_context import _callback_path, _context, _prompt
+from task_review_delta_packet import (
+    DeltaPacketError,
+    validate_materialized_delta_packet,
+)
 from task_review_resolution_bundle import _resolution_bundle
 from task_review_shared import ResolutionBundle, TaskReviewError, _git
 from task_review_transport import _receipt, _write_round_meta
+
+
+def _resolution_packet_ready(
+    gate: ReviewGateController,
+    run: ReviewGateRun,
+    context_manifest: Path,
+    bundle: ResolutionBundle,
+) -> bool:
+    """Validate the complete exact-HEAD packet before any provider prompt."""
+
+    try:
+        delta = validate_materialized_delta_packet(
+            context_manifest,
+            expected_reviewed_head=(
+                bundle.resolution.reviewed_head_sha
+            ),
+            expected_resolved_head=(
+                bundle.resolution.resolved_head_sha
+            ),
+        )
+        if delta != bundle.fix_delta:
+            raise DeltaPacketError(
+                "materialized review delta differs from Git evidence"
+            )
+    except (DeltaPacketError, OSError):
+        gate._mark_attention(run.execution.lanes)
+        return False
+    return True
 
 
 def _preload_resolution_bundle(
@@ -131,10 +163,34 @@ def _continue_resolution(
         task_id,
         resolution_bundle=bundle,
     )
+    if not _resolution_packet_ready(
+        gate, run, context_manifest, bundle
+    ):
+        return _receipt(
+            status="attention-required",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=gate.rehydrate(),
+        )
     decision = None
     for lane in run.execution.lanes:
         if lane.axis not in awaiting:
             continue
+        if not _resolution_packet_ready(
+            gate, run, context_manifest, bundle
+        ):
+            return _receipt(
+                status="attention-required",
+                meta=meta,
+                vault=vault,
+                worktree=worktree,
+                runtime_root=runtime_root,
+                context_manifest=context_manifest,
+                run=gate.rehydrate(),
+            )
         pointer = _prompt(
             vault=vault,
             worktree=worktree,

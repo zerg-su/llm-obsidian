@@ -2493,7 +2493,11 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     )
     check(
         "same-session verification receives previous findings and bounded fix delta",
-        {"resolution-evidence.json", "fix-delta.patch"}
+        {
+            "resolution-evidence.json",
+            "fix-delta.manifest.json",
+            "fix-delta.part-001.patch",
+        }
         <= verification_inputs,
     )
 

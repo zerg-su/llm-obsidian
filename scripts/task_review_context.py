@@ -28,6 +28,7 @@ from harness.workflows.review import (
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
 from task_contract import normalize
+from task_review_delta_packet import build_delta_packet
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
@@ -284,6 +285,11 @@ def _context(
         ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
     )
     if resolution_bundle is not None:
+        delta_packet = build_delta_packet(
+            resolution_bundle.fix_delta,
+            resolution_bundle.resolution.reviewed_head_sha,
+            resolution_bundle.resolution.resolved_head_sha,
+        )
         resolution_payload = {
             "schema_version": 1,
             "operation_id": resolution_bundle.resolution.operation_id,
@@ -305,31 +311,42 @@ def _context(
                 resolution_bundle.fix_delta
             ).hexdigest(),
         }
+        delta_source = (
+            "git:diff:"
+            f"{resolution_bundle.resolution.reviewed_head_sha}.."
+            f"{resolution_bundle.resolution.resolved_head_sha}"
+        )
+        inputs.append(
+            ContextInput(
+                "fix-delta.manifest.json",
+                delta_source + "#manifest",
+                delta_packet.manifest,
+                role="fix",
+            )
+        )
         inputs.extend(
-            (
-                ContextInput(
-                    "resolution-evidence.json",
-                    str(worktree / ".task-review-resolution.json"),
-                    (
-                        json.dumps(
-                            resolution_payload,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        )
-                        + "\n"
-                    ).encode(),
-                    role="resolution",
-                ),
-                ContextInput(
-                    "fix-delta.patch",
-                    (
-                        "git:diff:"
-                        f"{resolution_bundle.resolution.reviewed_head_sha}.."
-                        f"{resolution_bundle.resolution.resolved_head_sha}"
-                    ),
-                    resolution_bundle.fix_delta,
-                    role="fix",
-                ),
+            ContextInput(
+                part.name,
+                delta_source
+                + f"#part={index}/{len(delta_packet.parts)}",
+                part.content,
+                role="fix",
+            )
+            for index, part in enumerate(delta_packet.parts, start=1)
+        )
+        inputs.append(
+            ContextInput(
+                "resolution-evidence.json",
+                str(worktree / ".task-review-resolution.json"),
+                (
+                    json.dumps(
+                        resolution_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode(),
+                role="resolution",
             )
         )
     builder = ContextBuilder(runtime_root / "packets")
