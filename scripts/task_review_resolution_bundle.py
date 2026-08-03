@@ -18,6 +18,7 @@ from review_resolution import (
     validate_resolution,
     validate_resolution_evidence,
 )
+from review_contract import axis_finding_id
 from task_review_delta_packet import build_delta_packet
 from task_review_shared import (
     ResolutionBundle,
@@ -174,14 +175,37 @@ def _resolution_bundle(
         findings = result.get("findings")
         if result.get("axis") != axis or not isinstance(findings, list):
             raise TaskReviewError("review finding evidence is invalid")
-        material = tuple(
+        local_material = tuple(
             str(finding.get("finding_id") or "")
             for finding in findings
             if isinstance(finding, dict)
             and finding.get("severity") in MATERIAL_SEVERITIES
         )
-        if "" in material:
+        if "" in local_material:
             raise TaskReviewError("material finding identity is invalid")
+        raw_material = raw_boundary.get("material_finding_ids")
+        if raw_material is None:
+            material = local_material
+        else:
+            if (
+                not isinstance(raw_material, list)
+                or any(
+                    not isinstance(finding_id, str) or not finding_id
+                    for finding_id in raw_material
+                )
+            ):
+                raise TaskReviewError(
+                    "review resolution material identity is invalid"
+                )
+            material = tuple(raw_material)
+            qualified = tuple(
+                axis_finding_id(axis, finding_id)
+                for finding_id in local_material
+            )
+            if material not in {local_material, qualified}:
+                raise TaskReviewError(
+                    "review resolution material identity drifted"
+                )
         finding_ids_by_axis[str(axis)] = material
         reviewed_heads.add(str(raw_boundary.get("reviewed_head_sha") or ""))
         review_operation_ids.add(

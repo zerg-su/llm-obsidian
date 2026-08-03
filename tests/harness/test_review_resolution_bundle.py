@@ -94,6 +94,9 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             "round_run_id": f"run-{axis}",
             "callback_id": f"callback-{axis}",
             "callback_sha256": hashlib.sha256(axis.encode()).hexdigest(),
+            "material_finding_ids": [
+                f"{axis}:{findings[0]['finding_id']}"
+            ],
         }
         boundaries[axis] = boundary
         callbacks.append(
@@ -124,13 +127,13 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
                     "review_identity_sha256": review_identity,
                     "resolutions": [
                         {
-                            "finding_id": "SPEC-001",
+                            "finding_id": "anthropic-holistic:SPEC-001",
                             "disposition": "applied",
                             "rationale": spec_rationale,
                             "follow_up": "",
                         },
                         {
-                            "finding_id": "STD-001",
+                            "finding_id": "openai-holistic:STD-001",
                             "disposition": "applied",
                             "rationale": (
                                 "The exact standards repair is present."
@@ -170,11 +173,15 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
     check(
         "partial deep resolution retains already-staged material findings",
         tuple(item.finding_id for item in resumed.resolution.resolutions)
-        == ("SPEC-001", "STD-001"),
+        == (
+            "anthropic-holistic:SPEC-001",
+            "openai-holistic:STD-001",
+        ),
     )
     check(
         "remaining material axis receives its exact evidence",
-        resumed.by_axis[axes[1]].previous_finding_ids == ("STD-001",),
+        resumed.by_axis[axes[1]].previous_finding_ids
+        == ("openai-holistic:STD-001",),
     )
 
     persisted_standards_pointer = f"{task_id}/resolution-standards-0.json"
@@ -201,7 +208,10 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             item.finding_id
             for item in reverse_resumed.resolution.resolutions
         )
-        == ("SPEC-001", "STD-001"),
+        == (
+            "anthropic-holistic:SPEC-001",
+            "openai-holistic:STD-001",
+        ),
     )
     persisted_only = runner._resolution_bundle(
         worktree,
