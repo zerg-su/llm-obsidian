@@ -361,6 +361,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| v2.6.2 truthful cmux workspace progress and lifecycle fixes | [v2.6.2 release notes](docs/releases/v2.6.2.md) |
 | v2.6.1 independent review topology and lane isolation | [v2.6.1 release notes](docs/releases/v2.6.1.md) |
 | v2.6.0 outcome-preserving contracts and skill intelligence | [v2.6.0 release notes](docs/releases/v2.6.0.md) |
 | v2.4.1 typed fix loops, install, upgrade, and rollback | [v2.4.1 release notes](docs/releases/v2.4.1.md) |

@@ -16,6 +16,28 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.2] — 2026-08-03
+
+### Исправлено
+
+- cmux workspace progress теперь показывает только exact live программы
+  dispatch/review/research из coordinator origin workspace и сразу очищается в
+  idle. Terminal controller подавляет stale descendants, а отсутствующий exact
+  surface больше не выглядит активной работой.
+- Каждый publish использует один bounded live-tree snapshot. Неизвестный probe
+  сохраняет текущий UI и не меняет lifecycle; Claude и Codex используют одну
+  content-free строку и одинаковый cleanup.
+- Coordinator SessionStart обновляет stale progress, не передавая task
+  worktree полномочия coordinator status.
+- Сохранён pre-integrated turn-end save-and-close fix; ordinary provider launch
+  закрепляет trusted env-shebang interpreter и exact executor product root.
+
+### Изменено
+
+- Единственный исторический план v2.1.1 перенесён из `docs/plans` в
+  канонический `wiki/plans` с executed provenance, DragonScale address,
+  сохранённым body и ссылкой на validated final result.
+
 ## [2.6.1] — 2026-08-03
 
 ### Добавлено

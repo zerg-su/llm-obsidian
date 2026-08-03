@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.2] - 2026-08-03
+
+### Fixed
+
+- Made cmux workspace progress show only exact live dispatch, review, and
+  research programs from the coordinator origin workspace and clear
+  immediately when the workspace is idle. Terminal controllers now suppress
+  stale descendants, and missing exact surfaces no longer look active.
+- Added one bounded live-tree inventory per publish. An unknown probe preserves
+  the existing UI and never mutates harness lifecycle state; Claude and Codex
+  retain identical content-free labels and cleanup behavior.
+- Coordinator SessionStart now refreshes stale progress without granting task
+  worktrees coordinator authority.
+- Preserved the pre-integrated turn-end save-and-close repair and pinned the
+  trusted env-shebang interpreter and exact executor product root for ordinary
+  provider launches.
+
+### Changed
+
+- Moved the sole historical `docs/plans` v2.1.1 plan into canonical
+  `wiki/plans` with executed-plan provenance, a DragonScale address, preserved
+  body, and its validated final result link.
+
 ## [2.6.1] - 2026-08-03
 
 ### Added
