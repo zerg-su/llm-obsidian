@@ -2224,6 +2224,22 @@ check(
     and "--add-dir" not in codex_callback,
     (claude_callback, codex_callback),
 )
+codex_config_values = {
+    codex_callback[index + 1]
+    for index, value in enumerate(codex_callback[:-1])
+    if value == "--config"
+}
+check(
+    "Codex reviewer excludes ambient temporary roots and shell credentials",
+    "sandbox_workspace_write.exclude_slash_tmp=true" in codex_config_values
+    and "sandbox_workspace_write.exclude_tmpdir_env_var=true"
+    in codex_config_values
+    and "sandbox_workspace_write.network_access=false" in codex_config_values
+    and "sandbox_workspace_write.writable_roots=[]" in codex_config_values
+    and "shell_environment_policy.ignore_default_excludes=false"
+    in codex_config_values
+    and "--strict-config" in codex_callback,
+)
 
 
 def expect_sandbox_rejection(label: str, command: tuple[str, ...]) -> None:
@@ -2333,6 +2349,19 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
         and test_tmp.is_dir()
         and not test_tmp.is_symlink()
         and test_tmp.stat().st_mode & 0o077 == 0,
+    )
+    codex_sandbox_env = provider_environment(
+        {
+            "runtime": "codex",
+            "callback_mode": "envelope",
+            "callback_pointer": sandbox_callback,
+            "product_root": sandbox_product,
+        },
+        env={"PATH": "/usr/bin:/bin", "TMPDIR": "/private/tmp"},
+    )
+    check(
+        "Codex reviewer temp is contained by its exact callback lane",
+        codex_sandbox_env["TMPDIR"] == str(test_tmp),
     )
     symlink_callbacks = sandbox_root / "callback-link"
     symlink_callbacks.symlink_to(sandbox_callbacks, target_is_directory=True)

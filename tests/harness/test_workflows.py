@@ -29,6 +29,7 @@ from harness.workflows.review import (
     ReviewRequest,
     ReviewResult,
     aggregate,
+    namespace_review_result,
     resolution_required,
     verify_lane,
 )
@@ -115,6 +116,38 @@ aggregate_result = aggregate(
 )
 check("deep aggregation preserves axes and material verdict", aggregate_result["verdict"] == "changes-requested" and len(aggregate_result["axes"]) == 2)
 check("important findings require same-session resolution", resolution_required(spec_result))
+
+shared_id_results = {
+    axis: namespace_review_result(
+        deep,
+        ReviewResult(
+            axis,
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "SHARED-001",
+                    axis,
+                    "important",
+                    "independent issue",
+                    "each lane owns separate evidence",
+                ),
+            ),
+        ),
+    )
+    for axis in deep.axes
+}
+shared_id_aggregate = aggregate(deep, shared_id_results)
+shared_ids = [
+    finding["finding_id"]
+    for axis in shared_id_aggregate["axes"]
+    for finding in axis["findings"]
+]
+check(
+    "multi-lane resolution identities are axis-qualified before aggregation",
+    len(shared_ids) == len(set(shared_ids))
+    and shared_ids
+    == [f"{axis}:SHARED-001" for axis in deep.axes],
+)
 
 
 def check_aggregate_finding_rejected(label: str, **changes: object) -> None:

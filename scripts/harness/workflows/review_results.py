@@ -25,6 +25,7 @@ from review_contract import (
     SEVERITIES,
     VERIFY_BUDGETS,
     ReviewContractError,
+    axis_finding_id,
     require_unique_finding_ids,
     validate_finding,
     review_axis_responsibility,
@@ -148,6 +149,25 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
             for row in ordered
         ],
     }
+
+
+def namespace_review_result(
+    request: ReviewRequest, result: ReviewResult
+) -> ReviewResult:
+    """Qualify lane-local finding IDs before multi-lane persistence."""
+
+    if len(request.axes) == 1 or not result.findings:
+        return result
+    return replace(
+        result,
+        findings=tuple(
+            replace(
+                finding,
+                finding_id=axis_finding_id(result.axis, finding.finding_id),
+            )
+            for finding in result.findings
+        ),
+    )
 
 
 def aggregate_review_evidence(

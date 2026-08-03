@@ -55,6 +55,7 @@ from .review_results import (
     ReviewResult,
     aggregate,
     aggregate_review_evidence,
+    namespace_review_result,
     resolution_required,
     review_evidence_envelope,
     verify_lane,

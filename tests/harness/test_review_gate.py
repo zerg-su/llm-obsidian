@@ -79,6 +79,7 @@ from review_resolution import (
     ReviewResolutionEvidence,
     review_transport_identity_sha256,
 )
+from review_contract import axis_finding_id
 from outcome_contract import extract_from_bytes
 
 
@@ -1496,7 +1497,7 @@ with tempfile.TemporaryDirectory(prefix="review-full-partial-progress.") as raw:
             lane.axis,
             context.head_sha,
             resolved_context.head_sha,
-            f"F-full-partial-{index}",
+            axis_finding_id(lane.axis, f"F-full-partial-{index}"),
         )
         for index, lane in enumerate(lanes)
     }
@@ -2486,6 +2487,16 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
             ),
         ),
     )
+    qualified_deep_finding = (
+        f"{standards_lane.axis}:F-deep-resolution"
+    )
+    check(
+        "deep barrier persists an axis-qualified resolution identity",
+        controller.read()["awaiting_resolution"][standards_lane.axis][
+            "material_finding_ids"
+        ]
+        == [qualified_deep_finding],
+    )
     resolved = replace(context, head_sha="9" * 40)
     for lane in run.execution.lanes:
         controller.continue_after_resolution(
@@ -2498,7 +2509,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
                 context.head_sha,
                 resolved.head_sha,
                 *(
-                    ("F-deep-resolution",)
+                    (qualified_deep_finding,)
                     if lane.axis == standards_lane.axis
                     else ()
                 ),

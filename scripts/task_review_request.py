@@ -204,8 +204,7 @@ def _prompt(
             "A callback, clean diff, or locally green check is not outcome proof.",
             "",
         )
-        if context.implementer_summary_sha256
-        and responsibility in {"holistic", "intent"}
+        if responsibility in {"holistic", "intent"}
         else ()
     )
     responsibility_instructions = {

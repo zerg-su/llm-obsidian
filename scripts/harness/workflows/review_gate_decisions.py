@@ -17,6 +17,7 @@ from .review import (
     review_evidence_envelope,
     review_round_envelope,
 )
+from .review_results import namespace_review_result
 from .review_gate_contracts import (
     ReviewGateDecision,
     ReviewGateRun,
@@ -200,6 +201,9 @@ class ReviewGateDecisionMixin:
             lane,
             round_,
             envelope,
+        )
+        result = namespace_review_result(
+            run.execution.request.policy, result
         )
         pointer = self._persist_result(
             run.execution.request.policy.operation_id,

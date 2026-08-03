@@ -16,6 +16,7 @@ from .review import (
     review_round_envelope,
     verify_review_lane,
 )
+from .review_results import namespace_review_result
 from .review_gate_contracts import (
     ReviewGateDecision,
     ReviewGateRun,
@@ -105,6 +106,9 @@ class ReviewGateResolutionMixin:
             self.round_store.transition(
                 child.spec.owner_id, child.spec.operation_id, "complete"
             )
+        result = namespace_review_result(
+            run.execution.request.policy, result
+        )
         pointer = self._persist_result(
             run.execution.request.policy.operation_id,
             result,

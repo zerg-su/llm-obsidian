@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import zlib
@@ -76,6 +77,24 @@ def review_axis_provider(axis: str) -> str:
     if provider not in PROVIDERS:
         raise ValueError("review lane provider must be anthropic or openai")
     return provider
+
+
+def axis_finding_id(axis: str, finding_id: str) -> str:
+    """Return one bounded aggregate identity for a lane-local finding."""
+
+    review_axis_provider(axis)
+    if (
+        not IDENTIFIER_RE.fullmatch(finding_id)
+        or len(finding_id) > FINDING_ID_LIMIT
+    ):
+        raise ReviewContractError("finding_id must be a bounded identifier")
+    prefix = f"{axis}:"
+    if finding_id.startswith(prefix):
+        return finding_id
+    candidate = f"{prefix}{finding_id}"
+    if len(candidate) <= FINDING_ID_LIMIT:
+        return candidate
+    return f"{prefix}{hashlib.sha256(finding_id.encode()).hexdigest()[:32]}"
 
 
 def compile_review_axes(

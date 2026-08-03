@@ -191,7 +191,7 @@ def provider_environment(
 
     values = os.environ if env is None else env
     if (
-        spec.get("runtime") == "claude"
+        spec.get("runtime") in {"claude", "codex"}
         and spec.get("callback_mode") == "envelope"
         and isinstance(spec.get("product_root"), Path)
     ):
@@ -211,8 +211,9 @@ def provider_environment(
             raise RuntimeWorkerError("review test root ownership is invalid")
         reviewer = dict(values)
         reviewer["TMPDIR"] = str(temporary)
-        reviewer["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
-        reviewer["DISABLE_AUTOUPDATER"] = "1"
+        if spec.get("runtime") == "claude":
+            reviewer["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+            reviewer["DISABLE_AUTOUPDATER"] = "1"
         return reviewer
     if spec.get("callback_mode") not in {
         "research-fetch",

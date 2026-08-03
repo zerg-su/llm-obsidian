@@ -144,7 +144,23 @@ class CodexDriver:
                 raise CodexDriverError(
                     "review callback lane escapes its session root"
                 ) from exc
-            args.extend(("--cd", str(callback_root)))
+            args.extend(
+                (
+                    "--strict-config",
+                    "--config",
+                    "sandbox_workspace_write.exclude_slash_tmp=true",
+                    "--config",
+                    "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+                    "--config",
+                    "sandbox_workspace_write.network_access=false",
+                    "--config",
+                    "sandbox_workspace_write.writable_roots=[]",
+                    "--config",
+                    "shell_environment_policy.ignore_default_excludes=false",
+                    "--cd",
+                    str(callback_root),
+                )
+            )
         if route.profile == "research-safe":
             if session_root is None or not session_root.is_absolute():
                 raise CodexDriverError(

@@ -286,6 +286,12 @@ prompt_context = ReviewContext(
     profile.sha256,
     implementer_summary_sha256="c" * 64,
 )
+prompt_context_without_summary = ReviewContext(
+    "packets/review/manifest.json",
+    "d" * 40,
+    profile.name,
+    profile.sha256,
+)
 with tempfile.TemporaryDirectory(prefix="review-topology-prompts.") as raw:
     runtime_root = Path(raw)
     prompts = {}
@@ -330,3 +336,19 @@ with tempfile.TemporaryDirectory(prefix="review-topology-prompts.") as raw:
             and "correctness, failure behavior" in prompts[axis]
             and "Repository-specific standards override" in prompts[axis],
         )
+    no_summary_pointer = _prompt(
+        vault=ROOT,
+        worktree=ROOT,
+        runtime_root=runtime_root,
+        context=prompt_context_without_summary,
+        axis="openai-holistic",
+        verification=False,
+    )
+    no_summary_prompt = (runtime_root / no_summary_pointer).read_text(
+        encoding="utf-8"
+    )
+    check(
+        "outcome review remains mandatory without an implementer summary",
+        "Classify every declared success-evidence item" in no_summary_prompt
+        and "Check every declared non-goal for scope creep" in no_summary_prompt,
+    )
