@@ -2486,18 +2486,18 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
     task_review_runner = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(task_review_runner)
     check(
-        "quiescent stale-HEAD resolution permits a stricter replacement boundary",
+        "quiescent stale-HEAD resolution permits a fresh replacement boundary",
         task_review_runner.stale_resolution_boundary(
-            "awaiting-resolution", False, "a" * 40, "b" * 40, True
+            "awaiting-resolution", "a" * 40, "b" * 40, True
         ),
     )
     check(
         "same-HEAD or live resolution cannot be silently superseded",
         not task_review_runner.stale_resolution_boundary(
-            "awaiting-resolution", False, "a" * 40, "a" * 40, True
+            "awaiting-resolution", "a" * 40, "a" * 40, True
         )
         and not task_review_runner.stale_resolution_boundary(
-            "awaiting-resolution", False, "a" * 40, "b" * 40, False
+            "awaiting-resolution", "a" * 40, "b" * 40, False
         ),
     )
     task_store = OperationStore(vault / ".vault-meta/harness")
@@ -4202,6 +4202,14 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             scratch_root=scratch,
             runtime_manager=current_runtime,
         )
+        current_active_path = (
+            product / ".vault-meta/harness/current-review/active.json"
+        )
+        failed_runtime_root = str(
+            json.loads(current_active_path.read_text(encoding="utf-8"))[
+                "runtime_root"
+            ]
+        )
         failed_started_count = len(current_runtime.started)
         live_full_replay = task_review_runner.run_current_review(
             product,
@@ -4317,13 +4325,22 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             if fresh_full is not None
             else set()
         )
+        fresh_runtime_root = (
+            str(
+                json.loads(
+                    current_active_path.read_text(encoding="utf-8")
+                )["runtime_root"]
+            )
+            if fresh_full is not None
+            else ""
+        )
         check(
             "closed failed full gate selects fresh task runtime and reviewer identities"
             + (f": {fresh_full_error}" if fresh_full_error else ""),
             fresh_full is not None
             and fresh_full["status"] == "reviewing"
             and fresh_full["task_id"] != failed_full["task_id"]
-            and fresh_full["runtime_root"] != failed_full["runtime_root"]
+            and fresh_runtime_root != failed_runtime_root
             and len(fresh_operation_ids) == 4
             and fresh_operation_ids.isdisjoint(failed_operation_ids)
             and len(current_runtime.started) == failed_started_count + 4

@@ -336,7 +336,7 @@ def run_current_review(
                 and not gate_state.get("final_results")
                 and _same_review_purpose(stored_policy, requested_policy)
                 and _current_review_is_quiescent(vault, task_id)
-            ) or stale_resolution_boundary(status, same_policy, bound_head, _git(worktree, "rev-parse", "HEAD"), _current_review_is_quiescent(vault, task_id))
+            ) or stale_resolution_boundary(status, bound_head, _git(worktree, "rev-parse", "HEAD"), _current_review_is_quiescent(vault, task_id))
         elif gate_state_path.exists():
             raise TaskReviewError("current review gate is not a regular file")
         if not terminal_stale:
