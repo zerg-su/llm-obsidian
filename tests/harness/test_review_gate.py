@@ -4194,6 +4194,153 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         (
             product / ".vault-meta/harness/current-review/active.json"
         ).unlink()
+        failed_full = task_review_runner.run_current_review(
+            product,
+            full=True,
+            plan_file=review_plan,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        failed_started_count = len(current_runtime.started)
+        live_full_replay = task_review_runner.run_current_review(
+            product,
+            full=True,
+            plan_file=review_plan,
+            scratch_root=scratch,
+            runtime_manager=current_runtime,
+        )
+        failed_operation_ids = {
+            str(lane["operation_id"]) for lane in failed_full["lanes"]
+        }
+        check(
+            "live same-policy full review preserves task and reviewer identities",
+            live_full_replay["task_id"] == failed_full["task_id"]
+            and {
+                str(lane["operation_id"])
+                for lane in live_full_replay["lanes"]
+            }
+            == failed_operation_ids
+            and len(current_runtime.started) == failed_started_count,
+        )
+        failed_gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / failed_full["task_id"]
+            / failed_full["task_id"]
+        )
+        failed_gate_path = failed_gate_root / "review-gate.json"
+        failed_gate = json.loads(
+            failed_gate_path.read_text(encoding="utf-8")
+        )
+        failed_axis = str(failed_full["lanes"][-1]["axis"])
+        failed_finding_id = "openai-engineering.closed-dogfood"
+        failed_result_pointer = (
+            f'{failed_full["task_id"]}/round-{failed_axis}-0.json'
+        )
+        failed_result_path = failed_gate_root / failed_result_pointer
+        failed_result_path.parent.mkdir(parents=True, exist_ok=True)
+        failed_result_path.write_text(
+            json.dumps(
+                {
+                    "axis": failed_axis,
+                    "findings": [
+                        {
+                            "finding_id": failed_finding_id,
+                            "severity": "important",
+                        }
+                    ],
+                    "verdict": "changes-requested",
+                    "verification_iteration": 0,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        failed_gate["status"] = "awaiting-resolution"
+        failed_gate["round_results"] = {
+            failed_axis: failed_result_pointer
+        }
+        failed_gate["final_results"] = {}
+        failed_gate["awaiting_resolution"] = {
+            failed_axis: {
+                "callback_id": "review-" + "a" * 24,
+                "callback_sha256": "b" * 64,
+                "material_finding_ids": [failed_finding_id],
+                "pointer": failed_result_pointer,
+                "review_operation_id": failed_full["task_id"],
+                "reviewed_head_sha": failed_gate["context"]["head_sha"],
+                "round_operation_id": (
+                    str(failed_full["lanes"][-1]["operation_id"])
+                    + "-round-closed"
+                ),
+                "round_run_id": str(failed_full["lanes"][-1]["run_id"]),
+            }
+        }
+        failed_gate["resolution_evidence"] = {}
+        failed_gate["resolution_transport_identity_sha256"] = "c" * 64
+        failed_gate_path.write_text(
+            json.dumps(failed_gate, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        quiesce_operations(current_store, failed_full["task_id"])
+        preserved_failed_gate = failed_gate_path.read_bytes()
+        (product / "product.py").write_text("VALUE = 20\n", encoding="utf-8")
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "advance after closed full dogfood"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            fresh_full = task_review_runner.run_current_review(
+                product,
+                full=True,
+                plan_file=review_plan,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            fresh_full = None
+            fresh_full_error = str(exc)
+        else:
+            fresh_full_error = ""
+        fresh_operation_ids = (
+            {
+                str(lane["operation_id"])
+                for lane in fresh_full["lanes"]
+            }
+            if fresh_full is not None
+            else set()
+        )
+        check(
+            "closed failed full gate selects fresh task runtime and reviewer identities"
+            + (f": {fresh_full_error}" if fresh_full_error else ""),
+            fresh_full is not None
+            and fresh_full["status"] == "reviewing"
+            and fresh_full["task_id"] != failed_full["task_id"]
+            and fresh_full["runtime_root"] != failed_full["runtime_root"]
+            and len(fresh_operation_ids) == 4
+            and fresh_operation_ids.isdisjoint(failed_operation_ids)
+            and len(current_runtime.started) == failed_started_count + 4
+            and all(
+                sum(
+                    request.spec.operation_id == operation_id
+                    for request in current_runtime.started
+                )
+                == 1
+                for operation_id in failed_operation_ids
+            )
+            and failed_gate_path.read_bytes() == preserved_failed_gate,
+        )
+        quiesce_operations(current_store, fresh_full["task_id"])
+        (
+            product / ".vault-meta/harness/current-review/active.json"
+        ).unlink()
         release_head = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=product,
