@@ -545,6 +545,7 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         cwd,
         "prompt.md",
         "ordinary-callback.json",
+        product_root=cwd,
     )
     with patch.dict(os.environ, {"PATH": str(binary_root)}):
         ordinary_manager.start(ordinary_request)
@@ -560,6 +561,7 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
     check(
         "parent pins env shebang interpreter for ordinary providers",
         ordinary_launch["runtime_interpreter"] == str(node.resolve())
+        and ordinary_spec["product_root"] == cwd.resolve()
         and ordinary_argv
         == (
             str(node.resolve()),

@@ -242,10 +242,16 @@ def load_spec(path: Path) -> dict[str, Any]:
         if (
             product_root.is_symlink()
             or not product_root.is_dir()
-            or product_root == cwd
+        ):
+            raise RuntimeWorkerError("runtime product root is invalid")
+        overlaps_cwd = (
+            product_root == cwd
             or product_root in cwd.parents
             or cwd in product_root.parents
-        ):
+        )
+        if reviewer_sandbox and overlaps_cwd:
+            raise RuntimeWorkerError("runtime product root is invalid")
+        if not reviewer_sandbox and product_root != cwd:
             raise RuntimeWorkerError("runtime product root is invalid")
     if reviewer_sandbox and (
         callback_mode != "envelope" or product_root is None
