@@ -58,7 +58,7 @@ tags:
     },
     {
       "evidence_id": "ordinary-provider-launch",
-      "observable": "Ordinary dispatch/review providers pin an exact trusted env-shebang interpreter before entering a new cmux surface; the regression proves launch works even when the child PATH cannot resolve node."
+      "observable": "Ordinary dispatch/review providers pin an exact trusted env-shebang interpreter before entering a new cmux surface, and an ordinary worker accepts only an exact product_root equal to cwd; focused regressions pin both fail-closed invariants."
     },
     {
       "evidence_id": "turn-end-close-preserved",
@@ -100,7 +100,7 @@ tags:
 1. Ввести внутри status module маленькую code-owned классификацию top-level program controllers и derived operations. Она основывается на `OperationSpec.kind` и exact runtime metadata, не на operation-id suffix.
 2. Считать owner текущим только при наличии nonterminal top-level controller. Terminal controller является authoritative closure для его program и подавляет противоречивые stale children.
 3. Привязать visible program к coordinator origin surface/workspace из exact runtime `session.json`. Workspace-placement child не должен переносить aggregate bar из coordinator workspace в собственный child workspace.
-4. Получать один bounded cmux tree inventory snapshot на publish и проверять exact controller surface. `running`/`awaiting-callback` с missing surface исключаются как неживая работа. Probe error возвращает best-effort failure без очистки/перезаписи существующего bar и без lifecycle mutation.
+4. Получать один bounded cmux tree inventory snapshot на publish через единый adapter-owned decoder и проверять exact controller surface. Декодер использует только UUID, переживает постороннюю malformed запись, помечает ref-only или cross-workspace duplicate surface как ambiguous и никогда не превращает её в ложный idle. Probe имеет двухсекундный wall-clock bound; error/timeout возвращает best-effort failure без очистки существующего bar и без lifecycle mutation.
 5. Передавать exact trigger owner в runtime notification, чтобы preflight/starting boundary не терялся до появления session metadata; одновременно агрегировать другие доказанно текущие programs того же origin.
 6. Удалить terminal-owner fallback, который сохраняет 100% bar после окончания. Последняя terminal transition обязана очистить progress.
 7. На coordinator SessionStart/resume/clear/compact выполнить silent best-effort refresh. Task worktree SessionStart не получает coordinator status authority.
@@ -110,7 +110,7 @@ tags:
 
 ### Slice 1 — truthful status selection
 
-- `files/responsibility`: `tests/harness/test_status_segment.py` — behavioral matrix; `scripts/harness/status_segment.py` — selection, rendering and exact cmux inventory boundary.
+- `files/responsibility`: `tests/fixtures/cmux-tree-content-free.json` — обезличенная наблюдённая cmux hierarchy; `tests/harness/test_status_segment.py` — behavioral matrix; `scripts/harness/adapters/cmux.py` — единый exact-identity decoder; `scripts/harness/status_segment.py` — selection, rendering и bounded publish policy.
 - `consumes`: existing `OperationStore`, `OperationSpec.kind`, terminal states, runtime `session.json`, exact cmux workspace/surface identities.
 - `produces`: a pure/injectable current-program snapshot plus workspace-scoped publish/clear behavior.
 - `failing evidence`: fixtures where terminal dispatch + stale child and missing reviewer surface currently render nonzero progress; cross-workspace records currently contaminate one aggregate.

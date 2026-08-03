@@ -172,6 +172,110 @@ def ui_calls(calls: list[list[str]]) -> list[list[str]]:
     ]
 
 
+def observed_cmux_tree() -> dict[str, object]:
+    return json.loads(
+        (ROOT / "tests/fixtures/cmux-tree-content-free.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "observed-tree"
+    store = OperationStore(state_root)
+    owner = "owner-observed"
+    operation = "op-observed"
+    workspace = "6F3DE542-E296-454B-80A8-EED18B5BEC01"
+    surface = "F4E45A1C-F461-480A-B285-F598F0303DCC"
+    store.create(spec(owner, operation), lane_id="lane-observed", run_id="run-observed")
+    advance(store, owner, operation, ("preflight", "starting", "running"))
+    bind_runtime(
+        store,
+        owner,
+        operation,
+        origin_surface=surface,
+        surface_id=surface,
+    )
+
+    drifted = observed_cmux_tree()
+    drifted["windows"][0]["workspaces"].append(
+        {"ref": "workspace:999", "panes": [{"surfaces": [{}]}]}
+    )
+    drift_calls: list[list[str]] = []
+    check(
+        "one unrelated malformed cmux entry does not hide a live program",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=topology_runner(drift_calls, json.dumps(drifted)),
+            binary="/opt/cmux",
+        )
+        and any("0/1 · 1▶" in command for command in ui_calls(drift_calls)),
+        ui_calls(drift_calls),
+    )
+
+    ref_only = observed_cmux_tree()
+    target = ref_only["windows"][0]["workspaces"][0]
+    target.pop("id")
+    ref_calls: list[list[str]] = []
+    check(
+        "ref-only controller placement fails closed instead of reading idle",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=topology_runner(ref_calls, json.dumps(ref_only)),
+            binary="/opt/cmux",
+        )
+        and any("1!" in command for command in ui_calls(ref_calls))
+        and not any("clear-progress" in command for command in ui_calls(ref_calls)),
+        ui_calls(ref_calls),
+    )
+
+    duplicate = observed_cmux_tree()
+    duplicate["windows"][0]["workspaces"][1]["panes"][0]["surfaces"].append(
+        {"id": surface, "ref": "surface:999"}
+    )
+    duplicate_calls: list[list[str]] = []
+    check(
+        "duplicate cross-workspace placement is attention, never guessed",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=topology_runner(duplicate_calls, json.dumps(duplicate)),
+            binary="/opt/cmux",
+        )
+        and any("1!" in command for command in ui_calls(duplicate_calls))
+        and not any(
+            "clear-progress" in command for command in ui_calls(duplicate_calls)
+        ),
+        ui_calls(duplicate_calls),
+    )
+
+    timeout_values: list[object] = []
+
+    def timeout_runner(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        timeout_values.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(command, float(kwargs.get("timeout") or 0))
+
+    check(
+        "status inventory is bounded and timeout leaves the current bar untouched",
+        not publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=timeout_runner,
+            binary="/opt/cmux",
+        )
+        and timeout_values == [2.0],
+        timeout_values,
+    )
+
+
 with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "state"
     store = OperationStore(state_root)

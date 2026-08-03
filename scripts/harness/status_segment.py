@@ -9,13 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from .adapters.cmux import run_cmux
+from .adapters.cmux import CmuxError, run_cmux, surface_workspaces_from_tree
 from .contracts import OperationRecord
 from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
 
 
 LEGACY_STATUS_KEY = "llm-obsidian-harness"
+CMUX_STATUS_TIMEOUT_SECONDS = 2.0
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 CONTROLLER_KINDS = frozenset(
     {
@@ -46,12 +47,16 @@ class LiveInventory:
     """One bounded exact cmux surface-to-workspace snapshot."""
 
     surface_workspaces: Mapping[str, str]
+    ambiguous_surfaces: frozenset[str] = frozenset()
 
     def workspace_for(self, surface_id: str) -> str:
         return self.surface_workspaces.get(surface_id.casefold(), "")
 
     def contains(self, surface_id: str) -> bool:
         return surface_id.casefold() in self.surface_workspaces
+
+    def ambiguous(self, surface_id: str) -> bool:
+        return surface_id.casefold() in self.ambiguous_surfaces
 
 
 def _live_inventory(
@@ -64,55 +69,20 @@ def _live_inventory(
             ["--id-format", "both", "tree", "--all", "--json"],
             runner=runner,
             binary=binary,
+            timeout=CMUX_STATUS_TIMEOUT_SECONDS,
         )
         if result.returncode:
             return None
-        value = json.loads(result.stdout)
-    except (OSError, ValueError, json.JSONDecodeError):
+        index = surface_workspaces_from_tree(json.loads(result.stdout))
+    except (
+        CmuxError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ):
         return None
-    if not isinstance(value, dict) or not isinstance(value.get("windows"), list):
-        return None
-
-    placements: dict[str, str] = {}
-    for window in value["windows"]:
-        if not isinstance(window, dict) or not isinstance(
-            window.get("workspaces", []), list
-        ):
-            return None
-        for workspace in window.get("workspaces", []):
-            if not isinstance(workspace, dict) or not isinstance(
-                workspace.get("panes", []), list
-            ):
-                return None
-            workspace_id = str(
-                workspace.get("id")
-                or workspace.get("workspace_id")
-                or workspace.get("ref")
-                or ""
-            )
-            if not workspace_id:
-                return None
-            for pane in workspace.get("panes", []):
-                if not isinstance(pane, dict) or not isinstance(
-                    pane.get("surfaces", []), list
-                ):
-                    return None
-                for surface in pane.get("surfaces", []):
-                    if not isinstance(surface, dict):
-                        return None
-                    surface_id = str(
-                        surface.get("id")
-                        or surface.get("surface_id")
-                        or ""
-                    )
-                    if not surface_id:
-                        return None
-                    key = surface_id.casefold()
-                    prior = placements.get(key)
-                    if prior is not None and prior.casefold() != workspace_id.casefold():
-                        return None
-                    placements[key] = workspace_id
-    return LiveInventory(placements)
+    return LiveInventory(index.surface_workspaces, index.ambiguous_surfaces)
 
 
 def _records(
@@ -275,6 +245,8 @@ def _controller_is_current(
     if invalid:
         return False, True
     if origin_surface:
+        if inventory.ambiguous(origin_surface):
+            return False, True
         origin_workspace = inventory.workspace_for(origin_surface)
         if (
             not origin_workspace
@@ -285,6 +257,8 @@ def _controller_is_current(
         return False, False
 
     if live_surface:
+        if inventory.ambiguous(live_surface):
+            return False, True
         if not inventory.contains(live_surface):
             return False, False
     elif controller.state in SURFACE_BOUND_STATES:
@@ -429,9 +403,10 @@ def publish(
                 command,
                 runner=runner,
                 binary=cmux_binary,
+                timeout=CMUX_STATUS_TIMEOUT_SECONDS,
             )
             for command in commands
         ]
-    except (OSError, ValueError):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
     return all(result.returncode == 0 for result in results)

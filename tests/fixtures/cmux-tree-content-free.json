@@ -1,0 +1,42 @@
+{
+  "windows": [
+    {
+      "id": "7341B4E6-E199-41D4-AEAA-AB0F386EFBE9",
+      "ref": "window:1",
+      "workspaces": [
+        {
+          "id": "6F3DE542-E296-454B-80A8-EED18B5BEC01",
+          "ref": "workspace:190",
+          "panes": [
+            {
+              "id": "1B14A49D-F6F5-4EC5-83F5-248EF2BA1CE0",
+              "ref": "pane:1282",
+              "surfaces": [
+                {
+                  "id": "F4E45A1C-F461-480A-B285-F598F0303DCC",
+                  "ref": "surface:2156"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "E2AB26B2-8BF7-4AF1-8410-63EA78AE0AE2",
+          "ref": "workspace:386",
+          "panes": [
+            {
+              "id": "8E9E324E-348D-4E31-A59B-D2C77D212DEA",
+              "ref": "pane:1548",
+              "surfaces": [
+                {
+                  "id": "521D138C-5DDA-4F32-ADF4-C945A5754E9C",
+                  "ref": "surface:2485"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

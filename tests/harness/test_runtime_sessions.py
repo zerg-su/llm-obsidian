@@ -571,6 +571,19 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         ),
         (ordinary_launch, ordinary_argv),
     )
+    foreign_product = root / "foreign-product"
+    foreign_product.mkdir()
+    mismatched_launch = dict(ordinary_launch)
+    mismatched_launch["product_root"] = str(foreign_product)
+    ordinary_process.launch.spec_path.write_text(
+        json.dumps(mismatched_launch, sort_keys=True), encoding="utf-8"
+    )
+    try:
+        load_runtime_spec(ordinary_process.launch.spec_path)
+    except RuntimeWorkerError:
+        check("ordinary runtime rejects a product root outside cwd", True)
+    else:
+        check("ordinary runtime rejects a product root outside cwd", False)
 
 
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
