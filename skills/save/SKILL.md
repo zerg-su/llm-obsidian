@@ -80,7 +80,7 @@ In a single turn, before issuing any Write/Edit:
 5. **Collect links**: identify any wiki pages mentioned in the conversation. Add them to `related` in the **new note's** frontmatter (NOT in `wiki/hot.md` frontmatter — see Phase 2 below).
 6. **Draft** one transactional payload internally before writing anything (no pre-reads of log/hot needed — vault-write.py owns their structure):
    - Full content of the new note (path, frontmatter, body) — source of truth.
-   - The vault-write JSON payload: `log_entry` (full prose, format below), `hot_bullet` (one line, format below), optional `hot_threads` `{"add": [...], "resolve": ["substring"]}` when the save opens/closes an Active Thread, optional `hot_narrative` (≤120 words) when the save IS the new headline event of the day.
+   - Payload: `log_entry` (prose below), `hot_bullet` (one line below), optional `hot_threads` `{"add": [...], "resolve": ["substring"]}` for the Active Threads cache (max 8; additions evict oldest; `resolve` removes only cache entries), and optional `hot_narrative` (≤120 words) when save IS the day's headline.
 
 Log entry format (full prose, history-grade):
 ```

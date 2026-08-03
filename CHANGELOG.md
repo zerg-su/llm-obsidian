@@ -10,6 +10,13 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [Unreleased]
+
+### Fixed
+
+- Active Threads additions now evict the oldest hot-cache entries above the
+  eight-entry limit instead of requiring unrelated work to be resolved first.
+
 ## [2.6.1] - 2026-08-03
 
 ### Added
