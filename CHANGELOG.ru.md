@@ -22,8 +22,9 @@
 
 - cmux workspace progress теперь показывает только exact live программы
   dispatch/review/research из coordinator origin workspace и сразу очищается в
-  idle. Terminal controller подавляет stale descendants, а отсутствующий exact
-  surface больше не выглядит активной работой.
+  idle. Terminal controller подавляет stale descendants, а controller с
+  заведомо отсутствующим exact surface больше не выглядит активной работой,
+  включая stale attention после failed launch.
 - Каждый publish использует один bounded live-tree snapshot. Неизвестный probe
   сохраняет текущий UI и не меняет lifecycle; Claude и Codex используют одну
   content-free строку и одинаковый cleanup.

@@ -28,8 +28,9 @@ transport. Unknown prompts, ownership, callbacks, or resource state become
 The workspace progress bar is derived from this ledger but has no lifecycle
 authority. One bounded exact cmux tree snapshot scopes current top-level
 controllers to the coordinator origin workspace and verifies owned surfaces.
-A terminal controller closes its whole program even if a derived child is
-stale. With no proven current program the publisher clears progress; when the
+A controller with a recorded exact surface that is known missing is not current
+workspace work, including stale launch attention. A terminal controller closes
+its whole program even if a derived child is stale. With no proven current program the publisher clears progress; when the
 tree probe is unknown it leaves the existing UI untouched. Coordinator
 SessionStart refreshes this projection silently, while task-worktree hooks do
 not receive coordinator status authority. The label contains counts only:

@@ -284,9 +284,11 @@ def _controller_is_current(
     elif controller.spec.owner_id != trigger_owner:
         return False, False
 
-    if controller.state in SURFACE_BOUND_STATES:
-        if not live_surface or not inventory.contains(live_surface):
+    if live_surface:
+        if not inventory.contains(live_surface):
             return False, False
+    elif controller.state in SURFACE_BOUND_STATES:
+        return False, False
     return True, False
 
 

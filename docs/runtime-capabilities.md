@@ -44,8 +44,8 @@ definitions, sample-size limits, and the dogfood acceptance window.
 The cmux progress label is a read-only harness-step projection, not a project
 task counter. It aggregates only nonterminal top-level dispatch, review, and
 research controllers whose exact origin belongs to the target coordinator
-workspace. Running and callback-waiting controllers with a known missing exact
-surface are excluded; a failed live-tree probe preserves the existing bar and
+workspace. A controller with a recorded exact surface that is known missing is
+excluded in every state; a failed live-tree probe preserves the existing bar and
 never changes operation state. Terminal controllers are authoritative over
 stale descendants, and an empty selection issues workspace-scoped
 `clear-progress`. Claude and Codex use the same content-free label and the same

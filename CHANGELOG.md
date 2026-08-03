@@ -17,7 +17,8 @@ packages were published for them.
 - Made cmux workspace progress show only exact live dispatch, review, and
   research programs from the coordinator origin workspace and clear
   immediately when the workspace is idle. Terminal controllers now suppress
-  stale descendants, and missing exact surfaces no longer look active.
+  stale descendants, and controllers with known missing exact surfaces no
+  longer look active, including stale launch attention.
 - Added one bounded live-tree inventory per publish. An unknown probe preserves
   the existing UI and never mutates harness lifecycle state; Claude and Codex
   retain identical content-free labels and cleanup behavior.

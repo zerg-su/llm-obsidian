@@ -605,6 +605,51 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "stale-attention-surface"
+    store = OperationStore(state_root)
+    owner = "owner-stale-attention"
+    operation = "controller-stale-attention"
+    origin = "a4a4a4a4-a4a4-a4a4-a4a4-a4a4a4a4a4a4"
+    missing_surface = "a5a5a5a5-a5a5-a5a5-a5a5-a5a5a5a5a5a5"
+    workspace = "a6a6a6a6-a6a6-a6a6-a6a6-a6a6a6a6a6a6"
+    window = "a7a7a7a7-a7a7-a7a7-a7a7-a7a7a7a7a7a7"
+    store.create(
+        spec(owner, operation),
+        lane_id="lane-stale-attention",
+        run_id="run-stale-attention",
+    )
+    bind_runtime(
+        store,
+        owner,
+        operation,
+        origin_surface=origin,
+        surface_id=missing_surface,
+    )
+    store.transition(
+        owner,
+        operation,
+        "attention-required",
+        reason=AttentionReason.PROCESS_START_FAILED,
+    )
+    calls: list[list[str]] = []
+    check(
+        "attention controller with a known missing exact surface is idle",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == ["/opt/cmux", "clear-progress", "--workspace", workspace],
+        calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "program-identity"
     store = OperationStore(state_root)
     owner = "owner-programs"
