@@ -71,6 +71,10 @@ tags:
     {
       "evidence_id": "readme-onboarding",
       "observable": "README.md и README.ru.md точно и симметрично объясняют pipeline/DSL, review topology 2.6.1, truthful cmux progress 2.6.2 и короткий путь clarify/grill me → plan → plan review → dispatch → implementation review → reap/close для Claude и Codex."
+    },
+    {
+      "evidence_id": "hot-thread-eviction-preserved",
+      "observable": "LLM Obsidian 2.6.2 сохраняет отдельно одобренный bounded Active Threads cache repair: при добавлении девятого текущего thread детерминированно вытесняется самый старый, остальные восемь сохраняются, dedicated vault-write regression проходит, а pipeline/status semantics не меняются."
     }
   ],
   "non_goals": [
