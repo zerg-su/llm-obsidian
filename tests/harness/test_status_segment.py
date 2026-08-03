@@ -1480,6 +1480,129 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "malformed-runtime-identities"
+    store = OperationStore(state_root)
+    owner = "owner-malformed-runtime"
+    operation = "controller-malformed-runtime"
+    workspace = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
+    window = "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2"
+    store.create(
+        spec(owner, operation),
+        lane_id="lane-malformed-runtime",
+        run_id="run-malformed-runtime",
+    )
+    store.transition(owner, operation, "preflight")
+    bind_runtime(store, owner, operation, origin_surface="surface:1")
+
+    trigger_calls: list[list[str]] = []
+    check(
+        "malformed runtime origin renders attention for its exact trigger",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=topology_runner(trigger_calls, cmux_tree()),
+            binary="/opt/cmux",
+        )
+        and ui_calls(trigger_calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "1!",
+            "--workspace",
+            workspace,
+        ],
+        trigger_calls,
+    )
+
+    sessionstart_calls: list[list[str]] = []
+    check(
+        "SessionStart never clears progress for malformed active origin",
+        not publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(sessionstart_calls, cmux_tree()),
+            binary="/opt/cmux",
+        )
+        and ui_calls(sessionstart_calls) == [],
+        sessionstart_calls,
+    )
+
+    terminal_owner = "owner-malformed-terminal"
+    terminal_operation = "controller-malformed-terminal"
+    store.create(
+        spec(terminal_owner, terminal_operation),
+        lane_id="lane-malformed-terminal",
+        run_id="run-malformed-terminal",
+    )
+    advance(
+        store,
+        terminal_owner,
+        terminal_operation,
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    terminal_calls: list[list[str]] = []
+    check(
+        "another owner never clears progress for malformed active origin",
+        not publish(
+            state_root,
+            trigger_owner=terminal_owner,
+            workspace_id=workspace,
+            runner=topology_runner(terminal_calls, cmux_tree()),
+            binary="/opt/cmux",
+        )
+        and ui_calls(terminal_calls) == [],
+        terminal_calls,
+    )
+
+    surface_root = Path(raw) / "malformed-live-surface"
+    surface_store = OperationStore(surface_root)
+    surface_owner = "owner-malformed-surface"
+    surface_operation = "controller-malformed-surface"
+    origin = "e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3"
+    surface_store.create(
+        spec(surface_owner, surface_operation),
+        lane_id="lane-malformed-surface",
+        run_id="run-malformed-surface",
+    )
+    surface_store.transition(surface_owner, surface_operation, "preflight")
+    bind_runtime(
+        surface_store,
+        surface_owner,
+        surface_operation,
+        origin_surface=origin,
+        surface_id="surface:2",
+    )
+    surface_calls: list[list[str]] = []
+    check(
+        "malformed owned live surface renders attention instead of idle",
+        publish(
+            surface_root,
+            trigger_owner=surface_owner,
+            workspace_id=workspace,
+            runner=topology_runner(
+                surface_calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(surface_calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "1!",
+            "--workspace",
+            workspace,
+        ],
+        surface_calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "corrupt-history"
     corrupt = state_root / "owners/old-owner/operations/old-corrupt.json"
     corrupt.parent.mkdir(parents=True)

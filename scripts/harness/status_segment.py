@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
+from review_contract import review_parent_kind
+
 from .adapters.cmux import (
     UUID_RE,
     CmuxError,
@@ -23,13 +25,15 @@ from .store import OperationStore, StoreError
 LEGACY_STATUS_KEY = "llm-obsidian-harness"
 CMUX_STATUS_TIMEOUT_SECONDS = 2.0
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+REVIEW_CONTROLLER_KINDS = frozenset(
+    review_parent_kind(f"anthropic-{responsibility}")
+    for responsibility in ("holistic", "intent", "engineering")
+)
 CONTROLLER_KINDS = frozenset(
     {
         "dispatch",
         "research",
-        "simple-review-holistic",
-        "deep-review-spec",
-        "deep-review-correctness",
+        *REVIEW_CONTROLLER_KINDS,
     }
 )
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
@@ -155,7 +159,10 @@ def _runtime_origin(
     ):
         return "", True
     origin_surface = value.get("origin_surface")
-    if not isinstance(origin_surface, str) or not origin_surface:
+    if (
+        not isinstance(origin_surface, str)
+        or not UUID_RE.fullmatch(origin_surface)
+    ):
         return "", True
     return origin_surface, False
 
@@ -224,9 +231,6 @@ def _record_controller(
     ]
     if len(lane_matches) == 1:
         return lane_matches[0]
-    if lane_matches:
-        return None
-
     return None
 
 
@@ -247,6 +251,8 @@ def _controller_is_current(
         origin_surface, live_surface, invalid = _research_origin(
             store, program_records
         )
+    if live_surface and not UUID_RE.fullmatch(live_surface):
+        invalid = True
     if invalid:
         return False, True
     if origin_surface:
