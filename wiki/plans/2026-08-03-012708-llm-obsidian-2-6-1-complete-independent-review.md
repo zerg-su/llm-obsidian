@@ -74,6 +74,8 @@ tags:
 
 Публичные lane identities provider-stable: `anthropic-*` и `openai-*`. Имена Fable, Opus и Sol остаются только внутренними model-routing aliases и могут меняться без изменения callback/archive schema. Эта поправка согласована после plan review; она не меняет число sessions или ответственность lanes.
 
+Ограниченное implementation-boundary исключение также принято после видимого Full dogfood: repo-owned repairs checkpoint hydration, bounded delta transport, reviewer sandbox validation и exact cleanup входят в 2.6.1, поскольку нужны для прохождения уже существующего review lifecycle. Они не создают новый scheduler, store или FSM. Полный перечень и обоснование зафиксированы в [implementation deviations](../../docs/acceptance/v2.6.1-implementation-deviations.md); этот перечень расширяет вероятный список файлов раздела 5 только в названных seams.
+
 ## 2. Public review modes
 
 | Режим | Default Fable + Sol | Single-model policy | Ответственность |
