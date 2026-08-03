@@ -585,6 +585,51 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
     else:
         check("ordinary runtime rejects a product root outside cwd", False)
 
+    for label, mutate in (
+        (
+            "ordinary worker rejects an omitted product root",
+            lambda value: value.pop("product_root", None),
+        ),
+        (
+            "ordinary worker rejects an empty product root",
+            lambda value: value.update({"product_root": ""}),
+        ),
+    ):
+        invalid_launch = dict(ordinary_launch)
+        mutate(invalid_launch)
+        ordinary_process.launch.spec_path.write_text(
+            json.dumps(invalid_launch, sort_keys=True), encoding="utf-8"
+        )
+        try:
+            load_runtime_spec(ordinary_process.launch.spec_path)
+        except RuntimeWorkerError:
+            check(label, True)
+        else:
+            check(label, False)
+
+    parent_bound_request = RuntimeSessionRequest(
+        OperationSpec(
+            "ordinary-missing-product",
+            "ordinary-missing-product-key",
+            "dispatch",
+            "ordinary-missing-owner",
+            ordinary_route,
+            "context/manifest.json",
+            "scoped",
+        ),
+        "ordinary-missing-lane",
+        "ordinary-missing-run",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "ordinary-missing-callback.json",
+    )
+    check(
+        "ordinary parent materializes the exact cwd binding",
+        parent_bound_request.product_root == cwd.resolve(),
+        parent_bound_request.product_root,
+    )
+
 
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     root = Path(raw)
@@ -616,6 +661,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/result.json",
+        product_root=cwd,
     )
 
     incompatible_events: list[str] = []
@@ -795,6 +841,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/summary-result.json",
+        product_root=cwd,
         callback_mode="task-summary",
         task_summary_pointer=".task-summary.json",
     )
@@ -870,6 +917,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/phased-result.json",
+        product_root=cwd,
         callback_mode="task-summary",
         task_summary_pointer=".task-summary.json",
         initial_callback_operation_id=phased_child.operation_id,
@@ -1963,12 +2011,20 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         surface_id=SURFACE,
         runtime="claude",
     )
+    check(
+        "ordinary launch materializer persists the exact cwd binding",
+        json.loads(worker_launch.spec_path.read_text(encoding="utf-8"))[
+            "product_root"
+        ]
+        == str(cwd.resolve()),
+    )
     review_wake_launch = ProcessAdapter().prepare_surface_launch(
         argv=(str(Path(sys.executable).resolve()), "-c", "pass"),
         cwd=cwd,
         state_root=root / "review-wake-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=cwd / "callbacks" / "review-wake.json",
+        product_root=cwd,
         store_root=worker_store.root,
         owner_id="owner-worker",
         operation_id="worker-1",
@@ -2169,6 +2225,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         state_root=root / "guard-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=guard_callback,
+        product_root=cwd,
         store_root=guard_store.root,
         owner_id="owner-guard",
         operation_id="guard-worker",
@@ -2263,6 +2320,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         state_root=root / "natural-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=cwd / "callbacks" / "natural.json",
+        product_root=cwd,
         store_root=natural_store.root,
         owner_id="owner-natural",
         operation_id="natural-exit-worker",

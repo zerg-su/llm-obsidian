@@ -15,6 +15,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+TERMINAL_WORKSPACE = "45454545-4545-4545-4545-454545454545"
+STALE_WORKSPACE = "46464646-4646-4646-4646-464646464646"
+CORRUPT_WORKSPACE = "47474747-4747-4747-4747-474747474747"
+
 from harness.contracts import (
     AttentionReason,
     OperationSpec,
@@ -231,6 +235,46 @@ with tempfile.TemporaryDirectory() as raw:
         and any("1!" in command for command in ui_calls(ref_calls))
         and not any("clear-progress" in command for command in ui_calls(ref_calls)),
         ui_calls(ref_calls),
+    )
+
+    sessionstart_calls: list[list[str]] = []
+    check(
+        "SessionStart preserves progress when active placement is ambiguous",
+        not publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(sessionstart_calls, json.dumps(ref_only)),
+            binary="/opt/cmux",
+        )
+        and ui_calls(sessionstart_calls) == [],
+        ui_calls(sessionstart_calls),
+    )
+
+    terminal_owner = "owner-terminal-update"
+    terminal_operation = "op-terminal-update"
+    store.create(
+        spec(terminal_owner, terminal_operation),
+        lane_id="lane-terminal-update",
+        run_id="run-terminal-update",
+    )
+    advance(
+        store,
+        terminal_owner,
+        terminal_operation,
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    terminal_update_calls: list[list[str]] = []
+    check(
+        "terminal update preserves progress when another owner is ambiguous",
+        not publish(
+            state_root,
+            trigger_owner=terminal_owner,
+            workspace_id=workspace,
+            runner=topology_runner(terminal_update_calls, json.dumps(ref_only)),
+            binary="/opt/cmux",
+        )
+        and ui_calls(terminal_update_calls) == [],
+        ui_calls(terminal_update_calls),
     )
 
     duplicate = observed_cmux_tree()
@@ -480,6 +524,37 @@ with tempfile.TemporaryDirectory() as raw:
         and not no_cmux_calls,
     )
 
+    invalid_workspace_calls: list[list[str]] = []
+    check(
+        "positional workspace refs fail before inventory or UI mutation",
+        not publish(
+            state_root,
+            workspace_id="workspace:1",
+            runner=lambda command, **kwargs: invalid_workspace_calls.append(
+                command
+            ),
+        )
+        and not invalid_workspace_calls,
+    )
+    prior_workspace = os.environ.get("CMUX_WORKSPACE_ID")
+    os.environ["CMUX_WORKSPACE_ID"] = "workspace:2"
+    try:
+        check(
+            "malformed environment workspace fails before cmux mutation",
+            not publish(
+                state_root,
+                runner=lambda command, **kwargs: invalid_workspace_calls.append(
+                    command
+                ),
+            )
+            and not invalid_workspace_calls,
+        )
+    finally:
+        if prior_workspace is None:
+            os.environ.pop("CMUX_WORKSPACE_ID", None)
+        else:
+            os.environ["CMUX_WORKSPACE_ID"] = prior_workspace
+
     corrupt = state_root / "owners/owner-z/operations/op-corrupt.json"
     corrupt.parent.mkdir(parents=True)
     corrupt.write_text("{bad json\n", encoding="utf-8")
@@ -512,7 +587,7 @@ with tempfile.TemporaryDirectory() as raw:
         publish(
             state_root,
             trigger_owner="owner-final",
-            workspace_id="workspace:terminal",
+            workspace_id=TERMINAL_WORKSPACE,
             runner=topology_runner(terminal_calls, cmux_tree()),
             binary="/opt/cmux",
         )
@@ -523,13 +598,13 @@ with tempfile.TemporaryDirectory() as raw:
                 "clear-status",
                 "llm-obsidian-harness",
                 "--workspace",
-                "workspace:terminal",
+                TERMINAL_WORKSPACE,
             ],
             [
                 "/opt/cmux",
                 "clear-progress",
                 "--workspace",
-                "workspace:terminal",
+                TERMINAL_WORKSPACE,
             ],
         ],
     )
@@ -664,6 +739,24 @@ with tempfile.TemporaryDirectory() as raw:
         )
         and ui_calls(unknown_calls) == [],
         unknown_calls,
+    )
+    check(
+        "collection cannot represent missing inventory as idle",
+        status_segment.collect(
+            state_root,
+            workspace_id=workspace_a,
+            inventory=None,
+        )
+        is None,
+    )
+    check(
+        "collection requires an exact workspace scope",
+        status_segment.collect(
+            state_root,
+            workspace_id="",
+            inventory=status_segment.LiveInventory({}),
+        )
+        is None,
     )
 
 
@@ -968,6 +1061,68 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "orphan-contract-binding"
+    store = OperationStore(state_root)
+    owner = "owner-orphan-contract"
+    controller = "dispatch-current"
+    orphan = "pipeline-verify-orphan"
+    contract = "e" * 64
+    workspace = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
+    window = "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2"
+    origin = "e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3"
+    surface = "e4e4e4e4-e4e4-e4e4-e4e4-e4e4e4e4e4e4"
+    store.create(
+        replace(spec(owner, controller), contract_sha256=contract),
+        lane_id="lane-current",
+        run_id="run-current",
+    )
+    advance(store, owner, controller, ("preflight", "starting", "running"))
+    bind_runtime(
+        store,
+        owner,
+        controller,
+        origin_surface=origin,
+        surface_id=surface,
+    )
+    store.create(
+        replace(
+            spec(owner, orphan, kind="pipeline-verify"),
+            contract_sha256=contract,
+        ),
+        lane_id="lane-orphan",
+        run_id="run-orphan",
+    )
+    advance(store, owner, orphan, ("preflight", "starting", "running"))
+    calls: list[list[str]] = []
+    check(
+        "unparented shared-contract child is excluded instead of guessed",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree(
+                    (origin, workspace, window),
+                    (surface, workspace, window),
+                ),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "0/1 · 1▶",
+            "--workspace",
+            workspace,
+        ],
+        calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "research-program-identity"
     store = OperationStore(state_root)
     owner = "owner-research-programs"
@@ -1228,7 +1383,7 @@ with tempfile.TemporaryDirectory() as raw:
         publish(
             state_root,
             trigger_owner="owner-stale",
-            workspace_id="workspace:stale",
+            workspace_id=STALE_WORKSPACE,
             runner=topology_runner(stale_calls, cmux_tree()),
             binary="/opt/cmux",
         )
@@ -1237,7 +1392,7 @@ with tempfile.TemporaryDirectory() as raw:
             "/opt/cmux",
             "clear-progress",
             "--workspace",
-            "workspace:stale",
+            STALE_WORKSPACE,
         ],
         stale_calls,
     )
@@ -1286,6 +1441,43 @@ with tempfile.TemporaryDirectory() as raw:
         calls,
     )
 
+    terminal_owner = "owner-corrupt-terminal"
+    terminal_operation = "controller-corrupt-terminal"
+    store.create(
+        spec(terminal_owner, terminal_operation),
+        lane_id="lane-corrupt-terminal",
+        run_id="run-corrupt-terminal",
+    )
+    advance(
+        store,
+        terminal_owner,
+        terminal_operation,
+        (
+            "preflight",
+            "starting",
+            "running",
+            "finalizing",
+            "exiting",
+            "complete",
+        ),
+    )
+    terminal_calls: list[list[str]] = []
+    check(
+        "terminal update preserves progress for another corrupt active owner",
+        not publish(
+            state_root,
+            trigger_owner=terminal_owner,
+            workspace_id=workspace,
+            runner=topology_runner(
+                terminal_calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(terminal_calls) == [],
+        ui_calls(terminal_calls),
+    )
+
 
 with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "corrupt-history"
@@ -1297,7 +1489,7 @@ with tempfile.TemporaryDirectory() as raw:
         "corrupt inactive history cannot establish live workspace work",
         publish(
             state_root,
-            workspace_id="workspace:corrupt",
+            workspace_id=CORRUPT_WORKSPACE,
             runner=topology_runner(corrupt_calls, cmux_tree()),
             binary="/opt/cmux",
         )
@@ -1306,7 +1498,7 @@ with tempfile.TemporaryDirectory() as raw:
             "/opt/cmux",
             "clear-progress",
             "--workspace",
-            "workspace:corrupt",
+            CORRUPT_WORKSPACE,
         ],
         corrupt_calls,
     )
@@ -1336,7 +1528,7 @@ with tempfile.TemporaryDirectory() as raw:
     original_run_cmux = status_segment.run_cmux
     original_workspace = os.environ.get("CMUX_WORKSPACE_ID")
     status_segment.run_cmux = cli_fake
-    os.environ["CMUX_WORKSPACE_ID"] = "workspace:terminal"
+    os.environ["CMUX_WORKSPACE_ID"] = TERMINAL_WORKSPACE
     try:
         for command in ("cancel", "close"):
             operation = f"op-{command}"
@@ -1407,12 +1599,12 @@ with tempfile.TemporaryDirectory() as raw:
                     "clear-status",
                     "llm-obsidian-harness",
                     "--workspace",
-                    "workspace:terminal",
+                    TERMINAL_WORKSPACE,
                 ],
                 [
                     "clear-progress",
                     "--workspace",
-                    "workspace:terminal",
+                    TERMINAL_WORKSPACE,
                 ],
             )
         ],

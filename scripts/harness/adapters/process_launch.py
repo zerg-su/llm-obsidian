@@ -197,12 +197,21 @@ def prepare_surface_launch(
         or not store_root.is_absolute()
     ):
         raise error_type("surface launch paths and runtime must be absolute")
+    effective_product_root = product_root
+    if (
+        effective_product_root is None
+        and not reviewer_sandbox
+        and callback_mode not in {"research-fetch", "research-synth"}
+    ):
+        effective_product_root = cwd
     resolved_product_root = (
-        product_root.expanduser().resolve() if product_root is not None else None
+        effective_product_root.expanduser().resolve()
+        if effective_product_root is not None
+        else None
     )
-    if product_root is not None and (
-        not product_root.is_absolute()
-        or product_root.is_symlink()
+    if effective_product_root is not None and (
+        not effective_product_root.is_absolute()
+        or effective_product_root.is_symlink()
         or resolved_product_root is None
         or not resolved_product_root.is_dir()
     ):

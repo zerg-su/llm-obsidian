@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-from .adapters.cmux import CmuxError, run_cmux, surface_workspaces_from_tree
+from .adapters.cmux import (
+    UUID_RE,
+    CmuxError,
+    run_cmux,
+    surface_workspaces_from_tree,
+)
 from .contracts import OperationRecord
 from .state_machine import TERMINAL
 from .store import OperationStore, StoreError
@@ -28,6 +33,8 @@ CONTROLLER_KINDS = frozenset(
     }
 )
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
+
+
 @dataclass(frozen=True)
 class HarnessStatus:
     completed: int = 0
@@ -57,6 +64,12 @@ class LiveInventory:
 
     def ambiguous(self, surface_id: str) -> bool:
         return surface_id.casefold() in self.ambiguous_surfaces
+
+
+@dataclass(frozen=True)
+class CollectionResult:
+    status: HarnessStatus
+    unscoped_uncertainty: bool = False
 
 
 def _live_inventory(
@@ -214,14 +227,6 @@ def _record_controller(
     if lane_matches:
         return None
 
-    if record.spec.contract_sha256:
-        contract_matches = [
-            controller
-            for controller in controllers
-            if controller.spec.contract_sha256 == record.spec.contract_sha256
-        ]
-        if len(contract_matches) == 1:
-            return contract_matches[0]
     return None
 
 
@@ -266,24 +271,25 @@ def _controller_is_current(
     return True, False
 
 
-def collect(
+def _collect(
     state_root: Path | str,
     *,
     trigger_owner: str | None = None,
     workspace_id: str = "",
     inventory: LiveInventory | None = None,
-) -> HarnessStatus:
+) -> CollectionResult | None:
     """Select exact current programs without mutating durable lifecycle state."""
 
     trigger = trigger_owner or ""
     store, records_by_owner, invalid_by_owner = _records(state_root)
-    if inventory is None or not workspace_id:
-        return HarnessStatus()
+    if inventory is None or not UUID_RE.fullmatch(workspace_id):
+        return None
 
     selected: list[OperationRecord] = []
     selected_ids: set[tuple[str, str]] = set()
     selected_owners: set[str] = set()
     invalid = 0
+    unscoped_uncertainty = False
     for owner, records in records_by_owner.items():
         all_controllers = [
             record for record in records if record.spec.kind in CONTROLLER_KINDS
@@ -309,8 +315,11 @@ def collect(
                 trigger_owner=trigger,
                 inventory=inventory,
             )
-            if broken and owner == trigger:
-                invalid += 1
+            if broken:
+                if owner == trigger:
+                    invalid += 1
+                else:
+                    unscoped_uncertainty = True
             if current:
                 controllers.append((record, program_records))
         if not controllers:
@@ -325,14 +334,39 @@ def collect(
 
     invalid += sum(invalid_by_owner.get(owner, 0) for owner in selected_owners)
     active_records = [record for record in selected if record.state not in TERMINAL]
-    return HarnessStatus(
-        completed=sum(record.state == "complete" for record in selected),
-        total=len(selected),
-        active=len(active_records),
-        waiting=sum(record.state == "awaiting-callback" for record in active_records),
-        attention=sum(record.state == "attention-required" for record in active_records),
-        invalid=invalid,
+    return CollectionResult(
+        HarnessStatus(
+            completed=sum(record.state == "complete" for record in selected),
+            total=len(selected),
+            active=len(active_records),
+            waiting=sum(
+                record.state == "awaiting-callback" for record in active_records
+            ),
+            attention=sum(
+                record.state == "attention-required" for record in active_records
+            ),
+            invalid=invalid,
+        ),
+        unscoped_uncertainty=unscoped_uncertainty,
     )
+
+
+def collect(
+    state_root: Path | str,
+    *,
+    trigger_owner: str | None = None,
+    workspace_id: str = "",
+    inventory: LiveInventory | None = None,
+) -> HarnessStatus | None:
+    """Return an exact scoped status, or None when scope is unknowable."""
+
+    result = _collect(
+        state_root,
+        trigger_owner=trigger_owner,
+        workspace_id=workspace_id,
+        inventory=inventory,
+    )
+    return result.status if result is not None else None
 
 
 def render(status: HarnessStatus) -> str:
@@ -359,7 +393,7 @@ def publish(
     workspace = workspace_id if workspace_id is not None else os.environ.get(
         "CMUX_WORKSPACE_ID", ""
     )
-    if not workspace:
+    if not UUID_RE.fullmatch(workspace):
         return False
     cmux_binary = (
         binary
@@ -369,12 +403,15 @@ def publish(
     inventory = _live_inventory(runner=runner, binary=cmux_binary)
     if inventory is None:
         return False
-    status = collect(
+    collection = _collect(
         state_root,
         trigger_owner=trigger_owner,
         workspace_id=workspace,
         inventory=inventory,
     )
+    if collection is None or collection.unscoped_uncertainty:
+        return False
+    status = collection.status
     commands = [
         [
             "clear-status",

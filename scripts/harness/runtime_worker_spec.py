@@ -237,7 +237,7 @@ def load_spec(path: Path) -> dict[str, Any]:
     if not isinstance(reviewer_sandbox, bool):
         raise RuntimeWorkerError("reviewer sandbox identity is invalid")
     raw_product_root = value.get("product_root")
-    if raw_product_root:
+    if raw_product_root is not None and raw_product_root != "":
         product_root = _absolute(raw_product_root, "product_root")
         if (
             product_root.is_symlink()
@@ -257,6 +257,12 @@ def load_spec(path: Path) -> dict[str, Any]:
         callback_mode != "envelope" or product_root is None
     ):
         raise RuntimeWorkerError("reviewer product root is required")
+    if (
+        not reviewer_sandbox
+        and callback_mode not in {"research-fetch", "research-synth"}
+        and product_root is None
+    ):
+        raise RuntimeWorkerError("ordinary runtime product root is required")
     registration = _absolute(
         value.get("callback_registration"), "callback_registration"
     )
