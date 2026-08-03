@@ -516,6 +516,60 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         (launch_value, protected_argv),
     )
 
+    ordinary_route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "executor", "d" * 64
+    )
+    ordinary_process = ParentRecordingProcess()
+    ordinary_manager = RuntimeSessionManager(
+        OperationStore(root / "ordinary-store"),
+        FakeCmux([]),
+        ordinary_process,
+        {"codex": ShebangDriver(codex)},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            ordinary_route, True, ("provider:profile-valid",)
+        ),
+    )
+    ordinary_request = RuntimeSessionRequest(
+        OperationSpec(
+            "ordinary-runtime",
+            "ordinary-runtime-key",
+            "dispatch",
+            "ordinary-owner",
+            ordinary_route,
+            "context/manifest.json",
+            "scoped",
+        ),
+        "ordinary-lane",
+        "ordinary-run",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "ordinary-callback.json",
+    )
+    with patch.dict(os.environ, {"PATH": str(binary_root)}):
+        ordinary_manager.start(ordinary_request)
+    assert ordinary_process.launch is not None
+    ordinary_launch = json.loads(
+        ordinary_process.launch.spec_path.read_text(encoding="utf-8")
+    )
+    ordinary_spec = load_runtime_spec(ordinary_process.launch.spec_path)
+    ordinary_argv = runtime_provider_argv(
+        ordinary_spec,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    check(
+        "parent pins env shebang interpreter for ordinary providers",
+        ordinary_launch["runtime_interpreter"] == str(node.resolve())
+        and ordinary_argv
+        == (
+            str(node.resolve()),
+            str(codex),
+            "--strict-config",
+            "bounded research",
+        ),
+        (ordinary_launch, ordinary_argv),
+    )
+
 
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     root = Path(raw)

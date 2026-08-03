@@ -91,14 +91,14 @@ def _runtime_interpreter(value: dict[str, Any]) -> Path | None:
         interpreter_stat = runtime_interpreter.stat()
     except OSError as exc:
         raise RuntimeWorkerError(
-            "research runtime interpreter is unavailable"
+            "runtime interpreter is unavailable"
         ) from exc
     if (
         not runtime_interpreter.is_file()
         or not os.access(runtime_interpreter, os.X_OK)
         or interpreter_stat.st_mode & 0o022
     ):
-        raise RuntimeWorkerError("research runtime interpreter is untrusted")
+        raise RuntimeWorkerError("runtime interpreter is untrusted")
     return runtime_interpreter
 
 
@@ -182,17 +182,13 @@ def _reject_nonresearch_fields(
         ):
             raise RuntimeWorkerError("review callback wake is invalid")
         if (
-            value.get("runtime_home")
-            or value.get("runtime_interpreter")
-            or research_request_sha256
+            value.get("runtime_home") or research_request_sha256
         ):
             raise RuntimeWorkerError(
                 "research runtime fields require research callback mode"
             )
     elif (
-        value.get("runtime_home")
-        or value.get("runtime_interpreter")
-        or research_request_sha256
+        value.get("runtime_home") or research_request_sha256
         or callback_wake
     ):
         raise RuntimeWorkerError(
@@ -265,9 +261,9 @@ def load_spec(path: Path) -> dict[str, Any]:
         value, callback_mode, origin_surface
     )
     runtime_home = None
-    runtime_interpreter = None
+    runtime_interpreter = _runtime_interpreter(value)
     if callback_mode in {"research-fetch", "research-synth"}:
-        runtime_home, runtime_interpreter = _research_runtime(
+        runtime_home, research_runtime_interpreter = _research_runtime(
             value,
             callback_mode=callback_mode,
             cwd=cwd,
@@ -276,6 +272,8 @@ def load_spec(path: Path) -> dict[str, Any]:
             callback_wake=callback_wake,
             research_request_sha256=request_sha,
         )
+        if research_runtime_interpreter != runtime_interpreter:
+            raise RuntimeWorkerError("runtime interpreter identity drifted")
     else:
         _reject_nonresearch_fields(
             value,

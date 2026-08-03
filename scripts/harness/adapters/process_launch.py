@@ -236,10 +236,7 @@ def prepare_surface_launch(
     resolved_runtime_home = (
         runtime_home.expanduser().resolve() if runtime_home is not None else None
     )
-    research_mode = callback_mode in {"research-fetch", "research-synth"}
-    runtime_interpreter = (
-        shebang_resolver(argv, os.environ) if research_mode else None
-    )
+    runtime_interpreter = shebang_resolver(argv, os.environ)
     _validate_research_fields(
         runtime=runtime,
         callback_mode=callback_mode,
