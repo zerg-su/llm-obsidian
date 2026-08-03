@@ -421,6 +421,10 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         def capture_identity(
             self, pid: int, *, process_group: int = 0
         ) -> str:
+            if (pid == 42 and self.status == "dead") or (
+                pid == 43 and self.supervisor_status == "dead"
+            ):
+                raise ProcessLookupError(pid)
             if not self.capture_matches:
                 return "c" * 64
             if pid == 42 and process_group == 42:
@@ -567,6 +571,112 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             + "\n",
             encoding="utf-8",
         )
+        return workspace_id, window_id
+
+    def create_review_cleanup_operation(
+        operation_id: str,
+        *,
+        missing_checkpoint: bool = False,
+        launch_surface: str = "11111111-1111-1111-1111-111111111111",
+    ) -> tuple[str, str]:
+        review_route = RuntimeRoute(
+            "claude",
+            "fable",
+            "xhigh",
+            "reviewer-callback",
+            "d" * 64,
+        )
+        review_spec = OperationSpec(
+            operation_id,
+            f"key-{operation_id}",
+            "deep-review-spec",
+            "owner-cli",
+            review_route,
+            "packets/review.json",
+            "scoped",
+        )
+        run_id = f"run-{operation_id}"
+        store.create(review_spec, lane_id="lane-review", run_id=run_id)
+        for state in ("preflight", "starting", "running"):
+            store.transition("owner-cli", operation_id, state)
+        bind_owned_resources(operation_id)
+        store.transition(
+            "owner-cli",
+            operation_id,
+            "attention-required",
+            reason=AttentionReason.CLEANUP_INCOMPLETE,
+        )
+        state_root = (
+            store.root
+            / "owners"
+            / "owner-cli"
+            / "runtime"
+            / operation_id
+        )
+        state_root.mkdir(parents=True)
+        scratch = root / "review-scratch" / operation_id
+        product = root / "review-product" / operation_id
+        scratch.mkdir(parents=True)
+        product.mkdir(parents=True)
+        workspace_id = "22222222-2222-4222-8222-222222222222"
+        window_id = "33333333-3333-4333-8333-333333333333"
+        values = {
+            "session.json": {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "cwd": str(scratch.resolve()),
+                "product_root": str(product.resolve()),
+                "placement": "workspace",
+                "workspace_id": workspace_id,
+                "workspace_ref": "workspace:1",
+                "window_id": window_id,
+                "window_ref": "window:1",
+                "surface_ref": "surface:1",
+                "callback_mode": "envelope",
+                "checkpoint": "",
+            },
+            "launch.json": {
+                "schema_version": 1,
+                "owner_id": "owner-cli",
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "runtime": "claude",
+                "cwd": str(scratch.resolve()),
+                "surface_id": launch_surface,
+                "store_root": str(store.root.resolve()),
+                "argv": [
+                    "claude",
+                    "--model",
+                    "fable",
+                    f"Product worktree (read-only): `{product.resolve()}`.",
+                ],
+            },
+            "ready.json": {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": 42,
+                "process_group": 42,
+                "process_identity": "a" * 64,
+                "supervisor_pid": 43,
+                "supervisor_identity": "b" * 64,
+            },
+            "checkpoint.json": {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "run_id": run_id,
+                "runtime": "claude",
+                "checkpoint": f"checkpoint-{operation_id}",
+            },
+        }
+        if missing_checkpoint:
+            values.pop("checkpoint.json")
+        for name, value in values.items():
+            (state_root / name).write_text(
+                json.dumps(value, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        write_callback_target(operation_id)
         return workspace_id, window_id
 
     def write_callback_target(operation_id: str) -> None:
@@ -962,6 +1072,138 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and owned_process.guardian_requests[0]["action"] == "request-exit"
         and owned_process.guardian_requests[0]["operation_id"]
         == "op-owned-cli",
+    )
+
+    create_review_cleanup_operation("op-review-proof-cli")
+    proof_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    proof_cmux = FakeCmux("alive")
+    proof_rc, _proof_output = run_cli_in_process(
+        "close",
+        "op-review-proof-cli",
+        process=proof_process,
+        cmux=proof_cmux,
+    )
+    proof_after_exit = store.read("owner-cli", "op-review-proof-cli")
+    check(
+        "CLI reviewer cleanup reconstructs exact durable parent ownership",
+        proof_rc == 0
+        and proof_after_exit.state == "exiting"
+        and len(proof_process.guardian_requests) == 1
+        and proof_process.guardian_requests[0]["operation_id"]
+        == "op-review-proof-cli"
+        and proof_cmux.closed_workspaces == [],
+    )
+    proof_process.status = "dead"
+    proof_process.supervisor_status = "dead"
+    proof_cmux.current = "missing"
+    proof_cmux.workspace_current = "missing"
+    partial_rc, _partial_output = run_cli_in_process(
+        "close",
+        "op-review-proof-cli",
+        process=proof_process,
+        cmux=proof_cmux,
+    )
+    replay_rc, _replay_output = run_cli_in_process(
+        "close",
+        "op-review-proof-cli",
+        process=proof_process,
+        cmux=proof_cmux,
+    )
+    proof_terminal = store.read("owner-cli", "op-review-proof-cli")
+    check(
+        "CLI reviewer cleanup contains partial cleanup and replays idempotently",
+        partial_rc == 0
+        and replay_rc == 0
+        and proof_terminal.state in {"complete", "cancelled"}
+        and proof_terminal.resources == OwnedResources()
+        and len(proof_process.guardian_requests) == 1
+        and proof_cmux.closed_workspaces == [],
+    )
+
+    create_review_cleanup_operation("op-review-reused-cli")
+    reused_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=False
+    )
+    reused_rc, _reused_output = run_cli_in_process(
+        "close",
+        "op-review-reused-cli",
+        process=reused_process,
+        cmux=FakeCmux("alive"),
+    )
+    reused_after = store.read("owner-cli", "op-review-reused-cli")
+    check(
+        "CLI reviewer cleanup rejects a stale or reused process identity",
+        reused_rc == 0
+        and reused_after.state == "attention-required"
+        and reused_process.guardian_requests == [],
+    )
+
+    create_review_cleanup_operation("op-review-foreign-cli")
+    foreign_cmux = FakeCmux("alive")
+    foreign_cmux.workspace_current = "drift"
+    foreign_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    foreign_rc, _foreign_output = run_cli_in_process(
+        "close",
+        "op-review-foreign-cli",
+        process=foreign_process,
+        cmux=foreign_cmux,
+    )
+    foreign_after = store.read("owner-cli", "op-review-foreign-cli")
+    check(
+        "CLI reviewer cleanup rejects foreign workspace or surface identity",
+        foreign_rc == 0
+        and foreign_after.state == "attention-required"
+        and foreign_process.guardian_requests == []
+        and foreign_cmux.closed_workspaces == [],
+    )
+
+    create_review_cleanup_operation(
+        "op-review-foreign-surface-cli",
+        launch_surface="44444444-4444-4444-8444-444444444444",
+    )
+    foreign_surface_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    foreign_surface_rc, _foreign_surface_output = run_cli_in_process(
+        "close",
+        "op-review-foreign-surface-cli",
+        process=foreign_surface_process,
+        cmux=FakeCmux("alive"),
+    )
+    foreign_surface_after = store.read(
+        "owner-cli", "op-review-foreign-surface-cli"
+    )
+    check(
+        "CLI reviewer cleanup rejects a foreign launch surface",
+        foreign_surface_rc == 0
+        and foreign_surface_after.state == "attention-required"
+        and foreign_surface_process.guardian_requests == [],
+    )
+
+    create_review_cleanup_operation(
+        "op-review-missing-checkpoint-cli", missing_checkpoint=True
+    )
+    missing_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    missing_rc, _missing_output = run_cli_in_process(
+        "close",
+        "op-review-missing-checkpoint-cli",
+        process=missing_process,
+        cmux=FakeCmux("alive"),
+    )
+    missing_after = store.read(
+        "owner-cli", "op-review-missing-checkpoint-cli"
+    )
+    check(
+        "CLI reviewer cleanup rejects missing durable checkpoint evidence",
+        missing_rc == 0
+        and missing_after.state == "attention-required"
+        and missing_process.guardian_requests == [],
     )
 
     create_cli_operation(

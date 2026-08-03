@@ -259,6 +259,39 @@ def _cancel_or_close(
             operation_id,
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
+    if (
+        record.spec.route.profile == "reviewer-callback"
+        and _has_owned_resources(record)
+    ):
+        runtime = RuntimeSessionManager(
+            store,
+            cmux_adapter,
+            process_adapter,
+        )
+        try:
+            runtime.prove_durable_cleanup_ownership(owner, operation_id)
+        except RuntimeSessionError:
+            return _attention(
+                store,
+                owner,
+                operation_id,
+                reason=AttentionReason.CLEANUP_INCOMPLETE,
+            )
+        initial = record
+        result = (
+            runtime.cleanup(owner, operation_id)
+            if record.state == "exiting"
+            else runtime.request_exit(owner, operation_id)
+        )
+        current = result.record
+        return TransitionResult(
+            operation_id,
+            initial.state,
+            current.state,
+            current.revision,
+            current.revision != initial.revision,
+            current.attention_reason,
+        )
     if _has_owned_resources(record):
         decision = _reconcile_owned_resources(
             store, record, process_adapter, cmux_adapter

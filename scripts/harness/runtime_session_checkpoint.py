@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,18 @@ from .runtime_session_contracts import (
 
 
 MAX_CHECKPOINT_EVIDENCE_BYTES = 262_144
+
+
+@dataclass(frozen=True)
+class DurableCleanupOwnership:
+    """Fresh exact-resource observations backed by immutable launch evidence."""
+
+    process_status: str
+    supervisor_status: str
+    surface_status: str
+    workspace_status: str
+    workspace_id: str
+    window_id: str
 
 
 def _stable_owned_json(path: Path, label: str) -> tuple[dict[str, Any], str]:
@@ -173,3 +186,196 @@ class RuntimeSessionCheckpointMixin:
             checkpoint=checkpoint_value,
             checkpoint_sha256=binding_sha256,
         )
+
+    def prove_durable_cleanup_ownership(
+        self, owner_id: str, operation_id: str
+    ) -> DurableCleanupOwnership:
+        """Reconstruct one reviewer parent without weakening unknown ownership."""
+
+        record = self.store.read(owner_id, operation_id)
+        if (
+            record.spec.owner_id != owner_id
+            or record.spec.operation_id != operation_id
+            or record.spec.route.profile != "reviewer-callback"
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup parent identity is invalid"
+            )
+        resources = record.resources
+        if (
+            not resources.surface_id
+            or resources.process_group <= 1
+            or resources.supervisor_pid <= 1
+            or not resources.process_identity
+            or not resources.supervisor_identity
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup resources are incomplete"
+            )
+        self.hydrate_durable_checkpoint(
+            owner_id, operation_id, record.lane_id
+        )
+        state_root = self._state_root(record)
+        session, _session_sha256 = _stable_owned_json(
+            state_root / "session.json", "cleanup session evidence"
+        )
+        launch, _launch_sha256 = _stable_owned_json(
+            state_root / "launch.json", "cleanup launch evidence"
+        )
+        ready, _ready_sha256 = _stable_owned_json(
+            state_root / "ready.json", "cleanup ready evidence"
+        )
+        raw_cwd = Path(str(session.get("cwd") or "")).expanduser()
+        raw_product_root = Path(
+            str(session.get("product_root") or "")
+        ).expanduser()
+        if (
+            not raw_cwd.is_absolute()
+            or not raw_product_root.is_absolute()
+            or raw_cwd.is_symlink()
+            or raw_product_root.is_symlink()
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup worktree identity is invalid"
+            )
+        cwd = raw_cwd.resolve()
+        product_root = raw_product_root.resolve()
+        workspace_id = str(session.get("workspace_id") or "")
+        window_id = str(session.get("window_id") or "")
+        argv = launch.get("argv")
+        if (
+            session.get("operation_id") != operation_id
+            or session.get("run_id") != record.run_id
+            or session.get("placement") != "workspace"
+            or session.get("callback_mode", "envelope") != "envelope"
+            or not cwd.is_dir()
+            or not product_root.is_dir()
+            or product_root == cwd
+            or product_root in cwd.parents
+            or cwd in product_root.parents
+            or not IDENTIFIER.fullmatch(workspace_id)
+            or not IDENTIFIER.fullmatch(window_id)
+            or not IDENTIFIER.fullmatch(
+                str(session.get("workspace_ref") or "")
+            )
+            or not IDENTIFIER.fullmatch(
+                str(session.get("window_ref") or "")
+            )
+            or not IDENTIFIER.fullmatch(
+                str(session.get("surface_ref") or "")
+            )
+            or launch.get("owner_id") != owner_id
+            or launch.get("operation_id") != operation_id
+            or launch.get("run_id") != record.run_id
+            or launch.get("runtime") != record.spec.route.runtime
+            or launch.get("surface_id") != resources.surface_id
+            or launch.get("cwd") != str(cwd)
+            or launch.get("store_root") != str(self.store.root.resolve())
+            or not isinstance(argv, list)
+            or not all(isinstance(item, str) for item in argv)
+            or not any(str(product_root) in item for item in argv)
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup launch identity changed"
+            )
+        if (
+            set(ready)
+            != {
+                "schema_version",
+                "status",
+                "pid",
+                "process_group",
+                "process_identity",
+                "supervisor_pid",
+                "supervisor_identity",
+            }
+            or ready.get("status") != "ready"
+            or ready.get("pid") != resources.process_group
+            or ready.get("process_group") != resources.process_group
+            or ready.get("process_identity")
+            != resources.process_identity
+            or ready.get("supervisor_pid") != resources.supervisor_pid
+            or ready.get("supervisor_identity")
+            != resources.supervisor_identity
+            or resources.process_group == resources.supervisor_pid
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup supervisor relationship changed"
+            )
+
+        process_status = self._exact_cleanup_process_status(
+            self.process.process_status(
+                resources.process_group, resources.process_identity
+            ),
+            resources.process_group,
+            resources.process_identity,
+            process_group=resources.process_group,
+        )
+        supervisor_status = self._exact_cleanup_process_status(
+            self._supervisor_status(record),
+            resources.supervisor_pid,
+            resources.supervisor_identity,
+        )
+        try:
+            surface_status = str(self.cmux.status(resources.surface_id))
+            workspace_status = str(
+                self.cmux.workspace_status(workspace_id, window_id)
+            )
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "durable cleanup cmux ownership is unavailable"
+            ) from exc
+        if (
+            surface_status not in {"alive", "missing"}
+            or workspace_status not in {"alive", "missing"}
+            or surface_status != workspace_status
+        ):
+            raise RuntimeSessionError(
+                "durable cleanup cmux ownership changed"
+            )
+        return DurableCleanupOwnership(
+            process_status,
+            supervisor_status,
+            surface_status,
+            workspace_status,
+            workspace_id,
+            window_id,
+        )
+
+    def _exact_cleanup_process_status(
+        self,
+        status: object,
+        pid: int,
+        identity: str,
+        *,
+        process_group: int = 0,
+    ) -> str:
+        value = str(status)
+        if value not in {"alive", "dead", "unknown"}:
+            raise RuntimeSessionError(
+                "durable cleanup process status is invalid"
+            )
+        capture = getattr(self.process, "capture_identity", None)
+        if not callable(capture):
+            raise RuntimeSessionError(
+                "durable cleanup process identity probe is unavailable"
+            )
+        if value == "dead":
+            try:
+                capture(pid, process_group=process_group)
+            except (ProcessLookupError, OSError):
+                return "dead"
+            raise RuntimeSessionError(
+                "durable cleanup process identity was reused"
+            )
+        try:
+            actual = capture(pid, process_group=process_group)
+        except Exception as exc:
+            raise RuntimeSessionError(
+                "durable cleanup process identity is unavailable"
+            ) from exc
+        if actual != identity:
+            raise RuntimeSessionError(
+                "durable cleanup process identity changed"
+            )
+        return "alive"

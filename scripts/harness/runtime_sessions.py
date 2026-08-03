@@ -489,6 +489,14 @@ class RuntimeSessionManager(
             if resources.supervisor_pid > 1
             else "dead"
         )
+        if "unknown" in {process_status, supervisor_status}:
+            try:
+                proof = self.prove_durable_cleanup_ownership(
+                    record.spec.owner_id, record.spec.operation_id
+                )
+            except RuntimeSessionError:
+                return process_status, supervisor_status
+            return proof.process_status, proof.supervisor_status
         return process_status, supervisor_status
 
 
