@@ -12,6 +12,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,6 +148,23 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "suggested_agents": [],
         "reap": {"type": "repo-touch", "title": "Fast dispatch result"},
     }
+
+    current_context = dict(raw_request)
+    current_context.pop("origin_session")
+    with mock.patch(
+        "dispatch_setup.subprocess.run",
+        return_value=subprocess.CompletedProcess(
+            args=[str(vault / "scripts" / "current-session-id.sh")],
+            returncode=0,
+            stdout="materialized-session\n",
+            stderr="",
+        ),
+    ):
+        current_context = runner.materialize_current_context(current_context)
+    check(
+        "dispatch materializes the current coordinator session",
+        current_context["origin_session"] == "materialized-session",
+    )
 
     request = runner.validate_request(raw_request)
     missing_outcome = json.loads(json.dumps(raw_request))
