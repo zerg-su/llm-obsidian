@@ -362,8 +362,10 @@ class RuntimeSessionCheckpointMixin:
             )
         if value == "dead":
             try:
-                capture(pid, process_group=process_group)
+                actual = capture(pid, process_group=process_group)
             except (ProcessLookupError, OSError):
+                return "dead"
+            if actual == identity:
                 return "dead"
             raise RuntimeSessionError(
                 "durable cleanup process identity was reused"

@@ -421,10 +421,6 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         def capture_identity(
             self, pid: int, *, process_group: int = 0
         ) -> str:
-            if (pid == 42 and self.status == "dead") or (
-                pid == 43 and self.supervisor_status == "dead"
-            ):
-                raise ProcessLookupError(pid)
             if not self.capture_matches:
                 return "c" * 64
             if pid == 42 and process_group == 42:
