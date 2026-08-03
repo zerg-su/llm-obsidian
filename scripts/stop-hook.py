@@ -28,6 +28,8 @@ DEFAULT_REQUIRED_TIMEOUT = 60.0
 MIN_TIMEOUT = 1.0
 MAX_TIMEOUT = 600.0
 REQUIRED_TIMEOUT_ENV = "LLM_OBSIDIAN_STOP_REQUIRED_TIMEOUT_SEC"
+DEFAULT_LOCK_TIMEOUT = 2.0
+LOCK_TIMEOUT_ENV = "LLM_OBSIDIAN_STOP_LOCK_TIMEOUT_SEC"
 
 
 def emit(message: str) -> None:
@@ -125,7 +127,7 @@ def run_required(
     return result
 
 
-def acquire(lock_file: object, timeout: float = 2.0) -> bool:
+def acquire(lock_file: object, timeout: float = DEFAULT_LOCK_TIMEOUT) -> bool:
     deadline = time.monotonic() + timeout
     while True:
         try:
@@ -364,10 +366,11 @@ def main() -> int:
         )
         return 0
     required_timeout = timeout_setting(REQUIRED_TIMEOUT_ENV, DEFAULT_REQUIRED_TIMEOUT)
+    lock_timeout = timeout_setting(LOCK_TIMEOUT_ENV, DEFAULT_LOCK_TIMEOUT)
     META.mkdir(parents=True, exist_ok=True)
     timings: dict[str, float] = {}
     with LOCK.open("a+", encoding="utf-8") as lock_file:
-        if not acquire(lock_file):
+        if not acquire(lock_file, lock_timeout):
             emit(
                 "STOP_LOCK_BUSY: another session owns the turn-end pipeline; "
                 "this Stop skipped and the next one will self-heal."
