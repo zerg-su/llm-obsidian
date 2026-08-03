@@ -92,6 +92,8 @@ NON_STRING_JSON_VALUES = {
 EXPECTED_FINDING_CONSTRAINT_LINES = (
     "`finding_id` must match `[A-Za-z0-9][A-Za-z0-9._:-]*`, contain at most "
     "100 characters, and be unique within the review round.",
+    "`finding_id` must not start with the current lane's reserved `<axis>:` "
+    "aggregate prefix.",
     "`file` must be a repository-relative POSIX path (not absolute, `.`, or "
     "containing `..` or `\\`) of at most 1000 characters.",
     "`summary` is at most 300 characters; `evidence` and `recommendation` are "

@@ -1833,6 +1833,71 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         review_wake_spec["callback_wake"]
         == "resume exact current review",
     )
+    reviewer_product = root / "reviewer-product"
+    reviewer_product.mkdir()
+    reviewer_store = OperationStore(root / "reviewer-store")
+    reviewer_spec = OperationSpec(
+        "reviewer-worker",
+        "reviewer-worker-key",
+        "review-session",
+        "owner-reviewer-worker",
+        RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "reviewer-callback",
+            "d" * 64,
+        ),
+        "packets/review.json",
+        "scoped",
+    )
+    reviewer_store.create(
+        reviewer_spec,
+        lane_id="lane-reviewer-worker",
+        run_id="run-reviewer-worker",
+    )
+    reviewer_callback = cwd / "callbacks" / "reviewer-worker.json"
+    reviewer_command = CodexDriver(Path("/usr/bin/codex")).command(
+        reviewer_spec.route,
+        callback_pointer=reviewer_callback,
+        product_root=reviewer_product,
+        session_root=cwd,
+    )
+    reviewer_launch = ProcessAdapter().prepare_surface_launch(
+        argv=(*reviewer_command, "review"),
+        cwd=cwd,
+        state_root=root / "reviewer-worker-state",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=reviewer_callback,
+        product_root=reviewer_product,
+        reviewer_sandbox=True,
+        store_root=reviewer_store.root,
+        owner_id="owner-reviewer-worker",
+        operation_id="reviewer-worker",
+        run_id="run-reviewer-worker",
+        surface_id=SURFACE,
+        runtime="codex",
+    )
+    tampered_reviewer_spec = json.loads(
+        reviewer_launch.spec_path.read_text(encoding="utf-8")
+    )
+    tampered_reviewer_spec["reviewer_sandbox"] = False
+    reviewer_launch.spec_path.write_text(
+        json.dumps(tampered_reviewer_spec, sort_keys=True),
+        encoding="utf-8",
+    )
+    try:
+        run_runtime_worker(reviewer_launch.spec_path)
+    except RuntimeWorkerError:
+        check(
+            "reviewer sandbox identity is bound to durable operation authority",
+            True,
+        )
+    else:
+        check(
+            "reviewer sandbox identity is bound to durable operation authority",
+            False,
+        )
     worker_result: list[int] = []
     worker_thread = threading.Thread(
         target=lambda: worker_result.append(
@@ -2299,12 +2364,36 @@ expect_codex_sandbox_rejection(
         "sandbox_workspace_write.network_access=true",
     ),
 )
+for label, extra in (
+    (
+        "Codex reviewer rejects a short-form config override",
+        ("-c", "sandbox_workspace_write.network_access=true"),
+    ),
+    (
+        "Codex reviewer rejects a short-form cwd override",
+        ("-C", "/"),
+    ),
+    (
+        "Codex reviewer rejects a short-form sandbox override",
+        ("-s", "danger-full-access"),
+    ),
+    (
+        "Codex reviewer rejects a short-form approval override",
+        ("-a", "on-request"),
+    ),
+    (
+        "Codex reviewer rejects an equals-form writable root",
+        (f"--add-dir={product}",),
+    ),
+):
+    expect_codex_sandbox_rejection(label, (*codex_callback, *extra))
 try:
     runtime_provider_argv(
         {
             "argv": tuple(changed_codex_root),
             "runtime": "codex",
             "callback_mode": "envelope",
+            "reviewer_sandbox": True,
             "callback_pointer": callback,
             "product_root": product,
             "cwd": scratch.parent,
@@ -2315,6 +2404,32 @@ except RuntimeWorkerError:
     check("persisted Codex reviewer commands fail closed before replay", True)
 else:
     check("persisted Codex reviewer commands fail closed before replay", False)
+for runtime, command in (
+    ("claude", claude_callback),
+    ("codex", codex_callback),
+):
+    try:
+        runtime_provider_argv(
+            {
+                "argv": command,
+                "runtime": runtime,
+                "callback_mode": "envelope",
+                "reviewer_sandbox": True,
+                "callback_pointer": callback,
+                "cwd": scratch.parent,
+                "surface_id": SURFACE,
+            }
+        )
+    except RuntimeWorkerError:
+        check(
+            f"persisted {runtime} reviewer requires product_root before replay",
+            True,
+        )
+    else:
+        check(
+            f"persisted {runtime} reviewer requires product_root before replay",
+            False,
+        )
 
 
 def expect_sandbox_rejection(label: str, command: tuple[str, ...]) -> None:
@@ -2412,6 +2527,7 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
         {
             "runtime": "claude",
             "callback_mode": "envelope",
+            "reviewer_sandbox": True,
             "callback_pointer": sandbox_callback,
             "product_root": sandbox_product,
         },
@@ -2429,6 +2545,7 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
         {
             "runtime": "codex",
             "callback_mode": "envelope",
+            "reviewer_sandbox": True,
             "callback_pointer": sandbox_callback,
             "product_root": sandbox_product,
         },
@@ -2438,6 +2555,20 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
         "Codex reviewer temp is contained by its exact callback lane",
         codex_sandbox_env["TMPDIR"] == str(test_tmp),
     )
+    try:
+        provider_environment(
+            {
+                "runtime": "codex",
+                "callback_mode": "envelope",
+                "reviewer_sandbox": True,
+                "callback_pointer": sandbox_callback,
+            },
+            env={"PATH": "/usr/bin:/bin", "TMPDIR": "/private/tmp"},
+        )
+    except RuntimeWorkerError:
+        check("reviewer environment requires product_root", True)
+    else:
+        check("reviewer environment requires product_root", False)
     symlink_callbacks = sandbox_root / "callback-link"
     symlink_callbacks.symlink_to(sandbox_callbacks, target_is_directory=True)
     try:
@@ -2500,6 +2631,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-timeout.") as raw:
     timeout_cwd = timeout_root / "scratch"
     timeout_cwd.mkdir()
     (timeout_cwd / "callbacks").mkdir()
+    timeout_product = timeout_root / "product"
+    timeout_product.mkdir()
+    timeout_provider = timeout_root / "codex"
+    timeout_provider.write_text(
+        "#!/bin/sh\nsleep 0.2\n", encoding="utf-8"
+    )
+    timeout_provider.chmod(0o755)
     timeout_store = OperationStore(timeout_root / "store")
     timeout_route = RuntimeRoute(
         "codex",
@@ -2541,14 +2679,20 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-timeout.") as raw:
         )
     timeout_launch = ProcessAdapter().prepare_surface_launch(
         argv=(
-            str(Path(sys.executable).resolve()),
-            "-c",
-            "import time; time.sleep(0.2)",
+            *CodexDriver(timeout_provider).command(
+                timeout_route,
+                callback_pointer=timeout_cwd / "callbacks" / "review.json",
+                product_root=timeout_product,
+                session_root=timeout_cwd,
+            ),
+            "review",
         ),
         cwd=timeout_cwd,
         state_root=timeout_root / "worker-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=timeout_cwd / "callbacks" / "review.json",
+        product_root=timeout_product,
+        reviewer_sandbox=True,
         store_root=timeout_store.root,
         owner_id="owner-review-timeout",
         operation_id="runtime-review-timeout",
@@ -2590,6 +2734,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-early-exit.") as raw:
     timeout_cwd = timeout_root / "scratch"
     timeout_cwd.mkdir()
     (timeout_cwd / "callbacks").mkdir()
+    timeout_product = timeout_root / "product"
+    timeout_product.mkdir()
+    timeout_provider = timeout_root / "codex"
+    timeout_provider.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    timeout_provider.chmod(0o755)
     timeout_store = OperationStore(timeout_root / "store")
     timeout_route = RuntimeRoute(
         "codex",
@@ -2629,11 +2778,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-review-early-exit.") as raw:
             state,
         )
     timeout_launch = ProcessAdapter().prepare_surface_launch(
-        argv=(str(Path(sys.executable).resolve()), "-c", "pass"),
+        argv=(
+            *CodexDriver(timeout_provider).command(
+                timeout_route,
+                callback_pointer=timeout_cwd / "callbacks" / "review.json",
+                product_root=timeout_product,
+                session_root=timeout_cwd,
+            ),
+            "review",
+        ),
         cwd=timeout_cwd,
         state_root=timeout_root / "worker-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=timeout_cwd / "callbacks" / "review.json",
+        product_root=timeout_product,
+        reviewer_sandbox=True,
         store_root=timeout_store.root,
         owner_id="owner-review-early-exit",
         operation_id="runtime-review-early-exit",

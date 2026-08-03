@@ -72,6 +72,8 @@ tags:
 
 Следовательно, 2.6.1 меняет только compiled topology, reviewer responsibility и явный пользовательский флаг `--full`. Default Deep использует model diversity, single-model Deep — specialist depth, Full объединяет оба свойства. В этом плане single-model означает только существующий явный alias-backed override `--runtime`/`--model`, который ограничивает review одной зарегистрированной моделью; это не новый persisted policy object.
 
+Публичные lane identities provider-stable: `anthropic-*` и `openai-*`. Имена Fable, Opus и Sol остаются только внутренними model-routing aliases и могут меняться без изменения callback/archive schema. Эта поправка согласована после plan review; она не меняет число sessions или ответственность lanes.
+
 ## 2. Public review modes
 
 | Режим | Default Fable + Sol | Single-model policy | Ответственность |
@@ -124,9 +126,9 @@ Full single-model отсутствует: его полезная topology уж�
 Добавить `full` в существующий review preset и compile точных ordered lane identities:
 
 - Simple: `<selected-alias>-holistic`;
-- Deep default: `fable-holistic`, `sol-holistic`;
+- Deep default: `anthropic-holistic`, `openai-holistic`;
 - Deep single-model: `<alias>-intent`, `<alias>-engineering`;
-- Full default: `fable-intent`, `fable-engineering`, `sol-intent`, `sol-engineering`.
+- Full default: `anthropic-intent`, `anthropic-engineering`, `openai-intent`, `openai-engineering`.
 
 Не добавлять отдельный model-policy object. Использовать существующие aliases и explicit override.
 
@@ -171,7 +173,7 @@ Full single-model отсутствует: его полезная topology уж�
 Обязательные дешёвые проверки:
 
 1. Simple остаётся одной holistic lane выбранной модели.
-2. Default Deep компилирует ровно `fable-holistic` и `sol-holistic`.
+2. Default Deep компилирует ровно `anthropic-holistic` и `openai-holistic`.
 3. Simple holistic и обе default Deep holistic prompts содержат полный outcome checklist, engineering checklist, authoritative pointer на `docs/skill-references/engineering-quality-contract.md` и правило repository-specific overrides.
 4. Single-model Deep компилирует `<alias>-intent` и `<alias>-engineering`; другой runtime имеет ноль launch effects.
 5. Intent и engineering prompts имеют непересекающуюся ответственность и вместе покрывают полный denominator.

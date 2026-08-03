@@ -372,6 +372,27 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     custom_raw = json.loads(json.dumps(raw_request))
     custom_raw["pipeline"] = "custom"
     custom_raw["custom_pipeline_spec"] = str(custom_spec)
+    custom_full_spec = custom_dir / "custom-full.json"
+    custom_full_payload = json.loads(custom_spec.read_text(encoding="utf-8"))
+    custom_full_payload["review_mode"] = "full"
+    custom_full_spec.write_text(
+        json.dumps(custom_full_payload, sort_keys=True),
+        encoding="utf-8",
+    )
+    implicit_custom_full = json.loads(json.dumps(custom_raw))
+    implicit_custom_full["custom_pipeline_spec"] = str(custom_full_spec)
+    expect_error(
+        "model-authored custom pipeline cannot select Full implicitly",
+        lambda: runner.validate_request(implicit_custom_full),
+        "explicit review.mode=full",
+    )
+    explicit_custom_full = json.loads(json.dumps(implicit_custom_full))
+    explicit_custom_full["review"] = {"mode": "full"}
+    check(
+        "approved custom pipeline may bind an explicit Full request",
+        runner.validate_request(explicit_custom_full)["review"]["mode"]
+        == "full",
+    )
     custom_request = runner.validate_request(custom_raw)
     custom_contract = runner.lifecycle_contract_for_request(
         custom_request,

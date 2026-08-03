@@ -229,6 +229,14 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         "review round rejects duplicate finding ids",
         {**round_result, "findings": [finding, duplicate]},
     )
+    reserved = {
+        **finding,
+        "finding_id": f"{round_meta['axis']}:F-round-1",
+    }
+    check_round_finding_rejected(
+        "review round rejects the reserved aggregate finding prefix",
+        {**round_result, "findings": [reserved]},
+    )
     for field in ("finding_id", "file", "summary", "evidence", "recommendation"):
         check_round_finding_rejected(
             f"review round rejects whitespace-only finding {field}",

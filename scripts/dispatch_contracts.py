@@ -147,6 +147,7 @@ def _validated_routes_and_review(
         raw_review = {"mode": legacy_mode}
     if not isinstance(raw_review, dict):
         raise DispatchError("review must be an object")
+    explicit_review_mode = str(raw_review.get("mode") or "").strip()
     unknown = set(raw_review) - {"mode", "cross_model", "runtime", "model", "effort"}
     if unknown:
         raise DispatchError("unknown review keys: " + ", ".join(sorted(unknown)))
@@ -159,6 +160,10 @@ def _validated_routes_and_review(
     }
     if custom_pipeline_spec is not None:
         assert parsed_custom is not None
+        if parsed_custom.review_mode == "full" and not explicit_review_mode:
+            raise DispatchError(
+                "custom pipeline Full requires explicit review.mode=full"
+            )
         if not review["mode"]:
             review["mode"] = parsed_custom.review_mode
         elif review["mode"] != parsed_custom.review_mode:

@@ -26,6 +26,7 @@ from review_contract import (
     VERIFY_BUDGETS,
     ReviewContractError,
     axis_finding_id,
+    require_unqualified_finding_ids,
     require_unique_finding_ids,
     validate_finding,
     review_axis_responsibility,
@@ -159,13 +160,13 @@ def namespace_review_result(
 
     if len(request.axes) == 1 or not result.findings:
         return result
-    prefix = f"{result.axis}:"
-    if result.verification_iteration == 0 and any(
-        finding.finding_id.startswith(prefix) for finding in result.findings
-    ):
-        raise ValueError(
-            "initial multi-lane finding_id uses the reserved aggregate prefix"
+    try:
+        require_unqualified_finding_ids(
+            result.axis,
+            (finding.finding_id for finding in result.findings),
         )
+    except ReviewContractError as exc:
+        raise ValueError(str(exc)) from exc
     qualified = replace(
         result,
         findings=tuple(

@@ -43,7 +43,13 @@ from .review import (
     start_review,
     verify_review_lane,
 )
-from review_contract import MATERIAL_SEVERITIES, MODES, VERIFY_BUDGETS, validate_review
+from review_contract import (
+    MATERIAL_SEVERITIES,
+    MODES,
+    VERIFY_BUDGETS,
+    axis_finding_id,
+    validate_review,
+)
 from review_resolution import (
     ResolutionError,
     ReviewResolutionEvidence,
@@ -351,6 +357,17 @@ def authorize_task_finalization(
         if not result_path.is_file() or result_path.is_symlink():
             raise ValueError("approved review result is unavailable")
         result = _result_payload(_result_from_payload(_read_json(result_path)))
+        if len(expected_axes) > 1:
+            result["findings"] = [
+                {
+                    **finding,
+                    "finding_id": axis_finding_id(
+                        axis, str(finding.get("finding_id") or "")
+                    ),
+                }
+                for finding in result["findings"]
+                if isinstance(finding, dict)
+            ]
         aggregate_axis = dict(axes.get(axis) or {})
         aggregate_axis["findings"] = [
             {**finding, "axis": axis}

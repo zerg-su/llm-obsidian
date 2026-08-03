@@ -16,14 +16,12 @@ class CodexDriverError(ValueError):
 
 EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh", "max"})
 CHECKPOINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-REVIEWER_CONFIG = frozenset(
-    {
-        "sandbox_workspace_write.exclude_slash_tmp=true",
-        "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-        "sandbox_workspace_write.network_access=false",
-        "sandbox_workspace_write.writable_roots=[]",
-        "shell_environment_policy.ignore_default_excludes=false",
-    }
+REVIEWER_CONFIG = (
+    "sandbox_workspace_write.exclude_slash_tmp=true",
+    "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+    "sandbox_workspace_write.network_access=false",
+    "sandbox_workspace_write.writable_roots=[]",
+    "shell_environment_policy.ignore_default_excludes=false",
 )
 
 
@@ -43,6 +41,7 @@ def validate_reviewer_sandbox_command(
         return positions[0]
 
     one("--strict-config")
+    one("--model")
     cd_index = one("--cd")
     sandbox_index = one("--sandbox")
     approval_index = one("--ask-for-approval")
@@ -72,9 +71,6 @@ def validate_reviewer_sandbox_command(
         if index + 1 >= len(argv):
             raise CodexDriverError("review sandbox config is invalid")
         config_values.append(argv[index + 1])
-    for required in REVIEWER_CONFIG:
-        if config_values.count(required) != 1:
-            raise CodexDriverError("review sandbox config drifted")
     reasoning = [
         value
         for value in config_values
@@ -82,19 +78,37 @@ def validate_reviewer_sandbox_command(
     ]
     if (
         len(reasoning) != 1
-        or any(
-            value not in REVIEWER_CONFIG and value != reasoning[0]
-            for value in config_values
-        )
+        or config_values != [reasoning[0], *REVIEWER_CONFIG]
     ):
         raise CodexDriverError("review sandbox config expands authority")
+
+    option_argv = argv[1:]
+    forbidden_exact = {
+        "--add-dir",
+        "--approval-policy",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--full-auto",
+        "-a",
+        "-c",
+        "-C",
+        "-s",
+    }
+    forbidden_equals = (
+        "--add-dir=",
+        "--approval-policy=",
+        "--cd=",
+        "--config=",
+        "--sandbox=",
+        "-a=",
+        "-c=",
+        "-C=",
+        "-s=",
+    )
     if any(
-        flag in argv
-        for flag in (
-            "--add-dir",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "--full-auto",
-        )
+        value in forbidden_exact
+        or value.startswith(forbidden_equals)
+        or value == "danger-full-access"
+        for value in option_argv
     ):
         raise CodexDriverError("review sandbox command has an escape flag")
 
@@ -225,23 +239,10 @@ class CodexDriver:
                 raise CodexDriverError(
                     "review callback lane escapes its session root"
                 ) from exc
-            args.extend(
-                (
-                    "--strict-config",
-                    "--config",
-                    "sandbox_workspace_write.exclude_slash_tmp=true",
-                    "--config",
-                    "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-                    "--config",
-                    "sandbox_workspace_write.network_access=false",
-                    "--config",
-                    "sandbox_workspace_write.writable_roots=[]",
-                    "--config",
-                    "shell_environment_policy.ignore_default_excludes=false",
-                    "--cd",
-                    str(callback_root),
-                )
-            )
+            args.append("--strict-config")
+            for value in REVIEWER_CONFIG:
+                args.extend(("--config", value))
+            args.extend(("--cd", str(callback_root)))
         if route.profile == "research-safe":
             if session_root is None or not session_root.is_absolute():
                 raise CodexDriverError(

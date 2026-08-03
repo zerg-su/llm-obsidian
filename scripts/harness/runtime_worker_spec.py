@@ -237,6 +237,9 @@ def load_spec(path: Path) -> dict[str, Any]:
     cwd = _absolute(value.get("cwd"), "cwd")
     callback = _absolute(value.get("callback_pointer"), "callback_pointer")
     product_root = None
+    reviewer_sandbox = value.get("reviewer_sandbox", False)
+    if not isinstance(reviewer_sandbox, bool):
+        raise RuntimeWorkerError("reviewer sandbox identity is invalid")
     raw_product_root = value.get("product_root")
     if raw_product_root:
         product_root = _absolute(raw_product_root, "product_root")
@@ -248,6 +251,10 @@ def load_spec(path: Path) -> dict[str, Any]:
             or cwd in product_root.parents
         ):
             raise RuntimeWorkerError("runtime product root is invalid")
+    if reviewer_sandbox and (
+        callback_mode != "envelope" or product_root is None
+    ):
+        raise RuntimeWorkerError("reviewer product root is required")
     registration = _absolute(
         value.get("callback_registration"), "callback_registration"
     )
@@ -295,6 +302,7 @@ def load_spec(path: Path) -> dict[str, Any]:
             "cwd": cwd,
             "callback_pointer": callback,
             "product_root": product_root,
+            "reviewer_sandbox": reviewer_sandbox,
             "callback_registration": registration,
             "callback_mode": callback_mode,
             "task_summary_pointer": task_summary,

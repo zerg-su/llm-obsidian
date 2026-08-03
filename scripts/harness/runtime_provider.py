@@ -47,11 +47,13 @@ def provider_argv(
     values = os.environ if env is None else env
     runtime_interpreter = spec.get("runtime_interpreter")
     product_root = spec.get("product_root")
-    if (
-        runtime == "claude"
-        and spec.get("callback_mode") == "envelope"
-        and isinstance(product_root, Path)
+    reviewer = spec.get("reviewer_sandbox") is True
+    if reviewer and (
+        runtime not in {"claude", "codex"}
+        or not isinstance(product_root, Path)
     ):
+        raise RuntimeWorkerError("reviewer product root is unavailable")
+    if runtime == "claude" and reviewer:
         try:
             validate_reviewer_sandbox_command(
                 argv,
@@ -63,11 +65,7 @@ def provider_argv(
             raise RuntimeWorkerError(
                 "Claude reviewer sandbox identity is invalid"
             ) from exc
-    if (
-        runtime == "codex"
-        and spec.get("callback_mode") == "envelope"
-        and isinstance(product_root, Path)
-    ):
+    if runtime == "codex" and reviewer:
         try:
             validate_codex_reviewer_sandbox_command(
                 argv,
@@ -210,11 +208,12 @@ def provider_environment(
     """Return a fresh environment, isolating protected research from the caller."""
 
     values = os.environ if env is None else env
-    if (
-        spec.get("runtime") in {"claude", "codex"}
-        and spec.get("callback_mode") == "envelope"
-        and isinstance(spec.get("product_root"), Path)
-    ):
+    if spec.get("reviewer_sandbox") is True:
+        if (
+            spec.get("runtime") not in {"claude", "codex"}
+            or not isinstance(spec.get("product_root"), Path)
+        ):
+            raise RuntimeWorkerError("reviewer product root is unavailable")
         callback = spec.get("callback_pointer")
         if not isinstance(callback, Path):
             raise RuntimeWorkerError("review callback root is unavailable")

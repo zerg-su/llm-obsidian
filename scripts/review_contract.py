@@ -283,6 +283,8 @@ def finding_constraint_lines() -> tuple[str, ...]:
     return (
         f"`finding_id` must match `{IDENTIFIER_PATTERN}`, contain at most "
         f"{FINDING_ID_LIMIT} characters, and be unique within the review round.",
+        "`finding_id` must not start with the current lane's reserved `<axis>:` "
+        "aggregate prefix.",
         "`file` must be a repository-relative POSIX path (not absolute, `.`, or "
         f"containing `..` or `\\`) of at most {FINDING_FILE_LIMIT} characters.",
         f"`summary` is at most {FINDING_SUMMARY_LIMIT} characters; `evidence` and "
@@ -290,6 +292,19 @@ def finding_constraint_lines() -> tuple[str, ...]:
         "All finding string fields must be non-empty after trimming surrounding "
         "whitespace.",
     )
+
+
+def require_unqualified_finding_ids(
+    axis: str,
+    finding_ids: Iterable[str],
+) -> None:
+    """Reserve aggregate identities for the harness, never reviewer input."""
+
+    prefix = f"{axis}:"
+    if any(finding_id.startswith(prefix) for finding_id in finding_ids):
+        raise ReviewContractError(
+            f"review finding_id must not use reserved aggregate prefix {prefix}"
+        )
 
 
 def require_unique_finding_ids(

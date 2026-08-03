@@ -161,6 +161,7 @@ def prepare_surface_launch(
     worker: Path,
     callback_pointer: Path,
     product_root: Path | None,
+    reviewer_sandbox: bool,
     callback_registration: Path | None,
     store_root: Path,
     owner_id: str,
@@ -217,6 +218,10 @@ def prepare_surface_launch(
         "research-synth",
     }:
         raise error_type("surface callback mode is invalid")
+    if not isinstance(reviewer_sandbox, bool) or reviewer_sandbox and (
+        callback_mode != "envelope" or resolved_product_root is None
+    ):
+        raise error_type("reviewer sandbox identity is invalid")
     summary_pointer = (
         task_summary_pointer.resolve() if task_summary_pointer is not None else None
     )
@@ -275,6 +280,7 @@ def prepare_surface_launch(
             cwd=cwd,
             callback_pointer=callback_pointer,
             product_root=resolved_product_root,
+            reviewer_sandbox=reviewer_sandbox,
             callback_mode=callback_mode,
             summary_pointer=summary_pointer,
             origin_surface=origin_surface,
@@ -367,6 +373,7 @@ def _launch_spec(
     cwd: Path,
     callback_pointer: Path,
     product_root: Path | None,
+    reviewer_sandbox: bool,
     callback_mode: str,
     summary_pointer: Path | None,
     origin_surface: str,
@@ -389,6 +396,7 @@ def _launch_spec(
         "cwd": str(cwd),
         "callback_pointer": str(callback_pointer),
         "product_root": str(product_root) if product_root else "",
+        "reviewer_sandbox": reviewer_sandbox,
         "callback_mode": callback_mode,
         "task_summary_pointer": str(summary_pointer) if summary_pointer else "",
         "origin_surface": origin_surface,

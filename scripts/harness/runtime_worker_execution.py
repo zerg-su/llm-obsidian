@@ -50,6 +50,22 @@ class RuntimeWorkerExecution(
         self.ready = self.spec["ready_path"]
         self.exit_path = self.spec["exit_path"]
         self.store = OperationStore(self.spec["store_root"])
+        try:
+            operation = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+        except StoreError as exc:
+            raise RuntimeWorkerError(
+                "runtime operation authority is unavailable"
+            ) from exc
+        expected_reviewer = (
+            operation.spec.route.profile == "reviewer-callback"
+        )
+        if (
+            self.spec["reviewer_sandbox"] is not expected_reviewer
+            or self.spec["runtime"] != operation.spec.route.runtime
+        ):
+            raise RuntimeWorkerError("runtime launch authority drifted")
         self.trusted_store = self.spec["store_root"]
         self.trusted_vault = self.trusted_store.parent.parent
         if (
@@ -132,9 +148,7 @@ class RuntimeWorkerExecution(
         self.summary_stable_reads = 0
         self.summary_attention_revision = -1
         self.cmux_adapter = self.cmux_adapter or CmuxAdapter()
-        self.operation_contract = self.store.read(
-            self.spec["owner_id"], self.spec["operation_id"]
-        ).spec.contract_sha256
+        self.operation_contract = operation.spec.contract_sha256
         try:
             self._pipeline_name, self.pipeline = compiled_executable_for_contract(
                 self.operation_contract

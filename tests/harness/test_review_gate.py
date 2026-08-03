@@ -2380,6 +2380,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-attention.") as raw:
         request_for("review-deep-attention", depth="deep", context=context),
         scratch,
     )
+
     spec_lane, standards_lane = run.execution.lanes
     blocked = controller.complete_round(
         run,
@@ -2401,6 +2402,65 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-attention.") as raw:
         and state["status"] == "attention-required"
         and state["evidence"] == {},
     )
+
+for depth in ("deep", "full"):
+    with tempfile.TemporaryDirectory(
+        prefix=f"review-gate-{depth}-minor-finalization."
+    ) as raw:
+        base = Path(raw)
+        scratch = base / "scratch"
+        scratch.mkdir()
+        store = OperationStore(base / "store")
+        runtime = FakeRuntime(store)
+        controller = ReviewGateController(base / "gate", runtime, store)
+        operation_id = f"review-{depth}-minor-finalization"
+        run = begin(
+            controller,
+            request_for(operation_id, depth=depth, context=context),
+            scratch,
+        )
+        decision = None
+        for lane in run.execution.lanes:
+            decision = controller.complete_round(
+                run,
+                lane,
+                run.rounds[lane.axis],
+                ReviewResult(
+                    lane.axis,
+                    "approve",
+                    (
+                        ReviewFinding(
+                            "F-minor",
+                            lane.axis,
+                            "minor",
+                            "non-blocking independent note",
+                            "the lane retains one attributed minor finding",
+                        ),
+                    ),
+                ),
+            )
+        authorization = authorize_task_finalization(
+            base / "gate",
+            dispatch_operation_id="dispatch-1",
+            expected_head_sha=context.head_sha,
+            expected_profile=context.verification_profile,
+            expected_profile_sha256=context.verification_profile_sha256,
+        )
+        check(
+            f"{depth} minor findings preserve callback bytes and authorize",
+            decision is not None
+            and decision.action == "approved"
+            and authorization.approved
+            and {
+                finding["finding_id"]
+                for axis in authorization.evidence["axes"]
+                for finding in axis["findings"]
+            }
+            == {
+                axis_finding_id(lane.axis, "F-minor")
+                for lane in run.execution.lanes
+            },
+        )
 
 with tempfile.TemporaryDirectory(prefix="review-gate-defer-blocked.") as raw:
     base = Path(raw)

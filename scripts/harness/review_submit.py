@@ -25,6 +25,7 @@ from review_contract import (
     ReviewContractError,
     finding_constraint_lines,
     parse_review_json,
+    require_unqualified_finding_ids,
     require_unique_finding_ids,
     validate_finding,
 )
@@ -172,6 +173,10 @@ def _round_result(raw: str, meta: dict[str, Any]) -> ReviewResult:
                 f"review round finding is invalid: {exc}"
             ) from exc
     try:
+        require_unqualified_finding_ids(
+            axis,
+            (finding.finding_id for finding in findings),
+        )
         require_unique_finding_ids(
             (finding.finding_id for finding in findings),
             "review round finding_id values",
