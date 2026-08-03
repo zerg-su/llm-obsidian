@@ -67,6 +67,10 @@ tags:
     {
       "evidence_id": "plan-location-normalized",
       "observable": "Единственный docs/plans/v2.1.1-code-owned-optimization-plan.md сохранён в wiki/plans с валидным plan frontmatter, status executed, DragonScale address и ссылкой на финальный result; пустой отдельный docs/plans namespace больше не существует."
+    },
+    {
+      "evidence_id": "readme-onboarding",
+      "observable": "README.md и README.ru.md точно и симметрично объясняют pipeline/DSL, review topology 2.6.1, truthful cmux progress 2.6.2 и короткий путь clarify/grill me → plan → plan review → dispatch → implementation review → reap/close для Claude и Codex."
     }
   ],
   "non_goals": [
@@ -132,11 +136,11 @@ tags:
 
 ### Slice 4 — operator contract and 2.6.2 release
 
-- `files/responsibility`: `docs/runtime-capabilities.md` and/or `docs/unattended-pipeline-operations.md` — exact label/idle semantics; `CHANGELOG.md`, `CHANGELOG.ru.md`, `docs/releases/v2.6.2.md`, README release indexes and plugin manifests — patch release identity and commands.
+- `files/responsibility`: `docs/runtime-capabilities.md` and/or `docs/unattended-pipeline-operations.md` — exact label/idle semantics; `CHANGELOG.md`, `CHANGELOG.ru.md`, `docs/releases/v2.6.2.md`, `README.md`, `README.ru.md`, README release indexes and plugin manifests — patch release identity and commands.
 - `consumes`: green implementation, exact documented cmux 0.64.20 command contract и pre-integrated turn-end save-and-close fix `80fcab2` и ordinary-provider interpreter repair `0630477`.
-- `produces`: user-readable icon semantics, upgrade/rollback notes, version 2.6.2 metadata, release notes for both bounded fixes and exact release gate instructions.
+- `produces`: user-readable icon semantics, upgrade/rollback notes, version 2.6.2 metadata, release notes for both bounded fixes, exact release gate instructions and a concise pipeline/skill/session quick-start in both READMEs.
 - `failing evidence`: adapter/version checks identify 2.6.1 and docs do not promise idle clearing/current-program scoping.
-- `minimal green`: update only release-owned metadata/docs and regenerate/check the Codex adapter through repository tooling.
+- `minimal green`: update only release-owned metadata/docs; document clarify/grill me, saved plans, intent plan review, built-in/custom pipeline dispatch, Simple/Deep/Full review, single-model fallback, reap and close symmetrically in both READMEs; regenerate/check the Codex adapter through repository tooling.
 - `refactor seam`: no roadmap or 2.7 task semantics in 2.6.2 docs.
 - `focused verification`: `python3 tests/test_queue_session_exit.py`, `python3 tests/test_runtime_hooks.py`, `python3 tests/harness/test_runtime_sessions.py`, `python3 tests/harness/test_runtime_research.py`, adapter checks, instruction/docs lint and `git diff --check`; covers `provider-parity`, `ordinary-provider-launch`, `turn-end-close-preserved`, `release-ready`.
 
