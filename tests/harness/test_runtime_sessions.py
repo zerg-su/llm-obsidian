@@ -523,6 +523,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     cwd.mkdir()
     (cwd / "prompt.md").write_text("perform the bounded task", encoding="utf-8")
     (cwd / "continue.md").write_text("verify the bounded fix", encoding="utf-8")
+    (cwd / "continue-no-checkpoint.md").write_text(
+        "verify through the retained Claude process", encoding="utf-8"
+    )
     (cwd / "callbacks").mkdir()
     route = RuntimeRoute(
         "claude", "fable", "high", "reviewer-readonly", "a" * 64
@@ -1132,6 +1135,61 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and cmux.opens == 1
         and cmux.sent[-1] == (SURFACE, "verify the bounded fix"),
         cmux.sent,
+    )
+    checkpointless_cwd = root / "checkpointless-scratch"
+    checkpointless_cwd.mkdir()
+    (checkpointless_cwd / "callbacks").mkdir()
+    (checkpointless_cwd / "prompt.md").write_text("review", encoding="utf-8")
+    (checkpointless_cwd / "continue.md").write_text(
+        "verify through the retained Claude process", encoding="utf-8"
+    )
+    checkpointless_product = root / "checkpointless-product"
+    checkpointless_product.mkdir()
+    checkpointless_route = RuntimeRoute(
+        "claude", "fable", "high", "reviewer-callback", "a" * 64
+    )
+    checkpointless_spec = OperationSpec(
+        "runtime-1",
+        "runtime-key-1",
+        "review-session",
+        "owner-1",
+        checkpointless_route,
+        "packets/review.json",
+        "scoped",
+    )
+    checkpointless_events: list[str] = []
+    checkpointless_cmux = FakeCmux(checkpointless_events)
+    checkpointless_cmux.checkpoint = ""
+    checkpointless_manager = RuntimeSessionManager(
+        OperationStore(root / "checkpointless-store"),
+        checkpointless_cmux,
+        FakeProcess(checkpointless_events),
+        {"claude": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            checkpointless_route, True, ("provider:profile-valid",)
+        ),
+    )
+    checkpointless_manager.start(
+        RuntimeSessionRequest(
+            checkpointless_spec,
+            "lane-shared",
+            "run-1",
+            ORIGIN,
+            checkpointless_cwd,
+            "prompt.md",
+            "callbacks/result.json",
+            product_root=checkpointless_product,
+        )
+    )
+    checkpointless = checkpointless_manager.continue_session(
+        "owner-1", "runtime-1", "", "continue.md"
+    )
+    check(
+        "live Claude reviewer continues on exact ownership without a checkpoint",
+        checkpointless.record.state == "running"
+        and checkpointless.checkpoint == ""
+        and checkpointless_cmux.sent[-1]
+        == (SURFACE, "verify through the retained Claude process"),
     )
     child_spec = OperationSpec(
         "round-1",

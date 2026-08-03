@@ -372,18 +372,42 @@ class RuntimeSessionLaunchMixin:
     ) -> RuntimeSessionResult:
         """Send one bounded prompt to the exact existing provider session."""
 
-        if not checkpoint or not IDENTIFIER.fullmatch(checkpoint):
-            raise RuntimeSessionError("same-session continuation needs a checkpoint")
         record = self.store.read(owner_id, operation_id)
+        checkpointless_claude = (
+            not checkpoint
+            and record.spec.route.runtime == "claude"
+            and record.spec.route.profile == "reviewer-callback"
+        )
+        if not checkpointless_claude and (
+            not checkpoint or not IDENTIFIER.fullmatch(checkpoint)
+        ):
+            raise RuntimeSessionError(
+                "same-session continuation needs a checkpoint"
+            )
         if record.state not in {"running", "awaiting-callback", "verifying"}:
             raise RuntimeSessionError("operation cannot continue from its current state")
         if not record.resources.surface_id or record.resources.process_group <= 1:
             raise RuntimeSessionError("operation has no exact live ownership")
-        actual = self.cmux.resume_checkpoint(
-            record.resources.surface_id, record.spec.route.runtime
-        )
-        if actual != checkpoint:
-            raise RuntimeSessionError("same-session checkpoint identity changed")
+        if checkpointless_claude:
+            observed = self.status(owner_id, operation_id)
+            if (
+                observed.action != "observed"
+                or observed.record != record
+                or observed.process_status != "alive"
+                or observed.surface_status != "alive"
+                or observed.checkpoint
+            ):
+                raise RuntimeSessionError(
+                    "checkpointless Claude continuation is not exactly live"
+                )
+        else:
+            actual = self.cmux.resume_checkpoint(
+                record.resources.surface_id, record.spec.route.runtime
+            )
+            if actual != checkpoint:
+                raise RuntimeSessionError(
+                    "same-session checkpoint identity changed"
+                )
         metadata = self._metadata(record)
         cwd = Path(str(metadata.get("cwd") or "")).resolve()
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
