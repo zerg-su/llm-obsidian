@@ -28,7 +28,8 @@
     "wiki/concepts/Unattended Pipeline.md"
   ],
   "cmux": [
-    "wiki/concepts/Unattended Pipeline.md"
+    "wiki/concepts/Unattended Pipeline.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
   ],
   "codex": [
     "wiki/concepts/Unattended Pipeline.md",
@@ -137,7 +138,8 @@
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
-    "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md"
+    "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
   ],
   "hot-cache": [
     "wiki/hot.md"
@@ -196,7 +198,8 @@
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md",
-    "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md"
+    "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
   ],
   "memory": [
     "wiki/concepts/DragonScale Memory.md"
@@ -257,7 +260,8 @@
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md",
-    "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md"
+    "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
@@ -421,6 +425,9 @@
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md"
+  ],
+  "v2-6-2": [
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
   ],
   "v2.6": [
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",

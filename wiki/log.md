@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-08-02
+updated: 2026-08-03
 tags:
   - meta
   - log
@@ -26,6 +26,10 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-08-03 19:57] dispatch | llm-obsidian-2-6-2-status-v4
+
+Spawned an approved unattended task session (cmux `EAFCB62E-6247-4B4A-8C3A-C7FF5D23C840`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-2-status-v4`. Target repo `/Users/zak/Projects/worktrees/llm-obsidian-2-6-2-status`, branch `task/llm-obsidian-2-6-2-status-v4` from `release/2.6.2`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-2-status/wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md`. Pre-loaded context: [[LLM Obsidian 2.5.0 implementation]], [[Unattended Pipeline]], [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog]], [[Cross-model review — v2.1.1 code-owned optimization plan review — 4f7e86ffe465]]. Awaiting typed review and final reap.
 
 ## [2026-08-02 00:02] backlog | normalize — llm-obsidian-2-7-project-memory-layout
 

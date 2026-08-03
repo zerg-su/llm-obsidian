@@ -14,10 +14,20 @@ sessions: []
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_7 pages, updated 2026-08-01_
+_17 pages, updated 2026-08-03_
 
+- [[2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review]] — pending, 2026-08-03 `c-000096`
+- [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-03 `c-000097`
+- [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]] — pending, 2026-08-02 `c-000059`
+- [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog]] — executed, 2026-08-02 `c-000079`
+- [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet]] — executed, 2026-08-02 `c-000080`
+- [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings]] — pending, 2026-08-02 `c-000081`
+- [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype]] — executed, 2026-08-02 `c-000082`
 - [[2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood]] — pending, 2026-08-01 `c-000039`
-- [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]] — pending, 2026-08-01 `c-000059`
+- [[2026-08-01-222348-llm-obsidian-2-6-paired-design-baseline]] — pending, 2026-08-01 `c-000069`
+- [[2026-08-01-222348-llm-obsidian-2-6-paired-design-post-change]] — pending, 2026-08-01 `c-000070`
+- [[2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline]] — pending, 2026-08-01 `c-000067`
+- [[2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change]] — pending, 2026-08-01 `c-000068`
 - [[2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition]] — executed, 2026-07-31 `c-000034`
 - [[2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines]] — executed, 2026-07-31 `c-000035`
 - [[2026-07-31-llm-obsidian-2-4-dogfood-01-stale-reap-cache]] — pending, 2026-07-31 `c-000036`
