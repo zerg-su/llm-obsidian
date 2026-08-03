@@ -130,8 +130,7 @@ class RuntimeSessionLaunchMixin:
             *driver.command(
                 request.spec.route,
                 resume=request.checkpoint,
-                callback_pointer=callback_path,
-                product_root=request.product_root,
+                callback_pointer=callback_path, product_root=request.product_root,
                 session_root=request.cwd,
             ),
             prompt,
@@ -283,6 +282,7 @@ class RuntimeSessionLaunchMixin:
                 state_root=self._state_root(supervisor.read()),
                 worker=self.worker,
                 callback_pointer=callback_path,
+                product_root=request.product_root,
                 callback_registration=self._callback_target_path(supervisor.read()),
                 store_root=self.store.root,
                 owner_id=request.spec.owner_id,

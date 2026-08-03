@@ -59,7 +59,7 @@ HEAD_SHA = "d" * 40
 PROFILE_SHA = "a" * 64
 CANONICAL = {
     "schema_version": 1,
-    "axis": "correctness",
+    "axis": "anthropic-holistic",
     "verdict": "approve",
     "verification_iteration": 1,
     "findings": [],
@@ -108,7 +108,7 @@ def _meta(worktree: Path) -> dict[str, object]:
         "worktree": str(worktree),
         "operation_id": "op-review",
         "run_id": "run-review",
-        "axis": "correctness",
+        "axis": "anthropic-holistic",
         "verification_iteration": 1,
         "parent_session_operation_id": "op-parent",
         "verification_profile": {"name": "scoped", "sha256": PROFILE_SHA},
@@ -256,7 +256,7 @@ def _generate_gate_prompt(runner, tmp: Path) -> str:
         worktree=worktree,
         runtime_root=runtime_root,
         context=context,
-        axis="correctness",
+        axis="anthropic-holistic",
         verification=False,
     )
     return (runtime_root / pointer).read_text(encoding="utf-8")
@@ -502,7 +502,7 @@ def _stub_round():
         owner_id="owner-1",
         lane_id="lane-1",
         run_id="run-1",
-        axis="correctness",
+        axis="anthropic-holistic",
         verification_iteration=1,
         spec=spec,
     )

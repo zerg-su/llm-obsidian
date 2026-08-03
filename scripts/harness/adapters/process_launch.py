@@ -160,6 +160,7 @@ def prepare_surface_launch(
     state_root: Path,
     worker: Path,
     callback_pointer: Path,
+    product_root: Path | None,
     callback_registration: Path | None,
     store_root: Path,
     owner_id: str,
@@ -195,6 +196,16 @@ def prepare_surface_launch(
         or not store_root.is_absolute()
     ):
         raise error_type("surface launch paths and runtime must be absolute")
+    resolved_product_root = (
+        product_root.expanduser().resolve() if product_root is not None else None
+    )
+    if product_root is not None and (
+        not product_root.is_absolute()
+        or product_root.is_symlink()
+        or resolved_product_root is None
+        or not resolved_product_root.is_dir()
+    ):
+        raise error_type("surface launch product root is invalid")
     if registration.parent != resolved_state_root:
         raise error_type("callback registration must stay in launch state")
     if runtime not in {"claude", "codex"}:
@@ -263,6 +274,7 @@ def prepare_surface_launch(
             argv=argv,
             cwd=cwd,
             callback_pointer=callback_pointer,
+            product_root=resolved_product_root,
             callback_mode=callback_mode,
             summary_pointer=summary_pointer,
             origin_surface=origin_surface,
@@ -354,6 +366,7 @@ def _launch_spec(
     argv: Sequence[str],
     cwd: Path,
     callback_pointer: Path,
+    product_root: Path | None,
     callback_mode: str,
     summary_pointer: Path | None,
     origin_surface: str,
@@ -375,6 +388,7 @@ def _launch_spec(
         "argv": list(argv),
         "cwd": str(cwd),
         "callback_pointer": str(callback_pointer),
+        "product_root": str(product_root) if product_root else "",
         "callback_mode": callback_mode,
         "task_summary_pointer": str(summary_pointer) if summary_pointer else "",
         "origin_surface": origin_surface,

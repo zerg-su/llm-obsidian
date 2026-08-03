@@ -32,10 +32,12 @@ Review model overrides accept only the registered aliases `sol`, `terra`,
 invalid, and explicit Full cannot be combined with a runtime/model override.
 Aliases choose a concrete route only; public lane IDs use stable provider
 prefixes, while operation metadata records the exact resolved runtime/model.
-Legacy task/review
-records remain readable. Concrete top-level model/effort fields in old metadata
-are treated as explicit historical overrides. New task metadata carries both
-`routing.session` and `routing.effective`.
+`--cross-model` changes only the one-route Simple selection; default Deep and
+explicit Full are already dual-provider topologies. Legacy task routing records
+remain readable: concrete top-level model/effort fields in old metadata are
+treated as explicit historical overrides. Review gate evidence using an older
+axis vocabulary fails closed and must be restarted at the current HEAD. New
+task metadata carries both `routing.session` and `routing.effective`.
 
 The tracked `opus` alias resolves to the user-selected, versioned
 `claude-opus-5` target instead of the host's moving `opus` alias. A host that

@@ -22,7 +22,12 @@ from harness.workflows.review import (
 )
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
-from review_contract import review_axis_responsibility
+from review_contract import (
+    review_axis_provider,
+    review_axis_responsibility,
+    review_provider_runtime,
+    review_runtime_provider,
+)
 from task_review_shared import (
     StaleRoundCallbackError,
     TaskReviewError,
@@ -39,12 +44,6 @@ def _route(value: Mapping[str, Any]) -> RuntimeRoute:
         "reviewer-callback",
         str(value["config_sha256"]),
     )
-
-
-def _route_provider(route: RuntimeRoute) -> str:
-    """Map the durable runtime to its stable public provider identity."""
-
-    return {"claude": "anthropic", "codex": "openai"}[route.runtime]
 
 
 def _request(
@@ -82,29 +81,21 @@ def _request(
     axis_routes: dict[str, RuntimeRoute] | None = None
     selected_provider = ""
     if mode in {"deep", "full"} and not single_model:
-        fable = _route(
-            resolve(
-                config,
-                "review",
-                session=session,
-                explicit_model="fable",
-                explicit_effort=raw["effort"],
-                same_model=False,
-                review_profile="deep",
+        provider_routes = {
+            provider: _route(
+                resolve(
+                    config,
+                    "review",
+                    session=session,
+                    explicit_runtime=review_provider_runtime(provider),
+                    explicit_effort=raw["effort"],
+                    same_model=False,
+                    review_profile="deep",
+                )
             )
-        )
-        sol = _route(
-            resolve(
-                config,
-                "review",
-                session=session,
-                explicit_model="sol",
-                explicit_effort=raw["effort"],
-                same_model=False,
-                review_profile="deep",
-            )
-        )
-        primary = fable
+            for provider in ("anthropic", "openai")
+        }
+        primary = provider_routes["anthropic"]
     else:
         primary = _route(
             resolve(
@@ -118,7 +109,7 @@ def _request(
                 review_profile=route_profile,
             )
         )
-        selected_provider = _route_provider(primary)
+        selected_provider = review_runtime_provider(primary.runtime)
     review_request = preset.request(
         task_id,
         purpose=str(raw.get("purpose") or "implementation"),
@@ -129,7 +120,7 @@ def _request(
         axis_routes = {axis: primary for axis in review_request.axes}
     elif mode in {"deep", "full"}:
         axis_routes = {
-            axis: fable if axis.startswith("anthropic-") else sol
+            axis: provider_routes[review_axis_provider(axis)]
             for axis in review_request.axes
         }
     return (

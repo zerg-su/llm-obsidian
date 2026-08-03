@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .adapters.process import ProcessAdapter, ProcessError, ProcessHandle
+from .adapters.claude import (
+    ClaudeDriverError,
+    review_test_directory,
+    validate_reviewer_sandbox_command,
+)
 from .contracts import AttentionReason
 from .prompts import PromptDecision, classify
 from .runtime_worker_contracts import (
@@ -37,6 +42,23 @@ def provider_argv(
     surface_id = str(spec.get("surface_id") or "")
     values = os.environ if env is None else env
     runtime_interpreter = spec.get("runtime_interpreter")
+    product_root = spec.get("product_root")
+    if (
+        runtime == "claude"
+        and spec.get("callback_mode") == "envelope"
+        and isinstance(product_root, Path)
+    ):
+        try:
+            validate_reviewer_sandbox_command(
+                argv,
+                callback_pointer=spec["callback_pointer"],
+                product_root=product_root,
+                session_root=spec["cwd"],
+            )
+        except (ClaudeDriverError, KeyError, TypeError) as exc:
+            raise RuntimeWorkerError(
+                "Claude reviewer sandbox identity is invalid"
+            ) from exc
     pinned_interpreter = (
         runtime_interpreter
         if isinstance(runtime_interpreter, Path)
@@ -168,6 +190,30 @@ def provider_environment(
     """Return a fresh environment, isolating protected research from the caller."""
 
     values = os.environ if env is None else env
+    if (
+        spec.get("runtime") == "claude"
+        and spec.get("callback_mode") == "envelope"
+        and isinstance(spec.get("product_root"), Path)
+    ):
+        callback = spec.get("callback_pointer")
+        if not isinstance(callback, Path):
+            raise RuntimeWorkerError("review callback root is unavailable")
+        temporary = review_test_directory(callback).resolve(strict=False)
+        if temporary.is_symlink():
+            raise RuntimeWorkerError("review test root must not be a symlink")
+        temporary.mkdir(mode=0o700, parents=False, exist_ok=True)
+        temporary.chmod(0o700)
+        if (
+            temporary.resolve() != temporary
+            or temporary.stat().st_uid != os.getuid()
+            or temporary.stat().st_mode & 0o077
+        ):
+            raise RuntimeWorkerError("review test root ownership is invalid")
+        reviewer = dict(values)
+        reviewer["TMPDIR"] = str(temporary)
+        reviewer["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+        reviewer["DISABLE_AUTOUPDATER"] = "1"
+        return reviewer
     if spec.get("callback_mode") not in {
         "research-fetch",
         "research-synth",

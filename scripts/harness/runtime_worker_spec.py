@@ -236,6 +236,18 @@ def load_spec(path: Path) -> dict[str, Any]:
     _validate_argv(value)
     cwd = _absolute(value.get("cwd"), "cwd")
     callback = _absolute(value.get("callback_pointer"), "callback_pointer")
+    product_root = None
+    raw_product_root = value.get("product_root")
+    if raw_product_root:
+        product_root = _absolute(raw_product_root, "product_root")
+        if (
+            product_root.is_symlink()
+            or not product_root.is_dir()
+            or product_root == cwd
+            or product_root in cwd.parents
+            or cwd in product_root.parents
+        ):
+            raise RuntimeWorkerError("runtime product root is invalid")
     registration = _absolute(
         value.get("callback_registration"), "callback_registration"
     )
@@ -282,6 +294,7 @@ def load_spec(path: Path) -> dict[str, Any]:
         {
             "cwd": cwd,
             "callback_pointer": callback,
+            "product_root": product_root,
             "callback_registration": registration,
             "callback_mode": callback_mode,
             "task_summary_pointer": task_summary,

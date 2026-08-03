@@ -960,6 +960,31 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         and not authorization.skipped
         and authorization.evidence["verdict"] == "approve",
     )
+    state_path = base / "gate" / "review-gate.json"
+    approved_state = state_path.read_text(encoding="utf-8")
+    missing_lanes = json.loads(approved_state)
+    missing_lanes["lanes"] = []
+    state_path.write_text(json.dumps(missing_lanes), encoding="utf-8")
+    try:
+        authorize_task_finalization(
+            base / "gate",
+            dispatch_operation_id="dispatch-1",
+            expected_head_sha=resolved_context.head_sha,
+            expected_profile=context.verification_profile,
+            expected_profile_sha256=context.verification_profile_sha256,
+        )
+    except ValueError as exc:
+        check(
+            "approved finalization fails closed without durable lane identity",
+            "lane identity" in str(exc),
+        )
+    else:
+        check(
+            "approved finalization fails closed without durable lane identity",
+            False,
+        )
+    finally:
+        state_path.write_text(approved_state, encoding="utf-8")
     try:
         authorize_task_finalization(
             base / "gate",
@@ -2134,10 +2159,19 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         product_root=product.resolve(),
         session_root=initial_request.cwd,
     )
+    claude_sandbox = json.loads(
+        claude_command[claude_command.index("--settings") + 1]
+    )
     check(
-        "review prompt submit command has one exact Claude Bash permission",
+        "review prompt submit command runs inside the native Claude sandbox",
         f"`{submit}`" in prompt_text
-        and f"Bash({submit})" in claude_command
+        and "Bash" in claude_command
+        and not any(item.startswith("Bash(") for item in claude_command)
+        and claude_sandbox["sandbox"]["enabled"] is True
+        and claude_sandbox["sandbox"]["failIfUnavailable"] is True
+        and claude_sandbox["sandbox"]["allowUnsandboxedCommands"] is False
+        and str(product.resolve())
+        in claude_sandbox["sandbox"]["filesystem"]["denyWrite"]
         and "Read, Glob, and Grep with absolute paths" in prompt_text
         and "review-inspect.py" in prompt_text
         and "Do not run cd or copy packet files" in prompt_text,

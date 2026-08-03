@@ -31,8 +31,12 @@ from model_routing import (
     resolve,
     routing_from_environment,
 )
-from task_review_request import _route_provider
-from review_contract import review_axis_responsibility
+from review_contract import (
+    review_axis_provider,
+    review_axis_responsibility,
+    review_provider_runtime,
+    review_runtime_provider,
+)
 
 class ReviewRunnerError(ValueError):
     pass
@@ -329,29 +333,21 @@ def main(
         axis_routes: dict[str, RuntimeRoute] | None = None
         selected_provider = ""
         if depth in {"deep", "full"} and not single_model:
-            fable = _runtime_route(
-                resolve(
-                    config,
-                    "review",
-                    session=session,
-                    explicit_model="fable",
-                    explicit_effort=args.effort,
-                    same_model=False,
-                    review_profile="deep",
+            provider_routes = {
+                provider: _runtime_route(
+                    resolve(
+                        config,
+                        "review",
+                        session=session,
+                        explicit_runtime=review_provider_runtime(provider),
+                        explicit_effort=args.effort,
+                        same_model=False,
+                        review_profile="deep",
+                    )
                 )
-            )
-            sol = _runtime_route(
-                resolve(
-                    config,
-                    "review",
-                    session=session,
-                    explicit_model="sol",
-                    explicit_effort=args.effort,
-                    same_model=False,
-                    review_profile="deep",
-                )
-            )
-            route = fable
+                for provider in ("anthropic", "openai")
+            }
+            route = provider_routes["anthropic"]
         else:
             route = _runtime_route(
                 resolve(
@@ -365,7 +361,7 @@ def main(
                     review_profile=route_profile,
                 )
             )
-            selected_provider = _route_provider(route)
+            selected_provider = review_runtime_provider(route.runtime)
         policy = preset.request(
             args.operation_id,
             selected_provider=selected_provider,
@@ -374,7 +370,7 @@ def main(
             axis_routes = {axis: route for axis in policy.axes}
         elif depth in {"deep", "full"}:
             axis_routes = {
-                axis: fable if axis.startswith("anthropic-") else sol
+                axis: provider_routes[review_axis_provider(axis)]
                 for axis in policy.axes
             }
         context = ReviewContext(

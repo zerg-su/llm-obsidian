@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-import shlex
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,18 +15,38 @@ class ClaudeDriverError(ValueError):
     pass
 
 
-def _review_submit_root(
-    callback_pointer: Path | None, product_root: Path
-) -> Path:
-    if callback_pointer is not None:
-        for parent in callback_pointer.parents:
-            if parent.name == ".vault-meta":
-                return parent.parent
-    return product_root
-
-
 EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 CHECKPOINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+
+REVIEW_CREDENTIAL_FILES = (
+    "~/.aws",
+    "~/.azure",
+    "~/.codex",
+    "~/.config/gcloud",
+    "~/.config/gh",
+    "~/.docker",
+    "~/.gnupg",
+    "~/.kube",
+    "~/.netrc",
+    "~/.npmrc",
+    "~/.pypirc",
+    "~/.ssh",
+)
+REVIEW_CREDENTIAL_ENV = (
+    "ANTHROPIC_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AZURE_CLIENT_SECRET",
+    "CODEX_API_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "NPM_TOKEN",
+    "OPENAI_API_KEY",
+    "PYPI_TOKEN",
+    "SSH_AUTH_SOCK",
+)
 
 
 def _absolute_permission_path(path: Path) -> str:
@@ -36,6 +55,216 @@ def _absolute_permission_path(path: Path) -> str:
     if not path.is_absolute():
         raise ClaudeDriverError("Claude permission path must be absolute")
     return f"/{path.as_posix()}"
+
+
+def _resolved_owned_path(path: Path, label: str) -> Path:
+    if not path.is_absolute():
+        raise ClaudeDriverError(f"{label} must be absolute")
+    resolved = path.resolve(strict=False)
+    raw_current = Path(path.anchor)
+    for index, part in enumerate(path.parts[1:], start=1):
+        raw_current /= part
+        if index == 1 and part in {"tmp", "var"}:
+            continue
+        if raw_current.is_symlink():
+            raise ClaudeDriverError(f"{label} must not traverse a symlink")
+    inspected = resolved
+    current = Path(inspected.anchor)
+    for part in inspected.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            raise ClaudeDriverError(f"{label} must not traverse a symlink")
+    if path != resolved and path.parts[1:2] not in {("tmp",), ("var",)}:
+        raise ClaudeDriverError(f"{label} must use its canonical realpath")
+    if resolved.exists() and resolved.stat().st_uid != os.getuid():
+        raise ClaudeDriverError(f"{label} must be owned by the current user")
+    return resolved
+
+
+def _git_common_dir(product_root: Path) -> Path:
+    dot_git = product_root / ".git"
+    if dot_git.is_symlink():
+        raise ClaudeDriverError("product Git metadata must not be a symlink")
+    if dot_git.is_dir():
+        git_dir = _resolved_owned_path(dot_git, "product Git metadata")
+    elif dot_git.is_file():
+        first = dot_git.read_text(encoding="utf-8").strip()
+        if not first.startswith("gitdir: "):
+            raise ClaudeDriverError("product Git metadata pointer is invalid")
+        raw = Path(first.removeprefix("gitdir: "))
+        git_dir = _resolved_owned_path(
+            raw if raw.is_absolute() else product_root / raw,
+            "product Git metadata",
+        )
+    else:
+        return dot_git.resolve(strict=False)
+    common_pointer = git_dir / "commondir"
+    if common_pointer.is_symlink():
+        raise ClaudeDriverError("product Git common metadata must not be a symlink")
+    if common_pointer.is_file():
+        raw_common = Path(common_pointer.read_text(encoding="utf-8").strip())
+        common_candidate = (
+            raw_common if raw_common.is_absolute() else git_dir / raw_common
+        ).resolve(strict=False)
+        return _resolved_owned_path(
+            common_candidate,
+            "product Git common metadata",
+        )
+    return git_dir
+
+
+def review_test_directory(callback_pointer: Path) -> Path:
+    return callback_pointer.parent / ".review-test-tmp"
+
+
+def reviewer_sandbox_settings(
+    *,
+    callback_pointer: Path,
+    product_root: Path,
+    session_root: Path,
+) -> dict[str, object]:
+    """Compile one operation-owned native Claude Bash sandbox."""
+
+    product = _resolved_owned_path(product_root, "review product root")
+    session = _resolved_owned_path(session_root, "review session root")
+    callback_parent = _resolved_owned_path(
+        callback_pointer.parent, "review callback root"
+    )
+    test_tmp = _resolved_owned_path(
+        review_test_directory(callback_pointer), "review test root"
+    )
+    if product == session or product in session.parents or session in product.parents:
+        raise ClaudeDriverError("review scratch must be outside the product root")
+    if product == callback_parent or product in callback_parent.parents:
+        raise ClaudeDriverError("review callback root must be outside the product root")
+    try:
+        common = Path(os.path.commonpath((session, callback_parent)))
+    except ValueError as exc:
+        raise ClaudeDriverError("review scratch roots have no common owner") from exc
+    if common == Path(common.anchor):
+        raise ClaudeDriverError("review scratch roots are not operation-bounded")
+    git_common = _git_common_dir(product)
+    return {
+        "autoMemoryEnabled": False,
+        "disableAllHooks": True,
+        "disableArtifact": True,
+        "disableClaudeAiConnectors": True,
+        "includeGitInstructions": False,
+        "permissions": {
+            "deny": [
+                "Agent",
+                "Skill",
+                "WebFetch",
+                "WebSearch",
+            ],
+        },
+        "sandbox": {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "autoAllowBashIfSandboxed": True,
+            "allowUnsandboxedCommands": False,
+            "excludedCommands": [],
+            "filesystem": {
+                "allowWrite": [str(session), str(callback_parent), str(test_tmp)],
+                "denyWrite": [str(product), str(git_common)],
+            },
+            "credentials": {
+                "files": [
+                    {"path": path, "mode": "deny"}
+                    for path in REVIEW_CREDENTIAL_FILES
+                ],
+                "envVars": [
+                    {"name": name, "mode": "deny"}
+                    for name in REVIEW_CREDENTIAL_ENV
+                ],
+            },
+            "network": {
+                "allowedDomains": [],
+                "strictAllowlist": True,
+                "allowUnixSockets": [],
+                "allowLocalBinding": False,
+            },
+        },
+    }
+
+
+def validate_reviewer_sandbox_command(
+    argv: tuple[str, ...],
+    *,
+    callback_pointer: Path,
+    product_root: Path,
+    session_root: Path,
+) -> None:
+    """Fail closed if a persisted Claude reviewer command weakens its sandbox."""
+
+    def one(flag: str) -> int:
+        positions = [index for index, value in enumerate(argv) if value == flag]
+        if len(positions) != 1:
+            raise ClaudeDriverError(f"review sandbox must pin one {flag}")
+        return positions[0]
+
+    settings_index = one("--settings")
+    sources_index = one("--setting-sources")
+    allowed_index = one("--allowedTools")
+    tools_index = one("--tools")
+    add_dir_index = one("--add-dir")
+    mcp_index = one("--mcp-config")
+    for flag in (
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--no-chrome",
+        "--disable-slash-commands",
+    ):
+        one(flag)
+    if any(
+        flag in argv
+        for flag in (
+            "--dangerously-skip-permissions",
+            "--allow-dangerously-skip-permissions",
+            "--plugin-dir",
+            "--plugin-url",
+        )
+    ):
+        raise ClaudeDriverError("review sandbox command has an escape flag")
+    try:
+        observed_settings = json.loads(argv[settings_index + 1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise ClaudeDriverError("review sandbox settings are invalid") from exc
+    expected_settings = reviewer_sandbox_settings(
+        callback_pointer=callback_pointer,
+        product_root=product_root,
+        session_root=session_root,
+    )
+    if observed_settings != expected_settings:
+        raise ClaudeDriverError("review sandbox settings drifted")
+    if (
+        sources_index + 1 >= len(argv)
+        or argv[sources_index + 1] != ""
+        or tools_index + 1 >= len(argv)
+        or argv[tools_index + 1] != "Read,Glob,Grep,Edit,Write,Bash"
+        or add_dir_index + 1 >= len(argv)
+        or Path(argv[add_dir_index + 1]).resolve() != product_root.resolve()
+        or mcp_index + 1 >= len(argv)
+        or argv[mcp_index + 1] != '{"mcpServers":{}}'
+    ):
+        raise ClaudeDriverError("review sandbox command identity drifted")
+    input_pointer = callback_pointer.with_name(".review-input.json")
+    allowed = [
+        "Read",
+        "Glob",
+        "Grep",
+        f"Edit({_absolute_permission_path(input_pointer)})",
+        f"Write({_absolute_permission_path(input_pointer)})",
+    ]
+    try:
+        relative_input = input_pointer.relative_to(session_root).as_posix()
+    except ValueError:
+        pass
+    else:
+        allowed.extend((f"Edit({relative_input})", f"Write({relative_input})"))
+    allowed.append("Bash")
+    if tuple(argv[allowed_index + 1 : settings_index]) != tuple(allowed):
+        raise ClaudeDriverError("review sandbox tool surface drifted")
 
 
 @dataclass(frozen=True)
@@ -142,52 +371,30 @@ class ClaudeDriver:
             if product_root is not None:
                 if not product_root.is_absolute():
                     raise ClaudeDriverError("review product root must be absolute")
-                quoted = shlex.quote(str(product_root))
-                inspect = shlex.join(
-                    (
-                        str(Path(sys.executable).resolve()),
-                        str(product_root / "scripts" / "review-inspect.py"),
-                        "--worktree",
-                        str(product_root),
+                if callback_pointer is None or session_root is None:
+                    raise ClaudeDriverError(
+                        "review sandbox requires callback and session roots"
                     )
+                settings = reviewer_sandbox_settings(
+                    callback_pointer=callback_pointer,
+                    product_root=product_root,
+                    session_root=session_root,
                 )
                 args.extend(
                     (
-                        f"Bash(python3 {quoted}/tests/test_*.py)",
-                        f"Bash(bash {quoted}/tests/test_*.sh)",
-                        f"Bash(python3 {quoted}/scripts/lint-instructions.py)",
-                        f"Bash(make -C {quoted} test)",
-                        f"Bash({inspect}:*)",
-                        (
-                            f"Bash(python3 {quoted}/scripts/"
-                            "check-skill-budget.py)"
-                        ),
-                        f"Bash(make -C {quoted} test-harness)",
-                        f"Bash(make -C {quoted} test-model-routing)",
+                        "Bash",
+                        "--settings",
+                        json.dumps(settings, sort_keys=True, separators=(",", ":")),
+                        "--setting-sources",
+                        "",
+                        "--safe-mode",
+                        "--strict-mcp-config",
+                        "--mcp-config",
+                        '{"mcpServers":{}}',
+                        "--no-chrome",
+                        "--disable-slash-commands",
                     )
                 )
-                if callback_pointer is not None:
-                    submit_root = _review_submit_root(
-                        callback_pointer, product_root
-                    )
-                    submit = shlex.join(
-                        (
-                            str(Path(sys.executable).resolve()),
-                            str(
-                                submit_root
-                                / "scripts"
-                                / "harness"
-                                / "review_submit.py"
-                            ),
-                            "--worktree",
-                            str(product_root),
-                            "--state-dir",
-                            str(callback_pointer.parent),
-                            "--input-file",
-                            str(input_pointer),
-                        )
-                    )
-                    args.append(f"Bash({submit})")
                 args.extend(["--add-dir", str(product_root)])
         if resume:
             if not CHECKPOINT.fullmatch(resume):

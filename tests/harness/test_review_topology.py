@@ -17,11 +17,17 @@ from review_contract import (  # noqa: E402
     compile_review_axes,
     review_axis_provider,
     review_axis_responsibility,
+    review_provider_runtime,
+    review_runtime_provider,
 )
 from harness.workflows.review_gate import ReviewPreset  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import ReviewContext, review_session_specs  # noqa: E402
 from task_review_request import _prompt, _request  # noqa: E402
+from task_review_flow import (  # noqa: E402
+    _requires_lane_barrier,
+    _should_defer_ready_results,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -65,6 +71,22 @@ check(
     review_axis_responsibility("anthropic-holistic") == "holistic"
     and review_axis_responsibility("openai-intent") == "intent"
     and review_axis_responsibility("anthropic-engineering") == "engineering",
+)
+check(
+    "provider identity is independent from mutable model aliases",
+    review_provider_runtime("anthropic") == "claude"
+    and review_provider_runtime("openai") == "codex"
+    and review_runtime_provider("claude") == "anthropic"
+    and review_runtime_provider("codex") == "openai"
+    and all(
+        'explicit_model="fable"' not in (ROOT / path).read_text(encoding="utf-8")
+        and 'explicit_model="sol"' not in (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "scripts/task_review_request.py",
+            "scripts/review-runner.py",
+            "scripts/dispatch_setup.py",
+        )
+    ),
 )
 try:
     review_axis_provider("fable-holistic")
@@ -111,6 +133,21 @@ check(
         "anthropic-engineering",
         "openai-intent",
         "openai-engineering",
+    ),
+)
+check(
+    "every multi-lane mode aggregates all callbacks before resolution",
+    not _requires_lane_barrier(ReviewPreset.from_flags())
+    and _requires_lane_barrier(ReviewPreset.from_flags(deep=True))
+    and _requires_lane_barrier(ReviewPreset.from_flags(full=True)),
+)
+check(
+    "an interrupted Full barrier absorbs later callbacks into one resolution",
+    _should_defer_ready_results(
+        ReviewPreset.from_flags(full=True),
+        purpose="implementation",
+        has_material=False,
+        already_awaiting=True,
     ),
 )
 

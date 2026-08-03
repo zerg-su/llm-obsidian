@@ -21,14 +21,17 @@ summary bytes. Only `--no-review` persists a typed bypass.
   intent and engineering sessions on that selected model only;
 - `review --full`: only when explicitly requested, the four-lane
   `{Anthropic, OpenAI} × {intent, engineering}` grid at `xhigh`;
-- `--cross-model`: run the selected preset on the opposite runtime.
+- `--cross-model`: for the one-route Simple preset, select the opposite
+  runtime. Default Deep and explicit Full already use both providers, so the
+  flag does not change their topology; explicit runtime/model overrides remain
+  authoritative.
 
 Deep/Full use `review_profiles.deep`; model overrides accept only routing-config
 aliases. `--deep --full` is invalid. Full is never inferred and rejects a
 runtime/model override before launch, recommending single-model Deep.
 Public lane IDs use stable `anthropic-*` and `openai-*` prefixes. Concrete
-runtime/model values remain separate operation metadata; routing aliases such
-as `fable` and `sol` never become lane identity.
+runtime/model values remain separate operation metadata; registered routing
+aliases never become lane identity.
 
 ## Purpose boundaries
 

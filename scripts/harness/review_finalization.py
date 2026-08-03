@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping
 
+from review_contract import VERIFY_BUDGETS
+
 from .verification import VerificationError, load_profiles
 from .workflows.review_gate import (
     ReviewGateAuthorization,
@@ -146,7 +148,7 @@ def _review_binding(
     model = policy.get("model")
     effort = policy.get("effort")
     budget = policy.get("max_verify_iterations")
-    expected_budget = {"skip": 0, "simple": 1, "deep": 2}[mode]
+    expected_budget = 0 if mode == "skip" else VERIFY_BUDGETS[mode]
     if (
         type(cross_model) is not bool
         or not isinstance(runtime, str)

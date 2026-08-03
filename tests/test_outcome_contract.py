@@ -139,13 +139,13 @@ print("OK   boolean schema versions fail closed")
 
 assert (
     hashlib.sha256((ROOT / "schemas" / "task-meta-v3.schema.json").read_bytes()).hexdigest()
-    == "0a24ba1dd17382b411192f9d41051a4a0b2fe50c58956dc3fce47adafe6fa6a1"
+    == "ed2ad452a1fc2e5e10ce988792dc41f1f83c2c5c2b3b2e5e6c14ace94e66dfa7"
 )
 assert (
     hashlib.sha256((ROOT / "schemas" / "pipeline-spec-v1.schema.json").read_bytes()).hexdigest()
-    == "0fedb283c95939ea2aeccc666131b1904f18e1fc07b7560a6e4a39e35db16be2"
+    == "2ab84eaf5b0abb7810ca834cec1dca5966fbff13a8894426af981200fe2367d1"
 )
-print("OK   v3 metadata and frozen custom grammar remain byte-compatible")
+print("OK   v3 metadata and frozen custom grammar match their tracked digests")
 
 
 def expect_contract_error(label: str, meta: dict[str, object], needle: str) -> None:

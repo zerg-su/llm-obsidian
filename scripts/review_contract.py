@@ -18,6 +18,10 @@ SEVERITIES = frozenset({"critical", "important", "minor"})
 MATERIAL_SEVERITIES = SEVERITIES - {"minor"}
 MODES = {"simple", "deep", "full"}
 PROVIDERS = ("anthropic", "openai")
+PROVIDER_RUNTIMES = {"anthropic": "claude", "openai": "codex"}
+RUNTIME_PROVIDERS = {
+    runtime: provider for provider, runtime in PROVIDER_RUNTIMES.items()
+}
 VERIFY_BUDGETS = {"simple": 1, "deep": 2, "full": 2}
 IDENTIFIER_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]*"
 IDENTIFIER_RE = re.compile(rf"{IDENTIFIER_PATTERN}\Z")
@@ -29,6 +33,20 @@ FINDING_DETAIL_LIMIT = 4000
 
 class ReviewContractError(ValueError):
     pass
+
+
+def review_provider_runtime(provider: str) -> str:
+    try:
+        return PROVIDER_RUNTIMES[provider]
+    except KeyError as exc:
+        raise ValueError("review provider must be anthropic or openai") from exc
+
+
+def review_runtime_provider(runtime: str) -> str:
+    try:
+        return RUNTIME_PROVIDERS[runtime]
+    except KeyError as exc:
+        raise ValueError("review runtime must be claude or codex") from exc
 
 
 def review_axis_responsibility(axis: str) -> str:

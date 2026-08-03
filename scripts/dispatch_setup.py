@@ -51,6 +51,8 @@ from review_contract import (
     compile_review_axes,
     review_axis_provider,
     review_axis_responsibility,
+    review_provider_runtime,
+    review_runtime_provider,
 )
 
 
@@ -397,21 +399,15 @@ def review_topology_preview(
                 "deep" if review.depth == "deep" else "simple"
             ),
         )
-        selected_provider = {
-            "claude": "anthropic",
-            "codex": "openai",
-        }[str(selected["runtime"])]
+        selected_provider = review_runtime_provider(str(selected["runtime"]))
         routes[selected_provider] = selected
     else:
-        for provider, alias in (
-            ("anthropic", "fable"),
-            ("openai", "sol"),
-        ):
+        for provider in ("anthropic", "openai"):
             routes[provider] = resolve(
                 config,
                 "review",
                 session=request["session_route"],
-                explicit_model=alias,
+                explicit_runtime=review_provider_runtime(provider),
                 explicit_effort=review.effort,
                 same_model=False,
                 review_profile="deep",

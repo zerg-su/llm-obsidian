@@ -204,6 +204,22 @@ def _start_review(
 
 
 
+def _requires_lane_barrier(preset: ReviewPreset) -> bool:
+    return preset.depth in {"deep", "full"}
+
+
+def _should_defer_ready_results(
+    preset: ReviewPreset,
+    *,
+    purpose: str,
+    has_material: bool,
+    already_awaiting: bool = False,
+) -> bool:
+    return _requires_lane_barrier(preset) and (
+        already_awaiting or (purpose != "release" and has_material)
+    )
+
+
 def _complete_ready_results(
     *,
     gate: ReviewGateController,
@@ -214,28 +230,31 @@ def _complete_ready_results(
     worktree: Path,
     vault: Path,
     runtime_root: Path,
+    already_awaiting: bool = False,
 ) -> None:
-    defer_deep = (
-        context.purpose != "release"
-        and preset.depth == "deep"
+    has_material = any(
+        result.verdict == "changes-requested"
         and any(
-            result.verdict == "changes-requested"
-            and any(
-                finding.severity in MATERIAL_SEVERITIES
-                for finding in result.findings
-            )
-            for _lane, _round, result in ready
+            finding.severity in MATERIAL_SEVERITIES
+            for finding in result.findings
         )
+        for _lane, _round, result in ready
+    )
+    defer_resolution = _should_defer_ready_results(
+        preset,
+        purpose=context.purpose,
+        has_material=has_material,
+        already_awaiting=already_awaiting,
     )
     ordered = (
         ready
-        if defer_deep or context.purpose != "release"
+        if defer_resolution or context.purpose != "release"
         else sorted(ready, key=lambda item: item[2].verdict != "approve")
     )
     for lane, round_, result in ordered:
         decision = (
             gate.defer_round_for_resolution(run, lane, round_, result)
-            if defer_deep
+            if defer_resolution
             else gate.complete_round(run, lane, round_, result)
         )
         _record_accepted_result(
@@ -411,6 +430,28 @@ def _run_review(
 
     run = gate.rehydrate()
     if status == "awaiting-resolution":
+        if _requires_lane_barrier(preset):
+            recorded_axes = set((state.get("round_results") or {}).keys())
+            ready = [
+                item
+                for item in _collect_ready_results(
+                    run, runtime_root, worktree, vault
+                )
+                if item[2].axis not in recorded_axes
+            ]
+            if ready:
+                _complete_ready_results(
+                    gate=gate,
+                    run=run,
+                    ready=ready,
+                    preset=preset,
+                    context=context,
+                    worktree=worktree,
+                    vault=vault,
+                    runtime_root=runtime_root,
+                    already_awaiting=True,
+                )
+                state = gate.read()
         return _continue_resolution(
             meta=meta,
             vault=vault,
@@ -460,7 +501,7 @@ def _run_review(
         )
 
     ready = _collect_ready_results(run, runtime_root, worktree, vault)
-    if preset.depth == "deep" and len(ready) != len(run.execution.lanes):
+    if _requires_lane_barrier(preset) and len(ready) != len(run.execution.lanes):
         return _receipt(
             status=status,
             meta=meta,

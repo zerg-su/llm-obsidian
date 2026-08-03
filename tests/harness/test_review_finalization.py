@@ -102,6 +102,19 @@ with tempfile.TemporaryDirectory(prefix="review-finalization.") as raw:
         "missing gate is a typed non-terminal wait state",
         missing.status == "missing" and missing.authorization is None,
     )
+    full_meta = {
+        **meta,
+        "review_policy": {
+            **meta["review_policy"],
+            "mode": "full",
+            "max_verify_iterations": 2,
+        },
+    }
+    full_missing = task_review_status(full_meta, worktree)
+    check(
+        "full review finalization has a typed pre-review state",
+        full_missing.status == "missing" and full_missing.authorization is None,
+    )
     gate.mkdir(parents=True)
     active_meta = {
         **meta,

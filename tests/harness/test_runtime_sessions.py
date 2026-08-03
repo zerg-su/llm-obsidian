@@ -20,7 +20,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.adapters.claude import ClaudeDriver
+from harness.adapters.claude import (
+    ClaudeDriver,
+    ClaudeDriverError,
+    validate_reviewer_sandbox_command,
+)
 from harness.adapters.cmux import Surface
 from harness.adapters.codex import CodexDriver
 from harness.callbacks import CallbackBroker, CallbackTimeoutError
@@ -48,6 +52,7 @@ from harness.runtime_worker import (
     provider_argv as runtime_provider_argv,
     run as run_runtime_worker,
 )
+from harness.runtime_provider import provider_environment
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -2006,21 +2011,12 @@ review_submit = shlex.join(
         str(review_input),
     )
 )
-quoted_product = shlex.quote(str(product))
-review_inspect = shlex.join(
-    (
-        str(Path(sys.executable).resolve()),
-        str(product / "scripts" / "review-inspect.py"),
-        "--worktree",
-        str(product),
+try:
+    sandbox_settings = json.loads(
+        claude_callback[claude_callback.index("--settings") + 1]
     )
-)
-reviewer_readonly_probes = {
-    f"Bash({review_inspect}:*)",
-    f"Bash(python3 {quoted_product}/scripts/check-skill-budget.py)",
-    f"Bash(make -C {quoted_product} test-harness)",
-    f"Bash(make -C {quoted_product} test-model-routing)",
-}
+except (ValueError, IndexError, json.JSONDecodeError):
+    sandbox_settings = {}
 try:
     callback_instruction = claude_callback[
         claude_callback.index("--append-system-prompt") + 1
@@ -2055,16 +2051,30 @@ check(
     and str(callback) in callback_instruction
     and "absolute path verbatim" in callback_instruction
     and "input file's exact session-relative alias" in callback_instruction
-    and f"Bash({review_submit})" in claude_callback
-    and reviewer_readonly_probes.issubset(claude_callback)
-    and not any(item.startswith("Bash(git ") for item in claude_callback)
-    and "Bash(*)" not in claude_callback
-    and not any(
-        token in item
-        for item in claude_callback
-        if item.startswith("Bash(")
-        for token in (" && ", " || ", ";", "$(", "`")
-    )
+    and "Bash" in claude_callback
+    and not any(item.startswith("Bash(") for item in claude_callback)
+    and "--safe-mode" in claude_callback
+    and "--strict-mcp-config" in claude_callback
+    and claude_callback[claude_callback.index("--setting-sources") + 1] == ""
+    and sandbox_settings.get("sandbox", {}).get("enabled") is True
+    and sandbox_settings.get("sandbox", {}).get("failIfUnavailable") is True
+    and sandbox_settings.get("sandbox", {}).get("autoAllowBashIfSandboxed") is True
+    and sandbox_settings.get("sandbox", {}).get("allowUnsandboxedCommands") is False
+    and sandbox_settings.get("sandbox", {}).get("excludedCommands") == []
+    and sandbox_settings.get("sandbox", {}).get("filesystem", {}).get("allowWrite")
+    == [
+        str(scratch.parent.resolve()),
+        str(callback.parent.resolve()),
+        str((callback.parent / ".review-test-tmp").resolve()),
+    ]
+    and str(product.resolve())
+    in sandbox_settings.get("sandbox", {}).get("filesystem", {}).get("denyWrite", [])
+    and sandbox_settings.get("sandbox", {}).get("network", {}).get("allowedDomains") == []
+    and sandbox_settings.get("sandbox", {}).get("network", {}).get("strictAllowlist") is True
+    and sandbox_settings.get("sandbox", {}).get("network", {}).get("allowUnixSockets") == []
+    and sandbox_settings.get("sandbox", {}).get("network", {}).get("allowLocalBinding") is False
+    and sandbox_settings.get("permissions", {}).get("deny")
+    and "WebFetch" in sandbox_settings["permissions"]["deny"]
     and not any(
         item.startswith(("Edit(", "Write("))
         and item
@@ -2080,6 +2090,129 @@ check(
     and "--add-dir" not in codex_callback,
     (claude_callback, codex_callback),
 )
+
+
+def expect_sandbox_rejection(label: str, command: tuple[str, ...]) -> None:
+    try:
+        validate_reviewer_sandbox_command(
+            command,
+            callback_pointer=callback,
+            product_root=product,
+            session_root=scratch.parent,
+        )
+    except ClaudeDriverError:
+        check(label, True)
+    else:
+        check(label, False, command)
+
+
+validate_reviewer_sandbox_command(
+    claude_callback,
+    callback_pointer=callback,
+    product_root=product,
+    session_root=scratch.parent,
+)
+settings_position = claude_callback.index("--settings") + 1
+for label, mutate in (
+    (
+        "review sandbox rejects a product write root",
+        lambda value: value["sandbox"]["filesystem"]["allowWrite"].append(
+            str(product.resolve())
+        ),
+    ),
+    (
+        "review sandbox rejects the unsandboxed escape hatch",
+        lambda value: value["sandbox"].update(
+            {"allowUnsandboxedCommands": True}
+        ),
+    ),
+    (
+        "review sandbox rejects network expansion",
+        lambda value: value["sandbox"]["network"]["allowedDomains"].append(
+            "example.com"
+        ),
+    ),
+    (
+        "review sandbox rejects subprocess exclusions",
+        lambda value: value["sandbox"]["excludedCommands"].append("git *"),
+    ),
+):
+    changed_settings = json.loads(claude_callback[settings_position])
+    mutate(changed_settings)
+    changed_command = list(claude_callback)
+    changed_command[settings_position] = json.dumps(
+        changed_settings, sort_keys=True, separators=(",", ":")
+    )
+    expect_sandbox_rejection(label, tuple(changed_command))
+
+changed_sources = list(claude_callback)
+changed_sources[changed_sources.index("--setting-sources") + 1] = "user"
+expect_sandbox_rejection(
+    "review sandbox rejects inherited user permissions", tuple(changed_sources)
+)
+changed_root = list(claude_callback)
+changed_root[changed_root.index("--add-dir") + 1] = "/tmp/foreign-product"
+expect_sandbox_rejection(
+    "review sandbox rejects a foreign product path", tuple(changed_root)
+)
+missing_safe_mode = list(claude_callback)
+missing_safe_mode.remove("--safe-mode")
+expect_sandbox_rejection(
+    "review sandbox rejects a missing hard gate", tuple(missing_safe_mode)
+)
+check(
+    "redirect subprocess and git-write attempts inherit the same native sandbox",
+    "Bash" in claude_callback
+    and sandbox_settings["sandbox"]["excludedCommands"] == []
+    and str(product.resolve())
+    in sandbox_settings["sandbox"]["filesystem"]["denyWrite"],
+)
+with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
+    sandbox_root = Path(raw)
+    sandbox_product = sandbox_root / "product"
+    sandbox_product.mkdir()
+    (sandbox_product / ".git").mkdir()
+    sandbox_session = sandbox_root / "session"
+    sandbox_session.mkdir()
+    sandbox_callbacks = sandbox_session / "callbacks"
+    sandbox_callbacks.mkdir()
+    sandbox_callback = sandbox_callbacks / "callback.json"
+    sandbox_command = ClaudeDriver(Path("/usr/bin/claude")).command(
+        callback_route,
+        callback_pointer=sandbox_callback,
+        product_root=sandbox_product,
+        session_root=sandbox_session,
+    )
+    sandbox_env = provider_environment(
+        {
+            "runtime": "claude",
+            "callback_mode": "envelope",
+            "callback_pointer": sandbox_callback,
+            "product_root": sandbox_product,
+        },
+        env={"PATH": "/usr/bin:/bin", "GITHUB_TOKEN": "secret"},
+    )
+    test_tmp = (sandbox_callbacks / ".review-test-tmp").resolve()
+    check(
+        "review sandbox provisions one owned ephemeral test root",
+        sandbox_env["TMPDIR"] == str(test_tmp)
+        and test_tmp.is_dir()
+        and not test_tmp.is_symlink()
+        and test_tmp.stat().st_mode & 0o077 == 0,
+    )
+    symlink_callbacks = sandbox_root / "callback-link"
+    symlink_callbacks.symlink_to(sandbox_callbacks, target_is_directory=True)
+    try:
+        ClaudeDriver(Path("/usr/bin/claude")).command(
+            callback_route,
+            callback_pointer=symlink_callbacks / "callback.json",
+            product_root=sandbox_product,
+            session_root=sandbox_session,
+        )
+    except ClaudeDriverError:
+        check("review sandbox rejects a callback symlink escape", True)
+    else:
+        check("review sandbox rejects a callback symlink escape", False)
 research_scratch = Path("/tmp/owned-research-scratch")
 codex_research = CodexDriver(Path("/usr/bin/codex")).command(
     RuntimeRoute(

@@ -145,11 +145,15 @@ specs, callbacks, baselines, watchdog state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share
 singleton files. Simple review uses one holistic lane. Default Deep uses two
 independent holistic model lanes; single-model Deep and explicit Full reuse the
-same independent intent and engineering specialist responsibilities. Claude
-gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG
-smoke `bash scripts/dcg-test-suite.sh`; Codex gets a
-private scratch directory, exact loopback access/binding, disabled web search,
-and no product writable root. `tests/test_task_lifecycle.py` and
+same independent intent and engineering specialist responsibilities. Anthropic
+reviewers keep `dontAsk` but may read and run arbitrary local checks inside the
+native Claude OS sandbox. The product worktree and Git metadata stay explicitly
+read-only; writes are limited to operation-owned review scratch/callback roots
+and one private test temp directory. Unsandboxed fallback, inherited user or
+project settings, external network domains, Unix sockets, MCPs, hooks, and
+credential reads are disabled fail-closed. Codex keeps its private scratch
+directory, exact loopback access/binding, disabled web search, and no product
+writable root. `tests/test_task_lifecycle.py` and
 the harness adapter and task lifecycle suites reject command, environment,
 writable-root, domain, and socket drift.
 
