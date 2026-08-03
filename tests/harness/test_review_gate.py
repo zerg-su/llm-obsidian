@@ -30,6 +30,7 @@ from harness.adapters.claude import ClaudeDriver
 from harness.contracts import (
     AttentionReason,
     CallbackEnvelope,
+    CapabilityReport,
     EffectOutcome,
     OperationSpec,
     OwnedResources,
@@ -549,6 +550,15 @@ class FakeRuntime:
         self.cleanups: list[tuple[str, str]] = []
         self.cleanup_attention = False
         self.cleanup_terminate_once = False
+
+    def preflight_routes(
+        self,
+        requests: tuple[tuple[RuntimeRoute, Path, str], ...],
+    ) -> tuple[CapabilityReport, ...]:
+        return tuple(
+            CapabilityReport(route, True, ("provider:profile-valid",))
+            for route, _callback_dir, _origin_surface in requests
+        )
 
     def start(self, request: object, *, on_surface_opened=None) -> FakeSessionResult:
         self.started.append(request)

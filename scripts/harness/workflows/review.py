@@ -19,6 +19,7 @@ from ..contracts import (
     RuntimeRoute,
 )
 from ..state_machine import TERMINAL
+from ..runtime_session_contracts import RuntimeSessionError
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
@@ -104,52 +105,92 @@ def start_review(
     lanes: list[ReviewLaneSession] = []
     started_lanes: list[ReviewLaneSession] = []
     initial_rounds: list[ReviewRound] = []
+    prepared_sessions: list[
+        tuple[
+            ReviewSessionIdentity,
+            ReviewSessionRequest,
+            OperationRecord | None,
+            bool,
+        ]
+    ] = []
+    for identity in review_session_specs(request):
+        axis = identity.axis
+        spec = identity.spec
+        axis_prompt = (
+            prompt_pointer
+            if prompt_pointers is None
+            else prompt_pointers[axis]
+        )
+        session_request = ReviewSessionRequest(
+            spec=spec,
+            lane_id=identity.lane_id,
+            run_id=identity.run_id,
+            origin_surface=origin_surface,
+            cwd=cwd,
+            product_root=product_root,
+            prompt_pointer=axis_prompt,
+            placement="workspace",
+            callback_pointer=(
+                f"{callback_root}/{axis}/.review-callback.json"
+            ),
+            callback_wake=callback_wake,
+        )
+        try:
+            existing = round_store.read(spec.owner_id, spec.operation_id)
+        except Exception:
+            existing = None
+        restartable_created = (
+            existing is not None
+            and existing.state == "created"
+            and not existing.pending_effect
+            and not any(
+                (
+                    existing.resources.surface_id,
+                    existing.resources.process_group,
+                    existing.resources.supervisor_pid,
+                    existing.resources.process_identity,
+                    existing.resources.supervisor_identity,
+                )
+            )
+        )
+        prepared_sessions.append(
+            (identity, session_request, existing, restartable_created)
+        )
+    if request.policy.depth == "full":
+        fresh = tuple(
+            session_request
+            for _identity, session_request, existing, restartable_created
+            in prepared_sessions
+            if existing is None or restartable_created
+        )
+        reports = runtime.preflight_routes(
+            tuple(
+                (
+                    session_request.spec.route,
+                    (cwd / session_request.callback_pointer).parent,
+                    origin_surface,
+                )
+                for session_request in fresh
+            )
+        )
+        if len(reports) != len(fresh) or any(
+            not report.compatible for report in reports
+        ):
+            raise RuntimeSessionError(
+                "Full review is unavailable before provider start; "
+                "use single-model Deep"
+            )
     try:
-        for identity in review_session_specs(request):
+        for (
+            identity,
+            session_request,
+            existing,
+            restartable_created,
+        ) in prepared_sessions:
             axis = identity.axis
             spec = identity.spec
             lane_id = identity.lane_id
             run_id = identity.run_id
-            axis_name = axis
-            axis_prompt = (
-                prompt_pointer
-                if prompt_pointers is None
-                else prompt_pointers[axis]
-            )
-            session_request = ReviewSessionRequest(
-                spec=spec,
-                lane_id=lane_id,
-                run_id=run_id,
-                origin_surface=origin_surface,
-                cwd=cwd,
-                product_root=product_root,
-                prompt_pointer=axis_prompt,
-                placement="workspace",
-                callback_pointer=(
-                    f"{callback_root}/{axis_name}/.review-callback.json"
-                ),
-                callback_wake=callback_wake,
-            )
-            try:
-                existing = round_store.read(
-                    spec.owner_id, spec.operation_id
-                )
-            except Exception:
-                existing = None
-            restartable_created = (
-                existing is not None
-                and existing.state == "created"
-                and not existing.pending_effect
-                and not any(
-                    (
-                        existing.resources.surface_id,
-                        existing.resources.process_group,
-                        existing.resources.supervisor_pid,
-                        existing.resources.process_identity,
-                        existing.resources.supervisor_identity,
-                    )
-                )
-            )
             if existing is not None and not restartable_created:
                 if (
                     existing.spec != spec

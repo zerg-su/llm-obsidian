@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from review_contract import ReviewContractError, validate_review
 from harness.callbacks import CallbackBroker
-from harness.contracts import RuntimeRoute
+from harness.contracts import AttentionReason, CapabilityReport, RuntimeRoute
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.store import OperationStore
 from harness.workflows import review as review_facade
@@ -283,12 +283,33 @@ class FakeReviewRuntime:
     def __init__(self, store: OperationStore) -> None:
         self.store = store
         self.started: list[object] = []
+        self.preflighted: list[tuple[tuple[RuntimeRoute, Path, str], ...]] = []
+        self.incompatible_runtimes: set[str] = set()
         self.continued: list[tuple[str, str, str, str]] = []
         self.callbacks: list[object] = []
         self.exits: list[tuple[str, str]] = []
         self.cleanups: list[tuple[str, str]] = []
         self.prepared: list[str] = []
         self.registered: list[tuple[str, str, str, str, str]] = []
+
+    def preflight_routes(
+        self,
+        requests: tuple[tuple[RuntimeRoute, Path, str], ...],
+    ) -> tuple[CapabilityReport, ...]:
+        self.preflighted.append(requests)
+        return tuple(
+            CapabilityReport(
+                route,
+                route.runtime not in self.incompatible_runtimes,
+                ("provider:profile-valid",),
+                (
+                    None
+                    if route.runtime not in self.incompatible_runtimes
+                    else AttentionReason.CAPABILITY_MISMATCH
+                ),
+            )
+            for route, _callback_dir, _origin_surface in requests
+        )
 
     def start(
         self, request: object, *, on_surface_opened: object = None
@@ -652,6 +673,58 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         ]
         and [request.spec.route.runtime for request in runtime.started[-4:]]
         == ["claude", "claude", "codex", "codex"],
+    )
+    started_before_full_replay = len(runtime.started)
+    runtime.incompatible_runtimes.add("codex")
+    replayed_full = start_review(
+        full_request,
+        runtime,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=ROOT,
+        prompt_pointer="packets/review/handoff.md",
+        callback_root="callbacks/review-full",
+        round_store=runtime.store,
+    )
+    check(
+        "full replay trusts already-owned exact lanes without new provider preflight",
+        len(runtime.started) == started_before_full_replay
+        and [lane.operation_id for lane in replayed_full.lanes]
+        == [lane.operation_id for lane in full.lanes]
+        and runtime.preflighted[-1] == (),
+    )
+    runtime.incompatible_runtimes.clear()
+    blocked_runtime = FakeReviewRuntime(
+        OperationStore(runtime_root / "blocked-full-state")
+    )
+    blocked_runtime.incompatible_runtimes.add("codex")
+    try:
+        start_review(
+            full_request,
+            blocked_runtime,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            cwd=scratch,
+            product_root=ROOT,
+            prompt_pointer="packets/review/handoff.md",
+            callback_root="callbacks/review-full-blocked",
+            round_store=blocked_runtime.store,
+        )
+    except Exception as exc:
+        blocked_full_error = str(exc)
+    else:
+        blocked_full_error = ""
+    check(
+        "full preflights every provider before the first durable or external effect",
+        "Deep" in blocked_full_error
+        and len(blocked_runtime.preflighted) == 1
+        and [
+            route.runtime
+            for route, _callback_dir, _origin_surface
+            in blocked_runtime.preflighted[0]
+        ]
+        == ["claude", "claude", "codex", "codex"]
+        and blocked_runtime.started == []
+        and blocked_runtime.store.list("owner-1") == [],
     )
     full_results = {
         axis: ReviewResult(axis, "approve") for axis in full_request.policy.axes

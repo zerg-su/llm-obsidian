@@ -573,11 +573,15 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         operation_id: str,
         *,
         missing_checkpoint: bool = False,
+        runtime: str = "claude",
+        model: str = "fable",
+        launch_model: str = "",
+        session_checkpoint: str = "",
         launch_surface: str = "11111111-1111-1111-1111-111111111111",
     ) -> tuple[str, str]:
         review_route = RuntimeRoute(
-            "claude",
-            "fable",
+            runtime,
+            model,
             "xhigh",
             "reviewer-callback",
             "d" * 64,
@@ -630,21 +634,21 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 "window_ref": "window:1",
                 "surface_ref": "surface:1",
                 "callback_mode": "envelope",
-                "checkpoint": "",
+                "checkpoint": session_checkpoint,
             },
             "launch.json": {
                 "schema_version": 1,
                 "owner_id": "owner-cli",
                 "operation_id": operation_id,
                 "run_id": run_id,
-                "runtime": "claude",
+                "runtime": runtime,
                 "cwd": str(scratch.resolve()),
                 "surface_id": launch_surface,
                 "store_root": str(store.root.resolve()),
                 "argv": [
-                    "claude",
+                    runtime,
                     "--model",
-                    "fable",
+                    launch_model or model,
                     f"Product worktree (read-only): `{product.resolve()}`.",
                 ],
             },
@@ -661,7 +665,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 "schema_version": 1,
                 "operation_id": operation_id,
                 "run_id": run_id,
-                "runtime": "claude",
+                "runtime": runtime,
                 "checkpoint": f"checkpoint-{operation_id}",
             },
         }
@@ -1199,7 +1203,86 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "CLI exact Claude cleanup does not require unavailable checkpoint evidence",
         missing_rc == 0
         and missing_after.state == "exiting"
-        and len(missing_process.guardian_requests) == 1,
+        and len(missing_process.guardian_requests) == 1
+        and missing_process.guardian_requests[0]["operation_id"]
+        == "op-review-missing-checkpoint-cli"
+        and missing_process.guardian_requests[0]["action"]
+        == "request-exit",
+    )
+
+    create_review_cleanup_operation(
+        "op-review-missing-checkpoint-codex-cli",
+        missing_checkpoint=True,
+        runtime="codex",
+        model="gpt-5.6-sol",
+    )
+    missing_codex_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    missing_codex_rc, _missing_codex_output = run_cli_in_process(
+        "close",
+        "op-review-missing-checkpoint-codex-cli",
+        process=missing_codex_process,
+        cmux=FakeCmux("alive"),
+    )
+    missing_codex_after = store.read(
+        "owner-cli", "op-review-missing-checkpoint-codex-cli"
+    )
+    check(
+        "CLI non-Claude cleanup keeps missing checkpoint evidence fail-closed",
+        missing_codex_rc == 0
+        and missing_codex_after.state == "attention-required"
+        and missing_codex_after.attention_reason
+        == AttentionReason.CLEANUP_INCOMPLETE
+        and missing_codex_process.guardian_requests == [],
+    )
+
+    create_review_cleanup_operation(
+        "op-review-lost-requested-checkpoint-cli",
+        missing_checkpoint=True,
+        session_checkpoint="expected-resume-checkpoint",
+    )
+    lost_requested_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    lost_requested_rc, _lost_requested_output = run_cli_in_process(
+        "close",
+        "op-review-lost-requested-checkpoint-cli",
+        process=lost_requested_process,
+        cmux=FakeCmux("alive"),
+    )
+    lost_requested_after = store.read(
+        "owner-cli", "op-review-lost-requested-checkpoint-cli"
+    )
+    check(
+        "CLI checkpointless Claude cleanup rejects lost requested evidence",
+        lost_requested_rc == 0
+        and lost_requested_after.state == "attention-required"
+        and lost_requested_process.guardian_requests == [],
+    )
+
+    create_review_cleanup_operation(
+        "op-review-missing-checkpoint-route-drift-cli",
+        missing_checkpoint=True,
+        launch_model="foreign-model",
+    )
+    route_drift_process = FakeProcess(
+        "unknown", supervisor_status="unknown", capture_matches=True
+    )
+    route_drift_rc, _route_drift_output = run_cli_in_process(
+        "close",
+        "op-review-missing-checkpoint-route-drift-cli",
+        process=route_drift_process,
+        cmux=FakeCmux("alive"),
+    )
+    route_drift_after = store.read(
+        "owner-cli", "op-review-missing-checkpoint-route-drift-cli"
+    )
+    check(
+        "CLI checkpointless Claude cleanup still proves the exact model route",
+        route_drift_rc == 0
+        and route_drift_after.state == "attention-required"
+        and route_drift_process.guardian_requests == [],
     )
 
     create_cli_operation(

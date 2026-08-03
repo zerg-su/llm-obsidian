@@ -14,6 +14,7 @@ from typing import Callable, Mapping, Protocol
 from ..contracts import (
     AttentionReason,
     CallbackEnvelope,
+    CapabilityReport,
     OperationRecord,
     OperationSpec,
     RuntimeRoute,
@@ -286,6 +287,11 @@ class ReviewRuntimePort(Protocol):
         *,
         on_surface_opened: Callable[[object], None] | None = None,
     ) -> object: ...
+
+    def preflight_routes(
+        self,
+        requests: tuple[tuple[RuntimeRoute, Path, str], ...],
+    ) -> tuple[CapabilityReport, ...]: ...
 
     def continue_session(
         self,

@@ -35,6 +35,15 @@ class RuntimeCheckpointEvidenceMissing(RuntimeSessionError):
     """The exact provider checkpoint artifact was never materialized."""
 
 
+def checkpointless_reviewer_route(route: RuntimeRoute) -> bool:
+    """Return whether this review route legitimately has no cmux resume binding."""
+
+    return (
+        route.runtime == "claude"
+        and route.profile == "reviewer-callback"
+    )
+
+
 class ProviderDriver(Protocol):
     def command(
         self,

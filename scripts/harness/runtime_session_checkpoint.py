@@ -15,6 +15,7 @@ from .runtime_session_contracts import (
     RuntimeCheckpointEvidenceMissing,
     RuntimeSessionError,
     RuntimeSessionResult,
+    checkpointless_reviewer_route,
 )
 
 
@@ -81,6 +82,8 @@ class RuntimeSessionCheckpointMixin:
         owner_id: str,
         operation_id: str,
         lane_id: str,
+        *,
+        allow_missing_checkpoint: bool = False,
     ) -> RuntimeSessionResult:
         record = self.store.read(owner_id, operation_id)
         if (
@@ -119,11 +122,17 @@ class RuntimeSessionCheckpointMixin:
         session, session_sha256 = _stable_owned_json(
             state_root / "session.json", "session evidence"
         )
-        checkpoint, checkpoint_sha256 = _stable_owned_json(
-            state_root / "checkpoint.json",
-            "checkpoint evidence",
-            missing_error=RuntimeCheckpointEvidenceMissing,
-        )
+        try:
+            checkpoint, checkpoint_sha256 = _stable_owned_json(
+                state_root / "checkpoint.json",
+                "checkpoint evidence",
+                missing_error=RuntimeCheckpointEvidenceMissing,
+            )
+        except RuntimeCheckpointEvidenceMissing:
+            if not allow_missing_checkpoint:
+                raise
+            checkpoint = None
+            checkpoint_sha256 = ""
         launch, launch_sha256 = _stable_owned_json(
             state_root / "launch.json", "launch evidence"
         )
@@ -132,19 +141,6 @@ class RuntimeSessionCheckpointMixin:
             session.get("operation_id") != operation_id
             or session.get("run_id") != record.run_id
             or session.get("callback_mode", "envelope") != "envelope"
-            or str(session.get("checkpoint") or "")
-            not in {"", str(checkpoint.get("checkpoint") or "")}
-            or set(checkpoint)
-            != {
-                "schema_version",
-                "operation_id",
-                "run_id",
-                "runtime",
-                "checkpoint",
-            }
-            or checkpoint.get("operation_id") != operation_id
-            or checkpoint.get("run_id") != record.run_id
-            or checkpoint.get("runtime") != route.runtime
             or launch.get("owner_id") != owner_id
             or launch.get("operation_id") != operation_id
             or launch.get("run_id") != record.run_id
@@ -154,7 +150,32 @@ class RuntimeSessionCheckpointMixin:
             raise RuntimeSessionError(
                 "durable checkpoint session identity changed"
             )
-        checkpoint_value = str(checkpoint.get("checkpoint") or "")
+        if checkpoint is None:
+            if str(session.get("checkpoint") or ""):
+                raise RuntimeSessionError(
+                    "durable checkpoint session identity changed"
+                )
+            checkpoint_value = ""
+        else:
+            if (
+                str(session.get("checkpoint") or "")
+                not in {"", str(checkpoint.get("checkpoint") or "")}
+                or set(checkpoint)
+                != {
+                    "schema_version",
+                    "operation_id",
+                    "run_id",
+                    "runtime",
+                    "checkpoint",
+                }
+                or checkpoint.get("operation_id") != operation_id
+                or checkpoint.get("run_id") != record.run_id
+                or checkpoint.get("runtime") != route.runtime
+            ):
+                raise RuntimeSessionError(
+                    "durable checkpoint session identity changed"
+                )
+            checkpoint_value = str(checkpoint.get("checkpoint") or "")
         argv = launch.get("argv")
         model_positions = (
             [index for index, value in enumerate(argv) if value == "--model"]
@@ -162,7 +183,7 @@ class RuntimeSessionCheckpointMixin:
             else []
         )
         if (
-            not IDENTIFIER.fullmatch(checkpoint_value)
+            (checkpoint is not None and not IDENTIFIER.fullmatch(checkpoint_value))
             or len(model_positions) != 1
             or model_positions[0] + 1 >= len(argv)
             or argv[model_positions[0] + 1] != route.model
@@ -222,13 +243,14 @@ class RuntimeSessionCheckpointMixin:
             raise RuntimeSessionError(
                 "durable cleanup resources are incomplete"
             )
-        try:
-            self.hydrate_durable_checkpoint(
-                owner_id, operation_id, record.lane_id
-            )
-        except RuntimeCheckpointEvidenceMissing:
-            if record.spec.route.runtime != "claude":
-                raise
+        self.hydrate_durable_checkpoint(
+            owner_id,
+            operation_id,
+            record.lane_id,
+            allow_missing_checkpoint=checkpointless_reviewer_route(
+                record.spec.route
+            ),
+        )
         state_root = self._state_root(record)
         session, _session_sha256 = _stable_owned_json(
             state_root / "session.json", "cleanup session evidence"

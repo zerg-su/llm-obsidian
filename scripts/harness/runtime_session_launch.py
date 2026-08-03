@@ -25,6 +25,7 @@ from .runtime_session_contracts import (
     RuntimeSessionResult,
     SurfacePrepared,
     _relative,
+    checkpointless_reviewer_route,
     continuation_effect_id,
 )
 from .store import StoreError
@@ -375,8 +376,7 @@ class RuntimeSessionLaunchMixin:
         record = self.store.read(owner_id, operation_id)
         checkpointless_claude = (
             not checkpoint
-            and record.spec.route.runtime == "claude"
-            and record.spec.route.profile == "reviewer-callback"
+            and checkpointless_reviewer_route(record.spec.route)
         )
         if not checkpointless_claude and (
             not checkpoint or not IDENTIFIER.fullmatch(checkpoint)
