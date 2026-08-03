@@ -1196,10 +1196,10 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "owner-cli", "op-review-missing-checkpoint-cli"
     )
     check(
-        "CLI reviewer cleanup rejects missing durable checkpoint evidence",
+        "CLI exact Claude cleanup does not require unavailable checkpoint evidence",
         missing_rc == 0
-        and missing_after.state == "attention-required"
-        and missing_process.guardian_requests == [],
+        and missing_after.state == "exiting"
+        and len(missing_process.guardian_requests) == 1,
     )
 
     create_cli_operation(

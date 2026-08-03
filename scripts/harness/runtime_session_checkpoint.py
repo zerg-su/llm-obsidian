@@ -222,9 +222,13 @@ class RuntimeSessionCheckpointMixin:
             raise RuntimeSessionError(
                 "durable cleanup resources are incomplete"
             )
-        self.hydrate_durable_checkpoint(
-            owner_id, operation_id, record.lane_id
-        )
+        try:
+            self.hydrate_durable_checkpoint(
+                owner_id, operation_id, record.lane_id
+            )
+        except RuntimeCheckpointEvidenceMissing:
+            if record.spec.route.runtime != "claude":
+                raise
         state_root = self._state_root(record)
         session, _session_sha256 = _stable_owned_json(
             state_root / "session.json", "cleanup session evidence"
