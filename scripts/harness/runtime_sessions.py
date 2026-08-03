@@ -405,11 +405,11 @@ class RuntimeSessionManager(
             },
         )
 
-    def _notify(self) -> None:
+    def _notify(self, trigger_owner: str) -> None:
         if self.status_notifier is None:
             return
         try:
-            self.status_notifier(self.store.root)
+            self.status_notifier(self.store.root, trigger_owner)
         except Exception:
             pass
 
@@ -455,7 +455,7 @@ class RuntimeSessionManager(
             reason=reason,
         )
         updated = self.store.read(record.spec.owner_id, record.spec.operation_id)
-        self._notify()
+        self._notify(record.spec.owner_id)
         return updated
 
     def _supervisor_status(self, record: OperationRecord) -> str:
@@ -506,4 +506,7 @@ def _default_status_notifier() -> StatusNotifier | None:
         from .status_segment import publish
     except ImportError:
         return None
-    return publish
+    return lambda state_root, trigger_owner: publish(
+        state_root,
+        trigger_owner=trigger_owner,
+    )

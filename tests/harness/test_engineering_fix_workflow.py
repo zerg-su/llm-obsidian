@@ -116,6 +116,7 @@ with tempfile.TemporaryDirectory(prefix="engineering-fix-workflow.") as raw:
         "first phase is one deterministic resource-less child in the parent lane",
         first.step_id == "reproduce"
         and first.parent_operation_id == parent_record.spec.operation_id
+        and first.spec.parent_operation_id == parent_record.spec.operation_id
         and first.spec == first_replay.spec
         and first.lane_id == parent_record.lane_id
         and first.run_id == first_replay.run_id

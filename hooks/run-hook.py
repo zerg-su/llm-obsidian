@@ -119,6 +119,17 @@ def session_context(root: Path, data: dict[str, Any], raw: str) -> None:
             emit(result.stdout)
 
 
+def refresh_harness_status(root: Path) -> None:
+    """Silently refresh the coordinator projection without lifecycle authority."""
+
+    try:
+        from harness.status_segment import publish
+
+        publish(root / ".vault-meta" / "harness")
+    except Exception:
+        pass
+
+
 def surface_stop_blockers(output: str, returncode: int) -> None:
     """A blocked turn-end must reach the operator; silence reads as success."""
     lines = [line.strip() for line in output.splitlines() if line.strip()]
@@ -196,6 +207,7 @@ def main() -> int:
     elif route == "session-start":
         clear_stale(telemetry_root, data)
         if not is_task and root is not None:
+            refresh_harness_status(root)
             session_context(root, data, raw)
     elif route == "post-compact":
         # Codex ignores plain PostCompact stdout. SessionStart(source=compact)

@@ -223,6 +223,7 @@ def _stage_spec(request: ResearchOperationRequest, stage: str) -> OperationSpec:
         operation_id=operation_id,
         idempotency_key=hashlib.sha256(identity).hexdigest(),
         kind=f"research-{stage}",
+        parent_operation_id=base.operation_id,
     )
 
 

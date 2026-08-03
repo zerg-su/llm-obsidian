@@ -25,6 +25,16 @@ close. Runtime drivers pin model, effort, permission profile, cwd, and callback
 transport. Unknown prompts, ownership, callbacks, or resource state become
 `attention-required`; uncertain effects reconcile before any retry.
 
+The workspace progress bar is derived from this ledger but has no lifecycle
+authority. One bounded exact cmux tree snapshot scopes current top-level
+controllers to the coordinator origin workspace and verifies owned surfaces.
+A terminal controller closes its whole program even if a derived child is
+stale. With no proven current program the publisher clears progress; when the
+tree probe is unknown it leaves the existing UI untouched. Coordinator
+SessionStart refreshes this projection silently, while task-worktree hooks do
+not receive coordinator status authority. The label contains counts only:
+`completed/total · active▶`, plus waiting `⌛` and attention `!` when nonzero.
+
 ## Review and reap
 
 Simple review uses one holistic session. Deep review keeps independent spec and

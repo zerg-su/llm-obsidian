@@ -189,6 +189,21 @@ with tempfile.TemporaryDirectory(prefix="release-acceptance-test.") as raw:
         alternate_cli.returncode == 3 and "same checkout" in alternate_cli.stderr,
     )
     check("legacy public skills are absent", not (module.LEGACY_SKILLS & {p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")}))
+    pipeline_request = root / ".task-pipeline-step-request.json"
+    pipeline_callback = root / ".task-pipeline-step-callback.json"
+    pipeline_output = root / ".task-pipeline/outputs/pass-0/reproduce.json"
+    pipeline_output.parent.mkdir(parents=True)
+    pipeline_request.write_text("{}\n", encoding="utf-8")
+    pipeline_callback.write_text("{}\n", encoding="utf-8")
+    pipeline_output.write_text("{}\n", encoding="utf-8")
+    module.contract(root)
+    check("owned task pipeline transport is non-behavioral runtime state", True)
+    pipeline_request.unlink()
+    pipeline_callback.unlink()
+    pipeline_output.unlink()
+    pipeline_output.parent.rmdir()
+    pipeline_output.parent.parent.rmdir()
+    pipeline_output.parent.parent.parent.rmdir()
     task_origin = root / ".task-origin-session"
     task_origin.write_text("runtime-only coordinator identity\n", encoding="utf-8")
     module.contract(root)

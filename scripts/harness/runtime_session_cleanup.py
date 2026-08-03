@@ -122,7 +122,7 @@ class RuntimeSessionCleanupMixin:
 
         supervisor.effect("request-exit", exit_provider)
         current = supervisor.transition("exiting")
-        self._notify()
+        self._notify(current.spec.owner_id)
         return self._result(
             current,
             "exit-requested",
@@ -296,7 +296,7 @@ class RuntimeSessionCleanupMixin:
             )
         supervisor.bind_resources(OwnedResources())
         current = supervisor.transition("complete")
-        self._notify()
+        self._notify(current.spec.owner_id)
         return self._result(
             current,
             "cleaned",

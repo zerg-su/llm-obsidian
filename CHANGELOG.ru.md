@@ -16,13 +16,29 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
-## [Не выпущено]
+## [2.6.2] — 2026-08-03
 
 ### Исправлено
 
-- При добавлении Active Threads сверх лимита в восемь записей теперь
-  вытесняются самые старые записи hot-кэша; закрывать несвязанную работу больше
-  не требуется.
+- cmux workspace progress теперь показывает только exact live программы
+  dispatch/review/research из coordinator origin workspace и сразу очищается в
+  idle. Terminal controller подавляет stale descendants, а отсутствующий exact
+  surface больше не выглядит активной работой.
+- Каждый publish использует один bounded live-tree snapshot. Неизвестный probe
+  сохраняет текущий UI и не меняет lifecycle; Claude и Codex используют одну
+  content-free строку и одинаковый cleanup.
+- Coordinator SessionStart обновляет stale progress, не передавая task
+  worktree полномочия coordinator status.
+- Сохранён pre-integrated turn-end save-and-close fix; ordinary provider launch
+  закрепляет trusted env-shebang interpreter и exact executor product root.
+- Сохранён bounded hot-thread cache eviction: заполненный Active Threads cache
+  вытесняет самую старую запись вместо отказа добавить новый актуальный thread.
+
+### Изменено
+
+- Единственный исторический план v2.1.1 перенесён из `docs/plans` в
+  канонический `wiki/plans` с executed provenance, DragonScale address,
+  сохранённым body и ссылкой на validated final result.
 
 ## [2.6.1] — 2026-08-03
 

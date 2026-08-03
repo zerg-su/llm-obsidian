@@ -89,11 +89,36 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 2. **Спланировать.** Решения становятся сохранённым планом с provenance и стабильным DragonScale-адресом.
 3. **Dispatch.** Restartable harness фиксирует project/task/session ID, точный model route, hash утверждённого плана, permission domain, worktree и cmux surface вызывающего координатора. Окно открывается справа от правильной сессии, а не рядом со случайно выбранной позже вкладкой.
 4. **Выполнить.** Claude или Codex работает в отдельном Git worktree. Ограниченную работу той же моделью по умолчанию берёт внутренний агент; явный запрос отдельного окна создаёт долговременную видимую lane.
-5. **Review.** Simple review использует одну read-only holistic lane. Deep review сохраняет независимые spec и standards/correctness/architecture/security lanes. По умолчанию остаёмся на той же модели; cross-model route выбирается явно. Verify возобновляет точную lane и surface.
+5. **Review.** Simple review использует одну выбранную read-only holistic lane. Default Deep запускает независимые holistic lanes Anthropic и OpenAI; каждая проверяет и intent/outcome, и engineering quality. Явный single-model Deep вместо этого разделяет одну модель на intent и engineering lanes. Full review запускается только явно и использует четыре provider-by-responsibility lanes. Verify возобновляет точную lane и surface.
 6. **Reap.** Проверяются typed summary, approved review archive, hash плана, result path и session provenance. Одна vault-транзакция пишет результат и закрывает plan.
 7. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Supervisor закрывает точную surface после выхода процесса и никогда не угадывает соседнюю вкладку.
 
 Успешный review заканчивает **раунд**, а не всю задачу. Task остаётся возобновляемой до final reap. Архивная сессия никогда автоматически не привязывается к другому task ID.
+
+### Частые сценарии
+
+Обычный интерфейс — скилл, а не низкоуровневая команда runner. В Claude
+выберите скилл плагина или используйте фразу из таблицы. В Codex используйте
+явное имя `$llm-obsidian:<skill>`.
+
+| Цель | Что попросить | Скилл / результат |
+|---|---|---|
+| Уточнить идею | «Grill me перед кодом, задавай по одному существенному вопросу». | `clarify` фиксирует outcome, scope, evidence и stop conditions. |
+| Сохранить договорённость | «Сохрани этот утверждённый implementation plan». | `save-plan` пишет канонический план; `implementation-plan` раскладывает multi-file работу на TDD slices и ownership. |
+| Проверить план | «Проведи intent review плана до dispatch». | `review` на intent boundary проверяет соответствие цели до разбора реализации. |
+| Запустить обычную разработку | «Dispatch утверждённого плана через `engineering/change`». | `dispatch` проверяет repo, plan, route, worktree, permissions, review preset и открывает видимую cmux-сессию. |
+| Открыть или продолжить видимую сессию | «Открой задачу в отдельной видимой сессии» или «продолжи существующую task session». | `dispatch` по запросу создаёт owned cmux lane; продолжение использует её точный сохранённый checkpoint, а не открывает постороннее окно. |
+| Исправить воспроизводимый дефект | «Dispatch через `engineering/fix`». | Bounded loop выполняет reproduce → root cause → regression → minimal fix и останавливается на архитектурной или бюджетной границе. |
+| Собрать особый pipeline | «Built-in не подходит; предложи минимальный bounded custom pipeline». | Модель пишет typed DSL только после доказанного semantic gap; harness проверяет шаги, loops, hashes и budgets до approval. |
+| Проверить реализацию | «Запусти Deep review», «используй только Opus/Sol» или явно «Full review». | Simple — один выбранный holistic reviewer. Default Deep — два независимых provider holistic review; single-model Deep — отдельные intent и engineering review. Full — только явно выбранная сетка из четырёх provider/responsibility lanes. |
+| Завершить или уйти | «Reap утверждённую задачу» или «сохрани и закрой эту сессию». | `reap` архивирует результат и закрывает plan; `close` сохраняет и завершает только текущий agent process, не угадывая соседнюю cmux surface. |
+
+Pipeline выбирается и замораживается во время clarification.
+`lifecycle/default` покрывает простой lifecycle, `engineering/change` — обычную
+TDD-разработку, `engineering/fix` — цикл воспроизводимого дефекта. Custom DSL —
+escape hatch для согласованного semantic gap, а не новый default. cmux показывает
+executor/reviewer sessions, а harness владеет их exact IDs, callbacks, bounded
+retries, progress и cleanup.
 
 ## Где код экономит токены без потери качества
 
@@ -115,10 +140,16 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 
 ## Единое ревью
 
-`review` запускает одну same-model holistic session. `review --deep` сохраняет
-две независимые оси. `--cross-model` явно выбирает другой runtime;
-зарегистрированный model alias может переопределить профиль. Resolved route
-всегда фиксируется, а unknown alias или provider mismatch останавливает запуск.
+`review` запускает одного выбранного holistic reviewer. Default
+`review --deep` открывает независимых Anthropic и OpenAI holistic reviewers;
+каждый проверяет полный outcome и engineering denominator. Явный single-model
+Deep использует отдельные intent и engineering sessions на выбранной модели.
+Только явно запрошенный `--full` открывает четыре provider/responsibility lanes:
+`anthropic-intent`, `anthropic-engineering`, `openai-intent` и
+`openai-engineering`; heuristics и risk policy никогда не включают его сами.
+Model alias может переопределить разрешённый route. Resolved route фиксируется,
+а недоступного provider можно явно исключить single-model режимом, не ломая
+pipeline.
 
 Review operation хранит:
 
@@ -370,6 +401,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| Truthful cmux workspace progress и lifecycle fixes 2.6.2 | [Release notes 2.6.2](docs/releases/v2.6.2.md) |
 | Независимая review topology и изоляция lane 2.6.1 | [Release notes 2.6.1](docs/releases/v2.6.1.md) |
 | Outcome-preserving contracts и skill intelligence 2.6.0 | [Release notes 2.6.0](docs/releases/v2.6.0.md) |
 | Typed fix loops, install, upgrade и rollback 2.4.1 | [Release notes 2.4.1](docs/releases/v2.4.1.md) |
