@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -362,3 +363,11 @@ class RuntimeSessionResult:
     @property
     def run_id(self) -> str:
         return self.record.run_id
+
+
+def continuation_effect_id(prompt: str) -> str:
+    """Return the write-ahead identity for one exact continuation prompt."""
+
+    if not isinstance(prompt, str) or not prompt:
+        raise RuntimeSessionError("continuation prompt must be non-empty")
+    return f"continue-{hashlib.sha256(prompt.encode()).hexdigest()[:32]}"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from dataclasses import replace
@@ -26,6 +25,7 @@ from .runtime_session_contracts import (
     RuntimeSessionResult,
     SurfacePrepared,
     _relative,
+    continuation_effect_id,
 )
 from .store import StoreError
 from .supervisor import OperationSupervisor
@@ -388,7 +388,7 @@ class RuntimeSessionLaunchMixin:
         cwd = Path(str(metadata.get("cwd") or "")).resolve()
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
         prompt = self._read_prompt(prompt_path)
-        effect_id = f"continue-{hashlib.sha256(prompt.encode()).hexdigest()[:32]}"
+        effect_id = continuation_effect_id(prompt)
         supervisor = OperationSupervisor(self.store, owner_id, operation_id)
         current = supervisor.read()
         if not (

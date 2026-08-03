@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
+from harness.runtime_session_contracts import continuation_effect_id
 from harness.workflows.review import ReviewContext, ReviewRound
 from harness.workflows.review_gate import (
     ReviewGateController,
@@ -19,6 +20,25 @@ from task_review_delta_packet import (
 from task_review_resolution_bundle import _resolution_bundle
 from task_review_shared import ResolutionBundle, TaskReviewError, _git
 from task_review_transport import _receipt, _write_round_meta
+
+
+def _prompt_effect_id(runtime_root: Path, pointer: str) -> str:
+    """Bind a continuation receipt to the exact materialized prompt bytes."""
+
+    prompt_path = (runtime_root / pointer).resolve()
+    if (
+        runtime_root.resolve() not in prompt_path.parents
+        or not prompt_path.is_file()
+        or prompt_path.is_symlink()
+    ):
+        raise TaskReviewError("review verification prompt is unavailable")
+    try:
+        prompt = prompt_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise TaskReviewError(
+            "review verification prompt is unavailable"
+        ) from exc
+    return continuation_effect_id(prompt)
 
 
 def _resolution_packet_ready(
@@ -175,6 +195,19 @@ def _continue_resolution(
             context_manifest=context_manifest,
             run=gate.rehydrate(),
         )
+    for lane in run.execution.lanes:
+        if (
+            lane.axis in awaiting
+            or lane.verification_iteration < 1
+            or lane.axis not in bundle.by_axis
+            or lane.axis not in run.rounds
+        ):
+            continue
+        gate.backfill_succeeded_continuation_receipt(
+            lane,
+            run.rounds[lane.axis],
+            bundle.by_axis[lane.axis],
+        )
     decision = None
     for lane in run.execution.lanes:
         if lane.axis not in awaiting:
@@ -225,6 +258,9 @@ def _continue_resolution(
                 _callback_path(runtime_root, lane.axis)
                 .relative_to(runtime_root)
                 .as_posix()
+            ),
+            continuation_effect_id=_prompt_effect_id(
+                runtime_root, pointer
             ),
             prepare_round=prepare_round,
         )

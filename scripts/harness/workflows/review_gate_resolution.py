@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Callable
 
 from ..contracts import AttentionReason
@@ -11,6 +12,7 @@ from .review import (
     ReviewLaneSession,
     ReviewResult,
     ReviewRound,
+    prepare_review_round,
     review_round_envelope,
     verify_review_lane,
 )
@@ -152,6 +154,7 @@ class ReviewGateResolutionMixin:
         review_identity_sha256: str,
         verification_prompt_pointer: str,
         callback_pointer: str,
+        continuation_effect_id: str = "",
         prepare_round: (
             Callable[[ReviewLaneSession, ReviewRound], None] | None
         ) = None,
@@ -262,31 +265,76 @@ class ReviewGateResolutionMixin:
             raise ValueError(
                 "review resolution evidence does not cover the exact material findings"
             )
-        if not self._rearm_accepted_resolution_parent(lane, boundary):
-            self._replace(status="attention-required")
-            return ReviewGateDecision("attention-required", lane)
         resolution_pointer = self._persist_resolution(
             run.execution.request.policy.operation_id,
             resolution,
             verification_iteration=lane.verification_iteration,
         )
         captured: list[ReviewRound] = []
+        reconciled = None
+        if continuation_effect_id:
+            next_lane = replace(
+                lane,
+                verification_iteration=lane.verification_iteration + 1,
+            )
+            existing_round = prepare_review_round(
+                self.round_store, next_lane
+            )
+
+        if not self._rearm_accepted_resolution_parent(lane, boundary):
+            self._replace(status="attention-required")
+            return ReviewGateDecision("attention-required", lane)
+
+        if continuation_effect_id:
+            reconciled = self._reconcile_continuation_receipt(
+                lane,
+                existing_round,
+                resolution,
+                continuation_effect_id,
+            )
 
         def prepared(
             next_lane: ReviewLaneSession, next_round: ReviewRound
         ) -> None:
             captured.append(next_round)
+            if continuation_effect_id:
+                self._resource_free_unpublished_child(lane, next_round)
+                self._persist_continuation_receipt(
+                    lane,
+                    next_round,
+                    resolution,
+                    continuation_effect_id,
+                    "prepared",
+                )
             if prepare_round is not None:
                 prepare_round(next_lane, next_round)
 
-        continued = verify_review_lane(
-            self.runtime,
-            lane,
-            prompt_pointer=verification_prompt_pointer,
-            callback_pointer=callback_pointer,
-            round_store=self.round_store,
-            prepare_round=prepared,
-        )
+        if reconciled is None:
+            continued = verify_review_lane(
+                self.runtime,
+                lane,
+                prompt_pointer=verification_prompt_pointer,
+                callback_pointer=callback_pointer,
+                round_store=self.round_store,
+                prepare_round=prepared,
+            )
+            if continuation_effect_id:
+                if not captured or not self._effect_succeeded(
+                    lane, continuation_effect_id
+                ):
+                    raise ValueError(
+                        "review continuation effect has no durable success receipt"
+                    )
+                self._persist_continuation_receipt(
+                    lane,
+                    captured[0],
+                    resolution,
+                    continuation_effect_id,
+                    "succeeded",
+                )
+        else:
+            continued = reconciled
+            captured.append(existing_round)
         if continued.state == "attention-required":
             self._replace(status="attention-required")
             return ReviewGateDecision("attention-required", continued)

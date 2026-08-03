@@ -223,6 +223,7 @@ class ReviewGateStateMixin:
             "round_results": {},
             "final_results": {},
             "resolution_evidence": {},
+            "continuation_effects": {},
             "evidence": {},
         }
         with self._locked():

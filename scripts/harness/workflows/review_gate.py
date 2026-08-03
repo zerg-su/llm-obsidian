@@ -63,6 +63,7 @@ from .review_gate_contracts import (
     review_context_sha256,
 )
 from .review_gate_decisions import ReviewGateDecisionMixin
+from .review_gate_continuation import ReviewGateContinuationMixin
 from .review_gate_recovery import ReviewGateRecoveryMixin
 from .review_gate_state import ReviewGateStateMixin
 
@@ -81,6 +82,7 @@ EFFORTS = {
 
 class ReviewGateController(
     ReviewGateRecoveryMixin,
+    ReviewGateContinuationMixin,
     ReviewGateDecisionMixin,
     ReviewGateStateMixin,
 ):
@@ -212,6 +214,7 @@ class ReviewGateController(
             "round_results": {},
             "final_results": {},
             "resolution_evidence": {},
+            "continuation_effects": {},
             "evidence": {},
         }
         path = root / "review-gate.json"

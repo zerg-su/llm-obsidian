@@ -40,6 +40,7 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
+from harness.runtime_session_contracts import continuation_effect_id
 from harness.review_program import ReviewBoundaryInput
 from harness.review_program_authority import trusted_review_receipt
 from harness.custom_pipelines import (
@@ -682,6 +683,37 @@ class FakeRuntime:
         return self.store.read(owner_id, operation_id)
 
 
+class EffectRecordingRuntime(FakeRuntime):
+    """Mirror the real runtime's durable continuation effect receipt."""
+
+    def continue_session(
+        self,
+        owner_id: str,
+        operation_id: str,
+        checkpoint: str,
+        prompt_pointer: str,
+    ) -> FakeSessionResult:
+        request = next(
+            item
+            for item in self.started
+            if item.spec.operation_id == operation_id
+        )
+        prompt = (request.cwd / prompt_pointer).read_text(encoding="utf-8")
+        current = self.store.read(owner_id, operation_id)
+        self.store.save(
+            replace(
+                current,
+                effect_id=continuation_effect_id(prompt),
+                effect_outcome=EffectOutcome.SUCCEEDED,
+                revision=current.revision + 1,
+            ),
+            expected_revision=current.revision,
+        )
+        return super().continue_session(
+            owner_id, operation_id, checkpoint, prompt_pointer
+        )
+
+
 class CheckpointRecoveryRuntime(FakeRuntime):
     def __init__(self, store: OperationStore) -> None:
         super().__init__(store)
@@ -728,6 +760,54 @@ class CheckpointRecoveryRuntime(FakeRuntime):
             owner_id, operation_id, checkpoint, prompt_pointer
         )
 
+
+class PartialFullRecoveryRuntime(FakeRuntime):
+    def __init__(self, store: OperationStore) -> None:
+        super().__init__(store)
+        self.effect_ids: dict[str, str] = {}
+        self.provider_effects: dict[str, int] = {}
+        self.timeout_once: set[str] = set()
+
+    def continue_session(
+        self,
+        owner_id: str,
+        operation_id: str,
+        checkpoint: str,
+        prompt_pointer: str,
+    ) -> FakeSessionResult:
+        if operation_id in self.timeout_once:
+            self.timeout_once.remove(operation_id)
+            current = self.store.read(owner_id, operation_id)
+            self.store.save(
+                replace(
+                    current,
+                    deadline_at=1.0,
+                    revision=current.revision + 1,
+                ),
+                expected_revision=current.revision,
+            )
+            self.store.transition(
+                owner_id,
+                operation_id,
+                "attention-required",
+                reason=AttentionReason.CALLBACK_TIMEOUT,
+            )
+            raise ValueError("injected callback timeout before prompt effect")
+        self.provider_effects[operation_id] = (
+            self.provider_effects.get(operation_id, 0) + 1
+        )
+        current = self.store.read(owner_id, operation_id)
+        updated = replace(
+            current,
+            effect_id=self.effect_ids[operation_id],
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=current.revision + 1,
+        )
+        self.store.save(updated, expected_revision=current.revision)
+        return super().continue_session(
+            owner_id, operation_id, checkpoint, prompt_pointer
+        )
+
 def request_for(
     operation_id: str,
     *,
@@ -741,7 +821,9 @@ def request_for(
         "reviewer-callback",
         "a" * 64,
     )
-    preset = ReviewPreset.from_flags(deep=depth == "deep")
+    preset = ReviewPreset.from_flags(
+        deep=depth == "deep", full=depth == "full"
+    )
     max_verify_iterations = (
         0
         if context.purpose == "release"
@@ -753,7 +835,9 @@ def request_for(
         operation_id,
         purpose=context.purpose,
         max_verify_iterations=max_verify_iterations,
-        selected_provider="" if depth == "deep" else "anthropic",
+        selected_provider=(
+            "" if depth in {"deep", "full"} else "anthropic"
+        ),
     )
     axes = (
         {
@@ -767,6 +851,25 @@ def request_for(
             ),
         }
         if depth == "deep"
+        else {
+            "anthropic-intent": primary,
+            "anthropic-engineering": primary,
+            "openai-intent": RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "xhigh",
+                "reviewer-callback",
+                "b" * 64,
+            ),
+            "openai-engineering": RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "xhigh",
+                "reviewer-callback",
+                "b" * 64,
+            ),
+        }
+        if depth == "full"
         else None
     )
     return ReviewOperationRequest(
@@ -1173,6 +1276,155 @@ with tempfile.TemporaryDirectory(prefix="review-checkpoint-replay.") as raw:
         and runtime.provider_prompt_effects == 1
         and len(runtime.started) == 1
         and len(runtime.hydrations) == 1,
+    )
+
+with tempfile.TemporaryDirectory(prefix="review-full-partial-progress.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = PartialFullRecoveryRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    operation_id = "review-full-partial-progress"
+    run = begin(
+        controller,
+        request_for(operation_id, depth="full", context=context),
+        scratch,
+    )
+    lanes = run.execution.lanes
+    for index, lane in enumerate(lanes):
+        controller.defer_round_for_resolution(
+            run,
+            lane,
+            run.rounds[lane.axis],
+            ReviewResult(
+                lane.axis,
+                "changes-requested",
+                (
+                    ReviewFinding(
+                        f"F-full-partial-{index}",
+                        lane.axis,
+                        "important",
+                        "retain exact partial progress",
+                        "each continuation effect is independently durable",
+                    ),
+                ),
+            ),
+        )
+    resolved_context = replace(context, head_sha="7" * 40)
+    review_identity = resolution_transport_identity(controller)
+    resolutions = {
+        lane.axis: resolution_evidence(
+            operation_id,
+            lane.axis,
+            context.head_sha,
+            resolved_context.head_sha,
+            f"F-full-partial-{index}",
+        )
+        for index, lane in enumerate(lanes)
+    }
+    for index, lane in enumerate(lanes):
+        runtime.effect_ids[lane.operation_id] = (
+            "continue-" + str(index + 1) * 32
+        )
+    first = controller.continue_after_resolution(
+        run,
+        lanes[0],
+        context=resolved_context,
+        resolution=resolutions[lanes[0].axis],
+        review_identity_sha256=review_identity,
+        verification_prompt_pointer="prompts/verify-0.md",
+        callback_pointer="callbacks/full/0.json",
+        continuation_effect_id=runtime.effect_ids[lanes[0].operation_id],
+    )
+    post_first = controller.rehydrate()
+    first_lane = next(
+        lane for lane in post_first.execution.lanes
+        if lane.axis == lanes[0].axis
+    )
+    controller._replace(continuation_effects={})
+    for _ in range(2):
+        controller.backfill_succeeded_continuation_receipt(
+            first_lane,
+            post_first.rounds[first_lane.axis],
+            resolutions[first_lane.axis],
+            runtime.effect_ids[first_lane.operation_id],
+        )
+    second_parent = store.read(lanes[1].owner_id, lanes[1].operation_id)
+    store.save(
+        replace(
+            second_parent,
+            deadline_at=1.0,
+            revision=second_parent.revision + 1,
+        ),
+        expected_revision=second_parent.revision,
+    )
+    store.transition(
+        lanes[1].owner_id,
+        lanes[1].operation_id,
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    runtime.timeout_once.add(lanes[1].operation_id)
+    try:
+        controller.continue_after_resolution(
+            controller.rehydrate(),
+            controller.rehydrate().execution.lanes[1],
+            context=resolved_context,
+            resolution=resolutions[lanes[1].axis],
+            review_identity_sha256=review_identity,
+            verification_prompt_pointer="prompts/verify-1.md",
+            callback_pointer="callbacks/full/1.json",
+            continuation_effect_id=(
+                runtime.effect_ids[lanes[1].operation_id]
+            ),
+        )
+    except ValueError as exc:
+        check(
+            "full partial progress stops lane N before its prompt effect",
+            "before prompt effect" in str(exc),
+        )
+    else:
+        check("full partial progress stops lane N before its prompt effect", False)
+    prepared_state = controller.read()
+    child_for_second = runtime.registered[-1][2]
+    child_before_replay = store.read(lanes[1].owner_id, child_for_second)
+    for index in range(1, len(lanes)):
+        replay = controller.rehydrate()
+        replay_lane = next(
+            lane for lane in replay.execution.lanes
+            if lane.axis == lanes[index].axis
+        )
+        controller.continue_after_resolution(
+            replay,
+            replay_lane,
+            context=resolved_context,
+            resolution=resolutions[replay_lane.axis],
+            review_identity_sha256=review_identity,
+            verification_prompt_pointer=f"prompts/verify-{index}.md",
+            callback_pointer=f"callbacks/full/{index}.json",
+            continuation_effect_id=runtime.effect_ids[
+                replay_lane.operation_id
+            ],
+        )
+    final_state = controller.read()
+    receipts = final_state["continuation_effects"]
+    check(
+        "multi-lane replay resumes from N without replaying prior effects",
+        first.action == "verify"
+        and child_before_replay.resources == OwnedResources()
+        and prepared_state["continuation_effects"][lanes[1].axis + ":0"][
+            "state"
+        ]
+        == "prepared"
+        and all(receipt["state"] == "succeeded" for receipt in receipts.values())
+        and runtime.provider_effects
+        == {lane.operation_id: 1 for lane in lanes}
+        and len(runtime.started) == 4
+        and sum(
+            item[2] == child_for_second for item in runtime.registered
+        )
+        == 2,
     )
 
 with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as raw:
@@ -2277,7 +2529,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         "awaiting-callback",
     ):
         task_store.transition(task_id, task_id, dispatch_state)
-    task_runtime = FakeRuntime(task_store)
+    task_runtime = EffectRecordingRuntime(task_store)
     started = task_review_runner.run_task_review(
         product, runtime_manager=task_runtime
     )
@@ -3649,7 +3901,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         encoding="utf-8",
     )
 
-    class FailOnceCurrentRuntime(FakeRuntime):
+    class FailOnceCurrentRuntime(EffectRecordingRuntime):
         def __init__(self, store: OperationStore) -> None:
             super().__init__(store)
             self.fail_once = True
