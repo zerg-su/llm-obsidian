@@ -161,8 +161,11 @@ reviewers keep `dontAsk` but may read and run arbitrary local checks inside the
 native Claude OS sandbox. The product worktree and Git metadata stay explicitly
 read-only; writes are limited to operation-owned review scratch/callback roots
 and one private test temp directory. Unsandboxed fallback, inherited user or
-project settings, external network domains, Unix sockets, MCPs, hooks, and
-credential reads are disabled fail-closed. Codex keeps its private scratch
+project settings, external network domains, Unix sockets, MCPs, hooks,
+arbitrary status-line commands, and credential reads are disabled fail-closed.
+A pinned repository-owned Claude `statusLine` shows only model, effort,
+context usage, and native 5H/7D limit percentages inside the reviewer
+workspace; it has no lifecycle or cmux authority. Codex keeps its private scratch
 directory, exact loopback access/binding, disabled web search, and no product
 writable root. `tests/test_task_lifecycle.py` and
 the harness adapter and task lifecycle suites reject command, environment,

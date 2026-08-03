@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,6 +119,19 @@ def review_test_directory(callback_pointer: Path) -> Path:
     return callback_pointer.parent / ".review-test-tmp"
 
 
+def reviewer_statusline_settings() -> dict[str, object]:
+    """Pin the code-owned, content-free Claude reviewer status line."""
+
+    renderer = Path(__file__).with_name("claude_reviewer_statusline.py").resolve()
+    python = Path(sys.executable).resolve()
+    return {
+        "type": "command",
+        "command": shlex.join((str(python), str(renderer))),
+        "padding": 0,
+        "refreshInterval": 10,
+    }
+
+
 def reviewer_sandbox_settings(
     *,
     callback_pointer: Path,
@@ -150,6 +165,7 @@ def reviewer_sandbox_settings(
         "disableArtifact": True,
         "disableClaudeAiConnectors": True,
         "includeGitInstructions": False,
+        "statusLine": reviewer_statusline_settings(),
         "permissions": {
             "deny": [
                 "Agent",

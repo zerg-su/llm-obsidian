@@ -34,6 +34,9 @@
   закрепляет trusted env-shebang interpreter и exact executor product root.
 - Сохранён bounded hot-thread cache eviction: заполненный Active Threads cache
   вытесняет самую старую запись вместо отказа добавить новый актуальный thread.
+- Возвращена reviewer-local видимость Claude usage: code-owned стандартная
+  status line показывает model, effort, context, 5H и 7D limits без наследования
+  пользовательских hooks, MCP, permissions или произвольных команд.
 
 ### Изменено
 

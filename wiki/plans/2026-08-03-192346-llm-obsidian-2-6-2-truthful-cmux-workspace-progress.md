@@ -53,6 +53,10 @@ tags:
       "observable": "Одинаковая content-free строка и cleanup semantics работают для Claude и Codex; cmux commands используют exact workspace target и documented set-progress/clear-progress interface."
     },
     {
+      "evidence_id": "anthropic-reviewer-usage-visible",
+      "observable": "Каждый sandboxed Anthropic reviewer через стандартный Claude statusLine показывает model, effort, context usage, 5H и 7D limits; renderer code-owned и content-free, user settings/hooks/MCP остаются отключёнными, а подмена statusLine отклоняется fail-closed."
+    },
+    {
       "evidence_id": "release-ready",
       "observable": "Focused tests, полный make test, acceptance-check, vault/adapters/snapshot/release gates, bounded active-to-idle live cmux smoke и независимый Deep review зелёные на одном exact release HEAD."
     },
@@ -80,7 +84,7 @@ tags:
   "non_goals": [
     "Не создавать project/task backlog, DAG или task-program scheduler из 2.7.",
     "Не удалять, мигрировать, исправлять или переинтерпретировать исторические OperationStore records.",
-    "Не добавлять rate-limit metadata, новый sidebar widget или отдельный UI daemon.",
+    "Не добавлять rate-limit metadata в cmux workspace progress, новый sidebar widget или отдельный UI daemon; reviewer-local standard Claude statusLine не является cmux telemetry.",
     "Не менять pipeline DSL, review topology, provider routing, callback, cleanup или lifecycle authority.",
     "Не считать внутренние harness steps пользовательскими project tasks и не обещать task-level progress до 2.7.",
     "Не расширять cmux permissions и не использовать focused workspace/title/index guesses вместо exact identity.",
@@ -105,6 +109,7 @@ tags:
 6. Удалить terminal-owner fallback, который сохраняет 100% bar после окончания. Последняя terminal transition обязана очистить progress.
 7. На coordinator SessionStart/resume/clear/compact выполнить silent best-effort refresh. Task worktree SessionStart не получает coordinator status authority.
 8. Сохранить content-free compact label и документировать его как harness-step status. UI не должен читать prompts, paths, model output или user content.
+9. Для sandboxed Anthropic reviewer явно скомпилировать стандартный Claude `statusLine` с code-owned renderer model/effort/context/5H/7D. Не наследовать user setting sources, hooks, MCP или произвольную statusLine command.
 
 ## TDD slices
 
@@ -140,13 +145,13 @@ tags:
 
 ### Slice 4 — operator contract and 2.6.2 release
 
-- `files/responsibility`: `docs/runtime-capabilities.md` and/or `docs/unattended-pipeline-operations.md` — exact label/idle semantics; `CHANGELOG.md`, `CHANGELOG.ru.md`, `docs/releases/v2.6.2.md`, `README.md`, `README.ru.md`, README release indexes and plugin manifests — patch release identity and commands.
+- `files/responsibility`: `docs/runtime-capabilities.md` and/or `docs/unattended-pipeline-operations.md` — exact label/idle semantics; `scripts/harness/adapters/claude.py` and its code-owned reviewer statusLine renderer — isolated model/effort/context/limit visibility; `CHANGELOG.md`, `CHANGELOG.ru.md`, `docs/releases/v2.6.2.md`, `README.md`, `README.ru.md`, README release indexes and plugin manifests — patch release identity and commands.
 - `consumes`: green implementation, exact documented cmux 0.64.20 command contract и pre-integrated turn-end save-and-close fix `80fcab2` и ordinary-provider interpreter repair `0630477`.
 - `produces`: user-readable icon semantics, upgrade/rollback notes, version 2.6.2 metadata, release notes for both bounded fixes, exact release gate instructions and a concise pipeline/skill/session quick-start in both READMEs.
 - `failing evidence`: adapter/version checks identify 2.6.1 and docs do not promise idle clearing/current-program scoping.
-- `minimal green`: update only release-owned metadata/docs; document clarify/grill me, saved plans, intent plan review, built-in/custom pipeline dispatch, Simple/Deep/Full review, single-model fallback, reap and close symmetrically in both READMEs; regenerate/check the Codex adapter through repository tooling.
+- `minimal green`: update only release-owned metadata/docs; document clarify/grill me, saved plans, intent plan review, built-in/custom pipeline dispatch, Simple/Deep/Full review, single-model fallback, reap and close symmetrically in both READMEs; compile the safe Anthropic reviewer statusLine without enabling user settings; regenerate/check the Codex adapter through repository tooling.
 - `refactor seam`: no roadmap or 2.7 task semantics in 2.6.2 docs.
-- `focused verification`: `python3 tests/test_queue_session_exit.py`, `python3 tests/test_runtime_hooks.py`, `python3 tests/harness/test_runtime_sessions.py`, `python3 tests/harness/test_runtime_research.py`, adapter checks, instruction/docs lint and `git diff --check`; covers `provider-parity`, `ordinary-provider-launch`, `turn-end-close-preserved`, `release-ready`.
+- `focused verification`: `python3 tests/test_queue_session_exit.py`, `python3 tests/test_runtime_hooks.py`, `python3 tests/harness/test_runtime_sessions.py`, `python3 tests/harness/test_runtime_research.py`, adapter checks, instruction/docs lint and `git diff --check`; covers `provider-parity`, `anthropic-reviewer-usage-visible`, `ordinary-provider-launch`, `turn-end-close-preserved`, `release-ready`.
 
 ## Verification and review
 

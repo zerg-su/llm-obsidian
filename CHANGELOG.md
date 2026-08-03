@@ -29,6 +29,9 @@ packages were published for them.
   provider launches.
 - Preserved bounded hot-thread cache eviction: a full Active Threads cache now
   evicts its oldest entry instead of rejecting a new current thread.
+- Restored reviewer-local Claude usage visibility with a code-owned standard
+  status line for model, effort, context, 5-hour, and 7-day limits without
+  inheriting user hooks, MCP servers, permissions, or arbitrary commands.
 
 ### Changed
 

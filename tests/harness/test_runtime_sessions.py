@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -2430,6 +2431,48 @@ try:
     )
 except (ValueError, IndexError, json.JSONDecodeError):
     sandbox_settings = {}
+review_statusline = sandbox_settings.get("statusLine", {})
+review_statusline_command = review_statusline.get("command", "")
+review_statusline_argv = (
+    shlex.split(review_statusline_command)
+    if isinstance(review_statusline_command, str)
+    else []
+)
+review_statusline_output = ""
+if (
+    review_statusline.get("type") == "command"
+    and review_statusline.get("padding") == 0
+    and review_statusline.get("refreshInterval") == 10
+    and len(review_statusline_argv) == 2
+    and Path(review_statusline_argv[0]).resolve() == Path(sys.executable).resolve()
+    and Path(review_statusline_argv[1]).resolve()
+    == (ROOT / "scripts/harness/adapters/claude_reviewer_statusline.py").resolve()
+):
+    rendered_statusline = subprocess.run(
+        review_statusline_argv,
+        input=json.dumps(
+            {
+                "model": {"display_name": "Opus 5"},
+                "effort": {"level": "xhigh"},
+                "context_window": {"used_percentage": 25},
+                "rate_limits": {
+                    "five_hour": {"used_percentage": 42},
+                    "seven_day": {"used_percentage": 9},
+                },
+            }
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if rendered_statusline.returncode == 0:
+        review_statusline_output = rendered_statusline.stdout.strip()
+check(
+    "Claude reviewer keeps model, effort, context, and limits visible",
+    review_statusline_output
+    == "Opus 5 · effort xhigh · CTX 25% · 5H 42% · 7D 9%",
+    (review_statusline, review_statusline_output),
+)
 try:
     callback_instruction = claude_callback[
         claude_callback.index("--append-system-prompt") + 1
@@ -2692,6 +2735,12 @@ for label, mutate in (
     (
         "review sandbox rejects subprocess exclusions",
         lambda value: value["sandbox"]["excludedCommands"].append("git *"),
+    ),
+    (
+        "review sandbox rejects a foreign status line",
+        lambda value: value["statusLine"].update(
+            {"command": "python3 /tmp/foreign-statusline.py"}
+        ),
     ),
 ):
     changed_settings = json.loads(claude_callback[settings_position])
