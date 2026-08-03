@@ -1401,6 +1401,60 @@ with tempfile.TemporaryDirectory(
             False,
         )
 
+with tempfile.TemporaryDirectory(
+    prefix="review-partial-full-without-checkpoints."
+) as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = AcceptedRoundWithoutCheckpointRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    run = begin(
+        controller,
+        request_for(
+            "review-partial-full-without-checkpoints",
+            depth="full",
+            context=context,
+        ),
+        scratch,
+    )
+    accepted_lane = run.execution.lanes[2]
+    accepted_round = run.rounds[accepted_lane.axis]
+    result = ReviewResult(accepted_lane.axis, "approve", (), 0)
+    runtime.accept_callback(review_round_envelope(accepted_round, result))
+    accepted_record = store.read(
+        accepted_round.owner_id, accepted_round.operation_id
+    )
+    store.save(
+        replace(
+            accepted_record,
+            state="verifying",
+            revision=accepted_record.revision + 1,
+        ),
+        expected_revision=accepted_record.revision,
+    )
+    state_path = base / "gate" / "review-gate.json"
+    checkpointless = json.loads(state_path.read_text(encoding="utf-8"))
+    for raw_lane in checkpointless["lanes"]:
+        raw_lane["checkpoint"] = ""
+        raw_lane.pop("checkpoint_sha256", None)
+    state_path.write_text(
+        json.dumps(checkpointless, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        recovered = controller.rehydrate()
+    except RuntimeCheckpointEvidenceMissing:
+        recovered = None
+    check(
+        "partial Full callback tolerates live sibling lanes without checkpoints",
+        recovered is not None
+        and len(recovered.execution.lanes) == 4
+        and recovered.rounds[accepted_lane.axis].operation_id
+        == accepted_round.operation_id,
+    )
+
 with tempfile.TemporaryDirectory(prefix="review-full-partial-progress.") as raw:
     base = Path(raw)
     scratch = base / "scratch"

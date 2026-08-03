@@ -39,7 +39,7 @@ from review_contract import (
 )
 
 
-def _accepted_round_without_checkpoint(
+def _round_without_checkpoint(
     round_store: ReviewRoundStore,
     *,
     review: ReviewRequest,
@@ -48,8 +48,9 @@ def _accepted_round_without_checkpoint(
     axis: str,
     owner_id: str,
     unavailable: RuntimeSessionError,
+    allow_pending: bool,
 ) -> ReviewRound:
-    """Trust no missing checkpoint unless its exact child receipt is durable."""
+    """Bind an exact existing child while its checkpoint is unavailable."""
 
     lane = ReviewLaneSession(
         axis=axis,
@@ -94,7 +95,14 @@ def _accepted_round_without_checkpoint(
         )
         is not None
     )
-    if not valid_receipt:
+    valid_pending = (
+        allow_pending
+        and accepted_record.state == "awaiting-callback"
+        and not accepted_record.accepted_callback_id
+        and not accepted_record.accepted_callback_kind
+        and not accepted_record.accepted_callback_sha256
+    )
+    if not valid_receipt and not valid_pending:
         raise unavailable
     return accepted_round
 
@@ -109,13 +117,14 @@ def _rehydrate_checkpoint(
     axis: str,
     owner_id: str,
     runtime_checkpoint: str,
+    allow_pending: bool,
 ) -> tuple[str, str, ReviewRound | None, bool]:
     try:
         recovered = runtime.hydrate_durable_checkpoint(
             owner_id, record.spec.operation_id, record.lane_id
         )
     except RuntimeCheckpointEvidenceMissing as exc:
-        accepted_round = _accepted_round_without_checkpoint(
+        accepted_round = _round_without_checkpoint(
             round_store,
             review=review,
             raw_lane=raw_lane,
@@ -123,6 +132,7 @@ def _rehydrate_checkpoint(
             axis=axis,
             owner_id=owner_id,
             unavailable=exc,
+            allow_pending=allow_pending,
         )
         return "", "", accepted_round, False
     recovered_record = getattr(recovered, "record", None)
@@ -139,6 +149,33 @@ def _rehydrate_checkpoint(
     ):
         raise ValueError("durable review checkpoint identity changed")
     return checkpoint, checkpoint_sha256, None, True
+
+
+def _observed_lane_checkpoint(
+    observed: object,
+    record: OperationRecord,
+    raw_lane: dict[str, object],
+) -> tuple[str, bool]:
+    """Validate one read-only status and classify live pre-checkpoint work."""
+
+    observed_record = getattr(observed, "record", None)
+    if (
+        not isinstance(observed_record, OperationRecord)
+        or observed_record.spec != record.spec
+        or observed_record.lane_id
+        != str(raw_lane.get("lane_id") or "")
+        or observed_record.run_id != str(raw_lane.get("run_id") or "")
+    ):
+        raise ValueError("stored review lane identity changed")
+    checkpoint = str(getattr(observed, "checkpoint", "") or "")
+    live_without_checkpoint = (
+        str(getattr(observed, "action", "") or "")
+        in {"observed", "already-started"}
+        and str(getattr(observed, "process_status", "") or "") == "alive"
+        and str(getattr(observed, "surface_status", "") or "") == "alive"
+        and not checkpoint
+    )
+    return checkpoint, live_without_checkpoint
 
 
 class ReviewGateStateMixin:
@@ -429,8 +466,11 @@ class ReviewGateStateMixin:
             )
             if record.state not in TERMINAL:
                 observed = self.runtime.status(owner_id, operation_id)
-                runtime_checkpoint = str(
-                    getattr(observed, "checkpoint", "") or ""
+                (
+                    runtime_checkpoint,
+                    live_without_checkpoint,
+                ) = _observed_lane_checkpoint(
+                    observed, record, raw_lane
                 )
                 expected_runtime = review_provider_runtime(
                     review_axis_provider(axis)
@@ -462,6 +502,7 @@ class ReviewGateStateMixin:
                         axis=axis,
                         owner_id=owner_id,
                         runtime_checkpoint=runtime_checkpoint,
+                        allow_pending=live_without_checkpoint,
                     )
                     if accepted_round is not None:
                         rounds[axis] = accepted_round
