@@ -629,6 +629,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     events: list[str] = []
+    status_notifications: list[tuple[Path, str]] = []
     store = OperationStore(root / "store")
     cmux = FakeCmux(events)
     process = FakeProcess(events)
@@ -639,6 +640,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         {"claude": FakeDriver()},
         preflight=lambda _route, _callback_dir: CapabilityReport(
             route, True, ("provider:profile-valid",)
+        ),
+        status_notifier=lambda state_root, trigger_owner: (
+            status_notifications.append((state_root, trigger_owner))
         ),
     )
     (cwd / "callbacks" / "result.json").write_text(
@@ -930,6 +934,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == SUPERVISOR_IDENTITY
         and started.callback_pointer == "callbacks/result.json",
         started,
+    )
+    check(
+        "status notifications bind the exact transition owner",
+        bool(status_notifications)
+        and all(
+            state_root == store.root and trigger_owner == "owner-1"
+            for state_root, trigger_owner in status_notifications
+        ),
+        status_notifications,
     )
     checkpoint_root = (
         store.root
