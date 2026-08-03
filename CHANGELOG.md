@@ -26,6 +26,8 @@ packages were published for them.
 - Preserved the pre-integrated turn-end save-and-close repair and pinned the
   trusted env-shebang interpreter and exact executor product root for ordinary
   provider launches.
+- Preserved bounded hot-thread cache eviction: a full Active Threads cache now
+  evicts its oldest entry instead of rejecting a new current thread.
 
 ### Changed
 

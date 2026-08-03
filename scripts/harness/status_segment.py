@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,13 @@ CONTROLLER_KINDS = frozenset(
     }
 )
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
+DERIVED_PROGRAM_SUFFIXES = (
+    re.compile(r"-(?:repro|cause|test|fix)-[0-9]+-[0-9a-f]{12}\Z"),
+    re.compile(r"-custom-[0-9]+-[0-9a-f]{12}\Z"),
+    re.compile(r"-verify-[0-9a-f]{16}\Z"),
+    re.compile(r"-(?:round|fresh)-[0-9a-f]{8}\Z"),
+    re.compile(r"-(?:fetch|synth)-[0-9a-f]{8}\Z"),
+)
 
 
 @dataclass(frozen=True)
@@ -182,8 +190,9 @@ def _runtime_origin(
 def _research_origin(
     store: OperationStore,
     records: list[OperationRecord],
-) -> tuple[str, bool]:
+) -> tuple[str, str, bool]:
     origins: set[str] = set()
+    surfaces: set[str] = set()
     invalid = False
     for record in records:
         if (
@@ -195,15 +204,80 @@ def _research_origin(
         invalid = invalid or broken
         if origin:
             origins.add(origin)
-    if invalid or len(origins) > 1:
-        return "", True
-    return (next(iter(origins)) if origins else ""), False
+        if record.resources.surface_id:
+            surfaces.add(record.resources.surface_id)
+        else:
+            invalid = True
+    if invalid or len(origins) > 1 or len(surfaces) > 1:
+        return "", "", True
+    return (
+        next(iter(origins)) if origins else "",
+        next(iter(surfaces)) if surfaces else "",
+        False,
+    )
+
+
+def _derived_program_prefix(record: OperationRecord) -> str:
+    for pattern in DERIVED_PROGRAM_SUFFIXES:
+        match = pattern.search(record.spec.operation_id)
+        if match is not None:
+            return record.spec.operation_id[: match.start()]
+    return ""
+
+
+def _record_controller(
+    record: OperationRecord,
+    controllers: list[OperationRecord],
+) -> OperationRecord | None:
+    """Bind one record to at most one exact top-level program."""
+
+    if record.spec.kind in CONTROLLER_KINDS:
+        return next(
+            (
+                controller
+                for controller in controllers
+                if controller.spec.operation_id == record.spec.operation_id
+            ),
+            None,
+        )
+
+    prefix = _derived_program_prefix(record)
+    if prefix:
+        matches = [
+            controller
+            for controller in controllers
+            if controller.spec.operation_id.startswith(prefix)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return None
+
+    lane_matches = [
+        controller
+        for controller in controllers
+        if controller.lane_id == record.lane_id
+    ]
+    if len(lane_matches) == 1:
+        return lane_matches[0]
+    if lane_matches:
+        return None
+
+    if record.spec.contract_sha256:
+        contract_matches = [
+            controller
+            for controller in controllers
+            if controller.spec.contract_sha256 == record.spec.contract_sha256
+        ]
+        if len(contract_matches) == 1:
+            return contract_matches[0]
+    return None
 
 
 def _controller_is_current(
     store: OperationStore,
     controller: OperationRecord,
-    owner_records: list[OperationRecord],
+    program_records: list[OperationRecord],
     *,
     workspace_id: str,
     trigger_owner: str,
@@ -212,8 +286,11 @@ def _controller_is_current(
     if controller.state in TERMINAL:
         return False, False
     origin_surface, invalid = _runtime_origin(store, controller)
+    live_surface = controller.resources.surface_id
     if not origin_surface and not invalid and controller.spec.kind == "research":
-        origin_surface, invalid = _research_origin(store, owner_records)
+        origin_surface, live_surface, invalid = _research_origin(
+            store, program_records
+        )
     if invalid:
         return False, True
     if origin_surface:
@@ -226,46 +303,22 @@ def _controller_is_current(
     elif controller.spec.owner_id != trigger_owner:
         return False, False
 
-    surface_id = controller.resources.surface_id
-    if (
-        controller.state in SURFACE_BOUND_STATES
-        and surface_id
-        and not inventory.contains(surface_id)
-    ):
-        return False, False
+    if controller.state in SURFACE_BOUND_STATES:
+        if not live_surface or not inventory.contains(live_surface):
+            return False, False
     return True, False
-
-
-def _belongs_to_controller(
-    record: OperationRecord,
-    controller: OperationRecord,
-) -> bool:
-    if record.spec.kind in CONTROLLER_KINDS:
-        return record.spec.operation_id == controller.spec.operation_id
-    if record.lane_id == controller.lane_id:
-        return True
-    if (
-        controller.spec.contract_sha256
-        and record.spec.contract_sha256 == controller.spec.contract_sha256
-    ):
-        return True
-    return (
-        controller.spec.kind == "research"
-        and record.spec.kind in {"research-fetch", "research-synth"}
-    )
 
 
 def collect(
     state_root: Path | str,
     *,
-    terminal_owner: str | None = None,
     trigger_owner: str | None = None,
     workspace_id: str = "",
     inventory: LiveInventory | None = None,
 ) -> HarnessStatus:
     """Select exact current programs without mutating durable lifecycle state."""
 
-    trigger = trigger_owner or terminal_owner or ""
+    trigger = trigger_owner or ""
     store, records_by_owner, invalid_by_owner = _records(state_root)
     if inventory is None or not workspace_id:
         return HarnessStatus()
@@ -275,14 +328,26 @@ def collect(
     selected_owners: set[str] = set()
     invalid = 0
     for owner, records in records_by_owner.items():
-        controllers: list[OperationRecord] = []
-        for record in records:
-            if record.spec.kind not in CONTROLLER_KINDS:
-                continue
+        all_controllers = [
+            record for record in records if record.spec.kind in CONTROLLER_KINDS
+        ]
+        bindings = {
+            record.spec.operation_id: _record_controller(record, all_controllers)
+            for record in records
+        }
+        controllers: list[tuple[OperationRecord, list[OperationRecord]]] = []
+        for record in all_controllers:
+            program_records = [
+                candidate
+                for candidate in records
+                if bindings[candidate.spec.operation_id] is not None
+                and bindings[candidate.spec.operation_id].spec.operation_id
+                == record.spec.operation_id
+            ]
             current, broken = _controller_is_current(
                 store,
                 record,
-                records,
+                program_records,
                 workspace_id=workspace_id,
                 trigger_owner=trigger,
                 inventory=inventory,
@@ -290,17 +355,14 @@ def collect(
             if broken and owner == trigger:
                 invalid += 1
             if current:
-                controllers.append(record)
+                controllers.append((record, program_records))
         if not controllers:
             continue
         selected_owners.add(owner)
-        for controller in controllers:
-            for record in records:
+        for controller, program_records in controllers:
+            for record in program_records:
                 identity = (owner, record.spec.operation_id)
-                if (
-                    identity not in selected_ids
-                    and _belongs_to_controller(record, controller)
-                ):
+                if identity not in selected_ids:
                     selected_ids.add(identity)
                     selected.append(record)
 
@@ -317,6 +379,8 @@ def collect(
 
 
 def render(status: HarnessStatus) -> str:
+    if not status.total:
+        return f"{status.visible_attention}!" if status.visible_attention else ""
     parts = [f"{status.completed}/{status.total}", "·", f"{status.active}▶"]
     if status.waiting:
         parts.append(f"{status.waiting}⌛")
@@ -328,7 +392,6 @@ def render(status: HarnessStatus) -> str:
 def publish(
     state_root: Path | str,
     *,
-    terminal_owner: str | None = None,
     trigger_owner: str | None = None,
     workspace_id: str | None = None,
     runner: Runner | None = None,
@@ -351,7 +414,6 @@ def publish(
         return False
     status = collect(
         state_root,
-        terminal_owner=terminal_owner,
         trigger_owner=trigger_owner,
         workspace_id=workspace,
         inventory=inventory,

@@ -31,6 +31,8 @@
   worktree полномочия coordinator status.
 - Сохранён pre-integrated turn-end save-and-close fix; ordinary provider launch
   закрепляет trusted env-shebang interpreter и exact executor product root.
+- Сохранён bounded hot-thread cache eviction: заполненный Active Threads cache
+  вытесняет самую старую запись вместо отказа добавить новый актуальный thread.
 
 ### Изменено
 

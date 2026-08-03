@@ -405,7 +405,7 @@ with tempfile.TemporaryDirectory() as raw:
         "terminal transition clears progress instead of preserving 100 percent",
         publish(
             state_root,
-            terminal_owner="owner-final",
+            trigger_owner="owner-final",
             workspace_id="workspace:terminal",
             runner=topology_runner(terminal_calls, cmux_tree()),
             binary="/opt/cmux",
@@ -562,6 +562,283 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "missing-owned-surface"
+    store = OperationStore(state_root)
+    origin = "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1"
+    workspace = "a2a2a2a2-a2a2-a2a2-a2a2-a2a2a2a2a2a2"
+    window = "a3a3a3a3-a3a3-a3a3-a3a3-a3a3a3a3a3a3"
+    store.create(
+        spec("owner-empty-surface", "controller-empty-surface"),
+        lane_id="lane-empty-surface",
+        run_id="run-empty-surface",
+    )
+    advance(
+        store,
+        "owner-empty-surface",
+        "controller-empty-surface",
+        ("preflight", "starting", "running", "awaiting-callback"),
+    )
+    bind_runtime(
+        store,
+        "owner-empty-surface",
+        "controller-empty-surface",
+        origin_surface=origin,
+    )
+    calls: list[list[str]] = []
+    check(
+        "surface-bound controller without exact ownership is idle",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == ["/opt/cmux", "clear-progress", "--workspace", workspace],
+        calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "program-identity"
+    store = OperationStore(state_root)
+    owner = "owner-programs"
+    origin = "b1b1b1b1-b1b1-b1b1-b1b1-b1b1b1b1b1b1"
+    surface = "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2"
+    workspace = "b3b3b3b3-b3b3-b3b3-b3b3-b3b3b3b3b3b3"
+    window = "b4b4b4b4-b4b4-b4b4-b4b4-b4b4b4b4b4b4"
+    contract = "c" * 64
+    old = replace(
+        spec(owner, "dispatch-old"),
+        contract_sha256=contract,
+    )
+    new = replace(
+        spec(owner, "dispatch-new"),
+        contract_sha256=contract,
+    )
+    store.create(old, lane_id="lane-old", run_id="run-old")
+    advance(
+        store,
+        owner,
+        "dispatch-old",
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    stale = replace(
+        spec(owner, "dispatch-old-verify-0123456789abcdef", kind="pipeline-verify"),
+        contract_sha256=contract,
+    )
+    store.create(stale, lane_id="lane-stale-verify", run_id="run-stale-verify")
+    advance(
+        store,
+        owner,
+        stale.operation_id,
+        ("preflight", "starting", "running"),
+    )
+    store.create(new, lane_id="lane-new", run_id="run-new")
+    advance(store, owner, "dispatch-new", ("preflight", "starting", "running"))
+    bind_runtime(
+        store,
+        owner,
+        "dispatch-new",
+        origin_surface=origin,
+        surface_id=surface,
+    )
+    calls: list[list[str]] = []
+    check(
+        "terminal program descendants cannot attach to a live same-contract program",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree(
+                    (origin, workspace, window),
+                    (surface, workspace, window),
+                ),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "0/1 · 1▶",
+            "--workspace",
+            workspace,
+        ],
+        calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "research-program-identity"
+    store = OperationStore(state_root)
+    owner = "owner-research-programs"
+    old_origin = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1"
+    old_surface = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
+    new_origin = "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3"
+    new_surface = "c4c4c4c4-c4c4-c4c4-c4c4-c4c4c4c4c4c4"
+    workspace = "c5c5c5c5-c5c5-c5c5-c5c5-c5c5c5c5c5c5"
+    window = "c6c6c6c6-c6c6-c6c6-c6c6-c6c6c6c6c6c6"
+    store.create(
+        spec(owner, "research-old", kind="research"),
+        lane_id="lane-research-old",
+        run_id="run-research-old",
+    )
+    advance(
+        store,
+        owner,
+        "research-old",
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    store.create(
+        spec(owner, "research-old-fetch-e7d3799e", kind="research-fetch"),
+        lane_id="lane-research-old-fetch",
+        run_id="run-research-old-fetch",
+    )
+    advance(
+        store,
+        owner,
+        "research-old-fetch-e7d3799e",
+        ("preflight", "starting", "running", "awaiting-callback"),
+    )
+    bind_runtime(
+        store,
+        owner,
+        "research-old-fetch-e7d3799e",
+        origin_surface=old_origin,
+        surface_id=old_surface,
+    )
+    store.create(
+        spec(owner, "research-new", kind="research"),
+        lane_id="lane-research-new",
+        run_id="run-research-new",
+    )
+    advance(
+        store,
+        owner,
+        "research-new",
+        ("preflight", "starting", "running", "awaiting-callback"),
+    )
+    store.create(
+        spec(owner, "research-new-fetch-e7d3799e", kind="research-fetch"),
+        lane_id="lane-research-new-fetch",
+        run_id="run-research-new-fetch",
+    )
+    advance(
+        store,
+        owner,
+        "research-new-fetch-e7d3799e",
+        ("preflight", "starting", "running", "awaiting-callback"),
+    )
+    bind_runtime(
+        store,
+        owner,
+        "research-new-fetch-e7d3799e",
+        origin_surface=new_origin,
+        surface_id=new_surface,
+    )
+    calls: list[list[str]] = []
+    check(
+        "research placement and liveness come only from its exact current stage",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree(
+                    (new_origin, workspace, window),
+                    (new_surface, workspace, window),
+                ),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "0/2 · 2▶ 2⌛",
+            "--workspace",
+            workspace,
+        ],
+        calls,
+    )
+
+
+for stage, suffix in (("fetch", "e7d3799e"), ("synth", "e8c3e4fa")):
+    with tempfile.TemporaryDirectory() as raw:
+        state_root = Path(raw) / f"research-missing-{stage}-surface"
+        store = OperationStore(state_root)
+        owner = f"owner-research-{stage}"
+        controller = f"research-{stage}"
+        child = f"{controller}-{stage}-{suffix}"
+        origin = (
+            "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
+            if stage == "fetch"
+            else "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2"
+        )
+        surface = (
+            "e3e3e3e3-e3e3-e3e3-e3e3-e3e3e3e3e3e3"
+            if stage == "fetch"
+            else "e4e4e4e4-e4e4-e4e4-e4e4-e4e4e4e4e4e4"
+        )
+        workspace = "e5e5e5e5-e5e5-e5e5-e5e5-e5e5e5e5e5e5"
+        window = "e6e6e6e6-e6e6-e6e6-e6e6-e6e6e6e6e6e6"
+        store.create(
+            spec(owner, controller, kind="research"),
+            lane_id=f"lane-{controller}",
+            run_id=f"run-{controller}",
+        )
+        advance(
+            store,
+            owner,
+            controller,
+            ("preflight", "starting", "running", "awaiting-callback"),
+        )
+        store.create(
+            spec(owner, child, kind=f"research-{stage}"),
+            lane_id=f"lane-{child}",
+            run_id=f"run-{child}",
+        )
+        advance(
+            store,
+            owner,
+            child,
+            ("preflight", "starting", "running", "awaiting-callback"),
+        )
+        bind_runtime(
+            store,
+            owner,
+            child,
+            origin_surface=origin,
+            surface_id=surface,
+        )
+        calls: list[list[str]] = []
+        check(
+            f"missing exact research {stage} surface makes the program idle",
+            publish(
+                state_root,
+                workspace_id=workspace,
+                runner=topology_runner(
+                    calls,
+                    cmux_tree((origin, workspace, window)),
+                ),
+                binary="/opt/cmux",
+            )
+            and ui_calls(calls)[-1]
+            == ["/opt/cmux", "clear-progress", "--workspace", workspace],
+            calls,
+        )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "starting-boundary"
     store = OperationStore(state_root)
     origin = "abababab-abab-abab-abab-abababababab"
@@ -585,9 +862,9 @@ with tempfile.TemporaryDirectory() as raw:
             store.transition("owner-start", "controller-start", state)
         check(
             f"{state} controller is visible before surface binding",
-            publish(
-                state_root,
-                terminal_owner="owner-start",
+        publish(
+            state_root,
+            trigger_owner="owner-start",
                 workspace_id=workspace,
                 runner=topology_runner(
                     boundary_calls,
@@ -643,7 +920,7 @@ with tempfile.TemporaryDirectory() as raw:
         "terminal top-level controller suppresses a stale nonterminal child",
         publish(
             state_root,
-            terminal_owner="owner-stale",
+            trigger_owner="owner-stale",
             workspace_id="workspace:stale",
             runner=topology_runner(stale_calls, cmux_tree()),
             binary="/opt/cmux",
@@ -656,6 +933,50 @@ with tempfile.TemporaryDirectory() as raw:
             "workspace:stale",
         ],
         stale_calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "corrupt-active-history"
+    store = OperationStore(state_root)
+    owner = "owner-corrupt-active"
+    operation = "controller-corrupt-active"
+    origin = "d1d1d1d1-d1d1-d1d1-d1d1-d1d1d1d1d1d1"
+    workspace = "d2d2d2d2-d2d2-d2d2-d2d2-d2d2d2d2d2d2"
+    window = "d3d3d3d3-d3d3-d3d3-d3d3-d3d3d3d3d3d3"
+    store.create(
+        spec(owner, operation),
+        lane_id="lane-corrupt-active",
+        run_id="run-corrupt-active",
+    )
+    store.transition(owner, operation, "preflight")
+    bind_runtime(store, owner, operation, origin_surface=origin)
+    runtime = state_root / "owners" / owner / "runtime" / operation / "session.json"
+    runtime.write_text("{bad json\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    check(
+        "corrupt active identity renders attention without a false denominator",
+        publish(
+            state_root,
+            trigger_owner=owner,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree((origin, workspace, window)),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.000000",
+            "--label",
+            "1!",
+            "--workspace",
+            workspace,
+        ],
+        calls,
     )
 
 

@@ -35,6 +35,14 @@ from .supervisor import OperationSupervisor
 class RuntimeSessionLaunchMixin:
     """Own provider launch, continuation, and callback registration effects."""
 
+    def _begin_start(self, supervisor: OperationSupervisor) -> None:
+        """Publish both durable pre-surface lifecycle boundaries."""
+
+        supervisor.transition("preflight")
+        self._notify(supervisor.owner_id)
+        supervisor.transition("starting")
+        self._notify(supervisor.owner_id)
+
     def _abort_prepared_surface(
         self,
         supervisor: OperationSupervisor,
@@ -231,12 +239,7 @@ class RuntimeSessionLaunchMixin:
             callback_pointer=request.callback_pointer,
             generation=1,
         )
-        self.store.transition(
-            request.spec.owner_id, request.spec.operation_id, "preflight"
-        )
-        self.store.transition(
-            request.spec.owner_id, request.spec.operation_id, "starting"
-        )
+        self._begin_start(supervisor)
         def bind_surface(_record: OperationRecord, opened: object) -> None:
             surface_id = str(getattr(opened, "surface_id", ""))
             if not SURFACE_UUID.fullmatch(surface_id):

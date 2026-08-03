@@ -629,7 +629,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     events: list[str] = []
-    status_notifications: list[tuple[Path, str]] = []
+    status_notifications: list[tuple[Path, str, str]] = []
     store = OperationStore(root / "store")
     cmux = FakeCmux(events)
     process = FakeProcess(events)
@@ -642,7 +642,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             route, True, ("provider:profile-valid",)
         ),
         status_notifier=lambda state_root, trigger_owner: (
-            status_notifications.append((state_root, trigger_owner))
+            status_notifications.append(
+                (
+                    state_root,
+                    trigger_owner,
+                    store.read(trigger_owner, "runtime-1").state,
+                )
+            )
         ),
     )
     (cwd / "callbacks" / "result.json").write_text(
@@ -936,13 +942,19 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         started,
     )
     check(
-        "status notifications bind the exact transition owner",
-        bool(status_notifications)
+        "status notifications publish preflight starting and final exact owner states",
+        status_notifications
+        == [
+            (store.root, "owner-1", "preflight"),
+            (store.root, "owner-1", "starting"),
+            (store.root, "owner-1", "awaiting-callback"),
+        ]
         and all(
             state_root == store.root
-            for state_root, _trigger_owner in status_notifications
+            for state_root, _trigger_owner, _state in status_notifications
         )
-        and status_notifications[-1] == (store.root, "owner-1"),
+        and status_notifications[-1]
+        == (store.root, "owner-1", "awaiting-callback"),
         status_notifications,
     )
     checkpoint_root = (
