@@ -446,7 +446,7 @@ def _derived_id(parent: str, role: str) -> str:
     return f"{parent[: 128 - len(suffix)]}{suffix}"
 
 
-def _round_spec(lane: ReviewLaneSession) -> OperationSpec:
+def review_round_spec(lane: ReviewLaneSession) -> OperationSpec:
     role = f"round-{lane.verification_iteration}"
     operation_id = _derived_id(lane.operation_id, role)
     identity = (

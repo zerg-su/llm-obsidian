@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,7 +32,6 @@ class CodexDriver:
         product_root: Path | None = None,
         session_root: Path | None = None,
     ) -> tuple[str, ...]:
-        del callback_pointer
         if route.runtime != "codex":
             raise CodexDriverError("Codex driver received a non-Codex route")
         if self.registered_models and route.model not in self.registered_models:
@@ -106,6 +106,45 @@ class CodexDriver:
                     approval,
                 ]
             )
+        if route.profile == "reviewer-callback":
+            if callback_pointer is None or not callback_pointer.is_absolute():
+                raise CodexDriverError(
+                    "review callback requires an absolute lane root"
+                )
+            if session_root is None or not session_root.is_absolute():
+                raise CodexDriverError(
+                    "review callback requires an absolute session root"
+                )
+            session_input = session_root.expanduser()
+            callback_parent = callback_pointer.parent.expanduser()
+            session_lexical = Path(os.path.abspath(session_input))
+            callback_lexical = Path(os.path.abspath(callback_parent))
+            try:
+                relative = callback_lexical.relative_to(session_lexical)
+            except ValueError as exc:
+                raise CodexDriverError(
+                    "review callback lane escapes its session root"
+                ) from exc
+            cursor = session_lexical
+            for part in relative.parts:
+                if part == "..":
+                    raise CodexDriverError(
+                        "review callback lane escapes its session root"
+                    )
+                cursor /= part
+                if cursor.is_symlink():
+                    raise CodexDriverError(
+                        "review callback lane root must not contain symlinks"
+                    )
+            session = session_input.resolve()
+            callback_root = callback_parent.resolve(strict=False)
+            try:
+                callback_root.relative_to(session)
+            except ValueError as exc:
+                raise CodexDriverError(
+                    "review callback lane escapes its session root"
+                ) from exc
+            args.extend(("--cd", str(callback_root)))
         if route.profile == "research-safe":
             if session_root is None or not session_root.is_absolute():
                 raise CodexDriverError(
@@ -150,7 +189,7 @@ class CodexDriver:
                 callback_pointer=callback_pointer,
                 session_root=(
                     callback_pointer.parent
-                    if route.profile == "research-safe"
+                    if route.profile in {"reviewer-callback", "research-safe"}
                     else None
                 ),
             )

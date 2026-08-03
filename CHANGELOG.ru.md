@@ -16,6 +16,35 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.1] — 2026-08-03
+
+### Добавлено
+
+- Добавлен только явный `--full`: четыре lane по провайдерам и зонам
+  ответственности; автоматически Full не выбирается. В Deep каждый провайдер
+  получает независимый holistic обзор, а explicit single-model Deep разделяет
+  intent и engineering.
+- Публичные lane identities стали стабильными по провайдерам
+  (`anthropic-*`, `openai-*`); имена моделей остаются routing aliases.
+
+### Исправлено
+
+- Исправлены выбор свежего current review, exact same-session continuation,
+  bounded delta transport, callback/checkpoint races и exact reviewer cleanup,
+  найденные Full-topology dogfood.
+- Принятый terminal callback завершается и без cmux resume checkpoint;
+  отсутствие checkpoint типизировано и не разрешает новый provider effect.
+
+### Безопасность
+
+- Claude и Codex reviewer могут писать только в callback/test scratch своей
+  lane и не могут подменить соседний callback или изменить product worktree.
+
+### Совместимость
+
+- Lane IDs и review-v1 axis vocabulary намеренно изменены. Перед обновлением
+  завершите или отмените активные review 2.6.0: они не мигрируются молча.
+
 ## [2.6.0] — 2026-08-02
 
 ### Добавлено

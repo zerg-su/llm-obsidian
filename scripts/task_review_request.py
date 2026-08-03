@@ -135,15 +135,11 @@ def _request(
     )
 
 
-def _axis_name(axis: str) -> str:
-    return axis
-
-
 def _callback_path(runtime_root: Path, axis: str) -> Path:
     return (
         runtime_root
         / "callbacks"
-        / _axis_name(axis)
+        / axis
         / ".review-callback.json"
     )
 
@@ -159,9 +155,9 @@ def _prompt(
 ) -> str:
     responsibility = review_axis_responsibility(axis)
     name = (
-        f"verify-{_axis_name(axis)}.md"
+        f"verify-{axis}.md"
         if verification
-        else f"review-{_axis_name(axis)}.md"
+        else f"review-{axis}.md"
     )
     callback_directory = _callback_path(runtime_root, axis).parent
     if callback_directory.exists() and (

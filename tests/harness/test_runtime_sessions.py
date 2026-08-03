@@ -26,7 +26,7 @@ from harness.adapters.claude import (
     validate_reviewer_sandbox_command,
 )
 from harness.adapters.cmux import Surface
-from harness.adapters.codex import CodexDriver
+from harness.adapters.codex import CodexDriver, CodexDriverError
 from harness.callbacks import CallbackBroker, CallbackTimeoutError
 from harness.adapters.process import (
     ProcessAdapter,
@@ -2159,6 +2159,7 @@ codex_callback = CodexDriver(Path("/usr/bin/codex")).command(
     ),
     callback_pointer=callback,
     product_root=product,
+    session_root=scratch.parent,
 )
 check(
     "review callback profile edits and writes only isolated scratch transport",
@@ -2189,10 +2190,15 @@ check(
     and sandbox_settings.get("sandbox", {}).get("excludedCommands") == []
     and sandbox_settings.get("sandbox", {}).get("filesystem", {}).get("allowWrite")
     == [
-        str(scratch.parent.resolve()),
         str(callback.parent.resolve()),
         str((callback.parent / ".review-test-tmp").resolve()),
     ]
+    and not any(
+        root == str(scratch.parent.resolve())
+        for root in sandbox_settings.get("sandbox", {})
+        .get("filesystem", {})
+        .get("allowWrite", [])
+    )
     and str(product.resolve())
     in sandbox_settings.get("sandbox", {}).get("filesystem", {}).get("denyWrite", [])
     and sandbox_settings.get("sandbox", {}).get("network", {}).get("allowedDomains") == []
@@ -2213,6 +2219,8 @@ check(
         for item in claude_callback
     )
     and "workspace-write" in codex_callback
+    and codex_callback[codex_callback.index("--cd") + 1]
+    == str(callback.parent.resolve())
     and "--add-dir" not in codex_callback,
     (claude_callback, codex_callback),
 )
@@ -2339,6 +2347,29 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
         check("review sandbox rejects a callback symlink escape", True)
     else:
         check("review sandbox rejects a callback symlink escape", False)
+    sibling_callbacks = sandbox_session / "sibling-callbacks"
+    sibling_callbacks.mkdir()
+    codex_callback_link = sandbox_session / "codex-callback-link"
+    codex_callback_link.symlink_to(
+        sibling_callbacks, target_is_directory=True
+    )
+    try:
+        CodexDriver(Path("/usr/bin/codex")).command(
+            RuntimeRoute(
+                "codex",
+                "gpt-5.6-sol",
+                "high",
+                "reviewer-callback",
+                "d" * 64,
+            ),
+            callback_pointer=codex_callback_link / "callback.json",
+            product_root=sandbox_product,
+            session_root=sandbox_session,
+        )
+    except CodexDriverError:
+        check("Codex reviewer rejects a sibling callback symlink", True)
+    else:
+        check("Codex reviewer rejects a sibling callback symlink", False)
 research_scratch = Path("/tmp/owned-research-scratch")
 codex_research = CodexDriver(Path("/usr/bin/codex")).command(
     RuntimeRoute(

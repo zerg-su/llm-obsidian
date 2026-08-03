@@ -165,7 +165,7 @@ def reviewer_sandbox_settings(
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
             "filesystem": {
-                "allowWrite": [str(session), str(callback_parent), str(test_tmp)],
+                "allowWrite": [str(callback_parent), str(test_tmp)],
                 "denyWrite": [str(product), str(git_common)],
             },
             "credentials": {

@@ -38,7 +38,6 @@ from task_review_identity import (
     _validate_task,
 )
 from task_review_request import (
-    _axis_name,
     _callback_path,
     _canonical_sha256,
     _envelope,

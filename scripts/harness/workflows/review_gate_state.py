@@ -8,8 +8,12 @@ import re
 from pathlib import Path
 
 from ..contracts import OperationRecord
-from ..runtime_session_contracts import RuntimeSessionError
+from ..runtime_session_contracts import (
+    RuntimeCheckpointEvidenceMissing,
+    RuntimeSessionError,
+)
 from ..state_machine import TERMINAL
+from ..store import StoreError
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -19,6 +23,7 @@ from .review import (
     ReviewRound,
     ReviewRoundStore,
     prepare_review_round,
+    review_round_spec,
 )
 from .review_gate_contracts import (
     ReviewGateRun,
@@ -62,12 +67,26 @@ def _accepted_round_without_checkpoint(
         state=record.state,
         checkpoint_sha256="",
     )
-    accepted_round = prepare_review_round(round_store, lane)
-    accepted_record = round_store.read(
-        accepted_round.owner_id, accepted_round.operation_id
+    spec = review_round_spec(lane)
+    try:
+        accepted_record = round_store.read(spec.owner_id, spec.operation_id)
+    except StoreError as exc:
+        raise unavailable from exc
+    accepted_round = ReviewRound(
+        parent_operation_id=lane.operation_id,
+        operation_id=spec.operation_id,
+        owner_id=spec.owner_id,
+        lane_id=accepted_record.lane_id,
+        run_id=accepted_record.run_id,
+        axis=lane.axis,
+        verification_iteration=lane.verification_iteration,
+        spec=spec,
     )
     valid_receipt = (
-        accepted_record.state in {"finalizing", "exiting", "complete"}
+        accepted_record.spec == spec
+        and accepted_record.lane_id == lane.lane_id
+        and accepted_record.state
+        in {"verifying", "finalizing", "exiting", "complete"}
         and accepted_record.accepted_callback_kind == "review"
         and bool(accepted_record.accepted_callback_id)
         and re.fullmatch(
@@ -95,9 +114,7 @@ def _rehydrate_checkpoint(
         recovered = runtime.hydrate_durable_checkpoint(
             owner_id, record.spec.operation_id, record.lane_id
         )
-    except RuntimeSessionError as exc:
-        if str(exc) != "durable checkpoint evidence is unavailable":
-            raise
+    except RuntimeCheckpointEvidenceMissing as exc:
         accepted_round = _accepted_round_without_checkpoint(
             round_store,
             review=review,

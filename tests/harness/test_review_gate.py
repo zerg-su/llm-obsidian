@@ -41,6 +41,7 @@ from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.runtime_session_contracts import (
+    RuntimeCheckpointEvidenceMissing,
     RuntimeSessionError,
     continuation_effect_id,
 )
@@ -782,7 +783,7 @@ class AcceptedRoundWithoutCheckpointRuntime(FakeRuntime):
         self, owner_id: str, operation_id: str, lane_id: str
     ) -> FakeSessionResult:
         self.hydration_attempts += 1
-        raise RuntimeSessionError(
+        raise RuntimeCheckpointEvidenceMissing(
             "durable checkpoint evidence is unavailable"
         )
 
@@ -1322,6 +1323,15 @@ with tempfile.TemporaryDirectory(
     round_ = run.rounds[lane.axis]
     result = ReviewResult(lane.axis, "approve", (), 0)
     runtime.accept_callback(review_round_envelope(round_, result))
+    accepted = store.read(round_.owner_id, round_.operation_id)
+    store.save(
+        replace(
+            accepted,
+            state="verifying",
+            revision=accepted.revision + 1,
+        ),
+        expected_revision=accepted.revision,
+    )
     state_path = base / "gate" / "review-gate.json"
     checkpointless = json.loads(state_path.read_text(encoding="utf-8"))
     checkpointless["lanes"][0]["checkpoint"] = ""
@@ -1345,6 +1355,51 @@ with tempfile.TemporaryDirectory(
         and decision.action == "approved"
         and controller.read()["status"] == "approved",
     )
+
+with tempfile.TemporaryDirectory(
+    prefix="review-missing-round-without-checkpoint."
+) as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = AcceptedRoundWithoutCheckpointRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    run = begin(
+        controller,
+        request_for("review-missing-round-without-checkpoint", context=context),
+        scratch,
+    )
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    round_path = (
+        store.root
+        / "owners"
+        / round_.owner_id
+        / "operations"
+        / f"{round_.operation_id}.json"
+    )
+    round_path.unlink()
+    state_path = base / "gate" / "review-gate.json"
+    checkpointless = json.loads(state_path.read_text(encoding="utf-8"))
+    checkpointless["lanes"][0]["checkpoint"] = ""
+    checkpointless["lanes"][0].pop("checkpoint_sha256", None)
+    state_path.write_text(
+        json.dumps(checkpointless, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        controller.rehydrate()
+    except RuntimeCheckpointEvidenceMissing:
+        check(
+            "missing checkpoint recovery does not create a child round",
+            not round_path.exists(),
+        )
+    else:
+        check(
+            "missing checkpoint recovery does not create a child round",
+            False,
+        )
 
 with tempfile.TemporaryDirectory(prefix="review-full-partial-progress.") as raw:
     base = Path(raw)

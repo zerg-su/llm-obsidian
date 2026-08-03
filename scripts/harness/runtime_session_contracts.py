@@ -31,6 +31,10 @@ class RuntimeSessionError(RuntimeError):
     """A provider session cannot advance without violating lifecycle ownership."""
 
 
+class RuntimeCheckpointEvidenceMissing(RuntimeSessionError):
+    """The exact provider checkpoint artifact was never materialized."""
+
+
 class ProviderDriver(Protocol):
     def command(
         self,

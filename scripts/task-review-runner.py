@@ -104,7 +104,6 @@ from task_review_resolution_bundle import (
     _resolution_bundle,
 )
 from task_review_context import (
-    _axis_name,
     _callback_path,
     _canonical_sha256,
     _context,

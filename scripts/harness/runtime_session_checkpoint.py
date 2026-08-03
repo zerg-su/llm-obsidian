@@ -12,6 +12,7 @@ from typing import Any
 
 from .runtime_session_contracts import (
     IDENTIFIER,
+    RuntimeCheckpointEvidenceMissing,
     RuntimeSessionError,
     RuntimeSessionResult,
 )
@@ -32,13 +33,20 @@ class DurableCleanupOwnership:
     window_id: str
 
 
-def _stable_owned_json(path: Path, label: str) -> tuple[dict[str, Any], str]:
+def _stable_owned_json(
+    path: Path,
+    label: str,
+    *,
+    missing_error: type[RuntimeSessionError] = RuntimeSessionError,
+) -> tuple[dict[str, Any], str]:
     if path.is_symlink():
         raise RuntimeSessionError(f"durable {label} must not be a symlink")
     try:
         before = path.stat(follow_symlinks=False)
         raw = path.read_bytes()
         after = path.stat(follow_symlinks=False)
+    except FileNotFoundError as exc:
+        raise missing_error(f"durable {label} is unavailable") from exc
     except OSError as exc:
         raise RuntimeSessionError(f"durable {label} is unavailable") from exc
     identity = lambda value: (
@@ -112,7 +120,9 @@ class RuntimeSessionCheckpointMixin:
             state_root / "session.json", "session evidence"
         )
         checkpoint, checkpoint_sha256 = _stable_owned_json(
-            state_root / "checkpoint.json", "checkpoint evidence"
+            state_root / "checkpoint.json",
+            "checkpoint evidence",
+            missing_error=RuntimeCheckpointEvidenceMissing,
         )
         launch, launch_sha256 = _stable_owned_json(
             state_root / "launch.json", "launch evidence"

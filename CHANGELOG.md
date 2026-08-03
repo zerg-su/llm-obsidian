@@ -10,6 +10,35 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.1] - 2026-08-03
+
+### Added
+
+- Added explicit `--full` review as a four-lane provider/responsibility grid;
+  Full is never selected automatically. Deep review now gives each default
+  provider an independent holistic view, while an explicit single-model Deep
+  review separates intent and engineering responsibilities.
+- Added provider-stable public lane identities (`anthropic-*`, `openai-*`) and
+  retained model-family names only as centralized routing aliases.
+
+### Fixed
+
+- Repaired fresh current-review selection, exact same-session continuation,
+  bounded delta transport, callback/checkpoint races, and exact reviewer cleanup
+  discovered by Full-topology dogfood.
+- Accepted terminal callbacks can finish when cmux did not materialize a resume
+  checkpoint; missing evidence is typed and never authorizes another effect.
+
+### Security
+
+- Claude and Codex reviewers can write only their current lane's callback/test
+  scratch. They cannot forge sibling-lane callbacks or write the product tree.
+
+### Compatibility
+
+- Review lane IDs and the review-v1 axis vocabulary intentionally changed.
+  Finish or cancel active 2.6.0 reviews before upgrading; they are not migrated.
+
 ## [2.6.0] - 2026-08-02
 
 ### Added

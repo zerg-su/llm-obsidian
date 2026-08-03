@@ -40,13 +40,13 @@ from .review_contracts import (
     _bounded_finding_summary,
     _derived_id,
     _owner_relative,
-    _round_spec,
     _runtime_lane,
     _runtime_record,
     _session_spec,
     enqueue,
     operation_spec,
     review_session_specs,
+    review_round_spec,
     runtime_status_is_live,
 )
 from .review_results import (
@@ -313,7 +313,7 @@ def prepare_review_round(
 ) -> ReviewRound:
     """Create one durable one-shot callback receipt beside its parent session."""
 
-    spec = _round_spec(lane)
+    spec = review_round_spec(lane)
     run_id = hashlib.sha256(
         f"{spec.idempotency_key}:run".encode()
     ).hexdigest()[:32]
