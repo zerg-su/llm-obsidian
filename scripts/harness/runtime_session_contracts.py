@@ -349,6 +349,7 @@ class RuntimeSessionResult:
     workspace_ref: str = ""
     window_id: str = ""
     window_ref: str = ""
+    checkpoint_sha256: str = ""
 
     @property
     def operation_id(self) -> str:

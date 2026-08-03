@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import re
 from pathlib import Path
 
 from ..contracts import OperationRecord
@@ -24,7 +25,11 @@ from .review_gate_contracts import (
     _read_json,
     review_context_sha256,
 )
-from review_contract import review_axis_provider, review_axis_responsibility
+from review_contract import (
+    review_axis_provider,
+    review_axis_responsibility,
+    review_provider_runtime,
+)
 
 
 class ReviewGateStateMixin:
@@ -160,7 +165,7 @@ class ReviewGateStateMixin:
 
     @staticmethod
     def _lane(lane: ReviewLaneSession) -> dict[str, object]:
-        return {
+        value = {
             "axis": lane.axis,
             "operation_id": lane.operation_id,
             "lane_id": lane.lane_id,
@@ -170,6 +175,9 @@ class ReviewGateStateMixin:
             "verification_iteration": lane.verification_iteration,
             "state": lane.state,
         }
+        if lane.checkpoint_sha256:
+            value["checkpoint_sha256"] = lane.checkpoint_sha256
+        return value
 
     def _initialize(
         self,
@@ -297,6 +305,7 @@ class ReviewGateStateMixin:
         routes: dict[str, object] = {}
         rounds: dict[str, ReviewRound] = {}
         owner_id = str(state.get("owner_id") or "")
+        hydrated = False
         for raw_lane in raw_lanes:
             if not isinstance(raw_lane, dict):
                 raise ValueError("stored review lane is invalid")
@@ -305,13 +314,59 @@ class ReviewGateStateMixin:
             record = self.round_store.read(owner_id, operation_id)
             observed: object = record
             checkpoint = str(raw_lane.get("checkpoint") or "")
+            checkpoint_sha256 = str(
+                raw_lane.get("checkpoint_sha256") or ""
+            )
             if record.state not in TERMINAL:
                 observed = self.runtime.status(owner_id, operation_id)
                 runtime_checkpoint = str(
                     getattr(observed, "checkpoint", "") or ""
                 )
-                if runtime_checkpoint:
-                    checkpoint = runtime_checkpoint
+                expected_runtime = review_provider_runtime(
+                    review_axis_provider(axis)
+                )
+                if record.spec.route.runtime != expected_runtime:
+                    raise ValueError(
+                        "stored review provider route changed"
+                    )
+                if checkpoint:
+                    if (
+                        runtime_checkpoint
+                        and runtime_checkpoint != checkpoint
+                    ):
+                        raise ValueError(
+                            "stored review checkpoint identity changed"
+                        )
+                else:
+                    recovered = self.runtime.hydrate_durable_checkpoint(
+                        owner_id, operation_id, record.lane_id
+                    )
+                    recovered_record = getattr(recovered, "record", None)
+                    recovered_checkpoint = str(
+                        getattr(recovered, "checkpoint", "") or ""
+                    )
+                    recovered_sha256 = str(
+                        getattr(recovered, "checkpoint_sha256", "") or ""
+                    )
+                    if (
+                        not isinstance(recovered_record, OperationRecord)
+                        or recovered_record != record
+                        or not recovered_checkpoint
+                        or re.fullmatch(
+                            r"[0-9a-f]{64}", recovered_sha256
+                        )
+                        is None
+                        or (
+                            runtime_checkpoint
+                            and runtime_checkpoint != recovered_checkpoint
+                        )
+                    ):
+                        raise ValueError(
+                            "durable review checkpoint identity changed"
+                        )
+                    checkpoint = recovered_checkpoint
+                    checkpoint_sha256 = recovered_sha256
+                    hydrated = True
             observed_record = (
                 observed
                 if isinstance(observed, OperationRecord)
@@ -340,10 +395,21 @@ class ReviewGateStateMixin:
                 ),
                 max_verify_iterations=review.max_verify_iterations,
                 state=record.state,
+                checkpoint_sha256=checkpoint_sha256,
             )
             lanes.append(lane)
             routes[axis] = record.spec.route
             rounds[axis] = prepare_review_round(self.round_store, lane)
+        if hydrated:
+            persisted_lanes = [self._lane(lane) for lane in lanes]
+            with self._locked():
+                current = _read_json(self.state_path)
+                if current.get("lanes") != raw_lanes:
+                    raise ValueError(
+                        "stored review lanes changed during checkpoint hydration"
+                    )
+                current["lanes"] = persisted_lanes
+                _atomic_json(self.state_path, current)
         request = ReviewOperationRequest(
             review,
             owner_id,

@@ -867,6 +867,132 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and started.callback_pointer == "callbacks/result.json",
         started,
     )
+    checkpoint_root = (
+        store.root
+        / "owners"
+        / "owner-1"
+        / "runtime"
+        / "runtime-1"
+    )
+    checkpoint_path = checkpoint_root / "checkpoint.json"
+    launch_path = checkpoint_root / "launch.json"
+    checkpoint_value = {
+        "schema_version": 1,
+        "operation_id": "runtime-1",
+        "run_id": "run-1",
+        "runtime": "claude",
+        "checkpoint": "checkpoint-1",
+    }
+    checkpoint_path.write_text(
+        json.dumps(checkpoint_value) + "\n", encoding="utf-8"
+    )
+    launch_value = {
+        "schema_version": 1,
+        "owner_id": "owner-1",
+        "operation_id": "runtime-1",
+        "run_id": "run-1",
+        "runtime": "claude",
+        "surface_id": SURFACE,
+        "argv": ["/usr/bin/claude", "--model", "fable"],
+    }
+    launch_path.write_text(json.dumps(launch_value) + "\n", encoding="utf-8")
+    effects_before_hydration = tuple(events)
+    hydrated = manager.hydrate_durable_checkpoint(
+        "owner-1", "runtime-1", "lane-shared"
+    )
+    hydrated_replay = manager.hydrate_durable_checkpoint(
+        "owner-1", "runtime-1", "lane-shared"
+    )
+    check(
+        "durable checkpoint hydration binds the exact parent session",
+        hydrated.action == "checkpoint-hydrated"
+        and hydrated.checkpoint == "checkpoint-1"
+        and len(hydrated.checkpoint_sha256) == 64
+        and hydrated_replay.checkpoint_sha256
+        == hydrated.checkpoint_sha256
+        and tuple(events) == effects_before_hydration,
+    )
+    for label, mutate in (
+        (
+            "lane mismatch",
+            lambda: manager.hydrate_durable_checkpoint(
+                "owner-1", "runtime-1", "lane-foreign"
+            ),
+        ),
+        (
+            "stale run",
+            lambda: (
+                checkpoint_path.write_text(
+                    json.dumps({**checkpoint_value, "run_id": "run-stale"})
+                    + "\n",
+                    encoding="utf-8",
+                ),
+                manager.hydrate_durable_checkpoint(
+                    "owner-1", "runtime-1", "lane-shared"
+                ),
+            )[-1],
+        ),
+        (
+            "model mismatch",
+            lambda: (
+                launch_path.write_text(
+                    json.dumps(
+                        {
+                            **launch_value,
+                            "argv": [
+                                "/usr/bin/claude",
+                                "--model",
+                                "foreign-model",
+                            ],
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                ),
+                manager.hydrate_durable_checkpoint(
+                    "owner-1", "runtime-1", "lane-shared"
+                ),
+            )[-1],
+        ),
+    ):
+        try:
+            mutate()
+        except RuntimeSessionError:
+            check(f"durable checkpoint rejects {label}", True)
+        else:
+            check(f"durable checkpoint rejects {label}", False)
+        checkpoint_path.write_text(
+            json.dumps(checkpoint_value) + "\n", encoding="utf-8"
+        )
+        launch_path.write_text(
+            json.dumps(launch_value) + "\n", encoding="utf-8"
+        )
+    checkpoint_path.unlink()
+    try:
+        manager.hydrate_durable_checkpoint(
+            "owner-1", "runtime-1", "lane-shared"
+        )
+    except RuntimeSessionError:
+        check("durable checkpoint rejects missing evidence", True)
+    else:
+        check("durable checkpoint rejects missing evidence", False)
+    foreign_checkpoint = root / "foreign-checkpoint.json"
+    foreign_checkpoint.write_text(
+        json.dumps(checkpoint_value) + "\n", encoding="utf-8"
+    )
+    checkpoint_path.symlink_to(foreign_checkpoint)
+    try:
+        manager.hydrate_durable_checkpoint(
+            "owner-1", "runtime-1", "lane-shared"
+        )
+    except RuntimeSessionError:
+        check("durable checkpoint rejects symlink evidence", True)
+    else:
+        check("durable checkpoint rejects symlink evidence", False)
+    checkpoint_path.unlink()
+    checkpoint_path.write_text(
+        json.dumps(checkpoint_value) + "\n", encoding="utf-8"
+    )
     resumable_parent = store.read("owner-1", "runtime-1")
     try:
         manager.cleanup("owner-1", "runtime-1")

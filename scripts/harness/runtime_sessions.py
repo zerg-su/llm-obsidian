@@ -65,9 +65,12 @@ from .runtime_session_contracts import (
 )
 from .runtime_session_launch import RuntimeSessionLaunchMixin
 from .runtime_session_cleanup import RuntimeSessionCleanupMixin
+from .runtime_session_checkpoint import RuntimeSessionCheckpointMixin
 
 class RuntimeSessionManager(
-    RuntimeSessionLaunchMixin, RuntimeSessionCleanupMixin
+    RuntimeSessionLaunchMixin,
+    RuntimeSessionCleanupMixin,
+    RuntimeSessionCheckpointMixin,
 ):
     """Drive exact provider resources through one durable OperationRecord."""
 

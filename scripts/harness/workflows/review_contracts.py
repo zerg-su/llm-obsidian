@@ -303,6 +303,13 @@ class ReviewRuntimePort(Protocol):
 
     def status(self, owner_id: str, operation_id: str) -> object: ...
 
+    def hydrate_durable_checkpoint(
+        self,
+        owner_id: str,
+        operation_id: str,
+        lane_id: str,
+    ) -> object: ...
+
     def accept_callback(self, envelope: CallbackEnvelope) -> object: ...
 
     def register_callback_target(
@@ -332,6 +339,7 @@ class ReviewLaneSession:
     verification_iteration: int
     max_verify_iterations: int
     state: str = "running"
+    checkpoint_sha256: str = ""
 
     def __post_init__(self) -> None:
         try:
@@ -536,6 +544,9 @@ def _runtime_lane(
     } and not runtime_status_is_live(value):
         raise ValueError("stored review runtime is not live and resumable")
     checkpoint = str(getattr(value, "checkpoint", "") or "")
+    checkpoint_sha256 = str(
+        getattr(value, "checkpoint_sha256", "") or ""
+    )
     return ReviewLaneSession(
         axis=axis,
         owner_id=spec.owner_id,
@@ -548,4 +559,5 @@ def _runtime_lane(
         verification_iteration=0,
         max_verify_iterations=max_verify_iterations,
         state=record.state,
+        checkpoint_sha256=checkpoint_sha256,
     )

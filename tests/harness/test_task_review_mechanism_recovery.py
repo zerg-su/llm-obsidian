@@ -97,7 +97,7 @@ class FakeRuntime:
             )
             self.store.save(updated, expected_revision=record.revision)
             record = updated
-        result = SessionResult(record, f"checkpoint-{len(self.started)}")
+        result = SessionResult(record, "checkpoint-live")
         if on_surface_opened is not None:
             on_surface_opened(result)
         return result

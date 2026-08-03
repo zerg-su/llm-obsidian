@@ -528,6 +528,7 @@ class FakeSessionResult:
     action: str = ""
     process_status: str = ""
     surface_status: str = ""
+    checkpoint_sha256: str = ""
 
 
 class FakeRuntime:
@@ -559,7 +560,7 @@ class FakeRuntime:
                 ),
             )
             self.store.save(record, expected_revision=record.revision)
-        result = FakeSessionResult(record, f"checkpoint-{len(self.started)}")
+        result = FakeSessionResult(record, "checkpoint-live")
         if on_surface_opened is not None:
             on_surface_opened(result)
         return result
@@ -680,6 +681,52 @@ class FakeRuntime:
             )
         return self.store.read(owner_id, operation_id)
 
+
+class CheckpointRecoveryRuntime(FakeRuntime):
+    def __init__(self, store: OperationStore) -> None:
+        super().__init__(store)
+        self.hydrations: list[tuple[str, str, str]] = []
+        self.continue_attempts = 0
+        self.provider_prompt_effects = 0
+        self.fail_first_continuation = False
+
+    def status(self, owner_id: str, operation_id: str) -> object:
+        return FakeSessionResult(
+            self.store.read(owner_id, operation_id),
+            "",
+            "attention-required",
+            "alive",
+            "alive",
+        )
+
+    def hydrate_durable_checkpoint(
+        self, owner_id: str, operation_id: str, lane_id: str
+    ) -> FakeSessionResult:
+        record = self.store.read(owner_id, operation_id)
+        if record.lane_id != lane_id:
+            raise ValueError("checkpoint lane changed")
+        self.hydrations.append((owner_id, operation_id, lane_id))
+        return FakeSessionResult(
+            record,
+            "checkpoint-owned",
+            action="checkpoint-hydrated",
+            checkpoint_sha256="9" * 64,
+        )
+
+    def continue_session(
+        self,
+        owner_id: str,
+        operation_id: str,
+        checkpoint: str,
+        prompt_pointer: str,
+    ) -> FakeSessionResult:
+        self.continue_attempts += 1
+        if self.fail_first_continuation and self.continue_attempts == 1:
+            raise ValueError("injected pre-effect checkpoint interruption")
+        self.provider_prompt_effects += 1
+        return super().continue_session(
+            owner_id, operation_id, checkpoint, prompt_pointer
+        )
 
 def request_for(
     operation_id: str,
@@ -997,6 +1044,136 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         check("stale review evidence never unlocks finalization", True)
     else:
         check("stale review evidence never unlocks finalization", False)
+
+with tempfile.TemporaryDirectory(prefix="review-checkpoint-replay.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = CheckpointRecoveryRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    operation_id = "review-checkpoint-replay"
+    run = begin(
+        controller,
+        request_for(operation_id, context=context),
+        scratch,
+    )
+    lane = run.execution.lanes[0]
+    waiting = controller.defer_round_for_resolution(
+        run,
+        lane,
+        run.rounds[lane.axis],
+        ReviewResult(
+            lane.axis,
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "F-checkpoint-replay",
+                    lane.axis,
+                    "important",
+                    "checkpoint must survive coordinator restart",
+                    "the provider session remains exact and live",
+                ),
+            ),
+        ),
+    )
+    parent = store.read(lane.owner_id, lane.operation_id)
+    store.save(
+        replace(
+            parent,
+            deadline_at=1.0,
+            revision=parent.revision + 1,
+        ),
+        expected_revision=parent.revision,
+    )
+    store.transition(
+        lane.owner_id,
+        lane.operation_id,
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    state_path = base / "gate" / "review-gate.json"
+    checkpointless = json.loads(state_path.read_text(encoding="utf-8"))
+    checkpointless["lanes"][0]["checkpoint"] = ""
+    checkpointless["lanes"][0].pop("checkpoint_sha256", None)
+    state_path.write_text(
+        json.dumps(checkpointless, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    recovered_run = controller.rehydrate()
+    recovered_lane = recovered_run.execution.lanes[0]
+    persisted_hydration = controller.read()["lanes"][0]
+    controller.rehydrate()
+    check(
+        "empty review checkpoint hydrates once and persists its digest",
+        waiting.action == "awaiting-resolution"
+        and recovered_lane.checkpoint == "checkpoint-owned"
+        and persisted_hydration["checkpoint"] == "checkpoint-owned"
+        and persisted_hydration["checkpoint_sha256"] == "9" * 64
+        and runtime.hydrations
+        == [(lane.owner_id, lane.operation_id, lane.lane_id)]
+        and len(runtime.started) == 1,
+    )
+    resolved_context = replace(context, head_sha="8" * 40)
+    resolution = resolution_evidence(
+        operation_id,
+        lane.axis,
+        context.head_sha,
+        resolved_context.head_sha,
+        "F-checkpoint-replay",
+    )
+    review_identity = resolution_transport_identity(controller)
+    runtime.fail_first_continuation = True
+    try:
+        controller.continue_after_resolution(
+            recovered_run,
+            recovered_lane,
+            context=resolved_context,
+            resolution=resolution,
+            review_identity_sha256=review_identity,
+            verification_prompt_pointer="prompts/verify.md",
+            callback_pointer=(
+                "callbacks/review-checkpoint-replay/"
+                "anthropic-holistic/.review-callback.json"
+            ),
+        )
+    except ValueError as exc:
+        check(
+            "checkpoint interruption occurs before a provider effect",
+            "pre-effect" in str(exc)
+            and runtime.provider_prompt_effects == 0,
+        )
+    else:
+        check("checkpoint interruption occurs before a provider effect", False)
+    unpublished_child = runtime.registered[-1][2]
+    child_before_replay = store.read(lane.owner_id, unpublished_child)
+    replay_run = controller.rehydrate()
+    replay_lane = replay_run.execution.lanes[0]
+    resumed = controller.continue_after_resolution(
+        replay_run,
+        replay_lane,
+        context=resolved_context,
+        resolution=resolution,
+        review_identity_sha256=review_identity,
+        verification_prompt_pointer="prompts/verify.md",
+        callback_pointer=(
+            "callbacks/review-checkpoint-replay/"
+            "anthropic-holistic/.review-callback.json"
+        ),
+    )
+    check(
+        "checkpoint recovery reuses one unpublished child and one provider effect",
+        resumed.action == "verify"
+        and child_before_replay.resources == OwnedResources()
+        and runtime.registered[-2][2] == unpublished_child
+        and runtime.registered[-1][2] == unpublished_child
+        and runtime.rearmed
+        == [(lane.owner_id, lane.operation_id)]
+        and runtime.continue_attempts == 2
+        and runtime.provider_prompt_effects == 1
+        and len(runtime.started) == 1
+        and len(runtime.hydrations) == 1,
+    )
 
 with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as raw:
     container = Path(raw)
