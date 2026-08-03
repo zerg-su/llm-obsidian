@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from ..contracts import OperationRecord
+from ..runtime_session_contracts import RuntimeSessionError
 from ..state_machine import TERMINAL
 from .review import (
     ReviewContext,
@@ -16,6 +17,7 @@ from .review import (
     ReviewOperationRequest,
     ReviewRequest,
     ReviewRound,
+    ReviewRoundStore,
     prepare_review_round,
 )
 from .review_gate_contracts import (
@@ -30,6 +32,96 @@ from review_contract import (
     review_axis_responsibility,
     review_provider_runtime,
 )
+
+
+def _accepted_round_without_checkpoint(
+    round_store: ReviewRoundStore,
+    *,
+    review: ReviewRequest,
+    raw_lane: dict[str, object],
+    record: OperationRecord,
+    axis: str,
+    owner_id: str,
+    unavailable: RuntimeSessionError,
+) -> ReviewRound:
+    """Trust no missing checkpoint unless its exact child receipt is durable."""
+
+    lane = ReviewLaneSession(
+        axis=axis,
+        owner_id=owner_id,
+        operation_id=record.spec.operation_id,
+        lane_id=record.lane_id,
+        run_id=record.run_id,
+        surface_id=record.resources.surface_id,
+        checkpoint="",
+        spec=record.spec,
+        verification_iteration=int(
+            raw_lane.get("verification_iteration", -1)
+        ),
+        max_verify_iterations=review.max_verify_iterations,
+        state=record.state,
+        checkpoint_sha256="",
+    )
+    accepted_round = prepare_review_round(round_store, lane)
+    accepted_record = round_store.read(
+        accepted_round.owner_id, accepted_round.operation_id
+    )
+    valid_receipt = (
+        accepted_record.state in {"finalizing", "exiting", "complete"}
+        and accepted_record.accepted_callback_kind == "review"
+        and bool(accepted_record.accepted_callback_id)
+        and re.fullmatch(
+            r"[0-9a-f]{64}", accepted_record.accepted_callback_sha256
+        )
+        is not None
+    )
+    if not valid_receipt:
+        raise unavailable
+    return accepted_round
+
+
+def _rehydrate_checkpoint(
+    runtime: object,
+    round_store: ReviewRoundStore,
+    *,
+    review: ReviewRequest,
+    raw_lane: dict[str, object],
+    record: OperationRecord,
+    axis: str,
+    owner_id: str,
+    runtime_checkpoint: str,
+) -> tuple[str, str, ReviewRound | None, bool]:
+    try:
+        recovered = runtime.hydrate_durable_checkpoint(
+            owner_id, record.spec.operation_id, record.lane_id
+        )
+    except RuntimeSessionError as exc:
+        if str(exc) != "durable checkpoint evidence is unavailable":
+            raise
+        accepted_round = _accepted_round_without_checkpoint(
+            round_store,
+            review=review,
+            raw_lane=raw_lane,
+            record=record,
+            axis=axis,
+            owner_id=owner_id,
+            unavailable=exc,
+        )
+        return "", "", accepted_round, False
+    recovered_record = getattr(recovered, "record", None)
+    checkpoint = str(getattr(recovered, "checkpoint", "") or "")
+    checkpoint_sha256 = str(
+        getattr(recovered, "checkpoint_sha256", "") or ""
+    )
+    if (
+        not isinstance(recovered_record, OperationRecord)
+        or recovered_record != record
+        or not checkpoint
+        or re.fullmatch(r"[0-9a-f]{64}", checkpoint_sha256) is None
+        or (runtime_checkpoint and runtime_checkpoint != checkpoint)
+    ):
+        raise ValueError("durable review checkpoint identity changed")
+    return checkpoint, checkpoint_sha256, None, True
 
 
 class ReviewGateStateMixin:
@@ -339,35 +431,27 @@ class ReviewGateStateMixin:
                             "stored review checkpoint identity changed"
                         )
                 else:
-                    recovered = self.runtime.hydrate_durable_checkpoint(
-                        owner_id, operation_id, record.lane_id
+                    (
+                        recovered_checkpoint,
+                        recovered_sha256,
+                        accepted_round,
+                        did_hydrate,
+                    ) = _rehydrate_checkpoint(
+                        self.runtime,
+                        self.round_store,
+                        review=review,
+                        raw_lane=raw_lane,
+                        record=record,
+                        axis=axis,
+                        owner_id=owner_id,
+                        runtime_checkpoint=runtime_checkpoint,
                     )
-                    recovered_record = getattr(recovered, "record", None)
-                    recovered_checkpoint = str(
-                        getattr(recovered, "checkpoint", "") or ""
-                    )
-                    recovered_sha256 = str(
-                        getattr(recovered, "checkpoint_sha256", "") or ""
-                    )
-                    if (
-                        not isinstance(recovered_record, OperationRecord)
-                        or recovered_record != record
-                        or not recovered_checkpoint
-                        or re.fullmatch(
-                            r"[0-9a-f]{64}", recovered_sha256
-                        )
-                        is None
-                        or (
-                            runtime_checkpoint
-                            and runtime_checkpoint != recovered_checkpoint
-                        )
-                    ):
-                        raise ValueError(
-                            "durable review checkpoint identity changed"
-                        )
+                    if accepted_round is not None:
+                        rounds[axis] = accepted_round
                     checkpoint = recovered_checkpoint
                     checkpoint_sha256 = recovered_sha256
-                    hydrated = True
+                    if did_hydrate:
+                        hydrated = True
             observed_record = (
                 observed
                 if isinstance(observed, OperationRecord)
@@ -400,7 +484,10 @@ class ReviewGateStateMixin:
             )
             lanes.append(lane)
             routes[axis] = record.spec.route
-            rounds[axis] = prepare_review_round(self.round_store, lane)
+            if axis not in rounds:
+                rounds[axis] = prepare_review_round(
+                    self.round_store, lane
+                )
         if hydrated:
             persisted_lanes = [self._lane(lane) for lane in lanes]
             with self._locked():

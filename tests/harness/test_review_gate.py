@@ -40,7 +40,10 @@ from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.runtime_worker import _pipeline_verify_identity
-from harness.runtime_session_contracts import continuation_effect_id
+from harness.runtime_session_contracts import (
+    RuntimeSessionError,
+    continuation_effect_id,
+)
 from harness.review_program import ReviewBoundaryInput
 from harness.review_program_authority import trusted_review_receipt
 from harness.custom_pipelines import (
@@ -761,6 +764,29 @@ class CheckpointRecoveryRuntime(FakeRuntime):
         )
 
 
+class AcceptedRoundWithoutCheckpointRuntime(FakeRuntime):
+    def __init__(self, store: OperationStore) -> None:
+        super().__init__(store)
+        self.hydration_attempts = 0
+
+    def status(self, owner_id: str, operation_id: str) -> object:
+        return FakeSessionResult(
+            self.store.read(owner_id, operation_id),
+            "",
+            "observed",
+            "alive",
+            "alive",
+        )
+
+    def hydrate_durable_checkpoint(
+        self, owner_id: str, operation_id: str, lane_id: str
+    ) -> FakeSessionResult:
+        self.hydration_attempts += 1
+        raise RuntimeSessionError(
+            "durable checkpoint evidence is unavailable"
+        )
+
+
 class PartialFullRecoveryRuntime(FakeRuntime):
     def __init__(self, store: OperationStore) -> None:
         super().__init__(store)
@@ -1276,6 +1302,48 @@ with tempfile.TemporaryDirectory(prefix="review-checkpoint-replay.") as raw:
         and runtime.provider_prompt_effects == 1
         and len(runtime.started) == 1
         and len(runtime.hydrations) == 1,
+    )
+
+with tempfile.TemporaryDirectory(
+    prefix="review-accepted-without-checkpoint."
+) as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+    runtime = AcceptedRoundWithoutCheckpointRuntime(store)
+    controller = ReviewGateController(base / "gate", runtime, store)
+    run = begin(
+        controller,
+        request_for("review-accepted-without-checkpoint", context=context),
+        scratch,
+    )
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    result = ReviewResult(lane.axis, "approve", (), 0)
+    runtime.accept_callback(review_round_envelope(round_, result))
+    state_path = base / "gate" / "review-gate.json"
+    checkpointless = json.loads(state_path.read_text(encoding="utf-8"))
+    checkpointless["lanes"][0]["checkpoint"] = ""
+    checkpointless["lanes"][0].pop("checkpoint_sha256", None)
+    state_path.write_text(
+        json.dumps(checkpointless, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    recovered = controller.rehydrate()
+    recovered_lane = recovered.execution.lanes[0]
+    decision = controller.complete_round(
+        recovered,
+        recovered_lane,
+        recovered.rounds[recovered_lane.axis],
+        result,
+    )
+    check(
+        "accepted terminal callback does not require a resume checkpoint",
+        runtime.hydration_attempts == 1
+        and recovered_lane.checkpoint == ""
+        and decision.action == "approved"
+        and controller.read()["status"] == "approved",
     )
 
 with tempfile.TemporaryDirectory(prefix="review-full-partial-progress.") as raw:
