@@ -181,10 +181,10 @@ def apply_hot(payload: dict, hot_text: str, today: str) -> tuple[str, list[str]]
                 rendered = "- " + rendered
             current.insert(0, rendered)
         if len(current) > THREADS_MAX:
-            listing = "\n".join(f"  {thread[:120]}" for thread in current)
-            raise CapViolation(
-                f"Active Threads would be {len(current)} (cap {THREADS_MAX}). "
-                f"Resolve some first:\n{listing}"
+            evicted = len(current) - THREADS_MAX
+            current = current[:THREADS_MAX]
+            warnings.append(
+                f"Active Threads: evicted {evicted} oldest cache entry(s)"
             )
         lines = replace_section(lines, THREADS_HEADING, current)
 
