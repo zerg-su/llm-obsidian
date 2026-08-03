@@ -61,7 +61,7 @@ class RuntimeSessionLaunchMixin:
         self.store.transition(
             supervisor.owner_id, supervisor.operation_id, "failed"
         )
-        self._notify()
+        self._notify(supervisor.owner_id)
 
     def start(
         self,
@@ -354,7 +354,7 @@ class RuntimeSessionLaunchMixin:
             ) from exc
         supervisor.transition("running")
         record = supervisor.transition("awaiting-callback")
-        self._notify()
+        self._notify(record.spec.owner_id)
         checkpoint = ""
         try:
             checkpoint = self.cmux.resume_checkpoint(
@@ -440,7 +440,7 @@ class RuntimeSessionLaunchMixin:
         current = supervisor.read()
         if current.state != "running":
             current = supervisor.transition("running")
-        self._notify()
+        self._notify(current.spec.owner_id)
         return self._result(current, "continued", checkpoint=checkpoint)
 
     def rearm_callback_timeout(
@@ -466,7 +466,7 @@ class RuntimeSessionLaunchMixin:
             operation_id,
             deadline_at=time() + float(time_budget_seconds),
         )
-        self._notify()
+        self._notify(owner_id)
         return self._result(updated, "callback-timeout-rearmed")
 
     def register_callback_target(
@@ -533,7 +533,7 @@ class RuntimeSessionLaunchMixin:
                 callback_pointer=normalized,
                 generation=int(current["generation"]) + 1,
             )
-        self._notify()
+        self._notify(parent.spec.owner_id)
         return self._result(parent, "callback-target-registered")
 
     def continue_same_session_round(
@@ -577,7 +577,7 @@ class RuntimeSessionLaunchMixin:
             raise RuntimeSessionError(
                 "same-session round cannot await its callback"
             )
-        self._notify()
+        self._notify(owner_id)
         return self._result(
             parent,
             "round-continued",
@@ -615,5 +615,5 @@ class RuntimeSessionLaunchMixin:
         )
         updated = self.store.read(record.spec.owner_id, envelope.operation_id)
         action = "callback-duplicate" if acceptance.duplicate else "callback-accepted"
-        self._notify()
+        self._notify(record.spec.owner_id)
         return self._result(updated, action)

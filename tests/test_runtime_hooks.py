@@ -286,6 +286,9 @@ def publish(state_root, **kwargs):
         task_result.returncode == 0 and task_marker["actor"] == "task" and not task_result.stdout,
     )
     check("turn marker is content-free", "private task content" not in json.dumps(task_marker))
+    refresh_count_before_task = len(
+        status_refresh.read_text(encoding="utf-8").splitlines()
+    )
     task_start = subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "session-start"],
         input=json.dumps({**task_payload, "source": "resume"}),
@@ -298,7 +301,8 @@ def publish(state_root, **kwargs):
     )
     check(
         "task SessionStart has no coordinator status authority",
-        len(status_refresh.read_text(encoding="utf-8").splitlines()) == 1,
+        len(status_refresh.read_text(encoding="utf-8").splitlines())
+        == refresh_count_before_task,
         task_start.stderr,
     )
     task_compact = subprocess.run(

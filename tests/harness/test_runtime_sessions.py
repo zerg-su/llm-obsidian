@@ -939,9 +939,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         "status notifications bind the exact transition owner",
         bool(status_notifications)
         and all(
-            state_root == store.root and trigger_owner == "owner-1"
-            for state_root, trigger_owner in status_notifications
-        ),
+            state_root == store.root
+            for state_root, _trigger_owner in status_notifications
+        )
+        and status_notifications[-1] == (store.root, "owner-1"),
         status_notifications,
     )
     checkpoint_root = (

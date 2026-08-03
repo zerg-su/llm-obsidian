@@ -211,7 +211,7 @@ with tempfile.TemporaryDirectory() as raw:
             "op-complete",
             kind="pipeline-model-step",
         ),
-        lane_id="lane-d",
+        lane_id="lane-a",
         run_id="run-d",
     )
     advance(
@@ -465,7 +465,7 @@ with tempfile.TemporaryDirectory() as raw:
             "child-complete-a",
             kind="pipeline-model-step",
         ),
-        lane_id="lane-child-a",
+        lane_id="lane-live-a",
         run_id="run-child-a",
     )
     advance(
@@ -562,6 +562,54 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "starting-boundary"
+    store = OperationStore(state_root)
+    origin = "abababab-abab-abab-abab-abababababab"
+    workspace = "bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc"
+    window = "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd"
+    store.create(
+        spec("owner-start", "controller-start"),
+        lane_id="lane-start",
+        run_id="run-start",
+    )
+    store.transition("owner-start", "controller-start", "preflight")
+    bind_runtime(
+        store,
+        "owner-start",
+        "controller-start",
+        origin_surface=origin,
+    )
+    boundary_calls: list[list[str]] = []
+    for state in ("preflight", "starting"):
+        if state == "starting":
+            store.transition("owner-start", "controller-start", state)
+        check(
+            f"{state} controller is visible before surface binding",
+            publish(
+                state_root,
+                terminal_owner="owner-start",
+                workspace_id=workspace,
+                runner=topology_runner(
+                    boundary_calls,
+                    cmux_tree((origin, workspace, window)),
+                ),
+                binary="/opt/cmux",
+            )
+            and ui_calls(boundary_calls)[-1]
+            == [
+                "/opt/cmux",
+                "set-progress",
+                "0.000000",
+                "--label",
+                "0/1 · 1▶",
+                "--workspace",
+                workspace,
+            ],
+            boundary_calls,
+        )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "stale-controller"
     store = OperationStore(state_root)
     store.create(
@@ -581,7 +629,7 @@ with tempfile.TemporaryDirectory() as raw:
             "child-stale",
             kind="pipeline-model-step",
         ),
-        lane_id="lane-child-stale",
+        lane_id="lane-stale",
         run_id="run-child-stale",
     )
     advance(
