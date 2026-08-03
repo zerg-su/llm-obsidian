@@ -161,6 +161,38 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     )
     check("completed marker removed", not list(marker_dir.glob("*.json")))
 
+    stop_script = vault / ".claude" / "hooks" / "stop.sh"
+    stop_script.write_text(
+        "#!/usr/bin/env python3\n"
+        "print('VAULT_LINT_FAIL: questions: 1 page(s) without status open|answered')\n"
+        "print('COMMIT_BLOCKED: strict vault validation failed; changes remain unstaged/dirty for repair.')\n",
+        encoding="utf-8",
+    )
+    stop_script.chmod(0o755)
+    invoke("router", {**common, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
+    result = invoke("stop", {**common, "runtime": "codex", "hook_event_name": "Stop"}, vault)
+    blocked_output = json.loads(result.stdout)
+    check(
+        "blocked turn-end surfaces to the operator",
+        result.returncode == 0
+        and blocked_output["continue"] is True
+        and "COMMIT_BLOCKED" in blocked_output["systemMessage"]
+        and "VAULT_LINT_FAIL" in blocked_output["systemMessage"],
+        result.stdout,
+    )
+    check(
+        "blocked turn-end still writes the full log",
+        "COMMIT_BLOCKED" in (vault / ".vault-meta" / "stop-hook-last.log").read_text(encoding="utf-8"),
+    )
+    stop_script.write_text(
+        "#!/usr/bin/env python3\nprint('WIKI_CHANGED: validated and handled')\n", encoding="utf-8"
+    )
+    stop_script.chmod(0o755)
+    invoke("router", {**common, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
+    result = invoke("stop", {**common, "runtime": "codex", "hook_event_name": "Stop"}, vault)
+    check("clean turn-end stays quiet", result.returncode == 0 and not result.stdout.strip(), result.stdout)
+    stop_script.unlink()
+
     claude = {**common, "session_id": "claude-session", "runtime": "claude"}
     invoke("router", {**claude, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
     invoke("router", {**claude, "hook_event_name": "UserPromptSubmit", "prompt": "status again"}, vault)

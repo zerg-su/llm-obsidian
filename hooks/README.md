@@ -7,7 +7,10 @@ the exception: Codex plugin hooks also use it for the turn-end reindex and
 auto-commit pipeline, so `hooks.json` runs `stop.sh` with
 `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`. Codex requires hook stdout to be empty or
 JSON, so the plugin command redirects `stop.sh` output to
-`.vault-meta/stop-hook-last.log`.
+`.vault-meta/stop-hook-last.log`. A turn-end that did **not** commit
+(`COMMIT_BLOCKED`, `COMMIT_FAILED`, `MEMORY_BACKUP_BLOCKED`, or a non-zero exit)
+is additionally surfaced as a `systemMessage` JSON object, because a silently
+blocked pipeline is indistinguishable from a successful one.
 
 ## Events
 

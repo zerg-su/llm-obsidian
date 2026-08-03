@@ -14,6 +14,11 @@ from typing import Any
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts"))
 
+# Turn-end markers that mean the vault stayed dirty. Anything else the pipeline
+# prints is advisory and belongs in the log file only.
+STOP_BLOCKERS = ("COMMIT_BLOCKED:", "COMMIT_FAILED:", "MEMORY_BACKUP_BLOCKED:")
+STOP_MESSAGE_CAP = 1500
+
 from lifecycle_telemetry import origin_vault  # noqa: E402
 from turn_telemetry import clear_stale, finish_turn, start_turn  # noqa: E402
 
@@ -114,14 +119,43 @@ def session_context(root: Path, data: dict[str, Any], raw: str) -> None:
             emit(result.stdout)
 
 
+def surface_stop_blockers(output: str, returncode: int) -> None:
+    """A blocked turn-end must reach the operator; silence reads as success."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    blocked = [line for line in lines if line.startswith(STOP_BLOCKERS)]
+    if not blocked and returncode == 0:
+        return
+    detail = "\n".join(lines) if lines else f"turn-end pipeline exited {returncode}."
+    if len(detail) > STOP_MESSAGE_CAP:
+        detail = detail[:STOP_MESSAGE_CAP].rstrip() + " ..."
+    print(
+        json.dumps(
+            {
+                "continue": True,
+                "systemMessage": (
+                    "llm-obsidian turn-end pipeline did not commit the vault:\n"
+                    f"{detail}\n"
+                    "Vault writes stay dirty until this is repaired "
+                    "(full output: .vault-meta/stop-hook-last.log)."
+                ),
+            }
+        )
+    )
+
+
 def stop_pipeline(root: Path, raw: str) -> None:
-    result = invoke(PLUGIN_ROOT / ".claude" / "hooks" / "stop.sh", raw, root)
+    script = PLUGIN_ROOT / ".claude" / "hooks" / "stop.sh"
+    if not script.is_file():
+        return
+    result = invoke(script, raw, root)
+    output = (result.stdout or "") + (result.stderr or "")
     log = root / ".vault-meta" / "stop-hook-last.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text((result.stdout or "") + (result.stderr or ""), encoding="utf-8")
+        log.write_text(output, encoding="utf-8")
     except OSError:
         pass
+    surface_stop_blockers(output, result.returncode)
 
 
 def main() -> int:
