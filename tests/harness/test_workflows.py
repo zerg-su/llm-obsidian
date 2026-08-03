@@ -118,9 +118,7 @@ check("deep aggregation preserves axes and material verdict", aggregate_result["
 check("important findings require same-session resolution", resolution_required(spec_result))
 
 shared_id_results = {
-    axis: namespace_review_result(
-        deep,
-        ReviewResult(
+    axis: ReviewResult(
             axis,
             "changes-requested",
             (
@@ -132,8 +130,7 @@ shared_id_results = {
                     "each lane owns separate evidence",
                 ),
             ),
-        ),
-    )
+        )
     for axis in deep.axes
 }
 shared_id_aggregate = aggregate(deep, shared_id_results)
@@ -148,6 +145,34 @@ check(
     and shared_ids
     == [f"{axis}:SHARED-001" for axis in deep.axes],
 )
+try:
+    namespace_review_result(
+        deep,
+        ReviewResult(
+            "anthropic-holistic",
+            "changes-requested",
+            (
+                ReviewFinding(
+                    "F-1",
+                    "anthropic-holistic",
+                    "important",
+                    "ordinary identity",
+                    "first independent issue",
+                ),
+                ReviewFinding(
+                    "anthropic-holistic:F-1",
+                    "anthropic-holistic",
+                    "important",
+                    "reserved identity",
+                    "would collide after qualification",
+                ),
+            ),
+        ),
+    )
+except ValueError:
+    check("initial multi-lane findings reject reserved aggregate IDs", True)
+else:
+    check("initial multi-lane findings reject reserved aggregate IDs", False)
 
 
 def check_aggregate_finding_rejected(label: str, **changes: object) -> None:

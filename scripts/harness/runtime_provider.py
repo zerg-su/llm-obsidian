@@ -16,6 +16,10 @@ from .adapters.claude import (
     review_test_directory,
     validate_reviewer_sandbox_command,
 )
+from .adapters.codex import (
+    CodexDriverError,
+    validate_reviewer_sandbox_command as validate_codex_reviewer_sandbox_command,
+)
 from .contracts import AttentionReason
 from .prompts import PromptDecision, classify
 from .runtime_worker_contracts import (
@@ -58,6 +62,22 @@ def provider_argv(
         except (ClaudeDriverError, KeyError, TypeError) as exc:
             raise RuntimeWorkerError(
                 "Claude reviewer sandbox identity is invalid"
+            ) from exc
+    if (
+        runtime == "codex"
+        and spec.get("callback_mode") == "envelope"
+        and isinstance(product_root, Path)
+    ):
+        try:
+            validate_codex_reviewer_sandbox_command(
+                argv,
+                callback_pointer=spec["callback_pointer"],
+                product_root=product_root,
+                session_root=spec["cwd"],
+            )
+        except (CodexDriverError, KeyError, TypeError) as exc:
+            raise RuntimeWorkerError(
+                "Codex reviewer sandbox identity is invalid"
             ) from exc
     pinned_interpreter = (
         runtime_interpreter

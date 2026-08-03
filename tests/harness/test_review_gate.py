@@ -226,7 +226,8 @@ def write_trusted_current_approval(
         for axis in axes:
             short = axis
             pointer = f"{operation_id}/resolution-{short}-0.json"
-            finding_id = "authority-terminal-head-rebind"
+            raw_finding_id = "authority-terminal-head-rebind"
+            finding_id = axis_finding_id(axis, raw_finding_id)
             material_ids = (
                 [finding_id]
                 if valid_resolution_proof and axis == "openai-holistic"
@@ -280,7 +281,7 @@ def write_trusted_current_approval(
                                         "axis": axis,
                                         "evidence": "The implementation HEAD changed after the initial round.",
                                         "file": "product.py",
-                                        "finding_id": finding_id,
+                                        "finding_id": raw_finding_id,
                                         "line": 1,
                                         "recommendation": "Resolve and verify the exact changed HEAD.",
                                         "severity": "important",
@@ -2490,12 +2491,28 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
     qualified_deep_finding = (
         f"{standards_lane.axis}:F-deep-resolution"
     )
+    deep_boundary = controller.read()["awaiting_resolution"][
+        standards_lane.axis
+    ]
+    persisted_deep_result = json.loads(
+        (controller.root / deep_boundary["pointer"]).read_text(encoding="utf-8")
+    )
+    persisted_envelope = review_round_envelope(
+        run.rounds[standards_lane.axis],
+        _result_from_payload(persisted_deep_result),
+    )
+    persisted_child = controller.round_store.read(
+        run.rounds[standards_lane.axis].owner_id,
+        run.rounds[standards_lane.axis].operation_id,
+    )
     check(
-        "deep barrier persists an axis-qualified resolution identity",
-        controller.read()["awaiting_resolution"][standards_lane.axis][
-            "material_finding_ids"
-        ]
-        == [qualified_deep_finding],
+        "deep barrier preserves callback bytes and publishes a qualified resolution identity",
+        persisted_deep_result["findings"][0]["finding_id"]
+        == "F-deep-resolution"
+        and deep_boundary["material_finding_ids"]
+        == [qualified_deep_finding]
+        and persisted_child.accepted_callback_sha256
+        == persisted_envelope.payload_sha256,
     )
     resolved = replace(context, head_sha="9" * 40)
     for lane in run.execution.lanes:

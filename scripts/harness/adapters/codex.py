@@ -16,6 +16,87 @@ class CodexDriverError(ValueError):
 
 EFFORTS = frozenset({"minimal", "low", "medium", "high", "xhigh", "max"})
 CHECKPOINT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+REVIEWER_CONFIG = frozenset(
+    {
+        "sandbox_workspace_write.exclude_slash_tmp=true",
+        "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+        "sandbox_workspace_write.network_access=false",
+        "sandbox_workspace_write.writable_roots=[]",
+        "shell_environment_policy.ignore_default_excludes=false",
+    }
+)
+
+
+def validate_reviewer_sandbox_command(
+    argv: tuple[str, ...],
+    *,
+    callback_pointer: Path,
+    product_root: Path,
+    session_root: Path,
+) -> None:
+    """Fail closed if a persisted Codex reviewer command weakens isolation."""
+
+    def one(flag: str) -> int:
+        positions = [index for index, value in enumerate(argv) if value == flag]
+        if len(positions) != 1:
+            raise CodexDriverError(f"review sandbox must pin one {flag}")
+        return positions[0]
+
+    one("--strict-config")
+    cd_index = one("--cd")
+    sandbox_index = one("--sandbox")
+    approval_index = one("--ask-for-approval")
+    try:
+        callback_root = callback_pointer.parent.resolve(strict=False)
+        session = session_root.resolve()
+        product = product_root.resolve()
+        observed_root = Path(argv[cd_index + 1]).resolve(strict=False)
+        callback_root.relative_to(session)
+        sandbox = argv[sandbox_index + 1]
+        approval = argv[approval_index + 1]
+    except (IndexError, OSError, ValueError) as exc:
+        raise CodexDriverError("review sandbox root is invalid") from exc
+    if (
+        observed_root != callback_root
+        or observed_root == product
+        or product in observed_root.parents
+        or session == product
+        or sandbox != "workspace-write"
+        or approval != "never"
+    ):
+        raise CodexDriverError("review sandbox command identity drifted")
+    config_values: list[str] = []
+    for index, value in enumerate(argv):
+        if value != "--config":
+            continue
+        if index + 1 >= len(argv):
+            raise CodexDriverError("review sandbox config is invalid")
+        config_values.append(argv[index + 1])
+    for required in REVIEWER_CONFIG:
+        if config_values.count(required) != 1:
+            raise CodexDriverError("review sandbox config drifted")
+    reasoning = [
+        value
+        for value in config_values
+        if value.startswith("model_reasoning_effort=")
+    ]
+    if (
+        len(reasoning) != 1
+        or any(
+            value not in REVIEWER_CONFIG and value != reasoning[0]
+            for value in config_values
+        )
+    ):
+        raise CodexDriverError("review sandbox config expands authority")
+    if any(
+        flag in argv
+        for flag in (
+            "--add-dir",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--full-auto",
+        )
+    ):
+        raise CodexDriverError("review sandbox command has an escape flag")
 
 
 @dataclass(frozen=True)

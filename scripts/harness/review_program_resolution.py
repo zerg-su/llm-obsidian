@@ -21,6 +21,7 @@ from .workflows.review import review_round_payload
 from .workflows.review_gate_contracts import _result_from_payload
 from review_contract import (
     ReviewContractError,
+    axis_finding_id,
     review_parent_kind,
     validate_review_axes,
 )
@@ -221,7 +222,11 @@ def _material_ids(
         if severity in _MATERIAL:
             if not isinstance(finding_id, str) or not finding_id:
                 raise ReviewProgramError("trusted pre-resolution round is invalid")
-            material.append(finding_id)
+            material.append(
+                axis_finding_id(axis, finding_id)
+                if len(lanes) > 1
+                else finding_id
+            )
     if result.get("verdict") == "approve" and material:
         raise ReviewProgramError("trusted pre-resolution round is invalid")
     return tuple(material)

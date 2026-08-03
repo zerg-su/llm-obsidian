@@ -106,7 +106,8 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
         raise ValueError("review result exceeds the verification iteration budget")
     canonical_findings: dict[str, list[dict[str, object]]] = {}
     try:
-        for row in ordered:
+        for raw_row in ordered:
+            row = namespace_review_result(request, raw_row)
             canonical_findings[row.axis] = [
                 validate_finding(
                     {
@@ -154,11 +155,18 @@ def aggregate(request: ReviewRequest, results: Mapping[str, ReviewResult]) -> di
 def namespace_review_result(
     request: ReviewRequest, result: ReviewResult
 ) -> ReviewResult:
-    """Qualify lane-local finding IDs before multi-lane persistence."""
+    """Return aggregate-safe finding IDs without changing callback evidence."""
 
     if len(request.axes) == 1 or not result.findings:
         return result
-    return replace(
+    prefix = f"{result.axis}:"
+    if result.verification_iteration == 0 and any(
+        finding.finding_id.startswith(prefix) for finding in result.findings
+    ):
+        raise ValueError(
+            "initial multi-lane finding_id uses the reserved aggregate prefix"
+        )
+    qualified = replace(
         result,
         findings=tuple(
             replace(
@@ -168,6 +176,14 @@ def namespace_review_result(
             for finding in result.findings
         ),
     )
+    try:
+        require_unique_finding_ids(
+            (finding.finding_id for finding in qualified.findings),
+            f"review result {result.axis} qualified finding IDs",
+        )
+    except ReviewContractError as exc:
+        raise ValueError(str(exc)) from exc
+    return qualified
 
 
 def aggregate_review_evidence(

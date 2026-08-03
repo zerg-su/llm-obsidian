@@ -676,7 +676,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         and [row["axis"] for row in full_aggregate["axes"]]
         == list(full_request.policy.axes)
         and full_aggregate["axes"][-1]["findings"][0]["finding_id"]
-        == "F-full-openai-engineering",
+        == "openai-engineering:F-full-openai-engineering",
     )
     check(
         "verification callback gets a distinct receipt without owning resources",

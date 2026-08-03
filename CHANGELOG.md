@@ -29,14 +29,16 @@ packages were published for them.
 - Accepted terminal callbacks can finish when cmux did not materialize a resume
   checkpoint; missing evidence is typed and never authorizes another effect.
 - Prevented independent review lanes from colliding on a shared local finding
-  ID, and kept outcome review active when no implementer summary exists.
+  ID without rewriting trusted callback bytes, and kept outcome review active
+  when no implementer summary exists.
 
 ### Security
 
 - Claude and Codex reviewers can write only their current lane's callback/test
   scratch. They cannot forge sibling-lane callbacks or write the product tree.
 - Codex reviewers exclude ambient temporary write roots, disable reviewer
-  network access, and filter credential-like variables from shell subprocesses.
+  network access, and filter credential-like variables from shell subprocesses;
+  persisted reviewer commands are revalidated fail-closed before execution.
 
 ### Compatibility
 

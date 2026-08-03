@@ -15,6 +15,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from review_contract import ReviewContractError, axis_finding_id
 
 
 class RuntimeWorkerReviewBridgeMixin:
@@ -129,6 +130,8 @@ class RuntimeWorkerReviewBridgeMixin:
         reviewed_heads: set[str] = set()
         review_operation_ids: set[str] = set()
         review_callbacks: list[dict[str, object]] = []
+        raw_lanes = gate_state.get("lanes")
+        multi_lane = isinstance(raw_lanes, list) and len(raw_lanes) > 1
         for axis in sorted(awaiting):
             evidence = awaiting[axis]
             if not isinstance(evidence, dict):
@@ -150,12 +153,21 @@ class RuntimeWorkerReviewBridgeMixin:
                 or (not isinstance(rows, list))
             ):
                 raise RuntimeWorkerError("review result evidence is invalid")
-            material_ids = [
-                str(finding.get("finding_id") or "")
-                for finding in rows
-                if isinstance(finding, dict)
-                and finding.get("severity") in MATERIAL_SEVERITIES
-            ]
+            try:
+                material_ids = [
+                    axis_finding_id(
+                        axis, str(finding.get("finding_id") or "")
+                    )
+                    if multi_lane
+                    else str(finding.get("finding_id") or "")
+                    for finding in rows
+                    if isinstance(finding, dict)
+                    and finding.get("severity") in MATERIAL_SEVERITIES
+                ]
+            except ReviewContractError as exc:
+                raise RuntimeWorkerError(
+                    "review finding identity is invalid"
+                ) from exc
             callback = {
                 "axis": axis,
                 "round_operation_id": str(evidence.get("round_operation_id") or ""),
@@ -175,7 +187,17 @@ class RuntimeWorkerReviewBridgeMixin:
             for finding in rows:
                 if not isinstance(finding, dict):
                     raise RuntimeWorkerError("review finding evidence is invalid")
-                findings.append(dict(finding))
+                qualified = dict(finding)
+                if multi_lane:
+                    try:
+                        qualified["finding_id"] = axis_finding_id(
+                            axis, str(finding.get("finding_id") or "")
+                        )
+                    except ReviewContractError as exc:
+                        raise RuntimeWorkerError(
+                            "review finding identity is invalid"
+                        ) from exc
+                findings.append(qualified)
             reviewed_heads.add(str(evidence.get("reviewed_head_sha") or ""))
         active_review_operation_id = str(
             gate_state.get("active_review_operation_id") or ""

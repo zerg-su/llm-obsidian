@@ -35,14 +35,16 @@
 - Принятый terminal callback завершается и без cmux resume checkpoint;
   отсутствие checkpoint типизировано и не разрешает новый provider effect.
 - Независимые review-lane больше не конфликтуют из-за одинакового локального
-  finding ID; outcome-review выполняется и без implementer summary.
+  finding ID без переписывания trusted callback bytes; outcome-review
+  выполняется и без implementer summary.
 
 ### Безопасность
 
 - Claude и Codex reviewer могут писать только в callback/test scratch своей
   lane и не могут подменить соседний callback или изменить product worktree.
 - Codex reviewer не получает ambient-запись в системные временные каталоги,
-  работает без сети и фильтрует credential-like переменные shell-процессов.
+  работает без сети и фильтрует credential-like переменные shell-процессов;
+  persisted reviewer command повторно проверяется fail-closed перед запуском.
 
 ### Совместимость
 

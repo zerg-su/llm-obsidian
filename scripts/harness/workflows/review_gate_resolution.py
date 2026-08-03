@@ -78,6 +78,9 @@ class ReviewGateResolutionMixin:
         if self._parent_callback_timed_out(lane):
             self._replace(status="attention-required")
             return ReviewGateDecision("attention-required", lane, round_)
+        qualified_result = namespace_review_result(
+            run.execution.request.policy, result
+        )
         envelope = review_round_envelope(round_, result)
         payload = envelope.payload
         if (
@@ -106,9 +109,6 @@ class ReviewGateResolutionMixin:
             self.round_store.transition(
                 child.spec.owner_id, child.spec.operation_id, "complete"
             )
-        result = namespace_review_result(
-            run.execution.request.policy, result
-        )
         pointer = self._persist_result(
             run.execution.request.policy.operation_id,
             result,
@@ -124,7 +124,7 @@ class ReviewGateResolutionMixin:
         awaiting = dict(state.get("awaiting_resolution") or {})
         material_finding_ids = [
             finding.finding_id
-            for finding in result.findings
+            for finding in qualified_result.findings
             if finding.severity in MATERIAL_SEVERITIES
         ]
         awaiting[result.axis] = {
@@ -188,9 +188,12 @@ class ReviewGateResolutionMixin:
         ):
             raise ValueError("review resolution finding evidence is unavailable")
         previous_result = _result_from_payload(_read_json(result_path))
+        qualified_previous_result = namespace_review_result(
+            run.execution.request.policy, previous_result
+        )
         material_ids = tuple(
             finding.finding_id
-            for finding in previous_result.findings
+            for finding in qualified_previous_result.findings
             if finding.severity in MATERIAL_SEVERITIES
         )
         expected_resolution_operation_id = (

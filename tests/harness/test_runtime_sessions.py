@@ -26,7 +26,11 @@ from harness.adapters.claude import (
     validate_reviewer_sandbox_command,
 )
 from harness.adapters.cmux import Surface
-from harness.adapters.codex import CodexDriver, CodexDriverError
+from harness.adapters.codex import (
+    CodexDriver,
+    CodexDriverError,
+    validate_reviewer_sandbox_command as validate_codex_reviewer_sandbox_command,
+)
 from harness.callbacks import CallbackBroker, CallbackTimeoutError
 from harness.adapters.process import (
     ProcessAdapter,
@@ -53,6 +57,7 @@ from harness.runtime_worker import (
     run as run_runtime_worker,
 )
 from harness.runtime_provider import provider_environment
+from harness.runtime_worker_contracts import RuntimeWorkerError
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -2240,6 +2245,76 @@ check(
     in codex_config_values
     and "--strict-config" in codex_callback,
 )
+validate_codex_reviewer_sandbox_command(
+    codex_callback,
+    callback_pointer=callback,
+    product_root=product,
+    session_root=scratch.parent,
+)
+
+
+def expect_codex_sandbox_rejection(
+    label: str, command: tuple[str, ...]
+) -> None:
+    try:
+        validate_codex_reviewer_sandbox_command(
+            command,
+            callback_pointer=callback,
+            product_root=product,
+            session_root=scratch.parent,
+        )
+    except CodexDriverError:
+        check(label, True)
+    else:
+        check(label, False, command)
+
+
+for required_config in (
+    "sandbox_workspace_write.exclude_slash_tmp=true",
+    "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+    "sandbox_workspace_write.network_access=false",
+    "sandbox_workspace_write.writable_roots=[]",
+    "shell_environment_policy.ignore_default_excludes=false",
+):
+    changed = list(codex_callback)
+    value_index = changed.index(required_config)
+    del changed[value_index - 1 : value_index + 1]
+    expect_codex_sandbox_rejection(
+        f"Codex reviewer rejects missing {required_config}", tuple(changed)
+    )
+changed_codex_root = list(codex_callback)
+changed_codex_root[changed_codex_root.index("--cd") + 1] = "/tmp/foreign-review"
+expect_codex_sandbox_rejection(
+    "Codex reviewer rejects a foreign callback root", tuple(changed_codex_root)
+)
+expect_codex_sandbox_rejection(
+    "Codex reviewer rejects an extra writable root",
+    (*codex_callback, "--add-dir", str(product)),
+)
+expect_codex_sandbox_rejection(
+    "Codex reviewer rejects a conflicting sandbox override",
+    (
+        *codex_callback,
+        "--config",
+        "sandbox_workspace_write.network_access=true",
+    ),
+)
+try:
+    runtime_provider_argv(
+        {
+            "argv": tuple(changed_codex_root),
+            "runtime": "codex",
+            "callback_mode": "envelope",
+            "callback_pointer": callback,
+            "product_root": product,
+            "cwd": scratch.parent,
+            "surface_id": SURFACE,
+        }
+    )
+except RuntimeWorkerError:
+    check("persisted Codex reviewer commands fail closed before replay", True)
+else:
+    check("persisted Codex reviewer commands fail closed before replay", False)
 
 
 def expect_sandbox_rejection(label: str, command: tuple[str, ...]) -> None:

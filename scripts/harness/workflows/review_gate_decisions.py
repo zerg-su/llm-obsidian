@@ -194,6 +194,9 @@ class ReviewGateDecisionMixin:
         if self._parent_callback_timed_out(lane):
             self._replace(status="attention-required")
             return ReviewGateDecision("attention-required", lane, round_)
+        qualified_result = namespace_review_result(
+            run.execution.request.policy, result
+        )
         envelope = review_round_envelope(round_, result)
         cleanup = accept_review_round(
             self.runtime,
@@ -201,9 +204,6 @@ class ReviewGateDecisionMixin:
             lane,
             round_,
             envelope,
-        )
-        result = namespace_review_result(
-            run.execution.request.policy, result
         )
         pointer = self._persist_result(
             run.execution.request.policy.operation_id,
@@ -217,7 +217,7 @@ class ReviewGateDecisionMixin:
 
         material = tuple(
             finding
-            for finding in result.findings
+            for finding in qualified_result.findings
             if finding.severity in MATERIAL_SEVERITIES
         )
         if (
