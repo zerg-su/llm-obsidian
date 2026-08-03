@@ -1,3 +1,24 @@
+---
+type: plan
+title: "v2.1.1 code-owned optimization plan"
+address: c-000098
+session_id: 019f6ddd-d07e-7a30-b018-f6358753fb91
+sessions:
+  - id: 019f6ddd-d07e-7a30-b018-f6358753fb91
+    date: 2026-07-19
+  - id: 019fab00-3160-7380-8920-4b20183afb76
+    date: 2026-08-03
+source_cwd: "/Users/zak/Projects/llm-obsidian"
+status: executed
+created: 2026-07-19
+updated: 2026-08-03
+tags:
+  - plan
+  - v2-1-1
+  - code-owned-optimization
+  - historical-migration
+---
+
 # v2.1.1 code-owned optimization plan
 
 Status: committed review candidate after user clarification. Product
@@ -166,3 +187,5 @@ files; the first v2.1.0 acceptance run must use `--restart` (or delete the
 derived schema-2 `.vault-meta/acceptance/latest-live.json`) because v2.1.0
 rejects that report version. Runtime telemetry files remain derived, gitignored
 state, and vault content remains readable by v2.1.0.
+
+Результат: [[Cross-model review — v2.1.1 final implementation review — 1bae885ecfdf]]
