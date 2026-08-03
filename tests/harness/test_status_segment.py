@@ -39,16 +39,18 @@ def spec(
     runtime: str = "codex",
     *,
     kind: str = "dispatch",
+    parent_operation_id: str = "",
 ) -> OperationSpec:
     model = "fable" if runtime == "claude" else "gpt-5.6-sol"
     return OperationSpec(
         operation,
-        f"idem-{operation}",
+        f"idem-{operation}"[:128],
         kind,
         owner,
         RuntimeRoute(runtime, model, "high", "executor", "a" * 64),
         "context/manifest.json",
         "focused",
+        parent_operation_id=parent_operation_id,
     )
 
 
@@ -627,7 +629,12 @@ with tempfile.TemporaryDirectory() as raw:
         ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
     )
     stale = replace(
-        spec(owner, "dispatch-old-verify-0123456789abcdef", kind="pipeline-verify"),
+        spec(
+            owner,
+            "dispatch-old-verify-0123456789abcdef",
+            kind="pipeline-verify",
+            parent_operation_id="dispatch-old",
+        ),
         contract_sha256=contract,
     )
     store.create(stale, lane_id="lane-stale-verify", run_id="run-stale-verify")
@@ -676,6 +683,142 @@ with tempfile.TemporaryDirectory() as raw:
 
 
 with tempfile.TemporaryDirectory() as raw:
+    state_root = Path(raw) / "exact-parent-identity"
+    store = OperationStore(state_root)
+    owner = "owner-prefix-collision"
+    workspace = "d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4"
+    window = "d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5"
+    origin = "d6d6d6d6-d6d6-d6d6-d6d6-d6d6d6d6d6d6"
+    first_surface = "d7d7d7d7-d7d7-d7d7-d7d7-d7d7d7d7d7d7"
+    second_surface = "d8d8d8d8-d8d8-d8d8-d8d8-d8d8d8d8d8d8"
+    for controller, surface_id in (
+        ("job", first_surface),
+        ("job-more", second_surface),
+    ):
+        store.create(
+            spec(owner, controller),
+            lane_id=f"lane-{controller}",
+            run_id=f"run-{controller}",
+        )
+        advance(store, owner, controller, ("preflight", "starting", "running"))
+        bind_runtime(
+            store,
+            owner,
+            controller,
+            origin_surface=origin,
+            surface_id=surface_id,
+        )
+    completed = "job-verify-0123456789abcdef"
+    store.create(
+        spec(
+            owner,
+            completed,
+            kind="pipeline-verify",
+            parent_operation_id="job",
+        ),
+        lane_id="lane-independent-child",
+        run_id="run-independent-child",
+    )
+    advance(
+        store,
+        owner,
+        completed,
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    calls: list[list[str]] = []
+    check(
+        "explicit parent identity survives controller prefix collisions",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                calls,
+                cmux_tree(
+                    (origin, workspace, window),
+                    (first_surface, workspace, window),
+                    (second_surface, workspace, window),
+                ),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.333333",
+            "--label",
+            "1/3 · 2▶",
+            "--workspace",
+            workspace,
+        ],
+        calls,
+    )
+
+    long_parent = "dispatch-" + "p" * 119
+    long_surface = "d9d9d9d9-d9d9-d9d9-d9d9-d9d9d9d9d9d9"
+    store.create(
+        spec(owner, long_parent),
+        lane_id="lane-long-parent",
+        run_id="run-long-parent",
+    )
+    advance(store, owner, long_parent, ("preflight", "starting", "running"))
+    bind_runtime(
+        store,
+        owner,
+        long_parent,
+        origin_surface=origin,
+        surface_id=long_surface,
+    )
+    suffix = "-verify-fedcba9876543210"
+    truncated_child = f"{long_parent[: 128 - len(suffix)]}{suffix}"
+    store.create(
+        spec(
+            owner,
+            truncated_child,
+            kind="pipeline-verify",
+            parent_operation_id=long_parent,
+        ),
+        lane_id="lane-truncated-child",
+        run_id="run-truncated-child",
+    )
+    advance(
+        store,
+        owner,
+        truncated_child,
+        ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
+    )
+    truncated_calls: list[list[str]] = []
+    check(
+        "explicit parent identity survives bounded child id truncation",
+        publish(
+            state_root,
+            workspace_id=workspace,
+            runner=topology_runner(
+                truncated_calls,
+                cmux_tree(
+                    (origin, workspace, window),
+                    (first_surface, workspace, window),
+                    (second_surface, workspace, window),
+                    (long_surface, workspace, window),
+                ),
+            ),
+            binary="/opt/cmux",
+        )
+        and ui_calls(truncated_calls)[-1]
+        == [
+            "/opt/cmux",
+            "set-progress",
+            "0.400000",
+            "--label",
+            "2/5 · 3▶",
+            "--workspace",
+            workspace,
+        ],
+        truncated_calls,
+    )
+
+
+with tempfile.TemporaryDirectory() as raw:
     state_root = Path(raw) / "research-program-identity"
     store = OperationStore(state_root)
     owner = "owner-research-programs"
@@ -697,7 +840,12 @@ with tempfile.TemporaryDirectory() as raw:
         ("preflight", "starting", "running", "finalizing", "exiting", "complete"),
     )
     store.create(
-        spec(owner, "research-old-fetch-e7d3799e", kind="research-fetch"),
+        spec(
+            owner,
+            "research-old-fetch-e7d3799e",
+            kind="research-fetch",
+            parent_operation_id="research-old",
+        ),
         lane_id="lane-research-old-fetch",
         run_id="run-research-old-fetch",
     )
@@ -726,7 +874,12 @@ with tempfile.TemporaryDirectory() as raw:
         ("preflight", "starting", "running", "awaiting-callback"),
     )
     store.create(
-        spec(owner, "research-new-fetch-e7d3799e", kind="research-fetch"),
+        spec(
+            owner,
+            "research-new-fetch-e7d3799e",
+            kind="research-fetch",
+            parent_operation_id="research-new",
+        ),
         lane_id="lane-research-new-fetch",
         run_id="run-research-new-fetch",
     )
@@ -803,7 +956,12 @@ for stage, suffix in (("fetch", "e7d3799e"), ("synth", "e8c3e4fa")):
             ("preflight", "starting", "running", "awaiting-callback"),
         )
         store.create(
-            spec(owner, child, kind=f"research-{stage}"),
+            spec(
+                owner,
+                child,
+                kind=f"research-{stage}",
+                parent_operation_id=controller,
+            ),
             lane_id=f"lane-{child}",
             run_id=f"run-{child}",
         )

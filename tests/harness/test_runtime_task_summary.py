@@ -1713,6 +1713,10 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             input_sha256=input_sha256,
             profile="scoped",
         )
+        check(
+            "pipeline verification binds its exact parent operation",
+            child.parent_operation_id == parent.spec.operation_id,
+        )
         crash_store.create(child, lane_id=lane_id, run_id=run_id)
         child_supervisor = OperationSupervisor(
             crash_store, "owner-1", child.operation_id

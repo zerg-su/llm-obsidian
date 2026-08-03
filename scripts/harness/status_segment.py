@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,15 +27,6 @@ CONTROLLER_KINDS = frozenset(
     }
 )
 SURFACE_BOUND_STATES = frozenset({"running", "awaiting-callback"})
-DERIVED_PROGRAM_SUFFIXES = (
-    re.compile(r"-(?:repro|cause|test|fix)-[0-9]+-[0-9a-f]{12}\Z"),
-    re.compile(r"-custom-[0-9]+-[0-9a-f]{12}\Z"),
-    re.compile(r"-verify-[0-9a-f]{16}\Z"),
-    re.compile(r"-(?:round|fresh)-[0-9a-f]{8}\Z"),
-    re.compile(r"-(?:fetch|synth)-[0-9a-f]{8}\Z"),
-)
-
-
 @dataclass(frozen=True)
 class HarnessStatus:
     completed: int = 0
@@ -217,14 +207,6 @@ def _research_origin(
     )
 
 
-def _derived_program_prefix(record: OperationRecord) -> str:
-    for pattern in DERIVED_PROGRAM_SUFFIXES:
-        match = pattern.search(record.spec.operation_id)
-        if match is not None:
-            return record.spec.operation_id[: match.start()]
-    return ""
-
-
 def _record_controller(
     record: OperationRecord,
     controllers: list[OperationRecord],
@@ -241,17 +223,16 @@ def _record_controller(
             None,
         )
 
-    prefix = _derived_program_prefix(record)
-    if prefix:
-        matches = [
-            controller
-            for controller in controllers
-            if controller.spec.operation_id.startswith(prefix)
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        if matches:
-            return None
+    if record.spec.parent_operation_id:
+        return next(
+            (
+                controller
+                for controller in controllers
+                if controller.spec.operation_id
+                == record.spec.parent_operation_id
+            ),
+            None,
+        )
 
     lane_matches = [
         controller

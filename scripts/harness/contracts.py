@@ -110,6 +110,7 @@ class OperationSpec:
     verification_profile: str
     keep_open: bool = False
     contract_sha256: str = ""
+    parent_operation_id: str = ""
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -126,6 +127,10 @@ class OperationSpec:
         _relative_path(self.context_manifest, "context_manifest")
         if self.contract_sha256:
             _sha256(self.contract_sha256, "contract_sha256")
+        if self.parent_operation_id:
+            _identifier(self.parent_operation_id, "parent_operation_id")
+            if self.parent_operation_id == self.operation_id:
+                raise ContractError("operation cannot be its own parent")
 
 
 @dataclass(frozen=True)
@@ -390,6 +395,7 @@ def operation_spec_from_dict(value: Mapping[str, Any]) -> OperationSpec:
         verification_profile=value.get("verification_profile", ""),
         keep_open=value.get("keep_open", False),
         contract_sha256=value.get("contract_sha256", ""),
+        parent_operation_id=value.get("parent_operation_id", ""),
         schema_version=value.get("schema_version", 0),
     )
 

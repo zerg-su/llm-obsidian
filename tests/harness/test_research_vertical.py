@@ -361,6 +361,8 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         isinstance(execution.parent.spec, OperationSpec)
         and isinstance(execution.fetch.spec, OperationSpec)
         and execution.fetch.spec.operation_id == expected_fetch_id
+        and execution.fetch.spec.parent_operation_id
+        == execution.parent.spec.operation_id
         and fetch_request.spec == execution.fetch.spec
         and fetch_request.lane_id == execution.fetch.lane_id
         and fetch_request.run_id == execution.fetch.run_id
@@ -434,6 +436,8 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         isinstance(synth_request, RuntimeSessionRequest)
         and execution.synth is not None
         and execution.synth.spec.operation_id == expected_synth_id
+        and execution.synth.spec.parent_operation_id
+        == execution.parent.spec.operation_id
         and synth_request.spec == execution.synth.spec
         and synth_request.lane_id == execution.synth.lane_id
         and synth_request.run_id == execution.synth.run_id
