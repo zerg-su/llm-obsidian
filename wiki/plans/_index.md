@@ -14,8 +14,9 @@ sessions: []
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_17 pages, updated 2026-08-03_
+_18 pages, updated 2026-08-03_
 
+- [[2026-07-19-v2-1-1-code-owned-optimization-plan]] — executed, 2026-08-03 `c-000098`
 - [[2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review]] — pending, 2026-08-03 `c-000096`
 - [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-03 `c-000097`
 - [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]] — pending, 2026-08-02 `c-000059`
