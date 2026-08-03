@@ -66,13 +66,19 @@ def cell_evidence(row: dict[str, object], commit_sha: str) -> dict[str, object]:
         ]
     else:
         operations = [
-            operation("spec-op", "deep-review-spec", "claude", "spec-lane", "spec-run"),
             operation(
-                "correctness-op",
-                "deep-review-correctness",
+                "fable-op",
+                "simple-review-holistic",
+                "claude",
+                "fable-lane",
+                "fable-run",
+            ),
+            operation(
+                "sol-op",
+                "simple-review-holistic",
                 "codex",
-                "correctness-lane",
-                "correctness-run",
+                "sol-lane",
+                "sol-run",
             ),
         ]
     now = datetime.now(timezone.utc).isoformat()

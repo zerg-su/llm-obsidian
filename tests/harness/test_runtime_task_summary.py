@@ -662,7 +662,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     handoff_review_operation = "review-operation-current"
     handoff_callbacks = [
         {
-            "axis": "holistic",
+            "axis": "openai-holistic",
             "round_operation_id": "round-operation-current",
             "round_run_id": "round-run-current",
             "callback_id": "callback-current",
@@ -675,7 +675,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     handoff_gate = {
         "active_review_operation_id": handoff_review_operation,
         "awaiting_resolution": {
-            "holistic": {
+            "openai-holistic": {
                 "reviewed_head_sha": reviewed_head,
                 "material_finding_ids": ["F-material"],
                 "review_operation_id": handoff_review_operation,
@@ -757,8 +757,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         ),
     )
     for material_axis in (
-        "spec",
-        "standards-correctness-architecture-security",
+        "anthropic-holistic",
+        "openai-holistic",
     ):
         mixed_callbacks = [
             {
@@ -767,12 +767,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 "round_run_id": f"run-{axis}",
                 "callback_id": f"callback-{axis}",
                 "callback_sha256": (
-                    "d" * 64 if axis == "spec" else "e" * 64
+                    "d" * 64 if axis == "anthropic-holistic" else "e" * 64
                 ),
             }
             for axis in (
-                "spec",
-                "standards-correctness-architecture-security",
+                "anthropic-holistic",
+                "openai-holistic",
             )
         ]
         mixed_gate = {
@@ -2129,16 +2129,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             / default_resolution_task
         )
         if len(default_resolution_calls) == 1:
-            result_pointer = gate_root / "round-holistic-0.json"
+            result_pointer = gate_root / "round-openai-holistic-0.json"
             write_json(
                 result_pointer,
                 {
-                    "axis": "holistic",
+                    "axis": "openai-holistic",
                     "verdict": "changes-requested",
                     "verification_iteration": 0,
                     "findings": [
                         {
-                            "axis": "holistic",
+                            "axis": "openai-holistic",
                             "finding_id": "F-default-material",
                             "severity": "important",
                             "file": "product.txt",
@@ -2165,7 +2165,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                         "verification_profile_sha256": profile_sha,
                     },
                     "awaiting_resolution": {
-                        "holistic": {
+                        "openai-holistic": {
                             "pointer": result_pointer.relative_to(
                                 gate_root
                             ).as_posix(),
@@ -2369,7 +2369,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 / "review-runtime"
                 / asynchronous_task
                 / "callbacks"
-                / "spec"
+                / "anthropic-holistic"
                 / ".review-callback.json",
                 {"schema_version": 1, "status": "ready"},
             )
@@ -2391,17 +2391,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             return
         if len(asynchronous_calls) == 3:
             result_pointer = (
-                gate_root / asynchronous_task / "round-spec-0.json"
+                gate_root / asynchronous_task / "round-anthropic-holistic-0.json"
             )
             write_json(
                 result_pointer,
                 {
-                    "axis": "spec",
+                    "axis": "anthropic-holistic",
                     "verdict": "changes-requested",
                     "verification_iteration": 0,
                     "findings": [
                         {
-                            "axis": "spec",
+                            "axis": "anthropic-holistic",
                             "finding_id": "F-material",
                             "severity": "important",
                             "file": "product.txt",
@@ -2423,7 +2423,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 "review-operation-current"
             )
             gate_state["awaiting_resolution"] = {
-                "spec": {
+                "anthropic-holistic": {
                     "pointer": result_pointer.relative_to(
                         gate_root
                     ).as_posix(),
@@ -2522,17 +2522,17 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             return
         if len(asynchronous_calls) == 4:
             result_pointer = (
-                gate_root / asynchronous_task / "round-spec-1.json"
+                gate_root / asynchronous_task / "round-anthropic-holistic-1.json"
             )
             write_json(
                 result_pointer,
                 {
-                    "axis": "spec",
+                    "axis": "anthropic-holistic",
                     "verdict": "changes-requested",
                     "verification_iteration": 1,
                     "findings": [
                         {
-                            "axis": "spec",
+                            "axis": "anthropic-holistic",
                             "finding_id": "F-material-verified",
                             "severity": "important",
                             "file": "resolution.txt",
@@ -2557,7 +2557,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 "review-operation-current"
             )
             gate_state["awaiting_resolution"] = {
-                "spec": {
+                "anthropic-holistic": {
                     "pointer": result_pointer.relative_to(
                         gate_root
                     ).as_posix(),
@@ -2768,7 +2768,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and asynchronous_packet_payload["review_callbacks"]
         == [
             {
-                "axis": "spec",
+                "axis": "anthropic-holistic",
                 "round_operation_id": "round-operation-verified",
                 "round_run_id": "round-run-verified",
                 "callback_id": "callback-verified",

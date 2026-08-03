@@ -261,6 +261,7 @@ def run_current_review(
     worktree: Path,
     *,
     deep: bool = False,
+    full: bool = False,
     cross_model: bool = False,
     runtime: str = "",
     model: str = "",
@@ -276,6 +277,7 @@ def run_current_review(
     return _run_current_review(
         worktree,
         deep=deep,
+        full=full,
         cross_model=cross_model,
         runtime=runtime,
         model=model,
@@ -305,6 +307,7 @@ def parser() -> argparse.ArgumentParser:
     current = sub.add_parser("current")
     current.add_argument("--worktree", type=Path, required=True)
     current.add_argument("--deep", action="store_true")
+    current.add_argument("--full", action="store_true")
     current.add_argument("--cross-model", action="store_true")
     current.add_argument("--runtime", choices=("claude", "codex"), default="")
     current.add_argument("--model", default="")
@@ -346,6 +349,7 @@ def main(
             result = run_current_review(
                 args.worktree,
                 deep=args.deep,
+                full=args.full,
                 cross_model=args.cross_model,
                 runtime=args.runtime,
                 model=args.model,

@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
     resolved = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=worktree, text=True).strip()
 
     task_id = "review-task"
-    axes = ("spec", "standards-correctness-architecture-security")
+    axes = ("anthropic-holistic", "openai-holistic")
     boundaries = {}
     callbacks = []
     for axis in axes:
@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         findings = [
             {
                 "finding_id": (
-                    "SPEC-001" if axis == "spec" else "STD-001"
+                    "SPEC-001" if axis == "anthropic-holistic" else "STD-001"
                 ),
                 "severity": "important",
             }
@@ -150,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
     )
     persisted_pointer = f"{task_id}/resolution-spec-0.json"
     (gate_root / persisted_pointer).write_text(
-        json.dumps(initial.by_axis["spec"].payload()) + "\n",
+        json.dumps(initial.by_axis["anthropic-holistic"].payload()) + "\n",
         encoding="utf-8",
     )
     remaining = {axes[1]: boundaries[axes[1]]}
@@ -161,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         remaining,
         resolved,
         persisted_identity_sha256=identity,
-        persisted_resolution_pointers={"spec:0": persisted_pointer},
+        persisted_resolution_pointers={"anthropic-holistic:0": persisted_pointer},
     )
     check(
         "partial deep resolution preserves full transport identity",
@@ -190,7 +190,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         resolved,
         persisted_identity_sha256=identity,
         persisted_resolution_pointers={
-            "standards-correctness-architecture-security:0": (
+            "openai-holistic:0": (
                 persisted_standards_pointer
             )
         },
@@ -211,8 +211,8 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         resolved,
         persisted_identity_sha256=identity,
         persisted_resolution_pointers={
-            "spec:0": persisted_pointer,
-            "standards-correctness-architecture-security:0": (
+            "anthropic-holistic:0": persisted_pointer,
+            "openai-holistic:0": (
                 persisted_standards_pointer
             ),
         },
@@ -232,8 +232,8 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             "awaiting_resolution": {},
             "resolution_transport_identity_sha256": identity,
             "resolution_evidence": {
-                "spec:0": persisted_pointer,
-                "standards-correctness-architecture-security:0": (
+                "anthropic-holistic:0": persisted_pointer,
+                "openai-holistic:0": (
                     persisted_standards_pointer
                 ),
             },
@@ -273,7 +273,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         {axes[1]: fresh_boundaries[axes[1]]},
         resolved,
         persisted_identity_sha256=fresh_identity,
-        persisted_resolution_pointers={"spec:0": fresh_spec_pointer},
+        persisted_resolution_pointers={"anthropic-holistic:0": fresh_spec_pointer},
     )
     check(
         "fresh deep review keeps transport and resolution identities separate",
@@ -303,8 +303,8 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         sequential_boundaries,
         second_resolved,
         persisted_resolution_pointers={
-            "spec:0": persisted_pointer,
-            "standards-correctness-architecture-security:0": (
+            "anthropic-holistic:0": persisted_pointer,
+            "openai-holistic:0": (
                 persisted_standards_pointer
             ),
         },
@@ -342,8 +342,8 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         second_resolved,
         persisted_identity_sha256=identity,
         persisted_resolution_pointers={
-            "spec:1": second_spec_pointer,
-            "standards-correctness-architecture-security:0": (
+            "anthropic-holistic:1": second_spec_pointer,
+            "openai-holistic:0": (
                 historical_standards_pointer
             ),
         },
@@ -364,7 +364,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             second_resolved,
             persisted_identity_sha256=identity,
             persisted_resolution_pointers={
-                "standards-correctness-architecture-security:0": (
+                "openai-holistic:0": (
                     historical_standards_pointer
                 )
             },
@@ -387,8 +387,8 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             second_resolved,
             persisted_identity_sha256=identity,
             persisted_resolution_pointers={
-                "spec:1": second_spec_pointer,
-                "spec:duplicate": duplicate_spec_pointer,
+                "anthropic-holistic:1": second_spec_pointer,
+                "anthropic-holistic:duplicate": duplicate_spec_pointer,
             },
         ),
         "review resolution axis is staged more than once",
@@ -410,7 +410,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             {axes[1]: boundaries[axes[1]]},
             second_resolved,
             persisted_identity_sha256=identity,
-            persisted_resolution_pointers={"spec:1": changed_delta_pointer},
+            persisted_resolution_pointers={"anthropic-holistic:1": changed_delta_pointer},
         ),
         "persisted review resolution fix delta changed",
     )
@@ -429,7 +429,7 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
             {axes[1]: boundaries[axes[1]]},
             second_resolved,
             persisted_identity_sha256=identity,
-            persisted_resolution_pointers={"spec:1": second_spec_pointer},
+            persisted_resolution_pointers={"anthropic-holistic:1": second_spec_pointer},
         ),
         "persisted review resolution finding rulings changed",
     )

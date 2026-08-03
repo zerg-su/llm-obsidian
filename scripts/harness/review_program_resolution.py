@@ -19,19 +19,14 @@ from .review_program_contracts import ReviewBoundaryInput, ReviewProgramError
 from .store import OperationStore, StoreError
 from .workflows.review import review_round_payload
 from .workflows.review_gate_contracts import _result_from_payload
+from review_contract import (
+    ReviewContractError,
+    review_parent_kind,
+    validate_review_axes,
+)
 
 
-_AXIS_SHORT = {
-    "holistic": "holistic",
-    "spec": "spec",
-    "standards-correctness-architecture-security": "standards",
-}
 _MATERIAL = frozenset({"critical", "important"})
-_PARENT_KIND = {
-    "holistic": "simple-review-holistic",
-    "spec": "deep-review-spec",
-    "standards-correctness-architecture-security": "deep-review-correctness",
-}
 
 
 def _object(path: Path, label: str) -> dict[str, object]:
@@ -73,7 +68,7 @@ def _lane_identities(
             raise ReviewProgramError("trusted review lane identity is invalid")
         axis = raw.get("axis")
         if (
-            axis not in _AXIS_SHORT
+            not isinstance(axis, str)
             or axis in lanes
             or not isinstance(raw.get("operation_id"), str)
             or not isinstance(raw.get("lane_id"), str)
@@ -82,10 +77,11 @@ def _lane_identities(
         ):
             raise ReviewProgramError("trusted review lane identity is invalid")
         lanes[str(axis)] = raw
-    if set(lanes) not in (
-        {"holistic"},
-        {"spec", "standards-correctness-architecture-security"},
-    ):
+    policy = gate.get("policy")
+    mode = str(policy.get("depth") or "") if isinstance(policy, dict) else ""
+    try:
+        validate_review_axes(mode, lanes)
+    except ReviewContractError:
         raise ReviewProgramError("trusted review lane identity is invalid")
     if gate.get("active_review_operation_id") != operation_id:
         raise ReviewProgramError("trusted review lane identity is stale")
@@ -140,7 +136,7 @@ def _accepted_round_result(
         or result.verification_iteration != iteration
         or parent.spec.owner_id != owner_id
         or parent.spec.operation_id != parent_operation_id
-        or parent.spec.kind != _PARENT_KIND[axis]
+        or parent.spec.kind != review_parent_kind(axis)
         or parent.lane_id != lane_id
         or parent.run_id != parent_run_id
     ):
@@ -199,7 +195,7 @@ def _material_ids(
     axis: str,
     iteration: int,
 ) -> tuple[str, ...]:
-    short = _AXIS_SHORT[axis]
+    short = axis
     result = _bound_object(
         gate_root,
         f"{operation_id}/round-{short}-{iteration}.json",
@@ -357,7 +353,8 @@ def resolved_terminal_head(
             raise ReviewProgramError("trusted review resolution evidence is invalid")
         pointer = str(entry.get("pointer") or "")
         match = re.fullmatch(
-            rf"{re.escape(operation_id)}/resolution-(holistic|spec|standards)-(\d+)\.json",
+            rf"{re.escape(operation_id)}/resolution-"
+            r"([A-Za-z0-9][A-Za-z0-9._:-]*)-(\d+)\.json",
             pointer,
         )
         path = (gate_root / pointer).resolve()
@@ -386,7 +383,7 @@ def resolved_terminal_head(
         chain = chains.setdefault(axis, [])
         if (
             evidence.operation_id != operation_id
-            or _AXIS_SHORT.get(axis) != short
+            or axis != short
             or iteration != len(chain)
             or evidence.reviewed_head_sha
             != terminal_by_axis.get(axis, reviewed_head)

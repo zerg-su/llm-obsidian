@@ -66,8 +66,8 @@ def _validate_task(worktree: Path) -> tuple[dict[str, Any], Path, str]:
     mode = str(policy.get("mode") or "")
     budget = policy.get("max_verify_iterations")
     if (
-        mode not in {"simple", "deep", "skip"}
-        or budget != {"simple": 1, "deep": 2, "skip": 0}[mode]
+        mode not in {"simple", "deep", "full", "skip"}
+        or budget != {"simple": 1, "deep": 2, "full": 2, "skip": 0}[mode]
         or not isinstance(policy.get("cross_model"), bool)
         or not all(
             isinstance(policy.get(field), str)

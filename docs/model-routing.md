@@ -20,14 +20,19 @@ runtime fails closed. There is no silent alias substitution or effort coercion.
 | --- | --- |
 | Dispatch | Inherit the exact current runtime/model/effort. |
 | Daily | Inherit current runtime/model; use the configured daily effort. |
-| Simple review | The public `review` runner requests same-model and inherits the exact current route by default; `--cross-model` selects the opposite runtime's simple profile. The lower-level resolver keeps its explicit `--same-model` switch. |
-| Deep review | The public runner uses the current runtime's deep profile by default; `--cross-model` selects the opposite runtime's deep profile. The lower-level resolver behaves analogously through `--same-model`. Spec and standards/correctness/architecture/security remain independent axes. |
+| Simple review | One provider-prefixed holistic lane on the selected route. With no override it inherits the exact current route; `--cross-model` selects the opposite runtime's simple profile. |
+| Deep review | With no model/runtime override, independent `anthropic-holistic` and `openai-holistic` lanes use the configured deep routes. An explicit registered runtime/model override keeps both provider-prefixed intent and engineering lanes on that one model. |
+| Full review | Explicit `--full` only: four specialist lanes form the `{anthropic, openai} × {intent, engineering}` grid. Runtime/model overrides fail before launch and recommend single-model Deep; Full is never inferred. |
 | Protected research | Stay Codex-isolated. From Codex inherit current model/effort; from Claude use the central Codex route. |
 | Unsafe research | After an explicit unsafe request, inherit the full current route and security context; warn once and do not run a second synthesis. |
 | Other deep work | Inherit runtime/model and use the configured deep effort. |
 
 Review model overrides accept only the registered aliases `sol`, `terra`,
-`opus`, and `fable`; runtime/alias mismatches fail closed. Legacy task/review
+`opus`, and `fable`; runtime/alias mismatches fail closed. `--deep --full` is
+invalid, and explicit Full cannot be combined with a runtime/model override.
+Aliases choose a concrete route only; public lane IDs use stable provider
+prefixes, while operation metadata records the exact resolved runtime/model.
+Legacy task/review
 records remain readable. Concrete top-level model/effort fields in old metadata
 are treated as explicit historical overrides. New task metadata carries both
 `routing.session` and `routing.effective`.

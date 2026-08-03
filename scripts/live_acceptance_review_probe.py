@@ -20,11 +20,7 @@ from live_acceptance_runtime import _atomic_text
 
 
 def axis_directory(axis: str) -> str:
-    return (
-        "standards"
-        if axis == "standards-correctness-architecture-security"
-        else axis
-    )
+    return axis
 
 
 def review_scratch(root: Path, commit_sha: str, cell_id: str) -> Path:

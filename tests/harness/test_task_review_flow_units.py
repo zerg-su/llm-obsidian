@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
     )
     preset = ReviewPreset.from_flags()
     request = ReviewOperationRequest(
-        preset.request("flow-review"),
+        preset.request("flow-review", selected_provider="openai"),
         owner_id,
         RuntimeRoute(
             "codex",
@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         callback_root="callbacks",
     )
     lane = run.execution.lanes[0]
-    callback = _callback_path(runtime_root, "holistic")
+    callback = _callback_path(runtime_root, lane.axis)
     callback.parent.mkdir(parents=True)
     callback.write_text("{}\n", encoding="utf-8")
     gate._replace(status="attention-required")
@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         ("non-attention status", {**base_state, "status": "reviewing"}),
         ("empty lanes", {**base_state, "lanes": []}),
         ("missing owner", {**base_state, "owner_id": ""}),
-        ("non-object lane", {**base_state, "lanes": ["holistic"]}),
+        ("non-object lane", {**base_state, "lanes": ["openai-holistic"]}),
         (
             "missing axis",
             {

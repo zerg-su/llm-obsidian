@@ -121,6 +121,7 @@ from dispatch_setup import (  # noqa: E402
     render_task_prompt,
     resolved_routes,
     review_policy,
+    review_topology_preview,
     run_state_path,
 )
 from dispatch_workspace import (  # noqa: E402
@@ -293,6 +294,7 @@ def main() -> int:
             config = load_dispatch_config(request["vault_root"], request["target_repo"])
             session, effective = resolved_routes(request, persist=False)
             review = review_policy(request, config)
+            topology = review_topology_preview(request, review)
             prompt_request = request
             if request["pipeline"] == "custom":
                 prompt_request = dict(request)
@@ -327,6 +329,7 @@ def main() -> int:
                     "verification_profile_sha256": (
                         review.verification_profile_sha256
                     ),
+                    **topology,
                 },
             }
             challenge = None

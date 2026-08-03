@@ -139,7 +139,7 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
         worktree=worktree,
         runtime_root=runtime,
         context=context,
-        axis="holistic",
+        axis="openai-holistic",
         verification=False,
     )
     prompt = (runtime / prompt_pointer).read_text(encoding="utf-8")
@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
         worktree=worktree,
         runtime_root=runtime,
         context=context,
-        axis="standards-correctness-architecture-security",
+        axis="openai-engineering",
         verification=False,
     )
     standards_prompt = (runtime / standards_pointer).read_text(encoding="utf-8")

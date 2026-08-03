@@ -264,7 +264,7 @@ def build_fixture(base: Path) -> RecoveryFixture:
     gate = ReviewGateController(_gate_root(vault, task_id), runtime, store)
     preset = ReviewPreset.from_flags()
     request = ReviewOperationRequest(
-        preset.request(task_id),
+        preset.request(task_id, selected_provider="openai"),
         task_id,
         RuntimeRoute(
             "codex",
@@ -285,7 +285,7 @@ def build_fixture(base: Path) -> RecoveryFixture:
         callback_root="callbacks",
     )
     lane = run.execution.lanes[0]
-    round_ = run.rounds["holistic"]
+    round_ = run.rounds[lane.axis]
     gate._replace(status="attention-required", final_results={})
     attention = {
         "id": "mechanism-recovery-1",

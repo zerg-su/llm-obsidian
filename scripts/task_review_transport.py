@@ -224,6 +224,8 @@ def _callback_wake(
     ]
     if raw_policy["mode"] == "deep":
         wake_argv.append("--deep")
+    elif raw_policy["mode"] == "full":
+        wake_argv.append("--full")
     if raw_policy["cross_model"]:
         wake_argv.append("--cross-model")
     for option in ("runtime", "model", "effort"):

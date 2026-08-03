@@ -82,7 +82,7 @@ simple_review = {
     "verdict": "approve",
     "axes": [
         {
-            "axis": "holistic",
+            "axis": "openai-holistic",
             "verdict": "approve",
             "verification_iteration": 0,
             "findings": [],
@@ -96,7 +96,7 @@ validated = validate_review(simple_review)
 check(
     "one schema accepts simple review evidence",
     validated["operation_id"] == "review-1"
-    and validated["axes"][0]["axis"] == "holistic"
+    and validated["axes"][0]["axis"] == "openai-holistic"
     and validated["verification_profile"]["name"] == "scoped",
 )
 
@@ -178,13 +178,13 @@ deep_review = {
     "mode": "deep",
     "axes": [
         {
-            "axis": "spec",
+            "axis": "anthropic-holistic",
             "verdict": "approve",
             "verification_iteration": 2,
             "findings": [],
         },
         {
-            "axis": "standards-correctness-architecture-security",
+            "axis": "openai-holistic",
             "verdict": "approve",
             "verification_iteration": 1,
             "findings": [],
@@ -194,14 +194,16 @@ deep_review = {
 check(
     "deep review preserves both independently budgeted axes",
     [row["axis"] for row in validate_review(deep_review)["axes"]]
-    == ["spec", "standards-correctness-architecture-security"],
+    == ["anthropic-holistic", "openai-holistic"],
 )
 try:
     aggregate(
-        ReviewRequest("bounded", max_verify_iterations=1),
+        ReviewRequest(
+            "bounded", max_verify_iterations=1, selected_provider="openai"
+        ),
         {
-            "holistic": ReviewResult(
-                "holistic", "approve", verification_iteration=2
+            "openai-holistic": ReviewResult(
+                "openai-holistic", "approve", verification_iteration=2
             )
         },
     )
@@ -209,11 +211,11 @@ except ValueError:
     check("workflow aggregation rejects over-budget verification", True)
 else:
     check("workflow aggregation rejects over-budget verification", False)
-lane = ReviewLaneIdentity("holistic", "lane-1", "surface-1")
+lane = ReviewLaneIdentity("openai-holistic", "lane-1", "surface-1")
 verify_session(lane, lane)
 try:
     verify_session(
-        lane, ReviewLaneIdentity("holistic", "lane-1", "surface-2")
+        lane, ReviewLaneIdentity("openai-holistic", "lane-1", "surface-2")
     )
 except ValueError:
     check("verification reuses exact axis lane and surface", True)
@@ -245,7 +247,6 @@ with tempfile.TemporaryDirectory(prefix="review-workflow.") as raw:
         "review-queued",
         depth="deep",
         cross_model=True,
-        model="fable",
         max_verify_iterations=2,
     )
     context = ReviewContext(
@@ -258,7 +259,7 @@ with tempfile.TemporaryDirectory(prefix="review-workflow.") as raw:
     spec = operation_spec(request)
     check(
         "context-ready review builds one reviewer-readonly OperationSpec",
-        spec.kind == "deep-review-spec"
+        spec.kind == "simple-review-holistic"
         and spec.context_manifest == context.manifest
         and spec.verification_profile == "scoped"
         and spec.route.profile == "reviewer-readonly",
@@ -401,11 +402,11 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         "claude", "fable", "xhigh", "reviewer-callback", "c" * 64
     )
     simple_request = ReviewOperationRequest(
-        ReviewRequest("review-simple"),
+        ReviewRequest("review-simple", selected_provider="openai"),
         "owner-1",
         runtime_route,
         context,
-        lane_ids={"holistic": "composition-lane"},
+        lane_ids={"openai-holistic": "composition-lane"},
     )
     simple = start_review(
         simple_request,
@@ -423,7 +424,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
     check(
         "simple public start opens one persistent holistic runtime lane",
         isinstance(simple, ReviewExecution)
-        and [lane.axis for lane in simple.lanes] == ["holistic"]
+        and [lane.axis for lane in simple.lanes] == ["openai-holistic"]
         and len(runtime.started) == 1
         and runtime.started[0].spec.operation_id.startswith(
             "review-simple-holistic-"
@@ -432,18 +433,18 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         and runtime.started[0].lane_id == "composition-lane"
         and runtime.started[0].placement == "workspace"
         and runtime.started[0].callback_pointer
-        == "callbacks/review-simple/holistic/.review-callback.json"
-        and runtime.prepared == ["holistic"],
+        == "callbacks/review-simple/openai-holistic/.review-callback.json"
+        and runtime.prepared == ["openai-holistic"],
     )
     original = simple.lanes[0]
     first_round = prepare_review_round(runtime.store, original)
     material_result = ReviewResult(
-        "holistic",
+        "openai-holistic",
         "changes-requested",
         (
             ReviewFinding(
                 "F-runtime-1",
-                "holistic",
+                "openai-holistic",
                 "important",
                 "same-session verification is required",
                 "the initial review found a material issue",
@@ -471,7 +472,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         original,
         prompt_pointer="packets/review/verify-1.md",
         callback_pointer=(
-            "callbacks/review-simple/holistic/.review-callback.json"
+            "callbacks/review-simple/openai-holistic/.review-callback.json"
         ),
         round_store=runtime.store,
     )
@@ -498,7 +499,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         verified,
         prompt_pointer="packets/review/verify-2.md",
         callback_pointer=(
-            "callbacks/review-simple/holistic/.review-callback.json"
+            "callbacks/review-simple/openai-holistic/.review-callback.json"
         ),
         round_store=runtime.store,
     )
@@ -516,8 +517,8 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         route,
         context,
         axis_routes={
-            "spec": runtime_route,
-            "standards-correctness-architecture-security": RuntimeRoute(
+            "anthropic-holistic": runtime_route,
+            "openai-holistic": RuntimeRoute(
                 "codex",
                 "gpt-5.6-sol",
                 "xhigh",
@@ -541,7 +542,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
     check(
         "deep public start opens two independent runtime lanes",
         [lane.axis for lane in deep.lanes]
-        == ["spec", "standards-correctness-architecture-security"]
+        == ["anthropic-holistic", "openai-holistic"]
         and len(set(deep_operations)) == 2
         and len({lane.surface_id for lane in deep.lanes}) == 2
         and len(
@@ -549,7 +550,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         )
         == 2
         and [request.spec.kind for request in runtime.started[-2:]]
-        == ["deep-review-spec", "deep-review-correctness"]
+        == ["simple-review-holistic", "simple-review-holistic"]
         and [request.spec.route.runtime for request in runtime.started[-2:]]
         == ["claude", "codex"]
         and [request.placement for request in runtime.started[-2:]]
@@ -609,6 +610,74 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         == list(deep_request.policy.axes)
         and aggregate_envelope.operation_id == "review-deep-start",
     )
+    full_request = ReviewOperationRequest(
+        ReviewRequest("review-full-start", depth="full", max_verify_iterations=2),
+        "owner-1",
+        route,
+        context,
+        axis_routes={
+            "anthropic-intent": runtime_route,
+            "anthropic-engineering": runtime_route,
+            "openai-intent": deep_request.axis_routes["openai-holistic"],
+            "openai-engineering": deep_request.axis_routes["openai-holistic"],
+        },
+    )
+    full = start_review(
+        full_request,
+        runtime,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=ROOT,
+        prompt_pointer="packets/review/handoff.md",
+        callback_root="callbacks/review-full",
+        round_store=runtime.store,
+    )
+    check(
+        "full public start keeps four real independent specialist states",
+        [lane.axis for lane in full.lanes]
+        == [
+            "anthropic-intent",
+            "anthropic-engineering",
+            "openai-intent",
+            "openai-engineering",
+        ]
+        and len({lane.operation_id for lane in full.lanes}) == 4
+        and len({lane.surface_id for lane in full.lanes}) == 4
+        and [request.spec.kind for request in runtime.started[-4:]]
+        == [
+            "deep-review-spec",
+            "deep-review-correctness",
+            "deep-review-spec",
+            "deep-review-correctness",
+        ]
+        and [request.spec.route.runtime for request in runtime.started[-4:]]
+        == ["claude", "claude", "codex", "codex"],
+    )
+    full_results = {
+        axis: ReviewResult(axis, "approve") for axis in full_request.policy.axes
+    }
+    full_results["openai-engineering"] = ReviewResult(
+        "openai-engineering",
+        "changes-requested",
+        (
+            ReviewFinding(
+                "F-full-openai-engineering",
+                "openai-engineering",
+                "important",
+                "one specialist found a material defect",
+                "the defect remains independently attributable",
+            ),
+        ),
+    )
+    full_aggregate = aggregate(full_request.policy, full_results)
+    check(
+        "one material full-lane finding blocks aggregate approval without voting",
+        full_aggregate["verdict"] == "changes-requested"
+        and [row["axis"] for row in full_aggregate["axes"]]
+        == list(full_request.policy.axes)
+        and full_aggregate["axes"][-1]["findings"][0]["finding_id"]
+        == "F-full-openai-engineering",
+    )
     check(
         "verification callback gets a distinct receipt without owning resources",
         verification_round.operation_id != first_round.operation_id
@@ -616,7 +685,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
         and verification_round.verification_iteration == 1,
     )
     approved = ReviewResult(
-        "holistic", "approve", verification_iteration=1
+        "openai-holistic", "approve", verification_iteration=1
     )
     approved_envelope = review_round_envelope(verification_round, approved)
     accept_review_round(
@@ -689,7 +758,7 @@ with tempfile.TemporaryDirectory(prefix="review-runner.") as raw:
     round_meta = json.loads(
         (
             root
-            / "runtime/callbacks/holistic/.review-meta.json"
+            / "runtime/callbacks/openai-holistic/.review-meta.json"
         ).read_text(encoding="utf-8")
     )
     gate_state = json.loads(

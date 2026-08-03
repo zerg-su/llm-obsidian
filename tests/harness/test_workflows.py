@@ -80,23 +80,39 @@ check(
 workspace = DispatchRequest("task-1", "owner-1", "b" * 64, "packets/one/manifest.json", route, placement="workspace")
 check("workspace is a dispatch placement", workspace.placement == "workspace")
 
-simple = ReviewRequest("review-1")
+simple = ReviewRequest("review-1", selected_provider="openai")
 deep = ReviewRequest("review-2", depth="deep", cross_model=True, max_verify_iterations=2)
-check("simple review is one holistic session", simple.axes == ("holistic",))
-check("deep review preserves two independent axes", deep.axes == ("spec", "standards-correctness-architecture-security"))
+check("simple review is one holistic session", simple.axes == ("openai-holistic",))
+check("deep review preserves two independent axes", deep.axes == ("anthropic-holistic", "openai-holistic"))
 try:
-    ReviewRequest("review-3", depth="simple", max_verify_iterations=2)
+    ReviewRequest(
+        "review-3",
+        depth="simple",
+        max_verify_iterations=2,
+        selected_provider="openai",
+    )
 except ValueError:
     check("simple review verify is bounded", True)
 else:
     check("simple review verify is bounded", False)
 spec_result = ReviewResult(
-    "spec",
+    "anthropic-holistic",
     "changes-requested",
-    (ReviewFinding("F-1", "spec", "important", "contract gap", "tests fail"),),
+    (
+        ReviewFinding(
+            "F-1",
+            "anthropic-holistic",
+            "important",
+            "contract gap",
+            "tests fail",
+        ),
+    ),
 )
-standards_result = ReviewResult("standards-correctness-architecture-security", "approve")
-aggregate_result = aggregate(deep, {"spec": spec_result, "standards-correctness-architecture-security": standards_result})
+standards_result = ReviewResult("openai-holistic", "approve")
+aggregate_result = aggregate(
+    deep,
+    {"anthropic-holistic": spec_result, "openai-holistic": standards_result},
+)
 check("deep aggregation preserves axes and material verdict", aggregate_result["verdict"] == "changes-requested" and len(aggregate_result["axes"]) == 2)
 check("important findings require same-session resolution", resolution_required(spec_result))
 
@@ -104,7 +120,7 @@ check("important findings require same-session resolution", resolution_required(
 def check_aggregate_finding_rejected(label: str, **changes: object) -> None:
     values: dict[str, object] = {
         "finding_id": "F-canonical",
-        "axis": "holistic",
+        "axis": "openai-holistic",
         "severity": "important",
         "summary": "canonical issue",
         "evidence": "the failing path is reachable",
@@ -114,9 +130,12 @@ def check_aggregate_finding_rejected(label: str, **changes: object) -> None:
     }
     values.update(changes)
     finding = ReviewFinding(**values)  # type: ignore[arg-type]
-    result = ReviewResult("holistic", "changes-requested", (finding,))
+    result = ReviewResult("openai-holistic", "changes-requested", (finding,))
     try:
-        aggregate(ReviewRequest("finding-validation"), {"holistic": result})
+        aggregate(
+            ReviewRequest("finding-validation", selected_provider="openai"),
+            {"openai-holistic": result},
+        )
     except ValueError:
         check(label, True)
     else:
@@ -145,17 +164,17 @@ for field, value in (
     )
 duplicate_finding = ReviewFinding(
     "F-duplicate",
-    "holistic",
+    "openai-holistic",
     "important",
     "duplicate issue",
     "the same issue was emitted twice",
 )
 try:
     aggregate(
-        ReviewRequest("finding-duplicate"),
+        ReviewRequest("finding-duplicate", selected_provider="openai"),
         {
-            "holistic": ReviewResult(
-                "holistic",
+            "openai-holistic": ReviewResult(
+                "openai-holistic",
                 "changes-requested",
                 (duplicate_finding, duplicate_finding),
             )

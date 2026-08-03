@@ -60,6 +60,7 @@ def _validate_current_checkout(worktree: Path) -> Path:
 def _current_policy(
     *,
     deep: bool,
+    full: bool,
     cross_model: bool,
     runtime: str,
     model: str,
@@ -75,6 +76,7 @@ def _current_policy(
         raise TaskReviewError("a purpose-bound review cannot be skipped")
     preset = ReviewPreset.from_flags(
         deep=deep,
+        full=full,
         cross_model=cross_model,
         runtime=runtime,
         model=model,
@@ -218,6 +220,7 @@ def run_current_review(
     worktree: Path,
     *,
     deep: bool = False,
+    full: bool = False,
     cross_model: bool = False,
     runtime: str = "",
     model: str = "",
@@ -248,6 +251,7 @@ def run_current_review(
         )
     requested_policy = _current_policy(
         deep=deep,
+        full=full,
         cross_model=cross_model,
         runtime=runtime,
         model=model,

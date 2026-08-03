@@ -40,7 +40,7 @@ review = {
     "verdict": "approve",
     "axes": [
         {
-            "axis": "holistic",
+            "axis": "openai-holistic",
             "verdict": "approve",
             "verification_iteration": 0,
             "findings": [],
@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
     resolution_payload = {
         "schema_version": 1,
         "operation_id": "operation-1",
-        "axis": "holistic",
+        "axis": "openai-holistic",
         "reviewed_head_sha": "0" * 40,
         "resolved_head_sha": head,
         "fix_delta_sha256": "d" * 64,
@@ -131,7 +131,7 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
             }
         ],
     }
-    resolution_path = operation / "resolution-holistic-0.json"
+    resolution_path = operation / "resolution-openai-holistic-0.json"
     resolution_path.write_text(
         json.dumps(resolution_payload, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -166,12 +166,12 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         "run_id": "run-round-1",
         "review_id": "operation-1",
         "parent_session_operation_id": "operation-1",
-        "axis": "holistic",
+        "axis": "openai-holistic",
         "verification_iteration": 0,
     }
     round_result = {
         "schema_version": 1,
-        "axis": "holistic",
+        "axis": "openai-holistic",
         "verdict": "changes-requested",
         "verification_iteration": 0,
         "findings": [
@@ -200,7 +200,7 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         and round_envelope.run_id == "run-round-1"
         and round_envelope.payload["parent_session_operation_id"]
         == "operation-1"
-        and round_envelope.payload["axis"] == "holistic",
+        and round_envelope.payload["axis"] == "openai-holistic",
     )
 
     def check_round_finding_rejected(label: str, candidate: dict[str, Any]) -> None:
@@ -352,7 +352,7 @@ with tempfile.TemporaryDirectory(prefix="harness-review-transport.") as raw:
         json.dumps(historical_resolution, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    terminal_resolution_path = operation / "resolution-holistic-1.json"
+    terminal_resolution_path = operation / "resolution-openai-holistic-1.json"
     broken_terminal_resolution = {
         **resolution_payload,
         "reviewed_head_sha": "2" * 40,

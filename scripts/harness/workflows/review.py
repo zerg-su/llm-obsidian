@@ -19,7 +19,7 @@ from ..contracts import (
     RuntimeRoute,
 )
 from ..state_machine import TERMINAL
-from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
+from review_contract import MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
 
 
 from .review_contracts import (
@@ -109,12 +109,7 @@ def start_review(
             spec = identity.spec
             lane_id = identity.lane_id
             run_id = identity.run_id
-            axis_name = (
-                "standards"
-                if axis
-                == "standards-correctness-architecture-security"
-                else axis
-            )
+            axis_name = axis
             axis_prompt = (
                 prompt_pointer
                 if prompt_pointers is None

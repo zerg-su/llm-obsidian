@@ -49,7 +49,7 @@ class ReviewPreset:
 
     def __post_init__(self) -> None:
         if self.depth not in VERIFY_BUDGETS:
-            raise ValueError("review preset depth must be simple or deep")
+            raise ValueError("review preset depth must be simple, deep, or full")
         if self.runtime and self.runtime not in {"claude", "codex"}:
             raise ValueError("review preset runtime must be claude or codex")
         if self.model and not IDENTIFIER.fullmatch(self.model):
@@ -76,19 +76,27 @@ class ReviewPreset:
         cls,
         *,
         deep: bool = False,
+        full: bool = False,
         cross_model: bool = False,
         runtime: str = "",
         model: str = "",
         effort: str = "",
         no_review: bool = False,
     ) -> "ReviewPreset":
+        if deep and full:
+            raise ValueError("deep and full review are mutually exclusive")
+        if full and (runtime or model):
+            raise ValueError(
+                "Full review requires Anthropic and OpenAI; use Deep for a "
+                "single-model intent and engineering review"
+            )
         if no_review and any(
-            (deep, cross_model, runtime, model, effort)
+            (deep, full, cross_model, runtime, model, effort)
         ):
             raise ValueError("no-review cannot be combined with review flags")
         return cls(
             enabled=not no_review,
-            depth="deep" if deep else "simple",
+            depth="full" if full else "deep" if deep else "simple",
             cross_model=cross_model,
             runtime=runtime,
             model=model,
@@ -101,6 +109,7 @@ class ReviewPreset:
         *,
         purpose: str = "implementation",
         max_verify_iterations: int | None = None,
+        selected_provider: str = "",
     ) -> ReviewRequest:
         if not self.enabled:
             raise ValueError("no-review has no provider review request")
@@ -117,6 +126,7 @@ class ReviewPreset:
                 else max_verify_iterations
             ),
             purpose=purpose,
+            selected_provider=selected_provider,
         )
 
 

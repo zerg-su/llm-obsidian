@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="review-telemetry.") as raw:
     common = {
         "worktree": worktree,
         "vault_root": vault,
-        "axis": "standards-correctness-architecture-security",
+        "axis": "openai-engineering",
         "reviewer_runtime": "codex",
         "iteration": 2,
         "started_at": "2026-08-01T00:00:00Z",

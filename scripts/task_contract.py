@@ -17,8 +17,8 @@ from outcome_contract import OutcomeContractError, extract_from_bytes
 
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
-REVIEW_MODES = {"simple", "deep", "skip"}
-REVIEW_VERIFY_BUDGETS = {"simple": 1, "deep": 2, "skip": 0}
+REVIEW_MODES = {"simple", "deep", "full", "skip"}
+REVIEW_VERIFY_BUDGETS = {"simple": 1, "deep": 2, "full": 2, "skip": 0}
 REVIEW_POLICY_V4_FIELDS = {
     "mode",
     "cross_model",
@@ -219,7 +219,9 @@ def _validate_pipeline_policy(meta: dict[str, Any], version: int) -> None:
 def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any]:
     review = meta.get("review_policy")
     if not isinstance(review, dict) or review.get("mode") not in REVIEW_MODES:
-        raise ContractError("review_policy.mode must be simple, deep, or skip")
+        raise ContractError(
+            "review_policy.mode must be simple, deep, full, or skip"
+        )
     expected_review_fields = (
         REVIEW_POLICY_V3_FIELDS if version == 3 else REVIEW_POLICY_V4_FIELDS
     )
@@ -272,6 +274,11 @@ def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any
         ):
             raise ContractError(
                 "skip review cannot carry expert overrides"
+            )
+        if mode == "full" and (runtime or model):
+            raise ContractError(
+                "full review requires both providers; use deep for a "
+                "single-model review"
             )
         profile = review.get("verification_profile")
         digest = review.get("verification_profile_sha256")

@@ -48,6 +48,19 @@ assert summary_v2["properties"]["residual_gap_pointers"]["maxItems"] == (
 review = load("review-v1.schema.json")
 assert set(review["properties"]["verdict"]["enum"]) == review_contract.VERDICTS
 assert set(review["properties"]["mode"]["enum"]) == review_contract.MODES
+simple_axes = review["allOf"][0]["then"]["properties"]["axes"]
+assert simple_axes["prefixItems"][0]["allOf"][1]["properties"]["axis"] == {
+    "pattern": "^(anthropic|openai)-holistic$"
+}
+deep_topologies = review["allOf"][1]["then"]["properties"]["axes"]["oneOf"]
+assert [
+    [item["properties"]["axis"] for item in topology["prefixItems"]]
+    for topology in deep_topologies
+] == [
+    [{"const": "anthropic-holistic"}, {"const": "openai-holistic"}],
+    [{"const": "anthropic-intent"}, {"const": "anthropic-engineering"}],
+    [{"const": "openai-intent"}, {"const": "openai-engineering"}],
+]
 task_meta = load("task-meta-v2.schema.json")
 assert task_meta["properties"]["vault_root"] == {"type": "string", "minLength": 1}
 task_types = task_meta["properties"]["reap_policy"]["properties"]["allowed_types"]["items"]["enum"]
@@ -84,6 +97,16 @@ assert review_v3["allOf"] == [
     {
         "if": {"properties": {"mode": {"const": "deep"}}},
         "then": {"properties": {"max_verify_iterations": {"const": 2}}},
+    },
+    {
+        "if": {"properties": {"mode": {"const": "full"}}},
+        "then": {
+            "properties": {
+                "runtime": {"const": ""},
+                "model": {"const": ""},
+                "max_verify_iterations": {"const": 2},
+            }
+        },
     },
     {
         "if": {"properties": {"mode": {"const": "skip"}}},

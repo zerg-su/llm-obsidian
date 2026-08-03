@@ -22,6 +22,7 @@ from harness.workflows.review import (
 )
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
+from review_contract import review_axis_responsibility
 from task_review_shared import (
     StaleRoundCallbackError,
     TaskReviewError,
@@ -40,6 +41,12 @@ def _route(value: Mapping[str, Any]) -> RuntimeRoute:
     )
 
 
+def _route_provider(route: RuntimeRoute) -> str:
+    """Map the durable runtime to its stable public provider identity."""
+
+    return {"claude": "anthropic", "codex": "openai"}[route.runtime]
+
+
 def _request(
     meta: Mapping[str, Any],
     vault: Path,
@@ -49,6 +56,7 @@ def _request(
     raw = meta["review_policy"]
     preset = ReviewPreset.from_flags(
         deep=raw["mode"] == "deep",
+        full=raw["mode"] == "full",
         cross_model=raw["cross_model"],
         runtime=raw["runtime"],
         model=raw["model"],
@@ -57,11 +65,6 @@ def _request(
     )
     if not preset.enabled:
         return preset, None
-    review_request = preset.request(
-        task_id,
-        purpose=str(raw.get("purpose") or "implementation"),
-        max_verify_iterations=int(raw["max_verify_iterations"]),
-    )
     config = load_config(vault)
     profiles = load_profiles(vault / "config/verification-profiles.toml")
     profile = profiles.get(context.verification_profile)
@@ -73,44 +76,62 @@ def _request(
     session = session_from_meta(dict(meta))
     if session is None:
         raise TaskReviewError("task has no captured session route")
-    selected = resolve(
-        config,
-        "review",
-        session=session,
-        explicit_runtime=raw["runtime"],
-        explicit_model=raw["model"],
-        explicit_effort=raw["effort"],
-        same_model=not raw["cross_model"],
-        review_profile=preset.depth,
-    )
-    primary = _route(selected)
+    mode = preset.depth
+    route_profile = "deep" if mode in {"deep", "full"} else "simple"
+    single_model = bool(raw["runtime"] or raw["model"])
     axis_routes: dict[str, RuntimeRoute] | None = None
-    if preset.depth == "deep":
-        if any((raw["runtime"], raw["model"], raw["effort"])):
-            axis_routes = {axis: primary for axis in review_request.axes}
-        else:
-            axis_routes = {
-                "spec": _route(
-                    resolve(
-                        config,
-                        "review",
-                        session=session,
-                        explicit_runtime="claude",
-                        same_model=False,
-                        review_profile="deep",
-                    )
-                ),
-                "standards-correctness-architecture-security": _route(
-                    resolve(
-                        config,
-                        "review",
-                        session=session,
-                        explicit_runtime="codex",
-                        same_model=False,
-                        review_profile="deep",
-                    )
-                ),
-            }
+    selected_provider = ""
+    if mode in {"deep", "full"} and not single_model:
+        fable = _route(
+            resolve(
+                config,
+                "review",
+                session=session,
+                explicit_model="fable",
+                explicit_effort=raw["effort"],
+                same_model=False,
+                review_profile="deep",
+            )
+        )
+        sol = _route(
+            resolve(
+                config,
+                "review",
+                session=session,
+                explicit_model="sol",
+                explicit_effort=raw["effort"],
+                same_model=False,
+                review_profile="deep",
+            )
+        )
+        primary = fable
+    else:
+        primary = _route(
+            resolve(
+                config,
+                "review",
+                session=session,
+                explicit_runtime=raw["runtime"],
+                explicit_model=raw["model"],
+                explicit_effort=raw["effort"],
+                same_model=not raw["cross_model"],
+                review_profile=route_profile,
+            )
+        )
+        selected_provider = _route_provider(primary)
+    review_request = preset.request(
+        task_id,
+        purpose=str(raw.get("purpose") or "implementation"),
+        max_verify_iterations=int(raw["max_verify_iterations"]),
+        selected_provider=selected_provider,
+    )
+    if mode == "deep" and single_model:
+        axis_routes = {axis: primary for axis in review_request.axes}
+    elif mode in {"deep", "full"}:
+        axis_routes = {
+            axis: fable if axis.startswith("anthropic-") else sol
+            for axis in review_request.axes
+        }
     return (
         preset,
         ReviewOperationRequest(
@@ -124,11 +145,7 @@ def _request(
 
 
 def _axis_name(axis: str) -> str:
-    return (
-        "standards"
-        if axis == "standards-correctness-architecture-security"
-        else axis
-    )
+    return axis
 
 
 def _callback_path(runtime_root: Path, axis: str) -> Path:
@@ -149,6 +166,7 @@ def _prompt(
     axis: str,
     verification: bool,
 ) -> str:
+    responsibility = review_axis_responsibility(axis)
     name = (
         f"verify-{_axis_name(axis)}.md"
         if verification
@@ -200,9 +218,40 @@ def _prompt(
             "",
         )
         if context.implementer_summary_sha256
-        and axis in {"holistic", "spec"}
+        and responsibility in {"holistic", "intent"}
         else ()
     )
+    responsibility_instructions = {
+        "holistic": (
+            "Responsibility: independently review the full denominator: Outcome "
+            "Contract, success evidence, specification, scope, non-goals, "
+            "correctness, failure behavior, architecture, ownership, "
+            "maintainability, tests, security, and applicable recovery, "
+            "compatibility, and release risks."
+        ),
+        "intent": (
+            "Responsibility: review only the Outcome Contract, success evidence, "
+            "specification, scope, and non-goals; do not issue an engineering "
+            "verdict."
+        ),
+        "engineering": (
+            "Responsibility: review only correctness, failure behavior, "
+            "architecture, ownership, maintainability, tests, security, and "
+            "applicable recovery, compatibility, and release risks; do not issue "
+            "an intent verdict."
+        ),
+    }[responsibility]
+    engineering_instructions = (
+        (
+            "Use the authoritative engineering contract at "
+            f"`{worktree / 'docs/skill-references/engineering-quality-contract.md'}`."
+        ),
+        (
+            "Repository-specific standards override its heuristics, but their "
+            "absence never suppresses engineering-quality judgment."
+        ),
+        "",
+    ) if responsibility in {"holistic", "engineering"} else ()
     _atomic_text(
         runtime_root / pointer,
         "\n".join(
@@ -214,12 +263,14 @@ def _prompt(
                 f"Axis: `{axis}`.",
                 f"Purpose: `{context.purpose}`.",
                 f"Boundary question: {REVIEW_QUESTIONS[context.purpose]}",
+                responsibility_instructions,
                 f"Exact product HEAD: `{context.head_sha}`.",
                 f"Product worktree (read-only): `{worktree}`.",
                 f"ContextPacket: `{runtime_root / context.manifest}`.",
                 "The review standard and approved plan are inside the ContextPacket.",
                 "",
                 *outcome_instructions,
+                *engineering_instructions,
                 "Inspect the exact ContextPacket and product HEAD. Do not edit product files.",
                 *(
                     (

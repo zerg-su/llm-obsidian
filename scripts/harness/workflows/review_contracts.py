@@ -21,7 +21,15 @@ from ..contracts import (
 from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
 from ..review_program import PURPOSES
-from review_contract import AXES, MATERIAL_SEVERITIES, SEVERITIES, VERIFY_BUDGETS
+from review_contract import (
+    MATERIAL_SEVERITIES,
+    MODES,
+    SEVERITIES,
+    VERIFY_BUDGETS,
+    compile_review_axes,
+    review_axis_responsibility,
+    review_parent_kind,
+)
 
 
 MAX_REVIEW_SUMMARY_CHARS = 300
@@ -45,10 +53,11 @@ class ReviewRequest:
     effort: str = ""
     max_verify_iterations: int = 1
     purpose: str = "implementation"
+    selected_provider: str = ""
 
     def __post_init__(self) -> None:
-        if self.depth not in AXES:
-            raise ValueError("review depth must be simple or deep")
+        if self.depth not in MODES:
+            raise ValueError("review depth must be simple, deep, or full")
         if self.purpose not in PURPOSES:
             raise ValueError("review purpose is invalid")
         expected = VERIFY_BUDGETS[self.depth]
@@ -60,10 +69,20 @@ class ReviewRequest:
             raise ValueError("intent review verification budget exceeds one")
         if self.runtime and self.runtime not in {"claude", "codex"}:
             raise ValueError("review runtime must be claude or codex")
+        if (
+            self.depth == "deep"
+            and (self.runtime or self.model)
+            and not self.selected_provider
+        ):
+            raise ValueError("single-model deep requires its selected provider")
+        compile_review_axes(self.depth, selected_provider=self.selected_provider)
 
     @property
     def axes(self) -> tuple[str, ...]:
-        return AXES[self.depth]
+        return compile_review_axes(
+            self.depth,
+            selected_provider=self.selected_provider,
+        )
 
 
 @dataclass(frozen=True)
@@ -226,7 +245,7 @@ def operation_spec(request: ReviewOperationRequest) -> OperationSpec:
     return OperationSpec(
         operation_id=policy.operation_id,
         idempotency_key=hashlib.sha256(canonical).hexdigest(),
-        kind="simple-review" if policy.depth == "simple" else "deep-review-spec",
+        kind=review_parent_kind(policy.axes[0]),
         owner_id=request.owner_id,
         route=route,
         context_manifest=request.context.manifest,
@@ -315,12 +334,10 @@ class ReviewLaneSession:
     state: str = "running"
 
     def __post_init__(self) -> None:
-        if self.axis not in {
-            "holistic",
-            "spec",
-            "standards-correctness-architecture-security",
-        }:
-            raise ValueError("invalid review lane axis")
+        try:
+            review_axis_responsibility(self.axis)
+        except ValueError as exc:
+            raise ValueError("invalid review lane axis") from exc
         if self.spec.operation_id != self.operation_id:
             raise ValueError("review lane must retain its parent session spec")
         if self.spec.owner_id != self.owner_id:
@@ -413,12 +430,10 @@ def _owner_relative(value: str, label: str) -> str:
 
 
 def _derived_id(parent: str, role: str) -> str:
-    aliases = {
-        "spec": "spec",
-        "standards-correctness-architecture-security": "standards",
-        "holistic": "holistic",
-    }
-    short = aliases.get(role, "round")
+    try:
+        short = review_axis_responsibility(role)
+    except ValueError:
+        short = "round"
     suffix = f"-{short}-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
     return f"{parent[: 128 - len(suffix)]}{suffix}"
 
@@ -453,13 +468,7 @@ def _session_spec(
         base,
         operation_id=operation_id,
         idempotency_key=hashlib.sha256(identity).hexdigest(),
-        kind={
-            "holistic": "simple-review-holistic",
-            "spec": "deep-review-spec",
-            "standards-correctness-architecture-security": (
-                "deep-review-correctness"
-            ),
-        }[axis],
+        kind=review_parent_kind(axis),
         route=route,
     )
 

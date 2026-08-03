@@ -123,9 +123,9 @@ def _run_review_sessions(
     callback_root = (Path(base_id) / "callbacks").as_posix()
     prompt_pointer = (Path(base_id) / "prompt.md").as_posix()
     axes = (
-        ("spec", "standards-correctness-architecture-security")
+        ("anthropic-holistic", "openai-holistic")
         if deep
-        else ("holistic",)
+        else ("anthropic-holistic",)
     )
     for axis in axes:
         directory = scratch / callback_root / _axis_directory(axis)
@@ -133,16 +133,16 @@ def _run_review_sessions(
         directory.chmod(0o700)
     if deep:
         planned = {
-            "spec": _PlannedOperation(
-                "deep-review-spec", "claude", "spec"
+            "anthropic-holistic": _PlannedOperation(
+                "deep-review-anthropic-holistic", "claude", "anthropic-holistic"
             ),
-            "standards-correctness-architecture-security": _PlannedOperation(
-                "deep-review-correctness", "codex", "correctness"
+            "openai-holistic": _PlannedOperation(
+                "deep-review-openai-holistic", "codex", "openai-holistic"
             ),
         }
     else:
         planned = {
-            "holistic": _PlannedOperation(
+            "anthropic-holistic": _PlannedOperation(
                 "simple-review", "claude", "composition"
             )
         }
@@ -162,6 +162,7 @@ def _run_review_sessions(
         depth="deep" if deep else "simple",
         cross_model=True,
         max_verify_iterations=2 if deep else 1,
+        selected_provider="" if deep else "anthropic",
     )
     request = ReviewOperationRequest(
         policy,
@@ -175,7 +176,7 @@ def _run_review_sessions(
         ),
         axis_routes=axis_routes,
         lane_ids=(
-            {"holistic": shared_lane_id}
+            {"anthropic-holistic": shared_lane_id}
             if shared_lane_id
             else None
         ),

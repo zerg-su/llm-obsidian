@@ -127,7 +127,7 @@
         "verification_profile_sha256"
       ],
       "properties": {
-        "mode": {"enum": ["simple", "deep", "skip"]},
+        "mode": {"enum": ["simple", "deep", "full", "skip"]},
         "cross_model": {"type": "boolean"},
         "runtime": {"enum": ["", "claude", "codex"]},
         "model": {"type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
@@ -144,6 +144,16 @@
         {
           "if": {"properties": {"mode": {"const": "deep"}}},
           "then": {"properties": {"max_verify_iterations": {"const": 2}}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "full"}}},
+          "then": {
+            "properties": {
+              "runtime": {"const": ""},
+              "model": {"const": ""},
+              "max_verify_iterations": {"const": 2}
+            }
+          }
         },
         {
           "if": {"properties": {"mode": {"const": "skip"}}},

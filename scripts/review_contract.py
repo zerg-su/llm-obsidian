@@ -16,12 +16,9 @@ SCHEMA_VERSION = 1
 VERDICTS = {"approve", "changes-requested", "blocked"}
 SEVERITIES = frozenset({"critical", "important", "minor"})
 MATERIAL_SEVERITIES = SEVERITIES - {"minor"}
-MODES = {"simple", "deep"}
-AXES = {
-    "simple": ("holistic",),
-    "deep": ("spec", "standards-correctness-architecture-security"),
-}
-VERIFY_BUDGETS = {"simple": 1, "deep": 2}
+MODES = {"simple", "deep", "full"}
+PROVIDERS = ("anthropic", "openai")
+VERIFY_BUDGETS = {"simple": 1, "deep": 2, "full": 2}
 IDENTIFIER_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]*"
 IDENTIFIER_RE = re.compile(rf"{IDENTIFIER_PATTERN}\Z")
 FINDING_ID_LIMIT = 100
@@ -32,6 +29,102 @@ FINDING_DETAIL_LIMIT = 4000
 
 class ReviewContractError(ValueError):
     pass
+
+
+def review_axis_responsibility(axis: str) -> str:
+    """Return the bounded responsibility encoded in one exact lane identity."""
+
+    for responsibility in ("holistic", "intent", "engineering"):
+        if axis.endswith(f"-{responsibility}") and axis != f"-{responsibility}":
+            return responsibility
+    raise ValueError("review lane must end in holistic, intent, or engineering")
+
+
+def review_parent_kind(axis: str) -> str:
+    """Map a lane responsibility onto the existing lifecycle vocabulary."""
+
+    return {
+        "holistic": "simple-review-holistic",
+        "intent": "deep-review-spec",
+        "engineering": "deep-review-correctness",
+    }[review_axis_responsibility(axis)]
+
+
+def review_axis_provider(axis: str) -> str:
+    """Return the stable provider encoded in a public lane identity."""
+
+    responsibility = review_axis_responsibility(axis)
+    provider = axis[: -(len(responsibility) + 1)]
+    if provider not in PROVIDERS:
+        raise ValueError("review lane provider must be anthropic or openai")
+    return provider
+
+
+def compile_review_axes(
+    mode: str,
+    *,
+    selected_provider: str = "",
+) -> tuple[str, ...]:
+    """Compile the exact ordered reviewer lanes without provider effects."""
+
+    if mode not in MODES:
+        raise ValueError("review mode must be simple, deep, or full")
+    if selected_provider and selected_provider not in PROVIDERS:
+        raise ValueError("selected review provider must be anthropic or openai")
+    if mode == "simple":
+        if not selected_provider:
+            raise ValueError("simple review requires its selected provider")
+        return (f"{selected_provider}-holistic",)
+    if mode == "deep":
+        if selected_provider:
+            return (
+                f"{selected_provider}-intent",
+                f"{selected_provider}-engineering",
+            )
+        return ("anthropic-holistic", "openai-holistic")
+    if selected_provider:
+        raise ValueError(
+            "Full review requires Anthropic and OpenAI; use Deep for a "
+            "single-model intent and engineering review"
+        )
+    return (
+        "anthropic-intent",
+        "anthropic-engineering",
+        "openai-intent",
+        "openai-engineering",
+    )
+
+
+def validate_review_axes(mode: str, axes: Iterable[str]) -> tuple[str, ...]:
+    """Validate an exact compiled topology without collapsing lane identity."""
+
+    actual = tuple(axes)
+    try:
+        for axis in actual:
+            review_axis_provider(axis)
+        if mode == "simple":
+            valid = (
+                len(actual) == 1
+                and review_axis_responsibility(actual[0]) == "holistic"
+            )
+        elif mode == "deep":
+            valid = actual == compile_review_axes("deep") or (
+                len(actual) == 2
+                and tuple(review_axis_responsibility(axis) for axis in actual)
+                == ("intent", "engineering")
+                and len({review_axis_provider(axis) for axis in actual}) == 1
+            )
+        elif mode == "full":
+            valid = actual == compile_review_axes("full")
+        else:
+            valid = False
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ReviewContractError(
+            f"{mode} review axes do not match an approved ordered topology"
+        )
+    return actual
 
 
 def exact_keys(value: dict[str, Any], expected: set[str], field: str) -> None:
@@ -238,8 +331,8 @@ def validate_review(
         raise ReviewContractError(f"verdict must be one of {sorted(VERDICTS)}")
 
     raw_axes = raw.get("axes")
-    if not isinstance(raw_axes, list) or len(raw_axes) != len(AXES[mode]):
-        raise ReviewContractError(f"{mode} review must contain exactly {len(AXES[mode])} axes")
+    if not isinstance(raw_axes, list):
+        raise ReviewContractError("review axes must be a list")
     axes: list[dict[str, Any]] = []
     for index, item in enumerate(raw_axes):
         field = f"axes[{index}]"
@@ -281,11 +374,9 @@ def validate_review(
             }
         )
 
-    actual_axes = tuple(item["axis"] for item in axes)
-    if actual_axes != AXES[mode]:
-        raise ReviewContractError(
-            f"{mode} review axes must be ordered as {list(AXES[mode])}"
-        )
+    actual_axes = validate_review_axes(
+        mode, (item["axis"] for item in axes)
+    )
     finding_ids = [
         finding["finding_id"]
         for axis_result in axes

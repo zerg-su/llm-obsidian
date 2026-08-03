@@ -21,6 +21,7 @@ from task_review_shared import (
     _read_json,
 )
 from task_review_verification_resubmit import _durable_verification_resubmit
+from review_contract import review_axis_responsibility
 
 
 def _finalizing_resubmit_recovery(
@@ -37,6 +38,8 @@ def _finalizing_resubmit_recovery(
     """Validate one accepted approval stranded after verification repair."""
 
     state = gate.read()
+    axes = run.execution.request.policy.axes
+    simple_axis = axes[0] if len(axes) == 1 else ""
     if (
         state.get("status")
         not in {
@@ -45,12 +48,13 @@ def _finalizing_resubmit_recovery(
             "fresh-boundary-authorized",
         }
         or run.execution.request.policy.depth != "simple"
-        or run.execution.request.policy.axes != ("holistic",)
+        or not simple_axis
+        or review_axis_responsibility(simple_axis) != "holistic"
         or len(run.execution.lanes) != 1
     ):
         return None
     lane = run.execution.lanes[0]
-    round_ = run.rounds.get("holistic")
+    round_ = run.rounds.get(simple_axis)
     if round_ is None:
         return None
     child = gate.round_store.read(round_.owner_id, round_.operation_id)
@@ -64,7 +68,7 @@ def _finalizing_resubmit_recovery(
         return None
     summary_path = worktree / ".task-summary.json"
     resolution_path = worktree / ".task-review-resolution.json"
-    callback_path = _callback_path(runtime_root, "holistic")
+    callback_path = _callback_path(runtime_root, simple_axis)
     for path, label in (
         (summary_path, "task summary"),
         (resolution_path, "review resolution"),
@@ -130,7 +134,7 @@ def _finalizing_resubmit_recovery(
         ) from exc
     if (
         persisted_resolution.operation_id != task_id
-        or persisted_resolution.axis != "holistic"
+        or persisted_resolution.axis != simple_axis
         or persisted_resolution.resolved_head_sha
         != previous_context.head_sha
     ):
@@ -144,7 +148,7 @@ def _finalizing_resubmit_recovery(
         current_context.head_sha,
         str(state.get("resolution_transport_identity_sha256") or ""),
     )
-    rebuilt_resolution = bundle.by_axis.get("holistic")
+    rebuilt_resolution = bundle.by_axis.get(simple_axis)
     if (
         rebuilt_resolution is None
         or rebuilt_resolution.operation_id

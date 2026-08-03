@@ -219,7 +219,7 @@
         "escalate_severities"
       ],
       "properties": {
-        "mode": {"enum": ["simple", "deep", "skip"]},
+        "mode": {"enum": ["simple", "deep", "full", "skip"]},
         "cross_model": {"type": "boolean"},
         "runtime": {"enum": ["", "claude", "codex"]},
         "model": {
@@ -259,6 +259,16 @@
         {
           "if": {"properties": {"mode": {"const": "deep"}}},
           "then": {"properties": {"max_verify_iterations": {"const": 2}}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "full"}}},
+          "then": {
+            "properties": {
+              "runtime": {"const": ""},
+              "model": {"const": ""},
+              "max_verify_iterations": {"const": 2}
+            }
+          }
         },
         {
           "if": {"properties": {"mode": {"const": "skip"}}},

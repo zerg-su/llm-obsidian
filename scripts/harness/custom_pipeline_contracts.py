@@ -34,7 +34,7 @@ from .pipelines import (
 
 CUSTOM_SPEC_VERSION = 1
 CUSTOM_COMPILER_VERSION = "1.0.0"
-REVIEW_MODES = frozenset({"simple", "deep", "skip"})
+REVIEW_MODES = frozenset({"simple", "deep", "full", "skip"})
 BASELINES = {
     "change": "engineering/change",
     "fix": "engineering/fix",

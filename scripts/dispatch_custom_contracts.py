@@ -200,7 +200,7 @@ def _review_snapshot(review: ReviewPolicy) -> dict[str, Any]:
 
 def _review_from_snapshot(value: dict[str, Any]) -> ReviewPolicy:
     return ReviewPolicy(
-        depth="deep" if value["mode"] == "deep" else "simple",
+        depth="simple" if value["mode"] == "skip" else value["mode"],
         cross_model=value["cross_model"],
         enabled=value["mode"] != "skip",
         runtime=value["runtime"],

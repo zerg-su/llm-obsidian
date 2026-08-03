@@ -31,7 +31,7 @@ from .review_gate_contracts import (
 )
 from .review_gate_fresh_boundary import ReviewGateFreshBoundaryMixin
 from .review_gate_resolution import ReviewGateResolutionMixin
-from review_contract import MATERIAL_SEVERITIES
+from review_contract import MATERIAL_SEVERITIES, review_axis_responsibility
 from review_resolution import (
     ResolutionError,
     ReviewResolutionEvidence,
@@ -58,6 +58,8 @@ class ReviewGateRecoveryMixin(
         """Consume one accepted old-HEAD result without approving a new HEAD."""
 
         state = self.read()
+        axes = run.execution.request.policy.axes
+        simple_axis = axes[0] if len(axes) == 1 else ""
         recovery_path = (self.root / recovery_pointer).resolve()
         try:
             recovery_path.relative_to(self.root)
@@ -81,9 +83,10 @@ class ReviewGateRecoveryMixin(
                 "fresh-boundary-authorized",
             }
             or run.execution.request.policy.depth != "simple"
-            or run.execution.request.policy.axes != ("holistic",)
-            or lane.axis != "holistic"
-            or round_.axis != "holistic"
+            or not simple_axis
+            or review_axis_responsibility(simple_axis) != "holistic"
+            or lane.axis != simple_axis
+            or round_.axis != simple_axis
             or result.verdict != "approve"
             or child.state not in {"finalizing", "complete"}
             or child.resources != OwnedResources()
@@ -265,12 +268,7 @@ class ReviewGateRecoveryMixin(
             )
         exact_cwd = cwd.expanduser().resolve()
         for identity in review_session_specs(request):
-            axis_name = (
-                "standards"
-                if identity.axis
-                == "standards-correctness-architecture-security"
-                else identity.axis
-            )
+            axis_name = identity.axis
             ReviewSessionRequest(
                 spec=identity.spec,
                 lane_id=identity.lane_id,

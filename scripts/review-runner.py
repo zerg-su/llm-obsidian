@@ -31,6 +31,8 @@ from model_routing import (
     resolve,
     routing_from_environment,
 )
+from task_review_request import _route_provider
+from review_contract import review_axis_responsibility
 
 class ReviewRunnerError(ValueError):
     pass
@@ -49,6 +51,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--callback-root", default="")
     result.add_argument("--runtime-root", type=Path)
     result.add_argument("--deep", action="store_true")
+    result.add_argument("--full", action="store_true")
     result.add_argument("--cross-model", action="store_true")
     result.add_argument("--runtime", choices=("claude", "codex"), default="")
     result.add_argument("--model", default="", help="registered model alias only")
@@ -224,11 +227,33 @@ def _materialize_prompts(
         raise ReviewRunnerError("review prompt/context pointers are unavailable")
     prompts: dict[str, str] = {}
     for axis in axes:
-        axis_name = (
-            "standards"
-            if axis == "standards-correctness-architecture-security"
-            else axis
-        )
+        axis_name = axis
+        responsibility = review_axis_responsibility(axis)
+        responsibility_instruction = {
+            "holistic": (
+                "Responsibility: independently review the full outcome and "
+                "engineering denominator."
+            ),
+            "intent": (
+                "Responsibility: review only the Outcome Contract, success "
+                "evidence, specification, scope, and non-goals."
+            ),
+            "engineering": (
+                "Responsibility: review only correctness, failure behavior, "
+                "architecture, ownership, maintainability, tests, security, "
+                "and applicable recovery, compatibility, and release risks."
+            ),
+        }[responsibility]
+        engineering_instructions = (
+            (
+                "Authoritative engineering contract: "
+                f"`{product_root / 'docs/skill-references/engineering-quality-contract.md'}`."
+            ),
+            (
+                "Repository-specific standards override its heuristics, but "
+                "their absence never suppresses engineering-quality judgment."
+            ),
+        ) if responsibility in {"holistic", "engineering"} else ()
         state_dir = runtime_root / callback_root / axis_name
         review_input = state_dir / ".review-input.json"
         command = shlex.join(
@@ -249,10 +274,12 @@ def _materialize_prompts(
                 "# Harness-owned review lane",
                 "",
                 f"Review axis: `{axis}`.",
+                responsibility_instruction,
                 f"Product worktree (read-only): `{product_root}`.",
                 f"Context manifest: `{context_manifest}`.",
                 f"Source handoff: `{source_prompt}`.",
                 f"Review instructions: `{product_root / 'skills/review/SKILL.md'}`.",
+                *engineering_instructions,
                 "",
                 "Read those pointers, inspect the exact product HEAD, and do not edit it.",
                 "Use Read, Glob, and Grep with absolute paths for inspection.",
@@ -281,13 +308,12 @@ def main(
     try:
         preset = ReviewPreset.from_flags(
             deep=args.deep,
+            full=args.full,
             cross_model=args.cross_model,
             runtime=args.runtime,
             model=args.model,
             effort=args.effort,
         )
-        policy = preset.request(args.operation_id)
-        depth = policy.depth
         manifest = _context_manifest(
             args.context_root, args.context_manifest, args.operation_id
         )
@@ -297,44 +323,60 @@ def main(
         verification = profiles[args.verification_profile]
         config = load_config(cwd)
         session = _session(args, config)
-        selected = resolve(
-            config,
-            "review",
-            session=session,
-            explicit_runtime=args.runtime,
-            explicit_model=args.model,
-            explicit_effort=args.effort,
-            same_model=not args.cross_model,
-            review_profile=depth,
-        )
-        route = _runtime_route(selected)
+        depth = preset.depth
+        route_profile = "deep" if depth in {"deep", "full"} else "simple"
+        single_model = bool(args.runtime or args.model)
         axis_routes: dict[str, RuntimeRoute] | None = None
-        if depth == "deep":
-            if any((args.runtime, args.model, args.effort)):
-                axis_routes = {axis: route for axis in policy.axes}
-            else:
-                axis_routes = {
-                    "spec": _runtime_route(
-                        resolve(
-                            config,
-                            "review",
-                            session=session,
-                            explicit_runtime="claude",
-                            same_model=False,
-                            review_profile="deep",
-                        )
-                    ),
-                    "standards-correctness-architecture-security": _runtime_route(
-                        resolve(
-                            config,
-                            "review",
-                            session=session,
-                            explicit_runtime="codex",
-                            same_model=False,
-                            review_profile="deep",
-                        )
-                    ),
-                }
+        selected_provider = ""
+        if depth in {"deep", "full"} and not single_model:
+            fable = _runtime_route(
+                resolve(
+                    config,
+                    "review",
+                    session=session,
+                    explicit_model="fable",
+                    explicit_effort=args.effort,
+                    same_model=False,
+                    review_profile="deep",
+                )
+            )
+            sol = _runtime_route(
+                resolve(
+                    config,
+                    "review",
+                    session=session,
+                    explicit_model="sol",
+                    explicit_effort=args.effort,
+                    same_model=False,
+                    review_profile="deep",
+                )
+            )
+            route = fable
+        else:
+            route = _runtime_route(
+                resolve(
+                    config,
+                    "review",
+                    session=session,
+                    explicit_runtime=args.runtime,
+                    explicit_model=args.model,
+                    explicit_effort=args.effort,
+                    same_model=not args.cross_model,
+                    review_profile=route_profile,
+                )
+            )
+            selected_provider = _route_provider(route)
+        policy = preset.request(
+            args.operation_id,
+            selected_provider=selected_provider,
+        )
+        if depth == "deep" and single_model:
+            axis_routes = {axis: route for axis in policy.axes}
+        elif depth in {"deep", "full"}:
+            axis_routes = {
+                axis: fable if axis.startswith("anthropic-") else sol
+                for axis in policy.axes
+            }
         context = ReviewContext(
             manifest,
             _head(cwd, args.head_sha),
@@ -374,11 +416,7 @@ def main(
             callback_root_path, runtime_root, "callback root"
         )
         for axis in policy.axes:
-            axis_name = (
-                "standards"
-                if axis == "standards-correctness-architecture-security"
-                else axis
-            )
+            axis_name = axis
             path = callback_root_path / axis_name
             path.mkdir(parents=True, exist_ok=True)
             path.chmod(0o700)

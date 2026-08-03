@@ -29,7 +29,7 @@
       "maxLength": 100,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
     },
-    "mode": {"enum": ["deep", "simple"]},
+    "mode": {"enum": ["deep", "full", "simple"]},
     "head_sha": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
@@ -70,7 +70,7 @@
                   {"$ref": "#/$defs/axis"},
                   {
                     "properties": {
-                      "axis": {"const": "holistic"},
+                      "axis": {"pattern": "^(anthropic|openai)-holistic$"},
                       "verification_iteration": {"maximum": 1}
                     }
                   }
@@ -88,32 +88,55 @@
           "axes": {
             "minItems": 2,
             "maxItems": 2,
-            "prefixItems": [
+            "oneOf": [
               {
-                "allOf": [
-                  {"$ref": "#/$defs/axis"},
-                  {
-                    "properties": {
-                      "axis": {"const": "spec"},
-                      "verification_iteration": {"maximum": 2}
-                    }
-                  }
+                "prefixItems": [
+                  {"properties": {"axis": {"const": "anthropic-holistic"}}},
+                  {"properties": {"axis": {"const": "openai-holistic"}}}
                 ]
               },
               {
-                "allOf": [
-                  {"$ref": "#/$defs/axis"},
-                  {
-                    "properties": {
-                      "axis": {
-                        "const": "standards-correctness-architecture-security"
-                      },
-                      "verification_iteration": {"maximum": 2}
-                    }
-                  }
+                "prefixItems": [
+                  {"properties": {"axis": {"const": "anthropic-intent"}}},
+                  {"properties": {"axis": {"const": "anthropic-engineering"}}}
+                ]
+              },
+              {
+                "prefixItems": [
+                  {"properties": {"axis": {"const": "openai-intent"}}},
+                  {"properties": {"axis": {"const": "openai-engineering"}}}
                 ]
               }
-            ]
+            ],
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/axis"},
+                {"properties": {"verification_iteration": {"maximum": 2}}}
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"mode": {"const": "full"}}},
+      "then": {
+        "properties": {
+          "axes": {
+            "minItems": 4,
+            "maxItems": 4,
+            "prefixItems": [
+              {"properties": {"axis": {"const": "anthropic-intent"}}},
+              {"properties": {"axis": {"const": "anthropic-engineering"}}},
+              {"properties": {"axis": {"const": "openai-intent"}}},
+              {"properties": {"axis": {"const": "openai-engineering"}}}
+            ],
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/axis"},
+                {"properties": {"verification_iteration": {"maximum": 2}}}
+              ]
+            }
           }
         }
       }
@@ -217,11 +240,9 @@
       "required": ["axis", "verdict", "verification_iteration", "findings"],
       "properties": {
         "axis": {
-          "enum": [
-            "holistic",
-            "spec",
-            "standards-correctness-architecture-security"
-          ]
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*-(holistic|intent|engineering)$"
         },
         "verdict": {"enum": ["approve", "changes-requested", "blocked"]},
         "verification_iteration": {

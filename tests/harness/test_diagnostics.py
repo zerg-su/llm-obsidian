@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
                 "dispatch_operation_id": operation,
                 "status": "reviewing",
                 "product_root": str(product),
-                "lanes": [{"axis": "holistic"}],
+                "lanes": [{"axis": "openai-holistic"}],
                 "round_results": {},
             },
             sort_keys=True,
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         / "review-runtime"
         / owner
         / "callbacks"
-        / "holistic"
+        / "openai-holistic"
         / ".review-callback.json"
     )
     callback.parent.mkdir(parents=True)
@@ -110,9 +110,9 @@ with tempfile.TemporaryDirectory(prefix="harness-diagnostics.") as raw:
         (gate_root / "review-gate.json").read_text(encoding="utf-8")
     )
     gate["status"] = "awaiting-resolution"
-    gate["round_results"] = {"holistic": "result.json"}
+    gate["round_results"] = {"openai-holistic": "result.json"}
     gate["awaiting_resolution"] = {
-        "holistic": {
+        "openai-holistic": {
             "pointer": "result.json",
             "reviewed_head_sha": "b" * 40,
         }

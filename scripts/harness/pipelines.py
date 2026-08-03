@@ -593,10 +593,10 @@ def render_contract(
     """Render the bounded semantic contract and its execution bindings."""
 
     if (
-        review_mode not in {"simple", "deep", "skip"}
+        review_mode not in {"simple", "deep", "full", "skip"}
         or type(max_verify_iterations) is not int
         or max_verify_iterations
-        != {"simple": 1, "deep": 2, "skip": 0}[review_mode]
+        != {"simple": 1, "deep": 2, "full": 2, "skip": 0}[review_mode]
     ):
         raise ContractError("rendered review budget is invalid")
     _require_identifier(

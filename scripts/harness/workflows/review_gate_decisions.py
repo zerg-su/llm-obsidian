@@ -35,12 +35,7 @@ class ReviewGateDecisionMixin:
     def _persist_result(
         self, operation_id: str, result: ReviewResult, *, final: bool
     ) -> str:
-        axis = (
-            "standards"
-            if result.axis
-            == "standards-correctness-architecture-security"
-            else result.axis
-        )
+        axis = result.axis
         directory = self.root / operation_id
         name = (
             f"final-{axis}.json"
@@ -61,12 +56,7 @@ class ReviewGateDecisionMixin:
         *,
         verification_iteration: int,
     ) -> str:
-        axis = (
-            "standards"
-            if resolution.axis
-            == "standards-correctness-architecture-security"
-            else resolution.axis
-        )
+        axis = resolution.axis
         path = (
             self.root
             / operation_id

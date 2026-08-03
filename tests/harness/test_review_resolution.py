@@ -29,7 +29,7 @@ reviewed = "a" * 40
 resolved = "b" * 40
 review_callbacks = [
     {
-        "axis": "holistic",
+        "axis": "openai-holistic",
         "round_operation_id": "round-operation",
         "round_run_id": "round-run",
         "callback_id": "callback-current",
@@ -81,7 +81,7 @@ check(
 )
 evidence = build_resolution_evidence(
     validated,
-    axis="holistic",
+    axis="openai-holistic",
     fix_delta=b"diff --git a/product.py b/product.py\n",
 )
 payload = evidence.payload()
@@ -93,7 +93,7 @@ check(
     and payload["reviewed_head_sha"] == reviewed
     and payload["resolved_head_sha"] == resolved
     and len(payload["fix_delta_sha256"]) == 64
-    and payload["axis"] == "holistic"
+    and payload["axis"] == "openai-holistic"
     and round_tripped.payload() == payload,
 )
 check(

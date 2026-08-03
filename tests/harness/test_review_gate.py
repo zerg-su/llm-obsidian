@@ -120,8 +120,8 @@ def write_trusted_current_approval(
     context["head_sha"] = head_sha
     run_id = "trusted-current-run"
     axes = (
-        "spec",
-        "standards-correctness-architecture-security",
+        "anthropic-holistic",
+        "openai-holistic",
     )
     terminal_iteration = (
         1
@@ -133,7 +133,7 @@ def write_trusted_current_approval(
     aggregate_axes = []
     final_results = {}
     for axis in axes:
-        short = "standards" if axis.startswith("standards-") else axis
+        short = axis
         pointer = f"final-{short}.json"
         (gate_root / pointer).write_text(
             json.dumps(
@@ -218,12 +218,12 @@ def write_trusted_current_approval(
             capture_output=True,
         ).stdout
         for axis in axes:
-            short = "standards" if axis.startswith("standards-") else axis
+            short = axis
             pointer = f"{operation_id}/resolution-{short}-0.json"
             finding_id = "authority-terminal-head-rebind"
             material_ids = (
                 [finding_id]
-                if valid_resolution_proof and short == "standards"
+                if valid_resolution_proof and axis == "openai-holistic"
                 else []
             )
             resolutions = (
@@ -323,7 +323,7 @@ def write_trusted_current_approval(
             )
             proof_lanes = []
             for axis in axes:
-                short = "standards" if axis.startswith("standards-") else axis
+                short = axis
                 parent_id = f"{operation_id[:96]}-proof-{short}"
                 lane_id = hashlib.sha256(
                     f"{parent_id}:lane".encode()
@@ -336,11 +336,7 @@ def write_trusted_current_approval(
                     hashlib.sha256(
                         f"{parent_id}:parent".encode()
                     ).hexdigest(),
-                    (
-                        "deep-review-spec"
-                        if axis == "spec"
-                        else "deep-review-correctness"
-                    ),
+                    "simple-review-holistic",
                     operation_id,
                     route,
                     "packets/review/manifest.json",
@@ -710,11 +706,12 @@ def request_for(
         operation_id,
         purpose=context.purpose,
         max_verify_iterations=max_verify_iterations,
+        selected_provider="" if depth == "deep" else "anthropic",
     )
     axes = (
         {
-            "spec": primary,
-            "standards-correctness-architecture-security": RuntimeRoute(
+            "anthropic-holistic": primary,
+            "openai-holistic": RuntimeRoute(
                 "codex",
                 "gpt-5.6-sol",
                 "xhigh",
@@ -774,14 +771,14 @@ with tempfile.TemporaryDirectory(prefix="release-review-gate.") as raw:
     stopped = controller.complete_round(
         run,
         lane,
-        run.rounds["holistic"],
+        run.rounds["anthropic-holistic"],
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "changes-requested",
             (
                 ReviewFinding(
                     "F-release-stop",
-                    "holistic",
+                    "anthropic-holistic",
                     "important",
                     "release evidence is incomplete",
                     "the required evidence map has a material gap",
@@ -808,7 +805,7 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     check(
         "automatic simple gate starts one persistent holistic lane",
         len(run.execution.lanes) == 1
-        and run.execution.lanes[0].axis == "holistic"
+        and run.execution.lanes[0].axis == "anthropic-holistic"
         and len(runtime.started) == 1
         and controller.read()["status"] == "reviewing",
     )
@@ -816,14 +813,14 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     waiting = controller.complete_round(
         run,
         lane,
-        run.rounds["holistic"],
+        run.rounds["anthropic-holistic"],
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "changes-requested",
             (
                 ReviewFinding(
                     "F-gate-1",
-                    "holistic",
+                    "anthropic-holistic",
                     "important",
                     "material regression",
                     "focused test fails",
@@ -838,13 +835,13 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
             lane,
             context=resolved_context,
             resolution=resolution_evidence(
-                "review-auto", "holistic", context.head_sha,
+                "review-auto", "anthropic-holistic", context.head_sha,
                 resolved_context.head_sha, "F-gate-1",
             ),
             review_identity_sha256="0" * 64,
             verification_prompt_pointer="prompts/verify.md",
             callback_pointer=(
-                "callbacks/review-auto/holistic/.review-callback.json"
+                "callbacks/review-auto/anthropic-holistic/.review-callback.json"
             ),
         )
     except ValueError:
@@ -873,14 +870,14 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         reason=AttentionReason.CALLBACK_TIMEOUT,
     )
     orphan_resolution = (
-        base / "gate" / "review-auto" / "resolution-holistic-0.json"
+        base / "gate" / "review-auto" / "resolution-anthropic-holistic-0.json"
     )
     orphan_resolution.parent.mkdir(parents=True, exist_ok=True)
     orphan_resolution.write_text(
         json.dumps(
             resolution_evidence(
                 "review-auto",
-                "holistic",
+                "anthropic-holistic",
                 context.head_sha,
                 "e" * 40,
                 "F-gate-1",
@@ -895,12 +892,12 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         lane,
         context=resolved_context,
         resolution=resolution_evidence(
-            "review-auto", "holistic", context.head_sha,
+            "review-auto", "anthropic-holistic", context.head_sha,
             resolved_context.head_sha, "F-gate-1",
         ),
         review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify.md",
-        callback_pointer="callbacks/review-auto/holistic/.review-callback.json",
+        callback_pointer="callbacks/review-auto/anthropic-holistic/.review-callback.json",
     )
     check(
         "material finding waits for resolution, then continues exact session",
@@ -927,7 +924,9 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
         ]
         == resolved_context.head_sha,
     )
-    resolution_pointer = controller.read()["resolution_evidence"]["holistic:0"]
+    resolution_pointer = controller.read()["resolution_evidence"][
+        "anthropic-holistic:0"
+    ]
     check(
         "review gate persists per-finding resolution evidence before verification",
         (base / "gate" / resolution_pointer).is_file()
@@ -939,13 +938,13 @@ with tempfile.TemporaryDirectory(prefix="review-gate.") as raw:
     first = replace(
         first,
         lane=run.execution.lanes[0],
-        round=run.rounds["holistic"],
+        round=run.rounds["anthropic-holistic"],
     )
     approved = controller.complete_round(
         run,
         first.lane,
         first.round,
-        ReviewResult("holistic", "approve", verification_iteration=1),
+        ReviewResult("anthropic-holistic", "approve", verification_iteration=1),
     )
     authorization = authorize_task_finalization(
         base / "gate",
@@ -1054,14 +1053,14 @@ with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as ra
     controller.defer_round_for_resolution(
         run,
         lane,
-        run.rounds["holistic"],
+        run.rounds["anthropic-holistic"],
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "changes-requested",
             (
                 ReviewFinding(
                     "F-real-resolution",
-                    "holistic",
+                    "anthropic-holistic",
                     "important",
                     "the reviewed candidate needs one exact fix",
                     "the initial production value is incorrect",
@@ -1103,7 +1102,7 @@ with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as ra
         context=replace(real_context, head_sha=resolved_head),
         resolution=ReviewResolutionEvidence(
             operation_id,
-            "holistic",
+            "anthropic-holistic",
             reviewed_head,
             resolved_head,
             hashlib.sha256(fix_delta).hexdigest(),
@@ -1118,14 +1117,14 @@ with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as ra
         ),
         review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify.md",
-        callback_pointer=f"callbacks/{operation_id}/holistic/.review-callback.json",
+        callback_pointer=f"callbacks/{operation_id}/anthropic-holistic/.review-callback.json",
     )
     run = controller.rehydrate()
     terminal = controller.complete_round(
         run,
         run.execution.lanes[0],
-        run.rounds["holistic"],
-        ReviewResult("holistic", "approve", verification_iteration=1),
+        run.rounds["anthropic-holistic"],
+        ReviewResult("anthropic-holistic", "approve", verification_iteration=1),
     )
     receipt = trusted_review_receipt(product, boundary, operation_id)
     check(
@@ -1149,14 +1148,14 @@ with tempfile.TemporaryDirectory(prefix="review-bounded-summary.") as raw:
     decision = controller.complete_round(
         run,
         lane,
-        run.rounds["holistic"],
+        run.rounds["anthropic-holistic"],
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "approve",
             (
                 ReviewFinding(
                     "F-long-summary",
-                    "holistic",
+                    "anthropic-holistic",
                     "minor",
                     "s" * 300,
                     "full evidence remains available",
@@ -1210,8 +1209,8 @@ with tempfile.TemporaryDirectory(prefix="review-summary-refresh.") as raw:
     approved = controller.complete_round(
         run,
         lane,
-        run.rounds["holistic"],
-        ReviewResult("holistic", "approve"),
+        run.rounds["anthropic-holistic"],
+        ReviewResult("anthropic-holistic", "approve"),
     )
     for terminal_record in store.list("owner-1"):
         if terminal_record.state in TERMINAL:
@@ -1318,7 +1317,7 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-attention.") as raw:
         run,
         lane,
         run.rounds[lane.axis],
-        ReviewResult("holistic", "approve"),
+        ReviewResult("anthropic-holistic", "approve"),
     )
     state = controller.read()
     check(
@@ -1353,7 +1352,7 @@ with tempfile.TemporaryDirectory(prefix="review-callback-timeout.") as raw:
         run,
         lane,
         run.rounds[lane.axis],
-        ReviewResult("holistic", "approve"),
+        ReviewResult("anthropic-holistic", "approve"),
     )
     state = controller.read()
     check(
@@ -1432,7 +1431,7 @@ with tempfile.TemporaryDirectory(prefix="review-cleanup-terminate.") as raw:
         run,
         lane,
         run.rounds[lane.axis],
-        ReviewResult("holistic", "approve"),
+        ReviewResult("anthropic-holistic", "approve"),
     )
     check(
         "orphan termination remains a bounded cleanup wait before approval",
@@ -1463,14 +1462,14 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
     waiting = controller.complete_round(
         run,
         lane,
-        run.rounds["holistic"],
+        run.rounds["anthropic-holistic"],
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "changes-requested",
             (
                 ReviewFinding(
                     "F-budget-1",
-                    "holistic",
+                    "anthropic-holistic",
                     "important",
                     "first defect",
                     "first failure",
@@ -1483,30 +1482,30 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         lane,
         context=replace(context, head_sha="1" * 40),
         resolution=resolution_evidence(
-            "review-budget", "holistic", context.head_sha,
+            "review-budget", "anthropic-holistic", context.head_sha,
             "1" * 40, "F-budget-1",
         ),
         review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify.md",
-        callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
+        callback_pointer="callbacks/review-budget/anthropic-holistic/.review-callback.json",
     )
     run = controller.rehydrate()
     first = replace(
         first,
         lane=run.execution.lanes[0],
-        round=run.rounds["holistic"],
+        round=run.rounds["anthropic-holistic"],
     )
     second_waiting = controller.complete_round(
         run,
         first.lane,
         first.round,
         ReviewResult(
-            "holistic",
+            "anthropic-holistic",
             "changes-requested",
             (
                 ReviewFinding(
                     "F-budget-2",
-                    "holistic",
+                    "anthropic-holistic",
                     "important",
                     "residual defect",
                     "verification still fails",
@@ -1520,12 +1519,12 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         first.lane,
         context=replace(context, head_sha="2" * 40),
         resolution=resolution_evidence(
-            "review-budget", "holistic", "1" * 40,
+            "review-budget", "anthropic-holistic", "1" * 40,
             "2" * 40, "F-budget-2",
         ),
         review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/verify-2.md",
-        callback_pointer="callbacks/review-budget/holistic/.review-callback.json",
+        callback_pointer="callbacks/review-budget/anthropic-holistic/.review-callback.json",
     )
     check(
         "verification exhaustion is durable attention instead of ValueError",
@@ -1647,12 +1646,12 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
     assert fresh is not None
     fresh_lane = fresh.execution.lanes[0]
     fresh_result = ReviewResult(
-        "holistic",
+        "anthropic-holistic",
         "changes-requested",
         (
             ReviewFinding(
                 "F-fresh-1",
-                "holistic",
+                "anthropic-holistic",
                 "important",
                 "fresh context defect",
                 "fresh review found a product gap",
@@ -1662,12 +1661,12 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
     fresh_waiting = controller.complete_round(
         fresh,
         fresh_lane,
-        fresh.rounds["holistic"],
+        fresh.rounds["anthropic-holistic"],
         fresh_result,
     )
-    fresh_round = fresh.rounds["holistic"]
+    fresh_round = fresh.rounds["anthropic-holistic"]
     fresh_callback = review_round_envelope(fresh_round, fresh_result)
-    fresh_boundary = controller.read()["awaiting_resolution"]["holistic"]
+    fresh_boundary = controller.read()["awaiting_resolution"]["anthropic-holistic"]
     check(
         "fresh resolution boundary binds operation callback findings and HEAD",
         fresh_boundary["review_operation_id"]
@@ -1687,14 +1686,14 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         context=replace(new_context, head_sha="3" * 40),
         resolution=resolution_evidence(
             "review-budget",
-            "holistic",
+            "anthropic-holistic",
             new_context.head_sha,
             "3" * 40,
             "F-fresh-1",
         ),
         review_identity_sha256=resolution_transport_identity(controller),
         verification_prompt_pointer="prompts/fresh-verify.md",
-        callback_pointer="callbacks/review-budget-fresh/holistic/.review-callback.json",
+        callback_pointer="callbacks/review-budget-fresh/anthropic-holistic/.review-callback.json",
     )
     check(
         "fresh review resolutions remain bound to the dispatch identity",
@@ -1890,8 +1889,8 @@ with tempfile.TemporaryDirectory(prefix="review-gate-deep-resolution.") as raw:
             for row in controller.read()["lanes"]
         }
         == {
-            "spec": 1,
-            "standards-correctness-architecture-security": 1,
+            "anthropic-holistic": 1,
+            "openai-holistic": 1,
         },
     )
 
@@ -2105,6 +2104,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         and started_state["dispatch_operation_id"] == task_id,
     )
     initial_lane = started["lanes"][0]
+    simple_axis = str(initial_lane["axis"])
     callback_path = Path(initial_lane["callback_path"])
     submit = shlex.join(
         (
@@ -2146,17 +2146,17 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         gate_root,
         task_store,
         task_runtime,
-        axis="holistic",
+        axis=simple_axis,
     )
     callback = review_round_envelope(
         round_.round,
         ReviewResult(
-            "holistic",
+            simple_axis,
             "changes-requested",
             (
                 ReviewFinding(
                     "F-task-1",
-                    "holistic",
+                    simple_axis,
                     "important",
                     "fix the product value",
                     "VALUE still equals one",
@@ -2198,7 +2198,7 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         and review_events[2]["counts"]["minor_findings"] == 0
         and review_events[2]["identifiers"]
         == {
-            "axis": "holistic",
+            "axis": simple_axis,
             "reviewer_runtime": "codex",
             "terminal_status": "changes-requested",
         }
@@ -2292,10 +2292,10 @@ with tempfile.TemporaryDirectory(prefix="task-review-runner.") as raw:
         gate_root,
         task_store,
         task_runtime,
-        axis="holistic",
+        axis=simple_axis,
     )
     approved_result = ReviewResult(
-        "holistic",
+        simple_axis,
         "approve",
         (),
         verification_iteration=1,
@@ -3532,21 +3532,22 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             == "reviewing",
         )
         lane = started["lanes"][0]
+        current_simple_axis = str(lane["axis"])
         active = task_review_runner.load_active_round(
             current_gate_root,
             current_store,
             current_runtime,
-            axis="holistic",
+            axis=current_simple_axis,
         )
         callback = review_round_envelope(
             active.round,
             ReviewResult(
-                "holistic",
+                current_simple_axis,
                 "changes-requested",
                 (
                     ReviewFinding(
                         "F-current-1",
-                        "holistic",
+                        current_simple_axis,
                         "important",
                         "fix the current checkout",
                         "VALUE still equals one",
@@ -3672,7 +3673,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             restarted_gate_path.read_text(encoding="utf-8")
         )
         guarded_state["round_results"] = {
-            "holistic": f'{restarted["task_id"]}/round-holistic-0.json'
+            "anthropic-holistic": f'{restarted["task_id"]}/round-anthropic-holistic-0.json'
         }
         restarted_gate_path.write_text(
             json.dumps(guarded_state, sort_keys=True) + "\n",
@@ -3817,7 +3818,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         quiesce_operations(current_store, release_started["task_id"])
         release_state["status"] = "stopped"
         release_state["round_results"] = {
-            "spec": f'{release_started["task_id"]}/round-spec-0.json'
+            "anthropic-holistic": f'{release_started["task_id"]}/round-anthropic-holistic-0.json'
         }
         (release_gate_root / "review-gate.json").write_text(
             json.dumps(release_state, sort_keys=True) + "\n",
@@ -4005,7 +4006,7 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             implementation_state_path.read_text(encoding="utf-8")
         )
         implementation_state["status"] = "approved"
-        implementation_state["final_results"] = {"spec": "final-spec.json"}
+        implementation_state["final_results"] = {"anthropic-holistic": "final-anthropic-holistic.json"}
         implementation_state_path.write_text(
             json.dumps(implementation_state, sort_keys=True) + "\n",
             encoding="utf-8",

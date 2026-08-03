@@ -772,6 +772,96 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         base_spec.idempotency_key != expert_spec.idempotency_key,
     )
     check(
+        "single-model deep preview shows two specialist sessions",
+        runner.review_topology_preview(expert, expert_policy)
+        == {
+            "session_count": 2,
+            "lanes": [
+                {
+                    "lane": "anthropic-intent",
+                    "provider": "anthropic",
+                    "runtime": "claude",
+                    "model": "fable",
+                    "responsibility": "intent",
+                },
+                {
+                    "lane": "anthropic-engineering",
+                    "provider": "anthropic",
+                    "runtime": "claude",
+                    "model": "fable",
+                    "responsibility": "engineering",
+                },
+            ],
+        },
+    )
+    deep_default_raw = json.loads(json.dumps(raw_request))
+    deep_default_raw["review"] = {"mode": "deep"}
+    deep_default = runner.validate_request(deep_default_raw)
+    deep_default_policy = runner.review_policy(deep_default, config)
+    check(
+        "default deep preview shows two independent holistic sessions",
+        runner.review_topology_preview(deep_default, deep_default_policy)[
+            "lanes"
+        ]
+        == [
+            {
+                "lane": "anthropic-holistic",
+                "provider": "anthropic",
+                "runtime": "claude",
+                "model": "fable",
+                "responsibility": "holistic",
+            },
+            {
+                "lane": "openai-holistic",
+                "provider": "openai",
+                "runtime": "codex",
+                "model": "gpt-5.6-sol",
+                "responsibility": "holistic",
+            },
+        ],
+    )
+    full_raw = json.loads(json.dumps(raw_request))
+    full_raw["review"] = {"mode": "full", "effort": "xhigh"}
+    full = runner.validate_request(full_raw)
+    full_policy = runner.review_policy(full, config)
+    full_preview = runner.review_topology_preview(full, full_policy)
+    full_lifecycle = runner.lifecycle_contract(full_policy)
+    check(
+        "explicit full preview shows the exact four-session grid",
+        full_policy.depth == "full"
+        and full_policy.max_verify_iterations == 2
+        and full_preview["session_count"] == 4
+        and [lane["lane"] for lane in full_preview["lanes"]]
+        == [
+            "anthropic-intent",
+            "anthropic-engineering",
+            "openai-intent",
+            "openai-engineering",
+        ]
+        and [
+            (lane["provider"], lane["runtime"], lane["model"])
+            for lane in full_preview["lanes"]
+        ]
+        == [
+            ("anthropic", "claude", "fable"),
+            ("anthropic", "claude", "fable"),
+            ("openai", "codex", "gpt-5.6-sol"),
+            ("openai", "codex", "gpt-5.6-sol"),
+        ]
+        and "Review: mode=full, verification-iterations=2"
+        in full_lifecycle["summary"],
+    )
+    for field, value in (("runtime", "codex"), ("model", "sol")):
+        invalid_full_raw = json.loads(json.dumps(full_raw))
+        invalid_full_raw["review"][field] = value
+        expect_error(
+            f"full {field} override fails before provider effects",
+            lambda raw=invalid_full_raw: runner.review_policy(
+                runner.validate_request(raw), config
+            ),
+            "use Deep",
+        )
+    check(
         "dispatch operation binds the exact compiled lifecycle hash",
         base_spec.contract_sha256
         == lifecycle_contract["definition_sha256"],

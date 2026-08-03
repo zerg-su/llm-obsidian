@@ -47,6 +47,11 @@ from task_contract import ContractError, normalize as normalize_task_contract
 from harness.git_ops import GitAdapter, GitError
 from harness.verification import load_profiles
 from harness.workflows.dispatch import ReviewPolicy
+from review_contract import (
+    compile_review_axes,
+    review_axis_provider,
+    review_axis_responsibility,
+)
 
 
 def materialize_current_context(raw: dict[str, Any]) -> dict[str, Any]:
@@ -98,7 +103,7 @@ def load_dispatch_config(vault_root: Path, target_repo: Path) -> dict[str, Any]:
         values.update(section)
     if values["interaction_policy"] != "unattended":
         raise DispatchError("dispatch-runner supports approved unattended plans only")
-    if values["review_mode"] not in REVIEW_MODES:
+    if values["review_mode"] not in {"simple", "deep", "skip"}:
         raise DispatchError("dispatch review_mode must be simple, deep, or skip")
     bounds = {
         "max_verify_iterations": (0, 5),
@@ -323,7 +328,7 @@ def review_policy(
     raw = request["review"]
     mode = raw["mode"] or config["review_mode"]
     if mode not in REVIEW_MODES:
-        raise DispatchError("review mode must be simple, deep, or skip")
+        raise DispatchError("review mode must be simple, deep, full, or skip")
     overrides = (
         raw["cross_model"],
         raw["runtime"],
@@ -332,6 +337,11 @@ def review_policy(
     )
     if mode == "skip" and any(overrides):
         raise DispatchError("skip review cannot carry expert overrides")
+    if mode == "full" and any((raw["runtime"], raw["model"])):
+        raise DispatchError(
+            "Full review requires Anthropic and OpenAI; use Deep for a "
+            "single-model intent and engineering review"
+        )
     verification = load_profiles(
         request["vault_root"] / "config" / "verification-profiles.toml"
     )["scoped"]
@@ -346,12 +356,12 @@ def review_policy(
                 explicit_model=raw["model"],
                 explicit_effort=raw["effort"],
                 same_model=not raw["cross_model"],
-                review_profile=mode,
+                review_profile="deep" if mode == "full" else mode,
             )
         except RoutingError as exc:
             raise DispatchError(f"invalid review override: {exc}") from exc
     return ReviewPolicy(
-        depth="deep" if mode == "deep" else "simple",
+        depth="simple" if mode == "skip" else mode,
         cross_model=raw["cross_model"],
         enabled=mode != "skip",
         runtime=raw["runtime"],
@@ -360,6 +370,67 @@ def review_policy(
         verification_profile=verification.name,
         verification_profile_sha256=verification.sha256,
     )
+
+
+def review_topology_preview(
+    request: dict[str, Any], review: ReviewPolicy
+) -> dict[str, Any]:
+    """Compile the exact effect-free public lane preview."""
+
+    if not review.enabled:
+        return {"session_count": 0, "lanes": []}
+    config = load_config(request["vault_root"])
+    selected_provider = ""
+    routes: dict[str, dict[str, Any]] = {}
+    if review.depth == "simple" or (
+        review.depth == "deep" and (review.runtime or review.model)
+    ):
+        selected = resolve(
+            config,
+            "review",
+            session=request["session_route"],
+            explicit_runtime=review.runtime,
+            explicit_model=review.model,
+            explicit_effort=review.effort,
+            same_model=not review.cross_model,
+            review_profile=(
+                "deep" if review.depth == "deep" else "simple"
+            ),
+        )
+        selected_provider = {
+            "claude": "anthropic",
+            "codex": "openai",
+        }[str(selected["runtime"])]
+        routes[selected_provider] = selected
+    else:
+        for provider, alias in (
+            ("anthropic", "fable"),
+            ("openai", "sol"),
+        ):
+            routes[provider] = resolve(
+                config,
+                "review",
+                session=request["session_route"],
+                explicit_model=alias,
+                explicit_effort=review.effort,
+                same_model=False,
+                review_profile="deep",
+            )
+    axes = compile_review_axes(
+        review.depth,
+        selected_provider=selected_provider,
+    )
+    lanes = [
+        {
+            "lane": axis,
+            "provider": review_axis_provider(axis),
+            "runtime": routes[review_axis_provider(axis)]["runtime"],
+            "model": routes[review_axis_provider(axis)]["model"],
+            "responsibility": review_axis_responsibility(axis),
+        }
+        for axis in axes
+    ]
+    return {"session_count": len(lanes), "lanes": lanes}
 
 
 def resolved_routes(request: dict[str, Any], *, persist: bool = True) -> tuple[dict[str, Any], dict[str, Any]]:

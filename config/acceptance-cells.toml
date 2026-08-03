@@ -87,7 +87,7 @@ dependencies = [
 kind = "deep-review"
 runtimes = ["claude", "codex"]
 route = "deep"
-expected = ["spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"]
+expected = ["anthropic-holistic", "openai-holistic", "bounded-callback", "terminal-cleanup"]
 dependencies = [
   "config/model-routing.toml",
   "scripts/review-runner.py",

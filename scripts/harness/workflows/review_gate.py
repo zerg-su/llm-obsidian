@@ -43,7 +43,7 @@ from .review import (
     start_review,
     verify_review_lane,
 )
-from review_contract import AXES, MATERIAL_SEVERITIES, VERIFY_BUDGETS, validate_review
+from review_contract import MATERIAL_SEVERITIES, MODES, VERIFY_BUDGETS, validate_review
 from review_resolution import (
     ResolutionError,
     ReviewResolutionEvidence,
@@ -316,18 +316,30 @@ def authorize_task_finalization(
     if (
         not isinstance(policy, dict)
         or policy.get("depth") != mode
-        or mode not in AXES
+        or mode not in MODES
     ):
         raise ValueError("approved review mode does not match its gate policy")
+    raw_lanes = state.get("lanes")
+    if not isinstance(raw_lanes, list) or not raw_lanes:
+        raise ValueError("approved review lane identity is unavailable")
+    expected_axes = tuple(
+        str(lane.get("axis") or "")
+        for lane in raw_lanes
+        if isinstance(lane, dict)
+    )
     pointers = state.get("final_results")
-    if not isinstance(pointers, dict) or set(pointers) != set(AXES[mode]):
+    if (
+        len(expected_axes) != len(raw_lanes)
+        or not isinstance(pointers, dict)
+        or set(pointers) != set(expected_axes)
+    ):
         raise ValueError("approved review final axes are incomplete")
     axes = {
         str(item.get("axis") or ""): item
         for item in review.get("axes", [])
         if isinstance(item, dict)
     }
-    for axis in AXES[mode]:
+    for axis in expected_axes:
         result_path = (root / str(pointers[axis])).resolve()
         try:
             result_path.relative_to(root)

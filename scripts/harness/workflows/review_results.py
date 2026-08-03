@@ -21,13 +21,13 @@ from ..contracts import (
 from ..runtime_sessions import RuntimeSessionRequest
 from ..state_machine import TERMINAL
 from review_contract import (
-    AXES,
     MATERIAL_SEVERITIES,
     SEVERITIES,
     VERIFY_BUDGETS,
     ReviewContractError,
     require_unique_finding_ids,
     validate_finding,
+    review_axis_responsibility,
 )
 
 
@@ -221,12 +221,10 @@ class ReviewLaneIdentity:
     surface_id: str
 
     def __post_init__(self) -> None:
-        if self.axis not in {
-            "holistic",
-            "spec",
-            "standards-correctness-architecture-security",
-        }:
-            raise ValueError("invalid review axis")
+        try:
+            review_axis_responsibility(self.axis)
+        except ValueError as exc:
+            raise ValueError("invalid review axis") from exc
         if not self.lane_id or not self.surface_id:
             raise ValueError("review lane and surface identity are required")
 

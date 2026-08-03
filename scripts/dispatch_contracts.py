@@ -48,7 +48,7 @@ from dispatch_io import (
 
 TASK_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 RUNTIMES = {"claude", "codex"}
-REVIEW_MODES = {"simple", "deep", "skip"}
+REVIEW_MODES = {"simple", "deep", "full", "skip"}
 COMPLETION_PASS_LIMITS = {"attention": 2, "autonomous": 3}
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
 RUN_STATES = {"preparing", "launched", "failed"}
@@ -164,7 +164,7 @@ def _validated_routes_and_review(
         elif review["mode"] != parsed_custom.review_mode:
             raise DispatchError("review.mode differs from the custom pipeline contract")
     if review["mode"] and review["mode"] not in REVIEW_MODES:
-        raise DispatchError("review.mode must be simple, deep, or skip")
+        raise DispatchError("review.mode must be simple, deep, full, or skip")
     if not isinstance(review["cross_model"], bool):
         raise DispatchError("review.cross_model must be boolean")
     if review["runtime"] and review["runtime"] not in RUNTIMES:

@@ -297,31 +297,31 @@ def review_boundary(
 
 
 review_cases = (
-    (("holistic",), {"holistic": []}, False),
-    (("holistic",), {"holistic": ["H-1"]}, True),
+    (("openai-holistic",), {"openai-holistic": []}, False),
+    (("openai-holistic",), {"openai-holistic": ["H-1"]}, True),
     (
-        ("spec", "standards-correctness-architecture-security"),
-        {"spec": [], "standards-correctness-architecture-security": []},
+        ("anthropic-holistic", "openai-holistic"),
+        {"anthropic-holistic": [], "openai-holistic": []},
         False,
     ),
     (
-        ("spec", "standards-correctness-architecture-security"),
-        {"spec": ["S-1"], "standards-correctness-architecture-security": []},
+        ("anthropic-holistic", "openai-holistic"),
+        {"anthropic-holistic": ["S-1"], "openai-holistic": []},
         True,
     ),
     (
-        ("spec", "standards-correctness-architecture-security"),
-        {"spec": [], "standards-correctness-architecture-security": ["C-1"]},
+        ("anthropic-holistic", "openai-holistic"),
+        {"anthropic-holistic": [], "openai-holistic": ["C-1"]},
         True,
     ),
     (
-        ("spec", "standards-correctness-architecture-security"),
-        {"spec": ["S-1"], "standards-correctness-architecture-security": ["C-1"]},
+        ("anthropic-holistic", "openai-holistic"),
+        {"anthropic-holistic": ["S-1"], "openai-holistic": ["C-1"]},
         True,
     ),
     (
-        ("spec", "standards-correctness-architecture-security"),
-        {"spec": ["DUP-1"], "standards-correctness-architecture-security": ["DUP-1"]},
+        ("anthropic-holistic", "openai-holistic"),
+        {"anthropic-holistic": ["DUP-1"], "openai-holistic": ["DUP-1"]},
         False,
     ),
 )

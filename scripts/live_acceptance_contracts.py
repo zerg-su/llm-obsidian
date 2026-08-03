@@ -177,7 +177,7 @@ def _validate_cell_shape(cell_id: str, operations: list[dict[str, Any]]) -> None
         )
     else:
         valid = (
-            kinds == ["deep-review-spec", "deep-review-correctness"]
+            kinds == ["simple-review-holistic", "simple-review-holistic"]
             and runtimes == ["claude", "codex"]
             and len(set(lanes)) == 2
             and len(set(runs)) == 2
@@ -199,9 +199,11 @@ def _operations_for(cell_id: str) -> tuple[_PlannedOperation, ...]:
         )
     if cell_id == "deep-review":
         return (
-            _PlannedOperation("deep-review-spec", "claude", "spec"),
             _PlannedOperation(
-                "deep-review-correctness", "codex", "correctness"
+                "deep-review-anthropic-holistic", "claude", "anthropic-holistic"
+            ),
+            _PlannedOperation(
+                "deep-review-openai-holistic", "codex", "openai-holistic"
             ),
         )
     raise LiveDriverError("unknown live acceptance cell")

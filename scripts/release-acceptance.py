@@ -70,7 +70,12 @@ REQUIRED_TRACES = {
     "claude-lifecycle": ("open", "callback", "same-run-continue", "exit", "close"),
     "codex-lifecycle": ("open", "callback", "same-run-continue", "exit", "close"),
     "cross-runtime-composition": ("dispatch", "simple-review", "reap"),
-    "deep-review": ("spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"),
+    "deep-review": (
+        "anthropic-holistic",
+        "openai-holistic",
+        "bounded-callback",
+        "terminal-cleanup",
+    ),
 }
 
 

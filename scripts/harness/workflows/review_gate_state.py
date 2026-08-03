@@ -24,6 +24,7 @@ from .review_gate_contracts import (
     _read_json,
     review_context_sha256,
 )
+from review_contract import review_axis_provider, review_axis_responsibility
 
 
 class ReviewGateStateMixin:
@@ -248,6 +249,20 @@ class ReviewGateStateMixin:
             or not raw_lanes
         ):
             raise ValueError("active review gate cannot be rehydrated")
+        stored_axes = tuple(
+            str(item.get("axis") or "")
+            for item in raw_lanes
+            if isinstance(item, dict)
+        )
+        selected_provider = ""
+        if stored_axes and (
+            str(policy.get("depth") or "") == "simple"
+            or (
+                str(policy.get("depth") or "") == "deep"
+                and review_axis_responsibility(stored_axes[0]) != "holistic"
+            )
+        ):
+            selected_provider = review_axis_provider(stored_axes[0])
         review = ReviewRequest(
             operation_id=str(state.get("active_review_operation_id") or ""),
             depth=str(policy.get("depth") or ""),
@@ -259,6 +274,7 @@ class ReviewGateStateMixin:
                 policy.get("max_verify_iterations", -1)
             ),
             purpose=str(policy.get("purpose") or "implementation"),
+            selected_provider=selected_provider,
         )
         review_context = ReviewContext(
             manifest=str(context.get("manifest") or ""),

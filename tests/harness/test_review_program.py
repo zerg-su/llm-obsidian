@@ -66,9 +66,8 @@ SHA = {
     }.items()
 }
 AXIS_SHORT = {
-    "holistic": "holistic",
-    "spec": "spec",
-    "standards-correctness-architecture-security": "standards",
+    "anthropic-holistic": "anthropic-holistic",
+    "openai-holistic": "openai-holistic",
 }
 
 
@@ -395,7 +394,7 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         "verdict": "approve",
         "axes": [
             {
-                "axis": "holistic",
+                "axis": "anthropic-holistic",
                 "findings": [],
                 "verdict": "approve",
                 "verification_iteration": 0,
@@ -426,8 +425,8 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     callback_path = gate_root / ".review-callback.json"
     callback_bytes = (json.dumps(callback, sort_keys=True) + "\n").encode()
     callback_path.write_bytes(callback_bytes)
-    (gate_root / "final-holistic.json").write_text(
-        '{"axis":"holistic","findings":[],"verdict":"approve",'
+    (gate_root / "final-anthropic-holistic.json").write_text(
+        '{"axis":"anthropic-holistic","findings":[],"verdict":"approve",'
         '"verification_iteration":0}\n',
         encoding="utf-8",
     )
@@ -458,7 +457,7 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     cli_child_id = f"{'review-intent-cli'[: 128 - len(cli_suffix)]}{cli_suffix}"
     cli_child_key = hashlib.sha256(
         (
-            f"{cli_parent_spec.idempotency_key}:holistic:{cli_role}:"
+            f"{cli_parent_spec.idempotency_key}:anthropic-holistic:{cli_role}:"
             f"{cli_child_id}"
         ).encode()
     ).hexdigest()
@@ -482,7 +481,7 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     for state in ("preflight", "starting", "running", "awaiting-callback"):
         cli_store.transition("review-intent-cli", cli_child_id, state)
     cli_round = _result_from_payload(
-        json.loads((gate_root / "final-holistic.json").read_text(encoding="utf-8"))
+        json.loads((gate_root / "final-anthropic-holistic.json").read_text(encoding="utf-8"))
     )
     cli_round_payload = review_round_payload("review-intent-cli", cli_round)
     cli_round_bytes = json.dumps(
@@ -526,10 +525,10 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
                     "pointer": ".review-callback.json",
                     "sha256": callback_sha256,
                 },
-                "final_results": {"holistic": "final-holistic.json"},
+                "final_results": {"anthropic-holistic": "final-anthropic-holistic.json"},
                 "lanes": [
                     {
-                        "axis": "holistic",
+                        "axis": "anthropic-holistic",
                         "checkpoint": "checkpoint-holistic",
                         "lane_id": cli_lane_id,
                         "operation_id": "review-intent-cli",
@@ -681,23 +680,14 @@ def write_approved_gate(
     run_id = "trusted-review-run"
     profile_sha256 = "5" * 64
     axes = (
-        ("holistic",)
+        ("anthropic-holistic",)
         if mode == "simple"
-        else ("spec", "standards-correctness-architecture-security")
+        else ("anthropic-holistic", "openai-holistic")
     )
     terminal_iteration = 1 if resolved_head and valid_resolution_proof else 0
     parent_ids = {
-        axis: (
-            operation_id
-            if axis == "holistic"
-            else f"{operation_id[:96]}-{_short}"
-        )
-        for axis, _short in (
-            ("holistic", "holistic"),
-            ("spec", "spec"),
-            ("standards-correctness-architecture-security", "standards"),
-        )
-        if axis in axes
+        axis: operation_id if index == 0 else f"{operation_id[:96]}-{axis}"
+        for index, axis in enumerate(axes)
     }
     lane_ids = {
         axis: hashlib.sha256(f"{parent_ids[axis]}:lane".encode()).hexdigest()[:32]
@@ -748,7 +738,7 @@ def write_approved_gate(
     (gate_root / ".review-callback.json").write_bytes(callback_bytes)
     final_results = {}
     for axis in axes:
-        short = "standards" if axis.startswith("standards-") else axis
+        short = axis
         pointer = f"final-{short}.json"
         (gate_root / pointer).write_text(
             json.dumps(
@@ -801,15 +791,15 @@ def write_approved_gate(
                         "surface_id": "",
                         "verification_iteration": terminal_iteration,
                     }
-                    for axis, _short in (
-                        ("holistic", "holistic"),
-                        ("spec", "spec"),
-                        ("standards-correctness-architecture-security", "standards"),
-                    )
-                    if axis in axes
+                    for axis in axes
+                    for _short in (axis,)
                 ],
                 "resolution_evidence": (
-                    {"holistic:0": f"{operation_id}/resolution-holistic-0.json"}
+                    {
+                        "anthropic-holistic:0": (
+                            f"{operation_id}/resolution-anthropic-holistic-0.json"
+                        )
+                    }
                     if resolved_head
                     else {}
                 ),
@@ -852,7 +842,7 @@ def write_approved_gate(
         resolution = {
             "schema_version": 1,
             "operation_id": operation_id,
-            "axis": "holistic",
+            "axis": "anthropic-holistic",
             "reviewed_head_sha": expected_head,
             "resolved_head_sha": resolved_head,
             "fix_delta_sha256": (
@@ -866,17 +856,21 @@ def write_approved_gate(
         resolution_bytes = (
             json.dumps(resolution, sort_keys=True) + "\n"
         ).encode()
-        resolution_path = gate_root / operation_id / "resolution-holistic-0.json"
+        resolution_path = (
+            gate_root
+            / operation_id
+            / "resolution-anthropic-holistic-0.json"
+        )
         resolution_path.parent.mkdir()
         resolution_path.write_bytes(resolution_bytes)
         if valid_resolution_proof:
-            (gate_root / operation_id / "round-holistic-0.json").write_text(
+            (gate_root / operation_id / "round-anthropic-holistic-0.json").write_text(
                 json.dumps(
                     {
-                        "axis": "holistic",
+                        "axis": "anthropic-holistic",
                         "findings": [
                             {
-                                "axis": "holistic",
+                                "axis": "anthropic-holistic",
                                 "evidence": "The terminal HEAD differs from the reviewed boundary HEAD.",
                                 "file": "product.py",
                                 "finding_id": finding_id,
@@ -904,7 +898,10 @@ def write_approved_gate(
                     "review_boundary_input_sha256": boundary.input_sha256,
                     "resolution_evidence": [
                         {
-                            "pointer": f"{operation_id}/resolution-holistic-0.json",
+                            "pointer": (
+                                f"{operation_id}/"
+                                "resolution-anthropic-holistic-0.json"
+                            ),
                             "sha256": hashlib.sha256(resolution_bytes).hexdigest(),
                         }
                     ],
@@ -926,13 +923,7 @@ def write_approved_gate(
             parent_spec = OperationSpec(
                 parent_id,
                 hashlib.sha256(f"{parent_id}:parent".encode()).hexdigest(),
-                {
-                    "holistic": "simple-review-holistic",
-                    "spec": "deep-review-spec",
-                    "standards-correctness-architecture-security": (
-                        "deep-review-correctness"
-                    ),
-                }[axis],
+                "simple-review-holistic",
                 operation_id,
                 route,
                 "packets/review/manifest.json",
@@ -1122,7 +1113,7 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
 
     missing_axis = json.loads(original_gate)
     missing_axis["final_results"].pop(
-        "standards-correctness-architecture-security"
+        "openai-holistic"
     )
     deep_gate_path.write_text(
         json.dumps(missing_axis, sort_keys=True) + "\n", encoding="utf-8"

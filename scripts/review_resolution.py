@@ -13,15 +13,13 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from review_contract import MATERIAL_SEVERITIES
+from review_contract import review_axis_provider
 
 
 SCHEMA_VERSION = 1
 DISPOSITIONS = frozenset({"applied", "rejected", "out-of-scope"})
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 GIT_HEAD = re.compile(r"[0-9a-f]{40,64}\Z")
-AXES = frozenset(
-    {"holistic", "spec", "standards-correctness-architecture-security"}
-)
 MAX_RESOLUTIONS = 50
 MAX_RATIONALE_CHARS = 2_000
 MAX_FOLLOW_UP_CHARS = 500
@@ -93,8 +91,10 @@ def review_transport_identity_sha256(
             f"review_callbacks[{index}].axis",
             limit=64,
         )
-        if axis not in AXES:
-            raise ResolutionError("review callback axis is invalid")
+        try:
+            review_axis_provider(axis)
+        except ValueError as exc:
+            raise ResolutionError("review callback axis is invalid") from exc
         callback_sha256 = _text(
             callback.get("callback_sha256"),
             f"review_callbacks[{index}].callback_sha256",
@@ -121,9 +121,9 @@ def review_transport_identity_sha256(
             }
         )
     axes = [callback["axis"] for callback in normalized]
-    if not axes or axes != sorted(axes) or len(axes) != len(set(axes)):
+    if not axes or len(axes) != len(set(axes)):
         raise ResolutionError(
-            "review callbacks must cover unique axes in canonical order"
+            "review callbacks must cover unique ordered axes"
         )
     payload = {
         "review_operation_id": operation_id,
@@ -231,8 +231,10 @@ class ReviewResolutionEvidence:
     def __post_init__(self) -> None:
         if not IDENTIFIER.fullmatch(self.operation_id):
             raise ResolutionError("resolution evidence operation is invalid")
-        if self.axis not in AXES:
-            raise ResolutionError("resolution evidence axis is invalid")
+        try:
+            review_axis_provider(self.axis)
+        except ValueError as exc:
+            raise ResolutionError("resolution evidence axis is invalid") from exc
         if (
             not GIT_HEAD.fullmatch(self.reviewed_head_sha)
             or not GIT_HEAD.fullmatch(self.resolved_head_sha)

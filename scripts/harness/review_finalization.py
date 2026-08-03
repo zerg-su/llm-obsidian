@@ -139,7 +139,7 @@ def _review_binding(
     if not isinstance(policy, Mapping):
         raise ValueError("review finalization policy is unavailable")
     mode = str(policy.get("mode") or "")
-    if mode not in {"simple", "deep", "skip"}:
+    if mode not in {"simple", "deep", "full", "skip"}:
         raise ValueError("review finalization mode is invalid")
     cross_model = policy.get("cross_model")
     runtime = policy.get("runtime")

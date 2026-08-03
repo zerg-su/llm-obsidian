@@ -82,7 +82,7 @@ CONTRACT_CELLS = [
             "deep-review",
             "deep-review",
             ["claude", "codex"],
-            ("spec-axis", "correctness-axis", "bounded-callback", "terminal-cleanup"),
+            ("anthropic-holistic", "openai-holistic", "bounded-callback", "terminal-cleanup"),
         ),
     )
 ]
@@ -150,13 +150,19 @@ def evidence(row: dict[str, object]) -> dict[str, object]:
         ]
     else:
         operations = [
-            operation("spec-op", "deep-review-spec", "claude", "spec-lane", "spec-run"),
             operation(
-                "correctness-op",
-                "deep-review-correctness",
+                "fable-op",
+                "simple-review-holistic",
+                "claude",
+                "fable-lane",
+                "fable-run",
+            ),
+            operation(
+                "sol-op",
+                "simple-review-holistic",
                 "codex",
-                "correctness-lane",
-                "correctness-run",
+                "sol-lane",
+                "sol-run",
             ),
         ]
     return {
@@ -265,7 +271,7 @@ else:
     raise AssertionError("unresolved operation effect is rejected")
 
 shared_deep_lane = evidence(CONTRACT_CELLS[3])
-shared_deep_lane["operations"][1]["lane_id"] = "spec-lane"
+shared_deep_lane["operations"][1]["lane_id"] = "fable-lane"
 try:
     driver.validate_cell_evidence(CONTRACT_CELLS[3], shared_deep_lane, commit_sha=COMMIT)
 except driver.LiveDriverError:

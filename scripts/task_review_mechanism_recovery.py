@@ -37,6 +37,7 @@ from task_review_shared import (
     _read_json,
 )
 from task_review_transport import _receipt
+from review_contract import review_axis_responsibility
 
 
 def recover_task_review_for_mechanism(
@@ -107,12 +108,15 @@ def recover_task_review_for_mechanism(
             run=run,
         )
     previous_context = run.execution.request.context
+    axes = run.execution.request.policy.axes
+    simple_axis = axes[0] if len(axes) == 1 else ""
     if (
         state.get("status") == "approved"
         and state.get("fresh_reevaluation_used") is not True
         and state.get("final_results") not in ({}, None)
         and run.execution.request.policy.depth == "simple"
-        and run.execution.request.policy.axes == ("holistic",)
+        and bool(simple_axis)
+        and review_axis_responsibility(simple_axis) == "holistic"
         and previous_context.head_sha == current_context.head_sha
         and previous_context.verification_profile
         == current_context.verification_profile
@@ -155,7 +159,7 @@ def recover_task_review_for_mechanism(
             ) from exc
         if (
             persisted_resolution.operation_id != task_id
-            or persisted_resolution.axis != "holistic"
+            or persisted_resolution.axis != simple_axis
             or persisted_resolution.resolved_head_sha
             != current_context.head_sha
         ):

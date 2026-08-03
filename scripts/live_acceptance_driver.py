@@ -172,7 +172,7 @@ def run_cell(
                     )
                 )
                 continue
-            if operation.kind == "deep-review-spec":
+            if operation.kind == "deep-review-anthropic-holistic":
                 operations.extend(
                     _run_review_sessions(
                         root,
@@ -187,7 +187,7 @@ def run_cell(
                     )
                 )
                 continue
-            if operation.kind == "deep-review-correctness":
+            if operation.kind == "deep-review-openai-holistic":
                 continue
             operation_id = (
                 f"live-{commit_sha[:12]}-{cell_id}-{index}"

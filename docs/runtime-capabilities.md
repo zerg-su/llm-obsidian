@@ -130,19 +130,22 @@ blocked. Tests compare the task/base policies and exercise both allowed and
 denied commands.
 
 Dispatch and unified review resolve the current repository defaults from
-`config/model-routing.toml`. Simple review stays on the exact current route by
-default; cross-model mode selects the opposite runtime's simple profile. Deep
-mode selects the current runtime's deep profile, or the opposite deep profile
-when cross-model is explicit. Review model overrides accept registered aliases
-only. Every resolved route remains recorded in operation metadata. The bounded
+`config/model-routing.toml`. Simple review stays on one selected holistic
+route. Default Deep resolves independent Anthropic and OpenAI holistic routes; an
+explicit model/runtime override instead opens intent and engineering lanes on
+that model alone. Explicit Full resolves the four-lane Anthropic/OpenAI by
+intent/engineering grid and rejects model/runtime overrides before launch.
+Review model overrides accept registered aliases only. Every resolved route
+remains recorded in operation metadata. The bounded
 daily summarizer inherits the current session's exact model and changes only
 effort to the centrally configured daily value.
 
 Reviewers remain product-read-only but are no longer toolchain-starved. Review
 specs, callbacks, baselines, watchdog state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share
-singleton files. Simple review uses one holistic lane; deep review preserves
-independent spec and standards/correctness/architecture/security lanes. Claude
+singleton files. Simple review uses one holistic lane. Default Deep uses two
+independent holistic model lanes; single-model Deep and explicit Full reuse the
+same independent intent and engineering specialist responsibilities. Claude
 gets the same trusted `PATH`, bounded test entrypoints, and the exact DCG
 smoke `bash scripts/dcg-test-suite.sh`; Codex gets a
 private scratch directory, exact loopback access/binding, disabled web search,

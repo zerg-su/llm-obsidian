@@ -54,8 +54,8 @@ class ReviewPolicy:
     verification_profile_sha256: str = ""
 
     def __post_init__(self) -> None:
-        if self.depth not in {"simple", "deep"}:
-            raise ValueError("review depth must be simple or deep")
+        if self.depth not in {"simple", "deep", "full"}:
+            raise ValueError("review depth must be simple, deep, or full")
         if self.runtime and self.runtime not in {"claude", "codex"}:
             raise ValueError("review runtime must be claude or codex")
         if self.model and not re.fullmatch(
@@ -99,7 +99,7 @@ class ReviewPolicy:
 
     @property
     def max_verify_iterations(self) -> int:
-        return {"simple": 1, "deep": 2, "skip": 0}[self.mode]
+        return {"simple": 1, "deep": 2, "full": 2, "skip": 0}[self.mode]
 
 
 @dataclass(frozen=True)
