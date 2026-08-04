@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from harness.contracts import OwnedResources
+from harness.contracts import OperationRecord, OperationSpec, OwnedResources
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
-from harness.store import OperationStore
+from harness.store import OperationStore, StoreError
 from harness.workflows.review_gate import (
     ReviewGateController,
     ReviewScopeBoundary,
@@ -38,6 +39,48 @@ from task_review_shared import (
 )
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
+
+
+class _RecoveryRoundStore:
+    """Read exact terminal rounds created before parent identity persisted."""
+
+    def __init__(self, store: OperationStore) -> None:
+        self._store = store
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+    def create(
+        self,
+        spec: OperationSpec,
+        *,
+        lane_id: str,
+        run_id: str,
+    ) -> OperationRecord:
+        try:
+            return self._store.create(
+                spec, lane_id=lane_id, run_id=run_id
+            )
+        except StoreError as original:
+            try:
+                existing = self._store.read(
+                    spec.owner_id, spec.operation_id
+                )
+            except StoreError:
+                raise original
+            legacy_spec = replace(spec, parent_operation_id="")
+            if (
+                spec.kind != "review-round"
+                or not spec.parent_operation_id
+                or existing.spec != legacy_spec
+                or existing.lane_id != lane_id
+                or existing.run_id != run_id
+                or existing.state not in TERMINAL
+                or existing.resources != OwnedResources()
+                or existing.pending_effect
+            ):
+                raise original
+            return replace(existing, spec=spec)
 
 
 def recover_task_review_for_mechanism(
@@ -79,7 +122,7 @@ def recover_task_review_for_mechanism(
     gate = ReviewGateController(
         _gate_root(vault, task_id),
         runtime,
-        store,
+        _RecoveryRoundStore(store),
     )
     state = gate.read()
     run = gate.rehydrate()

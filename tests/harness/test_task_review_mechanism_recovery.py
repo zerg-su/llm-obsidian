@@ -126,6 +126,28 @@ class FakeRuntime:
         )
 
 
+class LegacyRoundStore:
+    """Create pre-parent-identity round records for recovery coverage."""
+
+    def __init__(self, store: OperationStore) -> None:
+        self.store = store
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.store, name)
+
+    def create(
+        self, spec: object, *, lane_id: str, run_id: str
+    ) -> OperationRecord:
+        stored_spec = (
+            replace(spec, parent_operation_id="")
+            if spec.kind == "review-round"
+            else spec
+        )
+        return self.store.create(
+            stored_spec, lane_id=lane_id, run_id=run_id
+        )
+
+
 @dataclass(frozen=True)
 class RecoveryFixture:
     vault: Path
@@ -150,6 +172,7 @@ def build_fixture(
     base: Path,
     *,
     gate_status: str = "attention-required",
+    legacy_round_specs: bool = False,
 ) -> RecoveryFixture:
     vault = base / "vault"
     product = base / "product"
@@ -265,7 +288,10 @@ def build_fixture(
     )
     store = OperationStore(vault / ".vault-meta/harness")
     runtime = FakeRuntime(store)
-    gate = ReviewGateController(_gate_root(vault, task_id), runtime, store)
+    gate_store = LegacyRoundStore(store) if legacy_round_specs else store
+    gate = ReviewGateController(
+        _gate_root(vault, task_id), runtime, gate_store
+    )
     preset = ReviewPreset.from_flags()
     request = ReviewOperationRequest(
         preset.request(task_id, selected_provider="openai"),
@@ -471,10 +497,13 @@ with tempfile.TemporaryDirectory(
     prefix="mechanism-recovery-awaiting-resolution."
 ) as raw:
     fixture = build_fixture(
-        Path(raw), gate_status="awaiting-resolution"
+        Path(raw),
+        gate_status="awaiting-resolution",
+        legacy_round_specs=True,
     )
     state_before = fixture.gate.read()
     started_before = len(fixture.runtime.started)
+    terminalize(fixture.store, fixture.task_id, fixture.child_id)
     expect_error(
         "awaiting-resolution recovery rejects live retained ownership",
         lambda: recover_task_review_for_mechanism(
