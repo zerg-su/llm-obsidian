@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 
@@ -176,6 +177,121 @@ with tempfile.TemporaryDirectory(prefix="callback-wake.") as raw:
             ("11111111-1111-4111-8111-111111111111", "Enter"),
         ]
         and marker["status"] == "sent",
+    )
+
+
+class PartialCallbackWakeCmux(CallbackWakeCmux):
+    def __init__(self, *, fail_after_key: bool = False) -> None:
+        super().__init__()
+        self.fail_after_key = fail_after_key
+
+    def send_key(self, surface_id: str, value: str) -> None:
+        if self.fail_after_key:
+            self.events.append((surface_id, value))
+        raise RuntimeError("callback wake kill point")
+
+
+for label, fail_after_key, expected_events in (
+    (
+        "after-send",
+        False,
+        [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "Run the exact idempotent current-review drive.",
+            )
+        ],
+    ),
+    (
+        "after-enter",
+        True,
+        [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "Run the exact idempotent current-review drive.",
+            ),
+            ("11111111-1111-4111-8111-111111111111", "Enter"),
+        ],
+    ),
+):
+    with tempfile.TemporaryDirectory(prefix=f"callback-wake-{label}.") as raw:
+        wake_cmux = PartialCallbackWakeCmux(fail_after_key=fail_after_key)
+        wake_spec = {
+            "origin_surface": "11111111-1111-4111-8111-111111111111",
+            "callback_wake": "Run the exact idempotent current-review drive.",
+        }
+        first_wake = runtime_worker.publish_callback_wake(
+            wake_spec, Path(raw), "callback-wake-1", wake_cmux
+        )
+        repeated_wake = runtime_worker.publish_callback_wake(
+            wake_spec, Path(raw), "callback-wake-1", wake_cmux
+        )
+        marker = json.loads(
+            (Path(raw) / "callback-wake.json").read_text(encoding="utf-8")
+        )
+        check(
+            f"callback wake {label} crash is fail-closed and never replayed",
+            not first_wake
+            and not repeated_wake
+            and wake_cmux.events == expected_events
+            and marker["status"] == "effect-uncertain",
+        )
+
+
+class ConcurrentCallbackWakeCmux(CallbackWakeCmux):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_send = threading.Event()
+        self.release_send = threading.Event()
+
+    def send(self, surface_id: str, value: str) -> None:
+        self.events.append((surface_id, value))
+        self.first_send.set()
+        if not self.release_send.wait(timeout=2):
+            raise RuntimeError("concurrent wake test timed out")
+
+
+with tempfile.TemporaryDirectory(prefix="callback-wake-concurrent.") as raw:
+    wake_cmux = ConcurrentCallbackWakeCmux()
+    wake_spec = {
+        "origin_surface": "11111111-1111-4111-8111-111111111111",
+        "callback_wake": "Run the exact idempotent current-review drive.",
+    }
+    results: list[bool] = []
+    errors: list[BaseException] = []
+
+    def publish() -> None:
+        try:
+            results.append(
+                runtime_worker.publish_callback_wake(
+                    wake_spec, Path(raw), "callback-wake-1", wake_cmux
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - test retains thread failure
+            errors.append(exc)
+
+    first = threading.Thread(target=publish)
+    second = threading.Thread(target=publish)
+    first.start()
+    assert wake_cmux.first_send.wait(timeout=1)
+    second.start()
+    wake_cmux.release_send.set()
+    first.join(timeout=3)
+    second.join(timeout=3)
+    check(
+        "concurrent callback wake reconcile has one provider-facing effect",
+        not errors
+        and not first.is_alive()
+        and not second.is_alive()
+        and results == [True, True]
+        and wake_cmux.events
+        == [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "Run the exact idempotent current-review drive.",
+            ),
+            ("11111111-1111-4111-8111-111111111111", "Enter"),
+        ],
     )
 check(
     "durable harness state is repository-ignored",

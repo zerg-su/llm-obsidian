@@ -65,6 +65,22 @@ check(
     == {"callback-submit", "callback-ingestion", "terminal-cleanup"},
 )
 
+final_path = ROOT / "docs/acceptance/v2.6.4-harness-control-plane-final.json"
+final = json.loads(final_path.read_text(encoding="utf-8"))
+final_stages = final["stages"]
+check(
+    "final authority trace closes every historical manual-ingress row",
+    final.get("schema_version") == 1
+    and {row["stage"] for row in final_stages} == expected_stages
+    and len(final_stages) == len(expected_stages)
+    and all(row["owner"] == "harness" for row in final_stages)
+    and all(not row["manual_ingress_required"] for row in final_stages)
+    and all(row["disposition"] == "established" for row in final_stages)
+    and all((ROOT / row["module"]).is_file() for row in final_stages)
+    and all((ROOT / row["test"]).is_file() for row in final_stages),
+    final_stages,
+)
+
 
 pipeline = compiled_builtin("engineering/change")
 step_ids = tuple(step.step_id for step in pipeline.definition.steps)
@@ -82,6 +98,59 @@ check(
     and after_prose.action == "wait"
     and after_prose.step_id == step_ids[0],
     after_prose,
+)
+
+fix_pipeline = compiled_builtin("engineering/fix")
+check(
+    "final trace binds the approved fix PipelineSpec and bounded controls",
+    final["pipeline"] == "engineering/fix"
+    and final["pipeline_definition_sha256"] == fix_pipeline.definition_sha256
+    and final["pipeline_steps"]
+    == [step.step_id for step in fix_pipeline.definition.steps]
+    and final["control_primitives"]
+    == [item.identity for item in fix_pipeline.definition.control_primitives],
+    final,
+)
+
+dogfood = json.loads(
+    (
+        ROOT
+        / "docs/acceptance/v2.6.4-unattended-missing-submit-dogfood.json"
+    ).read_text(encoding="utf-8")
+)
+dogfood_observations = dogfood["observations"]
+integrated_trace = final["integrated_trace"]
+check(
+    "final trace derives callback, next-stage and cleanup evidence from dogfood receipt",
+    integrated_trace["dogfood_trace_receipt_sha256"]
+    == dogfood["trace_receipt_sha256"]
+    and integrated_trace["accepted_callback_count"]
+    == dogfood_observations["accepted_receipt_count"]
+    and integrated_trace["same_session_recovery_count"]
+    == dogfood_observations["same_session_recovery_count"]
+    and integrated_trace["provider_prompt_count"]
+    == dogfood_observations["provider_prompt_count"]
+    and integrated_trace["provider_enter_count"]
+    == dogfood_observations["provider_enter_count"]
+    and integrated_trace["next_pipeline_action"]
+    == dogfood_observations["next_pipeline_action"]
+    and integrated_trace["parent_terminal_state"]
+    == dogfood_observations["parent_state"]
+    and integrated_trace["child_terminal_state"]
+    == dogfood_observations["next_child_state"]
+    and integrated_trace["terminal_resources_owned"]
+    == dogfood_observations["terminal_resources_owned"]
+    and integrated_trace["manual_current_count"]
+    == dogfood_observations["manual_current_count"]
+    and integrated_trace["manual_resume_count"]
+    == dogfood_observations["manual_resume_count"]
+    and integrated_trace["manual_send_count"]
+    == dogfood_observations["manual_send_count"]
+    and integrated_trace["manual_callback_write_count"]
+    == dogfood_observations["manual_callback_write_count"]
+    and integrated_trace["model_owned_lifecycle_effect_count"] == 0
+    and integrated_trace["terminal_prose_transition_count"] == 0,
+    integrated_trace,
 )
 
 trace: list[tuple[str, str]] = []

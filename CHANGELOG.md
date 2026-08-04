@@ -38,6 +38,11 @@ packages were published for them.
   acknowledgement. A prompt is never marked successful merely because paste
   and Enter RPCs returned zero; one identity-bound Enter retry may consume the
   shared liveness budget, otherwise typed attention is recorded.
+- Callback wake delivery is serialized per exact operation and uses
+  write-ahead paste/submit phases. Partial or ambiguous effects fail closed,
+  while concurrent reconciliation cannot send a second provider-facing wake.
+- Missing screen evidence after the first continuation Enter stops at a typed
+  unconfirmed result instead of consuming retry budget for another Enter.
 - Dispatch context preserves the exact resolved wiki path instead of treating
   a display title as a file identity. Review inspection requires canonical
   full object IDs.
@@ -49,6 +54,10 @@ packages were published for them.
 - Prevented silent pipeline stalls after completed reviewer output, accepted
   callback races, callback-rearm crashes, and retained prompt text that was not
   actually submitted.
+- Closed the release-evidence gap between callback acceptance and lifecycle
+  completion: the dogfood trace reaches resource-free terminal parent/child
+  states and an actual `reap-ready` pipeline boundary, with a separate final
+  harness-authority trace.
 - Bound both accepted and duplicate callback receipts to the exact broker
   callback and payload identity, and made continuation paste replay
   write-ahead/fail-closed so a crash cannot paste the same prompt twice.

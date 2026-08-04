@@ -223,7 +223,7 @@ class RuntimeWorkerControlMixin:
                 envelope.callback_id,
                 self.cmux_adapter,
             ):
-                self.callback_handled = False
+                self.summary_attention("callback-wake-effect-uncertain")
                 return
         except CallbackTimeoutError:
             _atomic_json(

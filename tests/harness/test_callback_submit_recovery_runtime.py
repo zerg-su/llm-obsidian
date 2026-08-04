@@ -36,6 +36,8 @@ from harness.liveness import (  # noqa: E402
     LivenessController,
     LivenessPolicy,
 )
+from harness.pipeline_builtins import compiled_builtin  # noqa: E402
+from harness.pipelines import reconcile_pipeline  # noqa: E402
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
@@ -1367,6 +1369,51 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and cmux.keys == [(SURFACE, "Enter")],
         (accepted_parent, cmux.sent, cmux.keys),
     )
+    for state in ("exiting", "complete"):
+        store.transition("review-owner-3", "review-round-3", state)
+    supervisor.bind_resources(OwnedResources())
+    for state in ("finalizing", "exiting", "complete"):
+        store.transition("review-owner-3", "review-parent-3", state)
+    terminal_child = store.read("review-owner-3", "review-round-3")
+    terminal_parent = store.read("review-owner-3", "review-parent-3")
+    pipeline = compiled_builtin("lifecycle/default")
+    dispatch_step, review_step = (
+        step.step_id for step in pipeline.definition.steps
+    )
+    next_progress = reconcile_pipeline(
+        pipeline,
+        {dispatch_step: "complete", review_step: terminal_parent.state},
+    )
+    trace_receipt = {
+        "schema_version": 1,
+        "pipeline_definition_sha256": pipeline.definition_sha256,
+        "parent_operation_id": terminal_parent.spec.operation_id,
+        "parent_state": terminal_parent.state,
+        "child_operation_id": terminal_child.spec.operation_id,
+        "child_state": terminal_child.state,
+        "accepted_callback_id": terminal_child.accepted_callback_id,
+        "accepted_callback_sha256": terminal_child.accepted_callback_sha256,
+        "next_action": next_progress.action,
+        "next_step_id": next_progress.step_id,
+        "resources_released": terminal_parent.resources == OwnedResources(),
+    }
+    trace_receipt_path = state_root / "pipeline-stage-receipt.json"
+    trace_receipt_path.write_text(
+        json.dumps(trace_receipt, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    trace_receipt_sha256 = hashlib.sha256(
+        trace_receipt_path.read_bytes()
+    ).hexdigest()
+    check(
+        "accepted callback advances through terminal cleanup to reap-ready",
+        terminal_child.state == "complete"
+        and terminal_parent.state == "complete"
+        and terminal_parent.resources == OwnedResources()
+        and next_progress.action == "reap-ready"
+        and next_progress.step_id == "",
+        trace_receipt,
+    )
     expected_observations = dogfood_evidence["observations"]
     check(
         "tracked E6 receipt binds the exact integrated unattended sequence",
@@ -1382,13 +1429,20 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
             "provider_enter_count": len(cmux.keys),
             "provider_typed_artifact_count": cmux.provider_artifact_writes,
             "accepted_receipt_count": int(joined_receipt["status"] == "accepted"),
-            "next_child_state": joined_child.state,
+            "next_child_state": terminal_child.state,
+            "parent_state": terminal_parent.state,
+            "terminal_resources_owned": terminal_parent.resources
+            != OwnedResources(),
+            "next_pipeline_action": next_progress.action,
+            "next_pipeline_step": next_progress.step_id,
             "manual_current_count": 0,
             "manual_resume_count": 0,
             "manual_send_count": 0,
             "manual_callback_write_count": 0,
             "repeated_review_count": 0,
-        },
+        }
+        and dogfood_evidence["trace_receipt_sha256"]
+        == trace_receipt_sha256,
         expected_observations,
     )
 

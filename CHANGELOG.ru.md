@@ -43,6 +43,11 @@
   provider generation. Нулевые exit-коды paste/Enter больше не означают успех;
   один identity-bound повтор Enter может потратить общий liveness budget,
   иначе сохраняется typed attention.
+- Доставка callback wake сериализована для точной operation и использует
+  write-ahead фазы paste/submit. Частичный или неоднозначный effect fail closed,
+  а конкурентный reconcile не может отправить второй provider-facing wake.
+- Исчезновение точного screen после первого continuation Enter сразу даёт
+  typed unconfirmed result и не расходует retry budget на второй Enter.
 - Dispatch сохраняет точный путь wiki context, а не принимает отображаемый
   title за имя файла. Review inspect принимает только полный канонический OID.
 - Standing Makefile и coverage denominator теперь проверяют полный набор
@@ -52,6 +57,10 @@
 
 - Устранены молчаливые остановки после готового reviewer output, callback races,
   сбоев callback rearm и случая, когда prompt остался в editor и не был запущен.
+- Закрыт пробел release evidence между callback acceptance и lifecycle
+  completion: dogfood trace доходит до terminal resource-free parent/child и
+  фактической границы `reap-ready`; отдельный финальный trace фиксирует
+  harness-only lifecycle authority.
 - Accepted и duplicate callback receipts теперь связаны с точной broker
   callback/payload identity; continuation paste использует write-ahead
   fail-closed replay, поэтому crash не вставит один prompt повторно.

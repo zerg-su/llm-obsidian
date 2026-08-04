@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -111,13 +113,25 @@ def _atomic_json(path: Path, value: object) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def publish_callback_wake(
+@contextmanager
+def _callback_wake_lock(state_root: Path):
+    lock_path = state_root / ".callback-wake.lock"
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _publish_callback_wake_locked(
     spec: dict[str, Any],
     state_root: Path,
     callback_id: str,
     cmux_adapter: object,
 ) -> bool:
-    """Publish one idempotent coordinator wake after durable acceptance."""
+    """Publish while the exact operation wake lock is held."""
 
     wake = str(spec.get("callback_wake") or "")
     if not wake:
@@ -129,24 +143,82 @@ def publish_callback_wake(
         if not isinstance(value, dict):
             raise RuntimeWorkerError("callback wake marker is invalid")
         notified = value
-    if (
-        notified.get("callback_id") == callback_id
-        and notified.get("status") == "sent"
-    ):
-        return True
+    if notified:
+        if (
+            notified.get("schema_version") != 1
+            or not isinstance(notified.get("callback_id"), str)
+            or notified.get("status")
+            not in {
+                "paste-reserved",
+                "transport-accepted",
+                "submit-accepted",
+                "sent",
+                "effect-uncertain",
+            }
+        ):
+            raise RuntimeWorkerError("callback wake marker is invalid")
+        if notified.get("callback_id") == callback_id:
+            status = str(notified["status"])
+            if status in {"submit-accepted", "sent"}:
+                if status != "sent":
+                    _atomic_json(
+                        notify_path,
+                        {
+                            "schema_version": 1,
+                            "callback_id": callback_id,
+                            "status": "sent",
+                        },
+                    )
+                return True
+            if status != "effect-uncertain":
+                _atomic_json(
+                    notify_path,
+                    {
+                        "schema_version": 1,
+                        "callback_id": callback_id,
+                        "status": "effect-uncertain",
+                    },
+                )
+            return False
+        if notified.get("status") != "sent":
+            raise RuntimeWorkerError("prior callback wake effect is uncertain")
     _atomic_json(
         notify_path,
         {
             "schema_version": 1,
             "callback_id": callback_id,
-            "status": "pending",
+            "status": "paste-reserved",
         },
     )
     try:
         cmux_adapter.send(spec["origin_surface"], wake)
+        _atomic_json(
+            notify_path,
+            {
+                "schema_version": 1,
+                "callback_id": callback_id,
+                "status": "transport-accepted",
+            },
+        )
         cmux_adapter.send_key(spec["origin_surface"], "Enter")
     except Exception:
+        _atomic_json(
+            notify_path,
+            {
+                "schema_version": 1,
+                "callback_id": callback_id,
+                "status": "effect-uncertain",
+            },
+        )
         return False
+    _atomic_json(
+        notify_path,
+        {
+            "schema_version": 1,
+            "callback_id": callback_id,
+            "status": "submit-accepted",
+        },
+    )
     _atomic_json(
         notify_path,
         {
@@ -156,6 +228,20 @@ def publish_callback_wake(
         },
     )
     return True
+
+
+def publish_callback_wake(
+    spec: dict[str, Any],
+    state_root: Path,
+    callback_id: str,
+    cmux_adapter: object,
+) -> bool:
+    """Publish one crash-safe, concurrent-idempotent coordinator wake."""
+
+    with _callback_wake_lock(state_root):
+        return _publish_callback_wake_locked(
+            spec, state_root, callback_id, cmux_adapter
+        )
 
 
 def _normalize_fetch_errors_at_provider_boundary(

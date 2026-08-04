@@ -310,6 +310,22 @@ assert port.keys == ["Enter"] and not retries
 print("OK   idle repaint cannot acknowledge a continuation")
 
 result, port, retries, _stages = run_case(
+    ["› # Harness-owned review verification", "", ""]
+)
+assert not result.acknowledged and result.evidence == "submit-unconfirmed"
+assert result.submit_count == 1
+assert port.keys == ["Enter"] and not retries
+print("OK   missing screen after Enter fails closed without retry")
+
+result, port, retries, _stages = run_case(
+    ["› # Harness-owned review verification", "› # Harness-owned review verification", ""]
+)
+assert not result.acknowledged and result.evidence == "submit-unconfirmed"
+assert result.submit_count == 1
+assert port.keys == ["Enter"] and not retries
+print("OK   later missing screen also blocks the Enter retry")
+
+result, port, retries, _stages = run_case(
     ["› # Harness-owned review verification", "1. Allow\n2. Deny\nEnter"]
 )
 assert not result.acknowledged and result.evidence == "unknown"

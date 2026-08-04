@@ -9,7 +9,7 @@ sessions:
 source_cwd: "/Users/zak/Projects/llm-obsidian"
 status: pending
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-08-05
 tags:
   - plan
   - manual-save
@@ -457,3 +457,7 @@ This coordinator-owned amendment preserves the frozen Outcome Contract while rec
 | D-264-32 | callback watchdog | accepted receipt did not validate run, callback and payload identity | `included` | accepted and duplicate receipts now share the full fail-closed identity predicate |
 | D-264-33 | continuation transport | crash after prompt paste but before transport receipt could paste twice | `included` | durable `paste-reserved` write-ahead state plus kill-point replay test proves zero second paste |
 | D-264-34 | test harness | orphan verification recovery responder expired under full-suite load | `included` | bounded 10-second packet wait, explicit thread join and typed timeout assertion remove the 2-second cleanup race |
+| D-264-35 | callback wake | crash or exception after coordinator wake paste/Enter replayed a second provider-facing wake | `included` | write-ahead `paste-reserved`/`transport-accepted`/`submit-accepted`, fail-closed uncertainty, exact-operation file lock, kill-point and concurrent-reconcile tests |
+| D-264-36 | continuation transport | missing screen after the first Enter fell through to the retry budget and sent a second Enter | `included` | `test_continuation_delivery.py` first/later missing-screen cases prove one Enter, zero retry reservation and typed unconfirmed attention |
+| D-264-37 | release evidence | E6 fixture stopped at child `finalizing` and did not prove parent publication, terminal cleanup or the following pipeline boundary | `included` | tracked dogfood receipt now binds accepted callback, complete resource-free parent/child and actual `reap-ready` reconciliation |
+| D-264-38 | release evidence | historical E14 baseline retained RED/manual-ingress rows without a final integrated authority trace | `included` | `v2.6.4-harness-control-plane-final.json` plus `test_harness_control_plane.py` bind the approved PipelineSpec, all lifecycle stages, dogfood receipt and zero model/prose authority |

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "release": "2.6.4",
+  "pipeline": "engineering/fix",
+  "pipeline_definition_sha256": "6c22e6280105af8c239ece8cf6c6289079a83ae1404d974af2f4b86def321d1d",
+  "pipeline_steps": [
+    "reproduce",
+    "root-cause",
+    "regression-test",
+    "minimal-fix",
+    "verify",
+    "review"
+  ],
+  "control_primitives": [
+    "bounded_loop@1.0.0",
+    "human_gate@1.0.0"
+  ],
+  "stages": [
+    {"stage":"plan-step","owner":"harness","module":"scripts/harness/runtime_worker_spec.py","test":"tests/harness/test_custom_runtime.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"loop","owner":"harness","module":"scripts/harness/runtime_worker_fix.py","test":"tests/harness/test_contract_state_edge_matrix.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"review","owner":"harness","module":"scripts/harness/runtime_worker_review_bridge.py","test":"tests/harness/test_runtime_task_summary.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"verification","owner":"harness","module":"scripts/harness/runtime_worker_verification.py","test":"tests/harness/test_runtime_task_summary.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"bounded-fix-retry","owner":"harness","module":"scripts/harness/runtime_worker_fix.py","test":"tests/harness/test_contract_state_edge_matrix.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"checkpoint","owner":"harness","module":"scripts/harness/runtime_session_checkpoint.py","test":"tests/harness/test_runtime_sessions.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"callback-submit","owner":"harness","module":"scripts/harness/runtime_worker_liveness.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"callback-ingestion","owner":"harness","module":"scripts/harness/runtime_callback_io.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"},
+    {"stage":"terminal-cleanup","owner":"harness","module":"scripts/harness/runtime_session_cleanup.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"}
+  ],
+  "integrated_trace": {
+    "dogfood_trace_receipt_sha256": "ce57e9b500311afe4bbe03eea20750f085f1376ad989b1a06494f40f116d88fc",
+    "accepted_callback_count": 1,
+    "same_session_recovery_count": 1,
+    "provider_prompt_count": 1,
+    "provider_enter_count": 1,
+    "next_pipeline_action": "reap-ready",
+    "parent_terminal_state": "complete",
+    "child_terminal_state": "complete",
+    "terminal_resources_owned": false,
+    "manual_current_count": 0,
+    "manual_resume_count": 0,
+    "manual_send_count": 0,
+    "manual_callback_write_count": 0,
+    "model_owned_lifecycle_effect_count": 0,
+    "terminal_prose_transition_count": 0
+  }
+}
