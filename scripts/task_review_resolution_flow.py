@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
 from harness.runtime_session_contracts import continuation_effect_id
-from harness.workflows.review import ReviewContext, ReviewRound
+from harness.workflows.review import (
+    ReviewContext,
+    ReviewRound,
+    prepare_review_round,
+)
 from harness.workflows.review_gate import (
     ReviewGateController,
     ReviewGateRun,
@@ -22,7 +28,14 @@ from task_review_shared import ResolutionBundle, TaskReviewError, _git
 from task_review_transport import _receipt, _write_round_meta
 
 
-def _prompt_effect_id(runtime_root: Path, pointer: str) -> str:
+def _prompt_effect_id(
+    runtime_root: Path,
+    pointer: str,
+    *,
+    callback_target_path: Path | None = None,
+    callback_operation_id: str = "",
+    callback_run_id: str = "",
+) -> str:
     """Bind a continuation receipt to the exact materialized prompt bytes."""
 
     prompt_path = (runtime_root / pointer).resolve()
@@ -38,7 +51,46 @@ def _prompt_effect_id(runtime_root: Path, pointer: str) -> str:
         raise TaskReviewError(
             "review verification prompt is unavailable"
         ) from exc
-    return continuation_effect_id(prompt)
+    if callback_target_path is None:
+        return continuation_effect_id(prompt)
+    try:
+        if callback_target_path.is_symlink() or not callback_target_path.is_file():
+            raise TaskReviewError("review callback target is unavailable")
+        target = json.loads(callback_target_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TaskReviewError("review callback target is unavailable") from exc
+    generation = target.get("generation") if isinstance(target, dict) else None
+    target_operation_id = (
+        str(target.get("operation_id") or "")
+        if isinstance(target, dict)
+        else ""
+    )
+    target_run_id = (
+        str(target.get("run_id") or "") if isinstance(target, dict) else ""
+    )
+    if (
+        not isinstance(target, dict)
+        or target.get("schema_version") != 1
+        or type(generation) is not int
+        or generation < 1
+        or not callback_operation_id
+        or not callback_run_id
+    ):
+        raise TaskReviewError("review callback target is invalid")
+    if (
+        target_operation_id != callback_operation_id
+        or target_run_id != callback_run_id
+    ):
+        generation += 1
+    bound_prompt = "\n".join(
+        (
+            prompt,
+            str(generation),
+            callback_operation_id,
+            callback_run_id,
+        )
+    )
+    return continuation_effect_id(bound_prompt)
 
 
 def _resolution_packet_ready(
@@ -247,6 +299,36 @@ def _continue_resolution(
                 round_=round_,
             )
 
+        next_round = prepare_review_round(
+            gate.round_store,
+            replace(
+                lane,
+                verification_iteration=lane.verification_iteration + 1,
+            ),
+        )
+        callback_target_path = (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "owners"
+            / lane.owner_id
+            / "runtime"
+            / lane.operation_id
+            / "callback-target.json"
+        )
+        effect_id = (
+            _prompt_effect_id(
+                runtime_root,
+                pointer,
+                callback_target_path=callback_target_path,
+                callback_operation_id=next_round.operation_id,
+                callback_run_id=next_round.run_id,
+            )
+            if callback_target_path.is_file()
+            and not callback_target_path.is_symlink()
+            else _prompt_effect_id(runtime_root, pointer)
+        )
+
         decision = gate.continue_after_resolution(
             run,
             lane,
@@ -259,9 +341,7 @@ def _continue_resolution(
                 .relative_to(runtime_root)
                 .as_posix()
             ),
-            continuation_effect_id=_prompt_effect_id(
-                runtime_root, pointer
-            ),
+            continuation_effect_id=effect_id,
             prepare_round=prepare_round,
         )
         if decision.action == "attention-required":

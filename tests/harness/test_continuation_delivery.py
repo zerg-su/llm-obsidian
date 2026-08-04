@@ -92,6 +92,16 @@ print("OK   paste visibility precedes first Enter and activity acknowledges")
 
 result, port, retries, _stages = run_case(
     [
+        "› [Pasted Content 3675 chars]",
+        "• Working (1s)",
+    ]
+)
+assert result.acknowledged and result.evidence == "provider-activity"
+assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
+print("OK   Codex collapsed pasted content is recognized as input-ready")
+
+result, port, retries, _stages = run_case(
+    [
         "› # Harness-owned review verification",
         "› # Harness-owned review verification",
         "› # Harness-owned review verification",

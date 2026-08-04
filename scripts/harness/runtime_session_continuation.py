@@ -67,6 +67,11 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     ):
         return "active"
     editor_lines = [line for line in tail if line.startswith(marker)]
+    if runtime == "codex" and any(
+        re.fullmatch(r"› \[Pasted Content [1-9][0-9]* chars\]", line)
+        for line in editor_lines
+    ):
+        return "input-ready"
     if any(anchor and anchor in line for line in editor_lines):
         return "input-ready"
     if editor_lines:
