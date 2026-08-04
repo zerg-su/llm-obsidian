@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 import hashlib
+import io
 import os
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from dataclasses import replace
@@ -32,16 +34,12 @@ from harness.contracts import (  # noqa: E402
 )
 from harness.liveness import (  # noqa: E402
     LivenessController,
-    LivenessEvidence,
     LivenessPolicy,
-    LivenessState,
-    observe_liveness,
 )
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
 from harness.runtime_callback_io import _callback_target  # noqa: E402
-from harness.runtime_worker import enforce_callback_deadline  # noqa: E402
 from harness.runtime_worker_liveness import RuntimeWorkerLivenessMixin  # noqa: E402
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
@@ -66,138 +64,268 @@ fixture = json.loads(
     ).read_text(encoding="utf-8")
 )
 incident = fixture["incident"]
-policy = LivenessPolicy.default()
-first = LivenessEvidence(
-    observed_at=incident["first_observed_at"],
-    process_status=incident["process_status"],
-    operation_revision=incident["operation_revision"],
-    operation_state=incident["operation_state"],
-    screen_sha256=incident["first_screen_sha256"],
-    prompt_state=incident["prompt_state"],
-)
-previous = LivenessState.start(first)
-second = LivenessEvidence(
-    observed_at=incident["second_observed_at"],
-    process_status=incident["process_status"],
-    operation_revision=incident["operation_revision"],
-    operation_state=incident["operation_state"],
-    screen_sha256=incident["second_screen_sha256"],
-    prompt_state=incident["prompt_state"],
-)
-decision, current = observe_liveness(previous, second, policy)
-check(
-    "v2.6.3 fixture preserves the screen-churn suppression guard",
-    decision.action == fixture["v2_6_3_observed"]["liveness_action"]
-    and current.last_progress_at == incident["second_observed_at"],
-    (decision, current),
-)
 
 
-for base_path, expected_key in (
-    (
-        "scripts/harness/runtime_worker.py",
-        "base_runtime_worker_sha256",
-    ),
-    (
-        "scripts/harness/runtime_worker_liveness.py",
-        "base_runtime_worker_liveness_sha256",
-    ),
-):
-    base_bytes = subprocess.check_output(
-        ["git", "show", f"{fixture['base_commit']}:{base_path}"],
-        cwd=ROOT,
+with tempfile.TemporaryDirectory(prefix="v263-exact-runtime.") as raw:
+    root = Path(raw).resolve()
+    snapshot = root / "snapshot"
+    snapshot.mkdir()
+    archive = subprocess.check_output(
+        ["git", "archive", fixture["base_commit"]], cwd=ROOT
     )
-    check(
-        f"frozen reproducer binds exact {base_path}",
-        hashlib.sha256(base_bytes).hexdigest() == fixture[expected_key],
-    )
-
-
-with tempfile.TemporaryDirectory(prefix="v263-reviewer-deadline.") as raw:
-    root = Path(raw)
-    store = OperationStore(root / "store")
-    callback_dir = root / "callbacks" / incident["lane_id"]
-    callback_dir.mkdir(parents=True)
-    route = RuntimeRoute(
-        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "6" * 64
-    )
-    spec = OperationSpec(
-        incident["operation_id"],
-        "v263-missing-submit-key",
-        "simple-review-holistic",
-        "v263-review-owner",
-        route,
-        "packets/review.json",
-        "scoped",
-    )
-    store.create(
-        spec,
-        lane_id=incident["lane_id"],
-        run_id=incident["run_id"],
-    )
-    supervisor = OperationSupervisor(
-        store, "v263-review-owner", incident["operation_id"]
-    )
-    supervisor.configure_budget(
-        attempt_limit=1,
-        model_restart_limit=0,
-        time_budget_seconds=(
-            incident["second_observed_at"]
-            + incident["deadline_remaining_seconds"]
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as bundle:
+        bundle.extractall(snapshot, filter="data")
+    for base_path, expected_key in (
+        (
+            "scripts/harness/runtime_worker.py",
+            "base_runtime_worker_sha256",
         ),
-        token_limit=100,
-        now=0,
+        (
+            "scripts/harness/runtime_worker_liveness.py",
+            "base_runtime_worker_liveness_sha256",
+        ),
+        (
+            "scripts/harness/runtime_worker_loop.py",
+            "base_runtime_worker_loop_sha256",
+        ),
+        (
+            "scripts/harness/runtime_worker_execution.py",
+            "base_runtime_worker_execution_sha256",
+        ),
+        ("scripts/harness/callbacks.py", "base_callbacks_sha256"),
+        ("scripts/harness/store.py", "base_store_sha256"),
+    ):
+        executed_bytes = (snapshot / base_path).read_bytes()
+        check(
+            f"executed v2.6.3 snapshot binds exact {base_path}",
+            hashlib.sha256(executed_bytes).hexdigest()
+            == fixture[expected_key],
+        )
+
+    compatibility_runner = r'''
+import json
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+snapshot = Path(sys.argv[1]).resolve()
+root = Path(sys.argv[2]).resolve()
+
+from harness.adapters.codex import CodexDriver
+from harness.adapters.process import ProcessAdapter
+from harness.callbacks import CallbackBroker
+from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute
+from harness.runtime_worker import run
+from harness.store import OperationStore
+from harness.supervisor import OperationSupervisor
+import harness.runtime_worker as executed_runtime_worker
+import harness.runtime_worker_liveness as executed_runtime_liveness
+
+assert Path(executed_runtime_worker.__file__).resolve() == (
+    snapshot / "scripts/harness/runtime_worker.py"
+)
+assert Path(executed_runtime_liveness.__file__).resolve() == (
+    snapshot / "scripts/harness/runtime_worker_liveness.py"
+)
+
+scratch = root / "scratch"
+product = root / "product"
+state_root = root / "worker-state"
+callback_dir = scratch / "callbacks" / "openai-holistic"
+for directory in (scratch, product, state_root, callback_dir):
+    directory.mkdir(parents=True, exist_ok=True)
+callback_path = callback_dir / ".review-callback.json"
+provider_marker = root / "provider-starts.jsonl"
+fake_codex = root / "codex"
+fake_codex.write_text(
+    f"#!{sys.executable}\n"
+    "import pathlib,time\n"
+    f"marker=pathlib.Path({str(provider_marker)!r})\n"
+    "with marker.open('a', encoding='utf-8') as handle: handle.write('start\\n')\n"
+    "time.sleep(0.8)\n",
+    encoding="utf-8",
+)
+fake_codex.chmod(0o755)
+
+route = RuntimeRoute(
+    "codex", "gpt-5.6-sol", "high", "reviewer-callback", "6" * 64
+)
+spec = OperationSpec(
+    "review-parent-1",
+    "v263-missing-submit-key",
+    "simple-review-holistic",
+    "v263-review-owner",
+    route,
+    "packets/review.json",
+    "scoped",
+)
+store = OperationStore(root / "store")
+store.create(
+    spec,
+    lane_id="openai-holistic",
+    run_id="review-run-1",
+)
+supervisor = OperationSupervisor(
+    store, "v263-review-owner", "review-parent-1"
+)
+supervisor.configure_budget(
+    attempt_limit=1,
+    model_restart_limit=0,
+    time_budget_seconds=1,
+    token_limit=100,
+    now=time.time() - 2,
+)
+for state in ("preflight", "starting", "running", "awaiting-callback"):
+    store.transition("v263-review-owner", "review-parent-1", state)
+
+provider_command = CodexDriver(fake_codex).command(
+    route,
+    callback_pointer=callback_path,
+    product_root=product,
+    session_root=scratch,
+)
+launch = ProcessAdapter().prepare_surface_launch(
+    argv=(*provider_command, "review"),
+    cwd=scratch,
+    state_root=state_root,
+    worker=snapshot / "scripts/harness-runtime-worker.py",
+    callback_pointer=callback_path,
+    product_root=product,
+    reviewer_sandbox=True,
+    store_root=store.root,
+    owner_id="v263-review-owner",
+    operation_id="review-parent-1",
+    run_id="review-run-1",
+    surface_id="11111111-1111-4111-8111-111111111111",
+    runtime="codex",
+)
+
+broker_calls = [0]
+original_accept = CallbackBroker.accept
+def counted_accept(self, *args, **kwargs):
+    broker_calls[0] += 1
+    return original_accept(self, *args, **kwargs)
+CallbackBroker.accept = counted_accept
+
+class FakeCmux:
+    def __init__(self):
+        self.sends = []
+        self.keys = []
+        self.reads = 0
+    def read(self, surface_id):
+        self.reads += 1
+        return f"provider working {self.reads}"
+    def send(self, surface_id, message):
+        self.sends.append((surface_id, message))
+    def send_key(self, surface_id, key):
+        self.keys.append((surface_id, key))
+
+cmux = FakeCmux()
+worker_results = []
+worker = threading.Thread(
+    target=lambda: worker_results.append(
+        run(
+            launch.spec_path,
+            poll_seconds=0.02,
+            checkpoint_probe=lambda _surface, _runtime: "checkpoint-v263",
+            cmux_adapter=cmux,
+        )
     )
-    for state in ("preflight", "starting", "running", "awaiting-callback"):
-        store.transition("v263-review-owner", incident["operation_id"], state)
-
-    class V263CompatibilityHarness:
-        def __init__(self) -> None:
-            self.provider_sends = 0
-            self.callbacks_accepted = 0
-
-        def observe_wait(self) -> str:
-            state = LivenessState.start(first)
-            observed, _state = observe_liveness(state, second, policy)
-            if observed.action == "model-call":
-                self.provider_sends += 1
-            return observed.action
-
-        def cross_deadline(self) -> bool:
-            return enforce_callback_deadline(
-                store,
-                "v263-review-owner",
-                incident["operation_id"],
-                callback_handled=False,
-                now=(
-                    incident["second_observed_at"]
-                    + incident["deadline_remaining_seconds"]
-                    + 1
-                ),
-            )
-
-    compatibility = V263CompatibilityHarness()
-    observed_action = compatibility.observe_wait()
-    timed_out = compatibility.cross_deadline()
-    terminal = store.read("v263-review-owner", incident["operation_id"])
-    input_path = callback_dir / ".review-input.json"
-    callback_path = callback_dir / ".review-callback.json"
-    receipt_path = callback_dir / ".review-callback-receipt.json"
+)
+worker.start()
+ready_path = state_root / "ready.json"
+ready_deadline = time.monotonic() + 2
+while not ready_path.is_file() and time.monotonic() < ready_deadline:
+    time.sleep(0.01)
+ready = json.loads(ready_path.read_text(encoding="utf-8"))
+supervisor.bind_resources(
+    OwnedResources(
+        "11111111-1111-4111-8111-111111111111",
+        ready["process_group"],
+        ready["supervisor_pid"],
+        ready["process_identity"],
+        ready["supervisor_identity"],
+    )
+)
+worker.join(timeout=3)
+assert not worker.is_alive()
+exit_code = worker_results[0]
+record = store.read("v263-review-owner", "review-parent-1")
+timeout_marker = state_root / "callback-timeout.json"
+print(json.dumps({
+    "executed_runtime_worker": str(Path(executed_runtime_worker.__file__).resolve()),
+    "executed_runtime_liveness": str(Path(executed_runtime_liveness.__file__).resolve()),
+    "exit_code": exit_code,
+    "state": record.state,
+    "attention_reason": (
+        record.attention_reason.value if record.attention_reason else ""
+    ),
+    "provider_starts": (
+        len(provider_marker.read_text(encoding="utf-8").splitlines())
+        if provider_marker.is_file() else 0
+    ),
+    "provider_sends": len(cmux.sends),
+    "provider_keys": len(cmux.keys),
+    "provider_reads": cmux.reads,
+    "broker_calls": broker_calls[0],
+    "accepted_callback_id": record.accepted_callback_id,
+    "input_exists": callback_path.with_name(".review-input.json").exists(),
+    "callback_exists": callback_path.exists(),
+    "receipt_exists": (state_root / "callback-receipt.json").exists(),
+    "timeout_exists": timeout_marker.is_file(),
+    "timeout_status": (
+        json.loads(timeout_marker.read_text(encoding="utf-8"))["status"]
+        if timeout_marker.is_file() else ""
+    ),
+}, sort_keys=True))
+'''
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(snapshot / "scripts")
+    environment["PYTHONNOUSERSITE"] = "1"
+    executed = subprocess.run(
+        [sys.executable, "-c", compatibility_runner, str(snapshot), str(root)],
+        cwd=snapshot,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+    try:
+        observed = json.loads(executed.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise AssertionError(
+            f"v2.6.3 exact runtime did not return evidence: {executed.stderr}"
+        ) from exc
     check(
-        "v2.6.3 full-runtime wait reaches typed timeout with zero effects",
-        observed_action == fixture["v2_6_3_observed"]["liveness_action"]
-        and timed_out
-        and terminal.state == "attention-required"
-        and terminal.attention_reason == AttentionReason.CALLBACK_TIMEOUT
-        and compatibility.provider_sends
+        "exact v2.6.3 worker reproduces missing submit through callback timeout",
+        executed.returncode == 0
+        and observed["executed_runtime_worker"]
+        == str((snapshot / "scripts/harness/runtime_worker.py").resolve())
+        and observed["executed_runtime_liveness"]
+        == str(
+            (snapshot / "scripts/harness/runtime_worker_liveness.py").resolve()
+        )
+        and observed["exit_code"] == 0
+        and observed["state"] == "attention-required"
+        and observed["attention_reason"]
+        == fixture["v2_6_3_observed"]["terminal_reason"]
+        and observed["provider_starts"] == 1
+        and observed["provider_reads"] > 0
+        and observed["provider_sends"]
         == fixture["v2_6_3_observed"]["provider_sends"]
-        and compatibility.callbacks_accepted
+        and observed["provider_keys"] == 0
+        and observed["broker_calls"]
         == fixture["v2_6_3_observed"]["callbacks_accepted"]
-        and not input_path.exists()
-        and not callback_path.exists()
-        and not receipt_path.exists()
-        and not terminal.accepted_callback_id,
-        terminal,
+        and not observed["accepted_callback_id"]
+        and not observed["input_exists"]
+        and not observed["callback_exists"]
+        and not observed["receipt_exists"]
+        and observed["timeout_exists"]
+        and observed["timeout_status"] == "attention-required",
+        (observed, executed.stderr),
     )
 
 

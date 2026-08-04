@@ -4,6 +4,10 @@
   "base_commit": "801f020e1bfaf73ba368aeb4771f33e372e83c75",
   "base_runtime_worker_sha256": "87292326eba45344ff692287f85333cd2613ae2963c590a1afd659646fa45fad",
   "base_runtime_worker_liveness_sha256": "b36e9ef88a20777a819d92188bece7d531a102552e36b5cce3feeef07cb7d657",
+  "base_runtime_worker_loop_sha256": "babec427f8a7f7d7aa2d372686818db90a3c49a26649a49e8ec5d3b318a80848",
+  "base_runtime_worker_execution_sha256": "8636f5c0925dd3c5685a07adad3e7fa85c40a9a6b43cdb51f4102767d32ebef9",
+  "base_callbacks_sha256": "9a0d2dc7ed38334a747237dd92475b3cbbf42b646b07d86c3739e25e2e8f7e3e",
+  "base_store_sha256": "12a881b41b4d6ff1d6771bdc045e6d0974fcd865717eceb2085c96948ecc66c9",
   "incident": {
     "operation_id": "review-parent-1",
     "run_id": "review-run-1",
