@@ -15,6 +15,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from task_escalation_records import EscalationRecordError, append_raise
 
 
 class RuntimeWorkerControlMixin:
@@ -470,20 +471,12 @@ class RuntimeWorkerControlMixin:
             "receipt_sha256": receipt_sha256,
             "allowed_decisions": ["stop", "retry-with-fixture"],
         }
-        if attention_path.exists():
-            if attention_path.is_symlink() or not attention_path.is_file():
-                raise RuntimeWorkerError("pipeline decision packet is invalid")
-            current = json.loads(attention_path.read_text(encoding="utf-8"))
-            if (
-                not isinstance(current, dict)
-                or current.get("id") != marker["id"]
-                or current.get("category") != "pipeline-decision"
-                or (current.get("receipt_operation_id") != receipt.operation_id)
-                or (current.get("receipt_sha256") != receipt_sha256)
-            ):
-                raise RuntimeWorkerError("pipeline decision packet changed")
-        else:
-            _atomic_json(attention_path, marker)
+        try:
+            raised = append_raise(self.spec["cwd"], marker)
+        except EscalationRecordError as exc:
+            raise RuntimeWorkerError(f"pipeline decision packet is invalid: {exc}") from exc
+        if raised.record_id != marker["id"] or raised.payload.get("status") != "pending":
+            return
         notify_path = (
             self.spec_path.parent / "pipeline-fix" / "cannot-reproduce-notify.json"
         )

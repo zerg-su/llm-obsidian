@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +16,10 @@ def authorization_payload(
     task_id: str,
     boundary: ReviewScopeBoundary,
     attention: dict[str, Any],
-    attention_path: Path,
+    attention_record_sha256: str,
 ) -> dict[str, Any]:
+    if not re.fullmatch(r"[0-9a-f]{64}", attention_record_sha256):
+        raise TaskReviewError("coordinator authorization record digest is invalid")
     return {
         "schema_version": 1,
         "operation_id": task_id,
@@ -27,9 +29,7 @@ def authorization_payload(
         "reason": boundary.reason,
         "authorization_provenance": "coordinator-approved",
         "verification_operation_id": str(attention.get("id") or ""),
-        "verification_receipt_sha256": hashlib.sha256(
-            attention_path.read_bytes()
-        ).hexdigest(),
+        "verification_receipt_sha256": attention_record_sha256,
         "status": "authorized",
     }
 

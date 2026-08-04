@@ -1399,6 +1399,19 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     check("pending escalation prevents task close", result.returncode == 3)
     result = run(CONTRACT, "check-handoff", "--current-session", "origin-1", cwd=worktree, env=env)
     check("pending escalation prevents final handoff", result.returncode == 2)
+    result = run(
+        LIFECYCLE,
+        "prepare-reap",
+        "--current-session",
+        "origin-1",
+        "--result-path",
+        str(rerouted_result_page),
+        "--vault-root",
+        str(worktree),
+        cwd=worktree,
+        env=origin_env,
+    )
+    check("pending pointer record prevents reap preparation", result.returncode == 3)
     cmux_log.write_text("", encoding="utf-8")
     result = run(
         ESCALATION, "resolve", "--decision", "Keep the current private interface",
@@ -1524,15 +1537,6 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         recovered_attention["status"] == "resolved"
         and recovered_attention["resolved_from"] == "delivery-failed",
     )
-    decision_chain = load_chain(worktree)
-    check(
-        "successive coordinator decisions never overwrite prior history",
-        len(decision_chain) == 11
-        and decision_chain[0].payload["reason"]
-        == "A new public endpoint is required"
-        and decision_chain[-1].payload["decision"]
-        == "Continue after coordinator inspection",
-    )
     escalation_events = telemetry(worktree, "task-escalation")
     check(
         "recovered escalation resolution counted",
@@ -1540,6 +1544,30 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
     )
     check("task exact surface targeted", f"--surface {meta['task_surface']}" in cmux_log.read_text())
     check("Codex task composer cleared", f"send-key --surface {meta['task_surface']} backspace" in cmux_log.read_text())
+    result = run(
+        ESCALATION,
+        "record-amendment",
+        "--plan-sha256",
+        plan_hash,
+        "--outcome-sha256",
+        extract_from_bytes(plan.read_bytes()).sha256,
+        "--decision",
+        "Approve the digest-bound plan amendment",
+        cwd=worktree,
+        env=origin_env,
+    )
+    check("origin coordinator records a digest-bound amendment", result.returncode == 0, result.stderr)
+    decision_chain = load_chain(worktree)
+    check(
+        "successive coordinator decisions never overwrite prior history",
+        len(decision_chain) == 12
+        and decision_chain[0].payload["reason"]
+        == "A new public endpoint is required"
+        and decision_chain[-2].payload["decision"]
+        == "Continue after coordinator inspection"
+        and decision_chain[-1].record_type == "amendment"
+        and decision_chain[-1].payload["plan_sha256"] == plan_hash,
+    )
 
     cmux_log.write_text("", encoding="utf-8")
     result = run(

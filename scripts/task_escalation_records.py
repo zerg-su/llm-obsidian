@@ -194,11 +194,8 @@ def _read_record(
 def _legacy_view(worktree: Path, value: dict[str, Any], raw: bytes) -> DecisionRecord:
     escalation_id = _valid_record_id(value.get("id"))
     status = str(value.get("status") or "")
-    if status not in {"pending", "delivery-failed", "resolved"}:
+    if not status or len(status) > 64:
         raise EscalationRecordError("legacy attention marker status is invalid")
-    recorded_worktree = str(value.get("worktree") or "")
-    if recorded_worktree and Path(recorded_worktree).expanduser().resolve() != worktree:
-        raise EscalationRecordError("legacy attention marker origin is stale")
     digest = _sha256(raw)
     return DecisionRecord(
         f"legacy-{digest[:32]}",
@@ -437,8 +434,13 @@ def append_raise(
     record_id = _valid_record_id(payload.get("id"))
     if payload.get("status") != "pending":
         raise EscalationRecordError("raise payload must be pending")
-    if str(payload.get("worktree") or "") != str(root):
+    payload_worktree = str(payload.get("worktree") or "")
+    if (
+        not payload_worktree
+        or Path(payload_worktree).expanduser().resolve() != root
+    ):
         raise EscalationRecordError("raise payload worktree origin is stale")
+    normalized_payload = {**payload, "worktree": str(root)}
     with _writer_lock(root):
         latest = load_latest(root)
         _require_expected_latest(latest, expected_record_sha256)
@@ -446,11 +448,20 @@ def append_raise(
             root,
             record_id,
             record_type="raise",
-            payload=payload,
+            payload=normalized_payload,
             ignored_payload_fields={"raised_at"},
         )
         if existing is not None:
-            return existing
+            if latest is not None and latest.sha256 == existing.sha256:
+                return existing
+            chain = load_chain(root)
+            if latest is not None and any(
+                item.sha256 == existing.sha256 for item in chain
+            ):
+                return latest
+            raise EscalationRecordError(
+                "replayed raise record is outside the authoritative chain"
+            )
         if latest is not None and latest.payload.get("status") in {
             "pending",
             "delivery-failed",
@@ -462,8 +473,8 @@ def append_raise(
             root,
             record_id=record_id,
             record_type="raise",
-            payload=dict(payload),
-            occurred_at=str(payload.get("raised_at") or _utc_now()),
+            payload=normalized_payload,
+            occurred_at=str(normalized_payload.get("raised_at") or _utc_now()),
             previous=latest,
         )
         record = _persist_record(root, value)
@@ -499,6 +510,12 @@ def append_resolution(
             raise EscalationRecordError("there is no unresolved coordinator escalation")
         if latest.payload.get("status") not in {"pending", "delivery-failed"}:
             raise EscalationRecordError("latest coordinator record cannot be resolved")
+        payload_worktree = str(latest.payload.get("worktree") or "")
+        if (
+            not payload_worktree
+            or Path(payload_worktree).expanduser().resolve() != root
+        ):
+            raise EscalationRecordError("legacy attention marker origin is stale")
         if latest.legacy:
             latest = _backfill_legacy(root, latest)
         record_id = _derived_record_id(

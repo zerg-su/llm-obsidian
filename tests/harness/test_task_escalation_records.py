@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,8 @@ from task_escalation_records import (  # noqa: E402
     load_latest,
     record_path,
 )
+from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -72,6 +75,54 @@ def raised_payload(worktree: Path, escalation_id: str, reason: str) -> dict[str,
         "task_surface": "11111111-1111-4111-8111-111111111111",
         "raised_at": "2026-08-04T12:00:00Z",
     }
+
+
+class FakeCmux:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    def send(self, surface: str, message: str) -> None:
+        self.sent.append((surface, message))
+
+    def send_key(self, surface: str, key: str) -> None:
+        self.sent.append((surface, key))
+
+
+class CustomWriterFixture(RuntimeWorkerCustomMixin):
+    def __init__(self, worktree: Path) -> None:
+        self.spec = {
+            "cwd": worktree,
+            "operation_id": "custom-operation",
+            "surface_id": "11111111-1111-4111-8111-111111111111",
+            "origin_surface": "22222222-2222-4222-8222-222222222222",
+        }
+        self.pipeline = SimpleNamespace(definition_sha256="d" * 64)
+        self.spec_path = worktree / "state" / "spec.json"
+        self.spec_path.parent.mkdir()
+        self.trusted_vault = worktree
+        self.cmux_adapter = FakeCmux()
+
+    def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
+        if not path.exists():
+            write_json(path, value)
+
+
+class ControlWriterFixture(RuntimeWorkerControlMixin):
+    def __init__(self, worktree: Path) -> None:
+        self.spec = {
+            "cwd": worktree,
+            "operation_id": "fix-operation",
+            "surface_id": "11111111-1111-4111-8111-111111111111",
+            "origin_surface": "22222222-2222-4222-8222-222222222222",
+            "store_root": worktree / ".vault-meta" / "harness",
+        }
+        self.spec_path = worktree / "state" / "spec.json"
+        self.spec_path.parent.mkdir()
+        self.cmux_adapter = FakeCmux()
+
+    def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
+        if not path.exists():
+            write_json(path, value)
 
 
 with tempfile.TemporaryDirectory(prefix="task-escalation-records.") as raw:
@@ -242,6 +293,86 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-legacy.") as raw:
             "record_id": resolved.record_id,
             "record_sha256": resolved.sha256,
         },
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-custom-writer.") as raw:
+    worktree = Path(raw)
+    meta(worktree)
+    writer = CustomWriterFixture(worktree)
+    writer.notify_custom_attention("declared-stop", None)
+    first_pointer = (worktree / ".task-needs-attention.json").read_bytes()
+    writer.notify_custom_attention("declared-stop", None)
+    custom = load_latest(worktree)
+    check(
+        "custom runtime writer is record-first and replay-idempotent",
+        custom is not None
+        and custom.legacy is False
+        and custom.payload["category"] == "pipeline-decision"
+        and custom.payload["allowed_decisions"]
+        == ["stop", "reapprove-pipeline"]
+        and len(load_chain(worktree)) == 1
+        and (worktree / ".task-needs-attention.json").read_bytes()
+        == first_pointer
+        and len(writer.cmux_adapter.sent) == 2,
+    )
+    append_resolution(
+        worktree,
+        "stop the custom pipeline",
+        resolved_at="2026-08-04T12:05:00Z",
+    )
+    (
+        writer.spec_path.parent
+        / "pipeline-custom"
+        / "attention-notify.json"
+    ).unlink()
+    writer.notify_custom_attention("declared-stop", None)
+    check(
+        "resolved custom decision cannot replay a stale wakeup",
+        len(load_chain(worktree)) == 2 and len(writer.cmux_adapter.sent) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-fix-writer.") as raw:
+    worktree = Path(raw)
+    meta(worktree)
+    writer = ControlWriterFixture(worktree)
+    receipt = SimpleNamespace(
+        receipt_sha256="e" * 64,
+        operation_id="reproduce-operation",
+    )
+    writer.notify_cannot_reproduce(receipt)
+    first_pointer = (worktree / ".task-needs-attention.json").read_bytes()
+    writer.notify_cannot_reproduce(receipt)
+    cannot_reproduce = load_latest(worktree)
+    check(
+        "engineering/fix writer is record-first and replay-idempotent",
+        cannot_reproduce is not None
+        and cannot_reproduce.legacy is False
+        and cannot_reproduce.payload["category"] == "pipeline-decision"
+        and cannot_reproduce.payload["allowed_decisions"]
+        == ["stop", "retry-with-fixture"]
+        and cannot_reproduce.payload["receipt_operation_id"]
+        == "reproduce-operation"
+        and len(load_chain(worktree)) == 1
+        and (worktree / ".task-needs-attention.json").read_bytes()
+        == first_pointer
+        and len(writer.cmux_adapter.sent) == 2,
+    )
+    append_resolution(
+        worktree,
+        "stop the fix pipeline",
+        resolved_at="2026-08-04T12:06:00Z",
+    )
+    (
+        writer.spec_path.parent
+        / "pipeline-fix"
+        / "cannot-reproduce-notify.json"
+    ).unlink()
+    writer.notify_cannot_reproduce(receipt)
+    check(
+        "resolved engineering/fix decision cannot replay a stale wakeup",
+        len(load_chain(worktree)) == 2 and len(writer.cmux_adapter.sent) == 2,
     )
 
 

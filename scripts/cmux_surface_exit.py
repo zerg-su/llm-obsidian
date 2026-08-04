@@ -18,6 +18,7 @@ from task_contract import (
     read_json as read_contract_json,
     validate_handoff,
 )
+from task_escalation_records import EscalationRecordError, load_attention
 from task_sessions import (
     TaskSessionError,
     TaskSessionStore,
@@ -127,8 +128,11 @@ def non_handoff_dirty(worktree: Path) -> list[str]:
 def arm(worktree: Path, kind: str) -> tuple[Path, str, str]:
     surface, runtime = surface_and_runtime(worktree, kind)
     if kind == "task":
-        attention_path = worktree / ".task-needs-attention.json"
-        if attention_path.is_file() and read_json(attention_path).get("status") != "resolved":
+        try:
+            attention = load_attention(worktree)
+        except EscalationRecordError as exc:
+            die(f"invalid task escalation record: {exc}", 3)
+        if attention is not None and attention.get("status") != "resolved":
             die("task has an unresolved coordinator escalation", 3)
         complete = read_json(worktree / ".task-reap-complete.json")
         summary = worktree / ".task-summary.json"
