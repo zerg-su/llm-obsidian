@@ -17,6 +17,14 @@ from typing import Any, NoReturn
 
 from lifecycle_telemetry import elapsed_ms, emit_lifecycle_event
 from task_contract import ContractError, normalize_for_runtime
+from task_escalation_records import (
+    EscalationRecordError,
+    append_amendment,
+    append_delivery_failure,
+    append_raise,
+    append_resolution,
+    load_latest,
+)
 from harness.adapters.cmux import run_cmux
 
 
@@ -60,10 +68,6 @@ def read_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         die(f"{path} must contain an object")
     return value
-
-
-def write_json(path: Path, value: dict[str, Any]) -> None:
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def read_surface(worktree: Path, meta: dict[str, Any], key: str, fallback: str) -> str:
@@ -126,7 +130,10 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
     if category == "mechanism-failure":
         marker["coordinator_policy"] = MECHANISM_REPAIR_POLICY
     marker_path = worktree / ".task-needs-attention.json"
-    write_json(marker_path, marker)
+    try:
+        raised = append_raise(worktree, marker)
+    except EscalationRecordError as exc:
+        die(str(exc), 3)
     title = f"Task {task_name} needs a decision"
     if category == "mechanism-failure":
         action = (
@@ -162,8 +169,13 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
     try:
         send(coordinator, wake)
     except SystemExit:
-        marker["status"] = "delivery-failed"
-        write_json(marker_path, marker)
+        try:
+            append_delivery_failure(
+                worktree,
+                expected_record_sha256=raised.sha256,
+            )
+        except EscalationRecordError as exc:
+            die(str(exc), 3)
         emit_lifecycle_event(
             worktree,
             "task-escalation",
@@ -187,32 +199,35 @@ def raise_escalation(worktree: Path, category: str, reason: str, question: str) 
 
 def resolve_escalation(worktree: Path, decision: str) -> int:
     meta, _ = load_unattended(worktree)
-    marker_path = worktree / ".task-needs-attention.json"
-    marker = read_json(marker_path)
+    try:
+        latest = load_latest(worktree)
+    except EscalationRecordError as exc:
+        die(str(exc), 3)
+    if latest is None:
+        die("there is no unresolved task escalation", 3)
+    marker = latest.payload
     unresolved_status = str(marker.get("status") or "")
-    if unresolved_status not in {"pending", "delivery-failed"}:
+    answer = compact(decision, "decision")
+    replay = unresolved_status == "resolved" and marker.get("decision") == answer
+    if unresolved_status not in {"pending", "delivery-failed"} and not replay:
         die("there is no unresolved task escalation", 3)
     current = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unknown"
     if current == "unknown" or current != str(meta.get("origin_session") or ""):
         die("only the originating coordinator session may resolve this escalation", 3)
     task_surface = read_surface(worktree, meta, "task_surface", ".task-cmux-surface")
-    answer = compact(decision, "decision")
+    try:
+        resolved = append_resolution(worktree, answer)
+    except EscalationRecordError as exc:
+        die(str(exc), 3)
     send(
         task_surface,
         f"[Coordinator decision for escalation {marker.get('id')}] {answer} "
         "Continue only within this decision and the approved plan; escalate again on further drift.",
         clear_codex=str(meta.get("executor_runtime") or meta.get("runtime") or "") == "codex",
     )
-    marker.update(
-        {
-            "status": "resolved",
-            "resolved_from": unresolved_status,
-            "decision": answer,
-            "resolved_at": utc_now(),
-        }
+    duration = elapsed_ms(
+        resolved.payload.get("raised_at"), resolved.payload.get("resolved_at")
     )
-    write_json(marker_path, marker)
-    duration = elapsed_ms(marker.get("raised_at"), marker.get("resolved_at"))
     emit_lifecycle_event(
         worktree,
         "task-escalation",
@@ -220,6 +235,35 @@ def resolve_escalation(worktree: Path, decision: str) -> int:
         counts={"resolved": 1, **({"duration_ms": duration} if duration is not None else {})},
     )
     print(f"decision relayed to task surface {task_surface}")
+    return 0
+
+
+def record_amendment(
+    worktree: Path,
+    plan_sha256: str,
+    outcome_sha256: str,
+    decision: str,
+) -> int:
+    meta, _ = load_unattended(worktree)
+    current = os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID") or "unknown"
+    if current == "unknown" or current != str(meta.get("origin_session") or ""):
+        die("only the originating coordinator session may record an amendment", 3)
+    try:
+        record = append_amendment(
+            worktree,
+            plan_sha256=plan_sha256,
+            outcome_sha256=outcome_sha256,
+            decision=compact(decision, "decision"),
+        )
+    except EscalationRecordError as exc:
+        die(str(exc), 3)
+    emit_lifecycle_event(
+        worktree,
+        "task-escalation",
+        actor="amendment",
+        counts={"amendments": 1},
+    )
+    print(f"amendment {record.record_id} recorded")
     return 0
 
 
@@ -234,11 +278,23 @@ def main() -> int:
     resolved = sub.add_parser("resolve")
     resolved.add_argument("--worktree", default=".")
     resolved.add_argument("--decision", required=True)
+    amendment = sub.add_parser("record-amendment")
+    amendment.add_argument("--worktree", default=".")
+    amendment.add_argument("--plan-sha256", required=True)
+    amendment.add_argument("--outcome-sha256", required=True)
+    amendment.add_argument("--decision", required=True)
     args = parser.parse_args()
     worktree = Path(args.worktree).expanduser().resolve()
     if args.command == "raise":
         return raise_escalation(worktree, args.category, args.reason, args.question)
-    return resolve_escalation(worktree, args.decision)
+    if args.command == "resolve":
+        return resolve_escalation(worktree, args.decision)
+    return record_amendment(
+        worktree,
+        args.plan_sha256,
+        args.outcome_sha256,
+        args.decision,
+    )
 
 
 if __name__ == "__main__":

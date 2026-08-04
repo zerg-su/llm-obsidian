@@ -16,6 +16,7 @@ from task_contract import (
     validate_handoff,
 )
 from task_sessions import TaskSessionError, TaskSessionStore
+from task_escalation_records import EscalationRecordError, load_attention
 from task_lifecycle_state import (
     die,
     read_json,
@@ -205,8 +206,11 @@ def prepared_reap_plan(
 
 def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
-    attention_path = worktree / ".task-needs-attention.json"
-    if attention_path.is_file() and read_json(attention_path).get("status") != "resolved":
+    try:
+        attention = load_attention(worktree)
+    except EscalationRecordError as exc:
+        die(f"invalid task escalation record: {exc}", 3)
+    if attention is not None and attention.get("status") != "resolved":
         die("task has an unresolved coordinator escalation", 3)
     meta_path = worktree / ".task-meta.json"
     meta = read_contract_json(meta_path)
@@ -312,8 +316,11 @@ def prepare_reap(worktree: Path, current_session: str, result_path: Path, vault_
 
 def complete_reap(worktree: Path, current_session: str, result_path: Path, vault_root: Path) -> int:
     require_origin_session(worktree, current_session)
-    attention_path = worktree / ".task-needs-attention.json"
-    if attention_path.is_file() and read_json(attention_path).get("status") != "resolved":
+    try:
+        attention = load_attention(worktree)
+    except EscalationRecordError as exc:
+        die(f"invalid task escalation record: {exc}", 3)
+    if attention is not None and attention.get("status") != "resolved":
         die("task has an unresolved coordinator escalation", 3)
     meta_path = worktree / ".task-meta.json"
     summary_path = worktree / ".task-summary.json"
@@ -384,7 +391,10 @@ def complete_reap(worktree: Path, current_session: str, result_path: Path, vault
     if meta.get("version") in {3, 4}:
         (worktree / ".task-session-binding.json").unlink(missing_ok=True)
     review_meta = read_object(worktree / ".review-meta.json")
-    attention = read_object(worktree / ".task-needs-attention.json")
+    try:
+        attention = load_attention(worktree)
+    except EscalationRecordError as exc:
+        die(f"invalid task escalation record: {exc}", 3)
     duration = elapsed_ms(meta.get("spawned_at"), marker["completed_at"])
     emit_lifecycle_event(
         worktree,

@@ -46,6 +46,10 @@ from task_review_resolution_evidence import (  # noqa: E402
     approved_summary_resolution,
 )
 from task_review_shared import TaskReviewError  # noqa: E402
+from task_escalation_records import (  # noqa: E402
+    append_raise,
+    append_resolution,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -192,6 +196,7 @@ class RecoveryFixture:
     child_id: str
     attention_path: Path
     exact_attention: dict[str, object]
+    attention_pointer: bytes
 
 
 def write_json(path: Path, value: dict[str, object]) -> None:
@@ -361,18 +366,26 @@ def build_fixture(
             {"evidence": "historical-resolution"},
         )
     gate._replace(**state_updates)
-    attention = {
+    raised_attention = {
+        "version": 1,
         "id": "mechanism-recovery-1",
-        "status": "resolved",
+        "status": "pending",
+        "task_name": "mechanism recovery",
         "category": "mechanism-failure",
+        "reason": "The repository-owned review mechanism failed",
+        "question": "Authorize one bounded fresh review boundary?",
         "worktree": str(product.resolve()),
-        "decision": (
-            "authorize-one-bounded-fresh-context-review-boundary-for-"
-            f"{head[:7]}"
-        ),
+        "task_surface": str(meta["task_surface"]),
+        "raised_at": "2026-08-04T12:00:00Z",
     }
     attention_path = product / ".task-needs-attention.json"
-    write_json(attention_path, attention)
+    append_raise(product, raised_attention)
+    resolved_attention = append_resolution(
+        product,
+        "authorize-one-bounded-fresh-context-review-boundary-for-"
+        f"{head[:7]}",
+        resolved_at="2026-08-04T12:01:00Z",
+    )
     return RecoveryFixture(
         vault,
         product,
@@ -383,7 +396,8 @@ def build_fixture(
         lane.operation_id,
         round_.operation_id,
         attention_path,
-        attention,
+        resolved_attention.payload,
+        attention_path.read_bytes(),
     )
 
 
@@ -633,7 +647,7 @@ with tempfile.TemporaryDirectory(prefix="mechanism-recovery-unit.") as raw:
             ),
             "lacks exact coordinator authorization",
         )
-    write_json(fixture.attention_path, fixture.exact_attention)
+    fixture.attention_path.write_bytes(fixture.attention_pointer)
 
     expect_error(
         "mechanism recovery rejects a live review boundary",

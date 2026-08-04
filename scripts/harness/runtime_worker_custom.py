@@ -19,6 +19,7 @@ from .workflows.research_contracts import (
     fetch_callback_payload,
     research_callback_identity,
 )
+from task_escalation_records import EscalationRecordError, append_raise
 
 
 class RuntimeWorkerCustomMixin:
@@ -91,11 +92,12 @@ class RuntimeWorkerCustomMixin:
             "receipt_sha256": receipt_sha256,
             "allowed_decisions": ["stop", "reapprove-pipeline"],
         }
-        if path.is_file() and (not path.is_symlink()):
-            if json.loads(path.read_text(encoding="utf-8")) != packet:
-                raise RuntimeWorkerError("custom decision packet changed")
-        else:
-            _atomic_json(path, packet)
+        try:
+            raised = append_raise(self.spec["cwd"], packet)
+        except EscalationRecordError as exc:
+            raise RuntimeWorkerError(f"custom decision packet is invalid: {exc}") from exc
+        if raised.record_id != packet["id"] or raised.payload.get("status") != "pending":
+            return
         notify_path = (
             self.spec_path.parent / "pipeline-custom" / "attention-notify.json"
         )

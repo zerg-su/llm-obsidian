@@ -14,6 +14,7 @@ from typing import Any, NoReturn
 
 from review_contract import MATERIAL_SEVERITIES, SEVERITIES
 from outcome_contract import OutcomeContractError, extract_from_bytes
+from task_escalation_records import EscalationRecordError, load_attention
 
 
 SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update", "repo-touch"}
@@ -609,8 +610,11 @@ def main() -> int:
         if args.command == "validate":
             result = normalize(meta)
         elif args.command == "check-handoff":
-            attention_path = meta_path.expanduser().resolve().parent / ".task-needs-attention.json"
-            if attention_path.is_file() and read_json(attention_path).get("status") != "resolved":
+            try:
+                attention = load_attention(meta_path.expanduser().resolve().parent)
+            except EscalationRecordError as exc:
+                raise ContractError(f"invalid task escalation record: {exc}") from exc
+            if attention is not None and attention.get("status") != "resolved":
                 raise ContractError("task has an unresolved coordinator escalation")
             result = validate_handoff(meta, read_json(Path(args.summary)), args.current_session)
         else:

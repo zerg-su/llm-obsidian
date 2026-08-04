@@ -39,13 +39,14 @@ from task_review_legacy_rounds import RecoveryRoundStore
 from task_review_resolution_evidence import approved_summary_resolution
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
+from task_escalation_records import EscalationRecordError, load_latest
 
 
 @dataclass(frozen=True)
 class _RecoveryContext:
     state: dict[str, Any]
     attention: dict[str, Any]
-    attention_path: Path
+    attention_record_sha256: str
     meta: dict[str, Any]
     vault: Path
     worktree: Path
@@ -150,7 +151,7 @@ def _approved_summary_recovery(
         task_id=recovery.task_id,
         boundary=boundary,
         attention=recovery.attention,
-        attention_path=recovery.attention_path,
+        attention_record_sha256=recovery.attention_record_sha256,
     )
     name, path = persist_authorization(
         recovery.gate,
@@ -242,7 +243,7 @@ def _recover_stale_boundary(
         task_id=recovery.task_id,
         boundary=boundary,
         attention=recovery.attention,
-        attention_path=recovery.attention_path,
+        attention_record_sha256=recovery.attention_record_sha256,
     )
     name, path = persist_authorization(
         recovery.gate,
@@ -282,8 +283,13 @@ def recover_task_review_for_mechanism(
 
     worktree = worktree.expanduser().resolve()
     meta, vault, task_id = _validate_task(worktree)
-    attention_path = worktree / ".task-needs-attention.json"
-    attention = _read_json(attention_path, "task escalation")
+    try:
+        attention_record = load_latest(worktree)
+    except EscalationRecordError as exc:
+        raise TaskReviewError(f"task escalation record is invalid: {exc}") from exc
+    if attention_record is None:
+        raise TaskReviewError("task escalation record is unavailable")
+    attention = attention_record.payload
     runtime_root = _runtime_root(vault, task_id)
     current_context, context_manifest = _context(
         meta,
@@ -320,7 +326,7 @@ def recover_task_review_for_mechanism(
     recovery = _RecoveryContext(
         state=state,
         attention=attention,
-        attention_path=attention_path,
+        attention_record_sha256=attention_record.sha256,
         meta=meta,
         vault=vault,
         worktree=worktree,
