@@ -15,6 +15,10 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .workflows.research_contracts import (
+    fetch_callback_payload,
+    research_callback_identity,
+)
 
 
 class RuntimeWorkerCustomMixin:
@@ -457,12 +461,10 @@ class RuntimeWorkerCustomMixin:
                     expected_run_id=run_id,
                     expected_request_sha256=self.spec["research_request_sha256"],
                 )
-                payload = {
-                    "stage": "fetch",
-                    "artifact_path": "artifact.json",
-                    "artifact_sha256": digest,
-                    "source_count": len(artifact["sources"]),
-                }
+                payload = fetch_callback_payload(
+                    artifact_sha256=digest,
+                    source_count=len(artifact["sources"]),
+                )
             else:
                 if (
                     not self.research_input_sha256
@@ -488,12 +490,9 @@ class RuntimeWorkerCustomMixin:
                     "artifact_sha256": result["artifact"]["sha256"],
                     "citation_count": len(result["artifact"]["citations"]),
                 }
-            encoded = json.dumps(
-                payload, sort_keys=True, separators=(",", ":")
-            ).encode()
-            payload_sha256 = hashlib.sha256(encoded).hexdigest()
+            callback_id, payload_sha256 = research_callback_identity(payload)
             envelope = CallbackEnvelope(
-                callback_id=f"research-{payload['stage']}-{payload_sha256[:24]}",
+                callback_id=callback_id,
                 operation_id=operation_id,
                 run_id=run_id,
                 kind="research",

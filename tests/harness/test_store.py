@@ -871,6 +871,26 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         ),
     )
 
+    create_cli_operation("op-accepted-cancel-cli", state="exiting")
+    accepted_cancel = store.read("owner-cli", "op-accepted-cancel-cli")
+    store.save(
+        replace(
+            accepted_cancel,
+            revision=accepted_cancel.revision + 1,
+            accepted_callback_id="accepted-callback-cancel",
+            accepted_callback_kind="result",
+            accepted_callback_sha256="b" * 64,
+        ),
+        expected_revision=accepted_cancel.revision,
+    )
+    cancelled_accepted = run_cli("cancel", "op-accepted-cancel-cli")
+    check(
+        "CLI cancel preserves an accepted callback as completion",
+        cancelled_accepted.returncode == 0
+        and store.read("owner-cli", "op-accepted-cancel-cli").state
+        == "complete",
+    )
+
     create_cli_operation("op-plain-reconcile-cli", state="cancelling")
     plain_reconcile = subprocess.run(
         [

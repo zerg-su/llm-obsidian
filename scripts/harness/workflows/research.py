@@ -62,7 +62,9 @@ from .research_contracts import (
     _stage_identity,
     _stage_spec,
     enqueue,
+    fetch_callback_payload,
     operation_spec,
+    research_callback_identity,
 )
 from .research_sandbox import (
     _ensure_private_directory,
@@ -82,16 +84,13 @@ def _accepted_research_receipt(
 ) -> bool:
     """Match a cancelled fetch stage to its exact durable callback payload."""
 
-    encoded = json.dumps(
-        dict(payload), sort_keys=True, separators=(",", ":")
-    ).encode()
-    digest = hashlib.sha256(encoded).hexdigest()
+    callback_id, digest = research_callback_identity(payload)
     stage = payload.get("stage")
     return (
         stage == "fetch"
         and record.accepted_callback_kind == "research"
         and record.accepted_callback_sha256 == digest
-        and record.accepted_callback_id == f"research-{stage}-{digest[:24]}"
+        and record.accepted_callback_id == callback_id
     )
 
 
@@ -158,12 +157,10 @@ def advance_research(
         expected_run_id=fetch_run,
         expected_request_sha256=request.context.request_sha256,
     )
-    fetch_payload = {
-        "stage": "fetch",
-        "artifact_path": "artifact.json",
-        "artifact_sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
-        "source_count": len(artifact["sources"]),
-    }
+    fetch_payload = fetch_callback_payload(
+        artifact_sha256=hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        source_count=len(artifact["sources"]),
+    )
     recovered_cancelled = (
         fetch.state == "cancelled"
         and _accepted_research_receipt(fetch, fetch_payload)

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -201,6 +202,25 @@ def compile_documentation_pipeline(path: Path = PIPELINE) -> None:
         raise AssertionError("documentation pipeline must end at review")
 
 
+def documentation_pointer_hash_failures(
+    pipeline: Path = PIPELINE,
+    authority: Path = ROOT / "docs" / "acceptance" / "v2.6.3-documentation-quality-contracts.md",
+) -> list[str]:
+    value = json.loads(pipeline.read_text(encoding="utf-8"))
+    pointers = {
+        str(item.get("pointer_id")): item
+        for item in value.get("context_pointers", [])
+        if isinstance(item, dict)
+    }
+    pointer = pointers.get("documentation-quality")
+    expected = hashlib.sha256(authority.read_bytes()).hexdigest()
+    if pointer is None:
+        return ["documentation-quality context pointer is missing"]
+    if pointer.get("content_sha256") != expected:
+        return ["documentation-quality context pointer digest is stale"]
+    return []
+
+
 failures: list[str] = []
 for relative in REQUIRED_PAGES:
     if not (DOCS / relative).is_file():
@@ -286,6 +306,7 @@ try:
     compile_documentation_pipeline()
 except (OSError, ValueError, AssertionError) as exc:
     failures.append(f"documentation PipelineSpec does not compile: {exc}")
+failures.extend(documentation_pointer_hash_failures())
 
 # Mutation-sensitive unit checks for the local validators.
 with tempfile.TemporaryDirectory(prefix="russian-docs-gate.") as raw:
@@ -326,6 +347,14 @@ with tempfile.TemporaryDirectory(prefix="russian-docs-gate.") as raw:
         pass
     else:
         raise AssertionError("invalid PipelineSpec mutation was accepted")
+
+    stale_pipeline = scratch / "stale-pointer.json"
+    stale_value = json.loads(PIPELINE.read_text(encoding="utf-8"))
+    stale_value["context_pointers"][0]["content_sha256"] = "0" * 64
+    stale_pipeline.write_text(json.dumps(stale_value), encoding="utf-8")
+    assert documentation_pointer_hash_failures(stale_pipeline) == [
+        "documentation-quality context pointer digest is stale"
+    ]
 
 decision = json.loads(
     (

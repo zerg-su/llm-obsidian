@@ -30,6 +30,10 @@ from harness.workflows.research import (
     research_runtime_config,
     start_research,
 )
+from harness.workflows.research_contracts import (
+    fetch_callback_payload,
+    research_callback_identity,
+)
 from research_contract import (
     ResearchContractError,
     load_artifact,
@@ -546,17 +550,13 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
     }
     (fetch / "artifact.json").write_text(json.dumps(fetch_artifact), encoding="utf-8")
     fetch_raw = (fetch / "artifact.json").read_bytes()
-    fetch_payload = {
-        "stage": "fetch",
-        "artifact_path": "artifact.json",
-        "artifact_sha256": hashlib.sha256(fetch_raw).hexdigest(),
-        "source_count": 1,
-    }
-    fetch_payload_digest = hashlib.sha256(
-        json.dumps(
-            fetch_payload, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
+    fetch_payload = fetch_callback_payload(
+        artifact_sha256=hashlib.sha256(fetch_raw).hexdigest(),
+        source_count=1,
+    )
+    fetch_callback_id, fetch_payload_digest = research_callback_identity(
+        fetch_payload
+    )
     accepted_fetch = store.read(
         pipeline_request.owner_id, execution.fetch.spec.operation_id
     )
@@ -564,9 +564,7 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         replace(
             accepted_fetch,
             revision=accepted_fetch.revision + 1,
-            accepted_callback_id=(
-                f"research-fetch-{fetch_payload_digest[:24]}"
-            ),
+            accepted_callback_id=fetch_callback_id,
             accepted_callback_kind="research",
             accepted_callback_sha256=fetch_payload_digest,
         ),

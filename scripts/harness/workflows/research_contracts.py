@@ -128,6 +128,38 @@ class ResearchRuntime(Protocol):
     def cleanup(self, owner_id: str, operation_id: str) -> object: ...
 
 
+def fetch_callback_payload(
+    *, artifact_sha256: str, source_count: int
+) -> dict[str, object]:
+    """Build the one durable callback payload for a completed fetch stage."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", artifact_sha256):
+        raise ValueError("research artifact digest must be a sha256")
+    if isinstance(source_count, bool) or source_count < 0:
+        raise ValueError("research source count must be non-negative")
+    return {
+        "stage": "fetch",
+        "artifact_path": "artifact.json",
+        "artifact_sha256": artifact_sha256,
+        "source_count": source_count,
+    }
+
+
+def research_callback_identity(
+    payload: Mapping[str, object],
+) -> tuple[str, str]:
+    """Return the canonical callback id and digest for a research payload."""
+
+    stage = payload.get("stage")
+    if stage not in {"fetch", "synth"}:
+        raise ValueError("research callback stage is invalid")
+    encoded = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":")
+    ).encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    return f"research-{stage}-{digest[:24]}", digest
+
+
 @dataclass(frozen=True)
 class ResearchExecution:
     request: ResearchOperationRequest
