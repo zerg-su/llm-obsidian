@@ -328,6 +328,16 @@ def run_current_review(
             ):
                 from task_review_plan import rebind_active_plan_review
 
+                candidate_runtime_root = Path(
+                    str(candidate.get("runtime_root") or "")
+                ).resolve()
+                expected_runtime_root = _current_runtime_root(
+                    worktree, task_id, scratch_root
+                )
+                if candidate_runtime_root != expected_runtime_root:
+                    raise TaskReviewError(
+                        "current review scratch root changed during plan rebind"
+                    )
                 candidate = rebind_active_plan_review(
                     worktree,
                     active_path,

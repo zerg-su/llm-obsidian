@@ -512,6 +512,13 @@ def rebind_active_plan_review(
     boundary_path = Path(
         str(candidate.get("review_boundary_input_file") or "")
     ).resolve()
+    if boundary_path != (
+        runtime_root / "inputs/review-boundary-input.json"
+    ).resolve():
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "plan rebind boundary pointer is outside exact review scratch",
+        )
     old_boundary = _load_review_boundary_input(boundary_path, purpose="intent")
     old_artifacts = {
         "outcome": b"",
@@ -524,7 +531,7 @@ def rebind_active_plan_review(
         ).read_bytes(),
     }
     reviewed = PlanReviewCompilation(
-        worktree,
+        worktree.expanduser().resolve(),
         compilation.plan_path,
         relative,
         old_boundary.plan_sha256,

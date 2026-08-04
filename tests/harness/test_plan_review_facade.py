@@ -367,6 +367,94 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         and len(delta["git_delta_sha256"]) == 64,
         delta,
     )
+    active_runtime = tmp / "active-review-scratch"
+    old_boundary = plan_review.materialize_plan_review(
+        active_runtime,
+        compiled,
+        base_sha=baseline,
+        head_sha=reviewed_head,
+    )
+    boundary_path = active_runtime / "inputs/review-boundary-input.json"
+    boundary_path.write_text(
+        json.dumps(old_boundary.payload(), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    active_path = tmp / "active.json"
+    task_id = "11111111-1111-4111-8111-111111111111"
+    candidate = {
+        "task_id": task_id,
+        "runtime_root": str(active_runtime),
+        "review_boundary_input_file": str(boundary_path),
+        "plan_review": {
+            "schema_version": 1,
+            "base_sha": baseline,
+            "head_sha": reviewed_head,
+            "plan_relative_path": compiled.plan_relative_path,
+            "artifact_root": "runtime",
+        },
+    }
+    gate_state = {
+        "status": "awaiting-resolution",
+        "context": {"head_sha": reviewed_head},
+    }
+    requested_policy = {
+        "purpose": "intent",
+        "boundary_input_sha256": resolved.boundary().input_sha256,
+    }
+    (worktree / ".task-review-resolution.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": task_id,
+                "reviewed_head_sha": reviewed_head,
+                "resolved_head_sha": resolved_head,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    foreign_boundary = tmp / "foreign-boundary.json"
+    foreign_boundary.write_text(boundary_path.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        plan_review.rebind_active_plan_review(
+            worktree,
+            active_path,
+            {**candidate, "review_boundary_input_file": str(foreign_boundary)},
+            gate_state,
+            requested_policy,
+            resolved,
+            requested_base_sha=reviewed_head,
+            requested_head_sha=resolved_head,
+        )
+    except plan_review.PlanReviewError:
+        foreign_rejected = True
+    else:
+        foreign_rejected = False
+    rebound = plan_review.rebind_active_plan_review(
+        worktree,
+        active_path,
+        candidate,
+        gate_state,
+        requested_policy,
+        resolved,
+        requested_base_sha=reviewed_head,
+        requested_head_sha=resolved_head,
+    )
+    rebound_boundary = json.loads(boundary_path.read_text(encoding="utf-8"))
+    check(
+        "retained-lane rebind updates exact scratch without a new session",
+        foreign_rejected
+        and rebound["task_id"] == task_id
+        and rebound["plan_review"]["reviewed_plan_sha256"]
+        == compiled.plan_sha256
+        and rebound["plan_review"]["resolved_plan_sha256"]
+        == resolved.plan_sha256
+        and rebound_boundary["design_sha256"]
+        == resolved.artifact_sha256["design"]
+        and sessions.starts == 0,
+        rebound,
+    )
 
     mutations = {
         "outcome": plan_text(
