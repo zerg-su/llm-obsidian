@@ -35,6 +35,7 @@ class AttentionReason(str, enum.Enum):
     PROMPT_UNKNOWN = "prompt-unknown"
     CALLBACK_INVALID = "callback-invalid"
     CALLBACK_TIMEOUT = "callback-timeout"
+    CONTINUATION_SUBMIT_UNCONFIRMED = "continuation-submit-unconfirmed"
     VERIFICATION_FAILED = "verification-failed"
     RETRY_EXHAUSTED = "retry-exhausted"
     SURFACE_LOST = "surface-lost"

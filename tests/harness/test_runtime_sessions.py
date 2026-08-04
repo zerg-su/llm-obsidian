@@ -46,6 +46,7 @@ from harness.contracts import (
     AttentionReason,
     CallbackEnvelope,
     CapabilityReport,
+    EffectOutcome,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
@@ -55,6 +56,7 @@ from harness.runtime_sessions import (
     RuntimeSessionManager,
     RuntimeSessionRequest,
 )
+from harness.runtime_session_contracts import continuation_effect_id
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -91,6 +93,8 @@ class FakeCmux:
         self.surface_statuses: list[str] = []
         self.workspace_status_value = "alive"
         self.checkpoint = "checkpoint-1"
+        self.submit_count = 0
+        self.submits_at_last_send = 0
 
     def open_split(self, origin_surface: str) -> Surface:
         self.events.append("surface-open")
@@ -114,6 +118,7 @@ class FakeCmux:
     def send(self, surface_id: str, text: str) -> None:
         self.events.append("provider-send")
         self.sent.append((surface_id, text))
+        self.submits_at_last_send = self.submit_count
 
     def send_key(self, surface_id: str, key: str) -> None:
         check(
@@ -121,6 +126,17 @@ class FakeCmux:
             surface_id == SURFACE and key == "Enter",
         )
         self.events.append("provider-submit")
+        self.submit_count += 1
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        if not self.sent:
+            return "›"
+        prompt = self.sent[-1][1]
+        anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
+        if self.submit_count == self.submits_at_last_send:
+            return f"› {anchor}"
+        return "• Working"
 
     def status(self, surface_id: str) -> str:
         check(
@@ -1343,6 +1359,116 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and checkpointless.checkpoint == ""
         and checkpointless_cmux.sent[-1]
         == (SURFACE, "verify through the retained Claude process"),
+    )
+
+    class RetainedPromptCmux(FakeCmux):
+        def __init__(self, events: list[str], *, acknowledge: bool) -> None:
+            super().__init__(events)
+            self.acknowledge = acknowledge
+
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            prompt = self.sent[-1][1]
+            anchor = next(
+                (line.strip() for line in prompt.splitlines() if line.strip()),
+                "",
+            )
+            if self.acknowledge and self.submit_count > self.submits_at_last_send:
+                return "• Working"
+            return f"› {anchor}"
+
+    stuck_root = root / "stuck-continuation"
+    stuck_root.mkdir()
+    (stuck_root / "callbacks").mkdir()
+    (stuck_root / "prompt.md").write_text("review", encoding="utf-8")
+    (stuck_root / "continue.md").write_text(
+        "# Harness-owned review verification\nInspect exact HEAD.",
+        encoding="utf-8",
+    )
+    stuck_store = OperationStore(root / "stuck-store")
+    stuck_cmux = RetainedPromptCmux([], acknowledge=False)
+    stuck_manager = RuntimeSessionManager(
+        stuck_store,
+        stuck_cmux,
+        FakeProcess([]),
+        {"codex": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    stuck_manager.start(
+        replace(
+            request,
+            cwd=stuck_root,
+            product_root=stuck_root,
+        )
+    )
+    try:
+        stuck_manager.continue_session(
+            "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("unacknowledged continuation must fail closed")
+    stuck_record = stuck_store.read("owner-1", "runtime-1")
+    stuck_receipts = list(
+        (stuck_root.parent / "stuck-store" / "owners" / "owner-1" / "runtime" / "runtime-1" / "continuation-deliveries").glob("*.json")
+    )
+    check(
+        "transport success without provider activity becomes typed attention",
+        stuck_record.state == "attention-required"
+        and stuck_record.attention_reason
+        == AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED
+        and stuck_record.effect_outcome == EffectOutcome.FAILED
+        and len(stuck_receipts) == 1
+        and json.loads(stuck_receipts[0].read_text(encoding="utf-8"))["status"]
+        == "unconfirmed"
+        and sum(text.startswith("# Harness-owned") for _surface, text in stuck_cmux.sent)
+        == 1,
+    )
+
+    legacy_root = root / "legacy-continuation"
+    legacy_root.mkdir()
+    (legacy_root / "callbacks").mkdir()
+    (legacy_root / "prompt.md").write_text("review", encoding="utf-8")
+    legacy_prompt = "# Harness-owned review verification\nInspect exact HEAD."
+    (legacy_root / "continue.md").write_text(legacy_prompt, encoding="utf-8")
+    legacy_store = OperationStore(root / "legacy-store")
+    legacy_cmux = RetainedPromptCmux([], acknowledge=True)
+    legacy_manager = RuntimeSessionManager(
+        legacy_store,
+        legacy_cmux,
+        FakeProcess([]),
+        {"codex": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    legacy_manager.start(
+        replace(request, cwd=legacy_root, product_root=legacy_root)
+    )
+    legacy_record = legacy_store.read("owner-1", "runtime-1")
+    legacy_store.save(
+        replace(
+            legacy_record,
+            effect_id=continuation_effect_id(legacy_prompt),
+            effect_outcome=EffectOutcome.SUCCEEDED,
+            revision=legacy_record.revision + 1,
+        ),
+        expected_revision=legacy_record.revision,
+    )
+    legacy_cmux.sent.append((SURFACE, legacy_prompt))
+    legacy_cmux.submits_at_last_send = legacy_cmux.submit_count
+    legacy = legacy_manager.continue_session(
+        "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+    )
+    check(
+        "legacy false-success continuation is acknowledged without repasting",
+        legacy.record.state == "running"
+        and sum(text == legacy_prompt for _surface, text in legacy_cmux.sent) == 1
+        and legacy_cmux.submit_count == legacy_cmux.submits_at_last_send + 1,
+        (legacy.record, legacy_cmux.sent, legacy_cmux.submit_count, legacy_cmux.submits_at_last_send),
     )
     child_spec = OperationSpec(
         "round-1",

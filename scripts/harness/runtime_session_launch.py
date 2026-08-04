@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 from dataclasses import replace
@@ -10,9 +12,11 @@ from time import time
 from typing import Callable
 
 from .callbacks import CallbackBroker
+from .liveness import LivenessController
 from .contracts import (
     AttentionReason,
     CallbackEnvelope,
+    ContractError,
     EffectOutcome,
     OperationRecord,
     OwnedResources,
@@ -28,12 +32,88 @@ from .runtime_session_contracts import (
     checkpointless_reviewer_route,
     continuation_effect_id,
 )
+from .runtime_session_continuation import deliver_continuation
 from .store import StoreError
 from .supervisor import OperationSupervisor
 
 
 class RuntimeSessionLaunchMixin:
     """Own provider launch, continuation, and callback registration effects."""
+
+    def _continuation_receipt_path(
+        self, record: OperationRecord, effect_id: str
+    ) -> Path:
+        return (
+            self._state_root(record)
+            / "continuation-deliveries"
+            / f"{effect_id}.json"
+        )
+
+    def _continuation_receipt(
+        self,
+        record: OperationRecord,
+        effect_id: str,
+        prompt: str,
+        target: dict[str, object],
+    ) -> tuple[Path, dict[str, object] | None, dict[str, object]]:
+        identity = {
+            "schema_version": 1,
+            "effect_id": effect_id,
+            "owner_id": record.spec.owner_id,
+            "operation_id": record.spec.operation_id,
+            "run_id": record.run_id,
+            "lane_id": record.lane_id,
+            "generation": int(target["generation"]),
+            "callback_operation_id": str(target["operation_id"]),
+            "callback_run_id": str(target["run_id"]),
+            "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        }
+        path = self._continuation_receipt_path(record, effect_id)
+        existing: dict[str, object] | None = None
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or not path.is_file():
+                raise RuntimeSessionError(
+                    "continuation delivery receipt is not a regular file"
+                )
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RuntimeSessionError(
+                    "continuation delivery receipt is invalid"
+                ) from exc
+            if not isinstance(value, dict) or any(
+                value.get(key) != expected for key, expected in identity.items()
+            ):
+                raise RuntimeSessionError(
+                    "continuation delivery receipt identity changed"
+                )
+            existing = value
+        return path, existing, identity
+
+    def _continuation_artifact_ready(
+        self,
+        record: OperationRecord,
+        cwd: Path,
+        target: dict[str, object],
+    ) -> bool:
+        operation_id = str(target["operation_id"])
+        try:
+            child = self.store.read(record.spec.owner_id, operation_id)
+        except StoreError:
+            child = None
+        if child is not None and child.run_id == str(target["run_id"]):
+            if child.state != "awaiting-callback":
+                return True
+        pointer = cwd / _relative(
+            str(target["callback_pointer"]), "callback_pointer"
+        )
+        candidates = (
+            pointer,
+            pointer.with_name(".review-input.json"),
+        )
+        return any(
+            path.is_file() and not path.is_symlink() for path in candidates
+        )
 
     def _begin_start(self, supervisor: OperationSupervisor) -> None:
         """Publish both durable pre-surface lifecycle boundaries."""
@@ -415,13 +495,37 @@ class RuntimeSessionLaunchMixin:
         cwd = Path(str(metadata.get("cwd") or "")).resolve()
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
         prompt = self._read_prompt(prompt_path)
-        effect_id = continuation_effect_id(prompt)
+        target = self._callback_target(record)
+        legacy_effect_id = continuation_effect_id(prompt)
+        bound_prompt = "\n".join(
+            (
+                prompt,
+                str(target["generation"]),
+                str(target["operation_id"]),
+                str(target["run_id"]),
+            )
+        )
+        bound_effect_id = continuation_effect_id(bound_prompt)
+        effect_id = (
+            legacy_effect_id
+            if record.effect_id == legacy_effect_id
+            and record.effect_outcome
+            in {EffectOutcome.PENDING, EffectOutcome.SUCCEEDED}
+            else bound_effect_id
+        )
+        receipt_path, receipt, receipt_identity = self._continuation_receipt(
+            record, effect_id, prompt, target
+        )
         supervisor = OperationSupervisor(self.store, owner_id, operation_id)
         current = supervisor.read()
-        if not (
+        already_acknowledged = bool(
+            receipt and receipt.get("status") == "acknowledged"
+        )
+        effect_succeeded = (
             current.effect_id == effect_id
             and current.effect_outcome == EffectOutcome.SUCCEEDED
-        ):
+        )
+        if not effect_succeeded and not already_acknowledged:
             time_budget_seconds = metadata.get("time_budget_seconds")
             if (
                 not isinstance(time_budget_seconds, (int, float))
@@ -435,11 +539,110 @@ class RuntimeSessionLaunchMixin:
                 time_budget_seconds=float(time_budget_seconds)
             )
 
-        def send_prompt(_record: OperationRecord) -> None:
-            self.cmux.send(record.resources.surface_id, prompt)
-            self.cmux.send_key(record.resources.surface_id, "Enter")
+        if receipt and receipt.get("status") == "unconfirmed":
+            current = self._mark_attention(
+                supervisor.read(),
+                AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED,
+            )
+            raise RuntimeSessionError(
+                f"continuation submit requires attention: {current.state}"
+            )
 
-        supervisor.effect(effect_id, send_prompt)
+        if not already_acknowledged:
+            if receipt is None:
+                self._write_json(
+                    receipt_path,
+                    {**receipt_identity, "status": "prepared", "submit_count": 0},
+                )
+            send_prompt = not effect_succeeded and not (
+                receipt
+                and receipt.get("status")
+                in {
+                    "transport-accepted",
+                    "submit-accepted",
+                    "submit-retried",
+                }
+            )
+            liveness = LivenessController(
+                self._state_root(record) / "liveness"
+            )
+            retry_binding = hashlib.sha256(
+                (
+                    f"{owner_id}:{operation_id}:{record.run_id}:"
+                    f"{effect_id}:{int(target['generation'])}"
+                ).encode()
+            ).hexdigest()
+
+            def reserve_retry() -> bool:
+                try:
+                    return liveness.reserve_callback_submit(retry_binding)
+                except ContractError:
+                    return False
+
+            def observe_stage(status: str, submit_count: int) -> None:
+                self._write_json(
+                    receipt_path,
+                    {
+                        **receipt_identity,
+                        "status": status,
+                        "submit_count": submit_count,
+                    },
+                )
+                if status == "submit-retried":
+                    liveness.mark_callback_submit_sent(retry_binding)
+
+            class ContinuationUnconfirmed(RuntimeError):
+                pass
+
+            def deliver(_record: OperationRecord) -> None:
+                result = deliver_continuation(
+                    self.cmux,
+                    surface_id=record.resources.surface_id,
+                    prompt=prompt,
+                    artifact_ready=lambda: self._continuation_artifact_ready(
+                        record, cwd, target
+                    ),
+                    reserve_retry=reserve_retry,
+                    observe_stage=observe_stage,
+                    send_prompt=send_prompt,
+                )
+                status = "acknowledged" if result.acknowledged else "unconfirmed"
+                self._write_json(
+                    receipt_path,
+                    {
+                        **receipt_identity,
+                        "status": status,
+                        "evidence": result.evidence,
+                        "submit_count": result.submit_count,
+                    },
+                )
+                if not result.acknowledged:
+                    raise ContinuationUnconfirmed(result.evidence)
+
+            try:
+                if effect_succeeded:
+                    deliver(supervisor.read())
+                else:
+                    supervisor.effect(
+                        effect_id,
+                        deliver,
+                        resume_pending=(
+                            supervisor.read().pending_effect == effect_id
+                        ),
+                    )
+            except ContinuationUnconfirmed as exc:
+                pending = supervisor.read()
+                if pending.pending_effect == effect_id:
+                    self.store.resolve_effect(
+                        owner_id, operation_id, EffectOutcome.FAILED
+                    )
+                current = self._mark_attention(
+                    supervisor.read(),
+                    AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED,
+                )
+                raise RuntimeSessionError(
+                    f"continuation submit requires attention: {exc}"
+                ) from exc
         current = supervisor.read()
         if current.state != "running":
             current = supervisor.transition("running")
