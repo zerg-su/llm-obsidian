@@ -367,6 +367,32 @@ class LivenessController:
             "status": state.callback_submit_status,
         }
 
+    def _write_callback_submit_receipt(
+        self,
+        binding_sha256: str,
+        state: LivenessState,
+        *,
+        allowed_existing: tuple[dict[str, object], ...] = (),
+    ) -> None:
+        path = (
+            self.root
+            / "receipts"
+            / f"callback-submit-{binding_sha256}.json"
+        )
+        target = self._callback_submit_receipt(binding_sha256, state)
+        if path.is_file() and not path.is_symlink():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ContractError("callback submit receipt is invalid") from exc
+            if existing != target and existing not in allowed_existing:
+                raise ContractError("callback submit receipt changed during replay")
+            if existing == target:
+                return
+        elif path.exists() or path.is_symlink():
+            raise ContractError("callback submit receipt is not a regular file")
+        self._write(path, target)
+
     def reserve_callback_submit(self, binding_sha256: str) -> bool:
         """Atomically consume the existing nudge ceiling for one generation."""
 
@@ -378,12 +404,7 @@ class LivenessController:
             if current.callback_submit_binding:
                 if current.callback_submit_binding != binding_sha256:
                     return False
-                self._write(
-                    self.root
-                    / "receipts"
-                    / f"callback-submit-{binding_sha256}.json",
-                    self._callback_submit_receipt(binding_sha256, current),
-                )
+                self._write_callback_submit_receipt(binding_sha256, current)
                 return False
             if current.nudge_count >= 1:
                 return False
@@ -394,12 +415,7 @@ class LivenessController:
                 callback_submit_status="reserved",
             )
             self._write(self.root / "state.json", to_dict(reserved))
-            self._write(
-                self.root
-                / "receipts"
-                / f"callback-submit-{binding_sha256}.json",
-                self._callback_submit_receipt(binding_sha256, reserved),
-            )
+            self._write_callback_submit_receipt(binding_sha256, reserved)
             return True
 
     def mark_callback_submit_sent(self, binding_sha256: str) -> None:
@@ -414,17 +430,27 @@ class LivenessController:
                 or current.callback_submit_status not in {"reserved", "sent"}
             ):
                 raise ContractError("callback submit reservation identity changed")
+            reserved_receipt = self._callback_submit_receipt(
+                binding_sha256,
+                replace(current, callback_submit_status="reserved"),
+            )
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                current,
+                allowed_existing=(reserved_receipt,),
+            )
             sent = (
                 current
                 if current.callback_submit_status == "sent"
                 else replace(current, callback_submit_status="sent")
             )
             self._write(self.root / "state.json", to_dict(sent))
-            self._write(
-                self.root
-                / "receipts"
-                / f"callback-submit-{binding_sha256}.json",
-                self._callback_submit_receipt(binding_sha256, sent),
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                sent,
+                allowed_existing=(
+                    reserved_receipt,
+                ),
             )
 
     def mark_callback_submit_uncertain(self, binding_sha256: str) -> None:
@@ -436,14 +462,28 @@ class LivenessController:
             if (
                 current is None
                 or current.callback_submit_binding != binding_sha256
-                or current.callback_submit_status != "reserved"
+                or current.callback_submit_status not in {"reserved", "uncertain"}
             ):
                 raise ContractError("callback submit reservation identity changed")
-            uncertain = replace(current, callback_submit_status="uncertain")
+            reserved_receipt = self._callback_submit_receipt(
+                binding_sha256,
+                replace(current, callback_submit_status="reserved"),
+            )
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                current,
+                allowed_existing=(reserved_receipt,),
+            )
+            uncertain = (
+                current
+                if current.callback_submit_status == "uncertain"
+                else replace(current, callback_submit_status="uncertain")
+            )
             self._write(self.root / "state.json", to_dict(uncertain))
-            self._write(
-                self.root
-                / "receipts"
-                / f"callback-submit-{binding_sha256}.json",
-                self._callback_submit_receipt(binding_sha256, uncertain),
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                uncertain,
+                allowed_existing=(
+                    reserved_receipt,
+                ),
             )
