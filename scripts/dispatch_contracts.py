@@ -12,7 +12,7 @@ import subprocess
 import tomllib
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from outcome_contract import OutcomeContractError, extract_from_bytes
@@ -207,11 +207,57 @@ def _validated_context(
             raise DispatchError("wiki_context entries must be objects")
         title = require_string(item.get("title"), "wiki_context.title", maximum=200)
         summary = require_string(item.get("summary"), "wiki_context.summary", maximum=500)
-        matches = list((vault_root / "wiki").rglob(f"{title}.md"))
-        if len(matches) != 1:
-            raise DispatchError(f"wiki context target must exist exactly once: {title}")
-        normalized.append({"title": title, "summary": summary})
-        source_paths.append(matches[0])
+        raw_context_path = item.get("context_path")
+        context_path = ""
+        if raw_context_path is not None:
+            context_path = require_string(
+                raw_context_path,
+                "wiki_context.context_path",
+                maximum=500,
+            )
+            relative = PurePosixPath(context_path)
+            if (
+                relative.is_absolute()
+                or relative.as_posix() != context_path
+                or len(relative.parts) < 2
+                or relative.parts[0] != "wiki"
+                or ".." in relative.parts
+                or any(part in {"", "."} for part in relative.parts)
+                or relative.suffix != ".md"
+            ):
+                raise DispatchError(
+                    "wiki_context.context_path must be an exact wiki Markdown path"
+                )
+            source = vault_root / context_path
+            target = source.resolve()
+            wiki_root = (vault_root / "wiki").resolve()
+            if (
+                target == wiki_root
+                or wiki_root not in target.parents
+                or not target.is_file()
+                or any(
+                    (vault_root.joinpath(*relative.parts[:index])).is_symlink()
+                    for index in range(1, len(relative.parts) + 1)
+                )
+            ):
+                raise DispatchError(
+                    f"wiki context target must exist exactly: {context_path}"
+                )
+            match = target
+        else:
+            matches = list((vault_root / "wiki").rglob(f"{title}.md"))
+            if len(matches) != 1:
+                raise DispatchError(f"wiki context target must exist exactly once: {title}")
+            match = matches[0]
+            context_path = match.relative_to(vault_root).as_posix()
+        normalized.append(
+            {
+                "title": title,
+                "summary": summary,
+                "context_path": context_path,
+            }
+        )
+        source_paths.append(match)
     if parsed_custom is not None:
         allowed: dict[str, int] = {}
         for source_path in source_paths:
