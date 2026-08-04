@@ -433,7 +433,7 @@ E12/E13/E14 и re-freeze authority закреплены в [[LLM Obsidian 2.6.4 
 2.6.4 becomes RC only when E1–E14 are established on one exact HEAD; all D-264 dispositions are durable; one shared nudge budget, callback deadline and accepted-timeout rearm are proven; same-session continuation success is bound to semantic provider acknowledgment rather than transport exit alone; offline dogfood advances without manual action; normal review has zero extra effects; plan-review mistakes fail before provider launch; Wiki repair rebuilds derived state through the sole writer; and provider/permission/model budgets match v2.6.3. Push, tag and GitHub release remain separate explicit user actions after terminal approval.
 
 
-## Append-only release amendment D-264-17 through D-264-33
+## Append-only release amendment D-264-17 through D-264-34
 
 This coordinator-owned amendment preserves the frozen Outcome Contract while recording defects discovered by later exact-HEAD dogfood and review. It is authoritative together with the original Capability Dispositions table.
 
@@ -456,3 +456,4 @@ This coordinator-owned amendment preserves the frozen Outcome Contract while rec
 | D-264-31 | coordinator | completed 2.6.3 vault history appears in the cumulative release delta | `included` | exact retained and derived paths are accepted in `docs/acceptance/v2.6.4-accepted-deviations.json`; no 2.6.4 runtime behavior |
 | D-264-32 | callback watchdog | accepted receipt did not validate run, callback and payload identity | `included` | accepted and duplicate receipts now share the full fail-closed identity predicate |
 | D-264-33 | continuation transport | crash after prompt paste but before transport receipt could paste twice | `included` | durable `paste-reserved` write-ahead state plus kill-point replay test proves zero second paste |
+| D-264-34 | test harness | orphan verification recovery responder expired under full-suite load | `included` | bounded 10-second packet wait, explicit thread join and typed timeout assertion remove the 2-second cleanup race |

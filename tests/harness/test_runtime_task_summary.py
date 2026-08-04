@@ -1655,6 +1655,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     crash_commands: list[tuple[str, ...]] = []
     crash_commands_before_response: list[int] = []
     recovered_links: list[str] = []
+    crash_response_threads: list[threading.Thread] = []
+    crash_response_errors: list[str] = []
 
     def pass_crash_restart_verification(
         argv: list[str], **kwargs: object
@@ -1817,13 +1819,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         ).unlink(missing_ok=True)
 
         def respond_after_recovery() -> None:
-            import time
-
             packet_path = worktree / ".task-verification.json"
-            for _ in range(100):
+            for _ in range(500):
                 if packet_path.is_file():
                     break
                 time.sleep(0.02)
+            if not packet_path.is_file():
+                crash_response_errors.append("verification-packet-timeout")
+                return
             packet = json.loads(packet_path.read_text(encoding="utf-8"))
             linked = json.loads(
                 (state / "pipeline-step-verify.json").read_text(
@@ -1852,7 +1855,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 },
             )
 
-        threading.Thread(target=respond_after_recovery).start()
+        response_thread = threading.Thread(target=respond_after_recovery)
+        crash_response_threads.append(response_thread)
+        response_thread.start()
 
     def approve_crash_restart(vault: Path, worktree: Path) -> None:
         gate = (
@@ -1902,6 +1907,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=approve_crash_restart,
         review_state="missing",
     )
+    for response_thread in crash_response_threads:
+        response_thread.join(timeout=12)
     crash_parent = crash_store.read("owner-1", crash_task)
     crash_children = [
         record
@@ -1928,6 +1935,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             )
         )["operation_id"]
         and crash_commands_before_response == [0]
+        and not crash_response_errors
+        and all(not thread.is_alive() for thread in crash_response_threads)
         and crash_commands
         == [
             ("make", "test-harness"),
@@ -1940,6 +1949,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             crash_children,
             recovered_links,
             crash_commands_before_response,
+            crash_response_errors,
             crash_commands,
         ),
     )

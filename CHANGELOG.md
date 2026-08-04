@@ -56,6 +56,8 @@ packages were published for them.
   reusing a retained lane after protected plan-contract drift.
 - Prevented newer coordinator decisions from overwriting older escalation and
   amendment evidence.
+- Removed a full-suite-only verification recovery test race by waiting for the
+  exact packet with a bounded deadline and joining its responder before cleanup.
 
 ## [2.6.3] - 2026-08-04
 

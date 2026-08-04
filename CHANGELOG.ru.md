@@ -59,6 +59,8 @@
   переиспользует старую lane после изменения защищённого контракта плана.
 - Новые coordinator decisions больше не перезаписывают старые escalation и
   amendment evidence.
+- Устранена проявлявшаяся только в полном suite гонка verification recovery:
+  тест ограниченно ждёт точный packet и join'ит responder до cleanup.
 
 ## [2.6.3] — 2026-08-04
 
