@@ -258,6 +258,37 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         and gate.read()["status"] == "awaiting-resolution",
     )
 
+    store.transition(owner_id, lane.operation_id, "running")
+    gate._replace(status="attention-required")
+    resumed_continuation_state, resumed_continuation_status = (
+        _resume_bound_attention(
+            gate,
+            store,
+            runtime_root,
+            gate.read(),
+        )
+    )
+    check(
+        "resolved running continuation restores awaiting-resolution",
+        resumed_continuation_status == "awaiting-resolution"
+        and resumed_continuation_state["status"] == "awaiting-resolution"
+        and gate.read()["status"] == "awaiting-resolution",
+    )
+
+    gate._replace(status="attention-required", awaiting_resolution={})
+    unbound_running_state, unbound_running_status = _resume_bound_attention(
+        gate,
+        store,
+        runtime_root,
+        gate.read(),
+    )
+    check(
+        "running review without a resolution boundary remains paused",
+        unbound_running_status == "attention-required"
+        and unbound_running_state["status"] == "attention-required"
+        and gate.read()["status"] == "attention-required",
+    )
+
     prompt = runtime_root / "prompts" / "verify.md"
     prompt.parent.mkdir()
     prompt.write_text("# Verify exact HEAD\n", encoding="utf-8")

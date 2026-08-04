@@ -279,6 +279,10 @@ def _resume_bound_attention(
     ):
         return state, status
     owner_id = str(state.get("owner_id") or "")
+    awaiting_resolution = state.get("awaiting_resolution")
+    allowed_states = {"awaiting-callback", "verifying"}
+    if isinstance(awaiting_resolution, dict) and awaiting_resolution:
+        allowed_states.add("running")
     recoverable = bool(owner_id)
     for lane in stored_lanes:
         if not isinstance(lane, dict):
@@ -300,7 +304,7 @@ def _resume_bound_attention(
         except StoreError:
             recoverable = False
             break
-        if record.state not in {"awaiting-callback", "verifying"}:
+        if record.state not in allowed_states:
             recoverable = False
             break
     if recoverable:

@@ -246,6 +246,10 @@ class ReviewGateStateMixin:
             or state.get("evidence") not in ({}, None)
         ):
             raise ValueError("only an evidence-free bound review may resume")
+        awaiting_resolution = state.get("awaiting_resolution")
+        allowed_states = {"awaiting-callback", "verifying"}
+        if isinstance(awaiting_resolution, dict) and awaiting_resolution:
+            allowed_states.add("running")
         for lane in lanes:
             if not isinstance(lane, dict):
                 raise ValueError("bound review lane is invalid")
@@ -253,11 +257,10 @@ class ReviewGateStateMixin:
             if not operation_id:
                 raise ValueError("bound review lane has no operation")
             record = self.round_store.read(owner_id, operation_id)
-            if record.state not in {"awaiting-callback", "verifying"}:
+            if record.state not in allowed_states:
                 raise ValueError(
                     "bound review runtime attention is not resolved"
                 )
-        awaiting_resolution = state.get("awaiting_resolution")
         status = (
             "awaiting-resolution"
             if isinstance(awaiting_resolution, dict) and awaiting_resolution
