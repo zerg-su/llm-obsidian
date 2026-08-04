@@ -20,6 +20,33 @@ from .runtime_worker import (
 
 class RuntimeWorkerLivenessMixin:
 
+    def _expected_callback_child(
+        self,
+        parent: object,
+        operation_id: str,
+        run_id: str,
+    ) -> object | None:
+        """Resolve callback identity independently from callback-target.json."""
+
+        try:
+            child = self.store.read(self.spec["owner_id"], operation_id)
+        except StoreError:
+            return None
+        expected_kind = (
+            parent.spec.kind
+            if operation_id == parent.spec.operation_id
+            else "review-round"
+        )
+        if (
+            child.run_id != run_id
+            or child.lane_id != parent.lane_id
+            or child.state != "awaiting-callback"
+            or child.accepted_callback_id
+            or child.spec.kind != expected_kind
+        ):
+            return None
+        return child
+
     def callback_submit_attention(self, reason: str) -> None:
         marker = self.spec_path.parent / "callback-submit-attention.json"
         value = {
@@ -64,6 +91,10 @@ class RuntimeWorkerLivenessMixin:
                 raise RuntimeWorkerError("callback target digest is unavailable")
         except RuntimeWorkerError:
             self.callback_submit_attention("callback-submit-evidence-malformed")
+            return
+        child = self._expected_callback_child(record, operation_id, run_id)
+        if child is None:
+            self.callback_submit_attention("callback-submit-stale-generation")
             return
 
         observed_at = self.clock()
@@ -163,11 +194,11 @@ class RuntimeWorkerLivenessMixin:
             callback_deadline_at=record.deadline_at,
             operation_id=operation_id,
             run_id=run_id,
-            lane_id=record.lane_id,
+            lane_id=child.lane_id,
             generation=generation,
-            expected_operation_id=operation_id,
-            expected_run_id=run_id,
-            expected_lane_id=record.lane_id,
+            expected_operation_id=child.spec.operation_id,
+            expected_run_id=child.run_id,
+            expected_lane_id=child.lane_id,
             expected_generation=generation,
             target_sha256=target_sha256,
             expected_target_sha256=target_sha256,
@@ -205,6 +236,14 @@ class RuntimeWorkerLivenessMixin:
             self.callback_submit_attention(decision.reason)
             return
         if decision.action == "reserve-submit-recovery":
+            if (
+                _bounded_file_sha256(self.spec["callback_registration"])
+                != target_sha256
+                or self._expected_callback_child(record, operation_id, run_id)
+                is None
+            ):
+                self.callback_submit_attention("callback-submit-stale-generation")
+                return
             if not self.liveness_controller.reserve_callback_submit(binding_sha256):
                 return
         elif decision.action != "send-reserved-recovery":
@@ -213,6 +252,9 @@ class RuntimeWorkerLivenessMixin:
         # Reservation is durable. Re-read every artifact and target immediately
         # before the single provider-facing effect.
         if _bounded_file_sha256(self.spec["callback_registration"]) != target_sha256:
+            self.callback_submit_attention("callback-submit-stale-generation")
+            return
+        if self._expected_callback_child(record, operation_id, run_id) is None:
             self.callback_submit_attention("callback-submit-stale-generation")
             return
         for artifact_path in (

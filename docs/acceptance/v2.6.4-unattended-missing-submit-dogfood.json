@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "evidence_id": "E6-unattended-dogfood",
+  "fixture": "tests/harness/test_callback_submit_recovery_runtime.py",
+  "base_commit": "801f020e1bfaf73ba368aeb4771f33e372e83c75",
+  "owner_id": "review-owner-3",
+  "parent_operation_id": "review-parent-3",
+  "child_operation_id": "review-round-3",
+  "child_run_id": "review-round-run-3",
+  "lane_id": "openai-holistic",
+  "generation": 3,
+  "observations": {
+    "coordinator_online": false,
+    "initial_submit_intentionally_omitted": true,
+    "same_session_recovery_count": 1,
+    "provider_prompt_count": 1,
+    "provider_enter_count": 1,
+    "accepted_receipt_count": 1,
+    "next_child_state": "finalizing",
+    "manual_current_count": 0,
+    "manual_resume_count": 0,
+    "manual_send_count": 0,
+    "manual_callback_write_count": 0,
+    "repeated_review_count": 0
+  }
+}

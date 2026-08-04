@@ -93,26 +93,50 @@ class RuntimeSessionLaunchMixin:
     def _continuation_artifact_ready(
         self,
         record: OperationRecord,
-        cwd: Path,
         target: dict[str, object],
     ) -> bool:
         operation_id = str(target["operation_id"])
         try:
             child = self.store.read(record.spec.owner_id, operation_id)
         except StoreError:
-            child = None
-        if child is not None and child.run_id == str(target["run_id"]):
-            if child.state != "awaiting-callback":
-                return True
-        pointer = cwd / _relative(
-            str(target["callback_pointer"]), "callback_pointer"
+            return False
+        return (
+            child.spec.kind == "review-round"
+            and child.run_id == str(target["run_id"])
+            and child.lane_id == record.lane_id
+            and child.state in {"verifying", "finalizing", "complete"}
+            and bool(child.accepted_callback_id)
+            and child.accepted_callback_kind == "review"
+            and bool(child.accepted_callback_sha256)
         )
-        candidates = (
-            pointer,
-            pointer.with_name(".review-input.json"),
-        )
-        return any(
-            path.is_file() and not path.is_symlink() for path in candidates
+
+    def _continuation_ownership_ready(
+        self,
+        record: OperationRecord,
+        target: dict[str, object],
+    ) -> bool:
+        """Revalidate exact parent resources and callback generation read-only."""
+
+        try:
+            current = self.store.read(
+                record.spec.owner_id, record.spec.operation_id
+            )
+            current_target = self._callback_target(current)
+            process_status = self.process.process_status(
+                current.resources.process_group,
+                current.resources.process_identity,
+            )
+            surface_status = self.cmux.status(current.resources.surface_id)
+        except Exception:
+            return False
+        return (
+            current.run_id == record.run_id
+            and current.lane_id == record.lane_id
+            and current.resources == record.resources
+            and current.state in {"running", "awaiting-callback", "verifying"}
+            and current_target == target
+            and process_status == "alive"
+            and surface_status == "alive"
         )
 
     def _begin_start(self, supervisor: OperationSupervisor) -> None:
@@ -599,8 +623,12 @@ class RuntimeSessionLaunchMixin:
                     self.cmux,
                     surface_id=record.resources.surface_id,
                     prompt=prompt,
+                    runtime=record.spec.route.runtime,
                     artifact_ready=lambda: self._continuation_artifact_ready(
-                        record, cwd, target
+                        record, target
+                    ),
+                    ownership_ready=lambda: self._continuation_ownership_ready(
+                        record, target
                     ),
                     reserve_retry=reserve_retry,
                     observe_stage=observe_stage,

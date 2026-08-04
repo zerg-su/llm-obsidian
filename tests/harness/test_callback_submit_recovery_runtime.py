@@ -64,6 +64,12 @@ fixture = json.loads(
     ).read_text(encoding="utf-8")
 )
 incident = fixture["incident"]
+dogfood_evidence = json.loads(
+    (
+        ROOT
+        / "docs/acceptance/v2.6.4-unattended-missing-submit-dogfood.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 with tempfile.TemporaryDirectory(prefix="v263-exact-runtime.") as raw:
@@ -906,7 +912,17 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         "packets/review.json",
         "scoped",
     )
+    child = OperationSpec(
+        "review-round-3",
+        "review-round-key-3",
+        "review-round",
+        "review-owner-3",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
     store.create(parent, lane_id="openai-holistic", run_id="review-parent-run-3")
+    store.create(child, lane_id="openai-holistic", run_id="review-round-run-3")
     supervisor = OperationSupervisor(store, "review-owner-3", "review-parent-3")
     supervisor.configure_budget(
         attempt_limit=1,
@@ -928,6 +944,41 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     )
     for state in ("running", "awaiting-callback"):
         store.transition("review-owner-3", "review-parent-3", state)
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("review-owner-3", "review-round-3", state)
+    wrong_lane_spec = OperationSpec(
+        "wrong-lane-round-3",
+        "wrong-lane-round-key-3",
+        "review-round",
+        "review-owner-3",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(
+        wrong_lane_spec, lane_id="other-lane", run_id="wrong-lane-round-run-3"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("review-owner-3", "wrong-lane-round-3", state)
+    terminal_spec = OperationSpec(
+        "terminal-round-3",
+        "terminal-round-key-3",
+        "review-round",
+        "review-owner-3",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(
+        terminal_spec,
+        lane_id="openai-holistic",
+        run_id="terminal-round-run-3",
+    )
+    terminal = store.read("review-owner-3", "terminal-round-3")
+    store.save(
+        replace(terminal, state="cancelled", revision=terminal.revision + 1),
+        expected_revision=terminal.revision,
+    )
 
     class Process:
         def process_status(self, process_group: int, identity: str) -> str:
@@ -984,6 +1035,39 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     worker.callback_recovery_digest = ""
     worker.callback_recovery_reads = 0
     worker.trusted_vault = ROOT
+    check(
+        "runtime resolves callback child independently from target JSON",
+        worker._expected_callback_child(
+            store.read("review-owner-3", "review-parent-3"),
+            "review-round-3",
+            "review-round-run-3",
+        )
+        is not None
+        and worker._expected_callback_child(
+            store.read("review-owner-3", "review-parent-3"),
+            "missing-round-3",
+            "missing-round-run-3",
+        )
+        is None
+        and worker._expected_callback_child(
+            store.read("review-owner-3", "review-parent-3"),
+            "review-round-3",
+            "wrong-run-3",
+        )
+        is None
+        and worker._expected_callback_child(
+            store.read("review-owner-3", "review-parent-3"),
+            "wrong-lane-round-3",
+            "wrong-lane-round-run-3",
+        )
+        is None
+        and worker._expected_callback_child(
+            store.read("review-owner-3", "review-parent-3"),
+            "terminal-round-3",
+            "terminal-round-run-3",
+        )
+        is None,
+    )
     worker.inspect_liveness()
     worker.inspect_liveness()
     worker.inspect_liveness()
@@ -998,6 +1082,239 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and recovery_state.nudge_count == 1
         and recovery_state.callback_submit_status == "sent",
         (cmux.sent, cmux.keys, recovery_state),
+    )
+
+    swapped_state_root = root / "swapped-worker-state"
+    swapped_state_root.mkdir()
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 3,
+                "operation_id": "review-round-3",
+                "run_id": "review-round-run-3",
+                "callback_pointer": str(callback_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.utime(registration, (now - 60, now - 60))
+
+    class SwappingCmux(Cmux):
+        def __init__(self) -> None:
+            super().__init__()
+            self.status_calls = 0
+
+        def status(self, surface_id: str) -> str:
+            self.status_calls += 1
+            if self.status_calls == 2:
+                registration.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "generation": 4,
+                            "operation_id": "review-round-3",
+                            "run_id": "review-round-run-3",
+                            "callback_pointer": str(callback_path),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return super().status(surface_id)
+
+    class NonMutatingSwapWorker(RecoveryWorker):
+        def callback_submit_attention(self, reason: str) -> None:
+            self.attention_reason = reason
+
+    swapping_cmux = SwappingCmux()
+    swapping_worker = NonMutatingSwapWorker()
+    swapping_worker.spec_path = swapped_state_root / "launch.json"
+    swapping_worker.spec = {**worker.spec, "callback_registration": registration}
+    swapping_worker.store = store
+    swapping_worker.process = Process()
+    swapping_worker.handle = worker.handle
+    swapping_worker.provider_exited = False
+    swapping_worker.cmux_adapter = swapping_cmux
+    swapping_worker.clock = lambda: now
+    swapping_worker.liveness_policy = LivenessPolicy.default()
+    swapping_worker.callback_submit_policy = CallbackSubmitPolicy(30, 60, 1)
+    swapping_worker.liveness_controller = LivenessController(
+        swapped_state_root / "liveness"
+    )
+    swapping_worker.latest_callback_prompt_class = "idle-prompt"
+    swapping_worker.callback_idle_observations = 0
+    swapping_worker.callback_prompt_observations = 0
+    swapping_worker.callback_generation_identity = ""
+    swapping_worker.callback_generation_progress_at = 0.0
+    swapping_worker.callback_recovery_input_digest = ""
+    swapping_worker.callback_recovery_input_reads = 0
+    swapping_worker.callback_recovery_digest = ""
+    swapping_worker.callback_recovery_reads = 0
+    swapping_worker.trusted_vault = ROOT
+    swapping_worker.inspect_liveness()
+    swapping_worker.inspect_liveness()
+    swapping_worker.inspect_liveness()
+    check(
+        "target swap before reservation has zero provider effect",
+        swapping_cmux.sent == []
+        and swapping_cmux.keys == []
+        and swapping_worker.attention_reason
+        == "callback-submit-stale-generation",
+        (swapping_cmux.sent, swapping_cmux.keys),
+    )
+
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 3,
+                "operation_id": "review-round-3",
+                "run_id": "review-round-run-3",
+                "callback_pointer": str(callback_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (callback_dir / ".review-meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "transport": "review-round",
+                "operation_id": "review-round-3",
+                "run_id": "review-round-run-3",
+                "review_id": "review-parent-3",
+                "parent_session_operation_id": "review-parent-3",
+                "axis": "openai-holistic",
+                "verification_iteration": 0,
+                "verification_profile": {
+                    "name": "scoped",
+                    "sha256": "d" * 64,
+                },
+                "worktree": str(product),
+            }
+        ),
+        encoding="utf-8",
+    )
+    input_path = callback_dir / ".review-input.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "axis": "openai-holistic",
+                "verdict": "approve",
+                "verification_iteration": 0,
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    callback_worker = FastPathWorker()
+    callback_worker.spec_path = state_root / "launch.json"
+    callback_worker.spec = worker.spec
+    callback_worker.store = store
+    callback_worker.trusted_vault = ROOT
+    callback_worker.active_target = None
+    callback_worker.last_digest = ""
+    callback_worker.stable_reads = 0
+    callback_worker.review_input_digest = ""
+    callback_worker.review_input_stable_reads = 0
+    callback_worker.callback_handled = False
+    callback_worker.registration_invalid = False
+    callback_worker.cmux_adapter = cmux
+    callback_worker.inspect_callback()
+    callback_worker.inspect_callback()
+    callback_worker.inspect_callback()
+    joined_child = store.read("review-owner-3", "review-round-3")
+    joined_receipt = json.loads(
+        (state_root / "callback-receipt.json").read_text(encoding="utf-8")
+    )
+    check(
+        "one unattended missing-submit incident reaches accepted next stage",
+        len(cmux.sent) == 1
+        and cmux.keys == [(SURFACE, "Enter")]
+        and joined_child.state == "finalizing"
+        and bool(joined_child.accepted_callback_id)
+        and joined_receipt["status"] == "accepted"
+        and not callback_worker.registration_invalid,
+        (cmux.sent, cmux.keys, joined_child, joined_receipt),
+    )
+    expected_observations = dogfood_evidence["observations"]
+    check(
+        "tracked E6 receipt binds the exact integrated unattended sequence",
+        dogfood_evidence["base_commit"] == fixture["base_commit"]
+        and dogfood_evidence["parent_operation_id"] == "review-parent-3"
+        and dogfood_evidence["child_operation_id"] == "review-round-3"
+        and expected_observations
+        == {
+            "coordinator_online": False,
+            "initial_submit_intentionally_omitted": True,
+            "same_session_recovery_count": recovery_state.nudge_count,
+            "provider_prompt_count": len(cmux.sent),
+            "provider_enter_count": len(cmux.keys),
+            "accepted_receipt_count": int(joined_receipt["status"] == "accepted"),
+            "next_child_state": joined_child.state,
+            "manual_current_count": 0,
+            "manual_resume_count": 0,
+            "manual_send_count": 0,
+            "manual_callback_write_count": 0,
+            "repeated_review_count": 0,
+        },
+        expected_observations,
+    )
+
+    def invalid_target_has_zero_effect(
+        operation_id: str, run_id: str, label: str
+    ) -> None:
+        registration.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "generation": 5,
+                    "operation_id": operation_id,
+                    "run_id": run_id,
+                    "callback_pointer": str(callback_path),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        class InvalidTargetWorker(RecoveryWorker):
+            def callback_submit_attention(self, reason: str) -> None:
+                self.attention_reason = reason
+
+        invalid_cmux = Cmux()
+        invalid_worker = InvalidTargetWorker()
+        invalid_worker.spec_path = state_root / f"{label}.json"
+        invalid_worker.spec = {
+            **worker.spec,
+            "callback_registration": registration,
+        }
+        invalid_worker.store = store
+        invalid_worker.process = Process()
+        invalid_worker.handle = worker.handle
+        invalid_worker.provider_exited = False
+        invalid_worker.cmux_adapter = invalid_cmux
+        invalid_worker.inspect_liveness()
+        check(
+            f"{label} callback child has zero recovery effect",
+            invalid_cmux.sent == []
+            and invalid_cmux.keys == []
+            and invalid_worker.attention_reason
+            == "callback-submit-stale-generation",
+            (invalid_cmux.sent, invalid_cmux.keys),
+        )
+
+    invalid_target_has_zero_effect(
+        "missing-round-3", "missing-round-run-3", "missing"
+    )
+    invalid_target_has_zero_effect(
+        "wrong-lane-round-3", "wrong-lane-round-run-3", "wrong-lane"
+    )
+    invalid_target_has_zero_effect(
+        "terminal-round-3", "terminal-round-run-3", "terminal"
+    )
+    invalid_target_has_zero_effect(
+        "review-round-3", "wrong-run-3", "wrong-run"
     )
 
 

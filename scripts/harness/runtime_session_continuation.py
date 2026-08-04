@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
+import re
 from dataclasses import dataclass
 from time import sleep
 from typing import Callable, Protocol
+
+from .prompts import classify
 
 
 class ContinuationPort(Protocol):
@@ -15,6 +17,7 @@ class ContinuationPort(Protocol):
 
 
 ArtifactProbe = Callable[[], bool]
+OwnershipProbe = Callable[[], bool]
 RetryReservation = Callable[[], bool]
 StageObserver = Callable[[str, int], None]
 Waiter = Callable[[float], None]
@@ -27,10 +30,6 @@ class ContinuationDelivery:
     submit_count: int
 
 
-def _digest(screen: str) -> str:
-    return hashlib.sha256(screen.encode("utf-8", errors="replace")).hexdigest()
-
-
 def _prompt_anchor(prompt: str) -> str:
     for line in prompt.splitlines():
         normalized = " ".join(line.strip().split())
@@ -39,9 +38,40 @@ def _prompt_anchor(prompt: str) -> str:
     return ""
 
 
-def _anchor_visible(screen: str, anchor: str) -> bool:
-    compact = "\n".join(" ".join(line.strip().split()) for line in screen.splitlines())
-    return bool(anchor and anchor in compact)
+def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
+    """Classify only provider UI states that are safe for continuation delivery.
+
+    The screen body remains transient.  We deliberately recognize a small set
+    of native prompt/activity shapes instead of treating arbitrary repainting
+    as provider progress.
+    """
+
+    if not screen.strip():
+        return "missing"
+    prompt = classify(runtime, screen)
+    if prompt.interactive:
+        return "permission" if prompt.recognized else "unknown"
+    lines = [" ".join(line.strip().split()) for line in screen.splitlines()]
+    tail = [line for line in lines[-24:] if line]
+    marker = {"claude": "❯", "codex": "›"}.get(runtime)
+    if not marker:
+        return "unknown"
+    if runtime == "codex" and any(
+        re.match(r"^•\s+(?:Working|Running)\b", line) for line in tail
+    ):
+        return "active"
+    if runtime == "claude" and any(
+        ("tokens" in line or "effort" in line)
+        and ("…(" in line or "...(" in line)
+        for line in tail
+    ):
+        return "active"
+    editor_lines = [line for line in tail if line.startswith(marker)]
+    if any(anchor and anchor in line for line in editor_lines):
+        return "input-ready"
+    if editor_lines:
+        return "idle"
+    return "unknown"
 
 
 def deliver_continuation(
@@ -49,7 +79,9 @@ def deliver_continuation(
     *,
     surface_id: str,
     prompt: str,
+    runtime: str,
     artifact_ready: ArtifactProbe,
+    ownership_ready: OwnershipProbe,
     reserve_retry: RetryReservation,
     observe_stage: StageObserver,
     send_prompt: bool = True,
@@ -73,6 +105,8 @@ def deliver_continuation(
 
     if artifact_ready():
         return ContinuationDelivery(True, "artifact", 0)
+    if not ownership_ready():
+        return ContinuationDelivery(False, "ownership-lost", 0)
 
     if send_prompt:
         port.send(surface_id, prompt)
@@ -82,22 +116,30 @@ def deliver_continuation(
     for observation in range(observation_limit):
         if artifact_ready():
             return ContinuationDelivery(True, "artifact", 0)
+        if not ownership_ready():
+            return ContinuationDelivery(False, "ownership-lost", 0)
         screen = port.read(surface_id)
-        if _anchor_visible(screen, anchor):
+        screen_state = classify_continuation_screen(runtime, screen, anchor)
+        if screen_state == "active":
+            return ContinuationDelivery(True, "provider-activity", 0)
+        if screen_state == "input-ready":
             paste_screen = screen
             break
+        if screen_state in {"idle", "permission", "unknown"}:
+            return ContinuationDelivery(False, screen_state, 0)
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     if not paste_screen:
         return ContinuationDelivery(False, "paste-unconfirmed", 0)
 
-    paste_digest = _digest(paste_screen)
     submit_count = 0
     for submit_attempt in range(2):
         if submit_attempt and not reserve_retry():
             return ContinuationDelivery(
                 False, "submit-retry-budget-unavailable", submit_count
             )
+        if not ownership_ready():
+            return ContinuationDelivery(False, "ownership-lost", submit_count)
         port.send_key(surface_id, "Enter")
         submit_count += 1
         observe_stage(
@@ -107,12 +149,16 @@ def deliver_continuation(
         for observation in range(observation_limit):
             if artifact_ready():
                 return ContinuationDelivery(True, "artifact", submit_count)
+            if not ownership_ready():
+                return ContinuationDelivery(
+                    False, "ownership-lost", submit_count
+                )
             screen = port.read(surface_id)
-            if (
-                not _anchor_visible(screen, anchor)
-                and _digest(screen) != paste_digest
-            ):
+            screen_state = classify_continuation_screen(runtime, screen, anchor)
+            if screen_state == "active":
                 return ContinuationDelivery(True, "provider-activity", submit_count)
+            if screen_state in {"idle", "permission", "unknown"}:
+                return ContinuationDelivery(False, screen_state, submit_count)
             if observation + 1 < observation_limit:
                 wait(observation_interval_seconds)
 

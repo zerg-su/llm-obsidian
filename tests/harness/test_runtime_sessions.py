@@ -135,8 +135,8 @@ class FakeCmux:
         prompt = self.sent[-1][1]
         anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
         if self.submit_count == self.submits_at_last_send:
-            return f"› {anchor}"
-        return "• Working"
+            return f"❯ {anchor}"
+        return "✻ Working…(1s · ↓10 tokens)"
 
     def status(self, surface_id: str) -> str:
         check(
@@ -1374,8 +1374,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
                 "",
             )
             if self.acknowledge and self.submit_count > self.submits_at_last_send:
-                return "• Working"
-            return f"› {anchor}"
+                return "✻ Working…(1s · ↓10 tokens)"
+            return f"❯ {anchor}"
 
     stuck_root = root / "stuck-continuation"
     stuck_root.mkdir()
@@ -1513,6 +1513,95 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and child_accepted.record.state == "finalizing"
         and store.read("owner-1", "runtime-1").resources.surface_id == SURFACE,
     )
+
+    artifact_spec = OperationSpec(
+        "artifact-round-1",
+        "artifact-round-key-1",
+        "review-round",
+        "owner-1",
+        route,
+        "packets/artifact-round.json",
+        "scoped",
+    )
+    store.create(
+        artifact_spec, lane_id="lane-shared", run_id="artifact-round-run-1"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-1", "artifact-round-1", state)
+    artifact_target = {
+        "operation_id": "artifact-round-1",
+        "run_id": "artifact-round-run-1",
+        "callback_pointer": "callbacks/artifact-round.json",
+        "generation": 3,
+    }
+    artifact_input = cwd / "callbacks" / ".review-input.json"
+    artifact_input.write_text("{}", encoding="utf-8")
+    check(
+        "unvalidated review input is not continuation evidence",
+        not manager._continuation_artifact_ready(
+            store.read("owner-1", "runtime-1"), artifact_target
+        ),
+    )
+    artifact_input.unlink()
+    artifact_payload = {"verdict": "approve", "findings": []}
+    artifact_encoded = json.dumps(
+        artifact_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    CallbackBroker(store, "owner-1").accept(
+        CallbackEnvelope(
+            "callback-artifact-round-1",
+            "artifact-round-1",
+            "artifact-round-run-1",
+            "review",
+            artifact_payload,
+            hashlib.sha256(artifact_encoded).hexdigest(),
+        )
+    )
+    check(
+        "exact accepted review receipt is continuation evidence",
+        manager._continuation_artifact_ready(
+            store.read("owner-1", "runtime-1"), artifact_target
+        ),
+    )
+    for invalid_state in (
+        "failed",
+        "cancelled",
+        "timed-out",
+        "attention-required",
+    ):
+        operation_id = f"invalid-artifact-{invalid_state}"
+        invalid_spec = OperationSpec(
+            operation_id,
+            f"{operation_id}-key",
+            "review-round",
+            "owner-1",
+            route,
+            "packets/invalid-artifact.json",
+            "scoped",
+        )
+        invalid = store.create(
+            invalid_spec, lane_id="lane-shared", run_id=f"{operation_id}-run"
+        )
+        store.save(
+            replace(
+                invalid,
+                state=invalid_state,
+                revision=invalid.revision + 1,
+            ),
+            expected_revision=invalid.revision,
+        )
+        check(
+            f"{invalid_state} child is not continuation evidence",
+            not manager._continuation_artifact_ready(
+                store.read("owner-1", "runtime-1"),
+                {
+                    "operation_id": operation_id,
+                    "run_id": f"{operation_id}-run",
+                    "callback_pointer": "callbacks/invalid.json",
+                    "generation": 4,
+                },
+            ),
+        )
 
     cmux.checkpoint = "different-checkpoint"
     try:
