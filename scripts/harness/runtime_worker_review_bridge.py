@@ -20,6 +20,48 @@ from review_contract import ReviewContractError, axis_finding_id
 
 class RuntimeWorkerReviewBridgeMixin:
 
+    def callback_timeout_rearm_receipt(
+        self,
+        *,
+        generation: int,
+        envelope: CallbackEnvelope,
+        status: str,
+    ) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "generation": generation,
+            "parent_operation_id": self.spec["operation_id"],
+            "parent_run_id": self.spec["run_id"],
+            "round_operation_id": envelope.operation_id,
+            "round_run_id": envelope.run_id,
+            "callback_id": envelope.callback_id,
+            "callback_sha256": envelope.payload_sha256,
+            "status": status,
+        }
+
+    def finalize_callback_timeout_rearm(
+        self,
+        *,
+        generation: int,
+        envelope: CallbackEnvelope,
+    ) -> None:
+        """Repair the receipt-only crash window after callback acceptance."""
+
+        marker = self.spec_path.parent / "callback-timeout-rearm.json"
+        if not marker.exists():
+            return
+        if marker.is_symlink() or not marker.is_file():
+            raise RuntimeWorkerError("callback timeout rearm receipt is invalid")
+        existing = json.loads(marker.read_text(encoding="utf-8"))
+        prepared = self.callback_timeout_rearm_receipt(
+            generation=generation, envelope=envelope, status="prepared"
+        )
+        accepted = {**prepared, "status": "accepted"}
+        if existing not in (prepared, accepted):
+            raise RuntimeWorkerError("callback timeout rearm receipt changed")
+        if existing == prepared:
+            _atomic_json(marker, accepted)
+
     def accept_callback_after_timeout(
         self,
         *,
@@ -68,17 +110,9 @@ class RuntimeWorkerReviewBridgeMixin:
                 "callback timeout rearm identity is invalid"
             )
         marker = self.spec_path.parent / "callback-timeout-rearm.json"
-        prepared = {
-            "schema_version": 1,
-            "generation": generation,
-            "parent_operation_id": parent.spec.operation_id,
-            "parent_run_id": parent.run_id,
-            "round_operation_id": envelope.operation_id,
-            "round_run_id": envelope.run_id,
-            "callback_id": envelope.callback_id,
-            "callback_sha256": envelope.payload_sha256,
-            "status": "prepared",
-        }
+        prepared = self.callback_timeout_rearm_receipt(
+            generation=generation, envelope=envelope, status="prepared"
+        )
         if marker.is_file() and not marker.is_symlink():
             existing = json.loads(marker.read_text(encoding="utf-8"))
             if existing not in (prepared, {**prepared, "status": "accepted"}):
@@ -197,6 +231,10 @@ class RuntimeWorkerReviewBridgeMixin:
                     generation=generation,
                     envelope=envelope,
                 )
+            self.finalize_callback_timeout_rearm(
+                generation=generation,
+                envelope=envelope,
+            )
             _atomic_json(
                 self.spec_path.parent / "callback-receipt.json",
                 {
