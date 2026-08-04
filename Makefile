@@ -9,6 +9,7 @@ test-harness:
 	@echo "=== harness contracts and replay regressions ==="
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_contract_boundaries.py
+	@python3 tests/harness/test_contract_state_edge_matrix.py
 	@python3 tests/harness/test_pipelines.py
 	@python3 tests/harness/test_custom_pipelines.py
 	@python3 tests/harness/test_custom_sequence.py
@@ -29,6 +30,7 @@ test-harness:
 	@python3 tests/harness/test_research_notifier.py
 	@python3 tests/harness/test_engineering_skills.py
 	@python3 tests/harness/test_review_inspect.py
+	@python3 tests/harness/test_plan_review_facade.py
 	@python3 tests/harness/test_review_resolution.py
 	@python3 tests/harness/test_review_resolution_bundle.py
 	@python3 tests/harness/test_review_delta_packet.py
@@ -44,11 +46,14 @@ test-harness:
 	@python3 tests/harness/test_review_finalization.py
 	@python3 tests/harness/test_task_review_mechanism_recovery.py
 	@python3 tests/harness/test_task_review_flow_units.py
+	@python3 tests/harness/test_task_escalation_records.py
+	@python3 tests/harness/test_task_session_store_io.py
 	@python3 tests/harness/test_dispatch_runtime.py
 	@python3 tests/harness/test_runtime_inventory.py
 	@python3 tests/harness/test_release_blocker_runtime.py
 	@python3 tests/harness/test_status_segment.py
 	@python3 tests/harness/test_diagnostics.py
+	@python3 tests/harness/test_suite_registration.py
 
 test-harness-coverage:
 	@echo "=== hermetic harness statement-line coverage ==="
