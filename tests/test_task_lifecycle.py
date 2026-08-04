@@ -31,6 +31,7 @@ import cmux_task_watchdog as watchdog_module
 from plan_lifecycle import render_plan_close
 from outcome_contract import extract_from_bytes
 from task_sessions import TaskSessionStore
+from task_escalation_records import load_chain, load_latest
 from harness.verification import load_profiles
 from harness.pipeline_builtins import compiled_builtin
 from harness.workflows.review import ReviewContext
@@ -1374,7 +1375,17 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=env,
     )
     check("task escalation notifies coordinator", result.returncode == 0, result.stderr)
-    attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    latest = load_latest(worktree)
+    assert latest is not None
+    attention = latest.payload
+    marker = json.loads(
+        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
+    )
+    check(
+        "task escalation marker is pointer-only",
+        latest.legacy is False
+        and set(marker) == {"schema_version", "record_id", "record_sha256"},
+    )
     check("task escalation remains pending", attention["status"] == "pending")
     check("coordinator exact surface notified", f"notify --surface {meta['wiki_surface']}" in cmux_log.read_text())
     check(
@@ -1399,7 +1410,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=origin_env,
     )
     check("coordinator decision reaches task", result.returncode == 0, result.stderr)
-    attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    latest = load_latest(worktree)
+    assert latest is not None
+    attention = latest.payload
     check("task escalation marked resolved", attention["status"] == "resolved")
     escalation_events = telemetry(worktree, "task-escalation")
     check(
@@ -1416,9 +1429,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=env,
     )
     check("mechanism failure reaches coordinator", result.returncode == 0, result.stderr)
-    mechanism_attention = json.loads(
-        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
-    )
+    latest = load_latest(worktree)
+    assert latest is not None
+    mechanism_attention = latest.payload
     check(
         "mechanism escalation carries auto-repair policy",
         mechanism_attention.get("coordinator_policy")
@@ -1441,9 +1454,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=env,
     )
     check("pipeline decision reaches coordinator", result.returncode == 0, result.stderr)
-    pipeline_attention = json.loads(
-        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
-    )
+    latest = load_latest(worktree)
+    assert latest is not None
+    pipeline_attention = latest.payload
     check(
         "pipeline decision remains a typed human gate",
         pipeline_attention["status"] == "pending"
@@ -1462,7 +1475,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=failed_notify_env,
     )
     check("toast failure falls back to coordinator callback", result.returncode == 0)
-    failed_attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    latest = load_latest(worktree)
+    assert latest is not None
+    failed_attention = latest.payload
     check("toast fallback keeps escalation pending", failed_attention["status"] == "pending")
     escalation_events = telemetry(worktree, "task-escalation")
     check(
@@ -1484,7 +1499,9 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=failed_send_env,
     )
     check("failed callback delivery is reported", result.returncode == 3)
-    failed_attention = json.loads((worktree / ".task-needs-attention.json").read_text(encoding="utf-8"))
+    latest = load_latest(worktree)
+    assert latest is not None
+    failed_attention = latest.payload
     check("failed callback delivery stays explicit", failed_attention["status"] == "delivery-failed")
     escalation_events = telemetry(worktree, "task-escalation")
     check(
@@ -1499,13 +1516,22 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         cwd=worktree, env=origin_env,
     )
     check("delivery-failed escalation can be recovered", result.returncode == 0, result.stderr)
-    recovered_attention = json.loads(
-        (worktree / ".task-needs-attention.json").read_text(encoding="utf-8")
-    )
+    latest = load_latest(worktree)
+    assert latest is not None
+    recovered_attention = latest.payload
     check(
         "recovered escalation preserves failed delivery provenance",
         recovered_attention["status"] == "resolved"
         and recovered_attention["resolved_from"] == "delivery-failed",
+    )
+    decision_chain = load_chain(worktree)
+    check(
+        "successive coordinator decisions never overwrite prior history",
+        len(decision_chain) == 11
+        and decision_chain[0].payload["reason"]
+        == "A new public endpoint is required"
+        and decision_chain[-1].payload["decision"]
+        == "Continue after coordinator inspection",
     )
     escalation_events = telemetry(worktree, "task-escalation")
     check(
