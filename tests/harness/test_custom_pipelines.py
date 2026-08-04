@@ -50,6 +50,8 @@ check(
     and custom_facade.parse_pipeline_spec is custom_contracts.parse_pipeline_spec,
 )
 
+DOCUMENTATION_EXAMPLE = ROOT / "examples" / "pipelines" / "document-project-v1.json"
+
 
 VALID = {
     "schema_version": 1,
@@ -131,6 +133,21 @@ compiled = compile_custom_spec(
     builtin_registry(),
     policy=policy,
     capabilities=("route:resolved",),
+)
+documentation_spec = parse_pipeline_spec(DOCUMENTATION_EXAMPLE.read_text(encoding="utf-8"))
+documentation_compiled = compile_custom_spec(
+    documentation_spec,
+    builtin_registry(),
+    policy=policy,
+    capabilities=("route:resolved",),
+)
+check(
+    "published documentation pipeline compiles through the strict contract",
+    documentation_compiled.definition.output_schema == "reap-ready/v1"
+    and documentation_spec.verification_checks == ("diff-check", "instruction-lint")
+    and documentation_spec.steps[0].semantic_skills == ("tdd",)
+    and documentation_spec.steps[1].semantic_skills == ("tdd",)
+    and documentation_spec.review_mode == "deep",
 )
 reserved_pointer = deepcopy(VALID)
 reserved_pointer["context_pointers"][0]["pointer_id"] = "outcome-contract"

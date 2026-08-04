@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "spec_id": "documentation-change-v1",
+  "version": "1.0.0",
+  "intent": "documentation-change",
+  "task_profile": "change",
+  "baseline_pipeline": "engineering/change",
+  "route_alias": "executor-default",
+  "required_capabilities": [
+    "route:resolved"
+  ],
+  "input_schema": "approved-plan/v1",
+  "output_schema": "reap-ready/v1",
+  "steps": [
+    {
+      "step_id": "inventory",
+      "primitive_id": "model_step",
+      "primitive_version": "1.0.0",
+      "input_schema": "approved-plan/v1",
+      "output_schema": "documentation-inventory/v1",
+      "session_mode": "worktree",
+      "semantic_skills": [
+        "tdd"
+      ]
+    },
+    {
+      "step_id": "author",
+      "primitive_id": "model_step",
+      "primitive_version": "1.0.0",
+      "input_schema": "documentation-inventory/v1",
+      "output_schema": "implementation-result/v1",
+      "session_mode": "parent-child",
+      "semantic_skills": [
+        "tdd"
+      ]
+    },
+    {
+      "step_id": "verify",
+      "primitive_id": "verify",
+      "primitive_version": "1.0.0",
+      "input_schema": "implementation-result/v1",
+      "output_schema": "verified-result/v1",
+      "session_mode": "verification",
+      "semantic_skills": []
+    },
+    {
+      "step_id": "review",
+      "primitive_id": "review",
+      "primitive_version": "1.0.0",
+      "input_schema": "verified-result/v1",
+      "output_schema": "reap-ready/v1",
+      "session_mode": "review",
+      "semantic_skills": [
+        "review"
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from_step": "inventory",
+      "outcome": "complete",
+      "target": "author",
+      "max_traversals": 1
+    },
+    {
+      "from_step": "author",
+      "outcome": "complete",
+      "target": "verify",
+      "max_traversals": 1
+    },
+    {
+      "from_step": "verify",
+      "outcome": "complete",
+      "target": "review",
+      "max_traversals": 1
+    },
+    {
+      "from_step": "review",
+      "outcome": "complete",
+      "target": "terminal:completed",
+      "max_traversals": 1
+    }
+  ],
+  "controls": [],
+  "budget": {
+    "attempt_limit": 2,
+    "model_restart_limit": 1,
+    "time_budget_seconds": 900,
+    "token_limit": 50000
+  },
+  "completion_policy": "attention",
+  "requested_permissions": [
+    "git-write",
+    "product-worktree"
+  ],
+  "requested_side_effects": [
+    "git-write",
+    "worktree"
+  ],
+  "context_pointers": [
+    {
+      "pointer_id": "documentation-quality",
+      "content_sha256": "9863026dfc76e01840edfa995ca46f7f8e246d02dee0f6e37907a82f624c615d",
+      "byte_limit": 16384
+    }
+  ],
+  "verification_checks": [
+    "diff-check",
+    "instruction-lint"
+  ],
+  "review_mode": "deep",
+  "human_gates": [
+    "initial-approval"
+  ],
+  "terminal_outcomes": [
+    "completed",
+    "attention-required"
+  ]
+}

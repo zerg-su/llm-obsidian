@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions
+.PHONY: test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
@@ -87,6 +87,7 @@ help:
 	@echo "llm-obsidian developer targets:"
 	@echo "  make test              Run all vault + retrieval + hook tests"
 	@echo "  make test-harness-coverage  Audit statement-line coverage and ratchet critical floors"
+	@echo "  make test-docs          Validate the Russian handbook, examples, inventory, and PipelineSpec"
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"
 	@echo "  make eval-live         Run opt-in live evals (EVAL_RUNNER='command')"
 	@echo "  make eval-regression   Smoke + live retrieval quality gate"
@@ -135,9 +136,13 @@ help:
 	@echo "  make setup-dragonscale Run bin/setup-dragonscale.sh against this vault"
 	@echo "  make clean-test-state Remove runtime lockfiles and tiling cache"
 
-test: test-harness test-code-quality test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
+test: test-harness test-code-quality test-docs test-task-sessions test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-release-acceptance test-live-acceptance-runner test-pipeline-runners test-agent-evals test-paired-evals test-daily-pipeline test-session-map test-claude-subscription test-journal-write test-agenda test-dense-worker test-document-normalize test-research-isolation test-runtime-hooks test-command-evidence test-runtime-detection test-skill-workstreams test-skill-budget test-improve-skills test-outcome-contract test-contract-schemas test-task-lifecycle test-instruction-lint test-ci-workflow test-mcp-schema-lock test-address test-schema test-tiling test-boundary test-vault test-plan-capture test-stop-hook test-memory-backup test-setup-vault test-pipeline-events test-pipeline-stats test-review-callback-evidence test-custom-pipeline-report test-bm25 test-retrieve test-bench test-retrieval-experiment test-fold test-router test-gateway test-codex-adapter test-dcg-assets test-with-timeout
 	@echo ""
 	@echo "All tests passed."
+
+test-docs:
+	@echo "=== test_russian_documentation.py ==="
+	@python3 tests/test_russian_documentation.py
 
 eval-smoke:
 	@python3 scripts/agent-evals.py smoke

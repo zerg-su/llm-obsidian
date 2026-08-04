@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Deterministic contracts for the versioned Russian handbook."""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / "docs" / "ru"
+PIPELINE = ROOT / "examples" / "pipelines" / "document-project-v1.json"
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from harness.custom_pipelines import (
+    CustomPipelinePolicy,
+    compile_custom_spec,
+    parse_pipeline_spec,
+)
+from harness.pipeline_builtins import builtin_registry
+
+
+REQUIRED_PAGES = (
+    "index.md",
+    "getting-started.md",
+    "mental-model.md",
+    "first-project.md",
+    "skills.md",
+    "planning.md",
+    "sessions-and-tasks.md",
+    "review.md",
+    "pipelines.md",
+    "pipeline-dsl.md",
+    "documentation-pipeline.md",
+    "wiki-memory.md",
+    "documents-and-research.md",
+    "operations.md",
+    "development.md",
+    "testing.md",
+    "extending.md",
+    "upgrading-and-releasing.md",
+    "troubleshooting.md",
+    "cookbook.md",
+    "reference/commands.md",
+    "reference/configuration.md",
+    "reference/glossary.md",
+)
+GUIDE_PAGES = (
+    "getting-started.md",
+    "first-project.md",
+    "planning.md",
+    "sessions-and-tasks.md",
+    "documentation-pipeline.md",
+    "wiki-memory.md",
+    "documents-and-research.md",
+    "operations.md",
+    "development.md",
+    "testing.md",
+    "extending.md",
+    "upgrading-and-releasing.md",
+    "troubleshooting.md",
+    "cookbook.md",
+)
+GUIDE_SECTIONS = (
+    "## Для кого и результат",
+    "## Предварительные условия",
+    "## Пример",
+    "## Ожидаемый результат и проверка",
+    "## Ошибки и восстановление",
+    "## Источники истины",
+)
+FENCE_RE = re.compile(r"```(json|toml)\s*\n(.*?)```", re.DOTALL)
+LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+
+
+def skill_names(root: Path = ROOT) -> tuple[str, ...]:
+    return tuple(sorted(path.parent.name for path in (root / "skills").glob("*/SKILL.md")))
+
+
+def markdown_files(root: Path = DOCS) -> tuple[Path, ...]:
+    return tuple(sorted(root.rglob("*.md"))) if root.is_dir() else ()
+
+
+def broken_relative_links(files: tuple[Path, ...]) -> list[str]:
+    failures: list[str] = []
+    for page in files:
+        for target in LINK_RE.findall(page.read_text(encoding="utf-8")):
+            clean = target.split("#", 1)[0]
+            if not clean or clean.startswith(("http://", "https://", "mailto:")):
+                continue
+            resolved = (page.parent / clean).resolve()
+            if not resolved.exists():
+                try:
+                    label = page.relative_to(ROOT)
+                except ValueError:
+                    label = page
+                failures.append(f"{label} -> {target}")
+    return failures
+
+
+def fenced_data_failures(files: tuple[Path, ...]) -> list[str]:
+    failures: list[str] = []
+    for page in files:
+        for index, (kind, body) in enumerate(
+            FENCE_RE.findall(page.read_text(encoding="utf-8")), 1
+        ):
+            try:
+                json.loads(body) if kind == "json" else tomllib.loads(body)
+            except (json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
+                try:
+                    label = page.relative_to(ROOT)
+                except ValueError:
+                    label = page
+                failures.append(f"{label} fence {index}: {exc}")
+    return failures
+
+
+def skill_inventory_failures(body: str, names: tuple[str, ...]) -> list[str]:
+    failures: list[str] = []
+    for name in names:
+        for token in (f"`{name}`", f"`/{name}`", f"`$llm-obsidian:{name}`"):
+            if token not in body:
+                failures.append(token)
+    return failures
+
+
+def compile_documentation_pipeline(path: Path = PIPELINE) -> None:
+    spec = parse_pipeline_spec(path.read_text(encoding="utf-8"))
+    compiled = compile_custom_spec(
+        spec,
+        builtin_registry(),
+        policy=CustomPipelinePolicy.default(),
+        capabilities=("route:resolved",),
+    )
+    if compiled.definition.steps[-1].primitive_id != "review":
+        raise AssertionError("documentation pipeline must end at review")
+
+
+failures: list[str] = []
+for relative in REQUIRED_PAGES:
+    if not (DOCS / relative).is_file():
+        failures.append(f"missing page: docs/ru/{relative}")
+
+files = markdown_files()
+index = (DOCS / "index.md").read_text(encoding="utf-8") if (DOCS / "index.md").is_file() else ""
+for relative in REQUIRED_PAGES[1:]:
+    if f"]({relative})" not in index:
+        failures.append(f"index does not reach: {relative}")
+
+failures.extend(f"broken relative link: {item}" for item in broken_relative_links(files))
+failures.extend(f"invalid fenced data: {item}" for item in fenced_data_failures(files))
+
+skills_page = (DOCS / "skills.md")
+skills_body = skills_page.read_text(encoding="utf-8") if skills_page.is_file() else ""
+for token in skill_inventory_failures(skills_body, skill_names()):
+    failures.append(f"skills inventory missing {token}")
+
+for relative in GUIDE_PAGES:
+    path = DOCS / relative
+    body = path.read_text(encoding="utf-8") if path.is_file() else ""
+    for section in GUIDE_SECTIONS:
+        if section not in body:
+            failures.append(f"docs/ru/{relative} missing {section}")
+
+all_docs = "\n".join(page.read_text(encoding="utf-8") for page in files)
+for marker in ("TODO", "TBD", "FIXME", "INSERT HERE"):
+    if marker in all_docs:
+        failures.append(f"placeholder marker remains: {marker}")
+
+matrix = ROOT / "docs" / "acceptance" / "v2.6.3-documentation-matrix.md"
+matrix_body = matrix.read_text(encoding="utf-8") if matrix.is_file() else ""
+for source in ("AGENTS.md", "CLAUDE.md", "schemas/pipeline-spec-v1.schema.json"):
+    if source not in matrix_body:
+        failures.append(f"source-of-truth manifest missing {source}")
+
+try:
+    compile_documentation_pipeline()
+except (OSError, ValueError, AssertionError) as exc:
+    failures.append(f"documentation PipelineSpec does not compile: {exc}")
+
+# Mutation-sensitive unit checks for the local validators.
+with tempfile.TemporaryDirectory(prefix="russian-docs-gate.") as raw:
+    scratch = Path(raw)
+    broken = scratch / "broken.md"
+    broken.write_text("[missing](not-there.md)\n", encoding="utf-8")
+    assert broken_relative_links((broken,))
+
+    invalid_data = scratch / "invalid-data.md"
+    invalid_data.write_text('```json\n{"open": true\n```\n', encoding="utf-8")
+    assert fenced_data_failures((invalid_data,))
+
+    assert skill_inventory_failures(
+        "`save` `/save` `$llm-obsidian:save`",
+        ("save", "review"),
+    ) == ["`review`", "`/review`", "`$llm-obsidian:review`"]
+
+    invalid_pipeline = scratch / "invalid-pipeline.json"
+    invalid_pipeline.write_text("{}\n", encoding="utf-8")
+    try:
+        compile_documentation_pipeline(invalid_pipeline)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid PipelineSpec mutation was accepted")
+
+decision = json.loads(
+    (
+        ROOT
+        / "docs"
+        / "acceptance"
+        / "v2.6.3-document-project-skill-verdicts.json"
+    ).read_text(encoding="utf-8")
+)
+if (
+    decision.get("disposition") != "not-adopted-per-stop-condition"
+    or decision.get("installed_skill") is not False
+    or (ROOT / "skills" / "document-project").exists()
+):
+    failures.append("E5 no-new-skill disposition is inconsistent")
+
+if failures:
+    raise SystemExit("Documentation gate failed:\n- " + "\n- ".join(failures))
+
+print(
+    f"OK   Russian handbook: {len(files)} pages, "
+    f"{len(skill_names())} skills, compiled PipelineSpec"
+)
