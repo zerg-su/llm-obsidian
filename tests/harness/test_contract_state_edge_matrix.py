@@ -472,6 +472,22 @@ def callback_recovery_transition_matrix() -> None:
         )
         assert generic.action == "suspected-idle"
         assert submit_first.current_state().nudge_count == 1
+        receipt_path = (
+            submit_first.root
+            / "receipts"
+            / f"callback-submit-{'e' * 64}.json"
+        )
+        tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
+        tampered["nudge_count"] = 99
+        receipt_path.write_text(
+            json.dumps(tampered, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        expect_error(
+            "callback reservation receipt tamper",
+            "receipt changed",
+            lambda: submit_first.mark_callback_submit_sent("e" * 64),
+        )
 
 
 contract_primitive_matrix()
