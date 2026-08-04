@@ -66,6 +66,7 @@ def run_case(
         observe_stage=lambda stage, count: stages.append((stage, count)),
         send_prompt=send_prompt,
         observation_limit=2,
+        wait=lambda _seconds: None,
     )
     return result, port, retries, stages
 

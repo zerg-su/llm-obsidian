@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from time import sleep
 from typing import Callable, Protocol
 
 
@@ -16,6 +17,7 @@ class ContinuationPort(Protocol):
 ArtifactProbe = Callable[[], bool]
 RetryReservation = Callable[[], bool]
 StageObserver = Callable[[str, int], None]
+Waiter = Callable[[float], None]
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,9 @@ def deliver_continuation(
     reserve_retry: RetryReservation,
     observe_stage: StageObserver,
     send_prompt: bool = True,
-    observation_limit: int = 4,
+    observation_limit: int = 20,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
 ) -> ContinuationDelivery:
     """Deliver once and require artifact or visible editor-to-activity progress.
 
@@ -61,6 +65,8 @@ def deliver_continuation(
 
     if observation_limit < 1:
         raise ValueError("continuation observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("continuation observation interval cannot be negative")
     anchor = _prompt_anchor(prompt)
     if not anchor:
         raise ValueError("continuation prompt has no visible anchor")
@@ -73,13 +79,15 @@ def deliver_continuation(
         observe_stage("transport-accepted", 0)
 
     paste_screen = ""
-    for _ in range(observation_limit):
+    for observation in range(observation_limit):
         if artifact_ready():
             return ContinuationDelivery(True, "artifact", 0)
         screen = port.read(surface_id)
         if _anchor_visible(screen, anchor):
             paste_screen = screen
             break
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
     if not paste_screen:
         return ContinuationDelivery(False, "paste-unconfirmed", 0)
 
@@ -96,7 +104,7 @@ def deliver_continuation(
             "submit-retried" if submit_attempt else "submit-accepted",
             submit_count,
         )
-        for _ in range(observation_limit):
+        for observation in range(observation_limit):
             if artifact_ready():
                 return ContinuationDelivery(True, "artifact", submit_count)
             screen = port.read(surface_id)
@@ -105,5 +113,7 @@ def deliver_continuation(
                 and _digest(screen) != paste_digest
             ):
                 return ContinuationDelivery(True, "provider-activity", submit_count)
+            if observation + 1 < observation_limit:
+                wait(observation_interval_seconds)
 
     return ContinuationDelivery(False, "submit-unconfirmed", submit_count)
