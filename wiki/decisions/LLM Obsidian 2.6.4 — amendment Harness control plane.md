@@ -33,6 +33,6 @@ E14 добавляется как отдельный regression-and-gap-closure 
 - unapproved proposal at HEAD `6830062dbde914e65e58dc2b567e489555ee65fd`: Outcome `1c64c2a373d2401f0ba8d25c14316e42ba2f8e4ea87121f1716419926633ac15`, plan `8e2654629b4a8c57f6e94a8eef56df65eb12dfc3aa6200bc0fe9fd3ffaa12e6a`;
 - corrected resulting Outcome digest: `af24873e06669632c5c45e9818a8646918e3a086a358285d1781a1a5540660ae`;
 - corrected resulting plan digest: `2bcd5d57960a11afc9218f02acd20623b8d82e0c12c1fb3a2e0ae05e3b07745c`;
-- amendment-introducing commit: `PENDING_FIRST_COMMIT`.
+- amendment-introducing commit: `b204289f584a684e34d5036b20eb417d70a18659`.
 
 Prior callbacks/findings are provenance only and do not approve these bytes. Approval requires a fresh exact Opus intent boundary.
