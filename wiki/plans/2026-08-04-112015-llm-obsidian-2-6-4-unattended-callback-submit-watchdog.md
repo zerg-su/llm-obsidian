@@ -464,3 +464,17 @@ This coordinator-owned amendment preserves the frozen Outcome Contract while rec
 | D-264-39 | test harness | runtime task-summary helpers were not synchronized with their worker boundaries, causing full-suite-only missing recovery/verification receipts | `included` | ready/done handshakes, bounded eventual reads and explicit thread joins make repeated standalone and full-suite runs deterministic |
 | D-264-40 | callback watchdog | a sent recovery binding survived its accepted callback and forced the next legitimate retained-session generation into stale-generation attention | `included` | exact accepted predecessor receipt retires only the generation binding, preserves the shared nudge/restart budgets, and the runtime regression accepts N+1 with zero second prompt or Enter |
 | D-264-41 | vault writer | deterministic wikilink self-heal planned a valid update for writer-owned `wiki/log.md`, but the sole writer rejected its own repair payload | `included` | writer accepts only the exact current `stop-hook-link-repair` payload derived by the canonical planner; forged or ordinary log/hot page updates remain rejected |
+
+
+## Append-only final review amendment D-264-42 through D-264-45
+
+This coordinator-owned amendment records the four changes-requested findings from the independent Sol implementation review of candidate `79d999889d6877235c48da1a0c3be8680bea3eab`. It preserves the frozen Outcome Contract and narrows the implementation to crash-safe exact-identity behavior plus honest production-owned E6/E14 evidence.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-42 | continuation transport | Enter was sent before its durable reservation, so a crash could replay the same generation submit | `included` | `submit-reserved` and `submit-retry-reserved` persist before Enter; reservation-crash replay sends zero second key and either observes exact generation activity or fails closed |
+| D-264-43 | callback watchdog | accepted-generation retirement lacked the complete immutable generation identity and concurrent idempotence | `included` | receipt identity binds operation/run/lane/generation/target plus expected counterparts; concurrent exact retirement converges and mismatches fail closed |
+| D-264-44 | callback watchdog | an equal attention marker returned before retrying a previously failed OperationStore transition | `included` | replay re-reads authoritative state and retries the exact attention transition; fail-once store regression proves eventual attention with zero provider effect |
+| D-264-45 | release evidence | E6/E14 terminal tail used fixture-owned state transitions and hard-coded manual-effect counters | `included` | dogfood now runs production review acceptance, provider exit, exact surface cleanup and pipeline advancement; adapter-derived effects prove provider prompt/Enter/callback plus zero manual lifecycle effects |
+
+Focused continuation, callback recovery, liveness, transition-matrix, dogfood and control-plane suites are green. `make test-harness` is green. The exact committed candidate still requires the full release ladder, a fresh Sol implementation review, and the separate purpose=release audit; no push, tag, publish or release is authorized by this amendment.

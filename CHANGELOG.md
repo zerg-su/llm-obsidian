@@ -41,6 +41,9 @@ packages were published for them.
 - Callback wake delivery is serialized per exact operation and uses
   write-ahead paste/submit phases. Partial or ambiguous effects fail closed,
   while concurrent reconciliation cannot send a second provider-facing wake.
+- Continuation Enter delivery now persists an exact generation reservation
+  before the external key effect. Crash replay sends no second Enter, and exact
+  accepted-generation retirement is idempotent under concurrent workers.
 - Missing screen evidence after the first continuation Enter stops at a typed
   unconfirmed result instead of consuming retry budget for another Enter.
 - Dispatch context preserves the exact resolved wiki path instead of treating
@@ -58,6 +61,9 @@ packages were published for them.
   completion: the dogfood trace reaches resource-free terminal parent/child
   states and an actual `reap-ready` pipeline boundary, with a separate final
   harness-authority trace.
+- Replaced fixture-owned terminal transitions and fixed manual-effect counters
+  in the E6/E14 dogfood with production review acceptance, exit/cleanup and
+  pipeline advancement plus an effect-derived zero-manual-action assertion.
 - Bound both accepted and duplicate callback receipts to the exact broker
   callback and payload identity, and made continuation paste replay
   write-ahead/fail-closed so a crash cannot paste the same prompt twice.
@@ -72,6 +78,8 @@ packages were published for them.
 - Retired a sent callback-recovery generation only after exact durable broker
   acceptance, so the next retained-session generation remains observable while
   active without gaining another prompt, Enter, nudge, or restart budget.
+- Made equal attention-marker replay retry an earlier failed authoritative
+  state transition instead of silently leaving the operation stranded.
 - Allowed the canonical one-shot wikilink repair to update a writer-owned
   log/hot surface only when its entire optimistic payload exactly matches the
   planner's current derivation; forged and ordinary direct updates stay blocked.

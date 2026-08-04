@@ -45,6 +45,8 @@ from harness.callback_submit_recovery import (  # noqa: E402
     ArtifactEvidence,
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
+    callback_submit_binding_identity,
+    callback_submit_binding_sha256,
     classify_callback_submit,
 )
 from harness.liveness import (  # noqa: E402
@@ -462,11 +464,15 @@ def callback_recovery_transition_matrix() -> None:
             replace(initial, observed_at=1_000), LivenessPolicy.default()
         )
         assert generic.action == "nudge"
-        assert not generic_first.reserve_callback_submit("d" * 64)
+        binding = callback_submit_binding_sha256(base)
+        binding_identity = callback_submit_binding_identity(base)
+        assert not generic_first.reserve_callback_submit(
+            binding, binding_identity
+        )
 
         submit_first = LivenessController(Path(raw) / "submit-first")
         submit_first.observe(initial, LivenessPolicy.default())
-        assert submit_first.reserve_callback_submit("e" * 64)
+        assert submit_first.reserve_callback_submit(binding, binding_identity)
         generic = submit_first.observe(
             replace(initial, observed_at=1_000), LivenessPolicy.default()
         )
@@ -475,7 +481,7 @@ def callback_recovery_transition_matrix() -> None:
         receipt_path = (
             submit_first.root
             / "receipts"
-            / f"callback-submit-{'e' * 64}.json"
+            / f"callback-submit-{binding}.json"
         )
         tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
         tampered["nudge_count"] = 99
@@ -486,7 +492,7 @@ def callback_recovery_transition_matrix() -> None:
         expect_error(
             "callback reservation receipt tamper",
             "receipt changed",
-            lambda: submit_first.mark_callback_submit_sent("e" * 64),
+            lambda: submit_first.mark_callback_submit_sent(binding),
         )
 
 

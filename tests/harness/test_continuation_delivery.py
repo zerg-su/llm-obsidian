@@ -102,8 +102,144 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.evidence == "provider-activity"
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("paste-reserved", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [
+    ("paste-reserved", 0),
+    ("transport-accepted", 0),
+    ("submit-reserved", 1),
+    ("submit-accepted", 1),
+]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
+
+pre_key_port = FakePort([
+    "› previous editor",
+    "› # Harness-owned review verification",
+])
+pre_key_stage: dict[str, object] = {}
+
+
+def crash_after_submit_reservation(
+    stage: str,
+    count: int,
+    pre_screen_sha256: str,
+    pre_editor_sha256: str,
+    paste_sha256: str,
+) -> None:
+    if stage == "submit-reserved":
+        pre_key_stage.update(
+            stage=stage,
+            count=count,
+            pre_screen=pre_screen_sha256,
+            pre_editor=pre_editor_sha256,
+            paste=paste_sha256,
+        )
+        raise RuntimeError("kill point before Enter")
+
+
+try:
+    deliver_continuation(
+        pre_key_port,
+        surface_id=SURFACE,
+        prompt=PROMPT,
+        runtime="codex",
+        artifact_ready=lambda: False,
+        ownership_ready=lambda: True,
+        reserve_retry=lambda: False,
+        observe_stage=crash_after_submit_reservation,
+        wait=lambda _seconds: None,
+    )
+except RuntimeError as exc:
+    assert str(exc) == "kill point before Enter"
+else:
+    raise AssertionError("pre-Enter kill point did not interrupt continuation")
+assert pre_key_stage["count"] == 1 and pre_key_port.keys == []
+pre_key_port.screens = ["› # Harness-owned review verification"]
+pre_key_replay = deliver_continuation(
+    pre_key_port,
+    surface_id=SURFACE,
+    prompt=PROMPT,
+    runtime="codex",
+    artifact_ready=lambda: False,
+    ownership_ready=lambda: True,
+    reserve_retry=lambda: False,
+    observe_stage=lambda *_args: None,
+    send_prompt=False,
+    submit_already_accepted=True,
+    accepted_submit_count=int(pre_key_stage["count"]),
+    paste_screen_sha256=str(pre_key_stage["paste"]),
+    wait=lambda _seconds: None,
+)
+assert not pre_key_replay.acknowledged
+assert pre_key_replay.evidence == "submit-effect-uncertain"
+assert pre_key_port.keys == []
+print("OK   pre-Enter reservation replay fails closed without an unbudgeted key")
+
+
+class CrashAfterEnterPort(FakePort):
+    def send_key(self, surface_id: str, key: str) -> None:
+        super().send_key(surface_id, key)
+        raise RuntimeError("kill point after Enter before receipt")
+
+
+post_key_port = CrashAfterEnterPort([
+    "› previous editor",
+    "› # Harness-owned review verification",
+])
+post_key_stage: dict[str, object] = {}
+
+
+def remember_post_key_reservation(
+    stage: str,
+    count: int,
+    pre_screen_sha256: str,
+    pre_editor_sha256: str,
+    paste_sha256: str,
+) -> None:
+    if stage == "submit-reserved":
+        post_key_stage.update(
+            count=count,
+            pre_screen=pre_screen_sha256,
+            pre_editor=pre_editor_sha256,
+            paste=paste_sha256,
+        )
+
+
+try:
+    deliver_continuation(
+        post_key_port,
+        surface_id=SURFACE,
+        prompt=PROMPT,
+        runtime="codex",
+        artifact_ready=lambda: False,
+        ownership_ready=lambda: True,
+        reserve_retry=lambda: False,
+        observe_stage=remember_post_key_reservation,
+        wait=lambda _seconds: None,
+    )
+except RuntimeError as exc:
+    assert str(exc) == "kill point after Enter before receipt"
+else:
+    raise AssertionError("post-Enter kill point did not interrupt continuation")
+assert post_key_port.keys == ["Enter"] and post_key_stage["count"] == 1
+post_key_port.screens = ["• Working (recovered exact continuation)"]
+post_key_replay = deliver_continuation(
+    post_key_port,
+    surface_id=SURFACE,
+    prompt=PROMPT,
+    runtime="codex",
+    artifact_ready=lambda: False,
+    ownership_ready=lambda: True,
+    reserve_retry=lambda: False,
+    observe_stage=lambda *_args: None,
+    send_prompt=False,
+    submit_already_accepted=True,
+    accepted_submit_count=int(post_key_stage["count"]),
+    paste_screen_sha256=str(post_key_stage["paste"]),
+    wait=lambda _seconds: None,
+)
+assert post_key_replay.acknowledged
+assert post_key_replay.evidence == "provider-activity"
+assert post_key_port.keys == ["Enter"]
+print("OK   post-Enter crash replay observes activity without a second key")
 
 crash_port = FakePort(["› previous editor"])
 reserved: dict[str, str] = {}
@@ -237,7 +373,12 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.submit_count == 1
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("paste-reserved", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [
+    ("paste-reserved", 0),
+    ("transport-accepted", 0),
+    ("submit-reserved", 1),
+    ("submit-accepted", 1),
+]
 print("OK   stale pre-Enter activity cannot acknowledge the new continuation")
 
 result, port, retries, _stages = run_case(

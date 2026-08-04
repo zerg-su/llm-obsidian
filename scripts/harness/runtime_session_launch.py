@@ -588,13 +588,21 @@ class RuntimeSessionLaunchMixin:
                 in {
                     "paste-reserved",
                     "transport-accepted",
+                    "submit-reserved",
                     "submit-accepted",
+                    "submit-retry-reserved",
                     "submit-retried",
                 }
             )
             prior_submit_accepted = bool(
                 receipt
-                and receipt.get("status") in {"submit-accepted", "submit-retried"}
+                and receipt.get("status")
+                in {
+                    "submit-reserved",
+                    "submit-accepted",
+                    "submit-retry-reserved",
+                    "submit-retried",
+                }
             )
             prior_submit_count = (
                 int(receipt.get("submit_count") or 0)
@@ -613,16 +621,31 @@ class RuntimeSessionLaunchMixin:
             liveness = LivenessController(
                 self._state_root(record) / "liveness"
             )
+            retry_identity = {
+                "operation_id": str(target["operation_id"]),
+                "run_id": str(target["run_id"]),
+                "lane_id": record.lane_id,
+                "generation": int(target["generation"]),
+                "target_sha256": effect_id,
+                "expected_operation_id": str(target["operation_id"]),
+                "expected_run_id": str(target["run_id"]),
+                "expected_lane_id": record.lane_id,
+                "expected_generation": int(target["generation"]),
+                "expected_target_sha256": effect_id,
+            }
             retry_binding = hashlib.sha256(
-                (
-                    f"{owner_id}:{operation_id}:{record.run_id}:"
-                    f"{effect_id}:{int(target['generation'])}"
+                json.dumps(
+                    retry_identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
                 ).encode()
             ).hexdigest()
 
             def reserve_retry() -> bool:
                 try:
-                    return liveness.reserve_callback_submit(retry_binding)
+                    return liveness.reserve_callback_submit(
+                        retry_binding, retry_identity
+                    )
                 except ContractError:
                     return False
 

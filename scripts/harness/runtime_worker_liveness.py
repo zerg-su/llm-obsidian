@@ -74,6 +74,10 @@ class RuntimeWorkerLivenessMixin:
             self.liveness_controller.retire_callback_submit_after_acceptance(
                 binding_sha256,
                 hashlib.sha256(raw).hexdigest(),
+                generation=prior_generation,
+                operation_id=operation_id,
+                run_id=run_id,
+                lane_id=accepted_child.lane_id,
             )
             return True
         except (
@@ -123,26 +127,31 @@ class RuntimeWorkerLivenessMixin:
             "reason": reason,
             "status": "attention-required",
         }
+        marker_matches = False
         if marker.is_file() and not marker.is_symlink():
             try:
                 if json.loads(marker.read_text(encoding="utf-8")) == value:
-                    return
+                    marker_matches = True
             except (OSError, json.JSONDecodeError):
                 pass
-        _atomic_json(marker, value)
+        if not marker_matches:
+            _atomic_json(marker, value)
         try:
             current = self.store.read(
                 self.spec["owner_id"], self.spec["operation_id"]
             )
-            if current.state not in TERMINAL and current.state != "attention-required":
-                self.store.transition(
-                    self.spec["owner_id"],
-                    self.spec["operation_id"],
-                    "attention-required",
-                    reason=AttentionReason.ATTENTION_REQUIRED,
-                )
-        except Exception:
-            pass
+            if current.state in TERMINAL or current.state == "attention-required":
+                return
+            self.store.transition(
+                self.spec["owner_id"],
+                self.spec["operation_id"],
+                "attention-required",
+                reason=AttentionReason.ATTENTION_REQUIRED,
+            )
+        except (StoreError, OSError, ValueError, TypeError) as exc:
+            raise RuntimeWorkerError(
+                "callback submit attention transition failed"
+            ) from exc
 
     def inspect_callback_submit_recovery(
         self, record: object, process_status: str
@@ -359,7 +368,10 @@ class RuntimeWorkerLivenessMixin:
             ):
                 self.callback_submit_attention("callback-submit-stale-generation")
                 return
-            if not self.liveness_controller.reserve_callback_submit(binding_sha256):
+            if not self.liveness_controller.reserve_callback_submit(
+                binding_sha256,
+                callback_submit_binding_identity(evidence),
+            ):
                 return
         else:
             return

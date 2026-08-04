@@ -51,6 +51,7 @@ from .callback_submit_recovery import (
     ArtifactEvidence,
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
+    callback_submit_binding_identity,
     callback_submit_binding_sha256,
     classify_callback_prompt,
     classify_callback_submit,

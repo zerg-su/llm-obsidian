@@ -18,6 +18,7 @@ from harness.callback_submit_recovery import (  # noqa: E402
     ArtifactEvidence,
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
+    callback_submit_binding_identity,
     callback_submit_binding_sha256,
     classify_callback_prompt,
     classify_callback_submit,
@@ -123,10 +124,12 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-reservation.") as raw:
         ),
         LivenessPolicy.default(),
     )
-    binding = "9" * 64
+    generation_evidence = idle()
+    binding = callback_submit_binding_sha256(generation_evidence)
+    binding_identity = callback_submit_binding_identity(generation_evidence)
 
     def reserve() -> bool:
-        return controller.reserve_callback_submit(binding)
+        return controller.reserve_callback_submit(binding, binding_identity)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         reservations = list(pool.map(lambda _index: reserve(), range(2)))
@@ -142,7 +145,7 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-reservation.") as raw:
     )
     check(
         "reservation replay is an idempotent no-op",
-        not controller.reserve_callback_submit(binding),
+        not controller.reserve_callback_submit(binding, binding_identity),
     )
     controller.mark_callback_submit_sent(binding)
     controller.mark_callback_submit_sent(binding)
@@ -166,6 +169,7 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-reservation.") as raw:
         == {
             "schema_version",
             "binding_sha256",
+            "generation_identity",
             "nudge_count",
             "status",
         }

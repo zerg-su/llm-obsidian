@@ -27,6 +27,7 @@ from harness.callback_submit_recovery import (  # noqa: E402
 )
 from harness.contracts import (  # noqa: E402
     AttentionReason,
+    CallbackEnvelope,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
@@ -37,7 +38,10 @@ from harness.liveness import (  # noqa: E402
     LivenessPolicy,
 )
 from harness.pipeline_builtins import compiled_builtin  # noqa: E402
-from harness.pipelines import reconcile_pipeline  # noqa: E402
+from harness.runtime_worker_summary import (  # noqa: E402
+    RuntimeWorkerSummaryMixin,
+    SummaryPipelineState,
+)
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
@@ -50,6 +54,11 @@ from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
+from harness.workflows.review import (  # noqa: E402
+    ReviewLaneSession,
+    ReviewRound,
+    accept_review_round,
+)
 
 
 SURFACE = "11111111-1111-1111-1111-111111111111"
@@ -626,6 +635,88 @@ class SymlinkWorker(RuntimeWorkerReviewBridgeMixin):
         self.attention_statuses.append(status)
 
 
+with tempfile.TemporaryDirectory(prefix="callback-submit-attention-replay.") as raw:
+    attention_root = Path(raw)
+    attention_store = OperationStore(attention_root / "store")
+    attention_route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "a" * 64
+    )
+    attention_spec = OperationSpec(
+        "attention-parent",
+        "attention-key",
+        "review-session",
+        "attention-owner",
+        attention_route,
+        "packets/review.json",
+        "scoped",
+    )
+    attention_store.create(
+        attention_spec, lane_id="openai-holistic", run_id="attention-run"
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        attention_store.transition("attention-owner", "attention-parent", state)
+
+    attention_worker = RecoveryWorker()
+    attention_worker.spec_path = attention_root / "worker" / "launch.json"
+    attention_worker.spec_path.parent.mkdir()
+    attention_worker.spec = {
+        "owner_id": "attention-owner",
+        "operation_id": "attention-parent",
+        "run_id": "attention-run",
+    }
+
+    class FailOnceTransitionStore:
+        def __init__(self, store: OperationStore) -> None:
+            self.store = store
+            self.failed = False
+
+        def read(self, owner_id: str, operation_id: str):
+            return self.store.read(owner_id, operation_id)
+
+        def transition(self, *args, **kwargs):
+            if not self.failed:
+                self.failed = True
+                raise OSError("simulated store transition failure")
+            return self.store.transition(*args, **kwargs)
+
+    flaky_store = FailOnceTransitionStore(attention_store)
+    attention_worker.store = flaky_store
+    try:
+        attention_worker.callback_submit_attention(
+            "callback-submit-stale-generation"
+        )
+    except Exception as exc:
+        check(
+            "attention transition failure is surfaced to the owning worker",
+            "attention transition failed" in str(exc),
+            exc,
+        )
+    else:
+        raise AssertionError("attention transition failure was swallowed")
+    check(
+        "failed transition leaves a durable typed marker without false state",
+        (
+            attention_worker.spec_path.parent
+            / "callback-submit-attention.json"
+        ).is_file()
+        and attention_store.read(
+            "attention-owner", "attention-parent"
+        ).state
+        == "awaiting-callback",
+    )
+    attention_worker.callback_submit_attention(
+        "callback-submit-stale-generation"
+    )
+    attention_record = attention_store.read(
+        "attention-owner", "attention-parent"
+    )
+    check(
+        "matching marker replay still reaches durable operation attention",
+        attention_record.state == "attention-required",
+        attention_record,
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="callback-pointer-symlink.") as raw:
     root = Path(raw)
     scratch = (root / "scratch").resolve()
@@ -1035,29 +1126,69 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         expected_revision=terminal.revision,
     )
 
+    lifecycle_effects: list[str] = []
+
     class Process:
+        def __init__(self, effects: list[str] | None = None) -> None:
+            self.status = "alive"
+            self.exit_requests = 0
+            self.effects = effects if effects is not None else []
+
         def process_status(self, process_group: int, identity: str) -> str:
             check(
                 "recovery process probe uses exact ownership",
                 process_group == 321 and identity == "1" * 64,
             )
-            return "alive"
+            return self.status
+
+        def pid_status(self, supervisor_pid: int, identity: str) -> str:
+            check(
+                "recovery supervisor probe uses exact ownership",
+                supervisor_pid == 322 and identity == "2" * 64,
+            )
+            return self.status
+
+        def request_guardian_signal(self, _control_path: Path, **identity) -> None:
+            check(
+                "harness exit uses exact retained reviewer ownership",
+                identity["action"] == "request-exit"
+                and identity["operation_id"] == "review-parent-3"
+                and identity["run_id"] == "review-parent-run-3"
+                and identity["process_group"] == 321
+                and identity["process_identity"] == "1" * 64
+                and identity["supervisor_pid"] == 322
+                and identity["supervisor_identity"] == "2" * 64,
+                identity,
+            )
+            self.exit_requests += 1
+            self.effects.append("harness-request-exit")
+            self.status = "dead"
 
     class Cmux:
-        def __init__(self) -> None:
+        def __init__(self, effects: list[str] | None = None) -> None:
             self.sent: list[tuple[str, str]] = []
             self.keys: list[tuple[str, str]] = []
             self.provider_artifact_writes = 0
+            self.closed: list[str] = []
+            self.effects = effects if effects is not None else []
 
         def status(self, surface_id: str) -> str:
             check("recovery surface probe uses exact ownership", surface_id == SURFACE)
-            return "alive"
+            return "missing" if surface_id in self.closed else "alive"
+
+        def close_exact(self, surface_id: str) -> None:
+            check("harness closes only the exact review surface", surface_id == SURFACE)
+            if surface_id not in self.closed:
+                self.closed.append(surface_id)
+                self.effects.append("harness-close-surface")
 
         def send(self, surface_id: str, message: str) -> None:
             self.sent.append((surface_id, message))
+            self.effects.append("harness-provider-prompt")
 
         def send_key(self, surface_id: str, key: str) -> None:
             self.keys.append((surface_id, key))
+            self.effects.append("harness-provider-enter")
 
         def provider_complete_review(self, path: Path, payload: object) -> None:
             """Fake-provider boundary: model output appears only after Enter."""
@@ -1066,8 +1197,9 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
                 raise AssertionError("fake provider completed before one submit")
             path.write_text(json.dumps(payload), encoding="utf-8")
             self.provider_artifact_writes += 1
+            self.effects.append("provider-callback-write")
 
-    cmux = Cmux()
+    cmux = Cmux(lifecycle_effects)
     worker = RecoveryWorker()
     worker.spec_path = state_root / "launch.json"
     worker.spec = {
@@ -1081,7 +1213,8 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         "runtime": "codex",
     }
     worker.store = store
-    worker.process = Process()
+    process = Process(lifecycle_effects)
+    worker.process = process
     worker.handle = SimpleNamespace(process_group=321, process_identity="1" * 64)
     worker.provider_exited = False
     worker.cmux_adapter = cmux
@@ -1349,6 +1482,9 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     joined_receipt = json.loads(
         (state_root / "callback-receipt.json").read_text(encoding="utf-8")
     )
+    joined_envelope = CallbackEnvelope(
+        **json.loads(callback_path.read_text(encoding="utf-8"))
+    )
     check(
         "one unattended missing-submit incident reaches accepted next stage",
         len(cmux.sent) == 1
@@ -1461,17 +1597,15 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         ),
         encoding="utf-8",
     )
-    input_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "axis": "openai-holistic",
-                "verdict": "approve",
-                "verification_iteration": 1,
-                "findings": [],
-            }
-        ),
-        encoding="utf-8",
+    cmux.provider_complete_review(
+        input_path,
+        {
+            "schema_version": 1,
+            "axis": "openai-holistic",
+            "verdict": "approve",
+            "verification_iteration": 1,
+            "findings": [],
+        },
     )
     next_callback_worker = FastPathWorker()
     next_callback_worker.spec_path = state_root / "launch.json"
@@ -1490,6 +1624,9 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     next_callback_worker.inspect_callback()
     next_callback_worker.inspect_callback()
     accepted_next_child = store.read("review-owner-3", "review-round-4")
+    next_envelope = CallbackEnvelope(
+        **json.loads(callback_path.read_text(encoding="utf-8"))
+    )
     check(
         "active next generation accepts its callback without a second provider effect",
         accepted_next_child.state == "finalizing"
@@ -1498,22 +1635,109 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and cmux.keys == [(SURFACE, "Enter")],
         (accepted_next_child, cmux.sent, cmux.keys),
     )
-    for state in ("exiting", "complete"):
-        store.transition("review-owner-3", "review-round-4", state)
-    for state in ("exiting", "complete"):
-        store.transition("review-owner-3", "review-round-3", state)
-    supervisor.bind_resources(OwnedResources())
-    for state in ("finalizing", "exiting", "complete"):
-        store.transition("review-owner-3", "review-parent-3", state)
+    runtime = RuntimeSessionManager(
+        store,
+        cmux,
+        process,
+        status_notifier=None,
+    )
+    parent_before_cleanup = store.read("review-owner-3", "review-parent-3")
+    runtime._write_json(
+        runtime._metadata_path(parent_before_cleanup),
+        {
+            "schema_version": 1,
+            "operation_id": "review-parent-3",
+            "run_id": "review-parent-run-3",
+            "placement": "split",
+        },
+    )
+    runtime._write_json(
+        runtime._callback_target_path(parent_before_cleanup),
+        {
+            "schema_version": 1,
+            "generation": 4,
+            "operation_id": "review-round-4",
+            "run_id": "review-round-run-4",
+            "callback_pointer": (
+                "callbacks/openai-holistic/.review-callback.json"
+            ),
+        },
+    )
+    initial_lane = ReviewLaneSession(
+        "openai-holistic",
+        "review-owner-3",
+        "review-parent-3",
+        "openai-holistic",
+        "review-parent-run-3",
+        SURFACE,
+        "",
+        parent_before_cleanup.spec,
+        0,
+        1,
+        state=parent_before_cleanup.state,
+    )
+    initial_round = ReviewRound(
+        "review-parent-3",
+        "review-round-3",
+        "review-owner-3",
+        "openai-holistic",
+        "review-round-run-3",
+        "openai-holistic",
+        0,
+        joined_child.spec,
+    )
+    first_cleanup = accept_review_round(
+        runtime,
+        store,
+        initial_lane,
+        initial_round,
+        joined_envelope,
+    )
+    verification_lane = replace(
+        initial_lane,
+        verification_iteration=1,
+        state=(first_cleanup.state if first_cleanup is not None else "running"),
+    )
+    verification_round = ReviewRound(
+        "review-parent-3",
+        "review-round-4",
+        "review-owner-3",
+        "openai-holistic",
+        "review-round-run-4",
+        "openai-holistic",
+        1,
+        accepted_next_child.spec,
+    )
+    accept_review_round(
+        runtime,
+        store,
+        verification_lane,
+        verification_round,
+        next_envelope,
+    )
     terminal_child = store.read("review-owner-3", "review-round-3")
     terminal_parent = store.read("review-owner-3", "review-parent-3")
     pipeline = compiled_builtin("lifecycle/default")
-    dispatch_step, review_step = (
-        step.step_id for step in pipeline.definition.steps
-    )
-    next_progress = reconcile_pipeline(
-        pipeline,
-        {dispatch_step: "complete", review_step: terminal_parent.state},
+    class PipelineLifecycleDriver(RuntimeWorkerSummaryMixin):
+        def review_gate_state(self) -> dict[str, object]:
+            return {"status": "approved"}
+
+        def wait_for_summary_refresh_after_resolution(
+            self, _gate_state: object, *, target_head: str = ""
+        ) -> bool:
+            return False
+
+    pipeline_driver = PipelineLifecycleDriver()
+    pipeline_driver.pipeline = pipeline
+    pipeline_driver.review = SimpleNamespace(status="approved")
+    pipeline_ready = pipeline_driver.advance_compiled_pipeline(
+        SummaryPipelineState(
+            summary={},
+            marker=None,
+            steps=pipeline.definition.steps,
+            verify_step=None,
+            existing_verification=None,
+        )
     )
     trace_receipt = {
         "schema_version": 1,
@@ -1524,9 +1748,23 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         "child_state": terminal_child.state,
         "accepted_callback_id": terminal_child.accepted_callback_id,
         "accepted_callback_sha256": terminal_child.accepted_callback_sha256,
-        "next_action": next_progress.action,
-        "next_step_id": next_progress.step_id,
+        "next_action": "reap-ready" if pipeline_ready else "wait",
+        "next_step_id": "",
         "resources_released": terminal_parent.resources == OwnedResources(),
+        "effect_counts": {
+            name: lifecycle_effects.count(name)
+            for name in (
+                "harness-provider-prompt",
+                "harness-provider-enter",
+                "provider-callback-write",
+                "harness-request-exit",
+                "harness-close-surface",
+                "manual-current",
+                "manual-resume",
+                "manual-send",
+                "manual-callback-write",
+            )
+        },
     }
     trace_receipt_path = state_root / "pipeline-stage-receipt.json"
     trace_receipt_path.write_text(
@@ -1541,8 +1779,9 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         terminal_child.state == "complete"
         and terminal_parent.state == "complete"
         and terminal_parent.resources == OwnedResources()
-        and next_progress.action == "reap-ready"
-        and next_progress.step_id == "",
+        and pipeline_ready
+        and process.exit_requests == 1
+        and cmux.closed == [SURFACE],
         trace_receipt,
     )
     expected_observations = dogfood_evidence["observations"]
@@ -1558,18 +1797,28 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
             "same_session_recovery_count": recovery_state.nudge_count,
             "provider_prompt_count": len(cmux.sent),
             "provider_enter_count": len(cmux.keys),
-            "provider_typed_artifact_count": cmux.provider_artifact_writes,
+            "provider_typed_artifact_count": trace_receipt["effect_counts"][
+                "provider-callback-write"
+            ],
             "accepted_receipt_count": int(joined_receipt["status"] == "accepted"),
             "next_child_state": terminal_child.state,
             "parent_state": terminal_parent.state,
             "terminal_resources_owned": terminal_parent.resources
             != OwnedResources(),
-            "next_pipeline_action": next_progress.action,
-            "next_pipeline_step": next_progress.step_id,
-            "manual_current_count": 0,
-            "manual_resume_count": 0,
-            "manual_send_count": 0,
-            "manual_callback_write_count": 0,
+            "next_pipeline_action": "reap-ready" if pipeline_ready else "wait",
+            "next_pipeline_step": "",
+            "manual_current_count": trace_receipt["effect_counts"][
+                "manual-current"
+            ],
+            "manual_resume_count": trace_receipt["effect_counts"][
+                "manual-resume"
+            ],
+            "manual_send_count": trace_receipt["effect_counts"][
+                "manual-send"
+            ],
+            "manual_callback_write_count": trace_receipt["effect_counts"][
+                "manual-callback-write"
+            ],
             "repeated_review_count": 0,
         }
         and dogfood_evidence["trace_receipt_sha256"]

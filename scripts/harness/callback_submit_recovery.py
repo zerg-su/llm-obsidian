@@ -142,22 +142,30 @@ def _decision(
     )
 
 
+def callback_submit_binding_identity(
+    evidence: CallbackSubmitEvidence,
+) -> dict[str, object]:
+    """Return the complete immutable generation identity persisted on reserve."""
+
+    return {
+        "operation_id": evidence.operation_id,
+        "run_id": evidence.run_id,
+        "lane_id": evidence.lane_id,
+        "generation": evidence.generation,
+        "target_sha256": evidence.target_sha256,
+        "expected_operation_id": evidence.expected_operation_id,
+        "expected_run_id": evidence.expected_run_id,
+        "expected_lane_id": evidence.expected_lane_id,
+        "expected_generation": evidence.expected_generation,
+        "expected_target_sha256": evidence.expected_target_sha256,
+    }
+
+
 def callback_submit_binding_sha256(evidence: CallbackSubmitEvidence) -> str:
     """Return the durable exact current/expected generation identity."""
 
     identity = json.dumps(
-        {
-            "operation_id": evidence.operation_id,
-            "run_id": evidence.run_id,
-            "lane_id": evidence.lane_id,
-            "generation": evidence.generation,
-            "target_sha256": evidence.target_sha256,
-            "expected_operation_id": evidence.expected_operation_id,
-            "expected_run_id": evidence.expected_run_id,
-            "expected_lane_id": evidence.expected_lane_id,
-            "expected_generation": evidence.expected_generation,
-            "expected_target_sha256": evidence.expected_target_sha256,
-        },
+        callback_submit_binding_identity(evidence),
         sort_keys=True,
         separators=(",", ":"),
     )

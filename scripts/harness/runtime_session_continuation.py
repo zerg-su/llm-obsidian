@@ -212,8 +212,16 @@ def deliver_continuation(
             )
         if not ownership_ready():
             return ContinuationDelivery(False, "ownership-lost", submit_count)
+        next_submit_count = submit_count + 1
+        observe_stage(
+            "submit-retry-reserved" if submit_attempt else "submit-reserved",
+            next_submit_count,
+            pre_send_digest,
+            pre_send_editor_digest,
+            paste_digest,
+        )
         port.send_key(surface_id, "Enter")
-        submit_count += 1
+        submit_count = next_submit_count
         observe_stage(
             "submit-retried" if submit_attempt else "submit-accepted",
             submit_count,

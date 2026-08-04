@@ -357,20 +357,83 @@ class LivenessController:
             return self._state()
 
     @staticmethod
+    def _callback_submit_identity(
+        binding_sha256: str, identity: object
+    ) -> dict[str, object]:
+        keys = {
+            "operation_id",
+            "run_id",
+            "lane_id",
+            "generation",
+            "target_sha256",
+            "expected_operation_id",
+            "expected_run_id",
+            "expected_lane_id",
+            "expected_generation",
+            "expected_target_sha256",
+        }
+        if not isinstance(identity, dict) or set(identity) != keys:
+            raise ContractError("callback submit generation identity is invalid")
+        for key in (
+            "operation_id",
+            "run_id",
+            "lane_id",
+            "expected_operation_id",
+            "expected_run_id",
+            "expected_lane_id",
+        ):
+            if not isinstance(identity[key], str) or not ID_RE.fullmatch(identity[key]):
+                raise ContractError("callback submit generation identity is invalid")
+        for key in ("generation", "expected_generation"):
+            if type(identity[key]) is not int or identity[key] < 1:
+                raise ContractError("callback submit generation identity is invalid")
+        for key in ("target_sha256", "expected_target_sha256"):
+            _sha(identity[key], key, optional=False)
+        canonical = json.dumps(
+            identity, sort_keys=True, separators=(",", ":")
+        ).encode()
+        if hashlib.sha256(canonical).hexdigest() != binding_sha256:
+            raise ContractError("callback submit binding identity changed")
+        return dict(identity)
+
+    @staticmethod
     def _callback_submit_receipt(
-        binding_sha256: str, state: LivenessState
+        binding_sha256: str,
+        state: LivenessState,
+        identity: dict[str, object],
     ) -> dict[str, object]:
         return {
             "schema_version": 1,
             "binding_sha256": binding_sha256,
+            "generation_identity": identity,
             "nudge_count": state.nudge_count,
             "status": state.callback_submit_status,
         }
+
+    def _read_callback_submit_receipt(
+        self, binding_sha256: str
+    ) -> dict[str, object]:
+        path = (
+            self.root
+            / "receipts"
+            / f"callback-submit-{binding_sha256}.json"
+        )
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ContractError("callback submit receipt is invalid") from exc
+        if not isinstance(value, dict):
+            raise ContractError("callback submit receipt is invalid")
+        self._callback_submit_identity(
+            binding_sha256, value.get("generation_identity")
+        )
+        return value
 
     def _write_callback_submit_receipt(
         self,
         binding_sha256: str,
         state: LivenessState,
+        identity: dict[str, object],
         *,
         allowed_existing: tuple[dict[str, object], ...] = (),
     ) -> None:
@@ -379,7 +442,9 @@ class LivenessController:
             / "receipts"
             / f"callback-submit-{binding_sha256}.json"
         )
-        target = self._callback_submit_receipt(binding_sha256, state)
+        target = self._callback_submit_receipt(
+            binding_sha256, state, identity
+        )
         if path.is_file() and not path.is_symlink():
             try:
                 existing = json.loads(path.read_text(encoding="utf-8"))
@@ -393,10 +458,13 @@ class LivenessController:
             raise ContractError("callback submit receipt is not a regular file")
         self._write(path, target)
 
-    def reserve_callback_submit(self, binding_sha256: str) -> bool:
+    def reserve_callback_submit(
+        self, binding_sha256: str, identity: dict[str, object]
+    ) -> bool:
         """Atomically consume the existing nudge ceiling for one generation."""
 
         _sha(binding_sha256, "callback submit binding", optional=False)
+        identity = self._callback_submit_identity(binding_sha256, identity)
         with self._locked():
             current = self._state()
             if current is None:
@@ -404,7 +472,14 @@ class LivenessController:
             if current.callback_submit_binding:
                 if current.callback_submit_binding != binding_sha256:
                     return False
-                self._write_callback_submit_receipt(binding_sha256, current)
+                existing = self._read_callback_submit_receipt(binding_sha256)
+                if existing.get("generation_identity") != identity:
+                    raise ContractError(
+                        "callback submit generation identity changed"
+                    )
+                self._write_callback_submit_receipt(
+                    binding_sha256, current, identity
+                )
                 return False
             if current.nudge_count >= 1:
                 return False
@@ -415,7 +490,9 @@ class LivenessController:
                 callback_submit_status="reserved",
             )
             self._write(self.root / "state.json", to_dict(reserved))
-            self._write_callback_submit_receipt(binding_sha256, reserved)
+            self._write_callback_submit_receipt(
+                binding_sha256, reserved, identity
+            )
             return True
 
     def mark_callback_submit_sent(self, binding_sha256: str) -> None:
@@ -430,13 +507,18 @@ class LivenessController:
                 or current.callback_submit_status not in {"reserved", "sent"}
             ):
                 raise ContractError("callback submit reservation identity changed")
+            identity = self._read_callback_submit_receipt(
+                binding_sha256
+            )["generation_identity"]
             reserved_receipt = self._callback_submit_receipt(
                 binding_sha256,
                 replace(current, callback_submit_status="reserved"),
+                identity,
             )
             self._write_callback_submit_receipt(
                 binding_sha256,
                 current,
+                identity,
                 allowed_existing=(reserved_receipt,),
             )
             sent = (
@@ -448,6 +530,7 @@ class LivenessController:
             self._write_callback_submit_receipt(
                 binding_sha256,
                 sent,
+                identity,
                 allowed_existing=(
                     reserved_receipt,
                 ),
@@ -465,13 +548,18 @@ class LivenessController:
                 or current.callback_submit_status not in {"reserved", "uncertain"}
             ):
                 raise ContractError("callback submit reservation identity changed")
+            identity = self._read_callback_submit_receipt(
+                binding_sha256
+            )["generation_identity"]
             reserved_receipt = self._callback_submit_receipt(
                 binding_sha256,
                 replace(current, callback_submit_status="reserved"),
+                identity,
             )
             self._write_callback_submit_receipt(
                 binding_sha256,
                 current,
+                identity,
                 allowed_existing=(reserved_receipt,),
             )
             uncertain = (
@@ -483,6 +571,7 @@ class LivenessController:
             self._write_callback_submit_receipt(
                 binding_sha256,
                 uncertain,
+                identity,
                 allowed_existing=(
                     reserved_receipt,
                 ),
@@ -492,6 +581,11 @@ class LivenessController:
         self,
         binding_sha256: str,
         accepted_callback_receipt_sha256: str,
+        *,
+        generation: int,
+        operation_id: str,
+        run_id: str,
+        lane_id: str,
     ) -> None:
         """Retire one sent generation after its exact callback is durable.
 
@@ -508,22 +602,31 @@ class LivenessController:
         )
         with self._locked():
             current = self._state()
-            if (
-                current is None
-                or current.callback_submit_binding != binding_sha256
-                or current.callback_submit_status != "sent"
-            ):
-                raise ContractError(
-                    "callback submit acceptance identity changed"
-                )
             path = (
                 self.root
                 / "receipts"
                 / f"callback-submit-{binding_sha256}.json"
             )
-            sent_receipt = self._callback_submit_receipt(
-                binding_sha256,
+            existing = self._read_callback_submit_receipt(binding_sha256)
+            identity = existing["generation_identity"]
+            if (
+                identity["expected_generation"] != generation
+                or identity["expected_operation_id"] != operation_id
+                or identity["expected_run_id"] != run_id
+                or identity["expected_lane_id"] != lane_id
+            ):
+                raise ContractError(
+                    "callback submit acceptance identity changed"
+                )
+            if current is None:
+                raise ContractError("callback submit acceptance identity changed")
+            sent_state = replace(
                 current,
+                callback_submit_binding=binding_sha256,
+                callback_submit_status="sent",
+            )
+            sent_receipt = self._callback_submit_receipt(
+                binding_sha256, sent_state, identity
             )
             accepted_receipt = {
                 **sent_receipt,
@@ -532,18 +635,24 @@ class LivenessController:
                     accepted_callback_receipt_sha256
                 ),
             }
-            try:
-                existing = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ContractError(
-                    "callback submit receipt is invalid"
-                ) from exc
-            if existing not in (sent_receipt, accepted_receipt):
+            if existing == accepted_receipt:
+                if (
+                    current.callback_submit_binding
+                    or current.callback_submit_status
+                ):
+                    raise ContractError(
+                        "callback submit acceptance identity changed"
+                    )
+                return
+            if (
+                current.callback_submit_binding != binding_sha256
+                or current.callback_submit_status != "sent"
+                or existing != sent_receipt
+            ):
                 raise ContractError(
                     "callback submit receipt changed during acceptance"
                 )
-            if existing != accepted_receipt:
-                self._write(path, accepted_receipt)
+            self._write(path, accepted_receipt)
             retired = replace(
                 current,
                 callback_submit_binding="",

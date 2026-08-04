@@ -7,6 +7,7 @@ import sys
 import tempfile
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,6 +34,25 @@ def check(label: str, value: bool) -> None:
 
 
 policy = LivenessPolicy.default()
+callback_submit_identity = {
+    "operation_id": "review-round",
+    "run_id": "review-run",
+    "lane_id": "openai-holistic",
+    "generation": 3,
+    "target_sha256": "a" * 64,
+    "expected_operation_id": "review-round",
+    "expected_run_id": "review-run",
+    "expected_lane_id": "openai-holistic",
+    "expected_generation": 3,
+    "expected_target_sha256": "a" * 64,
+}
+callback_submit_binding = hashlib.sha256(
+    json.dumps(
+        callback_submit_identity,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+).hexdigest()
 base = LivenessEvidence(
     observed_at=1000,
     process_status="alive",
@@ -225,11 +245,11 @@ with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
 with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:
     controller = LivenessController(Path(raw))
     controller.observe(base, policy)
-    binding = "d" * 64
+    binding = callback_submit_binding
     check(
         "callback submit reserves the shared nudge budget exactly once",
-        controller.reserve_callback_submit(binding) is True
-        and controller.reserve_callback_submit(binding) is False,
+        controller.reserve_callback_submit(binding, callback_submit_identity) is True
+        and controller.reserve_callback_submit(binding, callback_submit_identity) is False,
     )
     controller.mark_callback_submit_sent(binding)
     controller.mark_callback_submit_sent(binding)
@@ -242,10 +262,18 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:
         and sent.nudge_count == 1,
     )
     accepted_callback_receipt_sha256 = "9" * 64
-    controller.retire_callback_submit_after_acceptance(
-        binding,
-        accepted_callback_receipt_sha256,
-    )
+    def retire() -> None:
+        controller.retire_callback_submit_after_acceptance(
+            binding,
+            accepted_callback_receipt_sha256,
+            generation=3,
+            operation_id="review-round",
+            run_id="review-run",
+            lane_id="openai-holistic",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(lambda _index: retire(), range(2)))
     retired = controller.current_state()
     accepted_receipt = json.loads(
         (
@@ -264,28 +292,30 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:
         and accepted_receipt["accepted_callback_receipt_sha256"]
         == accepted_callback_receipt_sha256,
     )
-    try:
-        controller.retire_callback_submit_after_acceptance(
-            binding,
-            accepted_callback_receipt_sha256,
-        )
-    except Exception as exc:
-        check(
-            "retired callback generation cannot be accepted twice",
-            "acceptance identity changed" in str(exc),
-        )
-    else:
-        check("retired callback generation cannot be accepted twice", False)
+    check(
+        "concurrent callback retirement replays idempotently",
+        controller.current_state() == retired,
+    )
     check(
         "a different callback generation cannot reuse the reservation",
-        controller.reserve_callback_submit("e" * 64) is False,
+        controller.reserve_callback_submit(
+            hashlib.sha256(
+                json.dumps(
+                    {**callback_submit_identity, "generation": 4, "expected_generation": 4},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest(),
+            {**callback_submit_identity, "generation": 4, "expected_generation": 4},
+        )
+        is False,
     )
 
 with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
     controller = LivenessController(Path(raw))
     controller.observe(base, policy)
-    binding = "8" * 64
-    controller.reserve_callback_submit(binding)
+    binding = callback_submit_binding
+    controller.reserve_callback_submit(binding, callback_submit_identity)
     controller.mark_callback_submit_sent(binding)
     (
         Path(raw) / "receipts" / f"callback-submit-{binding}.json"
@@ -294,6 +324,10 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
         controller.retire_callback_submit_after_acceptance(
             binding,
             "7" * 64,
+            generation=3,
+            operation_id="review-round",
+            run_id="review-run",
+            lane_id="openai-holistic",
         )
     except Exception as exc:
         check(
@@ -303,13 +337,70 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
     else:
         check("malformed callback submit receipt fails closed", False)
 
+with tempfile.TemporaryDirectory(prefix="callback-submit-identity.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    invalid_identity = dict(callback_submit_identity)
+    invalid_identity.pop("expected_lane_id")
+    try:
+        controller.reserve_callback_submit(callback_submit_binding, invalid_identity)
+    except Exception as exc:
+        check(
+            "incomplete callback generation identity fails closed",
+            "generation identity is invalid" in str(exc),
+        )
+    else:
+        check("incomplete callback generation identity fails closed", False)
+    try:
+        controller.reserve_callback_submit("f" * 64, callback_submit_identity)
+    except Exception as exc:
+        check(
+            "callback generation identity cannot change its binding",
+            "binding identity changed" in str(exc),
+        )
+    else:
+        check("callback generation identity cannot change its binding", False)
+    controller.reserve_callback_submit(
+        callback_submit_binding, callback_submit_identity
+    )
+    controller.mark_callback_submit_sent(callback_submit_binding)
+    try:
+        controller.retire_callback_submit_after_acceptance(
+            callback_submit_binding,
+            "8" * 64,
+            generation=3,
+            operation_id="review-round",
+            run_id="wrong-run",
+            lane_id="openai-holistic",
+        )
+    except Exception as exc:
+        check(
+            "accepted callback must match the reserved run identity",
+            "acceptance identity changed" in str(exc),
+        )
+    else:
+        check("accepted callback must match the reserved run identity", False)
+
+with tempfile.TemporaryDirectory(prefix="callback-submit-no-reservation.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    try:
+        controller.mark_callback_submit_sent(callback_submit_binding)
+    except Exception as exc:
+        check(
+            "callback submit cannot be marked sent without reservation",
+            "reservation identity changed" in str(exc),
+        )
+    else:
+        check("callback submit cannot be marked sent without reservation", False)
+
 with tempfile.TemporaryDirectory(prefix="callback-submit-uncertain.") as raw:
     controller = LivenessController(Path(raw))
     controller.observe(base, policy)
-    binding = "f" * 64
+    binding = callback_submit_binding
     check(
         "callback submit uncertainty starts from an exact reservation",
-        controller.reserve_callback_submit(binding) is True,
+        controller.reserve_callback_submit(binding, callback_submit_identity) is True,
     )
     controller.mark_callback_submit_uncertain(binding)
     controller.mark_callback_submit_uncertain(binding)
@@ -324,7 +415,9 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-uncertain.") as raw:
 with tempfile.TemporaryDirectory(prefix="callback-submit-invalid.") as raw:
     controller = LivenessController(Path(raw))
     try:
-        controller.reserve_callback_submit("a" * 64)
+        controller.reserve_callback_submit(
+            callback_submit_binding, callback_submit_identity
+        )
     except Exception as exc:
         check(
             "callback submit cannot reserve without liveness state",

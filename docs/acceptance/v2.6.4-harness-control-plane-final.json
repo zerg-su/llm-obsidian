@@ -27,7 +27,7 @@
     {"stage":"terminal-cleanup","owner":"harness","module":"scripts/harness/runtime_session_cleanup.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"}
   ],
   "integrated_trace": {
-    "dogfood_trace_receipt_sha256": "ce57e9b500311afe4bbe03eea20750f085f1376ad989b1a06494f40f116d88fc",
+    "dogfood_trace_receipt_sha256": "2c64a851c6cbee6c6b9e3245f4ae4a08aff59108e0121603deab1fc6a172aa0c",
     "accepted_callback_count": 1,
     "same_session_recovery_count": 1,
     "provider_prompt_count": 1,

@@ -46,6 +46,9 @@
 - Доставка callback wake сериализована для точной operation и использует
   write-ahead фазы paste/submit. Частичный или неоднозначный effect fail closed,
   а конкурентный reconcile не может отправить второй provider-facing wake.
+- Перед continuation Enter теперь сохраняется точная generation reservation.
+  Crash replay не отправляет второй Enter, а retirement принятого поколения
+  идемпотентен при конкурентных worker'ах.
 - Исчезновение точного screen после первого continuation Enter сразу даёт
   typed unconfirmed result и не расходует retry budget на второй Enter.
 - Dispatch сохраняет точный путь wiki context, а не принимает отображаемый
@@ -61,6 +64,9 @@
   completion: dogfood trace доходит до terminal resource-free parent/child и
   фактической границы `reap-ready`; отдельный финальный trace фиксирует
   harness-only lifecycle authority.
+- Fixture-owned terminal transitions и фиксированные manual-effect counters в
+  E6/E14 dogfood заменены production review acceptance, exit/cleanup и pipeline
+  advancement с effect-derived доказательством отсутствия ручных действий.
 - Accepted и duplicate callback receipts теперь связаны с точной broker
   callback/payload identity; continuation paste использует write-ahead
   fail-closed replay, поэтому crash не вставит один prompt повторно.
@@ -76,6 +82,8 @@
   точного durable broker acceptance. Следующее поколение в той же retained
   session остаётся наблюдаемым в active-состоянии, но не получает второй
   prompt, Enter, nudge или restart budget.
+- Повтор равного attention marker теперь заново выполняет ранее неудавшийся
+  authoritative state transition, а не оставляет operation молча зависшей.
 - Канонический одноразовый wikilink repair может изменить writer-owned log/hot
   только когда весь optimistic payload точно совпадает с текущим результатом
   planner. Подделанные и обычные прямые обновления остаются запрещены.
