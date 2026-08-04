@@ -67,6 +67,8 @@ packages were published for them.
   amendment evidence.
 - Removed a full-suite-only verification recovery test race by waiting for the
   exact packet with a bounded deadline and joining its responder before cleanup.
+- Removed two additional task-summary fixture races by synchronizing helper
+  readiness/completion and waiting for atomic recovery receipts before cleanup.
 
 ## [2.6.3] - 2026-08-04
 

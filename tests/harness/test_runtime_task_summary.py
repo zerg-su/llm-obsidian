@@ -1441,6 +1441,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     failing_task = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
     failing_commands = [0]
     commands_before_resubmission = []
+    resubmit_helper_done = threading.Event()
+    resubmit_helpers: list[threading.Thread] = []
 
     def fail_then_pass_verification(
         argv: list[str], **kwargs: object
@@ -1471,11 +1473,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             import time
 
             packet_path = worktree / ".task-verification.json"
-            for _ in range(100):
-                if packet_path.is_file():
-                    break
-                time.sleep(0.02)
-            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            packet = read_json_eventually(packet_path, timeout=3)
             (worktree / "product.txt").write_text(
                 "ready\nfixed\n", encoding="utf-8"
             )
@@ -1526,8 +1524,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     "resubmitted_head_sha": resubmitted_head,
                 },
             )
+            resubmit_helper_done.set()
 
-        threading.Thread(target=respond).start()
+        helper = threading.Thread(target=respond)
+        resubmit_helpers.append(helper)
+        helper.start()
 
     def approve_resubmitted_verification(
         vault: Path, worktree: Path
@@ -1574,11 +1575,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         before_start=resubmit_failed_verification,
         review_launcher=approve_resubmitted_verification,
     )
+    if not resubmit_helper_done.wait(timeout=1):
+        raise AssertionError("resubmission helper did not publish its response")
+    for helper in resubmit_helpers:
+        helper.join(timeout=1)
     failed_record = failed_store.read("owner-1", failing_task)
-    resubmitted_receipt = json.loads(
-        (failed_state / "pipeline-step-verify.json").read_text(
-            encoding="utf-8"
-        )
+    resubmitted_receipt = read_json_eventually(
+        failed_state / "pipeline-step-verify.json"
     )
     failed_packet = json.loads(
         (
@@ -2920,6 +2923,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
 
     resumed_task = "abababab-abab-4bab-8bab-abababababab"
     resumed_calls: list[str] = []
+    resume_helper_ready = threading.Event()
+    resume_helper_done = threading.Event()
+    resume_helpers: list[threading.Thread] = []
 
     def fail_once_then_approve(vault: Path, worktree: Path) -> None:
         resumed_calls.append(str(worktree))
@@ -2928,6 +2934,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             def resume_after_attention() -> None:
                 import time
 
+                resume_helper_ready.set()
                 for _ in range(100):
                     record = store.read("owner-1", resumed_task)
                     if record.state == "attention-required":
@@ -2936,10 +2943,15 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                             resumed_task,
                             record.resume_state,
                         )
+                        resume_helper_done.set()
                         return
                     time.sleep(0.01)
 
-            threading.Thread(target=resume_after_attention).start()
+            helper = threading.Thread(target=resume_after_attention)
+            resume_helpers.append(helper)
+            helper.start()
+            if not resume_helper_ready.wait(timeout=1):
+                raise AssertionError("resume helper did not reach its polling boundary")
             raise OSError("simulated review drive failure")
         meta = json.loads(
             (worktree / ".task-meta.json").read_text(encoding="utf-8")
@@ -2978,10 +2990,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_launcher=fail_once_then_approve,
     )
     resumed_record = resumed_store.read("owner-1", resumed_task)
-    recovery = json.loads(
-        (resumed_state / "callback-recovery.json").read_text(
-            encoding="utf-8"
-        )
+    if not resume_helper_done.wait(timeout=1):
+        raise AssertionError("resume helper did not observe durable attention")
+    for helper in resume_helpers:
+        helper.join(timeout=1)
+    recovery = read_json_eventually(
+        resumed_state / "callback-recovery.json"
     )
     check(
         "explicit durable resume clears only the matching summary attention latch",
