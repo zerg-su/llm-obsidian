@@ -272,6 +272,41 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-duplicate.") as raw:
     )
 
 
+with tempfile.TemporaryDirectory(prefix="task-escalation-chain-tamper.") as raw:
+    worktree = Path(raw)
+    meta(worktree)
+    append_raise(
+        worktree,
+        raised_payload(worktree, "chain-tamper", "semantic chain"),
+    )
+    resolution = append_resolution(
+        worktree,
+        "original resolution",
+        resolved_at="2026-08-04T12:04:30Z",
+    )
+    path = record_path(worktree, resolution.record_id)
+    forged = json.loads(path.read_text(encoding="utf-8"))
+    forged["payload"]["decision"] = "forged resolution"
+    forged_bytes = (
+        json.dumps(forged, sort_keys=True, separators=(",", ":")).encode()
+        + b"\n"
+    )
+    path.write_bytes(forged_bytes)
+    write_json(
+        worktree / ".task-needs-attention.json",
+        {
+            "schema_version": 2,
+            "record_id": resolution.record_id,
+            "record_sha256": hashlib.sha256(forged_bytes).hexdigest(),
+        },
+    )
+    expect_error(
+        "chain semantics reject a re-digested forged resolution",
+        lambda: load_chain(worktree),
+        "identity",
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="task-escalation-symlink.") as raw:
     worktree = Path(raw) / "task"
     worktree.mkdir()

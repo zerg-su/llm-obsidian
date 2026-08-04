@@ -216,8 +216,8 @@ def _legacy_view(worktree: Path, value: dict[str, Any], raw: bytes) -> DecisionR
     )
 
 
-def load_latest(worktree: Path) -> DecisionRecord | None:
-    """Load and validate the authoritative latest record or legacy marker."""
+def _load_marker_latest(worktree: Path) -> DecisionRecord | None:
+    """Load the pointer target; callers validate its complete chain."""
 
     root = worktree.expanduser().resolve()
     marker_path = _marker_path(root)
@@ -237,7 +237,7 @@ def load_chain(worktree: Path) -> tuple[DecisionRecord, ...]:
     """Load the complete authoritative chain, oldest record first."""
 
     root = worktree.expanduser().resolve()
-    latest = load_latest(root)
+    latest = _load_marker_latest(root)
     if latest is None:
         return ()
     if latest.legacy:
@@ -260,7 +260,139 @@ def load_chain(worktree: Path) -> tuple[DecisionRecord, ...]:
             current.previous_record_sha256,
         )
     newest_first.reverse()
-    return tuple(newest_first)
+    chain = tuple(newest_first)
+    _validate_chain_semantics(root, chain)
+    return chain
+
+
+def load_latest(worktree: Path) -> DecisionRecord | None:
+    """Load and validate the complete chain, returning its authoritative head."""
+
+    chain = load_chain(worktree)
+    return None if not chain else chain[-1]
+
+
+def _validate_payload_worktree(worktree: Path, payload: dict[str, Any]) -> None:
+    raw = str(payload.get("worktree") or "")
+    if not raw or Path(raw).expanduser().resolve() != worktree:
+        raise EscalationRecordError("decision payload worktree origin is stale")
+
+
+def _validate_chain_semantics(
+    worktree: Path, chain: tuple[DecisionRecord, ...]
+) -> None:
+    previous: DecisionRecord | None = None
+    for record in chain:
+        payload = record.payload
+        _validate_payload_worktree(worktree, payload)
+        status = str(payload.get("status") or "")
+        if record.record_id.startswith("legacy-"):
+            if previous is not None or status not in {
+                "pending",
+                "delivery-failed",
+                "resolved",
+            }:
+                raise EscalationRecordError("legacy decision transition is invalid")
+            expected_type = "resolution" if status == "resolved" else "raise"
+            if record.record_type != expected_type:
+                raise EscalationRecordError("legacy decision record type is invalid")
+            previous = record
+            continue
+        if record.record_type == "raise":
+            if (
+                status != "pending"
+                or payload.get("id") != record.record_id
+                or (
+                    previous is not None
+                    and previous.payload.get("status")
+                    in {"pending", "delivery-failed"}
+                )
+            ):
+                raise EscalationRecordError("raise transition identity is invalid")
+        elif record.record_type == "resolution":
+            decision = " ".join(str(payload.get("decision") or "").split())
+            resolved_at = str(payload.get("resolved_at") or "")
+            if (
+                previous is None
+                or previous.record_type not in {"raise", "delivery-failure"}
+                or previous.payload.get("status") not in {
+                    "pending",
+                    "delivery-failed",
+                }
+                or status != "resolved"
+                or payload.get("id") != previous.payload.get("id")
+                or payload.get("resolved_from") != previous.payload.get("status")
+                or not decision
+                or not resolved_at
+                or record.record_id
+                != _derived_record_id(
+                    "resolution",
+                    {
+                        "previous_record_sha256": previous.sha256,
+                        "decision": decision,
+                    },
+                )
+            ):
+                raise EscalationRecordError("resolution transition identity is invalid")
+            expected = dict(previous.payload)
+            expected.update(
+                {
+                    "status": "resolved",
+                    "resolved_from": previous.payload.get("status"),
+                    "decision": decision,
+                    "resolved_at": resolved_at,
+                }
+            )
+            if payload != expected:
+                raise EscalationRecordError("resolution transition payload is invalid")
+        elif record.record_type == "delivery-failure":
+            failed_at = str(payload.get("delivery_failed_at") or "")
+            if (
+                previous is None
+                or previous.record_type != "raise"
+                or previous.payload.get("status") != "pending"
+                or status != "delivery-failed"
+                or payload.get("id") != previous.payload.get("id")
+                or not failed_at
+                or record.record_id
+                != _derived_record_id(
+                    "delivery-failure",
+                    {"previous_record_sha256": previous.sha256},
+                )
+            ):
+                raise EscalationRecordError(
+                    "delivery-failure transition identity is invalid"
+                )
+            expected = dict(previous.payload)
+            expected.update(
+                {"status": "delivery-failed", "delivery_failed_at": failed_at}
+            )
+            if payload != expected:
+                raise EscalationRecordError(
+                    "delivery-failure transition payload is invalid"
+                )
+        else:
+            decision = " ".join(str(payload.get("decision") or "").split())
+            stable = {
+                "plan_sha256": _valid_sha256(payload.get("plan_sha256"), "plan"),
+                "outcome_sha256": _valid_sha256(
+                    payload.get("outcome_sha256"), "Outcome"
+                ),
+                "decision": decision,
+            }
+            if (
+                status != "resolved"
+                or payload.get("category") != "amendment"
+                or not decision
+                or record.record_id != _derived_record_id("amendment", stable)
+                or (
+                    previous is not None
+                    and previous.payload.get("status")
+                    in {"pending", "delivery-failed"}
+                )
+            ):
+                raise EscalationRecordError("amendment transition identity is invalid")
+        previous = record
 
 
 def load_attention(worktree: Path) -> dict[str, Any] | None:
@@ -500,6 +632,10 @@ def append_raise(
         }:
             raise EscalationRecordError("another coordinator escalation is unresolved")
         if latest is not None and latest.legacy:
+            if latest.payload.get("status") != "resolved":
+                raise EscalationRecordError(
+                    "legacy attention marker cannot be deterministically backfilled"
+                )
             latest = _backfill_legacy(root, latest)
         value = _record_value(
             root,
