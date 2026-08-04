@@ -60,4 +60,3 @@ make test-research-isolation
 - [`skills/research/SKILL.md`](../../skills/research/SKILL.md).
 - [`skills/unsafe-research/SKILL.md`](../../skills/unsafe-research/SKILL.md).
 - [`docs/acceptance/v2.6.3-documentation-baseline.md`](../acceptance/v2.6.3-documentation-baseline.md).
-

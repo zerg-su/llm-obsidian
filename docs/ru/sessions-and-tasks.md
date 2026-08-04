@@ -50,4 +50,3 @@ worktree и state. Текущая ветка и cwd совпадают с task c
 - [`docs/unattended-pipeline-operations.md`](../unattended-pipeline-operations.md).
 - [`scripts/harness-cli.py`](../../scripts/harness-cli.py).
 - [`docs/skill-references/failure-repair-contract.md`](../skill-references/failure-repair-contract.md).
-

@@ -35,9 +35,11 @@
 ### Исправлено
 
 - Accepted protected-research callback сохраняется как terminal completion при
-  exact cleanup. Восстановление ранее cancelled fetch/synthesis receipt
-  разрешено только при полном совпадении callback digest, run, request и
-  artifact identity; обычная cancel semantics не изменена.
+  exact cleanup. Terminal research composition никогда не возобновляется:
+  исторический cancelled accepted receipt остаётся durable evidence, а не
+  resumable work. Cleanup или явный cancel после принятия exact callback
+  завершается как `complete`; cancel без accepted callback остаётся
+  `cancelled`.
 - Исправлен bootstrap MCP config в fresh worktree: только default
   `sync-config --apply` может атомарно создать отсутствующий `runtime.env` из
   строго валидированного committed sibling example с owner-only mode.
@@ -57,6 +59,9 @@
   fallbacks, built-in pipeline descriptors и custom PipelineSpec ceilings не
   меняются за пределами exact regression-covered repairs research callback и
   default MCP runtime-config self-bootstrap.
+- Bootstrap — отдельно разрешённое compatibility exception: default
+  `sync-config --apply` получает только узкое filesystem authority создать
+  missing canonical `runtime.env` из validated committed example.
 
 ## [2.6.2] — 2026-08-03
 

@@ -41,4 +41,3 @@ Operation ledger и content-free events хранят IDs, относительн
 [PipelineSpec DSL](pipeline-dsl.md). Авторитеты:
 [`scripts/harness/pipeline_builtins.py`](../../scripts/harness/pipeline_builtins.py),
 [`docs/pipeline-observability.md`](../pipeline-observability.md).
-

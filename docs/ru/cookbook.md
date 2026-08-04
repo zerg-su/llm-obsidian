@@ -56,4 +56,3 @@ diff для product, harness status/archive для task, citations для resear
 - [`review.md`](review.md).
 - [`operations.md`](operations.md).
 - Каталог [`skills/`](../../skills/).
-

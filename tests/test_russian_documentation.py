@@ -119,12 +119,47 @@ def fenced_data_failures(files: tuple[Path, ...]) -> list[str]:
     return failures
 
 
+def trailing_blank_line_failures(files: tuple[Path, ...]) -> list[str]:
+    failures: list[str] = []
+    for path in files:
+        if not path.read_bytes().endswith(b"\n\n"):
+            continue
+        try:
+            label = path.relative_to(ROOT)
+        except ValueError:
+            label = path
+        failures.append(str(label))
+    return failures
+
+
 def skill_inventory_failures(body: str, names: tuple[str, ...]) -> list[str]:
     failures: list[str] = []
     for name in names:
         for token in (f"`{name}`", f"`/{name}`", f"`$llm-obsidian:{name}`"):
             if token not in body:
                 failures.append(token)
+    return failures
+
+
+def skill_reference_contract_failures(
+    body: str, names: tuple[str, ...]
+) -> list[str]:
+    """Require one complete input/output/effect/example row per skill."""
+
+    failures: list[str] = []
+    lines = body.splitlines()
+    for name in names:
+        prefix = f"| `{name}` · `/{name}` · `$llm-obsidian:{name}` |"
+        rows = [line for line in lines if line.startswith(prefix)]
+        if len(rows) != 1:
+            failures.append(f"{name}: expected exactly one catalog row")
+            continue
+        cells = [cell.strip() for cell in rows[0].strip("|").split("|")]
+        if len(cells) != 5 or any(not cell for cell in cells):
+            failures.append(f"{name}: row must have five non-empty cells")
+            continue
+        if "·" not in cells[4]:
+            failures.append(f"{name}: permission/effect and example are required")
     return failures
 
 
@@ -153,11 +188,15 @@ for relative in REQUIRED_PAGES[1:]:
 
 failures.extend(f"broken relative link: {item}" for item in broken_relative_links(files))
 failures.extend(f"invalid fenced data: {item}" for item in fenced_data_failures(files))
+failures.extend(
+    f"trailing blank line: {item}" for item in trailing_blank_line_failures(files)
+)
 
 skills_page = (DOCS / "skills.md")
 skills_body = skills_page.read_text(encoding="utf-8") if skills_page.is_file() else ""
 for token in skill_inventory_failures(skills_body, skill_names()):
     failures.append(f"skills inventory missing {token}")
+failures.extend(skill_reference_contract_failures(skills_body, skill_names()))
 
 for relative in GUIDE_PAGES:
     path = DOCS / relative
@@ -177,6 +216,33 @@ for source in ("AGENTS.md", "CLAUDE.md", "schemas/pipeline-spec-v1.schema.json")
     if source not in matrix_body:
         failures.append(f"source-of-truth manifest missing {source}")
 
+required_page_tokens = {
+    "getting-started.md": (
+        "--check",
+        "--skip-proxy",
+        "--skip-docling",
+        "upgrading-and-releasing.md#ошибки-и-восстановление",
+    ),
+    "testing.md": (
+        "make test-harness-coverage",
+        "statement-line denominator",
+        "git diff --check v2.6.2..HEAD",
+    ),
+    "reference/commands.md": (
+        "make test-harness-coverage",
+        "git diff --check v2.6.2..HEAD",
+    ),
+    "upgrading-and-releasing.md": (
+        ".vault-meta/release-evidence/v2.6.3-<short-head>.json",
+        "git diff --check v2.6.2..HEAD",
+    ),
+}
+for relative, tokens in required_page_tokens.items():
+    body = (DOCS / relative).read_text(encoding="utf-8")
+    for token in tokens:
+        if token not in body:
+            failures.append(f"docs/ru/{relative} missing contract token {token}")
+
 try:
     compile_documentation_pipeline()
 except (OSError, ValueError, AssertionError) as exc:
@@ -193,10 +259,19 @@ with tempfile.TemporaryDirectory(prefix="russian-docs-gate.") as raw:
     invalid_data.write_text('```json\n{"open": true\n```\n', encoding="utf-8")
     assert fenced_data_failures((invalid_data,))
 
+    trailing = scratch / "trailing.md"
+    trailing.write_text("# Heading\n\n", encoding="utf-8")
+    assert trailing_blank_line_failures((trailing,))
+
     assert skill_inventory_failures(
         "`save` `/save` `$llm-obsidian:save`",
         ("save", "review"),
     ) == ["`review`", "`/review`", "`$llm-obsidian:review`"]
+
+    assert skill_reference_contract_failures(
+        "| `save` · `/save` · `$llm-obsidian:save` | Use | Input | Output | Effect only |",
+        ("save",),
+    ) == ["save: permission/effect and example are required"]
 
     invalid_pipeline = scratch / "invalid-pipeline.json"
     invalid_pipeline.write_text("{}\n", encoding="utf-8")
@@ -217,6 +292,8 @@ decision = json.loads(
 )
 if (
     decision.get("disposition") != "not-adopted-per-stop-condition"
+    or decision.get("coordinator_decision_id")
+    != "e81aaee1-3196-4350-af9f-efb352b8d696"
     or decision.get("installed_skill") is not False
     or (ROOT / "skills" / "document-project").exists()
 ):

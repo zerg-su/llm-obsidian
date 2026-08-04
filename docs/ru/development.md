@@ -52,4 +52,3 @@ Diff ограничен plan ownership, не содержит credentials/derive
 - [`docs/skill-references/failure-repair-contract.md`](../skill-references/failure-repair-contract.md).
 - [`skills/tdd/SKILL.md`](../../skills/tdd/SKILL.md).
 - [`skills/debug/SKILL.md`](../../skills/debug/SKILL.md).
-

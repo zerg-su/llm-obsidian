@@ -54,4 +54,3 @@ version — `save-plan`. Review плана проверяет intent до produc
 - [`skills/save-plan/SKILL.md`](../../skills/save-plan/SKILL.md).
 - [`skills/review/SKILL.md`](../../skills/review/SKILL.md).
 - [`AGENTS.md`](../../AGENTS.md), Failure-to-repair и Core rules.
-

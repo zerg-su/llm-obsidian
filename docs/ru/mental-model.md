@@ -54,4 +54,3 @@ migration, public interface и external effects требуют решения в
 
 Источники: [`AGENTS.md`](../../AGENTS.md), [`docs/task-sessions.md`](../task-sessions.md),
 [`docs/unattended-pipeline-operations.md`](../unattended-pipeline-operations.md).
-

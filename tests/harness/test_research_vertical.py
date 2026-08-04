@@ -380,6 +380,27 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and fetch_request.origin_surface
         == "11111111-1111-4111-8111-111111111111",
     )
+    starts_before_early_poll = tuple(runtime.starts)
+    try:
+        advance_research(
+            pipeline_request,
+            runtime,
+            store,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            fetch_cwd=fetch,
+            synth_cwd=synth,
+            synth_runtime_home=synth_home,
+            callback_wake="finalize exact research pipeline",
+        )
+    except ValueError as exc:
+        fetch_poll_error = str(exc)
+    else:
+        fetch_poll_error = ""
+    check(
+        "early fetch poll keeps the precise callback diagnostic",
+        fetch_poll_error == "research fetch callback has not been accepted"
+        and tuple(runtime.starts) == starts_before_early_poll,
+    )
 
     source_body = "# Source\n\nBounded source text.\n"
     sources = fetch / "sources"
@@ -425,41 +446,14 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
                 f"research-fetch-{fetch_payload_digest[:24]}"
             ),
             accepted_callback_kind="research",
-            accepted_callback_sha256="0" * 64,
+            accepted_callback_sha256=fetch_payload_digest,
         ),
         expected_revision=accepted_fetch.revision,
     )
-    for state in ("finalizing", "exiting", "cancelled"):
-        store.transition(
-            pipeline_request.owner_id,
-            execution.fetch.spec.operation_id,
-            state,
-        )
-    try:
-        advance_research(
-            pipeline_request,
-            runtime,
-            store,
-            origin_surface="11111111-1111-4111-8111-111111111111",
-            fetch_cwd=fetch,
-            synth_cwd=synth,
-            synth_runtime_home=synth_home,
-            callback_wake="finalize exact research pipeline",
-        )
-    except ValueError:
-        check("cancelled fetch recovery rejects a callback digest mismatch", True)
-    else:
-        check("cancelled fetch recovery rejects a callback digest mismatch", False)
-    mismatched_fetch = store.read(
-        pipeline_request.owner_id, execution.fetch.spec.operation_id
-    )
-    store.save(
-        replace(
-            mismatched_fetch,
-            revision=mismatched_fetch.revision + 1,
-            accepted_callback_sha256=fetch_payload_digest,
-        ),
-        expected_revision=mismatched_fetch.revision,
+    store.transition(
+        pipeline_request.owner_id,
+        execution.fetch.spec.operation_id,
+        "finalizing",
     )
     execution = advance_research(
         pipeline_request,
@@ -472,12 +466,15 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         callback_wake="finalize exact research pipeline",
     )
     check(
-        "cancelled accepted fetch recovers to the separate synthesis stage",
+        "accepted fetch completes before the separate synthesis stage",
         execution.stage == "synth"
-        and execution.fetch.state == "cancelled"
+        and execution.parent.state == "awaiting-callback"
+        and execution.fetch.state == "complete"
         and execution.synth is not None
         and len(runtime.starts) == 2
         and runtime.starts[1].callback_mode == "research-synth"
+        and runtime.exits == [execution.fetch.spec.operation_id]
+        and runtime.cleanups == runtime.exits
         and (synth / "artifact.json").is_file()
         and (synth / "context" / "packet" / "manifest.json").is_file(),
     )
@@ -500,6 +497,24 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and synth_request.callback_pointer == "complete.json"
         and synth_request.research_request_sha256 == ""
         and len(store.list(pipeline_request.owner_id)) == 3,
+    )
+    exits_before_synth_poll = tuple(runtime.exits)
+    try:
+        finalize_research(
+            pipeline_request,
+            runtime,
+            store,
+            synth_cwd=synth,
+        )
+    except ValueError as exc:
+        synth_poll_error = str(exc)
+    else:
+        synth_poll_error = ""
+    check(
+        "early synthesis poll keeps the precise callback diagnostic",
+        synth_poll_error
+        == "research synthesis callback has not been accepted"
+        and tuple(runtime.exits) == exits_before_synth_poll,
     )
     provenance_path = (
         store.root
@@ -539,7 +554,8 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
     check(
         "restart replay does not repeat the accepted fetch or synth start",
         replayed.stage == "synth"
-        and replayed.fetch.state == "cancelled"
+        and replayed.parent.state == "awaiting-callback"
+        and replayed.fetch.state == "complete"
         and replayed.synth is not None
         and replayed.synth.spec == execution.synth.spec
         and replay_runtime.starts == []
@@ -623,8 +639,146 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and completed.parent.state == "complete"
         and completed.result_artifact is not None
         and completed.result_artifact["path"] == str((synth / "answer.md").resolve())
-        and runtime.exits == [execution.synth.spec.operation_id]
+        and runtime.exits
+        == [execution.fetch.spec.operation_id, execution.synth.spec.operation_id]
         and runtime.cleanups == runtime.exits,
+    )
+
+with tempfile.TemporaryDirectory(prefix="research-terminal-parent.") as raw:
+    root = Path(raw)
+    store = OperationStore(root / "state")
+    runtime = FakeResearchRuntime(store)
+    fetch = root / "fetch"
+    synth = root / "synth"
+    fetch_context = fetch / "context" / "packet"
+    fetch_context.mkdir(parents=True)
+    query = "terminal parent must stay terminal"
+    (fetch_context / "question.bin").write_text(query, encoding="utf-8")
+    (fetch_context / "manifest.json").write_text(
+        '{"schema_version":1}\n', encoding="utf-8"
+    )
+    (fetch / "fetch-prompt.md").write_text("fetch safely\n", encoding="utf-8")
+    synth.mkdir()
+    (synth / "synth-prompt.md").write_text(
+        "synthesize safely\n", encoding="utf-8"
+    )
+    fetch_home = root / "fetch-home"
+    synth_home = root / "synth-home"
+    fetch_home.mkdir(mode=0o700)
+    synth_home.mkdir(mode=0o700)
+    terminal_request = ResearchOperationRequest(
+        policy=ResearchRequest(
+            operation_id="research-terminal-parent-1",
+            query_pointer="context/packet/question.bin",
+            context_manifest="context/packet/manifest.json",
+        ),
+        owner_id="owner-terminal-parent",
+        route=route,
+        context=ResearchContext(
+            manifest="context/packet/manifest.json",
+            request_sha256=hashlib.sha256(query.encode()).hexdigest(),
+        ),
+    )
+    terminal_execution = start_research(
+        terminal_request,
+        runtime,
+        store,
+        origin_surface="22222222-2222-4222-8222-222222222222",
+        fetch_cwd=fetch,
+        fetch_runtime_home=fetch_home,
+        callback_wake="do not resume terminal research",
+    )
+    source_body = "# Source\n\nDurable evidence only.\n"
+    sources = fetch / "sources"
+    sources.mkdir()
+    (sources / "source-1.md").write_text(source_body, encoding="utf-8")
+    fetch_artifact = {
+        "schema_version": 2,
+        "run_id": terminal_execution.fetch.run_id,
+        "request_sha256": terminal_request.context.request_sha256,
+        "fetched_at": "2026-08-04T00:00:00Z",
+        "sources": [
+            {
+                "url": "https://example.com/durable",
+                "title": "Durable",
+                "content_path": "sources/source-1.md",
+                "content_sha256": hashlib.sha256(
+                    source_body.encode()
+                ).hexdigest(),
+                "source_class": "official",
+            }
+        ],
+        "fetch_errors": [],
+    }
+    (fetch / "artifact.json").write_text(
+        json.dumps(fetch_artifact), encoding="utf-8"
+    )
+    fetch_payload = {
+        "stage": "fetch",
+        "artifact_path": "artifact.json",
+        "artifact_sha256": hashlib.sha256(
+            (fetch / "artifact.json").read_bytes()
+        ).hexdigest(),
+        "source_count": 1,
+    }
+    payload_digest = hashlib.sha256(
+        json.dumps(
+            fetch_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    accepted_fetch = store.read(
+        terminal_request.owner_id,
+        terminal_execution.fetch.spec.operation_id,
+    )
+    store.save(
+        replace(
+            accepted_fetch,
+            revision=accepted_fetch.revision + 1,
+            accepted_callback_id=(
+                f"research-fetch-{payload_digest[:24]}"
+            ),
+            accepted_callback_kind="research",
+            accepted_callback_sha256=payload_digest,
+        ),
+        expected_revision=accepted_fetch.revision,
+    )
+    for operation_id in (
+        terminal_execution.fetch.spec.operation_id,
+        terminal_execution.parent.spec.operation_id,
+    ):
+        for state in ("cancelling", "exiting", "cancelled"):
+            store.transition(
+                terminal_request.owner_id,
+                operation_id,
+                state,
+            )
+    store_records_before = tuple(store.list(terminal_request.owner_id))
+    synth_files_before = tuple(sorted(path.name for path in synth.iterdir()))
+    try:
+        advance_research(
+            terminal_request,
+            runtime,
+            store,
+            origin_surface="22222222-2222-4222-8222-222222222222",
+            fetch_cwd=fetch,
+            synth_cwd=synth,
+            synth_runtime_home=synth_home,
+            callback_wake="do not resume terminal research",
+        )
+    except ValueError as exc:
+        terminal_error = str(exc)
+    else:
+        terminal_error = ""
+    check(
+        "terminal research parent rejects recovery before child or provider effects",
+        terminal_error == "terminal research composition cannot be resumed"
+        and runtime.starts == [runtime.starts[0]]
+        and runtime.exits == []
+        and runtime.cleanups == []
+        and tuple(store.list(terminal_request.owner_id))
+        == store_records_before
+        and tuple(sorted(path.name for path in synth.iterdir()))
+        == synth_files_before,
     )
 
 print("\nAll research vertical tests passed.")

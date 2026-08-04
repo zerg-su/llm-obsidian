@@ -42,4 +42,3 @@
 publish, deploy, tag или release. Операционные правила принадлежат
 [`AGENTS.md`](../../AGENTS.md) и [`CLAUDE.md`](../../CLAUDE.md); handbook помогает
 применять их, но не переопределяет.
-

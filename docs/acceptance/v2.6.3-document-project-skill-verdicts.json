@@ -3,6 +3,7 @@
   "type": "capability-decision",
   "capability": "document-project",
   "disposition": "not-adopted-per-stop-condition",
+  "coordinator_decision_id": "e81aaee1-3196-4350-af9f-efb352b8d696",
   "installed_skill": false,
   "baseline_cases": 4,
   "baseline_failures": 0,

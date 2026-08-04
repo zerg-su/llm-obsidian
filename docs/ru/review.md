@@ -45,4 +45,3 @@ policy входят в operation identity. Same-session verification сохра�
 Источники: [`skills/review/SKILL.md`](../../skills/review/SKILL.md),
 [`docs/task-sessions.md`](../task-sessions.md),
 [`docs/model-routing.md`](../model-routing.md).
-

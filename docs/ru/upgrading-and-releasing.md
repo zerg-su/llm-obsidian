@@ -31,13 +31,17 @@ scripts/mcp-gateway/mcp-gateway.sh doctor
 ```bash
 make test-docs
 make test
+make test-harness-coverage
 make acceptance-check
 python3 scripts/validate-vault.py --summary
-git diff --check
+git diff --check v2.6.2..HEAD
 ```
 
 Release candidate включает changelogs, manifests версии 2.6.3, release notes,
-acceptance/readiness ledgers и command evidence одного HEAD.
+acceptance/readiness ledgers и content-free command receipt
+`.vault-meta/release-evidence/v2.6.3-<short-head>.json` одного HEAD. Receipt
+содержит полный 40-character SHA, команды и exit codes; новый commit делает его
+stale и требует повторного exact-HEAD gate.
 
 ## Ожидаемый результат и проверка
 

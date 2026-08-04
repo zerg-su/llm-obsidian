@@ -54,4 +54,3 @@ Validation подтверждает frontmatter, caps и plan lifecycle. Retriev
 - [`scripts/vault-write.py`](../../scripts/vault-write.py).
 - [`scripts/retrieve.py`](../../scripts/retrieve.py).
 - [`docs/dragonscale-guide.md`](../dragonscale-guide.md).
-

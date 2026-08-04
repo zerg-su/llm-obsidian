@@ -55,4 +55,3 @@ Gateway health отвечает только для настроенных route
 - [`docs/mcp-gateway.md`](../mcp-gateway.md).
 - [`docs/pipeline-observability.md`](../pipeline-observability.md).
 - [`AGENTS.md`](../../AGENTS.md), Write path и telemetry boundary.
-

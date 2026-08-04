@@ -46,13 +46,14 @@ skills `dispatch`/`review`/`reap` вместо ручной provider/cmux orches
 |---|---|
 | `make test-docs` | Russian handbook + PipelineSpec |
 | `make test` | Полный hermetic suite |
+| `make test-harness-coverage` | AST statement-line denominator, critical floors и transition matrix; обязателен после harness runtime change и перед RC |
 | `make bench-retrieval` | RU/EN retrieval metrics |
 | `make acceptance-check` | Model-free acceptance contract |
 | `make acceptance-live` | Authorized provider-backed affected cells |
 | `make test-instruction-lint` | Skill/instruction safety contracts |
 | `make test-skill-budget` | Registry/body budget |
 | `make test-codex-adapter` | Generated marketplace parity |
-| `git diff --check` | Whitespace/conflict-marker hygiene |
+| `git diff --check v2.6.2..HEAD` | Whitespace/conflict-marker hygiene для всего release range, а не только working tree |
 
 ## Git write boundary
 

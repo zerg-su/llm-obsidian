@@ -62,4 +62,3 @@ Operation identity и terminal state согласованы; повторный 
 - [`AGENTS.md`](../../AGENTS.md), Failure-to-repair.
 - [`docs/unattended-pipeline-operations.md`](../unattended-pipeline-operations.md).
 - [`docs/mcp-gateway.md`](../mcp-gateway.md).
-

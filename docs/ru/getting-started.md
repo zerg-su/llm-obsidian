@@ -64,11 +64,20 @@ Validation должна завершиться без ошибок; retrieval д
   CLI по его документации; repository bootstrap не выдаёт provider access.
 - Codex не видит новый skill: проверьте plugin list и начните новый thread;
   существующий thread сохраняет стартовый registry.
+- Для dry run используйте `--check`: он ничего не устанавливает. Варианты
+  `--skip-proxy` и `--skip-docling` оставляют соответственно MCP proxy и
+  document/OCR runtime непроверенными и неустановленными; `--skip-vault` не
+  запускает vault setup. Эти flags можно комбинировать, но пропущенная
+  capability остаётся недоступной до отдельного успешного setup.
 - Bootstrap сообщает optional dependency: используйте напечатанную точную
-  repair-команду или повторите с документированным skip-флагом; не редактируйте
-  generated metadata вручную.
+  repair-команду или один из названных skip-flags; не редактируйте generated
+  metadata вручную.
 - Vault validation красный: не обходите Stop hook. Сначала выполните read-only
   validation, исправьте названный файл и повторите проверку.
+- Универсального destructive uninstall нет. Для rollback частичной установки
+  сохраните `wiki/`, `.obsidian` и secrets, верните только repository/plugin к
+  зафиксированной версии через поддерживаемый installation path и выполните
+  шаги из [раздела rollback](upgrading-and-releasing.md#ошибки-и-восстановление).
 
 ## Источники истины
 

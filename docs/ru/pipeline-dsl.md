@@ -60,4 +60,3 @@ Compiler отвергает arbitrary command, неизвестные keys/check
 authority expansion, reserved `outcome-contract` pointer, graph bombs,
 unbounded backward edges, превышение budget и built-in-equivalent custom spec.
 Freeze связывает definition hash и approval-card hash; replay revalidates оба.
-

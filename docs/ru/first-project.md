@@ -63,4 +63,3 @@ Diff содержит только утверждённые файлы; evidence
 - [`skills/dispatch/SKILL.md`](../../skills/dispatch/SKILL.md).
 - [`skills/review/SKILL.md`](../../skills/review/SKILL.md).
 - [`skills/reap/SKILL.md`](../../skills/reap/SKILL.md).
-
