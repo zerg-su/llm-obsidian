@@ -118,7 +118,7 @@ from harness.adapters.process import ProcessAdapter
 from harness.callbacks import CallbackBroker
 from harness.contracts import OperationSpec, OwnedResources, RuntimeRoute
 from harness.runtime_worker import run
-from harness.store import OperationStore
+from harness.store import OperationStore, StoreError
 from harness.supervisor import OperationSupervisor
 import harness.runtime_worker as executed_runtime_worker
 import harness.runtime_worker_liveness as executed_runtime_liveness
@@ -240,15 +240,22 @@ ready_deadline = time.monotonic() + 2
 while not ready_path.is_file() and time.monotonic() < ready_deadline:
     time.sleep(0.01)
 ready = json.loads(ready_path.read_text(encoding="utf-8"))
-supervisor.bind_resources(
-    OwnedResources(
-        "11111111-1111-4111-8111-111111111111",
-        ready["process_group"],
-        ready["supervisor_pid"],
-        ready["process_identity"],
-        ready["supervisor_identity"],
-    )
+resources = OwnedResources(
+    "11111111-1111-4111-8111-111111111111",
+    ready["process_group"],
+    ready["supervisor_pid"],
+    ready["process_identity"],
+    ready["supervisor_identity"],
 )
+bind_deadline = time.monotonic() + 1
+while True:
+    try:
+        supervisor.bind_resources(resources)
+        break
+    except StoreError as exc:
+        if str(exc) != "stale operation writer" or time.monotonic() >= bind_deadline:
+            raise
+        time.sleep(0.01)
 worker.join(timeout=3)
 assert not worker.is_alive()
 exit_code = worker_results[0]

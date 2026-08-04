@@ -22,6 +22,9 @@ test-harness:
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
 	@python3 tests/harness/test_callbacks.py
+	@python3 tests/harness/test_callback_submit_recovery.py
+	@python3 tests/harness/test_callback_submit_recovery_runtime.py
+	@python3 tests/harness/test_harness_control_plane.py
 	@python3 tests/harness/test_release_transition_matrix.py
 	@python3 tests/harness/test_context_verification.py
 	@python3 tests/harness/test_workflows.py
