@@ -596,6 +596,15 @@ class RuntimeSessionLaunchMixin:
                 if prior_submit_accepted
                 else 0
             )
+            prior_pre_send_screen_sha256 = str(
+                receipt.get("pre_send_screen_sha256") or ""
+            ) if receipt else ""
+            prior_pre_send_editor_sha256 = str(
+                receipt.get("pre_send_editor_sha256") or ""
+            ) if receipt else ""
+            prior_paste_screen_sha256 = str(
+                receipt.get("paste_screen_sha256") or ""
+            ) if receipt else ""
             liveness = LivenessController(
                 self._state_root(record) / "liveness"
             )
@@ -612,13 +621,22 @@ class RuntimeSessionLaunchMixin:
                 except ContractError:
                     return False
 
-            def observe_stage(status: str, submit_count: int) -> None:
+            def observe_stage(
+                status: str,
+                submit_count: int,
+                pre_send_screen_sha256: str,
+                pre_send_editor_sha256: str,
+                paste_screen_sha256: str,
+            ) -> None:
                 self._write_json(
                     receipt_path,
                     {
                         **receipt_identity,
                         "status": status,
                         "submit_count": submit_count,
+                        "pre_send_screen_sha256": pre_send_screen_sha256,
+                        "pre_send_editor_sha256": pre_send_editor_sha256,
+                        "paste_screen_sha256": paste_screen_sha256,
                     },
                 )
                 if status == "submit-retried":
@@ -644,6 +662,9 @@ class RuntimeSessionLaunchMixin:
                     send_prompt=send_prompt,
                     submit_already_accepted=prior_submit_accepted,
                     accepted_submit_count=prior_submit_count,
+                    pre_send_screen_sha256=prior_pre_send_screen_sha256,
+                    pre_send_editor_sha256=prior_pre_send_editor_sha256,
+                    paste_screen_sha256=prior_paste_screen_sha256,
                 )
                 status = "acknowledged" if result.acknowledged else "unconfirmed"
                 self._write_json(

@@ -164,7 +164,9 @@ with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
         "schema_version": 1,
         "generation": 2,
         "operation_id": "review-round-initial",
+        "run_id": "verification-run",
         "callback_id": "callback-initial",
+        "payload_sha256": "a" * 64,
         "status": "accepted",
     }
     receipt_path.write_text(
@@ -199,6 +201,25 @@ with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
         "receipt matching the current callback target is liveness progress",
         _current_callback_receipt_sha256(runtime_root)
         == hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    )
+    receipt["status"] = "duplicate"
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "exact duplicate receipt reconstructed after broker acceptance is progress",
+        _current_callback_receipt_sha256(runtime_root)
+        == hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+    )
+    receipt["run_id"] = "wrong-run"
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    check(
+        "duplicate receipt with the wrong run is not liveness progress",
+        _current_callback_receipt_sha256(runtime_root) == "",
     )
 
 with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:

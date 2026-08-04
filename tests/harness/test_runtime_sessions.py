@@ -1460,15 +1460,23 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
     legacy_cmux.sent.append((SURFACE, legacy_prompt))
     legacy_cmux.submits_at_last_send = legacy_cmux.submit_count
-    legacy = legacy_manager.continue_session(
-        "owner-1", "runtime-1", "checkpoint-1", "continue.md"
-    )
+    try:
+        legacy_manager.continue_session(
+            "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("legacy continuation without a baseline must fail closed")
+    legacy = legacy_store.read("owner-1", "runtime-1")
     check(
-        "legacy false-success continuation is acknowledged without repasting",
-        legacy.record.state == "running"
+        "legacy false-success continuation without durable baseline needs attention",
+        legacy.state == "attention-required"
+        and legacy.attention_reason
+        == AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED
         and sum(text == legacy_prompt for _surface, text in legacy_cmux.sent) == 1
-        and legacy_cmux.submit_count == legacy_cmux.submits_at_last_send + 1,
-        (legacy.record, legacy_cmux.sent, legacy_cmux.submit_count, legacy_cmux.submits_at_last_send),
+        and legacy_cmux.submit_count == legacy_cmux.submits_at_last_send,
+        (legacy, legacy_cmux.sent, legacy_cmux.submit_count, legacy_cmux.submits_at_last_send),
     )
     child_spec = OperationSpec(
         "round-1",

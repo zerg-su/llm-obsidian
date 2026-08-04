@@ -10,7 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from harness.runtime_session_continuation import deliver_continuation  # noqa: E402
+from harness.runtime_session_continuation import (  # noqa: E402
+    _editor_digest,
+    _screen_digest,
+    deliver_continuation,
+)
 
 
 SURFACE = "11111111-1111-1111-1111-111111111111"
@@ -47,6 +51,9 @@ def run_case(
     send_prompt: bool = True,
     submit_already_accepted: bool = False,
     accepted_submit_count: int = 0,
+    pre_send_screen_sha256: str = "",
+    pre_send_editor_sha256: str = "",
+    paste_screen_sha256: str = "",
     runtime: str = "codex",
     ownership: list[bool] | None = None,
 ):
@@ -74,10 +81,13 @@ def run_case(
         artifact_ready=artifact_ready,
         ownership_ready=ownership_ready,
         reserve_retry=reserve_retry,
-        observe_stage=lambda stage, count: stages.append((stage, count)),
+        observe_stage=lambda stage, count, *_digests: stages.append((stage, count)),
         send_prompt=send_prompt,
         submit_already_accepted=submit_already_accepted,
         accepted_submit_count=accepted_submit_count,
+        pre_send_screen_sha256=pre_send_screen_sha256,
+        pre_send_editor_sha256=pre_send_editor_sha256,
+        paste_screen_sha256=paste_screen_sha256,
         observation_limit=2,
         wait=lambda _seconds: None,
     )
@@ -92,7 +102,7 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.evidence == "provider-activity"
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [("prepared", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
 
 result, port, retries, _stages = run_case(
@@ -139,12 +149,26 @@ assert result.acknowledged and result.evidence == "artifact"
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
 print("OK   callback artifact wins the delivery race")
 
+transport_baseline = "› previous editor"
 result, port, retries, _stages = run_case(
     ["› # Harness-owned review verification", "• Working"],
     send_prompt=False,
+    pre_send_screen_sha256=_screen_digest(transport_baseline),
+    pre_send_editor_sha256=_editor_digest("codex", transport_baseline),
 )
 assert result.acknowledged and port.sent == [] and port.keys == ["Enter"]
-print("OK   retained false-success recovery submits without repasting")
+print("OK   transport replay submits only after a baseline-bound editor change")
+
+stale_editor = "› # Harness-owned review verification"
+result, port, retries, _stages = run_case(
+    [stale_editor, "• Working (stale previous turn)"],
+    send_prompt=False,
+    pre_send_screen_sha256=_screen_digest(stale_editor),
+    pre_send_editor_sha256=_editor_digest("codex", stale_editor),
+)
+assert not result.acknowledged and result.evidence == "paste-unconfirmed"
+assert port.sent == [] and port.keys == [] and not retries
+print("OK   transport replay cannot submit a stale same-heading editor")
 
 result, port, retries, stages = run_case(
     [
@@ -155,7 +179,7 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.submit_count == 1
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [("prepared", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
 print("OK   stale pre-Enter activity cannot acknowledge the new continuation")
 
 result, port, retries, _stages = run_case(
@@ -181,6 +205,7 @@ result, port, retries, _stages = run_case(
     send_prompt=False,
     submit_already_accepted=True,
     accepted_submit_count=1,
+    paste_screen_sha256=_screen_digest("› # Harness-owned review verification"),
 )
 assert result.acknowledged and result.submit_count == 1
 assert port.sent == [] and port.keys == [] and not retries
@@ -191,10 +216,23 @@ result, port, retries, _stages = run_case(
     send_prompt=False,
     submit_already_accepted=True,
     accepted_submit_count=1,
+    paste_screen_sha256=_screen_digest("› # Harness-owned review verification"),
 )
 assert not result.acknowledged and result.evidence == "submit-effect-uncertain"
 assert port.sent == [] and port.keys == [] and not retries
 print("OK   accepted submit with visible editor fails closed without replay")
+
+stale_activity = "• Working (stale previous turn)"
+result, port, retries, _stages = run_case(
+    [stale_activity],
+    send_prompt=False,
+    submit_already_accepted=True,
+    accepted_submit_count=1,
+    paste_screen_sha256=_screen_digest(stale_activity),
+)
+assert not result.acknowledged and result.evidence == "submit-effect-uncertain"
+assert port.sent == [] and port.keys == [] and not retries
+print("OK   submit replay rejects activity identical to its durable baseline")
 
 result, port, retries, _stages = run_case(
     [

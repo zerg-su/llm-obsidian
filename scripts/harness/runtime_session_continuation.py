@@ -20,7 +20,7 @@ class ContinuationPort(Protocol):
 ArtifactProbe = Callable[[], bool]
 OwnershipProbe = Callable[[], bool]
 RetryReservation = Callable[[], bool]
-StageObserver = Callable[[str, int], None]
+StageObserver = Callable[[str, int, str, str, str], None]
 Waiter = Callable[[float], None]
 
 
@@ -50,6 +50,10 @@ def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
         return ()
     lines = [" ".join(line.strip().split()) for line in screen.splitlines()]
     return tuple(line for line in lines[-24:] if line.startswith(marker))
+
+
+def _editor_digest(runtime: str, screen: str) -> str:
+    return sha256("\n".join(_editor_state(runtime, screen)).encode("utf-8")).hexdigest()
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
@@ -106,6 +110,9 @@ def deliver_continuation(
     send_prompt: bool = True,
     submit_already_accepted: bool = False,
     accepted_submit_count: int = 0,
+    pre_send_screen_sha256: str = "",
+    pre_send_editor_sha256: str = "",
+    paste_screen_sha256: str = "",
     observation_limit: int = 20,
     observation_interval_seconds: float = 0.05,
     wait: Waiter = sleep,
@@ -133,14 +140,30 @@ def deliver_continuation(
     if not ownership_ready():
         return ContinuationDelivery(False, "ownership-lost", 0)
 
-    pre_send_digest = ""
-    pre_send_editor: tuple[str, ...] = ()
+    pre_send_digest = pre_send_screen_sha256
+    pre_send_editor_digest = pre_send_editor_sha256
     if send_prompt:
         pre_send_screen = port.read(surface_id)
         pre_send_digest = _screen_digest(pre_send_screen)
-        pre_send_editor = _editor_state(runtime, pre_send_screen)
+        pre_send_editor_digest = _editor_digest(runtime, pre_send_screen)
+        observe_stage(
+            "prepared", 0, pre_send_digest, pre_send_editor_digest, ""
+        )
         port.send(surface_id, prompt)
-        observe_stage("transport-accepted", 0)
+        observe_stage(
+            "transport-accepted", 0, pre_send_digest, pre_send_editor_digest, ""
+        )
+    elif not submit_already_accepted and (
+        re.fullmatch(r"[0-9a-f]{64}", pre_send_digest) is None
+        or re.fullmatch(r"[0-9a-f]{64}", pre_send_editor_digest) is None
+    ):
+        return ContinuationDelivery(False, "replay-baseline-unavailable", 0)
+    elif submit_already_accepted and re.fullmatch(
+        r"[0-9a-f]{64}", paste_screen_sha256
+    ) is None:
+        return ContinuationDelivery(
+            False, "submit-effect-uncertain", accepted_submit_count
+        )
 
     paste_screen = ""
     paste_digest = ""
@@ -152,6 +175,10 @@ def deliver_continuation(
         screen = port.read(surface_id)
         screen_state = classify_continuation_screen(runtime, screen, anchor)
         if screen_state == "active" and submit_already_accepted:
+            if _screen_digest(screen) == paste_screen_sha256:
+                return ContinuationDelivery(
+                    False, "submit-effect-uncertain", accepted_submit_count
+                )
             return ContinuationDelivery(
                 True, "provider-activity", accepted_submit_count
             )
@@ -160,9 +187,9 @@ def deliver_continuation(
                 return ContinuationDelivery(
                     False, "submit-effect-uncertain", accepted_submit_count
                 )
-            if send_prompt and (
+            if (
                 _screen_digest(screen) == pre_send_digest
-                or _editor_state(runtime, screen) == pre_send_editor
+                or _editor_digest(runtime, screen) == pre_send_editor_digest
             ):
                 if observation + 1 < observation_limit:
                     wait(observation_interval_seconds)
@@ -190,6 +217,9 @@ def deliver_continuation(
         observe_stage(
             "submit-retried" if submit_attempt else "submit-accepted",
             submit_count,
+            pre_send_digest,
+            pre_send_editor_digest,
+            paste_digest,
         )
         for observation in range(observation_limit):
             if artifact_ready():

@@ -382,6 +382,8 @@ class RuntimeWorkerSummaryMixin:
                 "schema_version": 1,
                 "callback_id": envelope.callback_id,
                 "operation_id": envelope.operation_id,
+                "run_id": envelope.run_id,
+                "payload_sha256": envelope.payload_sha256,
                 "status": "duplicate" if acceptance.duplicate else "accepted",
             },
         )

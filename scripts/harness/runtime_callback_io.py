@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -249,7 +250,16 @@ def _current_callback_receipt_sha256(runtime_root: Path) -> str:
         or not operation_id
         or receipt.get("generation") != generation
         or receipt.get("operation_id") != operation_id
-        or receipt.get("status") != "accepted"
+        or receipt.get("status") not in {"accepted", "duplicate"}
+    ):
+        return ""
+    if receipt.get("status") == "duplicate" and (
+        receipt.get("run_id") != target.get("run_id")
+        or not isinstance(receipt.get("callback_id"), str)
+        or not receipt.get("callback_id")
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(receipt.get("payload_sha256") or "")
+        )
     ):
         return ""
     return hashlib.sha256(receipt_raw).hexdigest()

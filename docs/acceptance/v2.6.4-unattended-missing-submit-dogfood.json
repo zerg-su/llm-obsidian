@@ -2,7 +2,7 @@
   "schema_version": 1,
   "evidence_id": "E6-unattended-dogfood",
   "fixture": "tests/harness/test_callback_submit_recovery_runtime.py",
-  "base_commit": "801f020e1bfaf73ba368aeb4771f33e372e83c75",
+  "base_commit": "99c4658562e868c9659c6722631f21d1228fa37a",
   "owner_id": "review-owner-3",
   "parent_operation_id": "review-parent-3",
   "child_operation_id": "review-round-3",

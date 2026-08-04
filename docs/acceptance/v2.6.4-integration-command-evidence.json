@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "release": "2.6.4",
+  "evidence": [
+    {
+      "evidence_id": "E7-stop-wikilink-self-heal",
+      "command": "bash tests/test_stop_hook.sh",
+      "exit_code": 0,
+      "output_sha256": "e78ace8e0ff049973b0d225ee49096b70dd712deeb8553f6419015e741fbef98",
+      "result": "66 passed, 0 failed",
+      "required_observables": [
+        "sh-repair-pre-index-stale",
+        "sh-repair-exit0",
+        "sh-repair-bounded-report",
+        "sh-repair-page-committed",
+        "sh-repair-single-commit",
+        "sh-repair-index-event-current",
+        "sh-ambiguous-source-unchanged",
+        "sh-ambiguous-no-commit",
+        "sh-ambiguous-blocked"
+      ]
+    },
+    {
+      "evidence_id": "E9-task-dcg-whole-command-matrix",
+      "command": "bash tests/test_dcg_assets.sh && bash scripts/dcg-test-suite.sh",
+      "exit_code": 0,
+      "output_sha256": "1f548d4801df98b03be88ca4cc009f37e62c9adf849e413a7760f23068d43c44",
+      "result": "19 asset checks passed; 157 policy cases passed (11 allowed, 146 blocked)",
+      "required_observables": [
+        "exact task_escalation.py raise argv allowed",
+        "bash wrapper blocked",
+        "semicolon composition blocked",
+        "command substitution blocked",
+        "pipe blocked",
+        "redirect blocked",
+        "newline composition blocked"
+      ]
+    }
+  ]
+}

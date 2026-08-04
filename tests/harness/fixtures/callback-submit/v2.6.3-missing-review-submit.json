@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "base_ref": "v2.6.3",
-  "base_commit": "801f020e1bfaf73ba368aeb4771f33e372e83c75",
+  "base_commit": "99c4658562e868c9659c6722631f21d1228fa37a",
   "base_runtime_worker_sha256": "87292326eba45344ff692287f85333cd2613ae2963c590a1afd659646fa45fad",
   "base_runtime_worker_liveness_sha256": "b36e9ef88a20777a819d92188bece7d531a102552e36b5cce3feeef07cb7d657",
   "base_runtime_worker_loop_sha256": "babec427f8a7f7d7aa2d372686818db90a3c49a26649a49e8ec5d3b318a80848",

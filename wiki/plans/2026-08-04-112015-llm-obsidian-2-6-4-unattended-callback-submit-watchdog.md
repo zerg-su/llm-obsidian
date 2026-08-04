@@ -431,3 +431,25 @@ E12/E13/E14 и re-freeze authority закреплены в [[LLM Obsidian 2.6.4 
 ## Завершение
 
 2.6.4 becomes RC only when E1–E14 are established on one exact HEAD; all D-264 dispositions are durable; one shared nudge budget, callback deadline and accepted-timeout rearm are proven; same-session continuation success is bound to semantic provider acknowledgment rather than transport exit alone; offline dogfood advances without manual action; normal review has zero extra effects; plan-review mistakes fail before provider launch; Wiki repair rebuilds derived state through the sole writer; and provider/permission/model budgets match v2.6.3. Push, tag and GitHub release remain separate explicit user actions after terminal approval.
+
+
+## Append-only release amendment D-264-17 through D-264-30
+
+This coordinator-owned amendment preserves the frozen Outcome Contract while recording defects discovered by later exact-HEAD dogfood and review. It is authoritative together with the original Capability Dispositions table.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-17 | harness | stale provider activity before Enter | `included` | `test_continuation_delivery.py`: current input then Enter then changed activity |
+| D-264-18 | harness | crash after callback-submit reservation | `included` | runtime kill-point tests after paste and Enter |
+| D-264-19 | plan review | dirty protected bytes at unchanged HEAD | `included` | `test_plan_review_facade.py` exact Git-byte guards |
+| D-264-20 | permission policy | shell composition after exact escalation argv | `included` | task DCG whole-command matrix and E9 receipt |
+| D-264-21 | coordinator | user-requested 2.7 planning page in 2.6.4 delta | `included` | accepted scope deviation in `docs/acceptance/v2.6.4-accepted-deviations.json`; no 2.7 runtime/DSL change |
+| D-264-22 | review gate | verification evidence reread from resolved HEAD | `included` | exact reviewed-Git evidence rebind plus resolved delta binding |
+| D-264-23 | callback watchdog | accepted callback misclassified stale | `included` | accepted current-generation receipt is a zero-effect terminal recovery signal |
+| D-264-24 | continuation transport | stale same-heading editor before initial Enter | `included` | durable pre-send screen/editor baseline and ordering matrix |
+| D-264-25 | review gate | resolution parent resumed to `running` | `included` | running rearm requires durable non-empty awaiting-resolution evidence |
+| D-264-26 | continuation transport | transport replay without current-paste identity | `included` | replay requires pre-send screen/editor digests; missing or unchanged baseline has zero Enter |
+| D-264-27 | callback watchdog | broker duplicate receipt ignored after crash | `included` | duplicate receipt binds generation, operation, run, callback and payload digest |
+| D-264-28 | release evidence | annotated tag object used as commit evidence | `included` | fixture and dogfood bind dereferenced commit `99c4658562e868c9659c6722631f21d1228fa37a` |
+| D-264-29 | release evidence | E7/E9 integration outputs not durable | `included` | `docs/acceptance/v2.6.4-integration-command-evidence.json` |
+| D-264-30 | release evidence | late defect rows lacked owners | `included` | this append-only table plus readiness mirror |
