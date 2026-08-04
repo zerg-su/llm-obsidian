@@ -57,6 +57,7 @@ class PlanReviewCompilation:
     plan_sha256: str
     artifacts: Mapping[str, bytes]
     artifact_sha256: Mapping[str, str]
+    explicit_artifact_paths: Mapping[str, str]
 
     def boundary(self) -> ReviewBoundaryInput:
         return ReviewBoundaryInput(
@@ -192,6 +193,7 @@ def _compile_bytes(
     }
     protected: dict[str, bytes] = {"outcome": section_contract.canonical}
     explicit_identities: dict[str, tuple[int, int]] = {}
+    explicit_paths: dict[str, str] = {}
     plan_stat = plan.stat()
     plan_identity = (plan_stat.st_dev, plan_stat.st_ino)
     for name in ("capability_dispositions", "success_evidence"):
@@ -206,6 +208,7 @@ def _compile_bytes(
         else:
             identity, content = _relative_file(root, pointer, name)
             explicit_identities[name] = identity
+            explicit_paths[name] = pointer
             protected[name] = content
     if len(set(explicit_identities.values())) != len(explicit_identities):
         raise _failure("explicit protected artifacts overlap")
@@ -265,6 +268,7 @@ def _compile_bytes(
         hashlib.sha256(raw).hexdigest(),
         ordered,
         digests,
+        explicit_paths,
     )
 
 
@@ -356,6 +360,29 @@ def resolve_plan_oids(
     )
     if ancestor.returncode != 0:
         raise PlanReviewError(BASE_INVALID, "plan review base must be an ancestor of HEAD")
+    repository_sources = {
+        "plan": (
+            compilation.plan_relative_path,
+            compilation.plan_sha256,
+        ),
+        **{
+            name: (relative, compilation.artifact_sha256[name])
+            for name, relative in compilation.explicit_artifact_paths.items()
+        },
+    }
+    for label, (relative, expected_sha256) in repository_sources.items():
+        try:
+            committed = _git_bytes(root, "show", f"{head}:{relative}")
+        except TaskReviewError as exc:
+            raise PlanReviewError(
+                BASE_INVALID,
+                f"{label} is not available at the exact review HEAD",
+            ) from exc
+        if hashlib.sha256(committed).hexdigest() != expected_sha256:
+            raise PlanReviewError(
+                BASE_INVALID,
+                f"{label} working bytes are not bound to the exact review HEAD",
+            )
     return base, head
 
 
@@ -612,6 +639,7 @@ def rebind_active_plan_review(
             "capability_dispositions": old_boundary.capability_dispositions_sha256,
             "success_evidence": old_boundary.success_evidence_map_sha256,
         },
+        {},
     )
     delta = validate_design_rebind(
         worktree,

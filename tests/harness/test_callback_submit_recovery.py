@@ -283,11 +283,11 @@ for label, mutation, state, action, reason in (
         "",
     ),
     (
-        "reserved effect is resumed without a second reservation",
+        "reserved effect is ambiguous and never replayed",
         {"recovery_status": "reserved", "nudge_count": 1},
-        "recovery-reserved",
-        "send-reserved-recovery",
-        "",
+        "attention",
+        "attention-required",
+        "callback-submit-effect-uncertain",
     ),
     (
         "sent effect is observed without replay",
@@ -415,7 +415,7 @@ for label, mutation, state, action, reason in (
         result.state == state
         and result.action == action
         and result.reason == reason
-        and result.model_effect == (action == "send-reserved-recovery"),
+        and not result.model_effect,
         result,
     )
 

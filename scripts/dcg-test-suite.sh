@@ -214,6 +214,9 @@ run_task_case ALLOWED "python3 /tmp/worktree/scripts/task_escalation.py raise --
 run_task_case BLOCKED "bash -c 'python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason bounded-reason --question bounded-question'"
 run_task_case BLOCKED "python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason bounded-reason --question bounded-question; echo composed"
 run_task_case BLOCKED 'python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason $(whoami) --question bounded-question'
+run_task_case BLOCKED "python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason bounded-reason --question bounded-question | sh"
+run_task_case BLOCKED "python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason bounded-reason --question bounded-question > /tmp/task-escalation-output"
+run_task_case BLOCKED $'python3 /tmp/worktree/scripts/task_escalation.py raise --worktree /tmp/worktree --category mechanism-failure --reason bounded-reason --question bounded-question\necho composed'
 
 #─────────────────────────────────────────────────────────────
 # infrastructure

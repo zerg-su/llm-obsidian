@@ -44,6 +44,8 @@ def run_case(
     artifacts: list[bool] | None = None,
     retry: bool = True,
     send_prompt: bool = True,
+    submit_already_accepted: bool = False,
+    accepted_submit_count: int = 0,
     runtime: str = "codex",
     ownership: list[bool] | None = None,
 ):
@@ -73,6 +75,8 @@ def run_case(
         reserve_retry=reserve_retry,
         observe_stage=lambda stage, count: stages.append((stage, count)),
         send_prompt=send_prompt,
+        submit_already_accepted=submit_already_accepted,
+        accepted_submit_count=accepted_submit_count,
         observation_limit=2,
         wait=lambda _seconds: None,
     )
@@ -140,6 +144,45 @@ result, port, retries, _stages = run_case(
 )
 assert result.acknowledged and port.sent == [] and port.keys == ["Enter"]
 print("OK   retained false-success recovery submits without repasting")
+
+result, port, retries, stages = run_case(
+    [
+        "• Working (stale previous turn)",
+        "› # Harness-owned review verification",
+        "• Working (current turn)",
+    ]
+)
+assert result.acknowledged and result.submit_count == 1
+assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
+assert stages == [("transport-accepted", 0), ("submit-accepted", 1)]
+print("OK   stale pre-Enter activity cannot acknowledge the new continuation")
+
+result, port, retries, _stages = run_case(
+    ["• Working (stale previous turn)", "• Working (still stale)"],
+)
+assert not result.acknowledged and result.evidence == "paste-unconfirmed"
+assert port.sent == [PROMPT] and port.keys == [] and not retries
+print("OK   stale activity without current input visibility fails closed")
+
+result, port, retries, _stages = run_case(
+    ["• Working (submitted continuation)"],
+    send_prompt=False,
+    submit_already_accepted=True,
+    accepted_submit_count=1,
+)
+assert result.acknowledged and result.submit_count == 1
+assert port.sent == [] and port.keys == [] and not retries
+print("OK   durable prior submit may acknowledge activity without another Enter")
+
+result, port, retries, _stages = run_case(
+    ["› # Harness-owned review verification"],
+    send_prompt=False,
+    submit_already_accepted=True,
+    accepted_submit_count=1,
+)
+assert not result.acknowledged and result.evidence == "submit-effect-uncertain"
+assert port.sent == [] and port.keys == [] and not retries
+print("OK   accepted submit with visible editor fails closed without replay")
 
 result, port, retries, _stages = run_case(
     [

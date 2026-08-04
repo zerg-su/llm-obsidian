@@ -246,7 +246,7 @@ class RuntimeWorkerLivenessMixin:
                 return
             if not self.liveness_controller.reserve_callback_submit(binding_sha256):
                 return
-        elif decision.action != "send-reserved-recovery":
+        else:
             return
 
         # Reservation is durable. Re-read every artifact and target immediately

@@ -85,7 +85,7 @@ allow = [
     { pattern = "^python3 (?:/[A-Za-z0-9._-]+)+/scripts/task_escalation\\.py raise --worktree (?:/[A-Za-z0-9._-]+)+ --category (?:blocking-review|contract-drift|external-effect|mechanism-failure|migration|permission|pipeline-decision|public-interface|scope|security) --reason (?:'[A-Za-z0-9 .,:_?/-]{1,500}'|[A-Za-z0-9._:-]{1,200}) --question (?:'[A-Za-z0-9 .,:_?/-]{1,500}'|[A-Za-z0-9._:-]{1,200})$", reason = "Permit only the exact code-owned task escalation argv" },
 ]
 block = [
-    { pattern = "(?:\\b(?:bash|sh)\\s+-c\\b.*task_escalation\\.py|task_escalation\\.py.*(?:;|&&|\\|\\||\\$\\())", reason = "Shell-composed escalation commands are outside the unattended task contract" },
+    { pattern = "(?:\\b(?:bash|sh)\\s+-c\\b[\\s\\S]*task_escalation\\.py|task_escalation\\.py[\\s\\S]*(?:;|&&|\\||[<>]|\\$\\(|[\\r\\n]))", reason = "Shell-composed escalation commands are outside the unattended task contract" },
     { pattern = "git\\b.*?\\bpush\\b", reason = "Only the human user should push branches/remotes from an agent workflow" },
     { pattern = "git\\b.*?\\breset\\s+--hard\\b", reason = "Hard reset is outside the practical unattended Git profile" },
     { pattern = "git\\b.*?\\bworktree\\s+(?:remove|prune)\\b", reason = "Worktree cleanup must use the validated lifecycle path" },

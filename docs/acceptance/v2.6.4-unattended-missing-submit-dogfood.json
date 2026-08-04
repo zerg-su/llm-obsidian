@@ -15,6 +15,7 @@
     "same_session_recovery_count": 1,
     "provider_prompt_count": 1,
     "provider_enter_count": 1,
+    "provider_typed_artifact_count": 1,
     "accepted_receipt_count": 1,
     "next_child_state": "finalizing",
     "manual_current_count": 0,

@@ -992,6 +992,7 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         def __init__(self) -> None:
             self.sent: list[tuple[str, str]] = []
             self.keys: list[tuple[str, str]] = []
+            self.provider_artifact_writes = 0
 
         def status(self, surface_id: str) -> str:
             check("recovery surface probe uses exact ownership", surface_id == SURFACE)
@@ -1002,6 +1003,14 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
 
         def send_key(self, surface_id: str, key: str) -> None:
             self.keys.append((surface_id, key))
+
+        def provider_complete_review(self, path: Path, payload: object) -> None:
+            """Fake-provider boundary: model output appears only after Enter."""
+
+            if self.keys != [(SURFACE, "Enter")]:
+                raise AssertionError("fake provider completed before one submit")
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            self.provider_artifact_writes += 1
 
     cmux = Cmux()
     worker = RecoveryWorker()
@@ -1083,6 +1092,65 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and recovery_state.callback_submit_status == "sent",
         (cmux.sent, cmux.keys, recovery_state),
     )
+
+    class AttentionOnlyRecoveryWorker(RecoveryWorker):
+        def callback_submit_attention(self, reason: str) -> None:
+            self.attention_reason = reason
+
+    class CrashCmux(Cmux):
+        def __init__(self, phase: str) -> None:
+            super().__init__()
+            self.phase = phase
+
+        def send(self, surface_id: str, message: str) -> None:
+            super().send(surface_id, message)
+            if self.phase == "paste":
+                raise KeyboardInterrupt("simulated hard crash after paste")
+
+        def send_key(self, surface_id: str, key: str) -> None:
+            super().send_key(surface_id, key)
+            if self.phase == "enter":
+                raise KeyboardInterrupt("simulated hard crash after Enter")
+
+    for crash_phase in ("paste", "enter"):
+        crash_root = root / f"crash-{crash_phase}"
+        crash_root.mkdir()
+        crash_worker = AttentionOnlyRecoveryWorker()
+        crash_worker.__dict__.update(worker.__dict__)
+        crash_worker.spec_path = crash_root / "launch.json"
+        crash_worker.liveness_controller = LivenessController(
+            crash_root / "liveness"
+        )
+        crash_worker.callback_idle_observations = 0
+        crash_worker.callback_prompt_observations = 0
+        crash_worker.callback_generation_identity = ""
+        crash_worker.callback_generation_progress_at = 0.0
+        crash_worker.callback_recovery_input_digest = ""
+        crash_worker.callback_recovery_input_reads = 0
+        crash_worker.callback_recovery_digest = ""
+        crash_worker.callback_recovery_reads = 0
+        crashing_cmux = CrashCmux(crash_phase)
+        crash_worker.cmux_adapter = crashing_cmux
+        try:
+            crash_worker.inspect_liveness()
+            crash_worker.inspect_liveness()
+            crash_worker.inspect_liveness()
+        except KeyboardInterrupt:
+            pass
+        crash_state = crash_worker.liveness_controller.current_state()
+        replay_cmux = Cmux()
+        crash_worker.cmux_adapter = replay_cmux
+        crash_worker.inspect_liveness()
+        check(
+            f"hard crash after {crash_phase} leaves ambiguous reservation without replay",
+            crash_state is not None
+            and crash_state.callback_submit_status == "reserved"
+            and crash_worker.attention_reason
+            == "callback-submit-effect-uncertain"
+            and replay_cmux.sent == []
+            and replay_cmux.keys == [],
+            (crash_state, replay_cmux.sent, replay_cmux.keys),
+        )
 
     swapped_state_root = root / "swapped-worker-state"
     swapped_state_root.mkdir()
@@ -1196,17 +1264,15 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         encoding="utf-8",
     )
     input_path = callback_dir / ".review-input.json"
-    input_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "axis": "openai-holistic",
-                "verdict": "approve",
-                "verification_iteration": 0,
-                "findings": [],
-            }
-        ),
-        encoding="utf-8",
+    cmux.provider_complete_review(
+        input_path,
+        {
+            "schema_version": 1,
+            "axis": "openai-holistic",
+            "verdict": "approve",
+            "verification_iteration": 0,
+            "findings": [],
+        },
     )
     callback_worker = FastPathWorker()
     callback_worker.spec_path = state_root / "launch.json"
@@ -1251,6 +1317,7 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
             "same_session_recovery_count": recovery_state.nudge_count,
             "provider_prompt_count": len(cmux.sent),
             "provider_enter_count": len(cmux.keys),
+            "provider_typed_artifact_count": cmux.provider_artifact_writes,
             "accepted_receipt_count": int(joined_receipt["status"] == "accepted"),
             "next_child_state": joined_child.state,
             "manual_current_count": 0,

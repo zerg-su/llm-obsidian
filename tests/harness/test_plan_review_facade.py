@@ -258,6 +258,33 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         ).stdout.strip(),
         (base_sha, head_sha),
     )
+    committed_plan = plan.read_bytes()
+    plan.write_text(
+        plan_text(design="Dirty bytes must never reach a reviewer."),
+        encoding="utf-8",
+    )
+    dirty_sessions = SessionCounter()
+    try:
+        plan_review.run_plan_review(
+            worktree,
+            plan_file=plan,
+            runtime_manager=dirty_sessions,
+            apply_finalizing_recovery=lambda **_ignored: {},
+        )
+    except plan_review.PlanReviewError as exc:
+        dirty_plan_rejected = (
+            exc.code == "plan-review-base-invalid"
+            and dirty_sessions.starts == 0
+        )
+    except AssertionError:
+        dirty_plan_rejected = False
+    else:
+        dirty_plan_rejected = False
+    plan.write_bytes(committed_plan)
+    check(
+        "12 dirty plan bytes are rejected before provider launch",
+        dirty_plan_rejected,
+    )
     packet_root = tmp / "packet-scratch"
     boundary = plan_review.materialize_plan_review(
         packet_root,
@@ -313,7 +340,66 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         )
     else:
         symbolic_rejected = False
-    check("12 symbolic base is rejected before launch", symbolic_rejected)
+    check("13 symbolic base is rejected before launch", symbolic_rejected)
+
+    subprocess.run(
+        [
+            "git",
+            "add",
+            explicit_plan.relative_to(worktree),
+            disposition.relative_to(worktree),
+            evidence.relative_to(worktree),
+        ],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "add explicit protected artifacts"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    committed_explicit = plan_review.compile_plan_review(
+        worktree,
+        explicit_plan,
+        capability_dispositions="wiki/dispositions.md",
+        success_evidence_map="wiki/evidence.md",
+    )
+    disposition_bytes = disposition.read_bytes()
+    disposition.write_text(
+        "# dispositions\n\nplan facade: dirty\n", encoding="utf-8"
+    )
+    explicit_sessions = SessionCounter()
+    try:
+        plan_review.run_plan_review(
+            worktree,
+            plan_file=explicit_plan,
+            base=head_sha,
+            capability_dispositions="wiki/dispositions.md",
+            success_evidence_map="wiki/evidence.md",
+            runtime_manager=explicit_sessions,
+            apply_finalizing_recovery=lambda **_ignored: {},
+        )
+    except plan_review.PlanReviewError as exc:
+        dirty_explicit_rejected = (
+            exc.code == "plan-review-base-invalid"
+            and explicit_sessions.starts == 0
+        )
+    except AssertionError:
+        dirty_explicit_rejected = False
+    else:
+        dirty_explicit_rejected = False
+    disposition.write_bytes(disposition_bytes)
+    check(
+        "14 dirty explicit protected bytes are rejected before provider launch",
+        dirty_explicit_rejected
+        and committed_explicit.explicit_artifact_paths
+        == {
+            "capability_dispositions": "wiki/dispositions.md",
+            "success_evidence": "wiki/evidence.md",
+        },
+    )
 
     (worktree / "README.md").write_text("baseline\nunrelated\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=worktree, check=True)
@@ -330,7 +416,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         missing_base_rejected = exc.code == "plan-review-base-invalid"
     else:
         missing_base_rejected = False
-    check("13 current plan review without a safe base fails closed", missing_base_rejected)
+    check("15 current plan review without a safe base fails closed", missing_base_rejected)
 
     plan.write_text(
         plan_text(design="Plan and product changed together."), encoding="utf-8"
@@ -367,7 +453,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
     else:
         mixed_base_rejected = False
     check(
-        "14 mixed plan and product HEAD requires an explicit trusted base",
+        "16 mixed plan and product HEAD requires an explicit trusted base",
         mixed_base_rejected,
     )
 
@@ -386,7 +472,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         check=False,
     )
     check(
-        "15 legacy current --plan rejects the ambiguous implementation default",
+        "17 legacy current --plan rejects the ambiguous implementation default",
         legacy.returncode == 3
         and "use the plan facade" in legacy.stderr
         and not (worktree / ".vault-meta").exists(),

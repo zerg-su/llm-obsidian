@@ -90,6 +90,8 @@ def deliver_continuation(
     reserve_retry: RetryReservation,
     observe_stage: StageObserver,
     send_prompt: bool = True,
+    submit_already_accepted: bool = False,
+    accepted_submit_count: int = 0,
     observation_limit: int = 20,
     observation_interval_seconds: float = 0.05,
     wait: Waiter = sleep,
@@ -104,12 +106,16 @@ def deliver_continuation(
         raise ValueError("continuation observation limit must be positive")
     if observation_interval_seconds < 0:
         raise ValueError("continuation observation interval cannot be negative")
+    if accepted_submit_count < 0:
+        raise ValueError("accepted submit count cannot be negative")
+    if submit_already_accepted and accepted_submit_count < 1:
+        raise ValueError("accepted submit requires a positive submit count")
     anchor = _prompt_anchor(prompt)
     if not anchor:
         raise ValueError("continuation prompt has no visible anchor")
 
     if artifact_ready():
-        return ContinuationDelivery(True, "artifact", 0)
+        return ContinuationDelivery(True, "artifact", accepted_submit_count)
     if not ownership_ready():
         return ContinuationDelivery(False, "ownership-lost", 0)
 
@@ -120,14 +126,20 @@ def deliver_continuation(
     paste_screen = ""
     for observation in range(observation_limit):
         if artifact_ready():
-            return ContinuationDelivery(True, "artifact", 0)
+            return ContinuationDelivery(True, "artifact", accepted_submit_count)
         if not ownership_ready():
             return ContinuationDelivery(False, "ownership-lost", 0)
         screen = port.read(surface_id)
         screen_state = classify_continuation_screen(runtime, screen, anchor)
-        if screen_state == "active":
-            return ContinuationDelivery(True, "provider-activity", 0)
+        if screen_state == "active" and submit_already_accepted:
+            return ContinuationDelivery(
+                True, "provider-activity", accepted_submit_count
+            )
         if screen_state == "input-ready":
+            if submit_already_accepted:
+                return ContinuationDelivery(
+                    False, "submit-effect-uncertain", accepted_submit_count
+                )
             paste_screen = screen
             break
         if screen_state in {"idle", "permission", "unknown"}:
@@ -137,7 +149,7 @@ def deliver_continuation(
     if not paste_screen:
         return ContinuationDelivery(False, "paste-unconfirmed", 0)
 
-    submit_count = 0
+    submit_count = accepted_submit_count
     for submit_attempt in range(2):
         if submit_attempt and not reserve_retry():
             return ContinuationDelivery(

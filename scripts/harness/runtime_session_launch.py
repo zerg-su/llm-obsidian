@@ -587,6 +587,15 @@ class RuntimeSessionLaunchMixin:
                     "submit-retried",
                 }
             )
+            prior_submit_accepted = bool(
+                receipt
+                and receipt.get("status") in {"submit-accepted", "submit-retried"}
+            )
+            prior_submit_count = (
+                int(receipt.get("submit_count") or 0)
+                if prior_submit_accepted
+                else 0
+            )
             liveness = LivenessController(
                 self._state_root(record) / "liveness"
             )
@@ -633,6 +642,8 @@ class RuntimeSessionLaunchMixin:
                     reserve_retry=reserve_retry,
                     observe_stage=observe_stage,
                     send_prompt=send_prompt,
+                    submit_already_accepted=prior_submit_accepted,
+                    accepted_submit_count=prior_submit_count,
                 )
                 status = "acknowledged" if result.acknowledged else "unconfirmed"
                 self._write_json(

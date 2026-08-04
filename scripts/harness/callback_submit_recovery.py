@@ -326,12 +326,7 @@ def classify_callback_submit(
     if evidence.recovery_status == "reserved":
         if evidence.nudge_count != policy.max_nudges:
             return _attention(evidence, "callback-submit-evidence-malformed")
-        return _decision(
-            evidence,
-            state="recovery-reserved",
-            action="send-reserved-recovery",
-            model_effect=True,
-        )
+        return _attention(evidence, "callback-submit-effect-uncertain")
     if evidence.recovery_status == "sent":
         if evidence.nudge_count != policy.max_nudges:
             return _attention(evidence, "callback-submit-evidence-malformed")
