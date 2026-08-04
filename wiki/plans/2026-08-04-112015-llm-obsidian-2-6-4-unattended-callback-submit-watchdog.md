@@ -24,7 +24,7 @@ tags:
 ## Outcome Contract
 
 ```json
-{"schema_version":1,"purpose":"Закрыть подтверждённые unattended gaps, из-за которых полностью выполненная моделью работа или безопасно восстанавливаемая ошибка vault validation не продолжают pipeline без присутствия пользователя.","desired_outcome":"Harness самостоятельно и безопасно доводит ожидающий typed callback до следующей стадии, когда точно принадлежащая ему reviewer-сессия закончила содержательную работу, вернулась к idle prompt, но не создала или не отправила callback: он использует durable generation-aware evidence, выполняет не более одного same-session submit-only nudge, принимает появившийся callback без повторного review и оставляет typed attention только после исчерпания bounded recovery. Stop hook также делает одну детерминированную попытку исправить unresolved wikilink, когда его target однозначно совпадает с title или H1 ровно одной существующей страницы, проводит изменение через vault-write и повторяет strict validation. Работа пользователя офлайн не должна останавливаться из-за забытого submit или однозначно исправимой адресации wikilink. Каждый incidental defect, обнаруженный вне frozen task scope, получает durable typed entry ближайшего будущего релиза и не теряется при смене attention marker.","success_evidence":[{"evidence_id":"E1-reproduce-missing-submit","observable":"Детерминированный full-runtime fixture воспроизводит точный инцидент: reviewer завершает вывод, возвращается к idle prompt, текущая callback generation остаётся без input/callback/receipt, а существующий harness до исправления не продолжает pipeline."},{"evidence_id":"E2-generation-aware-detection","observable":"Code-owned observer отличает стабильный idle-without-submit от активной модели по exact operation ownership, callback target generation, durable files/receipts и bounded content-free screen classification; raw review text не сохраняется и не интерпретируется."},{"evidence_id":"E3-bounded-auto-recovery","observable":"После короткого stable-idle grace harness ровно один раз отправляет в ту же exact session submit-only nudge, не просит повторить review, не создаёт новый reviewer/surface и продолжает pipeline после принятия callback."},{"evidence_id":"E4-race-and-replay-safety","observable":"Callback/input/receipt, появившиеся до или одновременно с nudge, побеждают recovery; повторный reconcile/restart не дублирует prompt, submit, callback, review или provider effect и сохраняет exact generation identity."},{"evidence_id":"E5-fail-closed-matrix","observable":"Active spinner/progress, permission prompt, unknown screen, stale generation, missing ownership, terminal parent, exhausted budget и malformed typed artifacts не вызывают nudge или synthetic callback; результатом остаётся bounded typed attention."},{"evidence_id":"E6-unattended-continuity-dogfood","observable":"Один изолированный end-to-end dogfood с недоступным координатором проходит от намеренно пропущенного reviewer submit через автоматическое same-session recovery к следующей pipeline стадии без ручной команды и без повторного review."},{"evidence_id":"E7-vault-link-self-heal","observable":"Stop hook воспроизводит текущий incident с unresolved ссылками на существующие страницы по уникальному title, атомарно канонизирует их через vault-write, повторно запускает strict validation и завершает штатный scoped commit; ambiguous, missing, anchor-only, malformed и concurrently changed targets не мутируются и остаются typed validation failure."},{"evidence_id":"E8-no-regression","observable":"Полные harness, transition, callback, review, permission, provider, vault-writer, wikilink, status/telemetry и release gates зелёные; существующие liveness nudge/restart ceilings и model budgets не расширены."},{"evidence_id":"E9-deferred-defect-ledger","observable":"Каждый подтверждённый внеплановый дефект имеет durable ID, reproducer/evidence, impact, ownership, предлагаемую release boundary и disposition included/deferred; новая escalation не перезаписывает историю предыдущих coordinator decisions, а release review проверяет отсутствие потерянных unresolved entries."}],"non_goals":["Парсить свободный текст review с экрана и превращать его в доверенный callback.","Синтезировать verdict или callback без typed reviewer artifact и штатного submit validator.","Добавлять новый scheduler, второй lifecycle owner или model-owned watchdog.","Делать периодические model calls, пока reviewer активно работает.","Увеличивать review, verification, nudge, restart или provider budgets.","Обходить dontAsk, sandbox, callback ownership, exact-generation или permission policy.","Создавать отсутствующие wiki-страницы, угадывать неоднозначные ссылки, менять смысл ссылки или редактировать vault в обход vault-write.","Переделывать PipelineSpec DSL, систему проектов 2.7 или общую task orchestration.","Включать исправление в уже финализируемый 2.6.3.","Автоматически расширять frozen task scope или чинить incidental defect внутри текущей задачи без отдельной release disposition и authority."]}
+{"schema_version":1,"purpose":"Закрыть подтверждённые unattended gaps 2.6.3, из-за которых завершённая reviewer-сессия, принятый callback, coordinator decision или однозначно исправимая Wiki-ссылка не продолжают pipeline без присутствия пользователя.","desired_outcome":"LLM Obsidian 2.6.4 сохраняет единственного harness lifecycle owner и автоматически продолжает безопасные exact-identity случаи: принимает уже созданный typed artifact без model call, выполняет не более одного generation-bound submit-only nudge в той же reviewer-сессии, публикует принятый resource-free callback, сохраняет coordinator decisions append-only, делает одну атомарную попытку исправить только однозначный unresolved wikilink через vault-write и оставляет typed attention для всего неизвестного. Reviewer tooling получает copy-paste exact OID evidence без ослабления read-only Git boundary. Работа пользователя офлайн либо продвигается, либо останавливается один раз с полной durable причиной, но не зависает молча.","success_evidence":[{"evidence_id":"E1-missing-submit-red","observable":"Детерминированный full-runtime fixture воспроизводит reviewer generation, где exact provider жив, экран стабильно idle, input/callback/receipt отсутствуют, а v2.6.3 до исправления завершается callback-timeout без continuation."},{"evidence_id":"E2-generation-classifier","observable":"Чистый code-owned classifier принимает только exact operation/run/lane/generation, stable typed-file digests, process/surface ownership и content-free prompt class; active, permission, unknown, stale и malformed evidence никогда не становятся recovery."},{"evidence_id":"E3-bounded-submit-recovery","observable":"Stable idle current generation резервирует один write-ahead submit-only effect, отправляет один фиксированный nudge в ту же exact session, не создаёт reviewer/surface и после валидного callback автоматически продолжает pipeline."},{"evidence_id":"E4-artifact-and-race-safety","observable":"Уже существующие stable input/callback/receipt обрабатываются без model call; callback races до reservation, между reservation/send и после send, restart и concurrent reconcile не дублируют prompt, submit, callback, review или provider effect."},{"evidence_id":"E5-terminal-fail-closed","observable":"Terminal parent, exhausted existing ceilings, lost ownership, dead/unknown provider, stale generation, symlink, oversize и malformed artifacts дают отдельную typed attention reason; budgets nudges/restarts/provider calls не увеличены."},{"evidence_id":"E6-unattended-dogfood","observable":"Один изолированный end-to-end dogfood с offline coordinator проходит намеренно пропущенный reviewer submit, ровно один same-session recovery, accepted receipt и следующую pipeline stage без ручного current/resume/send/callback write и без повторного review."},{"evidence_id":"E7-wikilink-self-heal","observable":"Stop fixture с уникальным frontmatter title или H1 атомарно канонизируется через optimistic vault-write и проходит повторную strict validation; ambiguous, missing, malformed, embed-unsupported и concurrently changed cases не мутируются."},{"evidence_id":"E8-durable-decisions","observable":"Каждая escalation/decision получает append-only identity-bound record, latest marker содержит только pointer, а отдельный amendment-record workflow связывает frozen plan/Outcome digests с coordinator decision без изменения утверждённых байтов и без потери прежних решений."},{"evidence_id":"E9-reviewer-tools","observable":"Review ContextPacket/prompt предоставляет exact base/head OID и готовые bounded review-inspect invocations; symbolic/non-OID ref по-прежнему отклоняется, а точный task_escalation raise argv проходит task DCG только через узкий anchored allow contract, тогда как shell composition и destructive variants блокируются."},{"evidence_id":"E10-defect-ledger","observable":"Все D-264 entries имеют reproducer/evidence, owner, release disposition included/already-shipped/deferred/not-a-defect и regression/evidence pointer; новая escalation не перезаписывает историю, а release review доказывает отсутствие потерянных unresolved entries."},{"evidence_id":"E11-no-regression","observable":"Focused unit/transition tests, full harness coverage, make test, vault validation, Codex/MCP sync, permission/provider snapshots and release acceptance green on one exact candidate HEAD; no public DSL, model routing or permission-budget drift."}],"non_goals":["Парсить terminal prose или синтезировать verdict/callback без typed reviewer artifact и штатного validator.","Добавлять scheduler, второй lifecycle owner, новую публичную FSM или model-owned watchdog.","Делать периодические model calls во время видимой активности или увеличивать nudge/restart/review/verification/provider budgets.","Обходить dontAsk, sandbox, exact-generation ownership, callback validation или разрешать произвольный Bash через DCG.","Создавать отсутствующие Wiki-страницы, применять fuzzy matching, угадывать неоднозначную ссылку или писать vault в обход vault-write.","Переделывать PipelineSpec DSL, Project Spaces/Task Orchestration 2.7, model routing или review topology.","Повторно реализовывать D-264-06/D-264-08, уже поставленные в 2.6.3, либо превращать одноразовую ошибку ad-hoc reviewer Python probe в product fix без воспроизводимого contract seam.","Push, publish, tag, release или удаление safety branches/worktrees в рамках реализации плана."]}
 ```
 
 ## 1. Контекст и подтверждённый дефект
@@ -96,158 +96,259 @@ Observer принимает решение только из следующег�
 - Нельзя отправлять prompt в surface без совпадения process/supervisor/surface identity и допустимого current state.
 - Нельзя очищать или переиспользовать accepted callback, перезаписывать input либо вручную редактировать OperationStore.
 
-## 6. Реализация TDD-срезами
+## 6. Архитектурная карта и dependency direction
 
-### Slice 0 — точный RED reproducer
+### 6.1 Callback recovery
 
-- Зафиксировать incident fixture: exact reviewer parent, verification round generation N, live exact surface, stable idle prompt, отсутствующие input/callback/receipt.
-- Доказать, что текущий observer достигает общего timeout/attention, но не выполняет submit-only recovery.
-- Добавить отрицательный контроль: active spinner не классифицируется как idle.
+| Модуль | Одна ответственность | Интерфейс | Зависимости | Test seam |
+|---|---|---|---|---|
+| `scripts/harness/callback_submit_recovery.py` (новый) | Чистая generation-aware классификация и детерминированный action/effect identity | immutable evidence/state/decision values + `classify_callback_submit(...)` | только bounded contract values; не знает cmux, filesystem и provider | новый `tests/harness/test_callback_submit_recovery.py` |
+| `scripts/harness/runtime_callback_io.py` | Bounded stable read и validation typed input/callback/receipt | существующие callback target/read/submit helpers, расширенные без side-effect policy | filesystem + callback schema | callback IO unit cases и vertical fixture |
+| `scripts/harness/runtime_worker_liveness.py` | Собрать evidence, вызвать pure policy и исполнить уже разрешённый effect | существующий `inspect_liveness()`; generic budgets из `liveness.py` не меняются | OperationStore, RuntimeSessionManager, cmux adapter, pure policy | `test_runtime_sessions.py`, `test_runtime_task_summary.py` |
+| `scripts/harness/runtime_worker_review_bridge.py` | Review-specific reconcile и публикация уже принятого callback | существующие review bridge methods | callback IO + review gate | `test_review_vertical.py`, `test_review_gate.py` |
 
-### Slice 1 — content-free callback progress evidence
+`liveness.py` остаётся владельцем общих one-nudge/one-restart ceilings. Новый модуль не создаёт вторую FSM: он скрывает только правила «можно ли применить существующую recovery ladder к exact callback generation». Runtime worker не интерпретирует screen body и не принимает policy-решений по строкам.
 
-- Добавить компактный typed contract для callback-generation progress и stable idle observations.
-- Расширить существующую liveness telemetry только identifiers/counters/classification values; body и screen content запрещены schema test.
-- Сделать classifier provider-neutral и покрыть Claude/Codex prompt variants только существующими adapter evidence seams.
+### 6.2 Decision history и amendment records
 
-### Slice 2 — exact typed-artifact fast paths
+| Модуль | Одна ответственность | Интерфейс | Зависимости | Test seam |
+|---|---|---|---|---|
+| `scripts/task_escalation_records.py` (новый) | Append-only identity/digest validation и optimistic запись coordinator decisions | `append_raise`, `append_resolution`, `append_amendment`, `load_chain` | filesystem + task/plan identity values; без cmux | новый `tests/test_task_escalation_records.py` |
+| `scripts/task_escalation.py` | CLI и доставка typed escalation/decision | текущие `raise`/`resolve` + узкий `record-amendment` | records module + cmux adapter | `tests/test_task_lifecycle.py` |
+| `.task-needs-attention.json` | Только latest mutable pointer/status для совместимости | `record_id`, `record_sha256`, current status | append-only record chain | lifecycle matrix |
 
-- Если input стабилен, использовать существующий review submit validator без модели.
-- Если callback существует, использовать существующий broker/reconcile.
-- Доказать idempotency, symlink rejection, size/digest bounds и race callback-before-effect.
+История не хранится в content-free telemetry и не подменяет OperationStore. Текст reason/decision остаётся owner-only task evidence; pipeline events получают только IDs/counters.
 
-### Slice 3 — one-shot same-session nudge
+### 6.3 Reviewer inspection и task DCG
 
-- Добавить per-generation write-ahead effect/receipt и один фиксированный submit-only prompt.
-- Проверить exact checkpointless Claude reviewer ownership и checkpoint-bound Codex ownership через существующий `RuntimeSessionManager`.
-- Запретить новую lane/surface/provider identity и повтор effect на replay.
+`task_review_request.py` владеет copy-paste reviewer instructions и включает exact base/head OID из уже доверенного ContextPacket. `review-inspect.py` сохраняет строгий lowercase-OID ingress; symbolic refs не разрешаются. `config/dcg/task.toml` получает только anchored allow для точной repo-owned escalation команды, если установленная версия DCG действительно поддерживает fail-closed allow semantics; иначе D-264-07 останавливается как security boundary, а не заменяется широким allow.
 
-### Slice 4 — runtime integration и terminal policy
+### 6.4 Wiki link repair
 
-- Подключить detector к существующему runtime worker review bridge/liveness loop.
-- После accepted receipt продолжить gate с первой missing stage.
-- После исчерпания существующих ceilings создать отдельную typed reason `callback-submit-missing`, сохранив exact evidence pointers.
-- Не считать простую process liveness или свежий screen hash durable pipeline progress для другой callback generation.
+Новый `scripts/vault_link_repair.py` владеет pure discovery/render plan: exact filename, unique frontmatter title и unique H1. `stop-hook.py` лишь запускает одну bounded repair attempt после первого wikilink-only validation failure. Mutation выполняет только `vault-write.py` с expected SHA каждого source page; после неё Stop один раз повторяет полный validator.
 
-### Slice 5 — детерминированная transition matrix
+### 6.5 Cohesion decisions
 
-Обязательные cases:
+- Не добавлять callback policy в уже смешанный `runtime_worker_liveness.py`: новый pure module уменьшает temporal coupling и тестируется без процессов.
+- Не расширять `vault_schema.py` mutation-логикой: schema остаётся read-only authority, repair planner зависит от неё.
+- Не превращать `task_escalation_records.py` в общий event store: он обслуживает только durable coordinator authority chain.
+- Файлы более ~500 строк трогаются через малые интерфейсы; новый unrelated growth в них запрещён. Экстракция допускается только если RED доказывает необходимый seam и сохраняет public identity.
 
-- idle два probes → один nudge → callback accepted → next stage;
-- callback появляется до reservation, между reservation/send и после send;
-- typed input появляется без callback;
-- accepted receipt replay;
-- stale generation и changed run/lane;
-- active spinner, changing output, permission prompt, unknown/missing surface;
-- dead provider с допустимым/исчерпанным restart budget;
-- terminal parent;
-- symlink/oversize/malformed input/callback;
-- concurrent reconcile;
-- process identity mismatch;
-- coordinator offline на всём пути.
+## 7. Execution topology
 
-### Slice 6 — unattended dogfood и release evidence
+После Slice 0 независимы и могут выполняться отдельными task worktrees:
 
-- Запустить один изолированный full-runtime fixture, где fake reviewer намеренно возвращается к idle prompt без submit.
-- Не выполнять ручной `current`, `resume`, cmux send или callback write.
-- Дождаться ровно одного harness nudge, штатного typed submit, accepted receipt и автоматического перехода к следующей стадии.
-- Дополнительно выполнить один обычный live review smoke, подтверждающий отсутствие ложного nudge при нормальном submit; новый намеренно сломанный live provider run не требуется.
-- Сохранить exact-HEAD receipt, transition trace без content и release-readiness disposition.
+- Workstream A: Slices 1–5, callback continuity;
+- Workstream B: Slice 6, decision/amendment history;
+- Workstream C: Slice 7, reviewer OID + DCG ergonomics;
+- Workstream D: Slice 8, Wiki self-heal.
 
-### Slice 7 — bounded self-heal для unresolved wikilink
+Они не меняют общие файлы, кроме заранее закреплённых интеграционных owners. Join выполняется только после зелёных focused gates; Slice 9 владеет общей матрицей/manifest, Slice 10 — dogfood и release evidence. Параллельные исполнители не редактируют release notes, readiness или общую transition matrix до join.
 
-- Зафиксировать RED fixture из реального Stop failure: `[[LLM Obsidian 2.4 — Typed Pipeline Composition]]` и `[[LLM Obsidian 2.6.0 — единый релиз technical foundation и skill intelligence]]` не совпадают с filename, но однозначно совпадают с frontmatter `title` существующих страниц.
-- Построить code-owned индекс `filename stem → page`, `frontmatter title → candidates`, `H1 → candidates` на валидных Markdown-страницах vault; title/H1 используется только при единственном совпадении.
-- Канонизировать basic/aliased/heading wikilink с сохранением видимого текста и anchor, например `[[Title]]` → `[[canonical filename|Title]]`; embed и неоднозначные формы не расширять без отдельного RED.
-- Сформировать одну bounded `vault-write.py` update transaction с optimistic source hash; прямой Edit из Stop hook запрещён.
-- После успешной записи один раз повторить strict validation и штатный scoped commit. На collision, ambiguity, missing candidate, malformed page или повторный failure прекратить recovery и оставить исходный `VAULT_LINT_FAIL`/`COMMIT_BLOCKED` с typed repair classification.
-- Не создавать страницы, не выбирать «ближайшее» fuzzy-совпадение и не чинить unrelated validation failures.
+## 8. TDD-срезы
 
-## 7. Предполагаемые файлы ответственности
+### Slice 0 — frozen baseline и defect triage
 
-Точные границы уточняются после RED, но предпочтительный ownership:
+- **files/responsibility:** `docs/acceptance/v2.6.4-baseline.md` — зафиксировать exact `v2.6.3` base, наблюдаемые incidents и D-264 disposition; `config/harness-audit-manifest.json` — только если новый planned module должен войти в denominator.
+- **consumes:** release `v2.6.3`, текущий план, retained callbacks/screenshots/escalation evidence без изменения runtime state.
+- **produces:** таблица D-264 с owner и `included/already-shipped/not-a-defect/deferred`; frozen base SHA и команды RED.
+- **failing evidence:** D-264-01, 02, 03, 04, 05, 07, 09 имеют воспроизводимый failing contract; D-264-06/08 отмечены already-shipped; tuple `.keys()` probe отмечен `not-a-defect`, пока нет repo command/API, обещающего dict.
+- **minimal green:** только evidence document; production code не меняется.
+- **refactor seam:** отсутствует.
+- **focused verification:** `python3 scripts/validate-vault.py --summary`, `git diff --check`; покрывает E1, E8–E10 baseline.
 
-- `scripts/harness/liveness.py` или малый новый callback-progress contract module — чистая классификация;
-- `scripts/harness/runtime_worker_liveness.py` — probes, grace и bounded decision;
-- `scripts/harness/runtime_worker_review_bridge.py` — review-specific submit/nudge integration;
-- `scripts/harness/runtime_session_checkpoint.py` / существующий continuation seam — только reuse, без нового ownership;
-- `scripts/harness/runtime_callback_io.py` — typed input/callback stable-read fast path при необходимости;
-- `scripts/harness/contracts.py` — только новый bounded attention reason/evidence shape, если существующий тип не выражает его;
-- `tests/harness/test_liveness.py`, `test_runtime_task_summary.py`, `test_runtime_sessions.py`, `test_review_vertical.py` — unit/integration matrix;
-- `.claude/hooks/stop.sh` и малый code-owned vault-link repair module — одна pre-commit repair attempt между первым strict lint failure и повторной validation;
-- `scripts/vault-write.py`/существующий writer contract — reuse optimistic update transaction, без второго writer;
-- `tests/test_stop_hook.sh`, vault schema/wikilink unit tests — однозначное исправление и fail-closed отрицательная матрица;
-- `docs/pipeline-observability.md`, `docs/runtime-capabilities.md`, release notes/readiness — user-visible semantics.
+### Slice 1 — pure callback-generation classifier
 
-Не создавать крупный новый controller и не расширять public callback schema без доказанного contract gap.
+- **files/responsibility:** новый `scripts/harness/callback_submit_recovery.py`; новый `tests/harness/test_callback_submit_recovery.py`; manifest registration при необходимости.
+- **consumes:** exact operation/run/lane/generation, current target digest, stable input/callback/receipt digests, process/surface ownership, content-free prompt class, generic liveness counters.
+- **produces:** immutable states `working`, `typed-input-ready`, `callback-ready`, `idle-without-submit`, `recovery-reserved`, `accepted`, `attention` и deterministic action ID bound to generation/target digest.
+- **failing evidence:** v2.6.3 classifies stable idle without typed artifact only as generic timeout; active/permission/unknown negative fixtures begin red against the new contract.
+- **minimal green:** pure validation/classification; no IO, cmux, provider or OperationStore mutation.
+- **refactor seam:** extract shared SHA/ID validation only if it removes duplicated knowledge without changing `harness.contracts` public values.
+- **focused verification:** new unit file + mutation removing generation equality must fail; E1, E2, E5.
 
-## 8. Проверка
+### Slice 2 — stable typed-artifact fast paths
 
-Минимальный gate:
+- **files/responsibility:** `scripts/harness/runtime_callback_io.py` — stable bounded reads and exact target validation; `scripts/harness/runtime_worker_review_bridge.py` — invoke existing submit/broker seams; `tests/harness/test_review_vertical.py`.
+- **consumes:** Slice 1 decisions `typed-input-ready`/`callback-ready`, existing review submit validator and callback broker.
+- **produces:** input reconciled or callback accepted without model call; durable receipt linked to exact generation.
+- **failing evidence:** input-without-callback and callback-without-receipt fixtures remain stuck before change; symlink/oversize/malformed controls fail closed.
+- **minimal green:** reuse current validators/broker; no new callback schema and no synthetic verdict.
+- **refactor seam:** centralize bounded stable-file read only if all existing callers retain exact errors.
+- **focused verification:** `python3 tests/harness/test_review_vertical.py`; race callback-before-action; E3, E4, E5.
+
+### Slice 3 — one-shot same-session submit nudge
+
+- **files/responsibility:** `scripts/harness/runtime_worker_liveness.py` — evidence assembly/action execution; `scripts/harness/runtime_session_contracts.py` only if exact session identity needs a typed value; `tests/harness/test_runtime_sessions.py`.
+- **consumes:** Slice 1 `idle-without-submit`, exact live provider/surface ownership, existing `LivenessController` max_nudges=1, callback target path and generation.
+- **produces:** write-ahead `callback-submit-nudge:<generation>:<target-digest>` receipt followed by one fixed submit-only message to the same surface.
+- **failing evidence:** stable idle fixture reaches timeout with zero submit-specific effect; concurrent callback arrival exposes race.
+- **minimal green:** reserve once, re-read input/callback/receipt immediately before send, send one fixed prompt+Enter; do not change generic budgets.
+- **refactor seam:** keep message rendering private and deterministic; do not create a provider abstraction.
+- **focused verification:** runtime-session unit cases; mutation allowing second nudge must fail; E3–E5.
+
+### Slice 4 — terminal policy и accepted-child publication (D-264-02)
+
+- **files/responsibility:** `scripts/harness/runtime_worker_review_bridge.py`, `scripts/task_review_verification.py`, `scripts/task_review_resolution_bundle.py`; `tests/harness/test_runtime_task_summary.py`, `tests/harness/test_review_resolution_bundle.py`.
+- **consumes:** exact resource-free child with accepted callback/receipt, retained parent/gate identity and Slice 2/3 effects.
+- **produces:** idempotent publication into the existing gate and continuation from the first missing stage; distinct `callback-submit-missing` attention after existing ceilings.
+- **failing evidence:** preserved D-264-02 fixture rejects an accepted resource-free child or requires replay; terminal/stale/mixed-identity controls remain rejected.
+- **minimal green:** reconcile accepted evidence once; no fresh reviewer, surface, provider, callback or generation.
+- **refactor seam:** share exact-chain validation with existing resolution bundle only when one owner remains explicit.
+- **focused verification:** focused summary/bundle tests and replay twice with identical bytes; E3–E5.
+
+### Slice 5 — callback transition matrix
+
+- **files/responsibility:** `tests/harness/test_contract_state_edge_matrix.py`, new callback fixtures under `tests/harness/fixtures/`, and only the smallest audit-manifest update.
+- **consumes:** Slices 1–4 public decisions/effects.
+- **produces:** table-driven proof for callback before reservation, between reservation/send, after send, accepted replay, concurrent reconcile, stale generation, changed lane/run, active/changing screen, permission, unknown/missing surface, dead provider, exhausted restart, terminal parent and identity mismatch.
+- **failing evidence:** each case is first added against preserved pre-fix base and must fail for the intended effect/state mismatch.
+- **minimal green:** no production logic beyond gaps exposed by a case.
+- **refactor seam:** merge fixtures only when independent expectations remain readable.
+- **focused verification:** transition oracle plus `make test-harness-coverage`; E2–E5, E11.
+
+### Slice 6 — append-only coordinator authority (D-264-03/05)
+
+- **files/responsibility:** new `scripts/task_escalation_records.py`; `scripts/task_escalation.py`; new `tests/test_task_escalation_records.py`; `tests/test_task_lifecycle.py`; operator docs.
+- **consumes:** current `.task-needs-attention.json`, task origin identity, plan/Outcome digests and existing raise/resolve CLI.
+- **produces:** immutable per-record JSON chain in task-owned state, latest pointer marker, idempotent `record-amendment` command and chain verification.
+- **failing evidence:** two escalations overwrite the first decision; frozen-plan amendment has no supported durable owner.
+- **minimal green:** append record before notification, update latest pointer optimistically, append resolution/amendment without editing approved plan; retain reader compatibility for legacy full marker.
+- **refactor seam:** CLI parsing/delivery stays in `task_escalation.py`; records module owns all chain validation/writes.
+- **focused verification:** lost-wakeup, duplicate resolve, stale pointer, tampered chain, origin mismatch, legacy marker; E8, E10.
+
+### Slice 7 — reviewer command affordances (D-264-07/09)
+
+- **files/responsibility:** `scripts/task_review_request.py`, `scripts/task_review_context.py`, `scripts/review-inspect.py` only if an additional bounded metadata operation is proven necessary, `config/dcg/task.toml`, `scripts/dcg-test-suite.sh`, `tests/harness/test_review_inspect.py`, `tests/harness/test_review_gate.py`, `tests/test_dcg_assets.sh`.
+- **consumes:** trusted ContextPacket head/base OIDs, existing lowercase-OID validator, exact repo-owned `task_escalation.py raise` argv.
+- **produces:** prompt/packet with literal copy-paste commands using exact OIDs; narrow anchored DCG allow only for validated escalation CLI.
+- **failing evidence:** reviewer prompt permits/elicits symbolic `--ref`; exact escalation raise is classified HIGH while shell-composed/destructive variants are controls.
+- **minimal green:** first fix the prompt/packet; add resolver only if prompt regression still reproduces. Add DCG allow only when tests prove exact whole-command anchoring and arguments are revalidated by CLI.
+- **refactor seam:** no general shell wrapper and no symbolic ref support inside `review-inspect`.
+- **focused verification:** review prompt snapshot, inspect negative matrix, task/base DCG suites; E9, E11.
+
+### Slice 8 — one-shot Wiki link self-heal (D-264-04)
+
+- **files/responsibility:** new `scripts/vault_link_repair.py`; `scripts/stop-hook.py`; `scripts/vault_schema.py` only for reusable read-only catalog API; `tests/test_vault_schema.py`, `tests/test_stop_hook.sh`, `tests/test_vault_scripts.sh`.
+- **consumes:** first strict validator output, current source-page SHA, exact filename/frontmatter title/H1 catalog and canonical `vault-write.py` update transaction.
+- **produces:** repair plan only for unique exact title/H1 match; one optimistic transaction; one complete revalidation.
+- **failing evidence:** preserved two-link Stop fixture blocks commit; ambiguous/missing/concurrent cases prove zero mutation.
+- **minimal green:** support normal and aliased links with optional heading while preserving display/anchor; embeds and other forms stay unsupported unless RED requires them.
+- **refactor seam:** catalog extraction may move from `vault_schema.py`, but validator remains mutation-free.
+- **focused verification:** Stop, schema, writer tests; mutation choosing first of two candidates and direct-write mutation must fail; E7, E11.
+
+### Slice 9 — integration join и honest coverage
+
+- **files/responsibility:** `config/harness-audit-manifest.json`, `tests/harness/state_transition_oracle.json`, release transition tests; no feature code ownership.
+- **consumes:** green commits from Workstreams A–D.
+- **produces:** combined exact-HEAD matrix and honest coverage denominator for every new production module.
+- **failing evidence:** join starts red if any module is unobserved, a shared transition conflicts, or a callback/vault/decision invariant is missing.
+- **minimal green:** manifest/fixture registration and only conflict corrections; no new feature.
+- **refactor seam:** none after join except behavior-preserving cleanup while all focused suites remain green.
+- **focused verification:** `make test-harness`, `make test-harness-coverage`, release transition matrix; E10, E11.
+
+### Slice 10 — unattended dogfood, docs и release candidate
+
+- **files/responsibility:** `docs/pipeline-observability.md`, `docs/runtime-capabilities.md`, `docs/acceptance/v2.6.4-release-readiness.md`, `docs/releases/v2.6.4.md`, changelogs/version manifests.
+- **consumes:** one clean integrated candidate HEAD and all prior receipts.
+- **produces:** fake-provider full-runtime dogfood with intentionally omitted submit, normal live Opus review smoke with zero false nudge, exact evidence map and release disposition for every D-264 item.
+- **failing evidence:** any manual `current/resume/send/callback write`, repeated provider effect, missing disposition or stale evidence blocks readiness.
+- **minimal green:** evidence/docs/version metadata only; product fix after release review requires a new HEAD and rerun of affected gates.
+- **refactor seam:** none; release review is approval-or-stop.
+- **focused verification:** E6 dogfood, full gate below, final Opus Deep implementation review and single release-purpose review; E6, E10, E11.
+
+## 9. Полная verification ladder
+
+Cheap-first порядок:
 
 ```bash
-python3 tests/harness/test_liveness.py
+python3 tests/harness/test_callback_submit_recovery.py
+python3 tests/harness/test_review_resolution_bundle.py
+python3 tests/harness/test_review_vertical.py
 python3 tests/harness/test_runtime_sessions.py
 python3 tests/harness/test_runtime_task_summary.py
-python3 tests/harness/test_review_vertical.py
+python3 tests/test_task_escalation_records.py
+python3 tests/test_task_lifecycle.py
+python3 tests/harness/test_review_inspect.py
+bash tests/test_dcg_assets.sh
+bash scripts/dcg-test-suite.sh
+python3 tests/test_vault_schema.py
 bash tests/test_stop_hook.sh
+bash tests/test_vault_scripts.sh
 make test-harness
 make test-harness-coverage
 make test
 python3 scripts/runtime-harness-lint.py
 python3 scripts/validate-vault.py --summary
+python3 scripts/codex-adapter.py --check
+scripts/mcp-gateway/mcp-gateway.sh codex-sync --check
 git diff --check v2.6.3..HEAD
 ```
 
-Дополнительно:
+Правила evidence:
 
-- mutation test удаляет generation check и обязан падать;
-- mutation test разрешает второй nudge и обязан падать;
-- transition matrix подтверждает zero duplicate effects;
-- telemetry schema запрещает prompt/review/screen body;
-- mutation test выбирает один из двух title-кандидатов и обязан падать;
-- mutation test пишет repair напрямую, минуя optimistic vault-write transaction, и обязан падать;
-- exact current Stop fixture после recovery проходит `scripts/validate-vault.py --summary` и не оставляет dirty writer-owned link repair;
-- source snapshot/adapter checks подтверждают отсутствие provider и permission drift.
+- каждый новый production module наблюдается in-process, а не только subprocess trace;
+- mutation checks обязаны ломать generation binding, second-nudge ceiling, unique-title ambiguity и escalation command anchoring;
+- telemetry/schema tests запрещают prompt, query, command, screen/review body и reason text в content-free events;
+- full-runtime dogfood использует fake provider для намеренного missing-submit; один normal live Opus review доказывает provider/callback/statusline compatibility без искусственного сбоя;
+- review/permission/provider snapshots сравниваются с v2.6.3; любое расширение требует отдельного public-interface/security решения.
 
-## 9. Review policy
+## 10. Review policy
 
-- Intent review: unattended outcome, offline coordinator, stop conditions, no false progress.
-- Engineering review: races, effect idempotency, exact ownership, security, test matrix и maintainability.
-- Vault review: однозначность title/H1 resolution, сохранение alias/anchor, optimistic concurrency, single writer и fail-closed boundaries.
-- Release review: один bounded dogfood, exact-HEAD receipt, отсутствие budget/provider/permission regression.
-- Deep review достаточно; Full запускается только по явному запросу пользователя.
+1. **До реализации:** single-model Opus xhigh `purpose=intent` проверяет этот план, Outcome Contract, границы patch-релиза и полноту D-264.
+2. **После каждого независимого workstream:** focused self-review + соответствующие unit/transition gates; cross-model provider effect не нужен.
+3. **После join:** Opus single-model Deep (`intent` + `engineering`) на exact candidate HEAD, `max_verify_iterations` не расширяется.
+4. **Перед релизом:** отдельный `purpose=release` approval-or-stop на integration HEAD и evidence map.
+5. Full review не запускается автоматически; только по явному запросу пользователя.
 
-## 10. Stop conditions
+Материальные findings применяются в том же approved scope и получают regression. Scope/public-interface/security/migration forks останавливают task и попадают в append-only decision chain; review не запускает скрытый fix loop.
 
-- Если detector требует интерпретировать review prose, решение отвергается.
-- Если recovery нельзя связать с exact generation/effect receipt, автоматический nudge не включается.
-- Если one-shot nudge приводит к duplicate callback/provider effect хотя бы в одном race case, релиз блокируется.
-- Если change расширяет model/restart budget или создаёт новый lifecycle owner, он переносится из patch-релиза.
-- Если wikilink нельзя разрешить точным уникальным title/H1 match либо repair требует создания страницы, fuzzy matching или обхода vault-write, Stop сохраняет исходный failure и ничего не меняет.
-- Если повторная strict validation после одной repair transaction не зелёная, дальнейшие автоматические попытки в этом Stop run запрещены.
-- Если unattended dogfood требует ручного resume/current/send, E6 не установлен.
+## 11. Stop conditions и rollback
 
-## 11. Incidental defect ledger и правило сохранения
+- Любая необходимость читать review prose, синтезировать verdict или посылать prompt без exact generation/effect receipt блокирует callback capability.
+- Duplicate nudge/callback/provider effect в одном race case блокирует релиз.
+- Если DCG exact allow нельзя доказать whole-command negative matrix, D-264-07 остаётся typed deferred; broad Bash allow запрещён.
+- Если link не разрешается точным unique title/H1 или repair требует создать страницу/fuzzy match/direct write, Stop ничего не меняет.
+- Если повторная strict validation после одной transaction не green, повторной repair попытки в том же Stop run нет.
+- Если append-only record chain нельзя совместить с legacy marker без потери решения, migration требует отдельного решения и релиз останавливается.
+- Если dogfood требует ручной lifecycle command, E6 отсутствует.
+- До publish rollback — удалить feature branch/worktree через штатный lifecycle и оставить main/v2.6.3 неизменным. После merge откат — один revert commit; durable evidence/decision chain не удаляется.
 
-Любой подтверждённый дефект, найденный во время frozen task, но не входящий в его Outcome Contract, получает durable entry в ближайшем будущем релизе до продолжения основной работы. Entry содержит ID, точный reproducer или evidence pointer, impact, затронутого owner, границу предполагаемого исправления и typed disposition `included`, `deferred` или `not-a-defect`. Запись не даёт authority чинить дефект внутри исходной задачи.
+## 12. Incidental defect ledger
 
-Начальный ledger 2.6.4:
-
-| ID | Дефект/evidence | Impact | Предлагаемая граница |
+| ID | Дефект/evidence | Owner | Disposition 2.6.4 |
 |---|---|---|---|
-| D-264-01 | Reviewer вернулся к idle prompt без `.review-input.json`/submit; callback generation осталась пустой | unattended pipeline полностью ждёт пользователя | core callback-submit watchdog, E1–E6 |
-| D-264-02 | Accepted verification callback находится в resource-free child со state `verifying`, но gate не публикует result; idempotent facade падает `review continuation child is not resource-free and unpublished` | принятый callback не достигает resolution/finalization, повторный запуск опасен | generation-aware callback publication/reconcile в том же review owner, без новой surface |
-| D-264-03 | `.task-needs-attention.json` хранит только последний marker; более раннее coordinator decision может остаться лишь в product-authored ссылках | reviewer не может независимо проверить amendment/authority trail | append-only typed coordinator decision records с pointer из latest marker; без prompt/body в content-free telemetry |
-| D-264-04 | Stop strict lint блокирует commit для wikilink, который однозначно совпадает с title существующей страницы, но не с filename | безопасно исправимая адресация требует возвращения пользователя | bounded unique-title/H1 self-heal через `vault-write.py`, E7 |
-| D-264-05 | Frozen plan hash запрещает вписывать позднее coordinator amendment в сам plan, а поддерживаемая отдельная authoritative decision-record операция не оформлена как явный workflow | корректный fail-closed требует ручного выбора и легко приводит к повторным невалидным попыткам | документированный code-owned amendment-record helper, не меняющий approved plan/Outcome digests |
-| D-264-06 | После coordinator-authorized containment gate остаётся `awaiting-resolution`, хотя все retained parent/child operations terminal, resource-free и effect-free; публичный `task-review-runner.py recover` отвергает это состояние как `not at one stale verification boundary` до создания fresh boundary | разрешённое exact-chain recovery не может запустить fresh review без ручной gate/store mutation или изменения контракта | `included-in-2.6.3`: commit `68a13ef`, authoritative amendment [[LLM Obsidian 2.6.3 — review recovery inclusion disposition]] |
-| D-264-07 | PreToolUse/DCG блокирует официальный `task_escalation.py raise` как HIGH unknown destructive pattern при восстановлении machine authorization token | callback-driven recovery снова требует возвращения пользователя, хотя команда не является destructive и уже coordinator-authorized | структурированный allow/deny contract для точного task-escalation CLI argv с fail-closed path/category validation и regression против shell/destructive variants |
-| D-264-08 | Quiescent historical review rounds имеют pre-schema `OperationSpec` без `parent_operation_id`; текущий `rehydrate()` вычисляет тот же idempotency key с новой spec и падает до recovery | fresh boundary не запускается даже после корректного containment, хотя provider effect отсутствует | `included-in-2.6.3`: commit `f3212cd`, authoritative amendment [[LLM Obsidian 2.6.3 — review recovery inclusion disposition]] |
-| D-264-09 | Opus reviewer при штатном review повторно вызывает `review-inspect.py` с symbolic/non-OID `--ref` и получает `--ref must be an exact lowercase Git object id`, после чего вынужден отдельно восстанавливать SHA | лишний failed tool turn, токены и риск неполного review; pipeline не падает, но bounded facade недостаточно self-describing | добавить exact base/head OID в ContextPacket/prompt или безопасный code-owned OID resolver перед facade call; сохранить строгий OID boundary внутри `review-inspect`, добавить prompt/command regression, запрещающий symbolic ref напрямую |
+| D-264-01 | Reviewer idle без `.review-input.json`/submit | callback recovery | `included`, Slices 1–5 |
+| D-264-02 | Accepted resource-free verification child не публикуется в gate | review bridge/resolution | `included`, Slice 4 |
+| D-264-03 | Latest attention marker перезаписывает прежнее coordinator decision | task escalation records | `included`, Slice 6 |
+| D-264-04 | Unique title/H1 wikilink блокирует Stop commit | vault/Stop | `included`, Slice 8 |
+| D-264-05 | Нет supported amendment record для frozen plan digest | task escalation records | `included`, Slice 6 |
+| D-264-06 | Quiescent `awaiting-resolution` recovery отвергался | review recovery | `already-shipped-in-2.6.3`, commit `68a13ef` |
+| D-264-07 | Exact `task_escalation.py raise` блокируется task DCG | task permission policy | `included-if-security-matrix-green`, Slice 7; иначе explicit deferred |
+| D-264-08 | Legacy review spec rehydrate несовместим с новым parent field | review recovery | `already-shipped-in-2.6.3`, commit `f3212cd` |
+| D-264-09 | Reviewer передаёт symbolic/non-OID `--ref` в strict facade | review ContextPacket/prompt | `included`, Slice 7; strict facade не ослабляется |
+| D-264-10 | Одноразовый inline Python probe вызвал `tuple has no attribute keys` | reviewer-authored ad-hoc script | `not-a-defect`: нет repo CLI/API contract; повторный product reproducer создаст новый ID |
 
-Release triage обязан обновить каждый entry: включённый дефект получает regression и exact-HEAD evidence; слишком широкий interface/schema change переносится в 2.7 с явным pointer, но не удаляется из ledger.
+Новый defect получает следующую D-264 identity до продолжения task. Ledger entry сам по себе не разрешает fix и не меняет frozen Outcome Contract; disposition меняется только через Slice 6 authority record.
 
-## 12. Завершение
+## 13. Requirement-to-slice coverage
 
-2.6.4 считается готовым только когда работа без пользователя проходит подтверждённый missing-submit incident автоматически, normal-path review не получает лишних prompt/model effects, текущий класс однозначно исправимых unresolved wikilink восстанавливается Stop hook без ручного вмешательства и без ослабления strict validation, а все incidental defects имеют durable disposition. Публикация, tag и release выполняются отдельно после terminal approval.
+| Evidence | Срезы |
+|---|---|
+| E1 | 0, 1 |
+| E2 | 1, 5 |
+| E3 | 2, 3, 4 |
+| E4 | 2–5 |
+| E5 | 1, 3–5 |
+| E6 | 10 |
+| E7 | 8 |
+| E8 | 6 |
+| E9 | 7 |
+| E10 | 0, 6, 9, 10 |
+| E11 | 5, 8–10 |
+
+Все 11 evidence items покрыты; каждый production slice имеет RED, minimal GREEN, refactor seam и runnable verification. Workstreams A–D не делят product files и могут исполняться параллельно только как отдельные task-level pipelines; внутри одного workstream порядок последовательный.
+
+## 14. Завершение
+
+2.6.4 считается release candidate только когда E1–E11 установлены на одном exact HEAD, каждый D-264 имеет durable disposition, offline missing-submit dogfood продолжается без ручного вмешательства, normal review не получает лишний effect, unique wikilink self-heal проходит через единственного writer, а exact provider/permission/model budgets совпадают с v2.6.3. Push, tag и GitHub release остаются отдельным явным действием пользователя после terminal approval.

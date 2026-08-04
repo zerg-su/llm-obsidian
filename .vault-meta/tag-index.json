@@ -171,6 +171,7 @@
   "index": [
     "wiki/comparisons/_index.md",
     "wiki/concepts/_index.md",
+    "wiki/decisions/_index.md",
     "wiki/entities/_index.md",
     "wiki/index.md",
     "wiki/meta/_index.md",
