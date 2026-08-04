@@ -10,6 +10,49 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.3] - 2026-08-04
+
+### Added
+
+- Added a versioned 23-page Russian technical handbook with explicit routes
+  for first-time users, operators, PipelineSpec authors, and maintainers; a
+  complete 34-skill invocation catalog; runnable examples with expected,
+  verification, failure, recovery, and authority fields; and release-candidate
+  documentation.
+- Added `make test-docs`, mutation-sensitive handbook checks, a source/coverage
+  matrix, three disposable-checkout dogfood walkthroughs, and a strict
+  documentation PipelineSpec example compiled entirely from the existing
+  primitive, `tdd`/`review` skill, and named-check registries.
+- Added protected-source claim rulings for eight fetched primary sources and
+  preserved the invalid nine-citation synthesis rejection as negative evidence.
+
+### Fixed
+
+- Preserved an accepted protected-research callback as terminal completion
+  during exact cleanup. Recovery from a previously cancelled fetch/synthesis
+  receipt now requires the exact callback digest, run, request, and artifact
+  identity; ordinary cancellation semantics are unchanged.
+- Repaired fresh-worktree MCP config bootstrap: only the default
+  `sync-config --apply` path may atomically initialize missing `runtime.env`
+  from its strictly validated committed sibling example with owner-only mode.
+  Check/print, custom paths, direct calls, invalid examples, and symlinks remain
+  write-free and fail closed.
+
+### Changed
+
+- Evaluated but did not ship a `document-project` skill. A fresh no-skill
+  control already satisfied all four required documentation behaviors, so the
+  approved no-improvement stop condition removed the candidate, its router and
+  compiler registrations, and its temporary 8,000-byte registry cap. The
+  reusable quality contracts and typed rejection evidence remain in docs.
+
+### Compatibility
+
+- This is a documentation-first patch release. Existing runtime, permissions,
+  providers, fallbacks, built-in pipeline descriptors, and custom PipelineSpec
+  ceilings are unchanged outside the exact regression-covered research
+  callback repair and default MCP runtime-config self-bootstrap.
+
 ## [2.6.2] - 2026-08-03
 
 ### Fixed

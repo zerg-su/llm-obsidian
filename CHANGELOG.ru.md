@@ -16,6 +16,48 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.3] — 2026-08-04
+
+### Добавлено
+
+- Добавлен версионированный русский технический handbook из 23 страниц с
+  маршрутами для новичка, оператора, автора PipelineSpec и maintainer'а;
+  полным каталогом 34 skills и обоих invocation branches; runnable examples с
+  expected result, verification, failure, recovery и authority; а также
+  документацией release candidate.
+- Добавлены `make test-docs`, mutation-sensitive проверки handbook,
+  source/coverage matrix, три walkthrough в disposable checkout и строгий
+  documentation PipelineSpec, компилируемый только из существующих primitives,
+  skills `tdd`/`review` и named checks.
+- Добавлены claim-level rulings для восьми protected-fetch primary sources;
+  ошибочный synthesis с девятью citations сохранён как negative evidence.
+
+### Исправлено
+
+- Accepted protected-research callback сохраняется как terminal completion при
+  exact cleanup. Восстановление ранее cancelled fetch/synthesis receipt
+  разрешено только при полном совпадении callback digest, run, request и
+  artifact identity; обычная cancel semantics не изменена.
+- Исправлен bootstrap MCP config в fresh worktree: только default
+  `sync-config --apply` может атомарно создать отсутствующий `runtime.env` из
+  строго валидированного committed sibling example с owner-only mode.
+  Check/print, custom paths, direct calls, invalid examples и symlinks ничего не
+  пишут и fail closed.
+
+### Изменено
+
+- Кандидат `document-project` проверен, но не поставляется: fresh no-skill
+  control уже выполнил все четыре обязательных поведения. Stop condition удалил
+  candidate, router/compiler registrations и временный cap реестра 8 000 bytes.
+  Reusable quality contracts и typed rejection evidence сохранены в docs.
+
+### Совместимость
+
+- Это documentation-first patch release. Runtime, permissions, providers,
+  fallbacks, built-in pipeline descriptors и custom PipelineSpec ceilings не
+  меняются за пределами exact regression-covered repairs research callback и
+  default MCP runtime-config self-bootstrap.
+
 ## [2.6.2] — 2026-08-03
 
 ### Исправлено

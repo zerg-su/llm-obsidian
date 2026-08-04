@@ -11,6 +11,8 @@
 Language: **English** · [Русский](README.ru.md)
 Release history: [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md)
 
+Complete technical handbook: [Русский, version 2.6.3](docs/ru/index.md).
+
 LLM Obsidian is an Obsidian vault and an agent toolkit in one repository. It turns conversations, plans, source documents, decisions, shell history, research, and completed tasks into structured Markdown that remains useful after a model session ends. The same repository then supplies both supported CLIs with versioned skills, deterministic scripts, retrieval, safety checks, and a complete dispatch → review → reap lifecycle.
 
 It is designed for sustained work on a laptop: software projects, infrastructure, research, personal knowledge systems, and long-running operational work. It is not a hosted agent platform, a provider proxy, or a way around subscriptions and rate limits. You keep using the official Claude Code and Codex CLIs with your own access; this project gives them a shared operating system for knowledge and work.
@@ -216,7 +218,7 @@ operation gets fresh scratch. `unsafe-research` is a separate, explicitly
 authorized single-context escape hatch; it never becomes a silent fallback from
 protected research.
 
-## The 32 shipped skills
+## The 34 shipped skills
 
 Claude invokes them through its plugin UI (`/skill`). Codex uses the generated repo-local marketplace (`$llm-obsidian:skill`). The mechanics live in `skills/<name>/SKILL.md`, so another coding agent can follow them manually even without plugin support.
 
@@ -393,6 +395,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| v2.6.3 complete Russian technical handbook and deterministic documentation gates | [v2.6.3 release notes](docs/releases/v2.6.3.md) |
 | v2.6.2 truthful cmux workspace progress and lifecycle fixes | [v2.6.2 release notes](docs/releases/v2.6.2.md) |
 | v2.6.1 independent review topology and lane isolation | [v2.6.1 release notes](docs/releases/v2.6.1.md) |
 | v2.6.0 outcome-preserving contracts and skill intelligence | [v2.6.0 release notes](docs/releases/v2.6.0.md) |

@@ -8,6 +8,7 @@
 | Claude plugin marketplace | `.claude-plugin/` | Generated/release metadata |
 | Codex plugin marketplace | `.codex-plugin/`, `.agents/plugins/marketplace.json` | `codex-adapter.py --apply` |
 | MCP routes | `scripts/mcp-gateway/config.json` | Local config из committed example |
+| MCP runtime port | `scripts/mcp-gateway/runtime.env` | Default `sync-config --apply` может атомарно создать из strict sibling example; custom/check paths не пишут |
 | MCP credentials | `~/.config/mcp-gateway/secrets.env` | User-owned, mode 600, вне Git |
 | Optional MCP profiles | `.mcp-profiles/` | Opt-in schema/context load |
 | Memory backup | `config/memory-backup.example.json` | Disabled до explicit env/config source |
@@ -43,4 +44,3 @@ migration, public-interface, permission или provider-default изменени
 [`docs/model-routing.md`](../../model-routing.md),
 [`docs/runtime-capabilities.md`](../../runtime-capabilities.md),
 [`docs/mcp-gateway.md`](../../mcp-gateway.md).
-

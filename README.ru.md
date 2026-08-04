@@ -11,6 +11,8 @@
 Язык: [English](README.md) · **Русский**
 История релизов: [English](CHANGELOG.md) · [Русский](CHANGELOG.ru.md)
 
+Полный технический handbook 2.6.3: [начать чтение](docs/ru/index.md).
+
 LLM Obsidian — одновременно Obsidian-вольт и набор инструментов для LLM-агентов. Он превращает разговоры, планы, документы, решения, команды, исследования и завершённые задачи в связанный Markdown, который не исчезает вместе с окном модели. Этот же репозиторий даёт обоим поддерживаемым CLI версионируемые скиллы, детерминированные скрипты, retrieval, защитные проверки и полный жизненный цикл dispatch → review → reap.
 
 Проект рассчитан на продолжительную работу с ноутбука: разработку ПО, инфраструктуру, исследования, личную базу знаний и большие операционные задачи. Это не облачная agent-платформа, не proxy провайдера и не обход подписок или лимитов. Вы продолжаете пользоваться официальными Claude Code и Codex CLI со своим доступом; репозиторий добавляет общий рабочий слой для знаний и задач.
@@ -225,7 +227,7 @@ task/isolation domain, поэтому follow-up research не стартует �
 операции свежий scratch. `unsafe-research` — отдельный явно разрешаемый
 single-context escape hatch; он не является fallback защищённого режима.
 
-## 32 скилла из коробки
+## 34 скилла из коробки
 
 Claude вызывает их через plugin UI (`/skill`), Codex — через repo-local marketplace (`$llm-obsidian:skill`). Механика лежит в `skills/<name>/SKILL.md`, поэтому другой coding agent может следовать ей вручную.
 
@@ -402,6 +404,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| Полный русский технический handbook и deterministic docs gates 2.6.3 | [Release notes 2.6.3](docs/releases/v2.6.3.md) |
 | Truthful cmux workspace progress и lifecycle fixes 2.6.2 | [Release notes 2.6.2](docs/releases/v2.6.2.md) |
 | Независимая review topology и изоляция lane 2.6.1 | [Release notes 2.6.1](docs/releases/v2.6.1.md) |
 | Outcome-preserving contracts и skill intelligence 2.6.0 | [Release notes 2.6.0](docs/releases/v2.6.0.md) |

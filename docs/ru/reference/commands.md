@@ -21,6 +21,7 @@
 | `python3 scripts/codex-adapter.py --apply` | Генерирует Codex plugin metadata |
 | `scripts/mcp-gateway/mcp-gateway.sh doctor` | Read-only diagnosis |
 | `scripts/mcp-gateway/mcp-gateway.sh health` | Проверяет configured HTTP routes |
+| `scripts/mcp-gateway/mcp-gateway.sh sync-config --apply` | Синхронизирует gateway/client JSON; только default path может создать missing `runtime.env` из validated sibling example |
 | `scripts/mcp-gateway/mcp-gateway.sh install` | Устанавливает/обновляет local gateway service |
 | `scripts/mcp-gateway/mcp-gateway.sh codex-sync --apply` | Меняет Codex MCP config |
 
@@ -61,4 +62,3 @@ deploy и release не следуют автоматически из green test
 
 Источники: [`Makefile`](../../../Makefile), [`scripts/`](../../../scripts/),
 [`AGENTS.md`](../../../AGENTS.md).
-
