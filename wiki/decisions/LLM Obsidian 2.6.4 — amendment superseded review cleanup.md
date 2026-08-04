@@ -38,3 +38,7 @@ related:
 
 Это coordinator-owned amendment к Outcome digest `83a8f81c78ac13a276e106cf33cd29d0300d0ca5f3e0307049183f53d493910d`. Новые contract bytes требуют fresh Opus intent boundary; текущий reviewer старых bytes сохраняется только как provenance.
 
+
+## Ownership clarification
+
+Пользователь уточнил amendment: Harness является control plane всего исполнения уже выбранного плана — steps, loops, review, verification, bounded fix/retry, checkpoints, callbacks и cleanup. LLM производит только содержательные typed artifacts внутри контракта и не управляет lifecycle. Это закреплено E14 как regression invariant; semantic task decomposition остаётся 2.7.
