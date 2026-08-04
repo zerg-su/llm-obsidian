@@ -468,6 +468,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         ).replace("E-plan | facade matrix", "E-plan | changed matrix"),
     }
     observed_changes: dict[str, tuple[str, ...]] = {}
+    active_guards: dict[str, bool] = {}
     for name, text in mutations.items():
         mutated_path = plan_dir / f"protected-{name}.md"
         mutated_path.write_text(text, encoding="utf-8")
@@ -475,6 +476,19 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         observed_changes[name] = plan_review.protected_artifact_changes(
             resolved, mutated
         )
+        try:
+            plan_review.guard_active_protected_artifacts(
+                active_runtime,
+                rebound,
+                mutated,
+            )
+        except plan_review.PlanReviewError as exc:
+            active_guards[name] = (
+                exc.code == "plan-review-protected-artifact-changed"
+                and "amendment and fresh boundary" in str(exc)
+            )
+        else:
+            active_guards[name] = False
     check(
         "Outcome dispositions and evidence-map deltas remain protected",
         observed_changes
@@ -484,6 +498,16 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
             "success_evidence": ("success_evidence",),
         },
         observed_changes,
+    )
+    check(
+        "every active protected delta requires amendment plus fresh boundary",
+        active_guards
+        == {
+            "outcome": True,
+            "capability_dispositions": True,
+            "success_evidence": True,
+        },
+        active_guards,
     )
 
 print("\nPlan review facade RED/green matrix passed.")

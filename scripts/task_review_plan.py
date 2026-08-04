@@ -393,6 +393,53 @@ def protected_artifact_changes(
     )
 
 
+def guard_active_protected_artifacts(
+    runtime_root: Path,
+    candidate: Mapping[str, Any],
+    compilation: PlanReviewCompilation,
+) -> None:
+    """Reject protected drift until an external amendment opens a fresh boundary."""
+
+    boundary_path = Path(
+        str(candidate.get("review_boundary_input_file") or "")
+    ).resolve()
+    expected = (runtime_root / "inputs/review-boundary-input.json").resolve()
+    if boundary_path != expected:
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "active plan boundary pointer is outside exact review scratch",
+        )
+    old = _load_review_boundary_input(boundary_path, purpose="intent")
+    current = compilation.boundary()
+    changed = tuple(
+        name
+        for name, before, after in (
+            (
+                "outcome",
+                old.outcome_contract_sha256,
+                current.outcome_contract_sha256,
+            ),
+            (
+                "capability_dispositions",
+                old.capability_dispositions_sha256,
+                current.capability_dispositions_sha256,
+            ),
+            (
+                "success_evidence",
+                old.success_evidence_map_sha256,
+                current.success_evidence_map_sha256,
+            ),
+        )
+        if before != after
+    )
+    if changed:
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "protected plan artifacts require an amendment and fresh boundary: "
+            + ", ".join(changed),
+        )
+
+
 def validate_design_rebind(
     worktree: Path,
     reviewed: PlanReviewCompilation,
@@ -639,6 +686,7 @@ __all__ = (
     "PlanReviewCompilation",
     "PlanReviewError",
     "compile_plan_review",
+    "guard_active_protected_artifacts",
     "materialize_plan_review",
     "protected_artifact_changes",
     "rebind_active_plan_review",

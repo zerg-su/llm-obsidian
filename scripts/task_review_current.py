@@ -321,12 +321,13 @@ def run_current_review(
             requested_purpose = str(
                 requested_policy.get("purpose") or "implementation"
             )
+            candidate_runtime_root: Path | None = None
             if (
                 plan_compilation is not None
                 and not same_policy
-                and status == "awaiting-resolution"
+                and isinstance(candidate.get("plan_review"), Mapping)
             ):
-                from task_review_plan import rebind_active_plan_review
+                from task_review_plan import guard_active_protected_artifacts
 
                 candidate_runtime_root = Path(
                     str(candidate.get("runtime_root") or "")
@@ -338,6 +339,18 @@ def run_current_review(
                     raise TaskReviewError(
                         "current review scratch root changed during plan rebind"
                     )
+                guard_active_protected_artifacts(
+                    candidate_runtime_root,
+                    candidate,
+                    plan_compilation,
+                )
+            if (
+                plan_compilation is not None
+                and not same_policy
+                and status == "awaiting-resolution"
+            ):
+                from task_review_plan import rebind_active_plan_review
+
                 candidate = rebind_active_plan_review(
                     worktree,
                     active_path,
