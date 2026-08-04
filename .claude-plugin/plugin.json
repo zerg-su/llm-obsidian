@@ -1,6 +1,6 @@
 {
   "name": "llm-obsidian",
-  "version": "2.6.3",
+  "version": "2.6.4",
   "description": "LLM-powered self-organizing second brain for Obsidian: wiki companion skills, local hybrid retrieval, protected research, and restartable Claude/Codex task orchestration.",
   "author": {
     "name": "zerg-su",

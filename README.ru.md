@@ -404,6 +404,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| Unattended callback continuity и durable decisions 2.6.4 | [Release notes 2.6.4](docs/releases/v2.6.4.md) |
 | Полный русский технический handbook и deterministic docs gates 2.6.3 | [Release notes 2.6.3](docs/releases/v2.6.3.md) |
 | Truthful cmux workspace progress и lifecycle fixes 2.6.2 | [Release notes 2.6.2](docs/releases/v2.6.2.md) |
 | Независимая review topology и изоляция lane 2.6.1 | [Release notes 2.6.1](docs/releases/v2.6.1.md) |

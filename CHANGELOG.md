@@ -10,6 +10,50 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.4] - 2026-08-04
+
+### Added
+
+- Added harness-owned recovery for a missing reviewer submit. Recovery is
+  bound to the exact operation, run, lane, generation, callback target,
+  deadline, process/surface ownership, and the existing shared one-nudge
+  ceiling; stable typed input, callback, or receipt wins without a model call.
+- Added append-only escalation, resolution, and plan-amendment records. The
+  latest attention marker is now a bounded pointer to immutable decision
+  history, with deterministic legacy-marker backfill.
+- Added `task-review-runner.py plan`, a purpose-safe plan-review facade with
+  protected Outcome/disposition/evidence regions, exact base/head OIDs, and
+  ready-to-run bounded inspection commands.
+- Added one-shot Wiki self-healing for uniquely resolvable title/H1 wikilinks
+  through the canonical transactional writer, followed by index rebuild and
+  strict validation.
+
+### Changed
+
+- Harness now publishes accepted resource-free reviewer callbacks, rearms an
+  exact timed-out parent only under durable identity checks, and cleans up only
+  exact-owned superseded reviewer resources. Active or unknown ownership still
+  fails closed.
+- Same-session continuation distinguishes transport acceptance from provider
+  acknowledgement. A prompt is never marked successful merely because paste
+  and Enter RPCs returned zero; one identity-bound Enter retry may consume the
+  shared liveness budget, otherwise typed attention is recorded.
+- Dispatch context preserves the exact resolved wiki path instead of treating
+  a display title as a file identity. Review inspection requires canonical
+  full object IDs.
+- All harness test suites and production entrypoints are checked against the
+  standing Makefile and coverage denominator.
+
+### Fixed
+
+- Prevented silent pipeline stalls after completed reviewer output, accepted
+  callback races, callback-rearm crashes, and retained prompt text that was not
+  actually submitted.
+- Prevented plan review from silently defaulting to implementation review or
+  reusing a retained lane after protected plan-contract drift.
+- Prevented newer coordinator decisions from overwriting older escalation and
+  amendment evidence.
+
 ## [2.6.3] - 2026-08-04
 
 ### Added

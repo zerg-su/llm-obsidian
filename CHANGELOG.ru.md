@@ -16,6 +16,47 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.4] — 2026-08-04
+
+### Добавлено
+
+- Harness-owned восстановление пропущенного reviewer submit. Оно связано с
+  точными operation/run/lane/generation, callback target, deadline и владением
+  process/surface и использует существующий общий лимит в один nudge; готовые
+  typed input, callback или receipt принимаются без вызова модели.
+- Append-only записи escalation, resolution и amendment плана. Последний
+  attention marker теперь является ограниченным указателем на неизменяемую
+  историю решений; старый полный marker мигрирует детерминированно.
+- `task-review-runner.py plan` — безопасный фасад ревью планов с
+  `purpose=intent`, защищёнными Outcome/disposition/evidence областями, точными
+  base/head OID и готовыми ограниченными командами инспекции.
+- Одноразовое самоисправление Wiki-ссылок, если цель однозначно определяется
+  по title/H1. Изменение идёт через канонический transactional writer, после
+  чего перестраиваются индексы и выполняется строгая валидация.
+
+### Изменено
+
+- Harness публикует принятые resource-free callback, безопасно rearm'ит только
+  точного timed-out parent и закрывает только exact-owned superseded reviewer
+  ресурсы. Активное или неизвестное владение по-прежнему останавливается.
+- Same-session continuation различает transport acceptance и подтверждение
+  provider generation. Нулевые exit-коды paste/Enter больше не означают успех;
+  один identity-bound повтор Enter может потратить общий liveness budget,
+  иначе сохраняется typed attention.
+- Dispatch сохраняет точный путь wiki context, а не принимает отображаемый
+  title за имя файла. Review inspect принимает только полный канонический OID.
+- Standing Makefile и coverage denominator теперь проверяют полный набор
+  harness-тестов и production entrypoints.
+
+### Исправлено
+
+- Устранены молчаливые остановки после готового reviewer output, callback races,
+  сбоев callback rearm и случая, когда prompt остался в editor и не был запущен.
+- Plan review больше не запускается как implementation по умолчанию и не
+  переиспользует старую lane после изменения защищённого контракта плана.
+- Новые coordinator decisions больше не перезаписывают старые escalation и
+  amendment evidence.
+
 ## [2.6.3] — 2026-08-04
 
 ### Добавлено
