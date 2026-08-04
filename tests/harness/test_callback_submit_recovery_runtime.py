@@ -1304,6 +1304,16 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and not callback_worker.registration_invalid,
         (cmux.sent, cmux.keys, joined_child, joined_receipt),
     )
+    worker.inspect_liveness()
+    accepted_parent = store.read("review-owner-3", "review-parent-3")
+    check(
+        "accepted callback receipt cannot become stale-generation attention",
+        accepted_parent.state == "awaiting-callback"
+        and not (state_root / "callback-submit-attention.json").exists()
+        and len(cmux.sent) == 1
+        and cmux.keys == [(SURFACE, "Enter")],
+        (accepted_parent, cmux.sent, cmux.keys),
+    )
     expected_observations = dogfood_evidence["observations"]
     check(
         "tracked E6 receipt binds the exact integrated unattended sequence",

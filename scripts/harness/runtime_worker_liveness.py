@@ -92,6 +92,8 @@ class RuntimeWorkerLivenessMixin:
         except RuntimeWorkerError:
             self.callback_submit_attention("callback-submit-evidence-malformed")
             return
+        if _current_callback_receipt_sha256(self.spec_path.parent):
+            return
         child = self._expected_callback_child(record, operation_id, run_id)
         if child is None:
             self.callback_submit_attention("callback-submit-stale-generation")
