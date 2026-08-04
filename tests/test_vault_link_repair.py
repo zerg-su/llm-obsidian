@@ -70,7 +70,9 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-") as raw:
             "[[Alpha Canonical|alpha alias]] [[Beta Heading#Details]]\n"
             "[[Alpha Canonical\\|escaped label]]\n"
             "`[[Alpha Canonical]]`\n"
-            "```md\n[[Beta Heading]]\n```\n",
+            "```md\n[[Beta Heading]]\n```\n"
+            "~~~~md\n[[Alpha Canonical]]\n~~~~\n"
+            "````md\n```\n[[Beta Heading]]\n```\n````\n",
         ),
         encoding="utf-8",
     )
@@ -88,7 +90,10 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-") as raw:
     )
     check(
         "inline and fenced examples remain byte-stable",
-        "`[[Alpha Canonical]]`" in rendered and "```md\n[[Beta Heading]]\n```" in rendered,
+        "`[[Alpha Canonical]]`" in rendered
+        and "```md\n[[Beta Heading]]\n```" in rendered
+        and "~~~~md\n[[Alpha Canonical]]\n~~~~" in rendered
+        and "````md\n```\n[[Beta Heading]]\n```\n````" in rendered,
     )
     check("repair report paths are bounded repo-relative paths", plan.paths == ("wiki/source.md",))
     check("repair identity is deterministic", build_repair_plan(root).repair_id == plan.repair_id)

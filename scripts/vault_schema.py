@@ -284,7 +284,8 @@ def rewrite_wikilinks(
                 embed=bool(match.group("embed")),
             )
             links.append(link)
-            rendered.append(rewriter(link) or link.text)
+            replacement = rewriter(link)
+            rendered.append(link.text if replacement is None else replacement)
             cursor = match.end()
         tail = segment[cursor:]
         malformed = malformed or "[[" in tail or "]]" in tail
@@ -532,7 +533,13 @@ def validate_schema(repo_root: Path) -> list[SchemaIssue]:
             or path.name == "_index.md"
         ):
             continue
-        for target in iter_wikilinks(text):
+        rewritten = rewrite_wikilinks(text, lambda _link: None)
+        if rewritten.malformed:
+            issues.append(
+                SchemaIssue("fail", "wikilink", f"{rel}: malformed wikilink syntax")
+            )
+        for link in rewritten.links:
+            target = link.target
             if catalog.resolves(target):
                 continue
             issues.append(SchemaIssue("fail", "wikilink", f"{rel}: unresolved [[{target}]]"))

@@ -25,6 +25,7 @@ mkdir -p "$SANDBOX/wiki" "$SANDBOX/.raw" "$SANDBOX/.vault-meta" \
   "$SANDBOX/.claude-memory" "$SANDBOX/scripts"
 cp "$ROOT/scripts/stop-hook.py" "$ROOT/scripts/reindex.py" \
    "$ROOT/scripts/vault_schema.py" "$ROOT/scripts/vault-write.py" \
+   "$ROOT/scripts/vault_link_repair.py" \
    "$ROOT/scripts/vault_write_contract.py" \
    "$ROOT/scripts/vault_write_mutations.py" \
    "$ROOT/scripts/vault_write_pages.py" \
@@ -146,6 +147,109 @@ out=$(run_hook); rc=$?
 printf '%s' "$out" | grep -q 'DENSE_DEFERRED' && ok "sh-dense-deferred" || bad "sh-dense-deferred" "no deferred notice"
 [[ -s "$SANDBOX/.vault-meta/dense-refresh.pending.json" ]] && ok "sh-dense-retry-marker" || bad "sh-dense-retry-marker" "marker missing"
 [[ -s "$SANDBOX/.vault-meta/retrieval-quality.pending.json" ]] && ok "sh-retrieval-quality-pending" || bad "sh-retrieval-quality-pending" "quality marker missing"
+
+# A unique frontmatter-title target is repaired through one optimistic writer
+# transaction, then every derived index reflects the repaired corpus.
+cat > "$SANDBOX/wiki/canonical.md" <<'EOF'
+---
+type: concept
+title: "Canonical Display"
+status: developing
+created: 2026-01-01
+updated: 2026-01-01
+tags: [test]
+sessions: []
+---
+
+# Canonical Heading
+EOF
+printf '\n[[Canonical Display|display alias]] [[Canonical Heading#Details]]\n' >> "$SANDBOX/wiki/seed.md"
+grep -q 'wiki/canonical.md' "$SANDBOX/.vault-meta/index.jsonl" \
+  && bad "sh-repair-pre-index-stale" "new target already indexed" || ok "sh-repair-pre-index-stale"
+before=$(commit_count)
+out=$(run_hook); rc=$?
+[[ "$rc" == 0 ]] && ok "sh-repair-exit0" || bad "sh-repair-exit0" "exit $rc"
+printf '%s' "$out" | grep -q 'WIKILINK_REPAIRED: 2 link(s) in wiki/seed.md' \
+  && ok "sh-repair-bounded-report" || bad "sh-repair-bounded-report" "bounded report missing"
+grep -q '\[\[canonical|display alias\]\] \[\[canonical#Details\]\]' "$SANDBOX/wiki/seed.md" \
+  && ok "sh-repair-page-committed" || bad "sh-repair-page-committed" "canonical links missing"
+[[ "$(commit_count)" == "$((before + 1))" ]] \
+  && ok "sh-repair-single-commit" || bad "sh-repair-single-commit" "commit count drift"
+python3 - "$SANDBOX" <<'PY' >/dev/null 2>&1
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+pages = [json.loads(line) for line in (root / ".vault-meta/index.jsonl").read_text().splitlines()]
+assert any(page["path"] == "wiki/canonical.md" for page in pages)
+sparse = json.loads((root / ".vault-meta/retrieval/index.json").read_text())
+assert any(doc["path"] == "wiki/canonical.md" for doc in sparse["docs"].values())
+bm25 = json.loads((root / ".vault-meta/bm25/index.json").read_text())
+assert "wiki/canonical.md" in bm25["docs"]
+events = [json.loads(line) for line in (root / ".vault-meta/pipeline-events.jsonl").read_text().splitlines()]
+repair = [event for event in events if event["op"] == "wikilink-repair"][-1]
+assert repair["paths"] == ["wiki/seed.md"]
+assert repair["counts"] == {"links": 2, "pages": 1}
+assert repair["identifiers"]["repair_id"].startswith("wikilink-")
+PY
+[[ "$?" == 0 ]] && ok "sh-repair-index-event-current" || bad "sh-repair-index-event-current" "index/event evidence stale"
+
+# Ambiguous titles, unsupported embeds, and malformed prose remain fail-closed.
+for control in ambiguous embed malformed; do
+  case "$control" in
+    ambiguous)
+      cat > "$SANDBOX/wiki/ambiguous-one.md" <<'EOF'
+---
+type: concept
+title: "Ambiguous Display"
+status: developing
+created: 2026-01-01
+updated: 2026-01-01
+tags: [test]
+sessions: []
+---
+# One
+EOF
+      cat > "$SANDBOX/wiki/ambiguous-two.md" <<'EOF'
+---
+type: concept
+title: "Ambiguous Display"
+status: developing
+created: 2026-01-01
+updated: 2026-01-01
+tags: [test]
+sessions: []
+---
+# Two
+EOF
+      probe='[[Ambiguous Display]]'
+      ;;
+    embed) probe='![[Canonical Display]]' ;;
+    malformed) probe='[[Canonical Display' ;;
+  esac
+  printf '\n%s\n' "$probe" >> "$SANDBOX/wiki/seed.md"
+  source_hash=$(shasum -a 256 "$SANDBOX/wiki/seed.md" | awk '{print $1}')
+  before=$(commit_count)
+  out=$(run_hook); rc=$?
+  after_hash=$(shasum -a 256 "$SANDBOX/wiki/seed.md" | awk '{print $1}')
+  [[ "$source_hash" == "$after_hash" ]] \
+    && ok "sh-${control}-source-unchanged" || bad "sh-${control}-source-unchanged" "source mutated"
+  [[ "$(commit_count)" == "$before" ]] \
+    && ok "sh-${control}-no-commit" || bad "sh-${control}-no-commit" "unexpected commit"
+  printf '%s' "$out" | grep -q 'COMMIT_BLOCKED' \
+    && ok "sh-${control}-blocked" || bad "sh-${control}-blocked" "failure not surfaced"
+  python3 - "$SANDBOX/wiki/seed.md" "$probe" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("\n" + sys.argv[2] + "\n", "\n"), encoding="utf-8")
+PY
+  if [[ "$control" == ambiguous ]]; then
+    rm "$SANDBOX/wiki/ambiguous-one.md" "$SANDBOX/wiki/ambiguous-two.md"
+  fi
+done
+out=$(run_hook)
 
 python3 - "$SANDBOX/scripts/stop-hook.py" "$SANDBOX" <<'PY' >/dev/null 2>&1
 import importlib.util

@@ -138,6 +138,13 @@ with tempfile.TemporaryDirectory(prefix="vault-schema-") as tmp:
     one_path.write_text(page("One", "[[Missing Page]]"), encoding="utf-8")
     issues = validate_schema(root)
     assert_true("dead link fails", any(i.code == "wikilink" for i in issues))
+    one_path.write_text(page("One", "[[Missing Page"), encoding="utf-8")
+    issues = validate_schema(root)
+    assert_true(
+        "malformed prose link fails",
+        any(i.code == "wikilink" and "malformed" in i.message for i in issues),
+    )
+    one_path.write_text(page("One", "[[Missing Page]]"), encoding="utf-8")
 
     reports = wiki / "meta" / "reports"
     reports.mkdir(parents=True)
