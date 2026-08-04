@@ -168,6 +168,28 @@ def _prompt(
     callback_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     callback_directory.chmod(0o700)
     review_input = callback_directory / ".review-input.json"
+    inspection_path = runtime_root / "inputs/plan-review-inspection.json"
+    plan_inspection_lines: tuple[str, ...] = ()
+    if inspection_path.is_file() and not inspection_path.is_symlink():
+        inspection = _read_json(
+            inspection_path, "plan review inspection evidence"
+        )
+        commands = inspection.get("commands")
+        base_sha = str(inspection.get("base_sha") or "")
+        if (
+            inspection.get("schema_version") != 1
+            or inspection.get("head_sha") != context.head_sha
+            or not base_sha
+            or not isinstance(commands, list)
+            or len(commands) != 4
+            or any(not isinstance(item, str) or not item for item in commands)
+        ):
+            raise TaskReviewError("plan review inspection evidence is invalid")
+        plan_inspection_lines = (
+            f"Exact review base: `{base_sha}`.",
+            "Literal bounded Git inspection commands:",
+            *(f"- `{command}`" for command in commands),
+        )
     pointer = f"prompts/{name}"
     submit = shlex.join(
         (
@@ -251,6 +273,7 @@ def _prompt(
                 f"Boundary question: {REVIEW_QUESTIONS[context.purpose]}",
                 responsibility_instructions,
                 f"Exact product HEAD: `{context.head_sha}`.",
+                *plan_inspection_lines,
                 f"Product worktree (read-only): `{worktree}`.",
                 f"ContextPacket: `{runtime_root / context.manifest}`.",
                 "The review standard and approved plan are inside the ContextPacket.",
