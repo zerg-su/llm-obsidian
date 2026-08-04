@@ -3,25 +3,19 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from harness.contracts import OperationRecord, OperationSpec, OwnedResources
+from harness.contracts import OwnedResources
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
-from harness.store import OperationStore, StoreError
+from harness.store import OperationStore
 from harness.workflows.review_gate import (
     ReviewGateController,
     ReviewScopeBoundary,
     review_context_sha256,
 )
-from review_resolution import (
-    ResolutionError,
-    validate_resolution_evidence,
-)
 from task_review_context import (
-    _canonical_sha256,
     _context,
     _gate_root,
     _runtime_root,
@@ -34,126 +28,65 @@ from task_review_finalizing import (
 from task_review_resolution_bundle import _recovery_resolution_bundle
 from task_review_shared import (
     TaskReviewError,
-    _atomic_json,
     _read_json,
+)
+from task_review_recovery_support import (
+    _RecoveryRoundStore,
+    _approved_summary_resolution,
+    _authorization_payload,
+    _persist_authorization,
 )
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
 
 
-class _RecoveryRoundStore:
-    """Read exact terminal rounds created before parent identity persisted."""
-
-    def __init__(self, store: OperationStore) -> None:
-        self._store = store
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._store, name)
-
-    def create(
-        self,
-        spec: OperationSpec,
-        *,
-        lane_id: str,
-        run_id: str,
-    ) -> OperationRecord:
-        try:
-            return self._store.create(
-                spec, lane_id=lane_id, run_id=run_id
-            )
-        except StoreError as original:
-            try:
-                existing = self._store.read(
-                    spec.owner_id, spec.operation_id
-                )
-            except StoreError:
-                raise original
-            legacy_spec = replace(spec, parent_operation_id="")
-            if (
-                spec.kind != "review-round"
-                or not spec.parent_operation_id
-                or existing.spec != legacy_spec
-                or existing.lane_id != lane_id
-                or existing.run_id != run_id
-                or existing.state not in TERMINAL
-                or existing.resources != OwnedResources()
-                or existing.pending_effect
-            ):
-                raise original
-            return replace(existing, spec=spec)
-
-
-def recover_task_review_for_mechanism(
-    worktree: Path,
+def _running_recovery_receipt(
     *,
-    runtime_manager: object | None = None,
-) -> dict[str, Any]:
-    """Use one resolved mechanism escalation to replace a dead review lane."""
-
-    worktree = worktree.expanduser().resolve()
-    meta, vault, task_id = _validate_task(worktree)
-    attention_path = worktree / ".task-needs-attention.json"
-    attention = _read_json(attention_path, "task escalation")
-    current_context, context_manifest = _context(
-        meta,
-        vault,
-        worktree,
-        _runtime_root(vault, task_id),
-        task_id,
-    )
-    decision = str(attention.get("decision") or "")
-    if (
-        attention.get("status") != "resolved"
-        or attention.get("category") != "mechanism-failure"
-        or str(attention.get("worktree") or "") != str(worktree)
-        or not decision.startswith(
-            "authorize-one-bounded-fresh-context-review-boundary-for-"
-        )
-        or current_context.head_sha[:7] not in decision
-    ):
-        raise TaskReviewError(
-            "review mechanism recovery lacks exact coordinator authorization"
-        )
-    store_root = vault / ".vault-meta" / "harness"
-    store = OperationStore(store_root)
-    runtime = runtime_manager or RuntimeSessionManager.for_root(
-        vault, store_root=store_root
-    )
-    gate = ReviewGateController(
-        _gate_root(vault, task_id),
-        runtime,
-        _RecoveryRoundStore(store),
-    )
-    state = gate.read()
-    run = gate.rehydrate()
+    state: dict[str, Any],
+    attention_id: str,
+    meta: dict[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    run: Any,
+) -> dict[str, Any] | None:
     stored_boundary = state.get("fresh_boundary")
-    if (
+    if not (
         state.get("fresh_reevaluation_used") is True
         and state.get("status") in {"fresh-reevaluation", "reviewing", "verifying"}
         and isinstance(stored_boundary, dict)
-        and str(attention.get("id") or "")
-        in str(stored_boundary.get("reason") or "")
+        and attention_id in str(stored_boundary.get("reason") or "")
     ):
-        return _receipt(
-            status=(
-                "verifying"
-                if state.get("status") == "verifying"
-                else "reviewing"
-            ),
-            meta=meta,
-            vault=vault,
-            worktree=worktree,
-            runtime_root=_runtime_root(vault, task_id),
-            context_manifest=(
-                _runtime_root(vault, task_id)
-                / run.execution.request.context.manifest
-            ),
-            run=run,
-        )
+        return None
+    return _receipt(
+        status="verifying" if state.get("status") == "verifying" else "reviewing",
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=runtime_root / run.execution.request.context.manifest,
+        run=run,
+    )
+
+
+def _approved_summary_recovery(
+    *,
+    state: dict[str, Any],
+    attention: dict[str, Any],
+    attention_path: Path,
+    meta: dict[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    task_id: str,
+    gate: ReviewGateController,
+    run: Any,
+    current_context: Any,
+) -> dict[str, Any] | None:
     previous_context = run.execution.request.context
     axes = run.execution.request.policy.axes
     simple_axis = axes[0] if len(axes) == 1 else ""
-    if (
+    is_summary_recovery = (
         state.get("status") == "approved"
         and state.get("fresh_reevaluation_used") is not True
         and state.get("final_results") not in ({}, None)
@@ -168,126 +101,80 @@ def recover_task_review_for_mechanism(
         and bool(previous_context.implementer_summary_sha256)
         and previous_context.implementer_summary_sha256
         != current_context.implementer_summary_sha256
-    ):
-        raw_resolution_evidence = state.get("resolution_evidence")
-        if (
-            not isinstance(raw_resolution_evidence, dict)
-            or len(raw_resolution_evidence) != 1
-        ):
-            raise TaskReviewError(
-                "approved summary recovery resolution boundary is invalid"
-            )
-        persisted_pointer = Path(
-            str(next(iter(raw_resolution_evidence.values())))
-        )
-        persisted_path = (gate.root / persisted_pointer).resolve()
-        if (
-            persisted_pointer.is_absolute()
-            or gate.root not in persisted_path.parents
-            or not persisted_path.is_file()
-            or persisted_path.is_symlink()
-        ):
-            raise TaskReviewError(
-                "approved summary recovery resolution evidence is unavailable"
-            )
-        try:
-            persisted_resolution = validate_resolution_evidence(
-                _read_json(
-                    persisted_path, "persisted review resolution"
-                )
-            )
-        except ResolutionError as exc:
-            raise TaskReviewError(
-                "approved summary recovery resolution evidence is invalid"
-            ) from exc
-        if (
-            persisted_resolution.operation_id != task_id
-            or persisted_resolution.axis != simple_axis
-            or persisted_resolution.resolved_head_sha
-            != current_context.head_sha
-        ):
-            raise TaskReviewError(
-                "approved summary recovery resolution identity changed"
-            )
-        bundle = _recovery_resolution_bundle(
-            worktree,
-            task_id,
-            persisted_resolution,
-            current_context.head_sha,
-            str(state.get("resolution_transport_identity_sha256") or ""),
-        )
-        current_context, context_manifest = _context(
-            meta,
-            vault,
-            worktree,
-            _runtime_root(vault, task_id),
-            task_id,
-            resolution_bundle=bundle,
-        )
-        boundary = ReviewScopeBoundary(
-            "context",
-            review_context_sha256(previous_context),
-            review_context_sha256(current_context),
-            (
-                "resolved mechanism escalation "
-                f"{attention.get('id')}: review refreshed summary bytes only"
-            ),
-        )
-        authorization = {
-            "schema_version": 1,
-            "operation_id": task_id,
-            "kind": boundary.kind,
-            "previous_context_sha256": boundary.previous_context_sha256,
-            "next_context_sha256": boundary.next_context_sha256,
-            "reason": boundary.reason,
-            "authorization_provenance": "coordinator-approved",
-            "verification_operation_id": str(attention.get("id") or ""),
-            "verification_receipt_sha256": hashlib.sha256(
-                attention_path.read_bytes()
-            ).hexdigest(),
-            "status": "authorized",
-        }
-        authorization_name = (
-            "fresh-boundary-authorization-"
-            f"{_canonical_sha256(authorization)[:16]}.json"
-        )
-        authorization_path = gate.root / authorization_name
-        if authorization_path.exists():
-            if (
-                authorization_path.is_symlink()
-                or _read_json(
-                    authorization_path,
-                    "fresh summary boundary authorization",
-                )
-                != authorization
-            ):
-                raise TaskReviewError(
-                    "approved summary recovery authorization changed"
-                )
-        else:
-            _atomic_json(authorization_path, authorization)
-        gate.authorize_fresh_summary_boundary(
-            run,
-            boundary=boundary,
-            context=current_context,
-            authorization_pointer=authorization_name,
-            authorization_sha256=hashlib.sha256(
-                authorization_path.read_bytes()
-            ).hexdigest(),
-        )
-        return _launch_authorized_task_review(
-            meta=meta,
-            vault=vault,
-            worktree=worktree,
-            runtime_root=_runtime_root(vault, task_id),
-            task_id=task_id,
-            gate=gate,
-            run=run,
-            context=current_context,
-            context_manifest=context_manifest,
-            boundary=boundary,
-            max_verify_iterations=0,
-        )
+    )
+    if not is_summary_recovery:
+        return None
+    resolution = _approved_summary_resolution(
+        gate=gate,
+        state=state,
+        task_id=task_id,
+        simple_axis=simple_axis,
+        current_head=current_context.head_sha,
+    )
+    bundle = _recovery_resolution_bundle(
+        worktree,
+        task_id,
+        resolution,
+        current_context.head_sha,
+        str(state.get("resolution_transport_identity_sha256") or ""),
+    )
+    current_context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+        resolution_bundle=bundle,
+    )
+    boundary = ReviewScopeBoundary(
+        "context",
+        review_context_sha256(previous_context),
+        review_context_sha256(current_context),
+        (
+            "resolved mechanism escalation "
+            f"{attention.get('id')}: review refreshed summary bytes only"
+        ),
+    )
+    authorization = _authorization_payload(
+        task_id=task_id,
+        boundary=boundary,
+        attention=attention,
+        attention_path=attention_path,
+    )
+    name, path = _persist_authorization(
+        gate,
+        authorization,
+        error_label="approved summary recovery",
+    )
+    gate.authorize_fresh_summary_boundary(
+        run,
+        boundary=boundary,
+        context=current_context,
+        authorization_pointer=name,
+        authorization_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    return _launch_authorized_task_review(
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        context=current_context,
+        context_manifest=context_manifest,
+        boundary=boundary,
+        max_verify_iterations=0,
+    )
+
+
+def _assert_quiescent_stale_boundary(
+    *,
+    state: dict[str, Any],
+    run: Any,
+    store: OperationStore,
+    task_id: str,
+) -> None:
     if (
         state.get("status")
         not in {
@@ -320,63 +207,64 @@ def recover_task_review_for_mechanism(
             raise TaskReviewError(
                 "review mechanism recovery still has live review ownership"
             )
+
+
+def _recover_stale_boundary(
+    *,
+    state: dict[str, Any],
+    attention: dict[str, Any],
+    attention_path: Path,
+    meta: dict[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+    task_id: str,
+    gate: ReviewGateController,
+    run: Any,
+    store: OperationStore,
+    current_context: Any,
+    context_manifest: Path,
+) -> dict[str, Any]:
+    _assert_quiescent_stale_boundary(
+        state=state,
+        run=run,
+        store=store,
+        task_id=task_id,
+    )
     boundary = ReviewScopeBoundary(
         "context",
-        review_context_sha256(previous_context),
+        review_context_sha256(run.execution.request.context),
         review_context_sha256(current_context),
         (
             "resolved mechanism escalation "
             f"{attention.get('id')}: replace the dead verification runtime"
         ),
     )
-    authorization = {
-        "schema_version": 1,
-        "operation_id": task_id,
-        "kind": boundary.kind,
-        "previous_context_sha256": boundary.previous_context_sha256,
-        "next_context_sha256": boundary.next_context_sha256,
-        "reason": boundary.reason,
-        "authorization_provenance": "coordinator-approved",
-        "verification_operation_id": str(attention.get("id") or ""),
-        "verification_receipt_sha256": hashlib.sha256(
-            attention_path.read_bytes()
-        ).hexdigest(),
-        "status": "authorized",
-    }
-    authorization_name = (
-        "fresh-boundary-authorization-"
-        f"{_canonical_sha256(authorization)[:16]}.json"
+    authorization = _authorization_payload(
+        task_id=task_id,
+        boundary=boundary,
+        attention=attention,
+        attention_path=attention_path,
     )
-    authorization_path = gate.root / authorization_name
-    if authorization_path.exists():
-        if (
-            authorization_path.is_symlink()
-            or _read_json(
-                authorization_path, "fresh boundary authorization"
-            )
-            != authorization
-        ):
-            raise TaskReviewError(
-                "review mechanism recovery authorization changed"
-            )
-    else:
-        _atomic_json(authorization_path, authorization)
+    name, path = _persist_authorization(
+        gate,
+        authorization,
+        error_label="review mechanism recovery",
+    )
     if state.get("status") in {"verifying", "awaiting-resolution"}:
         gate._mark_attention(run.execution.lanes)
     if gate.read().get("status") != "fresh-boundary-authorized":
         gate.authorize_fresh_boundary(
             run,
             boundary=boundary,
-            authorization_pointer=authorization_name,
-            authorization_sha256=hashlib.sha256(
-                authorization_path.read_bytes()
-            ).hexdigest(),
+            authorization_pointer=name,
+            authorization_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
         )
     return _launch_authorized_task_review(
         meta=meta,
         vault=vault,
         worktree=worktree,
-        runtime_root=_runtime_root(vault, task_id),
+        runtime_root=runtime_root,
         task_id=task_id,
         gate=gate,
         run=run,
@@ -384,6 +272,93 @@ def recover_task_review_for_mechanism(
         context_manifest=context_manifest,
         boundary=boundary,
         max_verify_iterations=0,
+    )
+
+
+def recover_task_review_for_mechanism(
+    worktree: Path,
+    *,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Use one resolved mechanism escalation to replace a dead review lane."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    attention_path = worktree / ".task-needs-attention.json"
+    attention = _read_json(attention_path, "task escalation")
+    runtime_root = _runtime_root(vault, task_id)
+    current_context, context_manifest = _context(
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+    )
+    decision = str(attention.get("decision") or "")
+    if (
+        attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(
+            "authorize-one-bounded-fresh-context-review-boundary-for-"
+        )
+        or current_context.head_sha[:7] not in decision
+    ):
+        raise TaskReviewError(
+            "review mechanism recovery lacks exact coordinator authorization"
+        )
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(
+        _gate_root(vault, task_id),
+        runtime,
+        _RecoveryRoundStore(store),
+    )
+    state = gate.read()
+    run = gate.rehydrate()
+    running = _running_recovery_receipt(
+        state=state,
+        attention_id=str(attention.get("id") or ""),
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        run=run,
+    )
+    if running is not None:
+        return running
+    summary_recovery = _approved_summary_recovery(
+        state=state,
+        attention=attention,
+        attention_path=attention_path,
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        current_context=current_context,
+    )
+    if summary_recovery is not None:
+        return summary_recovery
+    return _recover_stale_boundary(
+        state=state,
+        attention=attention,
+        attention_path=attention_path,
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        store=store,
+        current_context=current_context,
+        context_manifest=context_manifest,
     )
 
 
