@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from vault_link_repair import build_repair_plan  # noqa: E402
-from vault_write_contract import ConflictError  # noqa: E402
+from vault_write_contract import ConflictError, PayloadError  # noqa: E402
 from vault_write_mutations import MutationPlanner  # noqa: E402
 
 
@@ -109,6 +109,44 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-") as raw:
         check("concurrent source change is rejected by sole writer", True)
     else:
         raise AssertionError("concurrent source change is rejected by sole writer")
+
+
+with tempfile.TemporaryDirectory(prefix="vault-link-repair-log-") as raw:
+    root = Path(raw)
+    wiki = fixture(root)
+    (wiki / "concepts" / "canonical.md").write_text(
+        page("Canonical Display"), encoding="utf-8"
+    )
+    log = wiki / "log.md"
+    log.write_text(
+        page("Log", "[[Canonical Display]]"), encoding="utf-8"
+    )
+    plan = build_repair_plan(root)
+    assert plan is not None
+    check(
+        "canonical planner includes a writer-owned log repair",
+        plan.paths == ("wiki/log.md",),
+    )
+    applied = MutationPlanner(root).plan(plan.payload, "2026-08-05")
+    check(
+        "sole writer accepts its exact deterministic log repair",
+        applied.writes == [(log.resolve(), plan.payload["pages"][0]["content"])],
+    )
+    forged = {
+        **plan.payload,
+        "pages": [
+            {
+                **plan.payload["pages"][0],
+                "content": plan.payload["pages"][0]["content"] + "\nforged\n",
+            }
+        ],
+    }
+    try:
+        MutationPlanner(root).plan(forged, "2026-08-05")
+    except PayloadError:
+        check("forged writer-owned repair remains rejected", True)
+    else:
+        raise AssertionError("forged writer-owned repair remains rejected")
 
 
 def no_plan(name: str, source_body: str, targets: list[tuple[str, str, str | None]]) -> None:

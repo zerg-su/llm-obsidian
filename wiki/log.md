@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-08-04
+updated: 2026-08-05
 tags:
   - meta
   - log
@@ -26,6 +26,14 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-08-05] plan amendment | LLM Obsidian 2.6.4 D-264-41
+
+[[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]]. The E7 wikilink planner produced a valid optimistic repair for a broken link in writer-owned wiki/log.md, but the sole writer rejected its own payload. D-264-41 is included through exact planner-payload authorization: only the canonical current stop-hook-link-repair bytes may update log/hot, while forged and ordinary direct writes remain blocked. The original failed repair and the GREEN strict validation provide end-to-end evidence.
+
+## [2026-08-05] plan amendment | LLM Obsidian 2.6.4 D-264-40
+
+[[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]]. Single-model Sol implementation review found that an accepted callback-submit recovery left its sent generation binding active, which forced the next valid retained-session generation into typed stale-generation attention. D-264-40 is included through an exact accepted-receipt retirement transition that preserves the consumed nudge/restart budgets; RED/GREEN runtime evidence proves N+1 stays active and accepts its callback with no second provider effect.
 
 ## [2026-08-04] reap | llm-obsidian-2-6-4-wiki-self-heal
 

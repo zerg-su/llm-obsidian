@@ -40,7 +40,12 @@ class MutationPlanner:
         self.pages = PageMutationValidator(self.repo_root)
 
     def plan(self, payload: dict, today: str) -> MutationPlan:
-        writes, deletes = self.pages.page_mutations(payload.get("pages"))
+        writes, deletes = self.pages.page_mutations(
+            payload.get("pages"),
+            allow_writer_owned_link_repair=(
+                self._exact_writer_owned_link_repair(payload)
+            ),
+        )
         move_writes, move_deletes = self.pages.page_moves(payload.get("moves"))
         writes.extend(move_writes)
         deletes.extend(move_deletes)
@@ -71,6 +76,20 @@ class MutationPlanner:
         if not writes and not deletes:
             raise PayloadError("payload produced no writes")
         return MutationPlan(writes=writes, deletes=deletes, warnings=warnings)
+
+    def _exact_writer_owned_link_repair(self, payload: dict) -> bool:
+        """Authorize only the planner's current deterministic repair bytes."""
+
+        if (
+            payload.get("actor") != "stop-hook-link-repair"
+            or set(payload)
+            != {"schema_version", "request_id", "actor", "pages"}
+        ):
+            return False
+        from vault_link_repair import build_repair_plan
+
+        repair = build_repair_plan(self.repo_root)
+        return repair is not None and payload == repair.payload
 
     def manifest_write(self, spec: object) -> tuple[Path, str] | None:
         if spec is None:

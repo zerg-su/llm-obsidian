@@ -1369,6 +1369,137 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and cmux.keys == [(SURFACE, "Enter")],
         (accepted_parent, cmux.sent, cmux.keys),
     )
+
+    next_child = OperationSpec(
+        "review-round-4",
+        "review-round-key-4",
+        "review-round",
+        "review-owner-3",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(
+        next_child,
+        lane_id="openai-holistic",
+        run_id="review-round-run-4",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("review-owner-3", "review-round-4", state)
+    callback_path.unlink(missing_ok=True)
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 4,
+                "operation_id": "review-round-4",
+                "run_id": "review-round-run-4",
+                "callback_pointer": str(callback_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.utime(registration, (now, now))
+    worker.latest_callback_prompt_class = "active"
+    worker.inspect_liveness()
+    worker.inspect_liveness()
+    rollover_state = worker.liveness_controller.current_state()
+    rollover_parent = store.read("review-owner-3", "review-parent-3")
+    retired_submit_receipt = json.loads(
+        (
+            state_root
+            / "liveness"
+            / "receipts"
+            / (
+                "callback-submit-"
+                f"{recovery_state.callback_submit_binding}.json"
+            )
+        ).read_text(encoding="utf-8")
+    )
+    prior_callback_receipt_sha256 = hashlib.sha256(
+        (state_root / "callback-receipt.json").read_bytes()
+    ).hexdigest()
+    check(
+        "accepted recovery retires only its binding before an active next generation",
+        rollover_parent.state == "awaiting-callback"
+        and not (state_root / "callback-submit-attention.json").exists()
+        and rollover_state is not None
+        and rollover_state.nudge_count == 1
+        and rollover_state.callback_submit_binding == ""
+        and rollover_state.callback_submit_status == ""
+        and retired_submit_receipt["status"] == "accepted"
+        and retired_submit_receipt["accepted_callback_receipt_sha256"]
+        == prior_callback_receipt_sha256
+        and len(cmux.sent) == 1
+        and cmux.keys == [(SURFACE, "Enter")],
+        (
+            rollover_parent,
+            rollover_state,
+            retired_submit_receipt,
+            cmux.sent,
+            cmux.keys,
+        ),
+    )
+
+    (callback_dir / ".review-meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "transport": "review-round",
+                "operation_id": "review-round-4",
+                "run_id": "review-round-run-4",
+                "review_id": "review-parent-3",
+                "parent_session_operation_id": "review-parent-3",
+                "axis": "openai-holistic",
+                "verification_iteration": 1,
+                "verification_profile": {
+                    "name": "scoped",
+                    "sha256": "d" * 64,
+                },
+                "worktree": str(product),
+            }
+        ),
+        encoding="utf-8",
+    )
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "axis": "openai-holistic",
+                "verdict": "approve",
+                "verification_iteration": 1,
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    next_callback_worker = FastPathWorker()
+    next_callback_worker.spec_path = state_root / "launch.json"
+    next_callback_worker.spec = worker.spec
+    next_callback_worker.store = store
+    next_callback_worker.trusted_vault = ROOT
+    next_callback_worker.active_target = None
+    next_callback_worker.last_digest = ""
+    next_callback_worker.stable_reads = 0
+    next_callback_worker.review_input_digest = ""
+    next_callback_worker.review_input_stable_reads = 0
+    next_callback_worker.callback_handled = False
+    next_callback_worker.registration_invalid = False
+    next_callback_worker.cmux_adapter = cmux
+    next_callback_worker.inspect_callback()
+    next_callback_worker.inspect_callback()
+    next_callback_worker.inspect_callback()
+    accepted_next_child = store.read("review-owner-3", "review-round-4")
+    check(
+        "active next generation accepts its callback without a second provider effect",
+        accepted_next_child.state == "finalizing"
+        and bool(accepted_next_child.accepted_callback_id)
+        and len(cmux.sent) == 1
+        and cmux.keys == [(SURFACE, "Enter")],
+        (accepted_next_child, cmux.sent, cmux.keys),
+    )
+    for state in ("exiting", "complete"):
+        store.transition("review-owner-3", "review-round-4", state)
     for state in ("exiting", "complete"):
         store.transition("review-owner-3", "review-round-3", state)
     supervisor.bind_resources(OwnedResources())

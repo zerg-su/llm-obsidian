@@ -139,7 +139,10 @@ class PageMutationValidator:
             owners[identity] = path
 
     def page_mutations(
-        self, specs: object
+        self,
+        specs: object,
+        *,
+        allow_writer_owned_link_repair: bool = False,
     ) -> tuple[list[tuple[Path, str]], list[tuple[Path, str]]]:
         if specs is None:
             return [], []
@@ -159,7 +162,9 @@ class PageMutationValidator:
             if op not in {"create", "update", "delete"}:
                 raise PayloadError(f"pages[{index}].op must be create|update|delete")
             path = self.repo_path(rel, prefix="wiki/")
-            if path in {self.hot_file, self.log_file}:
+            if path in {self.hot_file, self.log_file} and not (
+                allow_writer_owned_link_repair and op == "update"
+            ):
                 key = "hot_*" if path == self.hot_file else "log_entry"
                 raise PayloadError(
                     f"pages[{index}].path {rel!r} is writer-owned; "

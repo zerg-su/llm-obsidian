@@ -487,3 +487,66 @@ class LivenessController:
                     reserved_receipt,
                 ),
             )
+
+    def retire_callback_submit_after_acceptance(
+        self,
+        binding_sha256: str,
+        accepted_callback_receipt_sha256: str,
+    ) -> None:
+        """Retire one sent generation after its exact callback is durable.
+
+        The shared nudge/restart budgets remain consumed.  The binding alone is
+        cleared so a later generation can be observed normally without gaining
+        another provider-facing recovery effect.
+        """
+
+        _sha(binding_sha256, "callback submit binding", optional=False)
+        _sha(
+            accepted_callback_receipt_sha256,
+            "accepted callback receipt",
+            optional=False,
+        )
+        with self._locked():
+            current = self._state()
+            if (
+                current is None
+                or current.callback_submit_binding != binding_sha256
+                or current.callback_submit_status != "sent"
+            ):
+                raise ContractError(
+                    "callback submit acceptance identity changed"
+                )
+            path = (
+                self.root
+                / "receipts"
+                / f"callback-submit-{binding_sha256}.json"
+            )
+            sent_receipt = self._callback_submit_receipt(
+                binding_sha256,
+                current,
+            )
+            accepted_receipt = {
+                **sent_receipt,
+                "status": "accepted",
+                "accepted_callback_receipt_sha256": (
+                    accepted_callback_receipt_sha256
+                ),
+            }
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ContractError(
+                    "callback submit receipt is invalid"
+                ) from exc
+            if existing not in (sent_receipt, accepted_receipt):
+                raise ContractError(
+                    "callback submit receipt changed during acceptance"
+                )
+            if existing != accepted_receipt:
+                self._write(path, accepted_receipt)
+            retired = replace(
+                current,
+                callback_submit_binding="",
+                callback_submit_status="",
+            )
+            self._write(self.root / "state.json", to_dict(retired))

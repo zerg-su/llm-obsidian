@@ -241,10 +241,67 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:
         and sent.callback_submit_status == "sent"
         and sent.nudge_count == 1,
     )
+    accepted_callback_receipt_sha256 = "9" * 64
+    controller.retire_callback_submit_after_acceptance(
+        binding,
+        accepted_callback_receipt_sha256,
+    )
+    retired = controller.current_state()
+    accepted_receipt = json.loads(
+        (
+            Path(raw)
+            / "receipts"
+            / f"callback-submit-{binding}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "accepted callback retires only its exact submit binding",
+        retired is not None
+        and retired.callback_submit_binding == ""
+        and retired.callback_submit_status == ""
+        and retired.nudge_count == 1
+        and accepted_receipt["status"] == "accepted"
+        and accepted_receipt["accepted_callback_receipt_sha256"]
+        == accepted_callback_receipt_sha256,
+    )
+    try:
+        controller.retire_callback_submit_after_acceptance(
+            binding,
+            accepted_callback_receipt_sha256,
+        )
+    except Exception as exc:
+        check(
+            "retired callback generation cannot be accepted twice",
+            "acceptance identity changed" in str(exc),
+        )
+    else:
+        check("retired callback generation cannot be accepted twice", False)
     check(
         "a different callback generation cannot reuse the reservation",
         controller.reserve_callback_submit("e" * 64) is False,
     )
+
+with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    binding = "8" * 64
+    controller.reserve_callback_submit(binding)
+    controller.mark_callback_submit_sent(binding)
+    (
+        Path(raw) / "receipts" / f"callback-submit-{binding}.json"
+    ).write_text("not-json\n", encoding="utf-8")
+    try:
+        controller.retire_callback_submit_after_acceptance(
+            binding,
+            "7" * 64,
+        )
+    except Exception as exc:
+        check(
+            "malformed callback submit receipt fails closed",
+            "receipt is invalid" in str(exc),
+        )
+    else:
+        check("malformed callback submit receipt fails closed", False)
 
 with tempfile.TemporaryDirectory(prefix="callback-submit-uncertain.") as raw:
     controller = LivenessController(Path(raw))

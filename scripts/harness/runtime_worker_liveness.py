@@ -20,6 +20,73 @@ from .runtime_worker import (
 
 class RuntimeWorkerLivenessMixin:
 
+    def _retire_accepted_callback_submit_binding(
+        self,
+        record: object,
+        generation: int,
+        binding_sha256: str,
+        binding_status: str,
+    ) -> bool:
+        """Prove and retire only an accepted predecessor generation."""
+
+        if binding_status != "sent":
+            return False
+        receipt_path = self.spec_path.parent / "callback-receipt.json"
+        try:
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                return False
+            raw = receipt_path.read_bytes()
+            if not raw or len(raw) > MAX_OUTBOX_BYTES:
+                return False
+            receipt = json.loads(raw)
+            prior_generation = receipt.get("generation")
+            operation_id = receipt.get("operation_id")
+            run_id = receipt.get("run_id")
+            callback_id = receipt.get("callback_id")
+            payload_sha256 = receipt.get("payload_sha256")
+            if (
+                receipt.get("schema_version") != 1
+                or receipt.get("status") not in {"accepted", "duplicate"}
+                or type(prior_generation) is not int
+                or prior_generation < 1
+                or prior_generation >= generation
+                or not isinstance(operation_id, str)
+                or not IDENTIFIER.fullmatch(operation_id)
+                or not isinstance(run_id, str)
+                or not IDENTIFIER.fullmatch(run_id)
+                or not isinstance(callback_id, str)
+                or not IDENTIFIER.fullmatch(callback_id)
+                or not isinstance(payload_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", payload_sha256)
+            ):
+                return False
+            accepted_child = self.store.read(
+                self.spec["owner_id"], operation_id
+            )
+            if (
+                accepted_child.run_id != run_id
+                or accepted_child.lane_id != record.lane_id
+                or accepted_child.accepted_callback_kind != "review"
+                or accepted_child.accepted_callback_id != callback_id
+                or accepted_child.accepted_callback_sha256 != payload_sha256
+            ):
+                return False
+            self.liveness_controller.retire_callback_submit_after_acceptance(
+                binding_sha256,
+                hashlib.sha256(raw).hexdigest(),
+            )
+            return True
+        except (
+            ContractError,
+            HarnessContractError,
+            StoreError,
+            OSError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            return False
+
     def _expected_callback_child(
         self,
         parent: object,
@@ -255,8 +322,27 @@ class RuntimeWorkerLivenessMixin:
                 evidence, recovery_status=current.callback_submit_status
             )
         elif current.callback_submit_binding:
-            self.callback_submit_attention("callback-submit-stale-generation")
-            return
+            if not self._retire_accepted_callback_submit_binding(
+                record,
+                generation,
+                current.callback_submit_binding,
+                current.callback_submit_status,
+            ):
+                self.callback_submit_attention(
+                    "callback-submit-stale-generation"
+                )
+                return
+            current = self.liveness_controller.current_state()
+            if current is None:
+                self.callback_submit_attention(
+                    "callback-submit-evidence-malformed"
+                )
+                return
+            evidence = replace(
+                evidence,
+                nudge_count=current.nudge_count,
+                restart_count=current.restart_count,
+            )
         decision = classify_callback_submit(evidence, self.callback_submit_policy)
         if decision.action in {"submit-typed-input", "accept-callback"}:
             self.inspect_callback()

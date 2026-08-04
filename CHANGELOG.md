@@ -69,6 +69,12 @@ packages were published for them.
   exact packet with a bounded deadline and joining its responder before cleanup.
 - Removed two additional task-summary fixture races by synchronizing helper
   readiness/completion and waiting for atomic recovery receipts before cleanup.
+- Retired a sent callback-recovery generation only after exact durable broker
+  acceptance, so the next retained-session generation remains observable while
+  active without gaining another prompt, Enter, nudge, or restart budget.
+- Allowed the canonical one-shot wikilink repair to update a writer-owned
+  log/hot surface only when its entire optimistic payload exactly matches the
+  planner's current derivation; forged and ordinary direct updates stay blocked.
 
 ## [2.6.3] - 2026-08-04
 

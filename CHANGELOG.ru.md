@@ -72,6 +72,13 @@
   тест ограниченно ждёт точный packet и join'ит responder до cleanup.
 - Устранены ещё две гонки task-summary fixtures: helper readiness/completion
   синхронизированы, а atomic recovery receipts ограниченно ожидаются до cleanup.
+- Sent binding поколения callback recovery теперь снимается только после
+  точного durable broker acceptance. Следующее поколение в той же retained
+  session остаётся наблюдаемым в active-состоянии, но не получает второй
+  prompt, Enter, nudge или restart budget.
+- Канонический одноразовый wikilink repair может изменить writer-owned log/hot
+  только когда весь optimistic payload точно совпадает с текущим результатом
+  planner. Подделанные и обычные прямые обновления остаются запрещены.
 
 ## [2.6.3] — 2026-08-04
 
