@@ -43,6 +43,7 @@ from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 from outcome_contract import extract_from_bytes
 from review_resolution import review_transport_identity_sha256
+from task_escalation_records import load_attention
 
 
 ORIGIN = "11111111-1111-1111-1111-111111111111"
@@ -1402,12 +1403,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             )
         ).read_text(encoding="utf-8")
     )
-    cannot_attention = json.loads(
-        (
-            root
-            / f"worktree-{cannot_task}"
-            / ".task-needs-attention.json"
-        ).read_text(encoding="utf-8")
+    cannot_attention = load_attention(
+        root / f"worktree-{cannot_task}"
     )
     cannot_notifications = [
         item
@@ -1423,6 +1420,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and not cannot_record.accepted_callback_id
         and cannot_receipt["step_id"] == "reproduce"
         and cannot_receipt["status"] == "cannot-reproduce"
+        and cannot_attention is not None
         and cannot_attention["category"] == "pipeline-decision"
         and cannot_attention["status"] == "pending"
         and cannot_attention["allowed_decisions"]
