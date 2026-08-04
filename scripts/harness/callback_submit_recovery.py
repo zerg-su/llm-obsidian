@@ -305,6 +305,8 @@ def classify_callback_submit(
 
     if evidence.operation_state in TERMINAL_OPERATION_STATES:
         return _attention(evidence, "callback-submit-terminal")
+    if evidence.operation_state != "awaiting-callback":
+        return _attention(evidence, "callback-submit-state-invalid")
     if evidence.process_status == "dead":
         return _attention(evidence, "callback-submit-provider-unavailable")
     if evidence.process_status != "alive" or evidence.surface_status != "alive":
