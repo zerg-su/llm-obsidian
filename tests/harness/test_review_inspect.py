@@ -79,6 +79,7 @@ with tempfile.TemporaryDirectory(prefix="review-inspect.") as raw:
     git(repo, "add", "tracked.txt", "notes.txt")
     git(repo, "commit", "-m", "second")
     head = git(repo, "rev-parse", "HEAD")
+    tree = git(repo, "rev-parse", "HEAD^{tree}")
     (repo / "tracked.txt").write_text("one\ntwo\nworking\n", encoding="utf-8")
     before = tree_evidence(repo)
 
@@ -159,6 +160,11 @@ with tempfile.TemporaryDirectory(prefix="review-inspect.") as raw:
         and "refs/tags/v-test" in contains.stdout,
         contains.stdout,
     )
+
+    uppercase = inspect(repo, "log", "--ref", head.upper())
+    tree_object = inspect(repo, "log", "--ref", tree)
+    check("review-inspect rejects uppercase object ids", uppercase.returncode == 2)
+    check("review-inspect rejects non-commit object ids", tree_object.returncode == 4)
 
     for label, args in (
         ("symbolic refs", ("log", "--ref", "HEAD")),

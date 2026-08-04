@@ -229,6 +229,47 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         ).stdout.strip(),
         (base_sha, head_sha),
     )
+    packet_root = tmp / "packet-scratch"
+    boundary = plan_review.materialize_plan_review(
+        packet_root,
+        compiled,
+        base_sha=base_sha,
+        head_sha=head_sha,
+    )
+    inspection = json.loads(
+        (packet_root / "inputs/plan-review-inspection.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    from harness.workflows.review import ReviewContext
+    from task_review_request import _prompt
+
+    prompt_pointer = _prompt(
+        vault=ROOT,
+        worktree=worktree,
+        runtime_root=packet_root,
+        context=ReviewContext(
+            "packets/example/manifest.json",
+            head_sha,
+            "scoped",
+            "a" * 64,
+            purpose="intent",
+            boundary_input_sha256=boundary.input_sha256,
+        ),
+        axis="openai-holistic",
+        verification=False,
+    )
+    prompt = (packet_root / prompt_pointer).read_text(encoding="utf-8")
+    check(
+        "plan packet and prompt expose exact OIDs and four literal inspect commands",
+        inspection["base_sha"] == base_sha
+        and inspection["head_sha"] == head_sha
+        and len(inspection["commands"]) == 4
+        and all(command in prompt for command in inspection["commands"])
+        and f"Exact review base: `{base_sha}`" in prompt
+        and f"Exact product HEAD: `{head_sha}`" in prompt,
+        (inspection, prompt),
+    )
     try:
         plan_review.run_plan_review(
             worktree,

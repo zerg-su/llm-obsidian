@@ -76,11 +76,24 @@ def section(text, name):
     match = re.search(rf"(?ms)^\[{re.escape(name)}\](.*?)(?:^\[|\Z)", text)
     assert match, name
     return match.group(1)
-base_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(cfg_text, "overrides")))
-task_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', section(task_cfg_text, "overrides")))
+base_overrides = section(cfg_text, "overrides")
+task_overrides = section(task_cfg_text, "overrides")
+base_block_match = re.search(r"(?ms)^block\s*=\s*\[(.*?)^\]", base_overrides)
+task_block_match = re.search(r"(?ms)^block\s*=\s*\[(.*?)^\]", task_overrides)
+assert base_block_match and task_block_match, "override block lists"
+base_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', base_block_match.group(1)))
+task_blocks = set(re.findall(r'pattern\s*=\s*"([^"]+)"', task_block_match.group(1)))
+task_allows_match = re.search(r"(?ms)^allow\s*=\s*\[(.*?)^\]", task_overrides)
+assert task_allows_match, "task exact allow block"
+task_allows = re.findall(r'pattern\s*=\s*"([^"]+)"', task_allows_match.group(1))
 rebase_pattern = "git\\\\b.*?\\\\brebase\\\\b"
 assert base_blocks - task_blocks == {rebase_pattern}, "only base rebase block may differ"
-assert task_blocks - base_blocks == set(), "task added unexpected absolute overrides"
+escalation_blocks = task_blocks - base_blocks
+assert len(escalation_blocks) == 1 and "task_escalation\\\\.py" in next(iter(escalation_blocks)), "task added only the escalation composition block"
+assert len(task_allows) == 1, "one narrow task allow"
+assert task_allows[0].startswith("^") and task_allows[0].endswith("$"), "task allow is whole-command anchored"
+assert "task_escalation\\\\.py raise" in task_allows[0], "task allow names the exact escalation entrypoint"
+assert "bash" not in task_allows[0] and ".*" not in task_allows[0], "task allow does not admit broad shell composition"
 def assignments(body):
     return dict(re.findall(r"(?m)^([a-z_]+)\s*=\s*([^#\n]+)", body))
 assert assignments(section(task_cfg_text, "interactive")) == assignments(section(cfg_text, "interactive")), "task/base interactive drift"
