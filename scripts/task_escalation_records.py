@@ -121,7 +121,16 @@ def _valid_sha256(value: object, label: str) -> str:
 
 def record_path(worktree: Path, record_id: str) -> Path:
     root = worktree.expanduser().resolve()
-    return root / RECORDS_NAME / f"{_valid_record_id(record_id)}.json"
+    return _records_root(root) / f"{_valid_record_id(record_id)}.json"
+
+
+def _records_root(worktree: Path) -> Path:
+    records = worktree / RECORDS_NAME
+    if records.is_symlink():
+        raise EscalationRecordError("decision records directory cannot be a symlink")
+    if records.exists() and not records.is_dir():
+        raise EscalationRecordError("decision records directory is invalid")
+    return records
 
 
 def _marker_path(worktree: Path) -> Path:
@@ -212,7 +221,7 @@ def load_latest(worktree: Path) -> DecisionRecord | None:
 
     root = worktree.expanduser().resolve()
     marker_path = _marker_path(root)
-    if not marker_path.exists():
+    if not marker_path.exists() and not marker_path.is_symlink():
         return None
     marker, raw = _read_object(marker_path, "task attention marker")
     if marker.get("schema_version") != 2:
@@ -270,9 +279,11 @@ def attention_record_sha256(worktree: Path) -> str:
 
 @contextmanager
 def _writer_lock(worktree: Path) -> Iterator[None]:
-    records = worktree / RECORDS_NAME
+    records = _records_root(worktree)
     records.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_path = records / ".lock"
+    if lock_path.is_symlink() or (lock_path.exists() and not lock_path.is_file()):
+        raise EscalationRecordError("decision records lock is invalid")
     with lock_path.open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -314,6 +325,8 @@ def _write_pointer(worktree: Path, record: DecisionRecord) -> None:
     encoded = _canonical_bytes(value)
     if path.is_symlink():
         raise EscalationRecordError("latest attention marker cannot be a symlink")
+    if path.exists() and not path.is_file():
+        raise EscalationRecordError("latest attention marker is not a regular file")
     if path.is_file() and path.read_bytes() == encoded:
         return
     descriptor, raw_tmp = tempfile.mkstemp(
@@ -402,6 +415,28 @@ def _require_expected_latest(
         raise EscalationRecordError("latest record changed before append")
 
 
+def _resume_existing_append(
+    worktree: Path,
+    existing: DecisionRecord,
+    latest: DecisionRecord | None,
+) -> tuple[DecisionRecord, bool]:
+    """Recover one interrupted pointer write without rewinding a live chain."""
+
+    if latest is not None and latest.sha256 == existing.sha256:
+        return existing, True
+    if latest is not None and any(
+        item.sha256 == existing.sha256 for item in load_chain(worktree)
+    ):
+        return existing, False
+    expected_previous = "" if latest is None else latest.sha256
+    if existing.previous_record_sha256 != expected_previous:
+        raise EscalationRecordError(
+            "replayed record predecessor does not match the authoritative chain"
+        )
+    _write_pointer(worktree, existing)
+    return existing, True
+
+
 def _backfill_legacy(worktree: Path, legacy: DecisionRecord) -> DecisionRecord:
     payload = dict(legacy.payload)
     occurred_at = str(
@@ -452,16 +487,13 @@ def append_raise(
             ignored_payload_fields={"raised_at"},
         )
         if existing is not None:
-            if latest is not None and latest.sha256 == existing.sha256:
-                return existing
-            chain = load_chain(root)
-            if latest is not None and any(
-                item.sha256 == existing.sha256 for item in chain
-            ):
-                return latest
-            raise EscalationRecordError(
-                "replayed raise record is outside the authoritative chain"
+            existing, authoritative = _resume_existing_append(
+                root, existing, latest
             )
+            if authoritative:
+                return existing
+            assert latest is not None
+            return latest
         if latest is not None and latest.payload.get("status") in {
             "pending",
             "delivery-failed",
@@ -539,7 +571,13 @@ def append_resolution(
             ignored_payload_fields={"resolved_at"},
         )
         if existing is not None:
-            _write_pointer(root, existing)
+            existing, authoritative = _resume_existing_append(
+                root, existing, latest
+            )
+            if not authoritative:
+                raise EscalationRecordError(
+                    "resolution replay is no longer the latest record"
+                )
             return existing
         value = _record_value(
             root,
@@ -590,7 +628,13 @@ def append_delivery_failure(
             ignored_payload_fields={"delivery_failed_at"},
         )
         if existing is not None:
-            _write_pointer(root, existing)
+            existing, authoritative = _resume_existing_append(
+                root, existing, latest
+            )
+            if not authoritative:
+                raise EscalationRecordError(
+                    "delivery-failure replay is no longer the latest record"
+                )
             return existing
         value = _record_value(
             root,
@@ -649,6 +693,7 @@ def append_amendment(
             ignored_payload_fields={"recorded_at"},
         )
         if existing is not None:
+            _resume_existing_append(root, existing, latest)
             return existing
         if latest is not None and latest.payload.get("status") in {
             "pending",

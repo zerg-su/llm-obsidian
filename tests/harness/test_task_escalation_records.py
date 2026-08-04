@@ -145,6 +145,16 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-records.") as raw:
         and marker["record_sha256"] == first.sha256,
     )
     first_bytes = record_path(worktree, first.record_id).read_bytes()
+    marker_path.unlink()
+    recovered = append_raise(
+        worktree,
+        raised_payload(worktree, "escalation-1", "first decision"),
+    )
+    check(
+        "record-first crash replay restores only its matching pointer",
+        recovered.sha256 == first.sha256
+        and marker_path.read_bytes() == marker_bytes,
+    )
     replay = append_raise(
         worktree,
         raised_payload(worktree, "escalation-1", "first decision"),
@@ -259,6 +269,34 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-duplicate.") as raw:
             raised_payload(worktree, "duplicate-id", "changed payload"),
         ),
         "record identity",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-symlink.") as raw:
+    worktree = Path(raw) / "task"
+    worktree.mkdir()
+    meta(worktree)
+    target = Path(raw) / "outside-records"
+    target.mkdir()
+    (worktree / ".task-escalation-records").symlink_to(
+        target, target_is_directory=True
+    )
+    expect_error(
+        "symlinked records root cannot redirect immutable writes",
+        lambda: append_raise(
+            worktree,
+            raised_payload(worktree, "symlink-root", "redirect attempt"),
+        ),
+        "records directory",
+    )
+    (worktree / ".task-escalation-records").unlink()
+    marker_target = Path(raw) / "outside-marker.json"
+    write_json(marker_target, raised_payload(worktree, "symlink-marker", "redirect"))
+    (worktree / ".task-needs-attention.json").symlink_to(marker_target)
+    expect_error(
+        "symlinked latest marker cannot masquerade as absent",
+        lambda: load_latest(worktree),
+        "symlink",
     )
 
 
