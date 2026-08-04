@@ -315,6 +315,11 @@ def classify_callback_submit(
         return _attention(evidence, "callback-submit-evidence-unknown")
     if any(artifact.state == "unstable" for artifact in artifacts):
         return _decision(evidence, state="working")
+    if (
+        evidence.callback_deadline_at - evidence.observed_at
+        < policy.minimum_deadline_seconds
+    ):
+        return _attention(evidence, "callback-submit-deadline-insufficient")
 
     if evidence.recovery_status == "reserved":
         if evidence.nudge_count != policy.max_nudges:
@@ -336,8 +341,6 @@ def classify_callback_submit(
         return _decision(evidence, state="working")
     if evidence.observed_at - evidence.generation_progress_at < policy.nudge_after_seconds:
         return _decision(evidence, state="working")
-    if evidence.callback_deadline_at - evidence.observed_at < policy.minimum_deadline_seconds:
-        return _attention(evidence, "callback-submit-deadline-insufficient")
     if evidence.nudge_count >= policy.max_nudges:
         return _attention(evidence, "callback-submit-budget-exhausted")
     return _decision(
