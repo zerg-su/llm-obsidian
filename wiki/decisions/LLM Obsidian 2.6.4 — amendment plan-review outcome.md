@@ -30,7 +30,7 @@ Outcome Contract плана получает дополнительное eviden
 
 ## Уточнение E8
 
-E8 сохраняется буквально: latest attention marker становится pointer-only. Все известные readers и writers мигрируют атомарно на append-only chain. Чтение старого full marker поддерживается только как legacy input с deterministic backfill; новые writers не создают full marker.
+Amendment изменяет исходный E8 observable: удалена clause `без изменения утверждённых байтов`. Replacement rule: in-place Outcome rewrite допустим только при наличии отдельного amendment record, fresh exact boundary и нового approval; прежний callback не считается approval новых bytes. E8 сохраняет требование не терять решения: latest attention marker становится pointer-only. Все известные readers и writers мигрируют атомарно на append-only chain. Чтение старого full marker поддерживается только как legacy input с deterministic backfill; новые writers не создают full marker.
 
 ## Boundary amendment
 
