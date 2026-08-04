@@ -26,6 +26,9 @@ from harness.adapters.claude import (
     ClaudeDriverError,
     validate_reviewer_sandbox_command,
 )
+from harness.adapters.claude_reviewer_statusline import (
+    render as render_claude_reviewer_statusline,
+)
 from harness.adapters.cmux import Surface
 from harness.adapters.codex import (
     CodexDriver,
@@ -2472,6 +2475,45 @@ check(
     review_statusline_output
     == "Opus 5 · effort xhigh · CTX 25% · 5H 42% · 7D 9%",
     (review_statusline, review_statusline_output),
+)
+normal_statusline_payload = {
+    "model": {"display_name": "Opus 5"},
+    "effort": {"level": "xhigh"},
+    "context_window": {"used_percentage": 25},
+    "rate_limits": {
+        "five_hour": {"used_percentage": 42},
+        "seven_day": {"used_percentage": 9},
+    },
+}
+check(
+    "Claude reviewer status renderer covers the normal payload in-process",
+    render_claude_reviewer_statusline(normal_statusline_payload)
+    == "Opus 5 · effort xhigh · CTX 25% · 5H 42% · 7D 9%",
+)
+fail_safe_statusline = "Claude · effort -- · CTX -- · 5H -- · 7D --"
+check(
+    "Claude reviewer status renderer fails safe for a malformed payload",
+    render_claude_reviewer_statusline("not-an-object")
+    == fail_safe_statusline,
+)
+check(
+    "Claude reviewer status renderer fails safe for missing fields",
+    render_claude_reviewer_statusline({}) == fail_safe_statusline,
+)
+check(
+    "Claude reviewer status renderer fails safe for wrong field types",
+    render_claude_reviewer_statusline(
+        {
+            "model": [],
+            "effort": "xhigh",
+            "context_window": {"used_percentage": True},
+            "rate_limits": {
+                "five_hour": {"used_percentage": "42"},
+                "seven_day": [],
+            },
+        }
+    )
+    == fail_safe_statusline,
 )
 try:
     callback_instruction = claude_callback[
