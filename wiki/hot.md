@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-04: [[LLM Obsidian 2.6.4 Subplan D result]] — finalized task result (`c-000116`)
 - 2026-08-04: [[LLM Obsidian 2.6.3 Russian technical documentation]] — finalized task result (`c-000105`)
 - 2026-08-04: [[LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization]] — bounded default runtime.env bootstrap (`c-000103`)
 - 2026-08-04: [[LLM Obsidian 2.6.3 — manual parallel task documentation amendment]] — handbook получает manual parallel task workflow без обещания… (`c-000102`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[LLM Obsidian 2.6 skill workstream C]] — finalized task result (`c-000076`)
 - 2026-08-01: [[LLM Obsidian 2.6 paired design baseline]] — finalized task result (`c-000074`)
 - 2026-08-01: [[LLM Obsidian 2.6 paired fix baseline]] — finalized task result (`c-000072`)
-- 2026-08-01: [[LLM Obsidian 2.6 upstream live drift verification]] — finalized task result (`c-000066`)
 
 ## Active Threads
 

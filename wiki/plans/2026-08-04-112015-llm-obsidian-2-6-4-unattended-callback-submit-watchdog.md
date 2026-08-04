@@ -182,7 +182,8 @@ Shared-file rules:
 - Workstream C создаёт отдельный `tests/harness/test_plan_review_facade.py` и не редактирует `test_review_gate.py`;
 - Workstream B эксклюзивно владеет `runtime_worker_custom.py` и `runtime_worker_control.py` в своей ветке;
 - Makefile/audit manifest/release matrix/release docs принадлежат join Slices 9–10, не feature branches;
-- join сравнивает expected case counts/registered suites каждой ветки и затем запускает полный harness.
+- join сравнивает expected case counts/registered suites каждой ветки и затем запускает полный harness;
+- после объединения A–D и первичного Slice 9, но до Slice 10, coordinator выполняет только join-owned Slice 9a для D-264-16; четыре завершённых feature-потока не переоткрываются и их verification budgets не повторяются.
 
 ## 8. TDD-срезы
 
@@ -296,10 +297,22 @@ Shared-file rules:
 - **refactor seam:** none after join.
 - **focused verification:** standing targets + coverage, including supersession cleanup and harness-only transition suites; E10, E11, E13, E14.
 
+### Slice 9a — acknowledged same-session continuation delivery
+
+Этот срез добавлен пользовательским решением сессии `019fab00-3160-7380-8920-4b20183afb76` после live dogfood четырёх подпланов. Он выполняется только на объединённом HEAD после Slice 9 и до финального Slice 10. После merge Workstream B join обязан записать amendment record, связывающий старый и новый plan digest; дочерние планы и их уже исчерпанные verification budgets не изменяются.
+
+- **files/responsibility:** `scripts/harness/runtime_session_launch.py`, существующий provider/cmux acknowledgment seam, review continuation receipts и узкие runtime/review-gate regressions; без публичного DSL, новых provider calls или новой FSM.
+- **consumes:** live D-264-16 trace: owner `8f36c040-d134-4987-884c-375b29d27340`, retained reviewer surface `826FDA9D-53A5-4327-8403-249EC18478F6`, verification child `8f36c040-d134-4987-884c-375b29d27340-holistic-23af2b2d-round-dcc2a687`; `continue-84dda8bcec3cd21b8b8cfc779821eafe` записан как `succeeded`, хотя verification prompt остался в input editor, generation не началась и callback отсутствует.
+- **produces:** transport acceptance и provider-generation acceptance становятся разными доказательствами. Успех `cmux send` плюс немедленный `send-key Enter` не завершает continuation effect сам по себе. Code-owned bounded observation подтверждает callback/typed artifact либо content-free переход exact retained session из input-ready в generation/activity; prompt bytes и screen content не персистятся.
+- **failing evidence:** fake cmux принимает оба RPC с exit 0, но применяет Enter раньше завершения paste или оставляет prompt в editor; прежний код фиксирует `succeeded`, parent остаётся `running`, resource-free child — `awaiting-callback`. Callback-before-ack, active generation, stale checkpoint, lost ownership и concurrent reconcile также входят в RED-матрицу.
+- **minimal green:** write-ahead continuation identity сохраняется, но durable success появляется только после semantic acknowledgment. Если exact prompt остаётся в input-ready без activity, разрешён не более чем один identity-bound повтор submit-key без повторной вставки prompt и без нового model/provider call; он использует существующий общий liveness budget. Callback/typed artifact выигрывает race. Неоднозначность или отсутствие acknowledgment дают `continuation-submit-unconfirmed` attention, а не ложный success.
+- **refactor seam:** correctness не зависит от фиксированного sleep; transport adapter возвращает только transport receipt, а lifecycle owner классифицирует acknowledgment через малый provider-stable interface.
+- **focused verification:** deterministic ordering tests (`paste pending → Enter`, `Enter accepted → no generation`, callback race), exact retained-session integration fixture и replay D-264-16; доказать zero duplicate prompt/provider effect, bounded one-key retry, resource ownership и автоматическое продолжение verification; E3, E4, E6, E11, E14.
+
 ### Slice 10 — dogfood, docs и RC
 
 - **files/responsibility:** observability/runtime docs, `v2.6.4-release-readiness.md`, release notes/changelogs/version manifests.
-- **consumes:** one clean integrated HEAD and all receipts.
+- **consumes:** one clean integrated HEAD after Slice 9a and all receipts.
 - **produces:** offline fake-provider missing-submit dogfood, normal live Opus review with zero false nudge, exact D-264 map.
 - **failing evidence:** manual lifecycle command, deadline/budget drift, repeat effect, missing disposition or stale evidence blocks RC.
 - **minimal green:** evidence/docs/metadata only; post-review product fix creates new HEAD.
@@ -389,6 +402,8 @@ Findings use same-session verification. Scope/public-interface/security/migratio
 | D-264-12 | Same-session plan resolution rejects corrected plan because control and subject share one digest | plan-review facade | `included` | task `15388886-a4e5-49f8-be9b-e964a0220c58`; stale-plan rejection |
 | D-264-13 | Superseded boundaries retained five unusable provider surfaces | review lifecycle cleanup | `included` | [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]] / E13 |
 | D-264-14 | Failure paths required manual current/resume despite Harness control-plane vision | harness control plane | `included` | tasks `15388886-a4e5-49f8-be9b-e964a0220c58`, `fb1e4842-17d9-40a8-9a9e-a0bf6e0fdebc`, `7cbf9c6d-375a-4b70-b672-408a0df7e8bb`, `43e4919e-9c0e-4705-afa1-8641923bba93`; Slice 0 stage baseline |
+| D-264-15 | Resolver display title was interpreted as exact context filename identity | dispatch context boundary | `included` | four pre-effect dispatch validation failures; Subplan C exact `context_path` round-trip |
+| D-264-16 | Same-session continuation transport returned success while verification prompt remained unsubmitted in the input editor | review continuation delivery | `included` | owner `8f36c040-d134-4987-884c-375b29d27340`, surface `826FDA9D-53A5-4327-8403-249EC18478F6`, child `dcc2a687`, effect `continue-84dda8bcec3cd21b8b8cfc779821eafe`; Slice 9a |
 
 New D-264 entry is recorded before task continuation. Disposition is exactly one of `included`, `already-shipped`, `deferred`, `not-a-defect`; qualifiers live only in the evidence column. Changes require Slice 6 amendment authority and never grant unrelated fix scope.
 
@@ -398,21 +413,21 @@ New D-264 entry is recorded before task continuation. Disposition is exactly one
 |---|---|
 | E1 | 0, 3 |
 | E2 | 1, 5 |
-| E3 | 2, 3, 4 |
-| E4 | 2, 3, 4, 5 |
+| E3 | 2, 3, 4, 9a |
+| E4 | 2, 3, 4, 5, 9a |
 | E5 | 1, 2, 3, 4, 5 |
-| E6 | 10 |
+| E6 | 9a, 10 |
 | E7 | 8 |
 | E8 | 6 |
 | E9 | 7 |
 | E10 | 0, 6, 9, 10 |
-| E11 | 3, 5, 5b, 7, 8, 9, 10 |
+| E11 | 3, 5, 5b, 7, 8, 9, 9a, 10 |
 | E12 | 7 |
 | E13 | 4, 5, 9 |
-| E14 | 0, 5, 5b, 9, 10 |
+| E14 | 0, 5, 5b, 9, 9a, 10 |
 
 E12/E13/E14 и re-freeze authority закреплены в [[LLM Obsidian 2.6.4 — amendment plan-review outcome]], [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]] и [[LLM Obsidian 2.6.4 — amendment Harness control plane]]. Table is the authority consumed by join/release evidence. Every slice-level focused verification matches it exactly.
 
 ## Завершение
 
-2.6.4 becomes RC only when E1–E14 are established on one exact HEAD; all D-264 dispositions are durable; one shared nudge budget, callback deadline and accepted-timeout rearm are proven; offline dogfood advances without manual action; normal review has zero extra effects; plan-review mistakes fail before provider launch; Wiki repair rebuilds derived state through the sole writer; and provider/permission/model budgets match v2.6.3. Push, tag and GitHub release remain separate explicit user actions after terminal approval.
+2.6.4 becomes RC only when E1–E14 are established on one exact HEAD; all D-264 dispositions are durable; one shared nudge budget, callback deadline and accepted-timeout rearm are proven; same-session continuation success is bound to semantic provider acknowledgment rather than transport exit alone; offline dogfood advances without manual action; normal review has zero extra effects; plan-review mistakes fail before provider launch; Wiki repair rebuilds derived state through the sole writer; and provider/permission/model budgets match v2.6.3. Push, tag and GitHub release remain separate explicit user actions after terminal approval.

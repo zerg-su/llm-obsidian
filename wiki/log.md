@@ -27,6 +27,28 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-04] reap | llm-obsidian-2-6-4-wiki-self-heal
+
+`c-000116` [[LLM Obsidian 2.6.4 Subplan D result]]. ## Outcome
+
+Implemented one-shot Stop self-heal for exact unique filename/frontmatter-title/H1 wikilinks at final HEAD `3467ef16ed5ace5ed3563a2fe5050606e6668bff`. The shared schema seam owns fence/code-span/escaped-pipe-aware tokenization, catalog lookup, malformed detection, and compatibility neutralization. The pure planner emits optimistic source-SHA page updates; Stop submits at most one `vault-write` transaction, then reruns reindex, BM25, sparse/fingerprint decisions, strict validation, an
+
+## [2026-08-04 18:09] dispatch | llm-obsidian-2-6-4-wiki-self-heal
+
+Spawned an approved unattended task session (cmux `44AFA58E-7F61-49FD-B726-674BA2E6FC04`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-4-wiki-self-heal`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-4-wiki-self-heal` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md`. Pre-loaded context: [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]]. Awaiting typed review and final reap.
+
+## [2026-08-04 18:09] dispatch | llm-obsidian-2-6-4-durable-decisions
+
+Spawned an approved unattended task session (cmux `C61929AA-B60C-4B05-95F5-C521559336BC`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-4-durable-decisions`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-4-durable-decisions` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md`. Pre-loaded context: [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]], [[LLM Obsidian 2.6.4 — amendment plan-review outcome]]. Awaiting typed review and final reap.
+
+## [2026-08-04 18:09] dispatch | llm-obsidian-2-6-4-callback-control-plane
+
+Spawned an approved unattended task session (cmux `946E4EF5-B05A-410F-991F-325290AF1A76`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-4-callback-control-plane`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-4-callback-control-plane` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md`. Pre-loaded context: [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]], [[LLM Obsidian 2.6.4 — amendment Harness control plane]], [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]]. Awaiting typed review and final reap.
+
+## [2026-08-04 18:09] dispatch | llm-obsidian-2-6-4-plan-review-safety
+
+Spawned an approved unattended task session (cmux `8A8EF26E-7B91-4FAF-AEC9-459D18C6B866`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-4-plan-review-safety`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-4-plan-review-safety` from `main`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md`. Pre-loaded context: [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]], [[LLM Obsidian 2.6.4 — amendment plan-review outcome]]. Awaiting typed review and final reap.
+
 ## [2026-08-04] reap | llm-obsidian-2-6-3-docs-v2
 
 `c-000105` [[LLM Obsidian 2.6.3 Russian technical documentation]]. ## Outcome
