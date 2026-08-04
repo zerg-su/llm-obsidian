@@ -17,6 +17,10 @@ from harness.liveness import (  # noqa: E402
     LivenessState,
     observe_liveness,
 )
+from harness.callback_submit_recovery import (  # noqa: E402
+    CallbackSubmitEvidence,
+    classify_callback_submit,
+)
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -60,8 +64,35 @@ check(
 )
 
 # RED until the reviewer-specific generation-bound recovery policy is wired.
+recovery = classify_callback_submit(
+    CallbackSubmitEvidence(
+        observed_at=incident["second_observed_at"],
+        generation_progress_at=incident["first_observed_at"],
+        callback_deadline_at=(
+            incident["second_observed_at"]
+            + incident["deadline_remaining_seconds"]
+        ),
+        operation_id=incident["operation_id"],
+        run_id=incident["run_id"],
+        lane_id=incident["lane_id"],
+        generation=incident["generation"],
+        expected_operation_id=incident["operation_id"],
+        expected_run_id=incident["run_id"],
+        expected_lane_id=incident["lane_id"],
+        expected_generation=incident["generation"],
+        target_sha256=incident["target_sha256"],
+        expected_target_sha256=incident["target_sha256"],
+        operation_state=incident["operation_state"],
+        process_status=incident["process_status"],
+        surface_status="alive",
+        prompt_class="idle-prompt",
+        stable_idle_observations=2,
+        nudge_count=incident["nudge_count"],
+        restart_count=incident["restart_count"],
+    )
+)
 check(
     "idle current reviewer generation reserves one submit-only recovery",
-    decision.action == fixture["required_recovery"]["action"],
-    decision,
+    recovery.action == fixture["required_recovery"]["action"],
+    recovery,
 )
