@@ -46,6 +46,14 @@
   строго валидированного committed sibling example с owner-only mode.
   Check/print, custom paths, direct calls, invalid examples и symlinks ничего не
   пишут и fail closed.
+- Исправлен coordinator-authorized review recovery для mixed-HEAD gate в
+  `awaiting-resolution`: existing fresh boundary разрешён только когда все
+  retained parents и current rounds terminal, resource-free и без pending
+  effects; verification budget зажимается до нуля.
+- Добавлена recovery-only совместимость для terminal pre-schema review rounds,
+  где единственное отличие specification — исторически отсутствующий
+  `parent_operation_id`. Durable records не переписываются; live ownership и
+  любое другое identity drift остаются fail-closed.
 
 ### Изменено
 
@@ -58,8 +66,8 @@
 
 - Это documentation-first patch release. Runtime, permissions, providers,
   fallbacks, built-in pipeline descriptors и custom PipelineSpec ceilings не
-  меняются за пределами exact regression-covered repairs research callback и
-  default MCP runtime-config self-bootstrap.
+  меняются за пределами exact regression-covered repairs research callback,
+  default MCP runtime-config self-bootstrap и review recovery.
 - Bootstrap — отдельно разрешённое compatibility exception: default
   `sync-config --apply` получает только узкое filesystem authority создать
   missing canonical `runtime.env` из validated committed example.

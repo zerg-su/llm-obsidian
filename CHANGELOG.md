@@ -40,6 +40,14 @@ packages were published for them.
   from its strictly validated committed sibling example with owner-only mode.
   Check/print, custom paths, direct calls, invalid examples, and symlinks remain
   write-free and fail closed.
+- Repaired coordinator-authorized review recovery for a mixed-HEAD
+  `awaiting-resolution` gate. It can enter the existing fresh boundary only
+  after every retained parent and current round is terminal, resource-free,
+  and free of pending effects; verification is clamped to zero iterations.
+- Added recovery-only compatibility for terminal pre-schema review rounds whose
+  sole specification difference is a missing historical `parent_operation_id`.
+  Stored records are not rewritten, and live or otherwise drifting identities
+  remain fail-closed.
 
 ### Changed
 
@@ -54,7 +62,7 @@ packages were published for them.
 - This is a documentation-first patch release. Existing runtime, permissions,
   providers, fallbacks, built-in pipeline descriptors, and custom PipelineSpec
   ceilings are unchanged outside the exact regression-covered research
-  callback repair and default MCP runtime-config self-bootstrap.
+  callback, default MCP runtime-config bootstrap, and review-recovery repairs.
 - The bootstrap is a separately authorized compatibility exception: the default
   `sync-config --apply` path gains only the bounded filesystem authority to
   create missing canonical `runtime.env` from its validated committed example.
