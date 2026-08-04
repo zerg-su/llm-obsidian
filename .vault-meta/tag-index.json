@@ -21,6 +21,9 @@
   "brand": [
     "wiki/concepts/SVG Diagram Style Guide.md"
   ],
+  "callback": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md"
+  ],
   "capability-decision": [
     "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
     "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md"
@@ -87,12 +90,18 @@
   "dashboard": [
     "wiki/meta/dashboard.md"
   ],
+  "dcg": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md"
+  ],
   "decision": [
     "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md",
     "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment Harness control plane.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment plan-review outcome.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md"
+  ],
+  "decisions": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md"
   ],
   "design": [
     "wiki/concepts/SVG Diagram Style Guide.md"
@@ -165,7 +174,9 @@
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
     "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
-    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md"
   ],
   "historical-migration": [
     "wiki/plans/2026-07-19-v2-1-1-code-owned-optimization-plan.md"
@@ -214,7 +225,11 @@
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md",
     "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
     "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md",
-    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ],
   "llm-wiki": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -243,7 +258,11 @@
     "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
     "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
     "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md",
-    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ],
   "mcp": [
     "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md"
@@ -319,7 +338,11 @@
     "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
     "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
     "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md",
-    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
@@ -443,7 +466,8 @@
     "wiki/meta/reviews/Cross-model review — v2.1.2 semantic acceptance refactor — bbbdbba79f2a.md",
     "wiki/meta/reviews/Cross-model review — v2.1.2 semantic acceptance refactor — f3e56a208804.md",
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 03ced8bcc75e.md",
-    "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c.md"
+    "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md"
   ],
   "review-recovery": [
     "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md"
@@ -466,6 +490,15 @@
   ],
   "source": [
     "wiki/sources/_index.md"
+  ],
+  "stop-hook": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
+  ],
+  "subplan": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ],
   "svg": [
     "wiki/concepts/SVG Diagram Style Guide.md"
@@ -511,7 +544,11 @@
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment Harness control plane.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment plan-review outcome.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md",
-    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ],
   "v2.6": [
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
@@ -521,5 +558,8 @@
   ],
   "verification": [
     "wiki/runbooks/RT10 Foundation Verification.md"
+  ],
+  "wiki": [
+    "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md"
   ]
 }
