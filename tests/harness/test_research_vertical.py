@@ -300,6 +300,128 @@ class FakeResearchRuntime:
         return SimpleNamespace(record=supervisor.read())
 
 
+def prepare_cancelled_fetch_fixture(
+    root: Path,
+    *,
+    operation_id: str,
+    owner_id: str,
+    exact_callback_digest: bool,
+) -> SimpleNamespace:
+    """Build one real-store cancelled fetch with a durable callback receipt."""
+
+    store = OperationStore(root / "state")
+    runtime = FakeResearchRuntime(store)
+    fetch = root / "fetch"
+    synth = root / "synth"
+    fetch_context = fetch / "context" / "packet"
+    fetch_context.mkdir(parents=True)
+    query = f"cancelled fetch recovery for {operation_id}"
+    (fetch_context / "question.bin").write_text(query, encoding="utf-8")
+    (fetch_context / "manifest.json").write_text(
+        '{"schema_version":1}\n', encoding="utf-8"
+    )
+    (fetch / "fetch-prompt.md").write_text("fetch safely\n", encoding="utf-8")
+    synth.mkdir()
+    (synth / "synth-prompt.md").write_text(
+        "synthesize safely\n", encoding="utf-8"
+    )
+    fetch_home = root / "fetch-home"
+    synth_home = root / "synth-home"
+    fetch_home.mkdir(mode=0o700)
+    synth_home.mkdir(mode=0o700)
+    request = ResearchOperationRequest(
+        policy=ResearchRequest(
+            operation_id=operation_id,
+            query_pointer="context/packet/question.bin",
+            context_manifest="context/packet/manifest.json",
+        ),
+        owner_id=owner_id,
+        route=route,
+        context=ResearchContext(
+            manifest="context/packet/manifest.json",
+            request_sha256=hashlib.sha256(query.encode()).hexdigest(),
+        ),
+    )
+    execution = start_research(
+        request,
+        runtime,
+        store,
+        origin_surface="22222222-2222-4222-8222-222222222222",
+        fetch_cwd=fetch,
+        fetch_runtime_home=fetch_home,
+        callback_wake="advance exact cancelled fetch",
+    )
+    source_body = "# Source\n\nDurable recovery evidence.\n"
+    sources = fetch / "sources"
+    sources.mkdir()
+    (sources / "source-1.md").write_text(source_body, encoding="utf-8")
+    fetch_artifact = {
+        "schema_version": 2,
+        "run_id": execution.fetch.run_id,
+        "request_sha256": request.context.request_sha256,
+        "fetched_at": "2026-08-04T00:00:00Z",
+        "sources": [
+            {
+                "url": "https://example.com/durable",
+                "title": "Durable",
+                "content_path": "sources/source-1.md",
+                "content_sha256": hashlib.sha256(
+                    source_body.encode()
+                ).hexdigest(),
+                "source_class": "official",
+            }
+        ],
+        "fetch_errors": [],
+    }
+    (fetch / "artifact.json").write_text(
+        json.dumps(fetch_artifact), encoding="utf-8"
+    )
+    fetch_payload = {
+        "stage": "fetch",
+        "artifact_path": "artifact.json",
+        "artifact_sha256": hashlib.sha256(
+            (fetch / "artifact.json").read_bytes()
+        ).hexdigest(),
+        "source_count": 1,
+    }
+    payload_digest = hashlib.sha256(
+        json.dumps(
+            fetch_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    accepted_fetch = store.read(owner_id, execution.fetch.spec.operation_id)
+    store.save(
+        replace(
+            accepted_fetch,
+            revision=accepted_fetch.revision + 1,
+            accepted_callback_id=(
+                f"research-fetch-{payload_digest[:24]}"
+            ),
+            accepted_callback_kind="research",
+            accepted_callback_sha256=(
+                payload_digest if exact_callback_digest else "0" * 64
+            ),
+        ),
+        expected_revision=accepted_fetch.revision,
+    )
+    for state in ("cancelling", "exiting", "cancelled"):
+        store.transition(
+            owner_id,
+            execution.fetch.spec.operation_id,
+            state,
+        )
+    return SimpleNamespace(
+        store=store,
+        runtime=runtime,
+        fetch=fetch,
+        synth=synth,
+        synth_home=synth_home,
+        request=request,
+        execution=execution,
+        payload_digest=payload_digest,
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
     root = Path(raw)
     store = OperationStore(root / "state")
@@ -644,125 +766,111 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and runtime.cleanups == runtime.exits,
     )
 
-with tempfile.TemporaryDirectory(prefix="research-terminal-parent.") as raw:
-    root = Path(raw)
-    store = OperationStore(root / "state")
-    runtime = FakeResearchRuntime(store)
-    fetch = root / "fetch"
-    synth = root / "synth"
-    fetch_context = fetch / "context" / "packet"
-    fetch_context.mkdir(parents=True)
-    query = "terminal parent must stay terminal"
-    (fetch_context / "question.bin").write_text(query, encoding="utf-8")
-    (fetch_context / "manifest.json").write_text(
-        '{"schema_version":1}\n', encoding="utf-8"
+with tempfile.TemporaryDirectory(prefix="research-cancelled-fetch.") as raw:
+    fixture = prepare_cancelled_fetch_fixture(
+        Path(raw),
+        operation_id="research-cancelled-fetch-1",
+        owner_id="owner-cancelled-fetch",
+        exact_callback_digest=False,
     )
-    (fetch / "fetch-prompt.md").write_text("fetch safely\n", encoding="utf-8")
-    synth.mkdir()
-    (synth / "synth-prompt.md").write_text(
-        "synthesize safely\n", encoding="utf-8"
+    records_before_mismatch = tuple(
+        fixture.store.list(fixture.request.owner_id)
     )
-    fetch_home = root / "fetch-home"
-    synth_home = root / "synth-home"
-    fetch_home.mkdir(mode=0o700)
-    synth_home.mkdir(mode=0o700)
-    terminal_request = ResearchOperationRequest(
-        policy=ResearchRequest(
-            operation_id="research-terminal-parent-1",
-            query_pointer="context/packet/question.bin",
-            context_manifest="context/packet/manifest.json",
-        ),
-        owner_id="owner-terminal-parent",
-        route=route,
-        context=ResearchContext(
-            manifest="context/packet/manifest.json",
-            request_sha256=hashlib.sha256(query.encode()).hexdigest(),
-        ),
+    synth_files_before_mismatch = tuple(
+        sorted(path.name for path in fixture.synth.iterdir())
     )
-    terminal_execution = start_research(
-        terminal_request,
-        runtime,
-        store,
-        origin_surface="22222222-2222-4222-8222-222222222222",
-        fetch_cwd=fetch,
-        fetch_runtime_home=fetch_home,
-        callback_wake="do not resume terminal research",
-    )
-    source_body = "# Source\n\nDurable evidence only.\n"
-    sources = fetch / "sources"
-    sources.mkdir()
-    (sources / "source-1.md").write_text(source_body, encoding="utf-8")
-    fetch_artifact = {
-        "schema_version": 2,
-        "run_id": terminal_execution.fetch.run_id,
-        "request_sha256": terminal_request.context.request_sha256,
-        "fetched_at": "2026-08-04T00:00:00Z",
-        "sources": [
-            {
-                "url": "https://example.com/durable",
-                "title": "Durable",
-                "content_path": "sources/source-1.md",
-                "content_sha256": hashlib.sha256(
-                    source_body.encode()
-                ).hexdigest(),
-                "source_class": "official",
-            }
-        ],
-        "fetch_errors": [],
-    }
-    (fetch / "artifact.json").write_text(
-        json.dumps(fetch_artifact), encoding="utf-8"
-    )
-    fetch_payload = {
-        "stage": "fetch",
-        "artifact_path": "artifact.json",
-        "artifact_sha256": hashlib.sha256(
-            (fetch / "artifact.json").read_bytes()
-        ).hexdigest(),
-        "source_count": 1,
-    }
-    payload_digest = hashlib.sha256(
-        json.dumps(
-            fetch_payload, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-    accepted_fetch = store.read(
-        terminal_request.owner_id,
-        terminal_execution.fetch.spec.operation_id,
-    )
-    store.save(
-        replace(
-            accepted_fetch,
-            revision=accepted_fetch.revision + 1,
-            accepted_callback_id=(
-                f"research-fetch-{payload_digest[:24]}"
-            ),
-            accepted_callback_kind="research",
-            accepted_callback_sha256=payload_digest,
-        ),
-        expected_revision=accepted_fetch.revision,
-    )
-    for operation_id in (
-        terminal_execution.fetch.spec.operation_id,
-        terminal_execution.parent.spec.operation_id,
-    ):
-        for state in ("cancelling", "exiting", "cancelled"):
-            store.transition(
-                terminal_request.owner_id,
-                operation_id,
-                state,
-            )
-    store_records_before = tuple(store.list(terminal_request.owner_id))
-    synth_files_before = tuple(sorted(path.name for path in synth.iterdir()))
+    starts_before_mismatch = tuple(fixture.runtime.starts)
     try:
         advance_research(
-            terminal_request,
-            runtime,
-            store,
+            fixture.request,
+            fixture.runtime,
+            fixture.store,
             origin_surface="22222222-2222-4222-8222-222222222222",
-            fetch_cwd=fetch,
-            synth_cwd=synth,
-            synth_runtime_home=synth_home,
+            fetch_cwd=fixture.fetch,
+            synth_cwd=fixture.synth,
+            synth_runtime_home=fixture.synth_home,
+            callback_wake="advance exact cancelled fetch",
+        )
+    except ValueError as exc:
+        mismatch_error = str(exc)
+    else:
+        mismatch_error = ""
+    check(
+        "cancelled fetch digest mismatch starts no synthesis child or provider",
+        mismatch_error == "research fetch callback has not been accepted"
+        and fixture.runtime.exits == []
+        and fixture.runtime.cleanups == []
+        and tuple(fixture.runtime.starts) == starts_before_mismatch
+        and tuple(fixture.store.list(fixture.request.owner_id))
+        == records_before_mismatch
+        and tuple(sorted(path.name for path in fixture.synth.iterdir()))
+        == synth_files_before_mismatch,
+    )
+    mismatched_fetch = fixture.store.read(
+        fixture.request.owner_id,
+        fixture.execution.fetch.spec.operation_id,
+    )
+    fixture.store.save(
+        replace(
+            mismatched_fetch,
+            revision=mismatched_fetch.revision + 1,
+            accepted_callback_sha256=fixture.payload_digest,
+        ),
+        expected_revision=mismatched_fetch.revision,
+    )
+    recovered = advance_research(
+        fixture.request,
+        fixture.runtime,
+        fixture.store,
+        origin_surface="22222222-2222-4222-8222-222222222222",
+        fetch_cwd=fixture.fetch,
+        synth_cwd=fixture.synth,
+        synth_runtime_home=fixture.synth_home,
+        callback_wake="advance exact cancelled fetch",
+    )
+    check(
+        "exact cancelled fetch receipt recovers only with a nonterminal parent",
+        recovered.stage == "synth"
+        and recovered.parent.state == "awaiting-callback"
+        and recovered.fetch.state == "cancelled"
+        and recovered.synth is not None
+        and len(fixture.runtime.starts) == 2
+        and fixture.runtime.starts[1].callback_mode == "research-synth"
+        and fixture.runtime.exits == []
+        and fixture.runtime.cleanups == []
+        and len(fixture.store.list(fixture.request.owner_id)) == 3
+        and (fixture.synth / "artifact.json").is_file(),
+    )
+
+with tempfile.TemporaryDirectory(prefix="research-terminal-parent.") as raw:
+    fixture = prepare_cancelled_fetch_fixture(
+        Path(raw),
+        operation_id="research-terminal-parent-1",
+        owner_id="owner-terminal-parent",
+        exact_callback_digest=True,
+    )
+    for state in ("cancelling", "exiting", "cancelled"):
+        fixture.store.transition(
+            fixture.request.owner_id,
+            fixture.execution.parent.spec.operation_id,
+            state,
+        )
+    store_records_before = tuple(
+        fixture.store.list(fixture.request.owner_id)
+    )
+    synth_files_before = tuple(
+        sorted(path.name for path in fixture.synth.iterdir())
+    )
+    starts_before = tuple(fixture.runtime.starts)
+    try:
+        advance_research(
+            fixture.request,
+            fixture.runtime,
+            fixture.store,
+            origin_surface="22222222-2222-4222-8222-222222222222",
+            fetch_cwd=fixture.fetch,
+            synth_cwd=fixture.synth,
+            synth_runtime_home=fixture.synth_home,
             callback_wake="do not resume terminal research",
         )
     except ValueError as exc:
@@ -772,12 +880,12 @@ with tempfile.TemporaryDirectory(prefix="research-terminal-parent.") as raw:
     check(
         "terminal research parent rejects recovery before child or provider effects",
         terminal_error == "terminal research composition cannot be resumed"
-        and runtime.starts == [runtime.starts[0]]
-        and runtime.exits == []
-        and runtime.cleanups == []
-        and tuple(store.list(terminal_request.owner_id))
+        and tuple(fixture.runtime.starts) == starts_before
+        and fixture.runtime.exits == []
+        and fixture.runtime.cleanups == []
+        and tuple(fixture.store.list(fixture.request.owner_id))
         == store_records_before
-        and tuple(sorted(path.name for path in synth.iterdir()))
+        and tuple(sorted(path.name for path in fixture.synth.iterdir()))
         == synth_files_before,
     )
 

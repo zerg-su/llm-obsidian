@@ -29,11 +29,12 @@ packages were published for them.
 ### Fixed
 
 - Preserved an accepted protected-research callback as terminal completion
-  during exact cleanup. A terminal research composition is never resurrected:
-  historical cancelled accepted receipts remain durable evidence, not resumable
-  work. Cleanup or explicit cancellation after an exact callback was accepted
-  ends as `complete`; cancellation without an accepted callback remains
-  `cancelled`.
+  during exact cleanup. An exact-identity cancelled fetch receipt may recover
+  only while its research parent is nonterminal; a digest, run, request, or
+  artifact mismatch starts no synthesis child or provider. A terminal
+  composition is never resurrected, and cancelled-synthesis recovery remains
+  unsupported. Cleanup or explicit cancellation after an exact callback was
+  accepted ends as `complete`; cancellation without one remains `cancelled`.
 - Repaired fresh-worktree MCP config bootstrap: only the default
   `sync-config --apply` path may atomically initialize missing `runtime.env`
   from its strictly validated committed sibling example with owner-only mode.

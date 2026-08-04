@@ -290,10 +290,20 @@ decision = json.loads(
         / "v2.6.3-document-project-skill-verdicts.json"
     ).read_text(encoding="utf-8")
 )
+amendment = decision.get("authoritative_amendment", {})
 if (
     decision.get("disposition") != "not-adopted-per-stop-condition"
     or decision.get("coordinator_decision_id")
     != "e81aaee1-3196-4350-af9f-efb352b8d696"
+    or amendment.get("vault_page")
+    != "[[LLM Obsidian 2.6.3 — E5 capability disposition]]"
+    or amendment.get("address") != "c-000100"
+    or amendment.get("page_sha256")
+    != "86501614f8d1d860c21a920ce8ec778c5b1c4bbe5f21875012b73569c9f113aa"
+    or amendment.get("approved_plan_sha256")
+    != "db4037cac1967b0907dbf1b6fd5850eefa2bfc5173080d2aa811a239fb36b8dc"
+    or amendment.get("outcome_contract_sha256")
+    != "2c9728dc7c7fa3bc108ffb6ce5085bb41fcd9ba16310157e76276c6967b5bf5f"
     or decision.get("installed_skill") is not False
     or (ROOT / "skills" / "document-project").exists()
 ):
