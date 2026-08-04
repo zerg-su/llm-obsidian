@@ -41,6 +41,7 @@ class FakePort:
 def run_case(
     screens: list[str],
     *,
+    pre_screen: str = "›",
     artifacts: list[bool] | None = None,
     retry: bool = True,
     send_prompt: bool = True,
@@ -49,7 +50,7 @@ def run_case(
     runtime: str = "codex",
     ownership: list[bool] | None = None,
 ):
-    port = FakePort(screens)
+    port = FakePort(([pre_screen] if send_prompt else []) + screens)
     artifact_values = list(artifacts or [])
     retries: list[bool] = []
     stages: list[tuple[str, int]] = []
@@ -163,6 +164,17 @@ result, port, retries, _stages = run_case(
 assert not result.acknowledged and result.evidence == "paste-unconfirmed"
 assert port.sent == [PROMPT] and port.keys == [] and not retries
 print("OK   stale activity without current input visibility fails closed")
+
+result, port, retries, _stages = run_case(
+    [
+        "› # Harness-owned review verification",
+        "• Working (stale previous turn)",
+    ],
+    pre_screen="› # Harness-owned review verification",
+)
+assert not result.acknowledged and result.evidence == "paste-unconfirmed"
+assert port.sent == [PROMPT] and port.keys == [] and not retries
+print("OK   stale same-heading editor cannot identify the current paste")
 
 result, port, retries, _stages = run_case(
     ["• Working (submitted continuation)"],

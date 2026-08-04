@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from dataclasses import dataclass
 from time import sleep
 from typing import Callable, Protocol
@@ -36,6 +37,19 @@ def _prompt_anchor(prompt: str) -> str:
         if normalized:
             return normalized[:96]
     return ""
+
+
+def _screen_digest(screen: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in screen.splitlines()).strip()
+    return sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _editor_state(runtime: str, screen: str) -> tuple[str, ...]:
+    marker = {"claude": "❯", "codex": "›"}.get(runtime)
+    if not marker:
+        return ()
+    lines = [" ".join(line.strip().split()) for line in screen.splitlines()]
+    return tuple(line for line in lines[-24:] if line.startswith(marker))
 
 
 def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
@@ -119,11 +133,17 @@ def deliver_continuation(
     if not ownership_ready():
         return ContinuationDelivery(False, "ownership-lost", 0)
 
+    pre_send_digest = ""
+    pre_send_editor: tuple[str, ...] = ()
     if send_prompt:
+        pre_send_screen = port.read(surface_id)
+        pre_send_digest = _screen_digest(pre_send_screen)
+        pre_send_editor = _editor_state(runtime, pre_send_screen)
         port.send(surface_id, prompt)
         observe_stage("transport-accepted", 0)
 
     paste_screen = ""
+    paste_digest = ""
     for observation in range(observation_limit):
         if artifact_ready():
             return ContinuationDelivery(True, "artifact", accepted_submit_count)
@@ -140,7 +160,15 @@ def deliver_continuation(
                 return ContinuationDelivery(
                     False, "submit-effect-uncertain", accepted_submit_count
                 )
+            if send_prompt and (
+                _screen_digest(screen) == pre_send_digest
+                or _editor_state(runtime, screen) == pre_send_editor
+            ):
+                if observation + 1 < observation_limit:
+                    wait(observation_interval_seconds)
+                continue
             paste_screen = screen
+            paste_digest = _screen_digest(screen)
             break
         if screen_state in {"idle", "permission", "unknown"}:
             return ContinuationDelivery(False, screen_state, 0)
@@ -172,7 +200,7 @@ def deliver_continuation(
                 )
             screen = port.read(surface_id)
             screen_state = classify_continuation_screen(runtime, screen, anchor)
-            if screen_state == "active":
+            if screen_state == "active" and _screen_digest(screen) != paste_digest:
                 return ContinuationDelivery(True, "provider-activity", submit_count)
             if screen_state in {"idle", "permission", "unknown"}:
                 return ContinuationDelivery(False, screen_state, submit_count)
