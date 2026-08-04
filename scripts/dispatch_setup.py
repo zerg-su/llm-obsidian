@@ -56,6 +56,26 @@ from review_contract import (
 )
 
 
+def _current_session_id(vault_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            [str(vault_root / "scripts" / "current-session-id.sh")],
+            cwd=str(vault_root),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise DispatchError(
+            f"current coordinator session could not start: {exc}"
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        suffix = f": {detail[-1][:300]}" if detail else ""
+        raise DispatchError(f"current coordinator session failed{suffix}")
+    return result.stdout.strip()
+
+
 def materialize_current_context(raw: dict[str, Any]) -> dict[str, Any]:
     """Resolve process-bound coordinator identity without guessing globally."""
     value = dict(raw)
@@ -66,11 +86,7 @@ def materialize_current_context(raw: dict[str, Any]) -> dict[str, Any]:
             raise DispatchError("origin_surface is absent and CMUX_SURFACE_ID is unavailable")
         value["origin_surface"] = surface
     if not str(value.get("origin_session") or "").strip():
-        session = run_command(
-            [str(vault_root / "scripts" / "current-session-id.sh")],
-            cwd=vault_root,
-            label="current coordinator session",
-        ).stdout.strip()
+        session = _current_session_id(vault_root)
         if not session or session == "unknown":
             raise DispatchError("origin_session is absent and the current session is unknown")
         value["origin_session"] = session

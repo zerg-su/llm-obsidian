@@ -14,12 +14,13 @@ must not be inferred from another runtime.
 | Local document normalization | Shared stdlib fast path + isolated pinned Docling | Same scripts/runtime | Same scripts/runtime |
 | MCP HTTP gateway | Shared local client pointers | Generated TOML/profile pointers | Any HTTP-capable MCP client |
 | Turn-end Stop pipeline | Claude `Stop` hook | Codex plugin `Stop` hook opts into the same `stop.sh`; output goes to `.vault-meta/stop-hook-last.log` | Run `.claude/hooks/stop.sh` manually |
-| `SessionStart` hot cache + nudges | Shared runtime adapter | Shared runtime adapter; startup/resume/clear/compact | Manual |
+| `SessionStart` hot cache + nudges | Shared runtime adapter; coordinator progress refresh | Shared runtime adapter; startup/resume/clear/compact and coordinator progress refresh | Manual |
 | `UserPromptSubmit` skill router | Shared runtime adapter, soft hints | Shared runtime adapter, soft hints | Manual |
 | Allowlisted shell command capture | Shared runtime adapter, sanitized | `Bash`, `exec_command`, `shell`, and strict literal `unified_exec` normalization | Typed `command_evidence.py ingest-user` |
 | `PostToolUse[ExitPlanMode]` plan capture | Automatic | Not provided by this plugin | Use `/save-plan` equivalent explicitly |
 | Compaction recovery | PostCompact adapter + host context behavior | Valid PostCompact hint; `SessionStart(source=compact)` reloads hot cache | Manual |
 | Harness operations | Shared owner-scoped ledger; `status`, `inspect`, `resume`, `reconcile`, `cancel`, `close`, `doctor` | Same | Read-only inspection works; visible provider lifecycle requires a supported host |
+| cmux workspace progress | Exact live controller programs in the coordinator origin workspace; idle clears | Same content-free label and cleanup semantics | Not projected |
 | Operation telemetry | Shared scripts emit `pipeline-events.jsonl`; task/review lifecycle adds numeric latency and outcome counters | Same | Same for explicit scripts |
 | Durable review history | Unified simple/deep operation archives exact HEAD/profile evidence at reap | Same | Explicit exact-operation archive from the coordinator vault |
 | Persistent task lanes | Exact owner/task/model/domain cmux resume with anchored right splits | Same harness and typed checkpoint contract | Script-only state; visible cmux resume requires supported host |
@@ -39,6 +40,19 @@ runtime-tagged router matched inside that activity. Absent
 Claude evidence is never rendered as zero Codex usage. See
 [pipeline observability](pipeline-observability.md) for metric
 definitions, sample-size limits, and the dogfood acceptance window.
+
+The cmux progress label is a read-only harness-step projection, not a project
+task counter. It aggregates only nonterminal top-level dispatch, review, and
+research controllers whose exact origin belongs to the target coordinator
+workspace. A controller with a recorded exact surface that is known missing is
+excluded in every state; a failed live-tree probe preserves the existing bar and
+never changes operation state. Unscoped uncertainty from another owner's stale
+nonterminal controller also preserves the existing bar. Diagnose that exact
+owner with `harness-cli.py diagnose`, then use its exact `reconcile` or `cancel`
+path; never hand-edit OperationStore records. Terminal controllers are
+authoritative over stale descendants, and an empty selection issues
+workspace-scoped `clear-progress`. Claude and Codex use the same content-free
+label and the same `set-progress`/`clear-progress` transport.
 
 Durable review pages are intentionally separate from telemetry. In unattended
 final reap, the lifecycle contract hashes the coordinator-generated marker,
@@ -150,10 +164,17 @@ reviewers keep `dontAsk` but may read and run arbitrary local checks inside the
 native Claude OS sandbox. The product worktree and Git metadata stay explicitly
 read-only; writes are limited to operation-owned review scratch/callback roots
 and one private test temp directory. Unsandboxed fallback, inherited user or
-project settings, external network domains, Unix sockets, MCPs, hooks, and
-credential reads are disabled fail-closed. Codex keeps its private scratch
-directory, exact loopback access/binding, disabled web search, and no product
-writable root. `tests/test_task_lifecycle.py` and
+project settings, external network domains, Unix sockets, MCPs, hooks,
+arbitrary status-line commands, and credential reads are disabled fail-closed.
+A pinned repository-owned Claude `statusLine` shows only model, effort,
+context usage, and native 5H/7D limit percentages inside the reviewer
+workspace; it has no lifecycle or cmux authority. The subscription-compatible
+profile keeps OAuth/keychain authentication available while excluding
+user/project/local setting sources and ordinary `CLAUDE.md`, disabling skills,
+marketplace autoinstall and MCP, and retaining the exact native sandbox. Host
+managed policy, when present, remains authoritative. Codex keeps its
+private scratch directory, exact loopback access/binding, disabled web search,
+and no product writable root. `tests/test_task_lifecycle.py` and
 the harness adapter and task lifecycle suites reject command, environment,
 writable-root, domain, and socket drift.
 

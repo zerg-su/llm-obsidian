@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -516,6 +517,120 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         (launch_value, protected_argv),
     )
 
+    ordinary_route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "executor", "d" * 64
+    )
+    ordinary_process = ParentRecordingProcess()
+    ordinary_manager = RuntimeSessionManager(
+        OperationStore(root / "ordinary-store"),
+        FakeCmux([]),
+        ordinary_process,
+        {"codex": ShebangDriver(codex)},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            ordinary_route, True, ("provider:profile-valid",)
+        ),
+    )
+    ordinary_request = RuntimeSessionRequest(
+        OperationSpec(
+            "ordinary-runtime",
+            "ordinary-runtime-key",
+            "dispatch",
+            "ordinary-owner",
+            ordinary_route,
+            "context/manifest.json",
+            "scoped",
+        ),
+        "ordinary-lane",
+        "ordinary-run",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "ordinary-callback.json",
+        product_root=cwd,
+    )
+    with patch.dict(os.environ, {"PATH": str(binary_root)}):
+        ordinary_manager.start(ordinary_request)
+    assert ordinary_process.launch is not None
+    ordinary_launch = json.loads(
+        ordinary_process.launch.spec_path.read_text(encoding="utf-8")
+    )
+    ordinary_spec = load_runtime_spec(ordinary_process.launch.spec_path)
+    ordinary_argv = runtime_provider_argv(
+        ordinary_spec,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+    )
+    check(
+        "parent pins env shebang interpreter for ordinary providers",
+        ordinary_launch["runtime_interpreter"] == str(node.resolve())
+        and ordinary_spec["product_root"] == cwd.resolve()
+        and ordinary_argv
+        == (
+            str(node.resolve()),
+            str(codex),
+            "--strict-config",
+            "bounded research",
+        ),
+        (ordinary_launch, ordinary_argv),
+    )
+    foreign_product = root / "foreign-product"
+    foreign_product.mkdir()
+    mismatched_launch = dict(ordinary_launch)
+    mismatched_launch["product_root"] = str(foreign_product)
+    ordinary_process.launch.spec_path.write_text(
+        json.dumps(mismatched_launch, sort_keys=True), encoding="utf-8"
+    )
+    try:
+        load_runtime_spec(ordinary_process.launch.spec_path)
+    except RuntimeWorkerError:
+        check("ordinary runtime rejects a product root outside cwd", True)
+    else:
+        check("ordinary runtime rejects a product root outside cwd", False)
+
+    for label, mutate in (
+        (
+            "ordinary worker rejects an omitted product root",
+            lambda value: value.pop("product_root", None),
+        ),
+        (
+            "ordinary worker rejects an empty product root",
+            lambda value: value.update({"product_root": ""}),
+        ),
+    ):
+        invalid_launch = dict(ordinary_launch)
+        mutate(invalid_launch)
+        ordinary_process.launch.spec_path.write_text(
+            json.dumps(invalid_launch, sort_keys=True), encoding="utf-8"
+        )
+        try:
+            load_runtime_spec(ordinary_process.launch.spec_path)
+        except RuntimeWorkerError:
+            check(label, True)
+        else:
+            check(label, False)
+
+    parent_bound_request = RuntimeSessionRequest(
+        OperationSpec(
+            "ordinary-missing-product",
+            "ordinary-missing-product-key",
+            "dispatch",
+            "ordinary-missing-owner",
+            ordinary_route,
+            "context/manifest.json",
+            "scoped",
+        ),
+        "ordinary-missing-lane",
+        "ordinary-missing-run",
+        ORIGIN,
+        cwd,
+        "prompt.md",
+        "ordinary-missing-callback.json",
+    )
+    check(
+        "ordinary parent materializes the exact cwd binding",
+        parent_bound_request.product_root == cwd.resolve(),
+        parent_bound_request.product_root,
+    )
+
 
 with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     root = Path(raw)
@@ -547,6 +662,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/result.json",
+        product_root=cwd,
     )
 
     incompatible_events: list[str] = []
@@ -573,6 +689,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
     )
 
     events: list[str] = []
+    status_notifications: list[tuple[Path, str, str, str]] = []
     store = OperationStore(root / "store")
     cmux = FakeCmux(events)
     process = FakeProcess(events)
@@ -583,6 +700,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         {"claude": FakeDriver()},
         preflight=lambda _route, _callback_dir: CapabilityReport(
             route, True, ("provider:profile-valid",)
+        ),
+        status_notifier=lambda state_root, trigger_owner, trigger_operation: (
+            status_notifications.append(
+                (
+                    state_root,
+                    trigger_owner,
+                    trigger_operation,
+                    store.read(trigger_owner, "runtime-1").state,
+                )
+            )
         ),
     )
     (cwd / "callbacks" / "result.json").write_text(
@@ -716,6 +843,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/summary-result.json",
+        product_root=cwd,
         callback_mode="task-summary",
         task_summary_pointer=".task-summary.json",
     )
@@ -791,6 +919,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         cwd,
         "prompt.md",
         "callbacks/phased-result.json",
+        product_root=cwd,
         callback_mode="task-summary",
         task_summary_pointer=".task-summary.json",
         initial_callback_operation_id=phased_child.operation_id,
@@ -874,6 +1003,27 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == SUPERVISOR_IDENTITY
         and started.callback_pointer == "callbacks/result.json",
         started,
+    )
+    check(
+        "status notifications publish preflight starting and final exact owner states",
+        status_notifications
+        == [
+            (store.root, "owner-1", "runtime-1", "preflight"),
+            (store.root, "owner-1", "runtime-1", "starting"),
+            (store.root, "owner-1", "runtime-1", "awaiting-callback"),
+        ]
+        and all(
+            state_root == store.root
+            for (
+                state_root,
+                _trigger_owner,
+                _trigger_operation,
+                _state,
+            ) in status_notifications
+        )
+        and status_notifications[-1]
+        == (store.root, "owner-1", "runtime-1", "awaiting-callback"),
+        status_notifications,
     )
     checkpoint_root = (
         store.root
@@ -1868,12 +2018,20 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         surface_id=SURFACE,
         runtime="claude",
     )
+    check(
+        "ordinary launch materializer persists the exact cwd binding",
+        json.loads(worker_launch.spec_path.read_text(encoding="utf-8"))[
+            "product_root"
+        ]
+        == str(cwd.resolve()),
+    )
     review_wake_launch = ProcessAdapter().prepare_surface_launch(
         argv=(str(Path(sys.executable).resolve()), "-c", "pass"),
         cwd=cwd,
         state_root=root / "review-wake-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=cwd / "callbacks" / "review-wake.json",
+        product_root=cwd,
         store_root=worker_store.root,
         owner_id="owner-worker",
         operation_id="worker-1",
@@ -2074,6 +2232,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         state_root=root / "guard-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=guard_callback,
+        product_root=cwd,
         store_root=guard_store.root,
         owner_id="owner-guard",
         operation_id="guard-worker",
@@ -2168,6 +2327,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         state_root=root / "natural-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",
         callback_pointer=cwd / "callbacks" / "natural.json",
+        product_root=cwd,
         store_root=natural_store.root,
         owner_id="owner-natural",
         operation_id="natural-exit-worker",
@@ -2271,6 +2431,48 @@ try:
     )
 except (ValueError, IndexError, json.JSONDecodeError):
     sandbox_settings = {}
+review_statusline = sandbox_settings.get("statusLine", {})
+review_statusline_command = review_statusline.get("command", "")
+review_statusline_argv = (
+    shlex.split(review_statusline_command)
+    if isinstance(review_statusline_command, str)
+    else []
+)
+review_statusline_output = ""
+if (
+    review_statusline.get("type") == "command"
+    and review_statusline.get("padding") == 0
+    and review_statusline.get("refreshInterval") == 10
+    and len(review_statusline_argv) == 2
+    and Path(review_statusline_argv[0]).resolve() == Path(sys.executable).resolve()
+    and Path(review_statusline_argv[1]).resolve()
+    == (ROOT / "scripts/harness/adapters/claude_reviewer_statusline.py").resolve()
+):
+    rendered_statusline = subprocess.run(
+        review_statusline_argv,
+        input=json.dumps(
+            {
+                "model": {"display_name": "Opus 5"},
+                "effort": {"level": "xhigh"},
+                "context_window": {"used_percentage": 25},
+                "rate_limits": {
+                    "five_hour": {"used_percentage": 42},
+                    "seven_day": {"used_percentage": 9},
+                },
+            }
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if rendered_statusline.returncode == 0:
+        review_statusline_output = rendered_statusline.stdout.strip()
+check(
+    "Claude reviewer keeps model, effort, context, and limits visible",
+    review_statusline_output
+    == "Opus 5 · effort xhigh · CTX 25% · 5H 42% · 7D 9%",
+    (review_statusline, review_statusline_output),
+)
 try:
     callback_instruction = claude_callback[
         claude_callback.index("--append-system-prompt") + 1
@@ -2308,9 +2510,13 @@ check(
     and "input file's exact session-relative alias" in callback_instruction
     and "Bash" in claude_callback
     and not any(item.startswith("Bash(") for item in claude_callback)
-    and "--safe-mode" in claude_callback
+    and "--bare" not in claude_callback
+    and "--safe-mode" not in claude_callback
     and "--strict-mcp-config" in claude_callback
     and claude_callback[claude_callback.index("--setting-sources") + 1] == ""
+    and "disableAllHooks" not in sandbox_settings
+    and sandbox_settings.get("claudeMdExcludes")
+    == ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/rules/**"]
     and sandbox_settings.get("sandbox", {}).get("enabled") is True
     and sandbox_settings.get("sandbox", {}).get("failIfUnavailable") is True
     and sandbox_settings.get("sandbox", {}).get("autoAllowBashIfSandboxed") is True
@@ -2534,6 +2740,12 @@ for label, mutate in (
         "review sandbox rejects subprocess exclusions",
         lambda value: value["sandbox"]["excludedCommands"].append("git *"),
     ),
+    (
+        "review sandbox rejects a foreign status line",
+        lambda value: value["statusLine"].update(
+            {"command": "python3 /tmp/foreign-statusline.py"}
+        ),
+    ),
 ):
     changed_settings = json.loads(claude_callback[settings_position])
     mutate(changed_settings)
@@ -2553,10 +2765,13 @@ changed_root[changed_root.index("--add-dir") + 1] = "/tmp/foreign-product"
 expect_sandbox_rejection(
     "review sandbox rejects a foreign product path", tuple(changed_root)
 )
-missing_safe_mode = list(claude_callback)
-missing_safe_mode.remove("--safe-mode")
 expect_sandbox_rejection(
-    "review sandbox rejects a missing hard gate", tuple(missing_safe_mode)
+    "review sandbox rejects bare because subscription OAuth is unavailable",
+    (*claude_callback, "--bare"),
+)
+expect_sandbox_rejection(
+    "review sandbox rejects safe mode because it suppresses status line",
+    (*claude_callback, "--safe-mode"),
 )
 check(
     "redirect subprocess and git-write attempts inherit the same native sandbox",
@@ -2589,12 +2804,23 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
             "callback_pointer": sandbox_callback,
             "product_root": sandbox_product,
         },
-        env={"PATH": "/usr/bin:/bin", "GITHUB_TOKEN": "secret"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "GITHUB_TOKEN": "secret",
+            "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1",
+            "CLAUDE_CODE_SAFE_MODE": "1",
+            "CLAUDE_CODE_SIMPLE": "1",
+        },
     )
     test_tmp = (sandbox_callbacks / ".review-test-tmp").resolve()
     check(
         "review sandbox provisions one owned ephemeral test root",
         sandbox_env["TMPDIR"] == str(test_tmp)
+        and sandbox_env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] == "0"
+        and sandbox_env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"]
+        == "1"
+        and "CLAUDE_CODE_SAFE_MODE" not in sandbox_env
+        and "CLAUDE_CODE_SIMPLE" not in sandbox_env
         and test_tmp.is_dir()
         and not test_tmp.is_symlink()
         and test_tmp.stat().st_mode & 0o077 == 0,

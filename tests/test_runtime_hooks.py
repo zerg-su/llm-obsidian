@@ -62,11 +62,28 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     vault = Path(raw)
     (vault / "wiki").mkdir()
     (vault / "scripts").mkdir()
+    (vault / "scripts" / "harness").mkdir()
     (vault / "hooks").mkdir()
     (vault / ".claude" / "hooks").mkdir(parents=True)
     (vault / ".claude-plugin").mkdir()
     (vault / ".vault-meta").mkdir()
     (vault / "scripts" / "vault-write.py").write_text("# marker\n", encoding="utf-8")
+    (vault / "scripts" / "harness" / "__init__.py").write_text(
+        "", encoding="utf-8"
+    )
+    (vault / "scripts" / "harness" / "status_segment.py").write_text(
+        """from __future__ import annotations
+import json
+from pathlib import Path
+
+def publish(state_root, **kwargs):
+    path = Path(state_root).parent / "status-refresh.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"state_root": str(state_root), **kwargs}, sort_keys=True) + "\\n")
+    return True
+""",
+        encoding="utf-8",
+    )
     shutil.copy2(ROOT / "scripts" / "lib_sanitize.py", vault / "scripts" / "lib_sanitize.py")
     shutil.copy2(ROOT / "scripts" / "command_evidence.py", vault / "scripts" / "command_evidence.py")
     shutil.copy2(ROOT / "scripts" / "pipeline_events.py", vault / "scripts" / "pipeline_events.py")
@@ -133,6 +150,13 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     }
     result = invoke("session-start", {**common, "hook_event_name": "SessionStart", "source": "resume"}, vault)
     check("Codex SessionStart context", result.returncode == 0 and "parity marker" in result.stdout, result.stderr)
+    status_refresh = vault / ".vault-meta" / "status-refresh.jsonl"
+    check(
+        "coordinator SessionStart refreshes workspace progress",
+        status_refresh.is_file()
+        and len(status_refresh.read_text(encoding="utf-8").splitlines()) == 1,
+        result.stderr,
+    )
 
     result = invoke("post-compact", {**common, "hook_event_name": "PostCompact", "trigger": "auto", "turn_id": "t1"}, vault)
     compact_output = json.loads(result.stdout)
@@ -160,6 +184,38 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
         result.stderr,
     )
     check("completed marker removed", not list(marker_dir.glob("*.json")))
+
+    stop_script = vault / ".claude" / "hooks" / "stop.sh"
+    stop_script.write_text(
+        "#!/usr/bin/env python3\n"
+        "print('VAULT_LINT_FAIL: questions: 1 page(s) without status open|answered')\n"
+        "print('COMMIT_BLOCKED: strict vault validation failed; changes remain unstaged/dirty for repair.')\n",
+        encoding="utf-8",
+    )
+    stop_script.chmod(0o755)
+    invoke("router", {**common, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
+    result = invoke("stop", {**common, "runtime": "codex", "hook_event_name": "Stop"}, vault)
+    blocked_output = json.loads(result.stdout)
+    check(
+        "blocked turn-end surfaces to the operator",
+        result.returncode == 0
+        and blocked_output["continue"] is True
+        and "COMMIT_BLOCKED" in blocked_output["systemMessage"]
+        and "VAULT_LINT_FAIL" in blocked_output["systemMessage"],
+        result.stdout,
+    )
+    check(
+        "blocked turn-end still writes the full log",
+        "COMMIT_BLOCKED" in (vault / ".vault-meta" / "stop-hook-last.log").read_text(encoding="utf-8"),
+    )
+    stop_script.write_text(
+        "#!/usr/bin/env python3\nprint('WIKI_CHANGED: validated and handled')\n", encoding="utf-8"
+    )
+    stop_script.chmod(0o755)
+    invoke("router", {**common, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
+    result = invoke("stop", {**common, "runtime": "codex", "hook_event_name": "Stop"}, vault)
+    check("clean turn-end stays quiet", result.returncode == 0 and not result.stdout.strip(), result.stdout)
+    stop_script.unlink()
 
     claude = {**common, "session_id": "claude-session", "runtime": "claude"}
     invoke("router", {**claude, "hook_event_name": "UserPromptSubmit", "prompt": "status"}, vault)
@@ -230,6 +286,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
         task_result.returncode == 0 and task_marker["actor"] == "task" and not task_result.stdout,
     )
     check("turn marker is content-free", "private task content" not in json.dumps(task_marker))
+    refresh_count_before_task = len(
+        status_refresh.read_text(encoding="utf-8").splitlines()
+    )
     task_start = subprocess.run(
         [sys.executable, str(vault / "hooks" / "run-hook.py"), "session-start"],
         input=json.dumps({**task_payload, "source": "resume"}),
@@ -238,6 +297,12 @@ with tempfile.TemporaryDirectory(prefix="runtime-hooks-test.") as raw:
     check(
         "task SessionStart does not inject coordinator context",
         task_start.returncode == 0 and "parity marker" not in task_start.stdout,
+        task_start.stderr,
+    )
+    check(
+        "task SessionStart has no coordinator status authority",
+        len(status_refresh.read_text(encoding="utf-8").splitlines())
+        == refresh_count_before_task,
         task_start.stderr,
     )
     task_compact = subprocess.run(

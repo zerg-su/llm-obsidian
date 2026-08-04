@@ -481,6 +481,7 @@ with tempfile.TemporaryDirectory(prefix="review-runtime.") as raw:
     check(
         "initial callback uses a terminal one-shot child in the parent lane",
         first_round.operation_id != original.operation_id
+        and child_record.spec.parent_operation_id == original.operation_id
         and first_round.lane_id == original.lane_id
         and first_round.run_id != original.run_id
         and not child_record.resources.surface_id

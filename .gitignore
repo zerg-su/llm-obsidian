@@ -153,6 +153,7 @@ _attachments/
 .vault-meta/evals/
 .vault-meta/acceptance/
 .vault-meta/harness/
+.vault-meta/release-evidence/
 .vault-meta/turn-markers/
 .vault-meta/research-runs/
 .vault-meta/session-routing/

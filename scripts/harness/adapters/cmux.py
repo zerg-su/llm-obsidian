@@ -8,7 +8,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 UUID_RE = re.compile(r"[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\Z")
@@ -47,6 +47,71 @@ class Surface:
     window_ref: str = ""
 
 
+@dataclass(frozen=True)
+class SurfaceWorkspaceIndex:
+    """Exact live placements plus identities whose placement is ambiguous."""
+
+    surface_workspaces: Mapping[str, str]
+    ambiguous_surfaces: frozenset[str] = frozenset()
+    observed_surfaces: frozenset[str] = frozenset()
+
+
+def surface_workspaces_from_tree(value: object) -> SurfaceWorkspaceIndex:
+    """Decode the content-free cmux hierarchy without trusting positional refs."""
+
+    if not isinstance(value, dict) or not isinstance(value.get("windows"), list):
+        raise CmuxError("cmux tree returned an invalid hierarchy")
+    placements: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    observed: set[str] = set()
+    for window in value["windows"]:
+        if not isinstance(window, dict) or not isinstance(
+            window.get("workspaces", []), list
+        ):
+            continue
+        for workspace in window.get("workspaces", []):
+            if not isinstance(workspace, dict) or not isinstance(
+                workspace.get("panes", []), list
+            ):
+                continue
+            workspace_id = str(
+                workspace.get("id") or workspace.get("workspace_id") or ""
+            )
+            exact_workspace = bool(UUID_RE.fullmatch(workspace_id))
+            for pane in workspace.get("panes", []):
+                if not isinstance(pane, dict) or not isinstance(
+                    pane.get("surfaces", []), list
+                ):
+                    continue
+                for surface in pane.get("surfaces", []):
+                    if not isinstance(surface, dict):
+                        continue
+                    surface_id = str(
+                        surface.get("id") or surface.get("surface_id") or ""
+                    )
+                    if not UUID_RE.fullmatch(surface_id):
+                        continue
+                    key = surface_id.casefold()
+                    observed.add(key)
+                    if not exact_workspace:
+                        placements.pop(key, None)
+                        ambiguous.add(key)
+                        continue
+                    prior = placements.get(key)
+                    if key in ambiguous:
+                        continue
+                    if prior is not None and prior.casefold() != workspace_id.casefold():
+                        placements.pop(key, None)
+                        ambiguous.add(key)
+                        continue
+                    placements[key] = workspace_id
+    return SurfaceWorkspaceIndex(
+        placements,
+        frozenset(ambiguous),
+        frozenset(observed),
+    )
+
+
 def run_cmux(
     args: Sequence[str],
     *,
@@ -72,18 +137,30 @@ def run_cmux(
 
 
 class CmuxAdapter:
-    def __init__(self, runner: Runner | None = None, binary: str = "cmux"):
+    def __init__(
+        self,
+        runner: Runner | None = None,
+        binary: str = "cmux",
+        *,
+        timeout: float | None = None,
+    ):
         self.runner = runner or subprocess.run
         self.binary = binary
+        self.timeout = timeout
 
     def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess[str]:
-        result = self.runner(
-            [self.binary, *args],
-            text=True,
-            capture_output=True,
-            check=False,
-            env=_untargeted_environment(),
-        )
+        kwargs: dict[str, object] = {
+            "text": True,
+            "capture_output": True,
+            "check": False,
+            "env": _untargeted_environment(),
+        }
+        if self.timeout is not None:
+            kwargs["timeout"] = self.timeout
+        try:
+            result = self.runner([self.binary, *args], **kwargs)
+        except subprocess.TimeoutExpired as exc:
+            raise CmuxError("cmux command timed out") from exc
         if result.returncode:
             diagnostic = (result.stderr or result.stdout).strip()[:1000]
             raise CmuxError(diagnostic or f"cmux command failed: {args[0]}")
@@ -161,6 +238,11 @@ class CmuxAdapter:
         ):
             raise CmuxError("cmux tree returned an invalid hierarchy")
         return value
+
+    def surface_workspaces(self) -> SurfaceWorkspaceIndex:
+        """Return the single owned decoder's exact surface placement view."""
+
+        return surface_workspaces_from_tree(self._tree())
 
     def open_split(self, origin_surface: str) -> Surface:
         if not UUID_RE.fullmatch(origin_surface):
@@ -259,25 +341,9 @@ class CmuxAdapter:
             raise CmuxError("cmux identify returned no caller identity")
         actual = str(caller.get("surface_id") or "")
         if not actual:
-            tree = self._tree()
-            matches = [
-                str(surface.get("id") or surface.get("surface_id") or "")
-                for window in tree.get("windows", [])
-                if isinstance(window, dict)
-                for workspace in window.get("workspaces", [])
-                if isinstance(workspace, dict)
-                for pane in workspace.get("panes", [])
-                if isinstance(pane, dict)
-                for surface in pane.get("surfaces", [])
-                if isinstance(surface, dict)
-                and str(
-                    surface.get("id") or surface.get("surface_id") or ""
-                ).casefold()
-                == surface_id.casefold()
-            ]
-            if len(matches) > 1:
-                raise CmuxError("cmux tree returned duplicate surface identity")
-            return "alive" if matches else "missing"
+            index = self.surface_workspaces()
+            key = surface_id.casefold()
+            return "alive" if key in index.observed_surfaces else "missing"
         if not UUID_RE.fullmatch(actual):
             raise CmuxError("cmux identify returned an invalid surface identity")
         return "alive" if actual.casefold() == surface_id.casefold() else "missing"

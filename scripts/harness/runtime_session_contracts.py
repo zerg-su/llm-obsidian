@@ -98,7 +98,7 @@ class ProcessPort(Protocol):
 
 Preflight = Callable[[RuntimeRoute, Path], CapabilityReport]
 SurfacePrepared = Callable[["RuntimeSessionResult"], None]
-StatusNotifier = Callable[[Path], object]
+StatusNotifier = Callable[[Path, str, str], object]
 
 
 def _relative(value: str, label: str) -> str:
@@ -346,6 +346,16 @@ def _normalize_checkpoint_and_product(
         ):
             raise RuntimeSessionError(
                 "review callback scratch must be isolated from product root"
+            )
+    elif request.callback_mode not in {"research-fetch", "research-synth"}:
+        if product_root is None:
+            product_root = request.cwd
+        if (
+            not product_root.is_dir()
+            or product_root != request.cwd
+        ):
+            raise RuntimeSessionError(
+                "ordinary runtime requires product root equal to cwd"
             )
     object.__setattr__(request, "product_root", product_root)
 

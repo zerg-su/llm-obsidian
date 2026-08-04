@@ -47,7 +47,7 @@ line appended to body.
 Ownership contract for hot.md sections:
   - ## Recent Changes    — THIS SCRIPT (prepend bullet, evict >15, truncate essence only)
   - ## Last Updated      — model via hot_narrative (cap 120 words, FAIL if over)
-  - ## Active Threads    — model via hot_threads (cap 8, FAIL with listing if over)
+  - ## Active Threads    — model via hot_threads (cap 8, evict oldest entries over cap)
   - ## Key Recent Facts  — model-curated durable facts; script never touches it
 
 All file contents are built and validated before mutation. A durable journal

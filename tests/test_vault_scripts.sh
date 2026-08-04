@@ -197,10 +197,19 @@ n_bullets=$(sed -n '/## Recent Changes/,/## Active Threads/p' "$SANDBOX/wiki/hot
 [[ "$n_bullets" == "15" ]] && ok "vw-rc-evict-count" || bad "vw-rc-evict-count" "got $n_bullets bullets (want 15)"
 
 adds='"- t1","- t2","- t3","- t4","- t5","- t6","- t7","- t8"'
-echo '{"hot_threads": {"add": ['"$adds"']}}' | "$VW" >/dev/null 2>&1
-expect_exit "vw-threads-cap" "$?" 2
+echo '{"hot_threads": {"add": ['"$adds"']}}' | "$VW" >/dev/null 2>"$SANDBOX/.err"
+expect_exit "vw-threads-evict" "$?" 0
+expect_grep "vw-threads-evict-warn" "$SANDBOX/.err" "evicted 1 oldest"
 n_threads=$(sed -n '/## Active Threads/,$p' "$SANDBOX/wiki/hot.md" | grep -c '^- ')
-[[ "$n_threads" == "1" ]] && ok "vw-threads-cap-unchanged" || bad "vw-threads-cap-unchanged" "got $n_threads threads (want 1, nothing written)"
+[[ "$n_threads" == "8" ]] && ok "vw-threads-evict-count" || bad "vw-threads-evict-count" "got $n_threads threads (want 8)"
+if sed -n '/## Active Threads/,$p' "$SANDBOX/wiki/hot.md" | grep -Fq -- '- **Open**: seed thread'; then
+  bad "vw-threads-evict-oldest" "oldest seed thread was retained"
+else
+  ok "vw-threads-evict-oldest"
+fi
+for i in $(seq 1 8); do
+  expect_grep "vw-threads-keep-t$i" "$SANDBOX/wiki/hot.md" "- t$i"
+done
 
 narrative=$(printf 'word %.0s' {1..130})
 echo '{"hot_narrative": "'"$narrative"'"}' | "$VW" >/dev/null 2>&1

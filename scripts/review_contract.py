@@ -24,6 +24,15 @@ RUNTIME_PROVIDERS = {
     runtime: provider for provider, runtime in PROVIDER_RUNTIMES.items()
 }
 VERIFY_BUDGETS = {"simple": 1, "deep": 2, "full": 2}
+REVIEW_RESPONSIBILITIES = ("holistic", "intent", "engineering")
+REVIEW_PARENT_KIND_BY_RESPONSIBILITY = {
+    "holistic": "simple-review-holistic",
+    "intent": "deep-review-spec",
+    "engineering": "deep-review-correctness",
+}
+REVIEW_PARENT_KINDS = frozenset(
+    REVIEW_PARENT_KIND_BY_RESPONSIBILITY.values()
+)
 IDENTIFIER_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]*"
 IDENTIFIER_RE = re.compile(rf"{IDENTIFIER_PATTERN}\Z")
 FINDING_ID_LIMIT = 100
@@ -53,7 +62,7 @@ def review_runtime_provider(runtime: str) -> str:
 def review_axis_responsibility(axis: str) -> str:
     """Return the bounded responsibility encoded in one exact lane identity."""
 
-    for responsibility in ("holistic", "intent", "engineering"):
+    for responsibility in REVIEW_RESPONSIBILITIES:
         if axis.endswith(f"-{responsibility}") and axis != f"-{responsibility}":
             return responsibility
     raise ValueError("review lane must end in holistic, intent, or engineering")
@@ -62,11 +71,9 @@ def review_axis_responsibility(axis: str) -> str:
 def review_parent_kind(axis: str) -> str:
     """Map a lane responsibility onto the existing lifecycle vocabulary."""
 
-    return {
-        "holistic": "simple-review-holistic",
-        "intent": "deep-review-spec",
-        "engineering": "deep-review-correctness",
-    }[review_axis_responsibility(axis)]
+    return REVIEW_PARENT_KIND_BY_RESPONSIBILITY[
+        review_axis_responsibility(axis)
+    ]
 
 
 def review_axis_provider(axis: str) -> str:

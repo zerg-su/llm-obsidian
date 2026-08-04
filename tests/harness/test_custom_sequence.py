@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix="custom-sequence.") as raw:
         "first custom visit is a deterministic child with bounded outcomes",
         design.step_id == "design" and design.visit == 0
         and design.allowed_outcomes == ("complete",)
+        and design.spec.parent_operation_id == parent_record.spec.operation_id
         and request["workflow_kind"] == "custom"
         and request["allowed_outcomes"] == ["complete"]
         and store.read("custom-owner", design.spec.operation_id).state == "awaiting-callback",

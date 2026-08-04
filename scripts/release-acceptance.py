@@ -33,7 +33,14 @@ LEGACY_SKILLS = {
 }
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 NON_BEHAVIORAL_ROOTS = frozenset({"docs", "references", "wiki"})
-NON_BEHAVIORAL_RUNTIME_PATHS = frozenset({".task-origin-session"})
+NON_BEHAVIORAL_RUNTIME_PATHS = frozenset(
+    {
+        ".task-origin-session",
+        ".task-pipeline-step-callback.json",
+        ".task-pipeline-step-request.json",
+    }
+)
+NON_BEHAVIORAL_RUNTIME_ROOTS = frozenset({".task-pipeline"})
 BEHAVIORAL_DOCUMENTS = frozenset(
     {
         "AGENTS.md",
@@ -108,6 +115,8 @@ def behavioral_path(relative: str) -> bool:
         return False
     normalized = path.as_posix()
     if normalized in NON_BEHAVIORAL_RUNTIME_PATHS:
+        return False
+    if path.parts[0] in NON_BEHAVIORAL_RUNTIME_ROOTS:
         return False
     if (
         normalized in BEHAVIORAL_DOCUMENTS

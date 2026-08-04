@@ -94,7 +94,10 @@ recovers transactions, reindexes `.vault-meta/`, self-heals sparse section retri
 validates, scoped-commits vault-owned paths, and schedules fingerprinted dense refresh
 when needed without blocking Stop. Stdlib `fcntl` locks serialize both paths.
 Validation failure blocks the commit and leaves the tree
-dirty. Memory backup is disabled unless `CLAUDE_MEMORY_DIR` is explicitly set or
+dirty; a blocked turn-end is reported to the session as a `systemMessage`
+rather than only logged. `/close` cannot rely on Stop, because its queued
+`/exit` wins that race, so `scripts/queue-session-exit.py` runs the same
+pipeline synchronously and refuses to queue an exit while it is blocked. Memory backup is disabled unless `CLAUDE_MEMORY_DIR` is explicitly set or
 `.vault-meta/memory-backup.json` enables a source (start from
 `config/memory-backup.example.json`); it never guesses a sibling vault. Claude Code runs it through the normal hook layer; Codex plugin
 hooks run the same script with `LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1`. Other agents

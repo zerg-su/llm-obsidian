@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from review_contract import (  # noqa: E402
     MODES,
+    REVIEW_PARENT_KINDS,
     VERIFY_BUDGETS,
     compile_review_axes,
     review_axis_provider,
@@ -20,6 +21,7 @@ from review_contract import (  # noqa: E402
     review_provider_runtime,
     review_runtime_provider,
 )
+from harness.status_segment import CONTROLLER_KINDS  # noqa: E402
 from harness.workflows.review_gate import ReviewPreset  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import ReviewContext, review_session_specs  # noqa: E402
@@ -37,6 +39,10 @@ def check(label: str, value: bool) -> None:
 
 
 check("full is an explicit review mode", MODES == {"simple", "deep", "full"})
+check(
+    "status projection covers every canonical review parent kind",
+    REVIEW_PARENT_KINDS <= CONTROLLER_KINDS,
+)
 check(
     "simple keeps one selected-model holistic lane",
     compile_review_axes("simple", selected_provider="openai")

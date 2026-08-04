@@ -464,6 +464,7 @@ def review_round_spec(lane: ReviewLaneSession) -> OperationSpec:
         idempotency_key=hashlib.sha256(identity).hexdigest(),
         kind="review-round",
         keep_open=False,
+        parent_operation_id=lane.operation_id,
     )
 
 

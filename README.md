@@ -77,11 +77,37 @@ The canonical state is ordinary Markdown, JSON/TOML contracts, Git history, and 
 2. **Plan.** Important decisions become a saved plan with provenance and a stable DragonScale address.
 3. **Dispatch.** The restartable harness captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
 4. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
-5. **Review.** Simple review uses one read-only holistic lane. Deep review keeps independent spec and standards/correctness/architecture/security lanes. Same-model is the default; cross-model routing is explicit. Verification resumes the exact lane and surface.
+5. **Review.** Simple review uses one selected read-only holistic lane. Default Deep review runs independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
 6. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
 7. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The supervisor closes that exact surface after the agent process exits; it never guesses another tab.
 
 Review approval finishes a **round**, not the whole task. The task remains resumable until final reap. Archived sessions are never silently attached to another task ID.
+
+### Common workflows
+
+The normal interface is the skill, not a low-level runner command. In Claude,
+select the named plugin skill or use the natural-language phrase shown below.
+In Codex, use the explicit `$llm-obsidian:<skill>` name.
+
+| Goal | What to ask for | Skill / result |
+|---|---|---|
+| Clarify an idea | “Grill me before code; ask one material question at a time.” | `clarify` turns the discussion into an explicit outcome, scope, evidence, and stop conditions. |
+| Save the agreed plan | “Save this approved implementation plan.” | `save-plan` writes the canonical plan; `implementation-plan` structures multi-file TDD slices and ownership. |
+| Review a plan | “Review this plan for intent and outcome before dispatch.” | `review` with the intent boundary checks that the plan still serves the goal before implementation mechanics. |
+| Start ordinary work | “Dispatch this approved plan with `engineering/change`.” | `dispatch` validates the exact repo, plan, route, worktree, permissions, review preset, and visible cmux session. |
+| Open or continue a visible session | “Open this task in a separate visible session,” or “continue the existing task session.” | `dispatch` creates the owned cmux lane when requested; later work resumes its exact stored checkpoint instead of opening an unrelated window. |
+| Read cmux progress | Look at the thin workspace progress line while a pipeline is active. | It counts only live harness steps owned by the current coordinator workspace. It clears at idle and deliberately does not report project-backlog tasks, model limits, or history from missing surfaces. |
+| Fix a reproducible defect | “Dispatch this approved plan with `engineering/fix`.” | The built-in bounded loop runs reproduce → root cause → regression → minimal fix and stops on architecture or budget boundaries. |
+| Use a custom pipeline | “No built-in fits; propose the smallest bounded custom pipeline.” | The model may author the typed DSL only after proving the semantic gap; the harness validates allowed steps, loops, hashes, and budgets before approval. |
+| Review implementation | “Run Deep review,” “use only Opus/Sol,” or explicitly “Run Full review.” | Simple is one selected holistic reviewer. Default Deep is two provider-independent holistic reviews; single-model Deep is separate intent and engineering reviews. Full is the explicit-only four-lane provider/responsibility grid. |
+| Finish or leave | “Reap the approved task,” or “save and close this session.” | `reap` archives the result and closes the plan; `close` saves and exits only the current agent process without guessing another cmux surface. |
+
+Pipeline choice is frozen during clarification. `lifecycle/default` handles a
+plain lifecycle, `engineering/change` is the normal TDD implementation path,
+and `engineering/fix` is the reproducible-defect loop. Custom DSL is an escape
+hatch for an approved semantic gap, not a more fashionable default. cmux keeps
+the resulting executor and reviewer sessions visible; the harness owns their
+exact IDs, callbacks, bounded retries, progress, and cleanup.
 
 ## Where code saves tokens without lowering quality
 
@@ -103,10 +129,16 @@ This division is deliberate. Requirements, interpretation, synthesis, code revie
 
 ## Unified review
 
-`review` starts one same-model holistic session. `review --deep` keeps two
-independent axes. Add `--cross-model` when another runtime should review; a
-registered model alias may override the selected profile. Every resolved route
-is recorded, and an unknown alias or provider mismatch fails closed.
+`review` starts one selected holistic reviewer. Default `review --deep` starts
+independent Anthropic and OpenAI holistic reviewers; each checks the complete
+outcome and engineering denominator. Explicit single-model Deep uses separate
+intent and engineering sessions on that model. Explicit-only `--full` starts
+the four provider/responsibility lanes (`anthropic-intent`,
+`anthropic-engineering`, `openai-intent`, `openai-engineering`) and is never
+chosen by heuristics or risk policy. A registered model alias may override an
+allowed selected route. Every resolved route is recorded, and an unavailable
+provider can be excluded through an explicit single-model choice instead of
+breaking the pipeline.
 
 A review operation contains:
 
@@ -361,6 +393,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| v2.6.2 truthful cmux workspace progress and lifecycle fixes | [v2.6.2 release notes](docs/releases/v2.6.2.md) |
 | v2.6.1 independent review topology and lane isolation | [v2.6.1 release notes](docs/releases/v2.6.1.md) |
 | v2.6.0 outcome-preserving contracts and skill intelligence | [v2.6.0 release notes](docs/releases/v2.6.0.md) |
 | v2.4.1 typed fix loops, install, upgrade, and rollback | [v2.4.1 release notes](docs/releases/v2.4.1.md) |
