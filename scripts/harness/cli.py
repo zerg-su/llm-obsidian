@@ -325,7 +325,16 @@ def _cancel_or_close(
         record = store.read(owner, operation_id)
     if record.state == "cancelling":
         store.transition(owner, operation_id, "exiting")
-    return store.transition(owner, operation_id, "cancelled")
+        record = store.read(owner, operation_id)
+    terminal_state = (
+        "complete"
+        if record.state == "exiting"
+        and record.accepted_callback_id
+        and record.accepted_callback_kind
+        and record.accepted_callback_sha256
+        else "cancelled"
+    )
+    return store.transition(owner, operation_id, terminal_state)
 
 
 def _recover_finalizing_review_if_present(
@@ -571,7 +580,11 @@ def main(
                                 process_adapter=process_adapter,
                                 cmux_adapter=cmux_adapter,
                             )
-                            action = "cancel-complete"
+                            action = (
+                                "callback-complete"
+                                if row.accepted_callback_id
+                                else "cancel-complete"
+                            )
                         else:
                             _attention(
                                 store,
@@ -599,7 +612,11 @@ def main(
                         process_adapter=process_adapter,
                         cmux_adapter=cmux_adapter,
                     )
-                    action = "cancel-complete"
+                    action = (
+                        "callback-complete"
+                        if row.accepted_callback_id
+                        else "cancel-complete"
+                    )
                 else:
                     action = "none"
                 current = store.read(args.owner, operation_id)

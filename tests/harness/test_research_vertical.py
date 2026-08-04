@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -401,10 +402,64 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         "fetch_errors": [],
     }
     (fetch / "artifact.json").write_text(json.dumps(fetch_artifact), encoding="utf-8")
-    store.transition(
-        pipeline_request.owner_id,
-        execution.fetch.spec.operation_id,
-        "finalizing",
+    fetch_raw = (fetch / "artifact.json").read_bytes()
+    fetch_payload = {
+        "stage": "fetch",
+        "artifact_path": "artifact.json",
+        "artifact_sha256": hashlib.sha256(fetch_raw).hexdigest(),
+        "source_count": 1,
+    }
+    fetch_payload_digest = hashlib.sha256(
+        json.dumps(
+            fetch_payload, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    accepted_fetch = store.read(
+        pipeline_request.owner_id, execution.fetch.spec.operation_id
+    )
+    store.save(
+        replace(
+            accepted_fetch,
+            revision=accepted_fetch.revision + 1,
+            accepted_callback_id=(
+                f"research-fetch-{fetch_payload_digest[:24]}"
+            ),
+            accepted_callback_kind="research",
+            accepted_callback_sha256="0" * 64,
+        ),
+        expected_revision=accepted_fetch.revision,
+    )
+    for state in ("finalizing", "exiting", "cancelled"):
+        store.transition(
+            pipeline_request.owner_id,
+            execution.fetch.spec.operation_id,
+            state,
+        )
+    try:
+        advance_research(
+            pipeline_request,
+            runtime,
+            store,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            fetch_cwd=fetch,
+            synth_cwd=synth,
+            synth_runtime_home=synth_home,
+            callback_wake="finalize exact research pipeline",
+        )
+    except ValueError:
+        check("cancelled fetch recovery rejects a callback digest mismatch", True)
+    else:
+        check("cancelled fetch recovery rejects a callback digest mismatch", False)
+    mismatched_fetch = store.read(
+        pipeline_request.owner_id, execution.fetch.spec.operation_id
+    )
+    store.save(
+        replace(
+            mismatched_fetch,
+            revision=mismatched_fetch.revision + 1,
+            accepted_callback_sha256=fetch_payload_digest,
+        ),
+        expected_revision=mismatched_fetch.revision,
     )
     execution = advance_research(
         pipeline_request,
@@ -417,9 +472,9 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         callback_wake="finalize exact research pipeline",
     )
     check(
-        "accepted fetch advances to a separate harness synthesis stage",
+        "cancelled accepted fetch recovers to the separate synthesis stage",
         execution.stage == "synth"
-        and execution.fetch.state == "complete"
+        and execution.fetch.state == "cancelled"
         and execution.synth is not None
         and len(runtime.starts) == 2
         and runtime.starts[1].callback_mode == "research-synth"
@@ -484,7 +539,7 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
     check(
         "restart replay does not repeat the accepted fetch or synth start",
         replayed.stage == "synth"
-        and replayed.fetch.state == "complete"
+        and replayed.fetch.state == "cancelled"
         and replayed.synth is not None
         and replayed.synth.spec == execution.synth.spec
         and replay_runtime.starts == []
@@ -568,8 +623,7 @@ with tempfile.TemporaryDirectory(prefix="research-pipeline.") as raw:
         and completed.parent.state == "complete"
         and completed.result_artifact is not None
         and completed.result_artifact["path"] == str((synth / "answer.md").resolve())
-        and runtime.exits
-        == [execution.fetch.spec.operation_id, execution.synth.spec.operation_id]
+        and runtime.exits == [execution.synth.spec.operation_id]
         and runtime.cleanups == runtime.exits,
     )
 

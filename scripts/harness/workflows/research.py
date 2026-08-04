@@ -76,6 +76,25 @@ from .research_sandbox import (
 )
 
 
+def _accepted_research_receipt(
+    record: OperationRecord,
+    payload: Mapping[str, object],
+) -> bool:
+    """Match a terminal research stage to its exact durable callback payload."""
+
+    encoded = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":")
+    ).encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    stage = payload.get("stage")
+    return (
+        stage in {"fetch", "synth"}
+        and record.accepted_callback_kind == "research"
+        and record.accepted_callback_sha256 == digest
+        and record.accepted_callback_id == f"research-{stage}-{digest[:24]}"
+    )
+
+
 def start_research(
     request: ResearchOperationRequest,
     runtime: ResearchRuntime,
@@ -129,17 +148,32 @@ def advance_research(
     parent = store.read(request.owner_id, request.policy.operation_id)
     fetch_spec, _fetch_lane, fetch_run = _stage_identity(request, "fetch")
     fetch = store.read(request.owner_id, fetch_spec.operation_id)
-    if fetch.state not in {"finalizing", "exiting", "complete"}:
-        raise ValueError("research fetch callback has not been accepted")
+    artifact_path = fetch_cwd.expanduser().resolve() / "artifact.json"
     artifact = load_artifact(
-        str(fetch_cwd.expanduser().resolve() / "artifact.json"),
+        str(artifact_path),
         expected_run_id=fetch_run,
         expected_request_sha256=request.context.request_sha256,
     )
+    fetch_payload = {
+        "stage": "fetch",
+        "artifact_path": "artifact.json",
+        "artifact_sha256": hashlib.sha256(artifact_path.read_bytes()).hexdigest(),
+        "source_count": len(artifact["sources"]),
+    }
+    recovered_cancelled = (
+        fetch.state == "cancelled"
+        and _accepted_research_receipt(fetch, fetch_payload)
+    )
+    if (
+        fetch.state not in {"finalizing", "exiting", "complete"}
+        and not recovered_cancelled
+    ):
+        raise ValueError("research fetch callback has not been accepted")
     if parent.state == "awaiting-callback":
         parent = _advance_parent(store, parent, ("verifying",))
-    fetch = _finish_stage(runtime, store, fetch)
-    if fetch.state != "complete":
+    if not recovered_cancelled:
+        fetch = _finish_stage(runtime, store, fetch)
+    if fetch.state != "complete" and not recovered_cancelled:
         return ResearchExecution(
             request, parent, fetch, None, "fetch-cleanup"
         )
@@ -188,8 +222,6 @@ def finalize_research(
     fetch = store.read(request.owner_id, fetch_spec.operation_id)
     synth_spec, _synth_lane, synth_run = _stage_identity(request, "synth")
     synth = store.read(request.owner_id, synth_spec.operation_id)
-    if synth.state not in {"finalizing", "exiting", "complete"}:
-        raise ValueError("research synthesis callback has not been accepted")
     synth_cwd = synth_cwd.expanduser().resolve()
     artifact = load_artifact(
         str(synth_cwd / "artifact.json"),
@@ -209,8 +241,24 @@ def finalize_research(
         expected_run_id=synth_run,
         source_urls={str(source["url"]) for source in artifact["sources"]},
     )
-    synth = _finish_stage(runtime, store, synth)
-    if synth.state != "complete":
+    synth_payload = {
+        "stage": "synth",
+        "artifact_path": result["artifact"]["path"],
+        "artifact_sha256": result["artifact"]["sha256"],
+        "citation_count": len(result["artifact"]["citations"]),
+    }
+    recovered_cancelled = (
+        synth.state == "cancelled"
+        and _accepted_research_receipt(synth, synth_payload)
+    )
+    if (
+        synth.state not in {"finalizing", "exiting", "complete"}
+        and not recovered_cancelled
+    ):
+        raise ValueError("research synthesis callback has not been accepted")
+    if not recovered_cancelled:
+        synth = _finish_stage(runtime, store, synth)
+    if synth.state != "complete" and not recovered_cancelled:
         return ResearchExecution(
             request, parent, fetch, synth, "synth-cleanup"
         )
