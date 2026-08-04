@@ -41,6 +41,7 @@ from harness.runtime_worker_review_bridge import (  # noqa: E402
 )
 from harness.runtime_worker_liveness import RuntimeWorkerLivenessMixin  # noqa: E402
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
+from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
 
@@ -194,20 +195,39 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
     )
 
+    current_receipt = dict(receipt)
+    current_receipt.update(
+        {
+            "superseded_owner_id": "review-new-owner-1",
+            "superseded_operation_id": "review-new-1",
+            "superseded_run_id": "review-new-run-1",
+            "replacement_owner_id": "review-new-owner-1",
+            "replacement_operation_id": "review-new-1",
+            "replacement_run_id": "review-new-run-1",
+        }
+    )
+    current_receipt_path = store.root / "supersession/current-cleanup.json"
+    current_receipt_path.write_text(
+        json.dumps(current_receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
     class CleanupProcess:
+        def __init__(self) -> None:
+            self.status = "unknown"
+
         def process_status(self, process_group: int, identity: str) -> str:
             check(
                 "superseded cleanup probes exact old process",
                 process_group == 401 and identity == "4" * 64,
             )
-            return "dead"
+            return self.status
 
         def pid_status(self, pid: int, identity: str) -> str:
             check(
                 "superseded cleanup probes exact old supervisor",
                 pid == 402 and identity == "5" * 64,
             )
-            return "dead"
+            return self.status
 
     class CleanupCmux:
         def __init__(self) -> None:
@@ -223,7 +243,37 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
             self.alive = False
 
     cleanup_cmux = CleanupCmux()
-    manager = RuntimeSessionManager(store, cleanup_cmux, CleanupProcess())
+    cleanup_process = CleanupProcess()
+    manager = RuntimeSessionManager(store, cleanup_cmux, cleanup_process)
+    try:
+        manager.cleanup_superseded_review(current_receipt_path)
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("active review cleanup receipt was accepted")
+    check(
+        "current review identity never closes through superseded cleanup",
+        cleanup_cmux.closed == []
+        and store.read("review-new-owner-1", "review-new-1").state == "running",
+    )
+    ownership_wait = manager.cleanup_superseded_review(receipt_path)
+    check(
+        "unknown superseded ownership fails closed without close",
+        ownership_wait.action == "attention-required"
+        and ownership_wait.record.resources.surface_id == SURFACE
+        and cleanup_cmux.closed == [],
+        ownership_wait,
+    )
+    current_old = store.read("review-old-owner-1", "review-old-1")
+    receipt["superseded_record_sha256"] = hashlib.sha256(
+        json.dumps(
+            to_dict(current_old), sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    cleanup_process.status = "dead"
     cleaned = manager.cleanup_superseded_review(receipt_path)
     replay = manager.cleanup_superseded_review(receipt_path)
     check(
