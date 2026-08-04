@@ -17,6 +17,8 @@ PORT_LINE = re.compile(r"^MCP_GATEWAY_PORT=([0-9]+)$")
 
 
 def read_port(path: Path) -> int:
+    if path.is_symlink():
+        raise ValueError(f"runtime config must not be a symlink: {path}")
     if not path.is_file():
         raise ValueError(f"runtime config missing: {path}")
     values: list[int] = []
@@ -96,6 +98,18 @@ def atomic_write(path: Path, content: str) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def initialize_default_runtime(path: Path, gateway: Path) -> None:
+    """Create the exact default runtime file from its validated sibling example."""
+
+    if path.is_symlink() or path.exists():
+        raise ValueError(f"runtime config target is not a missing regular file: {path}")
+    example = gateway / "runtime.env.example"
+    if example.is_symlink():
+        raise ValueError(f"runtime config example must not be a symlink: {example}")
+    read_port(example)
+    atomic_write(path, example.read_text(encoding="utf-8"))
+
+
 def sync_one(path: Path, template: Path, transform, apply: bool, quiet: bool) -> bool:
     value, missing = load_json_or_template(path, template)
     wanted_value = transform(value)
@@ -121,6 +135,11 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, default=root)
     parser.add_argument("--gateway-dir", type=Path, default=here)
     parser.add_argument("--runtime-env", type=Path)
+    parser.add_argument(
+        "--allow-default-runtime-init",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--gateway-only", action="store_true")
     parser.add_argument("--print-port", action="store_true")
     parser.add_argument("--quiet", action="store_true")
@@ -128,8 +147,26 @@ def main() -> int:
 
     gateway = args.gateway_dir.resolve()
     repo = args.repo_root.resolve()
-    runtime = (args.runtime_env or gateway / "runtime.env").resolve()
+    runtime_source = args.runtime_env or gateway / "runtime.env"
     try:
+        if runtime_source.is_symlink():
+            raise ValueError(
+                f"runtime config must not be a symlink: {runtime_source}"
+            )
+        runtime = runtime_source.resolve()
+        default_runtime = (gateway / "runtime.env").resolve()
+        if not runtime.is_file():
+            may_initialize = (
+                args.allow_default_runtime_init
+                and args.apply
+                and not args.check
+                and not args.print_port
+                and args.runtime_env is None
+                and gateway == here.resolve()
+                and runtime == default_runtime
+            )
+            if may_initialize:
+                initialize_default_runtime(runtime, gateway)
         port = read_port(runtime)
         if args.print_port:
             print(port)

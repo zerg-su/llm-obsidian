@@ -20,7 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_DIR="$HOME/.config/mcp-gateway"
 SECRETS="$CONF_DIR/secrets.env"
 CONFIG="$SCRIPT_DIR/config.json"
-RUNTIME_ENV="${MCP_GATEWAY_RUNTIME:-$SCRIPT_DIR/runtime.env}"
+DEFAULT_RUNTIME_ENV="$SCRIPT_DIR/runtime.env"
+RUNTIME_ENV_OVERRIDDEN=0
+if [ "${MCP_GATEWAY_RUNTIME+x}" = "x" ]; then
+  RUNTIME_ENV_OVERRIDDEN=1
+fi
+RUNTIME_ENV="${MCP_GATEWAY_RUNTIME:-$DEFAULT_RUNTIME_ENV}"
 PROXY_BIN="${MCP_PROXY_BIN:-$HOME/.local/bin/mcp-proxy}"
 GATEWAY_PORT=""
 LABEL_GW="${MCP_GATEWAY_LABEL:-io.llm-obsidian.mcp-gateway}"
@@ -311,7 +316,15 @@ PYEOF
     if [ "$#" -eq 0 ]; then
       set -- --check
     fi
-    python3 "$SCRIPT_DIR/config-sync.py" --runtime-env "$RUNTIME_ENV" "$@"
+    if [ "$RUNTIME_ENV_OVERRIDDEN" -eq 0 ]; then
+      if [ "$#" -eq 1 ] && [ "$1" = "--apply" ]; then
+        python3 "$SCRIPT_DIR/config-sync.py" --allow-default-runtime-init "$@"
+      else
+        python3 "$SCRIPT_DIR/config-sync.py" "$@"
+      fi
+    else
+      python3 "$SCRIPT_DIR/config-sync.py" --runtime-env "$RUNTIME_ENV" "$@"
+    fi
     ;;
   *)
     echo "usage: mcp-gateway.sh {run|install|start|stop|restart|status|health|smoke [server]|schema-check|schema-lock --apply|update [--check|--yes] [name...]|sync-tools|sync-config [--check|--apply]|codex-sync [--check|--apply] [--only-profile name]|doctor|logs [n]}"

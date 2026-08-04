@@ -146,6 +146,93 @@ expect_grep "C2.8 gateway custom fields preserved" "$SANDBOX/sync-gw/config.json
 expect_grep "C2.9 client custom fields preserved" "$SANDBOX/sync-repo/.mcp.json" '"custom-preserved"'
 expect_grep "C2.10 changed port materialized" "$SANDBOX/sync-repo/.mcp.json" "127.0.0.1:9192/context7/mcp"
 
+# Fresh default gateway bootstrap: only wrapper sync-config --apply may create
+# runtime.env, from its exact sibling example, before synchronizing JSON.
+fresh_gateway_fixture() {
+  local root="$1"
+  mkdir -p "$root/scripts/mcp-gateway"
+  cp "$GW/mcp-gateway.sh" "$GW/config-sync.py" \
+    "$GW/runtime.env.example" "$GW/config.json.example" \
+    "$root/scripts/mcp-gateway/"
+  cp "$REPO_ROOT/.mcp.json.example" "$root/.mcp.json.example"
+}
+
+FRESH_GATEWAY="$SANDBOX/fresh-gateway-repo"
+fresh_gateway_fixture "$FRESH_GATEWAY"
+HOME="$SANDBOX/home" bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --check >"$OUT" 2>&1
+expect_exit "C2.B01 missing default runtime check fails closed" "$?" 2
+[[ ! -e "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B02 check writes no runtime" || bad "C2.B02 check writes no runtime" "runtime created"
+HOME="$SANDBOX/home" bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --print-port >"$OUT" 2>&1
+expect_exit "C2.B03 missing default runtime print-port fails closed" "$?" 2
+[[ ! -e "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B04 print-port writes no runtime" || bad "C2.B04 print-port writes no runtime" "runtime created"
+
+CUSTOM_RUNTIME="$SANDBOX/custom-runtime.env"
+MCP_GATEWAY_RUNTIME="$CUSTOM_RUNTIME" HOME="$SANDBOX/home" \
+  bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B05 custom runtime apply cannot bootstrap" "$?" 2
+[[ ! -e "$CUSTOM_RUNTIME" && ! -e "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" ]] \
+  && ok "C2.B06 custom runtime writes nothing" \
+  || bad "C2.B06 custom runtime writes nothing" "runtime created"
+
+MCP_GATEWAY_RUNTIME="$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" HOME="$SANDBOX/home" \
+  bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B07 environment override cannot bootstrap default path" "$?" 2
+[[ ! -e "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B08 environment override writes nothing" || bad "C2.B08 environment override writes nothing" "runtime created"
+
+python3 "$FRESH_GATEWAY/scripts/mcp-gateway/config-sync.py" --apply >"$OUT" 2>&1
+expect_exit "C2.B09 direct config-sync cannot self-authorize bootstrap" "$?" 2
+[[ ! -e "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B10 direct apply writes nothing" || bad "C2.B10 direct apply writes nothing" "runtime created"
+
+MISSING_EXAMPLE="$SANDBOX/missing-example-repo"
+fresh_gateway_fixture "$MISSING_EXAMPLE"
+rm "$MISSING_EXAMPLE/scripts/mcp-gateway/runtime.env.example"
+HOME="$SANDBOX/home" bash "$MISSING_EXAMPLE/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B11 missing runtime example fails closed" "$?" 2
+[[ ! -e "$MISSING_EXAMPLE/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B12 missing example writes nothing" || bad "C2.B12 missing example writes nothing" "runtime created"
+
+INVALID_EXAMPLE="$SANDBOX/invalid-example-repo"
+fresh_gateway_fixture "$INVALID_EXAMPLE"
+printf 'MCP_GATEWAY_PORT=0\nMCP_GATEWAY_PORT=9090\n' > "$INVALID_EXAMPLE/scripts/mcp-gateway/runtime.env.example"
+HOME="$SANDBOX/home" bash "$INVALID_EXAMPLE/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B13 invalid runtime example fails closed" "$?" 2
+[[ ! -e "$INVALID_EXAMPLE/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B14 invalid example writes nothing" || bad "C2.B14 invalid example writes nothing" "runtime created"
+
+SYMLINK_EXAMPLE="$SANDBOX/symlink-example-repo"
+fresh_gateway_fixture "$SYMLINK_EXAMPLE"
+mv "$SYMLINK_EXAMPLE/scripts/mcp-gateway/runtime.env.example" "$SANDBOX/real-runtime-example"
+ln -s "$SANDBOX/real-runtime-example" "$SYMLINK_EXAMPLE/scripts/mcp-gateway/runtime.env.example"
+HOME="$SANDBOX/home" bash "$SYMLINK_EXAMPLE/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B15 symlink runtime example fails closed" "$?" 2
+[[ ! -e "$SYMLINK_EXAMPLE/scripts/mcp-gateway/runtime.env" ]] && ok "C2.B16 symlink example writes nothing" || bad "C2.B16 symlink example writes nothing" "runtime created"
+
+SYMLINK_TARGET="$SANDBOX/symlink-target-repo"
+fresh_gateway_fixture "$SYMLINK_TARGET"
+printf 'MCP_GATEWAY_PORT=9199\n' > "$SANDBOX/external-runtime.env"
+ln -s "$SANDBOX/external-runtime.env" "$SYMLINK_TARGET/scripts/mcp-gateway/runtime.env"
+HOME="$SANDBOX/home" bash "$SYMLINK_TARGET/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B17 symlink runtime target fails closed" "$?" 2
+expect_grep "C2.B18 symlink target remains unchanged" "$SANDBOX/external-runtime.env" "MCP_GATEWAY_PORT=9199"
+
+HOME="$SANDBOX/home" bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B19 default apply bootstraps runtime and configs" "$?" 0
+cmp -s "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env.example" "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" \
+  && ok "C2.B20 runtime bytes come from exact sibling example" \
+  || bad "C2.B20 runtime bytes come from exact sibling example" "bytes differ"
+python3 - "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" >"$OUT" 2>&1 <<'PYEOF'
+import pathlib, stat, sys
+path = pathlib.Path(sys.argv[1])
+assert stat.S_IMODE(path.stat().st_mode) == 0o600
+print("OWNER_ONLY_OK")
+PYEOF
+expect_exit "C2.B21 bootstrapped runtime is owner-only" "$?" 0
+expect_grep "C2.B22 gateway config synchronized" "$FRESH_GATEWAY/scripts/mcp-gateway/config.json" '"addr": "127.0.0.1:9090"'
+expect_grep "C2.B23 client config synchronized" "$FRESH_GATEWAY/.mcp.json" "127.0.0.1:9090/context7/mcp"
+FRESH_BEFORE=$(shasum -a 256 "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" "$FRESH_GATEWAY/scripts/mcp-gateway/config.json" "$FRESH_GATEWAY/.mcp.json")
+HOME="$SANDBOX/home" bash "$FRESH_GATEWAY/scripts/mcp-gateway/mcp-gateway.sh" sync-config --apply >"$OUT" 2>&1
+expect_exit "C2.B24 default apply replay is idempotent" "$?" 0
+FRESH_AFTER=$(shasum -a 256 "$FRESH_GATEWAY/scripts/mcp-gateway/runtime.env" "$FRESH_GATEWAY/scripts/mcp-gateway/config.json" "$FRESH_GATEWAY/.mcp.json")
+[[ -n "$FRESH_BEFORE" && "$FRESH_BEFORE" = "$FRESH_AFTER" ]] && ok "C2.B25 replay preserves exact bytes" || bad "C2.B25 replay preserves exact bytes" "hash drift"
+
 mkdir -p "$SANDBOX/proxy-fixture"
 cat > "$SANDBOX/proxy-fixture/mcp-proxy" <<'EOF'
 #!/usr/bin/env sh
