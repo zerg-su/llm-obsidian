@@ -20,6 +20,7 @@ from task_escalation_records import (  # noqa: E402
     append_amendment,
     append_raise,
     append_resolution,
+    load_attention,
     load_chain,
     load_latest,
     record_path,
@@ -418,6 +419,8 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-fix-writer.") as raw:
     first_pointer = (worktree / ".task-needs-attention.json").read_bytes()
     writer.notify_cannot_reproduce(receipt)
     cannot_reproduce = load_latest(worktree)
+    join_reader_payload = load_attention(worktree)
+    raw_latest_marker = json.loads(first_pointer)
     check(
         "engineering/fix writer is record-first and replay-idempotent",
         cannot_reproduce is not None
@@ -431,6 +434,16 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-fix-writer.") as raw:
         and (worktree / ".task-needs-attention.json").read_bytes()
         == first_pointer
         and len(writer.cmux_adapter.sent) == 2,
+    )
+    check(
+        "integration assertion must resolve the pointer through the authoritative reader",
+        set(raw_latest_marker)
+        == {"schema_version", "record_id", "record_sha256"}
+        and join_reader_payload is not None
+        and join_reader_payload["category"] == "pipeline-decision"
+        and join_reader_payload["status"] == "pending"
+        and join_reader_payload["allowed_decisions"]
+        == ["stop", "retry-with-fixture"],
     )
     append_resolution(
         worktree,
