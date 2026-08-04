@@ -217,7 +217,12 @@ def _bounded_file_sha256(
     return hashlib.sha256(raw).hexdigest()
 
 
-def _current_callback_receipt_sha256(runtime_root: Path) -> str:
+def _current_callback_receipt_sha256(
+    runtime_root: Path,
+    *,
+    expected_callback_id: str = "",
+    expected_payload_sha256: str = "",
+) -> str:
     """Return receipt evidence only for the currently bound callback target."""
 
     values: list[tuple[dict[str, Any], bytes]] = []
@@ -253,12 +258,19 @@ def _current_callback_receipt_sha256(runtime_root: Path) -> str:
         or receipt.get("status") not in {"accepted", "duplicate"}
     ):
         return ""
-    if receipt.get("status") == "duplicate" and (
+    if (
         receipt.get("run_id") != target.get("run_id")
-        or not isinstance(receipt.get("callback_id"), str)
-        or not receipt.get("callback_id")
+        or IDENTIFIER.fullmatch(str(receipt.get("callback_id") or "")) is None
         or not re.fullmatch(
             r"[0-9a-f]{64}", str(receipt.get("payload_sha256") or "")
+        )
+        or (
+            expected_callback_id
+            and receipt.get("callback_id") != expected_callback_id
+        )
+        or (
+            expected_payload_sha256
+            and receipt.get("payload_sha256") != expected_payload_sha256
         )
     ):
         return ""

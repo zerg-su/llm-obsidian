@@ -102,8 +102,66 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.evidence == "provider-activity"
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("prepared", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [("paste-reserved", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
 print("OK   paste visibility precedes first Enter and activity acknowledges")
+
+crash_port = FakePort(["› previous editor"])
+reserved: dict[str, str] = {}
+
+
+def crash_after_paste(
+    stage: str,
+    _count: int,
+    pre_send_screen_sha256: str,
+    pre_send_editor_sha256: str,
+    _paste_screen_sha256: str,
+) -> None:
+    reserved["stage"] = stage
+    reserved["screen"] = pre_send_screen_sha256
+    reserved["editor"] = pre_send_editor_sha256
+    if stage == "transport-accepted":
+        raise RuntimeError("kill point after prompt transport")
+
+
+try:
+    deliver_continuation(
+        crash_port,
+        surface_id=SURFACE,
+        prompt=PROMPT,
+        runtime="codex",
+        artifact_ready=lambda: False,
+        ownership_ready=lambda: True,
+        reserve_retry=lambda: False,
+        observe_stage=crash_after_paste,
+        wait=lambda _seconds: None,
+    )
+except RuntimeError as exc:
+    assert str(exc) == "kill point after prompt transport"
+else:
+    raise AssertionError("kill point did not interrupt continuation")
+assert crash_port.sent == [PROMPT] and reserved["stage"] == "transport-accepted"
+crash_port.screens = [
+    "› # Harness-owned review verification",
+    "• Working (recovered turn)",
+]
+replayed = deliver_continuation(
+    crash_port,
+    surface_id=SURFACE,
+    prompt=PROMPT,
+    runtime="codex",
+    artifact_ready=lambda: False,
+    ownership_ready=lambda: True,
+    reserve_retry=lambda: False,
+    observe_stage=lambda *_args: None,
+    send_prompt=False,
+    pre_send_screen_sha256=reserved["screen"],
+    pre_send_editor_sha256=reserved["editor"],
+    observation_limit=2,
+    wait=lambda _seconds: None,
+)
+assert replayed.acknowledged and replayed.evidence == "provider-activity"
+assert crash_port.sent == [PROMPT] and crash_port.keys == ["Enter"]
+print("OK   crash after prompt transport replays without a second paste")
 
 result, port, retries, _stages = run_case(
     [
@@ -179,7 +237,7 @@ result, port, retries, stages = run_case(
 )
 assert result.acknowledged and result.submit_count == 1
 assert port.sent == [PROMPT] and port.keys == ["Enter"] and not retries
-assert stages == [("prepared", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
+assert stages == [("paste-reserved", 0), ("transport-accepted", 0), ("submit-accepted", 1)]
 print("OK   stale pre-Enter activity cannot acknowledge the new continuation")
 
 result, port, retries, _stages = run_case(

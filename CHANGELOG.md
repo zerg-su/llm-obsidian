@@ -49,6 +49,9 @@ packages were published for them.
 - Prevented silent pipeline stalls after completed reviewer output, accepted
   callback races, callback-rearm crashes, and retained prompt text that was not
   actually submitted.
+- Bound both accepted and duplicate callback receipts to the exact broker
+  callback and payload identity, and made continuation paste replay
+  write-ahead/fail-closed so a crash cannot paste the same prompt twice.
 - Prevented plan review from silently defaulting to implementation review or
   reusing a retained lane after protected plan-contract drift.
 - Prevented newer coordinator decisions from overwriting older escalation and

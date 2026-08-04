@@ -147,7 +147,7 @@ def deliver_continuation(
         pre_send_digest = _screen_digest(pre_send_screen)
         pre_send_editor_digest = _editor_digest(runtime, pre_send_screen)
         observe_stage(
-            "prepared", 0, pre_send_digest, pre_send_editor_digest, ""
+            "paste-reserved", 0, pre_send_digest, pre_send_editor_digest, ""
         )
         port.send(surface_id, prompt)
         observe_stage(

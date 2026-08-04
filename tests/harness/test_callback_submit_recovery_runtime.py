@@ -39,7 +39,10 @@ from harness.liveness import (  # noqa: E402
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
-from harness.runtime_callback_io import _callback_target  # noqa: E402
+from harness.runtime_callback_io import (  # noqa: E402
+    _callback_target,
+    _current_callback_receipt_sha256,
+)
 from harness.runtime_worker_liveness import RuntimeWorkerLivenessMixin  # noqa: E402
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
@@ -54,6 +57,56 @@ def check(label: str, value: bool, detail: object = "") -> None:
     if not value:
         raise AssertionError(f"{label}: {detail}")
     print(f"OK   {label}")
+
+
+with tempfile.TemporaryDirectory(prefix="accepted-receipt-identity.") as raw:
+    runtime_root = Path(raw)
+    target = {
+        "schema_version": 1,
+        "generation": 7,
+        "operation_id": "round-7",
+        "run_id": "expected-run",
+    }
+    receipt = {
+        **target,
+        "callback_id": "review-accepted-receipt",
+        "payload_sha256": "a" * 64,
+        "status": "accepted",
+    }
+    (runtime_root / "callback-target.json").write_text(
+        json.dumps(target), encoding="utf-8"
+    )
+    receipt_path = runtime_root / "callback-receipt.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    check(
+        "accepted receipt binds the complete current callback identity",
+        bool(
+            _current_callback_receipt_sha256(
+                runtime_root,
+                expected_callback_id=receipt["callback_id"],
+                expected_payload_sha256=receipt["payload_sha256"],
+            )
+        ),
+    )
+    check(
+        "accepted receipt rejects a different valid broker callback identity",
+        not _current_callback_receipt_sha256(
+            runtime_root,
+            expected_callback_id="review-other-valid-callback",
+            expected_payload_sha256=receipt["payload_sha256"],
+        ),
+    )
+    for field, invalid in (
+        ("run_id", "wrong-run"),
+        ("callback_id", "not valid whitespace"),
+        ("payload_sha256", "not-a-digest"),
+    ):
+        malformed = {**receipt, field: invalid}
+        receipt_path.write_text(json.dumps(malformed), encoding="utf-8")
+        check(
+            f"accepted receipt rejects malformed {field}",
+            not _current_callback_receipt_sha256(runtime_root),
+        )
 
 
 fixture = json.loads(

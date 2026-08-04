@@ -92,7 +92,34 @@ class RuntimeWorkerLivenessMixin:
         except RuntimeWorkerError:
             self.callback_submit_attention("callback-submit-evidence-malformed")
             return
-        if _current_callback_receipt_sha256(self.spec_path.parent):
+        receipt_sha256 = _current_callback_receipt_sha256(
+            self.spec_path.parent
+        )
+        if receipt_sha256:
+            try:
+                accepted_child = self.store.read(
+                    self.spec["owner_id"], operation_id
+                )
+            except StoreError:
+                accepted_child = None
+            if (
+                accepted_child is not None
+                and accepted_child.run_id == run_id
+                and accepted_child.lane_id == record.lane_id
+                and accepted_child.accepted_callback_kind == "review"
+                and bool(accepted_child.accepted_callback_id)
+                and bool(accepted_child.accepted_callback_sha256)
+                and _current_callback_receipt_sha256(
+                    self.spec_path.parent,
+                    expected_callback_id=accepted_child.accepted_callback_id,
+                    expected_payload_sha256=(
+                        accepted_child.accepted_callback_sha256
+                    ),
+                )
+                == receipt_sha256
+            ):
+                return
+            self.callback_submit_attention("callback-submit-stale-generation")
             return
         child = self._expected_callback_child(record, operation_id, run_id)
         if child is None:

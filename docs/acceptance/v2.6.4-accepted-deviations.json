@@ -10,6 +10,33 @@
       "path": "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
       "authority": "explicit-user-request",
       "constraint": "No 2.7 scheduler, orchestration runtime, public DSL, model routing, or review topology change is included in 2.6.4."
+    },
+    {
+      "id": "D-264-31",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "completed-v2.6.3-vault-history",
+      "paths": [
+        "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md",
+        "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md",
+        "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
+        "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md",
+        "wiki/meta/reviews/Cross-model review — 55ae92aa-33f1-411d-b2c4-a3f88441bb18 — 3b5a88d6a4a6.md",
+        "wiki/meta/reviews/Cross-model review — 6c5f69c7-7ef4-4926-bc88-80b50d4abd34 — fa1d3401c7a0.md",
+        "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md",
+        "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md"
+      ],
+      "derived_paths": [
+        "wiki/decisions/_index.md",
+        "wiki/meta/_index.md",
+        "wiki/plans/_index.md",
+        "wiki/repos/_index.md",
+        "wiki/index.md",
+        "wiki/log.md",
+        "wiki/hot.md"
+      ],
+      "authority": "completed-prerequisite-release-history",
+      "constraint": "These are durable history and bookkeeping from the already completed 2.6.3 documentation release; they add no 2.6.4 runtime, pipeline, routing, or public-interface behavior."
     }
   ]
 }

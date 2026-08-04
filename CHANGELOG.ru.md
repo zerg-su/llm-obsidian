@@ -52,6 +52,9 @@
 
 - Устранены молчаливые остановки после готового reviewer output, callback races,
   сбоев callback rearm и случая, когда prompt остался в editor и не был запущен.
+- Accepted и duplicate callback receipts теперь связаны с точной broker
+  callback/payload identity; continuation paste использует write-ahead
+  fail-closed replay, поэтому crash не вставит один prompt повторно.
 - Plan review больше не запускается как implementation по умолчанию и не
   переиспользует старую lane после изменения защищённого контракта плана.
 - Новые coordinator decisions больше не перезаписывают старые escalation и

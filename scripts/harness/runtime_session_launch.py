@@ -576,12 +576,17 @@ class RuntimeSessionLaunchMixin:
             if receipt is None:
                 self._write_json(
                     receipt_path,
-                    {**receipt_identity, "status": "prepared", "submit_count": 0},
+                    {
+                        **receipt_identity,
+                        "status": "paste-reserved",
+                        "submit_count": 0,
+                    },
                 )
             send_prompt = not effect_succeeded and not (
                 receipt
                 and receipt.get("status")
                 in {
+                    "paste-reserved",
                     "transport-accepted",
                     "submit-accepted",
                     "submit-retried",
