@@ -146,7 +146,11 @@ def write_json(path: Path, value: dict[str, object]) -> None:
     )
 
 
-def build_fixture(base: Path) -> RecoveryFixture:
+def build_fixture(
+    base: Path,
+    *,
+    gate_status: str = "attention-required",
+) -> RecoveryFixture:
     vault = base / "vault"
     product = base / "product"
     plan = vault / "wiki/plans/approved.md"
@@ -286,7 +290,19 @@ def build_fixture(base: Path) -> RecoveryFixture:
     )
     lane = run.execution.lanes[0]
     round_ = run.rounds[lane.axis]
-    gate._replace(status="attention-required", final_results={})
+    state_updates: dict[str, object] = {
+        "status": gate_status,
+        "final_results": {},
+    }
+    if gate_status == "awaiting-resolution":
+        state_updates["resolution_evidence"] = {
+            "openai-holistic:0": "persisted-resolution.json"
+        }
+        write_json(
+            gate.root / "persisted-resolution.json",
+            {"evidence": "historical-resolution"},
+        )
+    gate._replace(**state_updates)
     attention = {
         "id": "mechanism-recovery-1",
         "status": "resolved",
@@ -445,6 +461,57 @@ with tempfile.TemporaryDirectory(prefix="mechanism-recovery-unit.") as raw:
     )
     check(
         "exact mechanism recovery replay does not launch another provider",
+        replay["status"] == "reviewing"
+        and replay["lanes"] == recovered["lanes"]
+        and len(fixture.runtime.started) == started_before + 1,
+    )
+
+
+with tempfile.TemporaryDirectory(
+    prefix="mechanism-recovery-awaiting-resolution."
+) as raw:
+    fixture = build_fixture(
+        Path(raw), gate_status="awaiting-resolution"
+    )
+    state_before = fixture.gate.read()
+    started_before = len(fixture.runtime.started)
+    expect_error(
+        "awaiting-resolution recovery rejects live retained ownership",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product, runtime_manager=fixture.runtime
+        ),
+        "still has live review ownership",
+    )
+    check(
+        "rejected awaiting-resolution recovery has zero state/provider effect",
+        fixture.gate.read() == state_before
+        and len(fixture.runtime.started) == started_before,
+    )
+
+    for operation_id in (fixture.parent_id, fixture.child_id):
+        terminalize(fixture.store, fixture.task_id, operation_id)
+
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    recovered_state = fixture.gate.read()
+    persisted_resolution = fixture.gate.root / "persisted-resolution.json"
+    check(
+        "quiescent awaiting-resolution enters one fresh review boundary",
+        recovered["status"] == "reviewing"
+        and len(fixture.runtime.started) == started_before + 1
+        and recovered_state["status"] == "reviewing"
+        and recovered_state["fresh_reevaluation_used"] is True
+        and recovered_state["policy"]["max_verify_iterations"] == 0
+        and json.loads(persisted_resolution.read_text(encoding="utf-8"))
+        == {"evidence": "historical-resolution"},
+    )
+
+    replay = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "awaiting-resolution recovery replay does not duplicate provider",
         replay["status"] == "reviewing"
         and replay["lanes"] == recovered["lanes"]
         and len(fixture.runtime.started) == started_before + 1,

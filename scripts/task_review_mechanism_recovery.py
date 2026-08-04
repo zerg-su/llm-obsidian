@@ -247,7 +247,12 @@ def recover_task_review_for_mechanism(
         )
     if (
         state.get("status")
-        not in {"verifying", "attention-required", "fresh-boundary-authorized"}
+        not in {
+            "verifying",
+            "awaiting-resolution",
+            "attention-required",
+            "fresh-boundary-authorized",
+        }
         or state.get("fresh_reevaluation_used") is True
         or state.get("final_results") not in ({}, None)
         or not run.execution.lanes
@@ -313,7 +318,7 @@ def recover_task_review_for_mechanism(
             )
     else:
         _atomic_json(authorization_path, authorization)
-    if state.get("status") == "verifying":
+    if state.get("status") in {"verifying", "awaiting-resolution"}:
         gate._mark_attention(run.execution.lanes)
     if gate.read().get("status") != "fresh-boundary-authorized":
         gate.authorize_fresh_boundary(
