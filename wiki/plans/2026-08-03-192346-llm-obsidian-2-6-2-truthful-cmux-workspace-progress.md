@@ -9,7 +9,7 @@ sessions:
 source_cwd: "/Users/zak/Projects/worktrees/llm-obsidian-2-6-2-status"
 status: pending
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-08-04
 tags:
   - plan
   - manual-save
@@ -54,11 +54,11 @@ tags:
     },
     {
       "evidence_id": "anthropic-reviewer-usage-visible",
-      "observable": "Каждый sandboxed Anthropic reviewer через стандартный Claude statusLine показывает model, effort, context usage, 5H и 7D limits; renderer code-owned и content-free, user settings/hooks/MCP остаются отключёнными, а подмена statusLine отклоняется fail-closed."
+      "observable": "Каждый sandboxed Anthropic reviewer через стандартный Claude statusLine показывает model, effort, context usage, 5H и 7D limits; поддерживаемый --bare профиль отключает ambient instructions/extensions, renderer code-owned и content-free, user settings/hooks/MCP остаются отключёнными, а подмена statusLine отклоняется fail-closed."
     },
     {
       "evidence_id": "release-ready",
-      "observable": "Focused tests, полный make test, acceptance-check, vault/adapters/snapshot/release gates, bounded active-to-idle live cmux smoke и независимый Deep review зелёные на одном exact release HEAD."
+      "observable": "Focused tests, полный make test, acceptance-check, vault/adapters/snapshot/release gates, bounded active-to-idle live cmux smoke и один явно выбранный пользователем независимый обычный Opus review зелёные на одном exact release HEAD."
     },
     {
       "evidence_id": "ordinary-provider-launch",
@@ -109,7 +109,12 @@ tags:
 6. Удалить terminal-owner fallback, который сохраняет 100% bar после окончания. Последняя terminal transition обязана очистить progress.
 7. На coordinator SessionStart/resume/clear/compact выполнить silent best-effort refresh. Task worktree SessionStart не получает coordinator status authority.
 8. Сохранить content-free compact label и документировать его как harness-step status. UI не должен читать prompts, paths, model output или user content.
-9. Для sandboxed Anthropic reviewer явно скомпилировать стандартный Claude `statusLine` с code-owned renderer model/effort/context/5H/7D. Не наследовать user setting sources, hooks, MCP или произвольную statusLine command.
+9. Для sandboxed Anthropic reviewer явно скомпилировать стандартный Claude `statusLine` с code-owned renderer model/effort/context/5H/7D. Использовать поддерживаемый `--bare` профиль; не наследовать user/project instructions, setting sources, hooks, skills, plugins, memory, MCP или произвольную statusLine command.
+
+## Одобренные уточнения 2026-08-04
+
+- Пользователь явно одобрил reviewer-local Claude model/effort/context/5H/7D statusLine как UI самой reviewer-сессии, а не как rate-limit metadata в cmux workspace progress.
+- Для этого bounded patch после полного deterministic gate пользователь явно выбрал один обычный независимый Opus review вместо Deep topology; это не меняет глобальные Simple/Deep/Full review semantics.
 
 ## TDD slices
 
@@ -155,7 +160,7 @@ tags:
 
 ## Verification and review
 
-Run fast tests first, then `make test`, `make acceptance-check`, `python3 scripts/validate-vault.py --summary`, `python3 scripts/codex-adapter.py --check`, `scripts/mcp-gateway/mcp-gateway.sh codex-sync --check`, `references/upstream-skills/verify_snapshots.py`, and `git diff --check` on one exact HEAD. Perform one bounded visible cmux smoke that demonstrates `active → awaiting/attention as applicable → terminal idle clear` without fabricating lifecycle records. Review with Deep default; if one provider is unavailable, use the existing explicit single-model Deep topology rather than weakening or blocking the pipeline. Apply material findings, rerun affected deterministic gates, then review the exact release HEAD.
+Run fast tests first, then `make test`, `make acceptance-check`, `python3 scripts/validate-vault.py --summary`, `python3 scripts/codex-adapter.py --check`, `scripts/mcp-gateway/mcp-gateway.sh codex-sync --check`, `references/upstream-skills/verify_snapshots.py`, and `git diff --check` on one exact HEAD. Perform one bounded visible cmux smoke that demonstrates `active → awaiting/attention as applicable → terminal idle clear` without fabricating lifecycle records. For this bounded patch, run the explicitly user-selected ordinary independent Opus review after the full deterministic gate. Apply material findings, rerun affected deterministic gates, then review the exact release HEAD; the exception is local to 2.6.2 and does not change default Deep or Full topology.
 
 ## Rollback and boundaries
 
