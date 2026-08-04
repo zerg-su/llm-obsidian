@@ -82,11 +82,13 @@ def run(
     args: list[str],
     *,
     timeout: float = 30.0,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         args,
         cwd=ROOT,
         text=True,
+        input=input_text,
         capture_output=True,
         timeout=timeout,
         check=False,
@@ -100,9 +102,10 @@ def run_bounded(
     *,
     timeout: float,
     retry_hint: str,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return run(args, timeout=timeout)
+        return run(args, timeout=timeout, input_text=input_text)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
             f"{phase} timed out after {timeout_label(timeout)}; retry: {retry_hint}; "
@@ -349,7 +352,145 @@ def timed(timings: dict[str, float], name: str, fn):
     try:
         return fn()
     finally:
-        timings[name] = time.monotonic() - started
+        timings[name] = timings.get(name, 0.0) + time.monotonic() - started
+
+
+def refresh_derived(
+    timings: dict[str, float], required_timeout: float
+) -> tuple[str, str]:
+    """Rebuild required derived state in the documented order."""
+    sparse_before = sparse_fingerprint()
+    reindex = ROOT / "scripts" / "reindex.py"
+    if reindex.is_file():
+        timed(
+            timings,
+            "reindex",
+            lambda: run_required(
+                "reindex",
+                [sys.executable, str(reindex), "--quiet", "--folder-indexes"],
+                timeout=required_timeout,
+                retry_hint="python3 scripts/reindex.py --quiet --folder-indexes",
+            ),
+        )
+
+    bm25 = ROOT / "scripts" / "bm25-index.py"
+    if bm25.is_file():
+        timed(
+            timings,
+            "bm25",
+            lambda: run_required(
+                "BM25 ensure",
+                [sys.executable, str(bm25), "ensure", "--quiet"],
+                timeout=required_timeout,
+                retry_hint="python3 scripts/bm25-index.py ensure --quiet",
+            ),
+        )
+
+    retriever = ROOT / "scripts" / "retrieve.py"
+    if retriever.is_file():
+        timed(
+            timings,
+            "sparse",
+            lambda: run_required(
+                "sparse ensure",
+                [sys.executable, str(retriever), "ensure", "--quiet"],
+                timeout=required_timeout,
+                retry_hint="python3 scripts/retrieve.py ensure --quiet",
+            ),
+        )
+    return sparse_before, sparse_fingerprint()
+
+
+def repairable_validation_failure(validation: subprocess.CompletedProcess[str]) -> bool:
+    lines = [
+        line
+        for line in validation.stdout.splitlines()
+        if line.startswith("VAULT_LINT_FAIL:")
+    ]
+    return bool(lines) and all(
+        line.startswith("VAULT_LINT_FAIL: schema/wikilink:") for line in lines
+    )
+
+
+def attempt_wikilink_repair(
+    validation: subprocess.CompletedProcess[str],
+    *,
+    required_timeout: float,
+    timings: dict[str, float],
+) -> bool:
+    """Submit at most one planner result to vault-write; never retry conflicts."""
+    planner = ROOT / "scripts" / "vault_link_repair.py"
+    writer = ROOT / "scripts" / "vault-write.py"
+    if (
+        not repairable_validation_failure(validation)
+        or not planner.is_file()
+        or not writer.is_file()
+    ):
+        return False
+    planned = timed(
+        timings,
+        "repair_plan",
+        lambda: run_required(
+            "wikilink repair planning",
+            [sys.executable, str(planner)],
+            timeout=required_timeout,
+            retry_hint="python3 scripts/vault_link_repair.py",
+        ),
+    )
+    try:
+        value = json.loads(planned.stdout)
+        status = value.get("status")
+        repair_id = str(value.get("repair_id") or "")
+        paths = value.get("paths")
+        link_count = int(value.get("link_count") or 0)
+        payload = value.get("payload")
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        raise RuntimeError("wikilink repair planner returned malformed JSON")
+    if status == "noop":
+        return False
+    if (
+        status != "planned"
+        or not repair_id.startswith("wikilink-")
+        or not isinstance(paths, list)
+        or not paths
+        or len(paths) > 20
+        or any(
+            not isinstance(path, str) or not path.startswith("wiki/")
+            for path in paths
+        )
+        or link_count < 1
+        or not isinstance(payload, dict)
+    ):
+        raise RuntimeError("wikilink repair planner returned an invalid plan")
+    applied = timed(
+        timings,
+        "repair_write",
+        lambda: run_bounded(
+            "wikilink repair write",
+            [sys.executable, str(writer), "--output", "json"],
+            timeout=required_timeout,
+            retry_hint="rerun Stop after resolving the reported vault conflict",
+            input_text=json.dumps(payload, ensure_ascii=False),
+        ),
+    )
+    if applied.returncode:
+        emit("WIKILINK_REPAIR_SKIPPED: optimistic writer rejected the one-shot plan.")
+        return False
+    visible = ", ".join(paths[:3])
+    if len(paths) > 3:
+        visible += f" +{len(paths) - 3}"
+    emit(f"WIKILINK_REPAIRED: {link_count} link(s) in {visible}.")
+    from pipeline_events import emit_event
+
+    emit_event(
+        "wikilink-repair",
+        actor="stop-hook",
+        paths=paths,
+        counts={"links": link_count, "pages": len(paths)},
+        identifiers={"repair_id": repair_id},
+        root=ROOT,
+    )
+    return True
 
 
 def main() -> int:
@@ -395,46 +536,7 @@ def main() -> int:
                     emit(recovered.stderr.strip())
 
             dirty = wiki_dirty()
-            sparse_before = sparse_fingerprint()
-            reindex = ROOT / "scripts" / "reindex.py"
-            if reindex.is_file():
-                timed(
-                    timings,
-                    "reindex",
-                    lambda: run_required(
-                        "reindex",
-                        [sys.executable, str(reindex), "--quiet", "--folder-indexes"],
-                        timeout=required_timeout,
-                        retry_hint="python3 scripts/reindex.py --quiet --folder-indexes",
-                    ),
-                )
-
-            bm25 = ROOT / "scripts" / "bm25-index.py"
-            if bm25.is_file():
-                timed(
-                    timings,
-                    "bm25",
-                    lambda: run_required(
-                        "BM25 ensure",
-                        [sys.executable, str(bm25), "ensure", "--quiet"],
-                        timeout=required_timeout,
-                        retry_hint="python3 scripts/bm25-index.py ensure --quiet",
-                    ),
-                )
-
-            retriever = ROOT / "scripts" / "retrieve.py"
-            if retriever.is_file():
-                timed(
-                    timings,
-                    "sparse",
-                    lambda: run_required(
-                        "sparse ensure",
-                        [sys.executable, str(retriever), "ensure", "--quiet"],
-                        timeout=required_timeout,
-                        retry_hint="python3 scripts/retrieve.py ensure --quiet",
-                    ),
-                )
-            sparse_after = sparse_fingerprint()
+            sparse_before, sparse_after = refresh_derived(timings, required_timeout)
             corpus_changed = dirty or bool(
                 sparse_before and sparse_after and sparse_before != sparse_after
             )
@@ -488,6 +590,27 @@ def main() -> int:
                         retry_hint="python3 scripts/validate-vault.py --summary",
                     ),
                 )
+                if validation.returncode and attempt_wikilink_repair(
+                    validation,
+                    required_timeout=required_timeout,
+                    timings=timings,
+                ):
+                    repair_sparse_before, repair_sparse_after = refresh_derived(
+                        timings, required_timeout
+                    )
+                    if repair_sparse_before != repair_sparse_after:
+                        mark_retrieval_quality_pending()
+                    dense_needed = dense_refresh_due()
+                    validation = timed(
+                        timings,
+                        "validate",
+                        lambda: run_bounded(
+                            "vault validation",
+                            [sys.executable, str(validator), "--summary"],
+                            timeout=required_timeout,
+                            retry_hint="python3 scripts/validate-vault.py --summary",
+                        ),
+                    )
                 if validation.returncode:
                     blocked = True
                     detail = (validation.stdout or validation.stderr).strip()

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import date
 from io import StringIO
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 ADDRESS_RX = re.compile(r"^c-(\d{6})$")
@@ -29,7 +29,8 @@ KEY_RX = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]*(.*))$")
 NESTED_KEY_RX = re.compile(r"^ {4}([A-Za-z_][\w-]*):(?:[ \t]*(.*))$")
 LIST_DICT_RX = re.compile(r"^  - ([A-Za-z_][\w-]*):(?:[ \t]*(.*))$")
 LIST_ITEM_RX = re.compile(r"^  -(?:[ \t]+(.*))?$")
-WIKILINK_RX = re.compile(r"(?<!!)\[\[([^\]\n]+)\]\]|!\[\[([^\]\n]+)\]\]")
+WIKILINK_RX = re.compile(r"(?P<embed>!)?\[\[(?P<inner>[^\]\n]+)\]\]")
+BACKTICK_RUN_RX = re.compile(r"`+")
 
 REQUIRED_KEYS = ("type", "status", "created", "updated", "tags", "sessions")
 ADDRESS_CUTOFF = date(2026, 4, 23)
@@ -46,6 +47,48 @@ class SchemaIssue:
     level: str
     code: str
     message: str
+
+
+@dataclass(frozen=True)
+class WikiLink:
+    """One prose wikilink token, retaining its exact display/anchor suffix."""
+
+    text: str
+    target: str
+    suffix: str
+    embed: bool
+
+    def with_target(self, target: str) -> str:
+        prefix = "!" if self.embed else ""
+        return f"{prefix}[[{target}{self.suffix}]]"
+
+
+@dataclass(frozen=True)
+class WikiRewrite:
+    text: str
+    links: tuple[WikiLink, ...]
+    malformed: bool
+
+
+@dataclass(frozen=True)
+class WikiCatalog:
+    """Read-only link resolution and exact repair-candidate indexes."""
+
+    exact: frozenset[str]
+    by_stem: dict[str, tuple[str, ...]]
+    aliases: frozenset[str]
+    repair_names: dict[str, tuple[str, ...]]
+
+    def resolves(self, target: str) -> bool:
+        normalized = _normal_target(target)
+        return (
+            normalized in self.exact
+            or Path(normalized).name in self.by_stem
+            or normalized in self.aliases
+        )
+
+    def repair_targets(self, target: str) -> tuple[str, ...]:
+        return self.repair_names.get(_normal_target(target), ())
 
 
 def split_frontmatter(text: str) -> str | None:
@@ -195,18 +238,135 @@ def extract_related(frontmatter: dict[str, Any]) -> list[str]:
     return [item for item in _as_list(frontmatter.get("related")) if isinstance(item, str)]
 
 
-def _strip_code(text: str) -> str:
-    text = re.sub(r"^```.*?^```[ \t]*$", "", text, flags=re.M | re.S)
-    text = re.sub(r"^~~~.*?^~~~[ \t]*$", "", text, flags=re.M | re.S)
-    return re.sub(r"`[^`\n]*`", "", text)
+def _fence_transition(
+    line: str, fence: tuple[str, int] | None
+) -> tuple[bool, tuple[str, int] | None]:
+    stripped = line.lstrip()
+    match = re.match(r"^(`{3,}|~{3,})", stripped)
+    marker = match.group(1) if match else ""
+    remainder = stripped[len(marker) :] if marker else ""
+    if fence is not None:
+        closed = (
+            marker.startswith(fence[0])
+            and len(marker) >= fence[1]
+            and not remainder.strip()
+        )
+        return True, None if closed else fence
+    if marker and not (marker[0] == "`" and "`" in remainder):
+        return True, (marker[0], len(marker))
+    return False, None
+
+
+def _prose_without_fences(text: str) -> str:
+    rendered: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines(keepends=True):
+        is_code, fence = _fence_transition(line, fence)
+        if not is_code:
+            rendered.append(line)
+    return "".join(rendered)
+
+
+def _split_link_inner(inner: str) -> tuple[str, str]:
+    separators = [
+        index
+        for token in ("#", "|", r"\|")
+        if (index := inner.find(token)) >= 0
+    ]
+    if not separators:
+        return inner.strip(), ""
+    boundary = min(separators)
+    return inner[:boundary].strip(), inner[boundary:]
+
+
+def _rewrite_code_spans(text: str, rewrite_prose: Callable[[str], str]) -> str:
+    """Preserve matching Markdown backtick runs and rewrite only prose."""
+
+    rendered: list[str] = []
+    cursor = 0
+    while opener := BACKTICK_RUN_RX.search(text, cursor):
+        width = len(opener.group(0))
+        close = next(
+            (
+                candidate
+                for candidate in BACKTICK_RUN_RX.finditer(text, opener.end())
+                if len(candidate.group(0)) == width
+            ),
+            None,
+        )
+        if close is None:
+            rendered.append(rewrite_prose(text[cursor : opener.end()]))
+            cursor = opener.end()
+            continue
+        rendered.append(rewrite_prose(text[cursor : opener.start()]))
+        rendered.append(text[opener.start() : close.end()])
+        cursor = close.end()
+    rendered.append(rewrite_prose(text[cursor:]))
+    return "".join(rendered)
+
+
+def rewrite_wikilinks(
+    text: str, rewriter: Callable[[WikiLink], str | None]
+) -> WikiRewrite:
+    """Rewrite prose wikilinks while leaving fenced and inline code untouched.
+
+    The callback returns replacement text or ``None`` to preserve the token.
+    Malformed prose delimiters are reported without attempting recovery.
+    """
+
+    links: list[WikiLink] = []
+    malformed = False
+
+    def rewrite_segment(segment: str) -> str:
+        nonlocal malformed
+        rendered: list[str] = []
+        cursor = 0
+        for match in WIKILINK_RX.finditer(segment):
+            gap = segment[cursor : match.start()]
+            malformed = malformed or "[[" in gap or "]]" in gap
+            rendered.append(gap)
+            inner = match.group("inner")
+            target, suffix = _split_link_inner(inner)
+            link = WikiLink(
+                text=match.group(0),
+                target=target.replace(r"\|", "|").strip(),
+                suffix=suffix,
+                embed=bool(match.group("embed")),
+            )
+            links.append(link)
+            replacement = rewriter(link)
+            rendered.append(link.text if replacement is None else replacement)
+            cursor = match.end()
+        tail = segment[cursor:]
+        malformed = malformed or "[[" in tail or "]]" in tail
+        rendered.append(tail)
+        return "".join(rendered)
+
+    rendered: list[str] = []
+    prose: list[str] = []
+    fence: tuple[str, int] | None = None
+
+    def flush_prose() -> None:
+        if prose:
+            rendered.append(_rewrite_code_spans("".join(prose), rewrite_segment))
+            prose.clear()
+
+    for line in text.splitlines(keepends=True):
+        is_code, fence = _fence_transition(line, fence)
+        if is_code:
+            flush_prose()
+            rendered.append(line)
+            continue
+        prose.append(line)
+    flush_prose()
+    return WikiRewrite("".join(rendered), tuple(links), malformed)
 
 
 def iter_wikilinks(text: str) -> Iterable[str]:
-    for match in WIKILINK_RX.finditer(_strip_code(text)):
-        raw = (match.group(1) or match.group(2) or "").replace(r"\|", "|")
-        target = raw.split("|", 1)[0].split("#", 1)[0].strip()
-        if target:
-            yield target
+    rewritten = rewrite_wikilinks(text, lambda _link: None)
+    for link in rewritten.links:
+        if link.target:
+            yield link.target
 
 
 def _normal_target(value: str) -> str:
@@ -219,10 +379,11 @@ def _normal_target(value: str) -> str:
     return value.strip("/").casefold()
 
 
-def _catalog(wiki: Path) -> tuple[set[str], dict[str, list[str]], set[str]]:
+def build_wiki_catalog(wiki: Path) -> WikiCatalog:
     exact: set[str] = set()
     by_stem: dict[str, list[str]] = {}
     aliases: set[str] = set()
+    repair_names: dict[str, list[str]] = {}
     for path in sorted(wiki.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in CONTENT_EXTENSIONS:
             continue
@@ -231,7 +392,8 @@ def _catalog(wiki: Path) -> tuple[set[str], dict[str, list[str]], set[str]]:
         exact.add(_normal_target(without_suffix))
         by_stem.setdefault(rel.stem.casefold(), []).append(str(rel))
         if path.suffix.lower() == ".md":
-            block = split_frontmatter(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            block = split_frontmatter(text)
             if block is None:
                 continue
             try:
@@ -241,17 +403,38 @@ def _catalog(wiki: Path) -> tuple[set[str], dict[str, list[str]], set[str]]:
             for alias in _as_list(fm.get("aliases")):
                 if isinstance(alias, str) and alias.strip():
                     aliases.add(alias.strip().casefold())
-    return exact, by_stem, aliases
+            names = [fm.get("title")]
+            document = split_document(text)
+            if document is not None:
+                heading = re.search(
+                    r"^#\s+(.+?)\s*#*\s*$",
+                    _prose_without_fences(document[1]),
+                    flags=re.M,
+                )
+                if heading is not None:
+                    names.append(heading.group(1))
+            for name in names:
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                key = _normal_target(name)
+                canonical = rel.stem
+                values = repair_names.setdefault(key, [])
+                if canonical not in values:
+                    values.append(canonical)
+    return WikiCatalog(
+        exact=frozenset(exact),
+        by_stem={key: tuple(values) for key, values in by_stem.items()},
+        aliases=frozenset(aliases),
+        repair_names={key: tuple(values) for key, values in repair_names.items()},
+    )
 
 
 def unresolved_wikilinks(wiki: Path, text: str) -> list[str]:
     """Return unresolved targets in prospective text without mutating the vault."""
-    exact, by_stem, aliases = _catalog(wiki)
+    catalog = build_wiki_catalog(wiki)
     missing: list[str] = []
     for target in iter_wikilinks(text):
-        normalized = _normal_target(target)
-        stem = Path(normalized).name
-        if normalized in exact or stem in by_stem or normalized in aliases:
+        if catalog.resolves(target):
             continue
         if target not in missing:
             missing.append(target)
@@ -265,41 +448,20 @@ def neutralize_unresolved_wikilinks(wiki: Path, text: str) -> tuple[str, list[st
     byte-for-byte intact.  The returned list is the de-duplicated set of targets
     that were neutralized.
     """
-    exact, by_stem, aliases = _catalog(wiki)
+    catalog = build_wiki_catalog(wiki)
     missing: list[str] = []
 
-    def replace(segment: str) -> str:
-        def repl(match: re.Match[str]) -> str:
-            raw = (match.group(1) or match.group(2) or "").replace(r"\|", "|")
-            target = raw.split("|", 1)[0].split("#", 1)[0].strip()
-            normalized = _normal_target(target)
-            stem = Path(normalized).name
-            if normalized in exact or stem in by_stem or normalized in aliases:
-                return match.group(0)
-            if target and target not in missing:
-                missing.append(target)
-            display = raw.split("|", 1)[1].strip() if "|" in raw else raw.strip()
-            return display
+    def replace(link: WikiLink) -> str | None:
+        if catalog.resolves(link.target):
+            return None
+        if link.target and link.target not in missing:
+            missing.append(link.target)
+        if link.suffix.startswith(("|", r"\|")):
+            return link.suffix[2 if link.suffix.startswith(r"\|") else 1 :].strip()
+        return f"{link.target}{link.suffix}".strip()
 
-        return WIKILINK_RX.sub(repl, segment)
-
-    rendered: list[str] = []
-    fence: str | None = None
-    for line in text.splitlines(keepends=True):
-        stripped = line.lstrip()
-        marker = stripped[:3] if stripped.startswith(("```", "~~~")) else ""
-        if fence is not None:
-            rendered.append(line)
-            if marker == fence:
-                fence = None
-            continue
-        if marker:
-            fence = marker
-            rendered.append(line)
-            continue
-        parts = re.split(r"(`[^`\n]*`)", line)
-        rendered.extend(part if index % 2 else replace(part) for index, part in enumerate(parts))
-    return "".join(rendered), missing
+    result = rewrite_wikilinks(text, replace)
+    return result.text, missing
 
 
 def validate_schema(repo_root: Path) -> list[SchemaIssue]:
@@ -404,8 +566,8 @@ def validate_schema(repo_root: Path) -> list[SchemaIssue]:
     if not address_map.is_file() or address_map.read_text(encoding="utf-8") != expected_text:
         issues.append(SchemaIssue("fail", "address", ".vault-meta/address-map.tsv is stale; run reindex.py"))
 
-    exact, by_stem, aliases = _catalog(wiki)
-    for stem, paths in sorted(by_stem.items()):
+    catalog = build_wiki_catalog(wiki)
+    for stem, paths in sorted(catalog.by_stem.items()):
         md_paths = [path for path in paths if path.lower().endswith(".md")]
         if stem != "_index" and len(md_paths) > 1:
             issues.append(
@@ -422,10 +584,14 @@ def validate_schema(repo_root: Path) -> list[SchemaIssue]:
             or path.name == "_index.md"
         ):
             continue
-        for target in iter_wikilinks(text):
-            normalized = _normal_target(target)
-            stem = Path(normalized).name
-            if normalized in exact or stem in by_stem or normalized in aliases:
+        rewritten = rewrite_wikilinks(text, lambda _link: None)
+        if rewritten.malformed:
+            issues.append(
+                SchemaIssue("fail", "wikilink", f"{rel}: malformed wikilink syntax")
+            )
+        for link in rewritten.links:
+            target = link.target
+            if catalog.resolves(target):
                 continue
             issues.append(SchemaIssue("fail", "wikilink", f"{rel}: unresolved [[{target}]]"))
     return issues
