@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "type": "capability-decision",
+  "capability": "document-project",
+  "disposition": "not-adopted-per-stop-condition",
+  "installed_skill": false,
+  "baseline_cases": 4,
+  "baseline_failures": 0,
+  "required_failures": 3,
+  "behavioral_improvement_established": false,
+  "registrations_added": false,
+  "description_budget": {
+    "installed_skills": 34,
+    "used_bytes": 7496,
+    "limit_bytes": 7500
+  },
+  "evidence": [
+    "evals/cases/project-documentation.jsonl",
+    "docs/acceptance/v2.6.3-document-project-skill-audit.md",
+    "docs/acceptance/v2.6.3-document-project-skill-pressure.md",
+    "docs/acceptance/v2.6.3-documentation-quality-contracts.md"
+  ],
+  "ruling": "The fresh no-skill control already satisfied all four required behaviors. The candidate added formatting precision but no required behavioral correction, so the approved stop condition removed it and every skill-only registration and budget change."
+}
