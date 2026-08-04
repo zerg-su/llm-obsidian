@@ -134,9 +134,17 @@ def _sha(value: str, field: str) -> str:
 
 def _commit(worktree: Path, value: str, field: str) -> str:
     sha = _sha(value, field)
-    result = _run_git(worktree, ("cat-file", "-e", f"{sha}^{{commit}}"), limit=1_024)
+    result = _run_git(
+        worktree, ("rev-parse", "--verify", f"{sha}^{{commit}}"), limit=1_024
+    )
     if result.returncode:
         raise InspectError(f"{field} is not a local commit", returncode=4)
+    try:
+        canonical = result.stdout.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise InspectError("Git returned an invalid commit id", returncode=3) from exc
+    if canonical != sha:
+        raise InspectError(f"{field} must be the complete commit object id")
     return sha
 
 
@@ -170,7 +178,7 @@ def _emit(result: GitResult) -> int:
 
 
 def _status(worktree: Path, expected: str) -> int:
-    expected = _sha(expected, "--expect-head")
+    expected = _commit(worktree, expected, "--expect-head")
     head_result = _run_git(worktree, ("rev-parse", "HEAD"), limit=128)
     if head_result.returncode:
         return _emit(head_result)

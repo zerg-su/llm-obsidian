@@ -6,11 +6,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from dispatch_contracts import DispatchError, _validated_context
+
 spec = importlib.util.spec_from_file_location("dispatch_resolver", ROOT / "scripts/dispatch-resolver.py")
 assert spec and spec.loader
 resolver = importlib.util.module_from_spec(spec)
@@ -56,6 +60,41 @@ with tempfile.TemporaryDirectory(prefix="dispatch-resolver-test.") as raw:
     check("current-session plan is selected", len(result["plan_candidates"]) == 1)
     check("context is ranked deterministically", result["context_candidates"][0]["title"] == "Dispatch safety")
     check("missing canonical retriever is an explicit sparse degradation", result["context_retrieval"]["degraded"] is True)
+    candidate = dict(result["context_candidates"][0])
+    candidate["title"] = "Human display title, not a filename stem"
+    normalized = _validated_context(
+        {"wiki_context": [candidate]},
+        vault,
+        vault / "wiki/plans/2026-demo.md",
+        None,
+    )
+    check(
+        "resolver candidate round-trips through dispatch by exact context identity",
+        normalized
+        == [
+            {
+                "title": "Human display title, not a filename stem",
+                "summary": candidate["summary"],
+                "context_path": "wiki/decisions/Dispatch safety.md",
+            }
+        ],
+    )
+    tampered = {**candidate, "context_path": "wiki/decisions/Missing.md"}
+    try:
+        _validated_context(
+            {"wiki_context": [tampered]},
+            vault,
+            vault / "wiki/plans/2026-demo.md",
+            None,
+        )
+    except DispatchError:
+        tampered_rejected = True
+    else:
+        tampered_rejected = False
+    check(
+        "display title never rescues a stale exact context identity",
+        tampered_rejected,
+    )
 
     missing_plan = resolver.resolve_request({
         "schema_version": 1, "vault_root": str(vault), "projects_root": str(projects),

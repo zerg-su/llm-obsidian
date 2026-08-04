@@ -78,6 +78,7 @@ def _purpose_boundary_inputs(
     boundary: ReviewBoundaryInput,
     *,
     pointer_root: Path,
+    artifact_root: Path | None = None,
 ) -> tuple[ContextInput, ...]:
     """Validate and materialize every exact artifact named by a purpose boundary."""
 
@@ -92,13 +93,14 @@ def _purpose_boundary_inputs(
     if hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256:
         raise TaskReviewError("review program plan digest is stale")
     inputs = [contract]
+    source_root = (artifact_root or worktree).resolve()
     for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:
         relative = Path(str(getattr(boundary, path_field)))
-        candidate = worktree / relative
+        candidate = source_root / relative
         target = candidate.resolve()
         if (
-            target == worktree
-            or worktree not in target.parents
+            target == source_root
+            or source_root not in target.parents
             or not target.is_file()
             or candidate.is_symlink()
         ):
@@ -134,6 +136,56 @@ def _context(
         policy.get("boundary_input_sha256") or ""
     )
     plan = Path(str(meta["plan_file"])).expanduser().resolve()
+    plan_review = meta.get("plan_review")
+    plan_artifact_root: Path | None = None
+    plan_review_inputs: list[ContextInput] = []
+    packet_metadata = {
+        "task_id": task_id,
+        "task_name": str(meta.get("task_name") or ""),
+        "head_sha": head,
+    }
+    if plan_review is not None:
+        if not isinstance(plan_review, Mapping):
+            raise TaskReviewError("plan review metadata is invalid")
+        base_sha = str(plan_review.get("base_sha") or "")
+        bound_head = str(plan_review.get("head_sha") or "")
+        if (
+            plan_review.get("schema_version") != 1
+            or plan_review.get("artifact_root") != "runtime"
+            or bound_head != head
+            or not base_sha
+        ):
+            raise TaskReviewError("plan review OID binding is stale")
+        inspection = runtime_root / "inputs/plan-review-inspection.json"
+        evidence = _read_json(inspection, "plan review inspection evidence")
+        commands = evidence.get("commands")
+        if (
+            evidence.get("schema_version") != 1
+            or evidence.get("base_sha") != base_sha
+            or evidence.get("head_sha") != head
+            or not isinstance(commands, list)
+            or len(commands) != 4
+            or any(not isinstance(item, str) or not item for item in commands)
+        ):
+            raise TaskReviewError("plan review inspection evidence is stale")
+        plan_artifact_root = runtime_root
+        packet_metadata["base_sha"] = base_sha
+        plan_review_inputs.extend(
+            (
+                ContextInput(
+                    "exact-base.txt",
+                    "git:base",
+                    (base_sha + "\n").encode(),
+                    role="base",
+                ),
+                ContextInput(
+                    "review-inspect-commands.txt",
+                    str(inspection),
+                    ("\n".join(commands) + "\n").encode(),
+                    role="instructions",
+                ),
+            )
+        )
     inputs = [
         _bounded_input(
             "approved-plan.md",
@@ -169,6 +221,7 @@ def _context(
             (head + "\n").encode(),
             role="head",
         ),
+        *plan_review_inputs,
     ]
     if boundary_input_sha256:
         boundary_path = Path(
@@ -232,6 +285,7 @@ def _context(
                 plan,
                 boundary,
                 pointer_root=runtime_root / "pointers",
+                artifact_root=plan_artifact_root,
             )
         )
     elif purpose != "implementation":
@@ -352,11 +406,7 @@ def _context(
     manifest = builder.build(
         task_id,
         tuple(inputs),
-        metadata={
-            "task_id": task_id,
-            "task_name": str(meta.get("task_name") or ""),
-            "head_sha": head,
-        },
+        metadata=packet_metadata,
     )
     manifest_path = (
         runtime_root

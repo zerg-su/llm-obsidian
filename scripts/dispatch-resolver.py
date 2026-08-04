@@ -152,6 +152,8 @@ def lexical_context_candidates(vault: Path, description: str, repo_name: str) ->
         scored.append((score, rel, {
             "title": page.stem,
             "path": f"wiki/{rel}",
+            "context_path": f"wiki/{rel}",
+            "summary": "Matched terms: " + ", ".join(hits[:5]),
             "score": score,
             "matched_terms": hits[:5],
         }))
@@ -191,6 +193,11 @@ def context_candidates(vault: Path, description: str, repo_name: str) -> tuple[l
                     {
                         "title": str(row.get("title") or Path(str(row.get("path") or "")).stem),
                         "path": str(row.get("path") or ""),
+                        "context_path": str(row.get("path") or ""),
+                        "summary": str(
+                            row.get("heading")
+                            or "Retrieved exact wiki context"
+                        )[:500],
                         "heading": str(row.get("heading") or ""),
                         "score": float(row.get("score") or 0),
                     }

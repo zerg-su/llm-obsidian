@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from harness.review_program import (
     PURPOSES as REVIEW_PURPOSES,
@@ -35,6 +35,9 @@ from task_review_shared import (
     _load_review_boundary_input,
     _read_json,
 )
+
+if TYPE_CHECKING:
+    from task_review_plan import PlanReviewCompilation
 
 
 def _validate_current_checkout(worktree: Path) -> Path:
@@ -233,15 +236,34 @@ def run_current_review(
     scratch_root: Path | None = None,
     runtime_manager: object | None = None,
     apply_finalizing_recovery: Callable[..., dict[str, Any]],
+    plan_compilation: PlanReviewCompilation | None = None,
+    plan_base_sha: str = "",
+    plan_head_sha: str = "",
 ) -> dict[str, Any]:
     worktree = _validate_current_checkout(worktree)
+    if plan_compilation is not None:
+        from task_review_plan import GIT_OID
+
+        if (
+            purpose != "intent"
+            or boundary_input_file is not None
+            or plan_file is None
+            or plan_compilation.worktree != worktree
+            or plan_compilation.plan_path != plan_file.expanduser().resolve()
+            or not GIT_OID.fullmatch(plan_base_sha)
+            or not GIT_OID.fullmatch(plan_head_sha)
+            or _git(worktree, "rev-parse", "HEAD") != plan_head_sha
+        ):
+            raise TaskReviewError("plan facade boundary is invalid")
     vault = worktree
     profiles = load_profiles(vault / "config/verification-profiles.toml")
     profile = profiles.get("scoped")
     if profile is None:
         raise TaskReviewError("scoped verification profile is unavailable")
     boundary_input = (
-        _load_review_boundary_input(boundary_input_file, purpose=purpose)
+        plan_compilation.boundary()
+        if plan_compilation is not None
+        else _load_review_boundary_input(boundary_input_file, purpose=purpose)
         if boundary_input_file is not None
         else None
     )
@@ -299,6 +321,52 @@ def run_current_review(
             requested_purpose = str(
                 requested_policy.get("purpose") or "implementation"
             )
+            candidate_runtime_root: Path | None = None
+            if (
+                plan_compilation is not None
+                and not same_policy
+                and isinstance(candidate.get("plan_review"), Mapping)
+            ):
+                from task_review_plan import guard_active_protected_artifacts
+
+                candidate_runtime_root = Path(
+                    str(candidate.get("runtime_root") or "")
+                ).resolve()
+                expected_runtime_root = _current_runtime_root(
+                    worktree, task_id, scratch_root
+                )
+                if candidate_runtime_root != expected_runtime_root:
+                    raise TaskReviewError(
+                        "current review scratch root changed during plan rebind"
+                    )
+                guard_active_protected_artifacts(
+                    candidate_runtime_root,
+                    candidate,
+                    plan_compilation,
+                )
+            if (
+                plan_compilation is not None
+                and not same_policy
+                and status == "awaiting-resolution"
+            ):
+                from task_review_plan import rebind_active_plan_review
+
+                candidate = rebind_active_plan_review(
+                    worktree,
+                    active_path,
+                    candidate,
+                    gate_state,
+                    requested_policy,
+                    plan_compilation,
+                    requested_base_sha=plan_base_sha,
+                    requested_head_sha=plan_head_sha,
+                )
+                stored_policy = candidate.get("review_policy")
+                same_policy = isinstance(
+                    stored_policy, dict
+                ) and _same_requested_policy(
+                    stored_policy, requested_policy
+                )
             approved_stale = status == "approved" and (
                 _approved_implementation_enters_release(
                     worktree,
@@ -405,6 +473,22 @@ def run_current_review(
             "runtime_root": str(runtime_root),
         }
         if boundary_input is not None:
+            if plan_compilation is not None:
+                from task_review_plan import materialize_plan_review
+
+                boundary_input = materialize_plan_review(
+                    runtime_root,
+                    plan_compilation,
+                    base_sha=plan_base_sha,
+                    head_sha=plan_head_sha,
+                )
+                meta["plan_review"] = {
+                    "schema_version": 1,
+                    "base_sha": plan_base_sha,
+                    "head_sha": plan_head_sha,
+                    "plan_relative_path": plan_compilation.plan_relative_path,
+                    "artifact_root": "runtime",
+                }
             stored_boundary = (
                 runtime_root / "inputs" / "review-boundary-input.json"
             )

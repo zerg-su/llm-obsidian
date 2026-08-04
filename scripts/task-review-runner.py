@@ -137,6 +137,7 @@ from task_review_current import (
     _validate_current_checkout,
     run_current_review as _run_current_review,
 )
+from task_review_plan import run_plan_review as _run_plan_review
 from task_review_finalizing import (
     _apply_finalizing_recovery,
     _dispatched_review_is_quiescent,
@@ -292,6 +293,42 @@ def run_current_review(
     )
 
 
+def run_plan_review(
+    worktree: Path,
+    *,
+    plan_file: Path,
+    base: str = "",
+    capability_dispositions: str = "",
+    success_evidence_map: str = "",
+    deep: bool = False,
+    full: bool = False,
+    cross_model: bool = False,
+    runtime: str = "",
+    model: str = "",
+    effort: str = "",
+    origin_surface: str = "",
+    scratch_root: Path | None = None,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    return _run_plan_review(
+        worktree,
+        plan_file=plan_file,
+        base=base,
+        capability_dispositions=capability_dispositions,
+        success_evidence_map=success_evidence_map,
+        deep=deep,
+        full=full,
+        cross_model=cross_model,
+        runtime=runtime,
+        model=model,
+        effort=effort,
+        origin_surface=origin_surface,
+        scratch_root=scratch_root,
+        runtime_manager=runtime_manager,
+        apply_finalizing_recovery=_apply_finalizing_recovery,
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     sub = result.add_subparsers(dest="command", required=True)
@@ -318,6 +355,19 @@ def parser() -> argparse.ArgumentParser:
     current.add_argument("--boundary-input", type=Path)
     current.add_argument("--plan", type=Path)
     current.add_argument("--origin-surface", default="")
+    plan = sub.add_parser("plan")
+    plan.add_argument("--worktree", type=Path, required=True)
+    plan.add_argument("--plan", type=Path, required=True)
+    plan.add_argument("--base", default="")
+    plan.add_argument("--capability-dispositions", default="")
+    plan.add_argument("--success-evidence-map", default="")
+    plan.add_argument("--deep", action="store_true")
+    plan.add_argument("--full", action="store_true")
+    plan.add_argument("--cross-model", action="store_true")
+    plan.add_argument("--runtime", choices=("claude", "codex"), default="")
+    plan.add_argument("--model", default="")
+    plan.add_argument("--effort", default="")
+    plan.add_argument("--origin-surface", default="")
     return result
 
 
@@ -344,7 +394,16 @@ def main(
                 args.worktree,
                 runtime_manager=runtime_manager,
             )
-        else:
+        elif args.command == "current":
+            if (
+                args.plan is not None
+                and args.purpose == "implementation"
+                and args.boundary_input is None
+            ):
+                raise TaskReviewError(
+                    "legacy current --plan is ambiguous; use the plan facade "
+                    "or pass an explicit compatible purpose and boundary"
+                )
             result = run_current_review(
                 args.worktree,
                 deep=args.deep,
@@ -357,6 +416,22 @@ def main(
                 purpose=args.purpose,
                 boundary_input_file=args.boundary_input,
                 plan_file=args.plan,
+                origin_surface=args.origin_surface,
+                runtime_manager=runtime_manager,
+            )
+        else:
+            result = run_plan_review(
+                args.worktree,
+                plan_file=args.plan,
+                base=args.base,
+                capability_dispositions=args.capability_dispositions,
+                success_evidence_map=args.success_evidence_map,
+                deep=args.deep,
+                full=args.full,
+                cross_model=args.cross_model,
+                runtime=args.runtime,
+                model=args.model,
+                effort=args.effort,
                 origin_surface=args.origin_surface,
                 runtime_manager=runtime_manager,
             )
