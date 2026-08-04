@@ -321,6 +321,29 @@ def run_current_review(
             requested_purpose = str(
                 requested_policy.get("purpose") or "implementation"
             )
+            if (
+                plan_compilation is not None
+                and not same_policy
+                and status == "awaiting-resolution"
+            ):
+                from task_review_plan import rebind_active_plan_review
+
+                candidate = rebind_active_plan_review(
+                    worktree,
+                    active_path,
+                    candidate,
+                    gate_state,
+                    requested_policy,
+                    plan_compilation,
+                    requested_base_sha=plan_base_sha,
+                    requested_head_sha=plan_head_sha,
+                )
+                stored_policy = candidate.get("review_policy")
+                same_policy = isinstance(
+                    stored_policy, dict
+                ) and _same_requested_policy(
+                    stored_policy, requested_policy
+                )
             approved_stale = status == "approved" and (
                 _approved_implementation_enters_release(
                     worktree,

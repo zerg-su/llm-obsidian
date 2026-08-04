@@ -124,6 +124,15 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         ) from exc
 
     compiled = plan_review.compile_plan_review(worktree, plan)
+
+    class SessionCounter:
+        starts = 0
+
+        def start(self, *_args: object, **_kwargs: object) -> object:
+            self.starts += 1
+            raise AssertionError("invalid plan boundary reached provider start")
+
+    sessions = SessionCounter()
     check(
         "1 valid plan compiles four independent artifacts",
         set(compiled.artifacts)
@@ -147,9 +156,23 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         candidate = plan_dir / f"{label}.md"
         candidate.write_text(text, encoding="utf-8")
         try:
-            plan_review.compile_plan_review(worktree, candidate, **kwargs)
+            plan_review.run_plan_review(
+                worktree,
+                plan_file=candidate,
+                capability_dispositions=str(
+                    kwargs.get("capability_dispositions") or ""
+                ),
+                success_evidence_map=str(
+                    kwargs.get("success_evidence_map") or ""
+                ),
+                runtime_manager=sessions,
+                apply_finalizing_recovery=lambda **_ignored: {},
+            )
         except plan_review.PlanReviewError as exc:
-            guarded = exc.code == "plan-review-artifact-boundary-invalid"
+            guarded = (
+                exc.code == "plan-review-artifact-boundary-invalid"
+                and sessions.starts == 0
+            )
         else:
             guarded = False
         check(label, guarded)
@@ -207,9 +230,17 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         (base_sha, head_sha),
     )
     try:
-        plan_review.resolve_plan_oids(worktree, compiled, explicit_base="HEAD")
+        plan_review.run_plan_review(
+            worktree,
+            plan_file=plan,
+            base="HEAD",
+            runtime_manager=sessions,
+            apply_finalizing_recovery=lambda **_ignored: {},
+        )
     except plan_review.PlanReviewError as exc:
-        symbolic_rejected = exc.code == "plan-review-base-invalid"
+        symbolic_rejected = (
+            exc.code == "plan-review-base-invalid" and sessions.starts == 0
+        )
     else:
         symbolic_rejected = False
     check("10 symbolic base is rejected before launch", symbolic_rejected)
@@ -251,6 +282,79 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         and "use the plan facade" in legacy.stderr
         and not (worktree / ".vault-meta").exists(),
         (legacy.stdout, legacy.stderr),
+    )
+
+    reviewed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    plan.write_text(
+        plan_text(design="Implement the bounded facade and retain both lanes."),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", plan.relative_to(worktree)], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "resolve plan design"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    resolved_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    resolved = plan_review.compile_plan_review(worktree, plan)
+    delta = plan_review.validate_design_rebind(
+        worktree,
+        compiled,
+        resolved,
+        reviewed_head=reviewed_head,
+        resolved_head=resolved_head,
+    )
+    check(
+        "design-only rebind binds reviewed/resolved plan digests and exact Git delta",
+        delta["reviewed_plan_sha256"] == compiled.plan_sha256
+        and delta["resolved_plan_sha256"] == resolved.plan_sha256
+        and delta["changed_paths"] == [compiled.plan_relative_path]
+        and len(delta["git_delta_sha256"]) == 64,
+        delta,
+    )
+
+    mutations = {
+        "outcome": plan_text(
+            design="Implement the bounded facade and retain both lanes."
+        ).replace("the exact behavior is established", "changed protected outcome"),
+        "capability_dispositions": plan_text(
+            design="Implement the bounded facade and retain both lanes."
+        ).replace("plan facade | included", "plan facade | deferred"),
+        "success_evidence": plan_text(
+            design="Implement the bounded facade and retain both lanes."
+        ).replace("E-plan | facade matrix", "E-plan | changed matrix"),
+    }
+    observed_changes: dict[str, tuple[str, ...]] = {}
+    for name, text in mutations.items():
+        mutated_path = plan_dir / f"protected-{name}.md"
+        mutated_path.write_text(text, encoding="utf-8")
+        mutated = plan_review.compile_plan_review(worktree, mutated_path)
+        observed_changes[name] = plan_review.protected_artifact_changes(
+            resolved, mutated
+        )
+    check(
+        "Outcome dispositions and evidence-map deltas remain protected",
+        observed_changes
+        == {
+            "outcome": ("outcome",),
+            "capability_dispositions": ("capability_dispositions",),
+            "success_evidence": ("success_evidence",),
+        },
+        observed_changes,
     )
 
 print("\nPlan review facade RED/green matrix passed.")

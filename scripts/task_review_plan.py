@@ -19,6 +19,8 @@ from task_review_shared import (
     _atomic_bytes,
     _atomic_json,
     _git,
+    _git_bytes,
+    _load_review_boundary_input,
     _read_json,
 )
 
@@ -374,6 +376,206 @@ def materialize_plan_review(
     return boundary
 
 
+def protected_artifact_changes(
+    reviewed: PlanReviewCompilation,
+    resolved: PlanReviewCompilation,
+) -> tuple[str, ...]:
+    """Return the frozen artifact names whose semantic bytes changed."""
+
+    return tuple(
+        name
+        for name in (
+            "outcome",
+            "capability_dispositions",
+            "success_evidence",
+        )
+        if reviewed.artifact_sha256[name] != resolved.artifact_sha256[name]
+    )
+
+
+def validate_design_rebind(
+    worktree: Path,
+    reviewed: PlanReviewCompilation,
+    resolved: PlanReviewCompilation,
+    *,
+    reviewed_head: str,
+    resolved_head: str,
+) -> dict[str, object]:
+    """Prove one exact plan-only Git delta changed only the design subject."""
+
+    root = worktree.expanduser().resolve()
+    reviewed_head = _exact_commit(root, reviewed_head, "reviewed HEAD")
+    resolved_head = _exact_commit(root, resolved_head, "resolved HEAD")
+    if (
+        reviewed.worktree != root
+        or resolved.worktree != root
+        or reviewed.plan_relative_path != resolved.plan_relative_path
+        or reviewed.plan_path != resolved.plan_path
+        or reviewed_head == resolved_head
+    ):
+        raise PlanReviewError(PROTECTED_CHANGED, "plan rebind identity is invalid")
+    protected = protected_artifact_changes(reviewed, resolved)
+    if protected:
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "protected plan artifacts changed: " + ", ".join(protected),
+        )
+    if reviewed.artifact_sha256["design"] == resolved.artifact_sha256["design"]:
+        raise PlanReviewError(PROTECTED_CHANGED, "plan design did not change")
+    relative = reviewed.plan_relative_path
+    try:
+        reviewed_plan = _git_bytes(root, "show", f"{reviewed_head}:{relative}")
+        resolved_plan = _git_bytes(root, "show", f"{resolved_head}:{relative}")
+        changed_paths = list(
+            filter(
+                None,
+                _git(
+                    root,
+                    "diff",
+                    "--name-only",
+                    reviewed_head,
+                    resolved_head,
+                    "--",
+                ).splitlines(),
+            )
+        )
+        delta = _git_bytes(
+            root,
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            reviewed_head,
+            resolved_head,
+            "--",
+            relative,
+        )
+    except TaskReviewError as exc:
+        raise PlanReviewError(PROTECTED_CHANGED, "exact plan Git delta is unavailable") from exc
+    if (
+        hashlib.sha256(reviewed_plan).hexdigest() != reviewed.plan_sha256
+        or hashlib.sha256(resolved_plan).hexdigest() != resolved.plan_sha256
+        or changed_paths != [relative]
+        or not delta
+    ):
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "plan rebind must contain one exact plan-only Git delta",
+        )
+    return {
+        "reviewed_head_sha": reviewed_head,
+        "resolved_head_sha": resolved_head,
+        "reviewed_plan_sha256": reviewed.plan_sha256,
+        "resolved_plan_sha256": resolved.plan_sha256,
+        "changed_paths": changed_paths,
+        "git_delta_sha256": hashlib.sha256(delta).hexdigest(),
+    }
+
+
+def rebind_active_plan_review(
+    worktree: Path,
+    active_path: Path,
+    candidate: Mapping[str, Any],
+    gate_state: Mapping[str, Any],
+    requested_policy: Mapping[str, Any],
+    compilation: PlanReviewCompilation,
+    *,
+    requested_base_sha: str,
+    requested_head_sha: str,
+) -> dict[str, Any]:
+    """Atomically replace only a validated design subject on retained lanes."""
+
+    plan_meta = candidate.get("plan_review")
+    context = gate_state.get("context")
+    if (
+        gate_state.get("status") != "awaiting-resolution"
+        or not isinstance(plan_meta, Mapping)
+        or not isinstance(context, Mapping)
+    ):
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "a changed plan boundary requires awaiting retained lanes",
+        )
+    task_id = str(candidate.get("task_id") or "")
+    reviewed_head = str(context.get("head_sha") or "")
+    original_base = str(plan_meta.get("base_sha") or "")
+    relative = str(plan_meta.get("plan_relative_path") or "")
+    runtime_root = Path(str(candidate.get("runtime_root") or "")).resolve()
+    if (
+        requested_base_sha != reviewed_head
+        or requested_head_sha != _git(worktree, "rev-parse", "HEAD")
+        or str(plan_meta.get("head_sha") or "") != reviewed_head
+        or relative != compilation.plan_relative_path
+        or runtime_root == worktree
+        or worktree in runtime_root.parents
+    ):
+        raise PlanReviewError(PROTECTED_CHANGED, "plan rebind OID identity is stale")
+    boundary_path = Path(
+        str(candidate.get("review_boundary_input_file") or "")
+    ).resolve()
+    old_boundary = _load_review_boundary_input(boundary_path, purpose="intent")
+    old_artifacts = {
+        "outcome": b"",
+        "design": (runtime_root / ARTIFACT_PATHS["design"]).read_bytes(),
+        "capability_dispositions": (
+            runtime_root / ARTIFACT_PATHS["capability_dispositions"]
+        ).read_bytes(),
+        "success_evidence": (
+            runtime_root / ARTIFACT_PATHS["success_evidence"]
+        ).read_bytes(),
+    }
+    reviewed = PlanReviewCompilation(
+        worktree,
+        compilation.plan_path,
+        relative,
+        old_boundary.plan_sha256,
+        old_artifacts,
+        {
+            "outcome": old_boundary.outcome_contract_sha256,
+            "design": old_boundary.design_sha256,
+            "capability_dispositions": old_boundary.capability_dispositions_sha256,
+            "success_evidence": old_boundary.success_evidence_map_sha256,
+        },
+    )
+    delta = validate_design_rebind(
+        worktree,
+        reviewed,
+        compilation,
+        reviewed_head=reviewed_head,
+        resolved_head=requested_head_sha,
+    )
+    resolution = _read_json(
+        worktree / ".task-review-resolution.json",
+        "plan review resolution",
+    )
+    if (
+        resolution.get("schema_version") != 1
+        or resolution.get("operation_id") != task_id
+        or resolution.get("reviewed_head_sha") != reviewed_head
+        or resolution.get("resolved_head_sha") != requested_head_sha
+    ):
+        raise PlanReviewError(
+            PROTECTED_CHANGED,
+            "typed plan resolution does not bind the exact reviewed/resolved OIDs",
+        )
+    new_boundary = materialize_plan_review(
+        runtime_root,
+        compilation,
+        base_sha=original_base,
+        head_sha=requested_head_sha,
+    )
+    updated = dict(candidate)
+    updated["review_policy"] = dict(requested_policy)
+    updated["plan_review"] = {
+        **dict(plan_meta),
+        "head_sha": requested_head_sha,
+        **delta,
+    }
+    _atomic_json(boundary_path, new_boundary.payload())
+    _atomic_json(runtime_root / "current-review.json", updated)
+    _atomic_json(active_path, updated)
+    return updated
+
+
 def run_plan_review(
     worktree: Path,
     *,
@@ -431,7 +633,10 @@ __all__ = (
     "PlanReviewError",
     "compile_plan_review",
     "materialize_plan_review",
+    "protected_artifact_changes",
+    "rebind_active_plan_review",
     "resolve_plan_oids",
     "review_inspection_commands",
     "run_plan_review",
+    "validate_design_rebind",
 )
