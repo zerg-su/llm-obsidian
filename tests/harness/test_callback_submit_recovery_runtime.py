@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,9 +23,11 @@ from harness.callback_submit_recovery import (  # noqa: E402
     classify_callback_submit,
 )
 from harness.contracts import (  # noqa: E402
+    AttentionReason,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
+    to_dict,
 )
 from harness.liveness import (  # noqa: E402
     LivenessController,
@@ -32,8 +36,11 @@ from harness.liveness import (  # noqa: E402
     LivenessState,
     observe_liveness,
 )
-from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
+from harness.runtime_worker_review_bridge import (  # noqa: E402
+    RuntimeWorkerReviewBridgeMixin,
+)
 from harness.runtime_worker_liveness import RuntimeWorkerLivenessMixin  # noqa: E402
+from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
 
@@ -80,7 +87,157 @@ check(
 )
 
 
-class FastPathWorker(RuntimeWorkerControlMixin):
+with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
+    root = Path(raw)
+    store = OperationStore(root / "store")
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "7" * 64
+    )
+    old_spec = OperationSpec(
+        "review-old-1",
+        "review-old-key-1",
+        "review-session",
+        "review-old-owner-1",
+        route,
+        "packets/old.json",
+        "scoped",
+    )
+    new_spec = OperationSpec(
+        "review-new-1",
+        "review-new-key-1",
+        "review-session",
+        "review-new-owner-1",
+        route,
+        "packets/new.json",
+        "scoped",
+    )
+    store.create(old_spec, lane_id="openai-holistic", run_id="review-old-run-1")
+    store.create(new_spec, lane_id="openai-holistic", run_id="review-new-run-1")
+    old_supervisor = OperationSupervisor(
+        store, "review-old-owner-1", "review-old-1"
+    )
+    for owner_id, operation_id in (
+        ("review-old-owner-1", "review-old-1"),
+        ("review-new-owner-1", "review-new-1"),
+    ):
+        for state in ("preflight", "starting"):
+            store.transition(owner_id, operation_id, state)
+    old_supervisor.bind_resources(
+        OwnedResources(SURFACE, 401, 402, "4" * 64, "5" * 64)
+    )
+    for owner_id, operation_id in (
+        ("review-old-owner-1", "review-old-1"),
+        ("review-new-owner-1", "review-new-1"),
+    ):
+        store.transition(owner_id, operation_id, "running")
+    old_record = store.read("review-old-owner-1", "review-old-1")
+    old_sha256 = hashlib.sha256(
+        json.dumps(to_dict(old_record), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    session = (
+        store.root / "owners/review-old-owner-1/runtime/review-old-1/session.json"
+    )
+    session.parent.mkdir(parents=True)
+    session.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "review-old-1",
+                "run_id": "review-old-run-1",
+                "placement": "split",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session.parent / "callback-target.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 1,
+                "operation_id": "review-old-round-1",
+                "run_id": "review-old-round-run-1",
+                "callback_pointer": "callbacks/old.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    authorization = {
+        "schema_version": 1,
+        "status": "authorized",
+        "superseded_review_operation_id": "review-old-1",
+        "active_review_operation_id": "review-new-1",
+    }
+    authorization_path = store.root / "supersession/authorization.json"
+    authorization_path.parent.mkdir()
+    authorization_path.write_text(
+        json.dumps(authorization, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    authorization_sha256 = hashlib.sha256(
+        authorization_path.read_bytes()
+    ).hexdigest()
+    receipt = {
+        "schema_version": 1,
+        "status": "authorized",
+        "superseded_owner_id": "review-old-owner-1",
+        "superseded_operation_id": "review-old-1",
+        "superseded_run_id": "review-old-run-1",
+        "superseded_record_sha256": old_sha256,
+        "replacement_owner_id": "review-new-owner-1",
+        "replacement_operation_id": "review-new-1",
+        "replacement_run_id": "review-new-run-1",
+        "store_sha256": hashlib.sha256(str(store.root).encode()).hexdigest(),
+        "authorization_pointer": "supersession/authorization.json",
+        "authorization_sha256": authorization_sha256,
+    }
+    receipt_path = store.root / "supersession/cleanup.json"
+    receipt_path.write_text(
+        json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    class CleanupProcess:
+        def process_status(self, process_group: int, identity: str) -> str:
+            check(
+                "superseded cleanup probes exact old process",
+                process_group == 401 and identity == "4" * 64,
+            )
+            return "dead"
+
+        def pid_status(self, pid: int, identity: str) -> str:
+            check(
+                "superseded cleanup probes exact old supervisor",
+                pid == 402 and identity == "5" * 64,
+            )
+            return "dead"
+
+    class CleanupCmux:
+        def __init__(self) -> None:
+            self.alive = True
+            self.closed: list[str] = []
+
+        def status(self, surface_id: str) -> str:
+            check("superseded cleanup probes exact old surface", surface_id == SURFACE)
+            return "alive" if self.alive else "missing"
+
+        def close_exact(self, surface_id: str) -> None:
+            self.closed.append(surface_id)
+            self.alive = False
+
+    cleanup_cmux = CleanupCmux()
+    manager = RuntimeSessionManager(store, cleanup_cmux, CleanupProcess())
+    cleaned = manager.cleanup_superseded_review(receipt_path)
+    replay = manager.cleanup_superseded_review(receipt_path)
+    check(
+        "authorized superseded review cleanup reaches resource-free terminal once",
+        cleaned.record.state == "complete"
+        and cleaned.record.resources == OwnedResources()
+        and replay.record == cleaned.record
+        and cleanup_cmux.closed == [SURFACE]
+        and authorization_path.is_file(),
+        (cleaned, replay, cleanup_cmux.closed),
+    )
+
+
+class FastPathWorker(RuntimeWorkerReviewBridgeMixin):
     pass
 
 
@@ -180,6 +337,37 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
     for operation_id in ("review-parent-1", "review-round-1"):
         for state in ("preflight", "starting", "running", "awaiting-callback"):
             store.transition("review-owner-1", operation_id, state)
+    parent_record = store.read("review-owner-1", "review-parent-1")
+    store.save(
+        replace(
+            parent_record,
+            deadline_at=1.0,
+            revision=parent_record.revision + 1,
+        ),
+        expected_revision=parent_record.revision,
+    )
+    store.transition(
+        "review-owner-1",
+        "review-parent-1",
+        "attention-required",
+        reason=AttentionReason.CALLBACK_TIMEOUT,
+    )
+    session = (
+        store.root
+        / "owners/review-owner-1/runtime/review-parent-1/session.json"
+    )
+    session.parent.mkdir(parents=True)
+    session.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "review-parent-1",
+                "run_id": "review-parent-run-1",
+                "time_budget_seconds": 3600,
+            }
+        ),
+        encoding="utf-8",
+    )
     worker = FastPathWorker()
     worker.spec_path = state_root / "launch.json"
     worker.spec = {
@@ -204,10 +392,16 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
     worker.inspect_callback()
     worker.inspect_callback()
     accepted = store.read("review-owner-1", "review-round-1")
+    rearmed = store.read("review-owner-1", "review-parent-1")
+    rearm_receipt = json.loads(
+        (state_root / "callback-timeout-rearm.json").read_text(encoding="utf-8")
+    )
     check(
-        "runtime consumes stable typed input and accepts its callback without model input",
+        "runtime rearms only to ingest a stable typed callback without model input",
         accepted.state == "finalizing"
         and bool(accepted.accepted_callback_id)
+        and rearmed.state == "awaiting-callback"
+        and rearm_receipt["status"] == "accepted"
         and (state_root / "callback-receipt.json").is_file()
         and not input_path.exists(),
         accepted,

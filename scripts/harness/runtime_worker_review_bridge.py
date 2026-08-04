@@ -20,6 +20,210 @@ from review_contract import ReviewContractError, axis_finding_id
 
 class RuntimeWorkerReviewBridgeMixin:
 
+    def accept_callback_after_timeout(
+        self,
+        *,
+        generation: int,
+        envelope: CallbackEnvelope,
+    ) -> object:
+        """Rearm only to ingest one already stable exact reviewer callback."""
+
+        parent = self.store.read(
+            self.spec["owner_id"], self.spec["operation_id"]
+        )
+        child = self.store.read(self.spec["owner_id"], envelope.operation_id)
+        metadata_path = (
+            self.store.root
+            / "owners"
+            / self.spec["owner_id"]
+            / "runtime"
+            / self.spec["operation_id"]
+            / "session.json"
+        )
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError(
+                "callback timeout rearm metadata is unavailable"
+            ) from exc
+        time_budget = metadata.get("time_budget_seconds")
+        if (
+            parent.state != "attention-required"
+            or parent.attention_reason != AttentionReason.CALLBACK_TIMEOUT
+            or parent.spec.route.profile != "reviewer-callback"
+            or child.state != "awaiting-callback"
+            or child.run_id != envelope.run_id
+            or child.lane_id != parent.lane_id
+            or envelope.kind != "review"
+            or envelope.payload.get("parent_session_operation_id")
+            != parent.spec.operation_id
+            or metadata.get("schema_version") != 1
+            or metadata.get("operation_id") != parent.spec.operation_id
+            or metadata.get("run_id") != parent.run_id
+            or not isinstance(time_budget, (int, float))
+            or isinstance(time_budget, bool)
+            or time_budget <= 0
+        ):
+            raise RuntimeWorkerError(
+                "callback timeout rearm identity is invalid"
+            )
+        marker = self.spec_path.parent / "callback-timeout-rearm.json"
+        prepared = {
+            "schema_version": 1,
+            "generation": generation,
+            "parent_operation_id": parent.spec.operation_id,
+            "parent_run_id": parent.run_id,
+            "round_operation_id": envelope.operation_id,
+            "round_run_id": envelope.run_id,
+            "callback_id": envelope.callback_id,
+            "callback_sha256": envelope.payload_sha256,
+            "status": "prepared",
+        }
+        if marker.is_file() and not marker.is_symlink():
+            existing = json.loads(marker.read_text(encoding="utf-8"))
+            if existing not in (prepared, {**prepared, "status": "accepted"}):
+                raise RuntimeWorkerError(
+                    "callback timeout rearm receipt changed"
+                )
+        elif marker.exists() or marker.is_symlink():
+            raise RuntimeWorkerError(
+                "callback timeout rearm receipt is invalid"
+            )
+        else:
+            _atomic_json(marker, prepared)
+        now = self.clock() if hasattr(self, "clock") else time.time()
+        self.store.rearm_callback_timeout(
+            self.spec["owner_id"],
+            self.spec["operation_id"],
+            deadline_at=now + float(time_budget),
+        )
+        acceptance = CallbackBroker(
+            self.store, self.spec["owner_id"]
+        ).accept(
+            envelope,
+            deadline_operation_id=self.spec["operation_id"],
+        )
+        _atomic_json(marker, {**prepared, "status": "accepted"})
+        return acceptance
+
+    def inspect_callback(self) -> None:
+        """Ingest stable review input/callback artifacts without a model call."""
+
+        try:
+            target = _callback_target(self.spec)
+        except RuntimeWorkerError:
+            if not self.registration_invalid:
+                self.registration_invalid = True
+                try:
+                    self.store.transition(
+                        self.spec["owner_id"],
+                        self.spec["operation_id"],
+                        "attention-required",
+                        reason=AttentionReason.CALLBACK_INVALID,
+                    )
+                except Exception:
+                    pass
+                _atomic_json(
+                    self.spec_path.parent / "callback-error.json",
+                    {"schema_version": 1, "status": "callback-target-invalid"},
+                )
+            return
+        self.registration_invalid = False
+        if target != self.active_target:
+            if self.active_target is not None and target[0] <= self.active_target[0]:
+                return
+            self.active_target = target
+            self.last_digest = ""
+            self.stable_reads = 0
+            self.review_input_digest = ""
+            self.review_input_stable_reads = 0
+            self.callback_handled = False
+        if self.callback_handled:
+            return
+        generation, operation_id, run_id, callback_path = target
+        review_input = callback_path.with_name(".review-input.json")
+        input_evidence, self.review_input_digest, self.review_input_stable_reads = (
+            observe_review_artifact(
+                review_input,
+                self.review_input_digest,
+                self.review_input_stable_reads,
+            )
+        )
+        if input_evidence.state in {"symlink", "oversize", "malformed"}:
+            self.summary_attention("review-input-invalid")
+            return
+        if input_evidence.state == "stable" and not callback_path.exists():
+            try:
+                submitted = submit_stable_review_input(
+                    vault_root=self.trusted_vault,
+                    worktree=self.spec["product_root"],
+                    callback_path=callback_path,
+                )
+            except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired):
+                submitted = subprocess.CompletedProcess((), 3, "", "")
+            if _submit_failure_requires_attention(submitted, callback_path):
+                self.summary_attention("review-input-invalid")
+                return
+        callback_evidence, self.last_digest, self.stable_reads = (
+            observe_review_artifact(
+                callback_path,
+                self.last_digest,
+                self.stable_reads,
+            )
+        )
+        if callback_evidence.state in {"symlink", "oversize", "malformed"}:
+            self.summary_attention("callback-artifact-invalid")
+            return
+        if callback_evidence.state != "stable":
+            return
+        try:
+            raw = callback_path.read_bytes()
+        except OSError:
+            return
+        self.callback_handled = True
+        try:
+            envelope = _envelope(json.loads(raw))
+            if envelope.operation_id != operation_id or envelope.run_id != run_id:
+                raise RuntimeWorkerError("callback identity mismatches runtime launch")
+            try:
+                acceptance = CallbackBroker(
+                    self.store, self.spec["owner_id"]
+                ).accept(
+                    envelope,
+                    deadline_operation_id=self.spec["operation_id"],
+                )
+            except CallbackTimeoutError:
+                acceptance = self.accept_callback_after_timeout(
+                    generation=generation,
+                    envelope=envelope,
+                )
+            _atomic_json(
+                self.spec_path.parent / "callback-receipt.json",
+                {
+                    "schema_version": 1,
+                    "generation": generation,
+                    "callback_id": envelope.callback_id,
+                    "operation_id": operation_id,
+                    "status": "duplicate" if acceptance.duplicate else "accepted",
+                },
+            )
+            if not publish_callback_wake(
+                self.spec,
+                self.spec_path.parent,
+                envelope.callback_id,
+                self.cmux_adapter,
+            ):
+                self.callback_handled = False
+        except (
+            CallbackError,
+            RuntimeWorkerError,
+            StoreError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            self.summary_attention("callback-invalid")
+
     def review_drive_sha256(self) -> str:
         digest = hashlib.sha256()
         gate_state = self.review.gate_root / "review-gate.json"

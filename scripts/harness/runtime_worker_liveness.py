@@ -86,6 +86,26 @@ class RuntimeWorkerLivenessMixin:
             self.callback_recovery_digest = ""
             self.callback_recovery_reads = 0
 
+        reader = getattr(self.cmux_adapter, "read", None)
+        if reader is not None:
+            try:
+                screen = str(reader(self.spec["surface_id"]))
+                encoded = screen.encode("utf-8", errors="replace")
+                if encoded and len(encoded) <= MAX_SCREEN_BYTES:
+                    prompt = classify(
+                        self.spec["runtime"],
+                        screen,
+                        closure_armed=record.state == "exiting",
+                    )
+                    self.latest_callback_prompt_class = classify_callback_prompt(
+                        self.spec["runtime"],
+                        screen,
+                        interactive=prompt.interactive,
+                        recognized=prompt.recognized,
+                    )
+            except Exception:
+                self.latest_callback_prompt_class = "unknown"
+
         self.callback_prompt_observations += 1
         if self.latest_callback_prompt_class == "idle-prompt":
             self.callback_idle_observations += 1

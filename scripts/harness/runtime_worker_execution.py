@@ -19,11 +19,11 @@ from .runtime_worker_loop import RuntimeWorkerLoopMixin
 
 
 class RuntimeWorkerExecution(
+    RuntimeWorkerReviewBridgeMixin,
     RuntimeWorkerControlMixin,
     RuntimeWorkerFixMixin,
     RuntimeWorkerCustomMixin,
     RuntimeWorkerSummaryMixin,
-    RuntimeWorkerReviewBridgeMixin,
     RuntimeWorkerVerificationMixin,
     RuntimeWorkerLivenessMixin,
     RuntimeWorkerLoopMixin,
