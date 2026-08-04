@@ -236,5 +236,25 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         and gate.read()["status"] == "reviewing",
     )
 
+    gate._replace(
+        status="attention-required",
+        awaiting_resolution={
+            lane.axis: {
+                "reviewed_head_sha": context.head_sha,
+                "round_operation_id": "accepted-round-1",
+            }
+        },
+    )
+    resolution_state = gate.read()
+    rebound_state, rebound_status = _resume_bound_attention(
+        gate, store, runtime_root, resolution_state
+    )
+    check(
+        "resolved runtime attention restores the awaiting-resolution phase",
+        rebound_status == "awaiting-resolution"
+        and rebound_state["status"] == "awaiting-resolution"
+        and gate.read()["status"] == "awaiting-resolution",
+    )
+
 
 print("\nAll task review flow unit tests passed.")

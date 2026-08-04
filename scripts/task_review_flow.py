@@ -378,6 +378,14 @@ def _run_review(
     gate.reconcile_superseded_review_cleanup()
     gate_exists = gate.state_path.exists()
     initial_state = gate.read() if gate_exists else {}
+    # A code-owned runtime resume can clear the lane attention before this
+    # facade is replayed. Restore the gate phase before building the context:
+    # an awaiting-resolution boundary needs its resolution bundle to rebind
+    # the original boundary input to the resolved exact HEAD.
+    if gate_exists:
+        initial_state, _initial_status = _resume_bound_attention(
+            gate, store, runtime_root, initial_state
+        )
     resolution_bundle = _preload_resolution_bundle(
         worktree=worktree,
         gate_root=gate_root,

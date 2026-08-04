@@ -257,8 +257,11 @@ class ReviewGateStateMixin:
                 raise ValueError(
                     "bound review runtime attention is not resolved"
                 )
+        awaiting_resolution = state.get("awaiting_resolution")
         status = (
-            "verifying"
+            "awaiting-resolution"
+            if isinstance(awaiting_resolution, dict) and awaiting_resolution
+            else "verifying"
             if any(
                 int(lane.get("verification_iteration") or 0) > 0
                 for lane in lanes
