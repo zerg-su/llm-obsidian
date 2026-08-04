@@ -4486,11 +4486,48 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             and len(superseded["lanes"]) == 2,
         )
         quiesce_operations(current_store, superseded["task_id"])
+        current_active_path = (
+            product / ".vault-meta/harness/current-review/active.json"
+        )
+        superseded_meta = json.loads(
+            current_active_path.read_text(encoding="utf-8")
+        )
+        current_active_path.unlink()
+        stale_boundary_path = base / "stale-current-boundary.json"
+        stale_boundary = replace(current_boundary, product_head_sha="0" * 40)
+        stale_boundary_path.write_text(
+            json.dumps(stale_boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            task_review_runner.run_current_review(
+                product,
+                purpose="implementation",
+                boundary_input_file=stale_boundary_path,
+                plan_file=review_plan,
+                scratch_root=scratch,
+                runtime_manager=current_runtime,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            stale_preflight_rejected = "targets another HEAD" in str(exc)
+        else:
+            stale_preflight_rejected = False
+        check(
+            "stale new boundary fails before publishing an active pointer",
+            stale_preflight_rejected and not current_active_path.exists(),
+        )
+        orphan_task_id = str(uuid.uuid4())
+        orphan_meta = {
+            **superseded_meta,
+            "task_id": orphan_task_id,
+            "runtime_root": str(scratch / orphan_task_id),
+        }
+        current_active_path.write_text(
+            json.dumps(orphan_meta, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         # The next assertions exercise a fresh purpose-bound release chain,
         # not authority inherited from this generic preset fixture.
-        (
-            product / ".vault-meta/harness/current-review/active.json"
-        ).unlink()
         failed_full = task_review_runner.run_current_review(
             product,
             full=True,
@@ -4501,6 +4538,10 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         )
         current_active_path = (
             product / ".vault-meta/harness/current-review/active.json"
+        )
+        check(
+            "zero-effect active pointer without a gate is superseded safely",
+            failed_full["task_id"] != orphan_task_id,
         )
         failed_runtime_root = str(
             json.loads(current_active_path.read_text(encoding="utf-8"))[

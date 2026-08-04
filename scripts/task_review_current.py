@@ -16,6 +16,7 @@ from harness.review_program_authority import (
     stale_resolution_boundary,
     trusted_review_receipt,
 )
+from harness.store import OperationStore
 from harness.verification import load_profiles
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewPreset
@@ -345,6 +346,15 @@ def _active_current_review(
         )
     elif gate_state_path.exists():
         raise TaskReviewError("current review gate is not a regular file")
+    else:
+        # The active pointer is written before the gate is materialized.  If a
+        # preflight exception stopped that launch, a later invocation must not
+        # treat the zero-effect pointer as live ownership forever.  Supersede
+        # it only when the exact owner has no operation rows; any persisted
+        # row remains fail-closed and requires normal lifecycle recovery.
+        terminal_stale = not OperationStore(
+            vault / ".vault-meta" / "harness"
+        ).list(task_id)
     if terminal_stale:
         return None
     if not same_policy:
@@ -446,6 +456,18 @@ def run_current_review(
     )
 
     if meta is None:
+        current_head = _git(worktree, "rev-parse", "HEAD")
+        if boundary_input is not None and (
+            (
+                purpose == "implementation"
+                and boundary_input.product_head_sha != current_head
+            )
+            or (
+                purpose == "release"
+                and boundary_input.integration_head_sha != current_head
+            )
+        ):
+            raise TaskReviewError("review boundary input targets another HEAD")
         task_id = str(uuid.uuid4())
         runtime_root = _current_runtime_root(
             worktree, task_id, scratch_root
