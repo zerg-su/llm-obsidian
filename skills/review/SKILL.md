@@ -62,7 +62,8 @@ completely. Verify findings against code; rejection requires technical evidence.
 
 ## Flow
 
-1. Run `task-review-runner.py run --worktree <worktree>` for dispatched tasks;
+1. For a dispatched v3/v4 task, run
+   `task-review-runner.py run --worktree <worktree>`;
    `plan --worktree <checkout> --plan <plan>` for plans (add exact `--base`
    unless a single-parent HEAD changes that plan); otherwise `current --worktree
    <checkout>` with requested preset/aliases and compatible purpose/boundary.

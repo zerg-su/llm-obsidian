@@ -28,6 +28,7 @@ import cmux_agent_supervisor as supervisor_module
 import cmux_agent_support as support_module
 import cmux_surface_lifecycle as lifecycle_module
 import cmux_task_watchdog as watchdog_module
+import task_escalation as escalation_module
 from plan_lifecycle import render_plan_close
 from outcome_contract import extract_from_bytes
 from task_sessions import TaskSessionStore
@@ -36,6 +37,9 @@ from harness.verification import load_profiles
 from harness.pipeline_builtins import compiled_builtin
 from harness.workflows.review import ReviewContext
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
+
+
+assert escalation_module.MECHANISM_REPAIR_POLICY == "classify-and-auto-repair-if-eligible"
 
 
 def run(script: Path, *args: str, cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

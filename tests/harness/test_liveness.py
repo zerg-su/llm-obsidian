@@ -201,4 +201,58 @@ with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
         == hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
     )
 
+with tempfile.TemporaryDirectory(prefix="callback-submit-liveness.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    binding = "d" * 64
+    check(
+        "callback submit reserves the shared nudge budget exactly once",
+        controller.reserve_callback_submit(binding) is True
+        and controller.reserve_callback_submit(binding) is False,
+    )
+    controller.mark_callback_submit_sent(binding)
+    controller.mark_callback_submit_sent(binding)
+    sent = controller.current_state()
+    check(
+        "callback submit sent state is durable and idempotent",
+        sent is not None
+        and sent.callback_submit_binding == binding
+        and sent.callback_submit_status == "sent"
+        and sent.nudge_count == 1,
+    )
+    check(
+        "a different callback generation cannot reuse the reservation",
+        controller.reserve_callback_submit("e" * 64) is False,
+    )
+
+with tempfile.TemporaryDirectory(prefix="callback-submit-uncertain.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    binding = "f" * 64
+    check(
+        "callback submit uncertainty starts from an exact reservation",
+        controller.reserve_callback_submit(binding) is True,
+    )
+    controller.mark_callback_submit_uncertain(binding)
+    controller.mark_callback_submit_uncertain(binding)
+    uncertain = controller.current_state()
+    check(
+        "uncertain callback transport fails closed and remains idempotent",
+        uncertain is not None
+        and uncertain.callback_submit_status == "uncertain"
+        and uncertain.nudge_count == 1,
+    )
+
+with tempfile.TemporaryDirectory(prefix="callback-submit-invalid.") as raw:
+    controller = LivenessController(Path(raw))
+    try:
+        controller.reserve_callback_submit("a" * 64)
+    except Exception as exc:
+        check(
+            "callback submit cannot reserve without liveness state",
+            "no liveness state" in str(exc),
+        )
+    else:
+        check("callback submit cannot reserve without liveness state", False)
+
 print("\nAll liveness tests passed.")
