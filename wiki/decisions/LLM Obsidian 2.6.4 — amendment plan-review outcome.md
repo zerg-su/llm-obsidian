@@ -37,4 +37,3 @@ Amendment изменяет исходный E8 observable: удалена clause
 Это coordinator-owned amendment к digest `a4a1e8e10a99a56e4d5bb2a90244ec80752e5f98b6300d0d4e8eb343e7184150`. После внесения E12 Outcome Contract re-freeze выполняется новым exact intent boundary и новым Opus approval. Старые callback и finding receipts сохраняются как provenance и не считаются approval новых contract bytes.
 
 Intent compiler материализует Outcome, design, capability dispositions и success-evidence map как четыре отдельные digest-bound artifacts. Same-session plan resolution может rebind только design subject через typed resolution и exact delta; изменение Outcome, disposition table или evidence map требует отдельного amendment и fresh boundary.
-
