@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from time import time
 
+from review_contract import REVIEW_PARENT_KINDS
+
 from .contracts import (
     AttentionReason,
     EffectOutcome,
@@ -140,7 +142,7 @@ class RuntimeSessionCleanupMixin:
         ):
             if (
                 record.run_id != run_id
-                or record.spec.kind != "review-session"
+                or record.spec.kind not in REVIEW_PARENT_KINDS
                 or record.spec.route.profile != "reviewer-callback"
             ):
                 raise RuntimeSessionError(f"{label} review identity mismatch")

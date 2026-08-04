@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     old_spec = OperationSpec(
         "review-old-1",
         "review-old-key-1",
-        "review-session",
+        "simple-review-holistic",
         "review-old-owner-1",
         route,
         "packets/old.json",
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     new_spec = OperationSpec(
         "review-new-1",
         "review-new-key-1",
-        "review-session",
+        "simple-review-holistic",
         "review-new-owner-1",
         route,
         "packets/new.json",
