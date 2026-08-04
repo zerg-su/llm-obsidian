@@ -30,6 +30,7 @@ NESTED_KEY_RX = re.compile(r"^ {4}([A-Za-z_][\w-]*):(?:[ \t]*(.*))$")
 LIST_DICT_RX = re.compile(r"^  - ([A-Za-z_][\w-]*):(?:[ \t]*(.*))$")
 LIST_ITEM_RX = re.compile(r"^  -(?:[ \t]+(.*))?$")
 WIKILINK_RX = re.compile(r"(?P<embed>!)?\[\[(?P<inner>[^\]\n]+)\]\]")
+BACKTICK_RUN_RX = re.compile(r"`+")
 
 REQUIRED_KEYS = ("type", "status", "created", "updated", "tags", "sessions")
 ADDRESS_CUTOFF = date(2026, 4, 23)
@@ -243,10 +244,15 @@ def _fence_transition(
     stripped = line.lstrip()
     match = re.match(r"^(`{3,}|~{3,})", stripped)
     marker = match.group(1) if match else ""
+    remainder = stripped[len(marker) :] if marker else ""
     if fence is not None:
-        closed = marker.startswith(fence[0]) and len(marker) >= fence[1]
+        closed = (
+            marker.startswith(fence[0])
+            and len(marker) >= fence[1]
+            and not remainder.strip()
+        )
         return True, None if closed else fence
-    if marker:
+    if marker and not (marker[0] == "`" and "`" in remainder):
         return True, (marker[0], len(marker))
     return False, None
 
@@ -271,6 +277,32 @@ def _split_link_inner(inner: str) -> tuple[str, str]:
         return inner.strip(), ""
     boundary = min(separators)
     return inner[:boundary].strip(), inner[boundary:]
+
+
+def _rewrite_code_spans(text: str, rewrite_prose: Callable[[str], str]) -> str:
+    """Preserve matching Markdown backtick runs and rewrite only prose."""
+
+    rendered: list[str] = []
+    cursor = 0
+    while opener := BACKTICK_RUN_RX.search(text, cursor):
+        width = len(opener.group(0))
+        close = next(
+            (
+                candidate
+                for candidate in BACKTICK_RUN_RX.finditer(text, opener.end())
+                if len(candidate.group(0)) == width
+            ),
+            None,
+        )
+        if close is None:
+            rendered.append(rewrite_prose(text[cursor : opener.end()]))
+            cursor = opener.end()
+            continue
+        rendered.append(rewrite_prose(text[cursor : opener.start()]))
+        rendered.append(text[opener.start() : close.end()])
+        cursor = close.end()
+    rendered.append(rewrite_prose(text[cursor:]))
+    return "".join(rendered)
 
 
 def rewrite_wikilinks(
@@ -311,17 +343,22 @@ def rewrite_wikilinks(
         return "".join(rendered)
 
     rendered: list[str] = []
+    prose: list[str] = []
     fence: tuple[str, int] | None = None
+
+    def flush_prose() -> None:
+        if prose:
+            rendered.append(_rewrite_code_spans("".join(prose), rewrite_segment))
+            prose.clear()
+
     for line in text.splitlines(keepends=True):
         is_code, fence = _fence_transition(line, fence)
         if is_code:
+            flush_prose()
             rendered.append(line)
             continue
-        parts = re.split(r"(`[^`\n]*`)", line)
-        rendered.extend(
-            part if index % 2 else rewrite_segment(part)
-            for index, part in enumerate(parts)
-        )
+        prose.append(line)
+    flush_prose()
     return WikiRewrite("".join(rendered), tuple(links), malformed)
 
 

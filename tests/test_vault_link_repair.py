@@ -70,6 +70,8 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-") as raw:
             "[[Alpha Canonical|alpha alias]] [[Beta Heading#Details]]\n"
             "[[Alpha Canonical\\|escaped label]]\n"
             "`[[Alpha Canonical]]`\n"
+            "``[[Alpha Canonical]]``\n"
+            "```one ` two `` [[Beta Heading]]```\n"
             "```md\n[[Beta Heading]]\n```\n"
             "~~~~md\n[[Alpha Canonical]]\n~~~~\n"
             "````md\n```\n[[Beta Heading]]\n```\n````\n",
@@ -91,6 +93,8 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-") as raw:
     check(
         "inline and fenced examples remain byte-stable",
         "`[[Alpha Canonical]]`" in rendered
+        and "``[[Alpha Canonical]]``" in rendered
+        and "```one ` two `` [[Beta Heading]]```" in rendered
         and "```md\n[[Beta Heading]]\n```" in rendered
         and "~~~~md\n[[Alpha Canonical]]\n~~~~" in rendered
         and "````md\n```\n[[Beta Heading]]\n```\n````" in rendered,
@@ -142,6 +146,16 @@ no_plan(
 no_plan(
     "already valid filename needs no mutation",
     "[[alpha]]",
+    [("alpha.md", "Alpha Canonical", None)],
+)
+no_plan(
+    "double-backtick code span needs no mutation",
+    "``[[Alpha Canonical]]``",
+    [("alpha.md", "Alpha Canonical", None)],
+)
+no_plan(
+    "long code span containing shorter runs needs no mutation",
+    "```one ` two `` [[Alpha Canonical]]```",
     [("alpha.md", "Alpha Canonical", None)],
 )
 

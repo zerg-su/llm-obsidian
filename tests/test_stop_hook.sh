@@ -195,6 +195,39 @@ assert repair["identifiers"]["repair_id"].startswith("wikilink-")
 PY
 [[ "$?" == 0 ]] && ok "sh-repair-index-event-current" || bad "sh-repair-index-event-current" "index/event evidence stale"
 
+# Matching runs of two or more backticks are inline code, even when their
+# content contains shorter backtick runs. A clean committed corpus stays clean:
+# no repair transaction, event, or follow-up commit.
+for control in inline-double inline-longer; do
+  case "$control" in
+    inline-double) probe='``[[Canonical Display]]``' ;;
+    inline-longer) probe='```one ` two `` [[Canonical Display]]```' ;;
+  esac
+  printf '\n%s\n' "$probe" >> "$SANDBOX/wiki/seed.md"
+  git -C "$SANDBOX" add -- wiki/seed.md
+  git -C "$SANDBOX" commit -qm "test: committed ${control} fixture" -- wiki/seed.md
+  source_hash=$(shasum -a 256 "$SANDBOX/wiki/seed.md" | awk '{print $1}')
+  repair_events_before=$(grep -c '"op": "wikilink-repair"' "$SANDBOX/.vault-meta/pipeline-events.jsonl" || true)
+  before=$(commit_count)
+  out=$(run_hook); rc=$?
+  after_hash=$(shasum -a 256 "$SANDBOX/wiki/seed.md" | awk '{print $1}')
+  repair_events_after=$(grep -c '"op": "wikilink-repair"' "$SANDBOX/.vault-meta/pipeline-events.jsonl" || true)
+  [[ "$source_hash" == "$after_hash" ]] \
+    && ok "sh-${control}-source-unchanged" || bad "sh-${control}-source-unchanged" "source mutated"
+  [[ "$(commit_count)" == "$before" ]] \
+    && ok "sh-${control}-no-repair-commit" || bad "sh-${control}-no-repair-commit" "unexpected commit"
+  [[ "$repair_events_before" == "$repair_events_after" ]] \
+    && ok "sh-${control}-no-repair-event" || bad "sh-${control}-no-repair-event" "repair event emitted"
+  python3 - "$SANDBOX/wiki/seed.md" "$probe" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+path.write_text(path.read_text(encoding="utf-8").replace("\n" + sys.argv[2] + "\n", "\n"), encoding="utf-8")
+PY
+  git -C "$SANDBOX" add -- wiki/seed.md
+  git -C "$SANDBOX" commit -qm "test: remove ${control} fixture" -- wiki/seed.md
+done
+
 # Ambiguous titles, unsupported embeds, and malformed prose remain fail-closed.
 for control in ambiguous embed malformed; do
   case "$control" in

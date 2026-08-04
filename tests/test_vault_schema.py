@@ -108,13 +108,17 @@ with tempfile.TemporaryDirectory(prefix="vault-schema-") as tmp:
     assert_true("canvas/base/alias/escaped links resolve", not [i for i in issues if i.level == "fail"])
     cleaned, neutralized = neutralize_unresolved_wikilinks(
         wiki,
-        "Keep [[Two]] and `[[Inline Example]]`; strip [[Missing Plan|the plan]].\n"
+        "Keep [[Two]], `[[Inline Example]]`, and ``[[Double Inline]]``; "
+        "strip [[Missing Plan|the plan]].\n"
+        "Keep ```one ` two `` [[Long Inline]]``` too.\n"
         "```md\n[[Fenced Example]]\n```\n",
     )
     assert_true(
         "summary neutralizer preserves valid links and code",
         "[[Two]]" in cleaned
         and "`[[Inline Example]]`" in cleaned
+        and "``[[Double Inline]]``" in cleaned
+        and "```one ` two `` [[Long Inline]]```" in cleaned
         and "[[Fenced Example]]" in cleaned,
     )
     assert_true(
