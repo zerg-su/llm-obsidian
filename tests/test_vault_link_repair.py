@@ -145,4 +145,17 @@ no_plan(
     [("alpha.md", "Alpha Canonical", None)],
 )
 
+with tempfile.TemporaryDirectory(prefix="vault-link-repair-fenced-h1-") as raw:
+    root = Path(raw)
+    wiki = fixture(root)
+    target = page("Target Title", heading="Real Heading").replace(
+        "# Real Heading",
+        "````md\n# Fenced Heading\n````\n\n# Real Heading",
+    )
+    (wiki / "concepts" / "target.md").write_text(target, encoding="utf-8")
+    (wiki / "source.md").write_text(
+        page("Source", "[[Fenced Heading]]"), encoding="utf-8"
+    )
+    check("fenced H1 is not a repair candidate", build_repair_plan(root) is None)
+
 print(f"\nPassed: {passed}")

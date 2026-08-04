@@ -237,10 +237,28 @@ def extract_related(frontmatter: dict[str, Any]) -> list[str]:
     return [item for item in _as_list(frontmatter.get("related")) if isinstance(item, str)]
 
 
-def _strip_code(text: str) -> str:
-    text = re.sub(r"^```.*?^```[ \t]*$", "", text, flags=re.M | re.S)
-    text = re.sub(r"^~~~.*?^~~~[ \t]*$", "", text, flags=re.M | re.S)
-    return re.sub(r"`[^`\n]*`", "", text)
+def _fence_transition(
+    line: str, fence: tuple[str, int] | None
+) -> tuple[bool, tuple[str, int] | None]:
+    stripped = line.lstrip()
+    match = re.match(r"^(`{3,}|~{3,})", stripped)
+    marker = match.group(1) if match else ""
+    if fence is not None:
+        closed = marker.startswith(fence[0]) and len(marker) >= fence[1]
+        return True, None if closed else fence
+    if marker:
+        return True, (marker[0], len(marker))
+    return False, None
+
+
+def _prose_without_fences(text: str) -> str:
+    rendered: list[str] = []
+    fence: tuple[str, int] | None = None
+    for line in text.splitlines(keepends=True):
+        is_code, fence = _fence_transition(line, fence)
+        if not is_code:
+            rendered.append(line)
+    return "".join(rendered)
 
 
 def _split_link_inner(inner: str) -> tuple[str, str]:
@@ -295,16 +313,8 @@ def rewrite_wikilinks(
     rendered: list[str] = []
     fence: tuple[str, int] | None = None
     for line in text.splitlines(keepends=True):
-        stripped = line.lstrip()
-        fence_match = re.match(r"^(`{3,}|~{3,})", stripped)
-        marker = fence_match.group(1) if fence_match else ""
-        if fence is not None:
-            rendered.append(line)
-            if marker.startswith(fence[0]) and len(marker) >= fence[1]:
-                fence = None
-            continue
-        if marker:
-            fence = (marker[0], len(marker))
+        is_code, fence = _fence_transition(line, fence)
+        if is_code:
             rendered.append(line)
             continue
         parts = re.split(r"(`[^`\n]*`)", line)
@@ -359,7 +369,11 @@ def build_wiki_catalog(wiki: Path) -> WikiCatalog:
             names = [fm.get("title")]
             document = split_document(text)
             if document is not None:
-                heading = re.search(r"^#\s+(.+?)\s*#*\s*$", _strip_code(document[1]), flags=re.M)
+                heading = re.search(
+                    r"^#\s+(.+?)\s*#*\s*$",
+                    _prose_without_fences(document[1]),
+                    flags=re.M,
+                )
                 if heading is not None:
                     names.append(heading.group(1))
             for name in names:
