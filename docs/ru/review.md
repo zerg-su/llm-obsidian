@@ -15,6 +15,27 @@ context, пишет только typed outbox/callback и не может исп
 Risk policy не включает Full автоматически. Model alias разрешается через
 `config/model-routing.toml`; hardcoded model names в skills и runners запрещены.
 
+## Review плана
+
+План запускается только через code-owned facade:
+
+```bash
+python3 scripts/task-review-runner.py plan \
+  --worktree "$(pwd)" \
+  --plan wiki/plans/<exact-plan>.md
+```
+
+Facade всегда выбирает `purpose=intent`, до provider start проверяет единственный
+Outcome Contract и независимые design/dispositions/evidence-map artifacts. Для
+обычного single-parent commit, который меняет exact plan path, base выводится как
+`HEAD^`; иначе нужен полный lowercase `--base <OID>`. ContextPacket и prompt
+содержат exact base/head и literal команды `review-inspect.py`.
+
+Design-only исправление с typed resolution и exact Git delta продолжает retained
+lanes. Изменение Outcome, disposition или evidence map требует amendment и fresh
+boundary. Legacy `current --plan` без явных совместимых purpose/boundary
+отклоняется до запуска reviewer.
+
 ## Жизненный цикл finding
 
 1. Harness замораживает точный HEAD, baseline, plan hash и review policy.

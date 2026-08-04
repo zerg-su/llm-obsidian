@@ -47,6 +47,10 @@ are additive; digest drift stales them. Evidence paths are repo-relative.
 
 Current purpose review adds `--purpose <intent|implementation|release>
 --boundary-input <json>`; ContextPacket, identity, question and budget bind it.
+Plan review is never a legacy `current --plan` default. Use the code-owned
+`plan --plan <repository-relative-plan>` facade, which always selects `intent`,
+compiles the protected artifacts, and resolves exact base/head OIDs before any
+provider start.
 
 ## Outcome-first judgment
 
@@ -69,10 +73,13 @@ completely. Verify findings against code; rejection requires technical evidence.
 
 1. Run the state facade. For a dispatched v3/v4 task:
    `python3 <vault-root>/scripts/task-review-runner.py run --worktree
-   <worktree>`. For a current/non-dispatched checkout:
+   <worktree>`. For a plan:
+   `python3 <checkout>/scripts/task-review-runner.py plan --worktree <checkout>
+   --plan <plan>`, adding an exact `--base` unless HEAD is a single-parent
+   commit that changes that exact plan. For another current/non-dispatched checkout:
    `python3 <checkout>/scripts/task-review-runner.py current --worktree
    <checkout>`, adding requested `--deep`, explicit `--full`, `--cross-model`,
-   alias-backed overrides, and approved `--plan`. The idempotent facade starts,
+   alias-backed overrides, and an explicit compatible purpose/boundary. The idempotent facade starts,
    resumes, or returns a receipt; `review-runner.py` stays low-level.
 2. Keep ContextPacket/outbox in owner-only scratch and product read-only. Each
    lane has one parent session and deterministic one-shot child round; submit
@@ -82,6 +89,9 @@ completely. Verify findings against code; rejection requires technical evidence.
    checkpoint/surface, once for simple and twice per Deep or Full lane. Every
    parent verifies a shared new HEAD; minor findings do not force a round.
 4. The executor records typed rulings/checks and escalates protected boundaries.
+   A plan finding may rebind retained lanes only when the exact Git delta changes
+   the design artifact alone; Outcome, dispositions, or evidence-map changes
+   require an amendment and fresh boundary.
 5. After accepted receipts, terminal approval exits the provider before closing
    only its surface. Archive only exact operation/worktree/HEAD/profile evidence.
 6. One explicit changed scope/context boundary permits one compact
