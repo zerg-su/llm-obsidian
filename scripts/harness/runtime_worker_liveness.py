@@ -1,6 +1,7 @@
 """Extracted runtime-worker responsibility mixin."""
 
 from __future__ import annotations
+from dataclasses import replace
 from .runtime_worker import *
 from .runtime_worker import (
     _atomic_json,
@@ -18,6 +19,224 @@ from .runtime_worker import (
 
 
 class RuntimeWorkerLivenessMixin:
+
+    def callback_submit_attention(self, reason: str) -> None:
+        marker = self.spec_path.parent / "callback-submit-attention.json"
+        value = {
+            "schema_version": 1,
+            "operation_id": self.spec["operation_id"],
+            "run_id": self.spec["run_id"],
+            "reason": reason,
+            "status": "attention-required",
+        }
+        if marker.is_file() and not marker.is_symlink():
+            try:
+                if json.loads(marker.read_text(encoding="utf-8")) == value:
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass
+        _atomic_json(marker, value)
+        try:
+            current = self.store.read(
+                self.spec["owner_id"], self.spec["operation_id"]
+            )
+            if current.state not in TERMINAL and current.state != "attention-required":
+                self.store.transition(
+                    self.spec["owner_id"],
+                    self.spec["operation_id"],
+                    "attention-required",
+                    reason=AttentionReason.ATTENTION_REQUIRED,
+                )
+        except Exception:
+            pass
+
+    def inspect_callback_submit_recovery(
+        self, record: object, process_status: str
+    ) -> None:
+        try:
+            generation, operation_id, run_id, callback_path = _callback_target(
+                self.spec
+            )
+            target_sha256 = _bounded_file_sha256(
+                self.spec["callback_registration"]
+            )
+            if not target_sha256:
+                raise RuntimeWorkerError("callback target digest is unavailable")
+        except RuntimeWorkerError:
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return
+
+        observed_at = self.clock()
+        generation_identity = (
+            f"{generation}:{operation_id}:{run_id}:{target_sha256}"
+        )
+        if generation_identity != self.callback_generation_identity:
+            self.callback_generation_identity = generation_identity
+            try:
+                target_created_at = self.spec["callback_registration"].stat().st_mtime
+            except OSError:
+                target_created_at = observed_at
+            self.callback_generation_progress_at = min(
+                observed_at, target_created_at
+            )
+            self.callback_idle_observations = 0
+            self.callback_prompt_observations = 0
+            self.callback_recovery_input_digest = ""
+            self.callback_recovery_input_reads = 0
+            self.callback_recovery_digest = ""
+            self.callback_recovery_reads = 0
+
+        self.callback_prompt_observations += 1
+        if self.latest_callback_prompt_class == "idle-prompt":
+            self.callback_idle_observations += 1
+        else:
+            self.callback_idle_observations = 0
+
+        input_artifact, self.callback_recovery_input_digest, self.callback_recovery_input_reads = observe_review_artifact(
+            callback_path.with_name(".review-input.json"),
+            self.callback_recovery_input_digest,
+            self.callback_recovery_input_reads,
+        )
+        callback_artifact, self.callback_recovery_digest, self.callback_recovery_reads = observe_review_artifact(
+            callback_path,
+            self.callback_recovery_digest,
+            self.callback_recovery_reads,
+        )
+        receipt_sha256 = _current_callback_receipt_sha256(self.spec_path.parent)
+        receipt_artifact = (
+            ArtifactEvidence("stable", receipt_sha256)
+            if receipt_sha256
+            else ArtifactEvidence()
+        )
+        current = self.liveness_controller.current_state()
+        if current is None:
+            self.liveness_controller.observe(
+                LivenessEvidence(
+                    observed_at=observed_at,
+                    process_status=process_status,
+                    operation_revision=record.revision,
+                    operation_state=record.state,
+                    callback_sha256=callback_artifact.sha256,
+                    receipt_sha256=receipt_artifact.sha256,
+                ),
+                self.liveness_policy,
+            )
+            current = self.liveness_controller.current_state()
+        if current is None:
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return
+
+        try:
+            surface_status = self.cmux_adapter.status(self.spec["surface_id"])
+        except Exception:
+            surface_status = "unknown"
+        exact_resources = (
+            record.resources.surface_id == self.spec["surface_id"]
+            and record.resources.process_group == self.handle.process_group
+            and record.resources.process_identity == self.handle.process_identity
+        )
+        if not exact_resources:
+            surface_status = "unknown"
+        evidence = CallbackSubmitEvidence(
+            observed_at=observed_at,
+            generation_progress_at=self.callback_generation_progress_at,
+            callback_deadline_at=record.deadline_at,
+            operation_id=operation_id,
+            run_id=run_id,
+            lane_id=record.lane_id,
+            generation=generation,
+            expected_operation_id=operation_id,
+            expected_run_id=run_id,
+            expected_lane_id=record.lane_id,
+            expected_generation=generation,
+            target_sha256=target_sha256,
+            expected_target_sha256=target_sha256,
+            operation_state=record.state,
+            process_status=process_status,
+            surface_status=surface_status,
+            prompt_class=self.latest_callback_prompt_class,
+            stable_idle_observations=self.callback_idle_observations,
+            input_artifact=input_artifact,
+            callback_artifact=callback_artifact,
+            receipt_artifact=receipt_artifact,
+            nudge_count=current.nudge_count,
+            restart_count=current.restart_count,
+        )
+        if (
+            self.callback_prompt_observations < 2
+            and input_artifact.state in {"missing", "unstable"}
+            and callback_artifact.state in {"missing", "unstable"}
+            and receipt_artifact.state == "missing"
+        ):
+            return
+        binding_sha256 = callback_submit_binding_sha256(evidence)
+        if current.callback_submit_binding == binding_sha256:
+            evidence = replace(
+                evidence, recovery_status=current.callback_submit_status
+            )
+        elif current.callback_submit_binding:
+            self.callback_submit_attention("callback-submit-stale-generation")
+            return
+        decision = classify_callback_submit(evidence, self.callback_submit_policy)
+        if decision.action in {"submit-typed-input", "accept-callback"}:
+            self.inspect_callback()
+            return
+        if decision.action == "attention-required":
+            self.callback_submit_attention(decision.reason)
+            return
+        if decision.action == "reserve-submit-recovery":
+            if not self.liveness_controller.reserve_callback_submit(binding_sha256):
+                return
+        elif decision.action != "send-reserved-recovery":
+            return
+
+        # Reservation is durable. Re-read every artifact and target immediately
+        # before the single provider-facing effect.
+        if _bounded_file_sha256(self.spec["callback_registration"]) != target_sha256:
+            self.callback_submit_attention("callback-submit-stale-generation")
+            return
+        for artifact_path in (
+            callback_path.with_name(".review-input.json"),
+            callback_path,
+            self.spec_path.parent / "callback-receipt.json",
+        ):
+            if artifact_path.exists() or artifact_path.is_symlink():
+                self.inspect_callback()
+                return
+        input_path = callback_path.with_name(".review-input.json")
+        submit_command = shlex.join(
+            (
+                sys.executable,
+                str(self.trusted_vault / "scripts/harness/review_submit.py"),
+                "--worktree",
+                str(self.spec["product_root"]),
+                "--state-dir",
+                str(callback_path.parent),
+                "--input-file",
+                str(input_path),
+            )
+        )
+        message = (
+            "Harness callback-submit recovery: write the already completed "
+            f"review JSON only to {input_path}, then run this exact command: "
+            f"{submit_command}. Do not write the callback manually."
+        )
+        if len(message.encode()) > 4096:
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return
+        try:
+            self.cmux_adapter.send(self.spec["surface_id"], message)
+            self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        except Exception:
+            try:
+                self.liveness_controller.mark_callback_submit_uncertain(
+                    binding_sha256
+                )
+            except Exception:
+                pass
+            self.callback_submit_attention("callback-submit-effect-uncertain")
+            return
+        self.liveness_controller.mark_callback_submit_sent(binding_sha256)
 
     def restart_for_liveness(self, action_id: str) -> None:
         supervisor = OperationSupervisor(
@@ -120,6 +339,12 @@ class RuntimeWorkerLivenessMixin:
                     self.handle.process_group, self.handle.process_identity
                 )
             )
+            if (
+                record.spec.route.profile == "reviewer-callback"
+                and process_status != "dead"
+            ):
+                self.inspect_callback_submit_recovery(record, process_status)
+                return
             typed_result_path = self.spec["cwd"] / self.spec["task_summary_pointer"]
             if self.spec["callback_mode"] == "task-summary" and (
                 self._pipeline_name == "engineering/fix"

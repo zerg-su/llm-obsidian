@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import json
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,11 +18,18 @@ from harness.callback_submit_recovery import (  # noqa: E402
     ArtifactEvidence,
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
+    callback_submit_binding_sha256,
+    classify_callback_prompt,
     classify_callback_submit,
 )
 from harness.runtime_callback_io import (  # noqa: E402
     observe_review_artifact,
     submit_stable_review_input,
+)
+from harness.liveness import (  # noqa: E402
+    LivenessController,
+    LivenessEvidence,
+    LivenessPolicy,
 )
 
 
@@ -80,6 +88,90 @@ check(
     and len(decision.action_id) == 64,
     decision,
 )
+check(
+    "recovery binding excludes artifact races but includes exact generation",
+    callback_submit_binding_sha256(idle())
+    == callback_submit_binding_sha256(
+        idle(callback_artifact=artifact("stable", "c" * 64))
+    )
+    and callback_submit_binding_sha256(idle())
+    != callback_submit_binding_sha256(idle(expected_generation=4)),
+)
+check(
+    "screen classifier recognizes only exact provider idle prompts",
+    classify_callback_prompt("claude", "review complete\n❯") == "idle-prompt"
+    and classify_callback_prompt("codex", "review complete\n›") == "idle-prompt"
+    and classify_callback_prompt("claude", "working") == "active"
+    and classify_callback_prompt(
+        "claude", "1. Allow\n2. Deny\nEnter", interactive=True
+    )
+    == "unknown"
+    and classify_callback_prompt(
+        "claude", "trust dialog", interactive=True, recognized=True
+    )
+    == "permission",
+)
+
+with tempfile.TemporaryDirectory(prefix="callback-submit-reservation.") as raw:
+    controller = LivenessController(Path(raw) / "liveness")
+    controller.observe(
+        LivenessEvidence(
+            observed_at=0,
+            process_status="alive",
+            operation_revision=1,
+            operation_state="awaiting-callback",
+        ),
+        LivenessPolicy.default(),
+    )
+    binding = "9" * 64
+
+    def reserve() -> bool:
+        return controller.reserve_callback_submit(binding)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reservations = list(pool.map(lambda _index: reserve(), range(2)))
+    reserved = controller.current_state()
+    check(
+        "concurrent reconcile reserves the shared nudge exactly once",
+        sum(reservations) == 1
+        and reserved is not None
+        and reserved.nudge_count == 1
+        and reserved.callback_submit_binding == binding
+        and reserved.callback_submit_status == "reserved",
+        (reservations, reserved),
+    )
+    check(
+        "reservation replay is an idempotent no-op",
+        not controller.reserve_callback_submit(binding),
+    )
+    controller.mark_callback_submit_sent(binding)
+    controller.mark_callback_submit_sent(binding)
+    sent = controller.current_state()
+    check(
+        "same write-ahead receipt becomes sent idempotently",
+        sent is not None
+        and sent.nudge_count == 1
+        and sent.callback_submit_binding == binding
+        and sent.callback_submit_status == "sent",
+        sent,
+    )
+    receipt = json.loads(
+        (controller.root / "receipts" / f"callback-submit-{binding}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "generation receipt is content-free and sent",
+        set(receipt)
+        == {
+            "schema_version",
+            "binding_sha256",
+            "nudge_count",
+            "status",
+        }
+        and receipt["status"] == "sent",
+        receipt,
+    )
 
 with tempfile.TemporaryDirectory(prefix="callback-input-fast-path.") as raw:
     root = Path(raw)

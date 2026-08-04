@@ -129,6 +129,12 @@ class RuntimeWorkerControlMixin:
         decision = classify(
             self.spec["runtime"], screen, closure_armed=record.state == "exiting"
         )
+        self.latest_callback_prompt_class = classify_callback_prompt(
+            self.spec["runtime"],
+            screen,
+            interactive=decision.interactive,
+            recognized=decision.recognized,
+        )
         self.latest_screen_digest = digest
         self.latest_prompt_state = (
             "interactive" if decision.interactive else "non-interactive"

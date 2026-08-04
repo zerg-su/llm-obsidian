@@ -18,7 +18,7 @@ PROMPT_CLASSES = frozenset(
     {"active", "idle-prompt", "permission", "unknown", "missing"}
 )
 OWNERSHIP_STATES = frozenset({"alive", "dead", "unknown", "missing"})
-RECOVERY_STATES = frozenset({"none", "reserved", "sent"})
+RECOVERY_STATES = frozenset({"none", "reserved", "sent", "uncertain"})
 TERMINAL_OPERATION_STATES = frozenset(
     {"complete", "cancelled", "failed", "timed-out"}
 )
@@ -140,6 +140,50 @@ def _decision(
         reason=reason,
         model_effect=model_effect,
     )
+
+
+def callback_submit_binding_sha256(evidence: CallbackSubmitEvidence) -> str:
+    """Return the durable exact current/expected generation identity."""
+
+    identity = json.dumps(
+        {
+            "operation_id": evidence.operation_id,
+            "run_id": evidence.run_id,
+            "lane_id": evidence.lane_id,
+            "generation": evidence.generation,
+            "target_sha256": evidence.target_sha256,
+            "expected_operation_id": evidence.expected_operation_id,
+            "expected_run_id": evidence.expected_run_id,
+            "expected_lane_id": evidence.expected_lane_id,
+            "expected_generation": evidence.expected_generation,
+            "expected_target_sha256": evidence.expected_target_sha256,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(identity.encode()).hexdigest()
+
+
+def classify_callback_prompt(
+    runtime: str,
+    screen: str,
+    *,
+    interactive: bool = False,
+    recognized: bool = False,
+) -> str:
+    """Reduce a bounded provider screen to a content-free recovery class."""
+
+    if not screen:
+        return "missing"
+    if interactive:
+        return "permission" if recognized else "unknown"
+    lines = [line.strip() for line in screen.splitlines() if line.strip()]
+    if not lines:
+        return "missing"
+    idle_marker = {"claude": "❯", "codex": "›"}.get(runtime)
+    if idle_marker and lines[-1] == idle_marker:
+        return "idle-prompt"
+    return "active"
 
 
 def _attention(
@@ -285,6 +329,8 @@ def classify_callback_submit(
         if evidence.nudge_count != policy.max_nudges:
             return _attention(evidence, "callback-submit-evidence-malformed")
         return _decision(evidence, state="recovery-sent")
+    if evidence.recovery_status == "uncertain":
+        return _attention(evidence, "callback-submit-effect-uncertain")
 
     if evidence.prompt_class == "active" or evidence.stable_idle_observations < 2:
         return _decision(evidence, state="working")
