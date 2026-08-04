@@ -60,6 +60,10 @@ packages were published for them.
   approved no-improvement stop condition removed the candidate, its router and
   compiler registrations, and its temporary 8,000-byte registry cap. The
   reusable quality contracts and typed rejection evidence remain in docs.
+- Split the newly added review-recovery facade into cohesive authorization,
+  legacy-round, and resolution-evidence modules, then centralized the durable
+  research callback payload/identity shared by producer and recovery. Focused
+  tests pin the refactor and the accepted-callback result of explicit `cancel`.
 
 ### Compatibility
 

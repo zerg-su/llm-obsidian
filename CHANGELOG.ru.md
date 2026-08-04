@@ -66,6 +66,10 @@
   control уже выполнил все четыре обязательных поведения. Stop condition удалил
   candidate, router/compiler registrations и временный cap реестра 8 000 bytes.
   Reusable quality contracts и typed rejection evidence сохранены в docs.
+- Новый review-recovery facade разделён на связные модули authorization,
+  legacy-round и resolution-evidence; durable payload/identity research
+  callback централизован между producer и recovery. Focused tests фиксируют
+  refactor и результат explicit `cancel` после accepted callback.
 
 ### Совместимость
 

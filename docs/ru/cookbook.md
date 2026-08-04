@@ -35,6 +35,17 @@
 16. **Ускорить крупную цель:** `implementation-plan` по независимым ownership →
     отдельный `save-plan` и `dispatch` на каждую часть → отдельный `reap` →
     approved integration plan. Полный сценарий: [параллельные задачи](parallel-tasks.md).
+17. **Проверить одной моделью:** explicit single-model Deep route из
+    [руководства по review](review.md); fallback задаётся явно, а не угадывается.
+18. **Восстановиться после callback failure:** `harness-cli.py status` →
+    `inspect <operation-id>` → поддерживаемый `diagnose`/`reconcile`; таблица
+    решений — в [troubleshooting](troubleshooting.md).
+19. **Обновить установленную систему:** preflight → backup → apply → validate →
+    rollback при несоответствии; точная процедура — в
+    [upgrading-and-releasing](upgrading-and-releasing.md).
+20. **Собрать release candidate:** cheap gates → full gates → exact-HEAD review
+    → owner-authorized publish; tag или release никогда не выводятся из зелёного
+    теста автоматически.
 
 ### Runnable recipe: одна обычная длительная задача
 
