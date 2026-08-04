@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-08-02
+updated: 2026-08-04
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,10 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-04: [[LLM Obsidian 2.6.3 Russian technical documentation]] — finalized task result (`c-000105`)
+- 2026-08-04: [[LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization]] — bounded default runtime.env bootstrap (`c-000103`)
+- 2026-08-04: [[LLM Obsidian 2.6.3 — manual parallel task documentation amendment]] — handbook получает manual parallel task workflow без обещания… (`c-000102`)
+- 2026-08-04: [[LLM Obsidian 2.6.3 — review recovery inclusion disposition]] — D-264-06 и D-264-08 включены в 2.6.3 (`c-000101`)
 - 2026-08-02: [[LLM Obsidian 2.6 paired design rollback validation]] — finalized task result (`c-000094`)
 - 2026-08-02: [[LLM Obsidian 2.6 common dogfood fixes]] — finalized task result (`c-000092`)
 - 2026-08-02: [[LLM Obsidian 2.6 dogfood RT2 fresh review packet identity]] — finalized task result (`c-000090`)
@@ -45,10 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[LLM Obsidian 2.6 paired design baseline]] — finalized task result (`c-000074`)
 - 2026-08-01: [[LLM Obsidian 2.6 paired fix baseline]] — finalized task result (`c-000072`)
 - 2026-08-01: [[LLM Obsidian 2.6 upstream live drift verification]] — finalized task result (`c-000066`)
-- 2026-08-01: [[LLM Obsidian 2.6 skill quality baseline audit]] — finalized task result (`c-000064`)
-- 2026-08-01: [[LLM Obsidian 2.6.0 technical foundation]] — finalized task result (`c-000061`)
-- 2026-08-01: runbook [[RT10 Foundation Verification]] — RT10 foundation verification checks (`c-000060`)
-- 2026-08-01: [[Superpowers vs Matt Pocock Skills]] — upstream comparison refreshed from pins; live drift unverified (`c-000058`)
 
 ## Active Threads
 

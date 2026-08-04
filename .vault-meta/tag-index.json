@@ -15,8 +15,15 @@
     "wiki/backlog.md",
     "wiki/concepts/cherry-picks.md"
   ],
+  "bootstrap": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md"
+  ],
   "brand": [
     "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "capability-decision": [
+    "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md"
   ],
   "capture": [
     "wiki/backlog.md"
@@ -80,11 +87,20 @@
   "dashboard": [
     "wiki/meta/dashboard.md"
   ],
+  "decision": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md",
+    "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md"
+  ],
   "design": [
     "wiki/concepts/SVG Diagram Style Guide.md"
   ],
   "diagrams": [
     "wiki/concepts/SVG Diagram Style Guide.md"
+  ],
+  "documentation": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
+    "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md"
   ],
   "dogfood": [
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
@@ -121,6 +137,7 @@
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
     "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
+    "wiki/meta/reviews/Cross-model review — 55ae92aa-33f1-411d-b2c4-a3f88441bb18 — 3b5a88d6a4a6.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
@@ -142,7 +159,8 @@
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-5-model-authored-custom-pipelines.md",
     "wiki/plans/2026-07-31-223011-llm-obsidian-2-5-10-real-task-dogfood.md",
-    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
   ],
   "historical-migration": [
     "wiki/plans/2026-07-19-v2-1-1-code-owned-optimization-plan.md"
@@ -179,7 +197,12 @@
     "wiki/concepts/LLM Wiki Pattern.md"
   ],
   "llm-obsidian": [
-    "wiki/concepts/cherry-picks.md"
+    "wiki/concepts/cherry-picks.md",
+    "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md",
+    "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md",
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
   ],
   "llm-wiki": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -205,7 +228,13 @@
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md",
     "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md",
-    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
+    "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
+    "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md",
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+  ],
+  "mcp": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md"
   ],
   "memory": [
     "wiki/concepts/DragonScale Memory.md"
@@ -240,6 +269,9 @@
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-baseline.md",
     "wiki/plans/2026-08-01-222348-llm-obsidian-2-6-paired-fix-post-change.md"
   ],
+  "parallel-tasks": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md"
+  ],
   "person": [
     "wiki/entities/Andrej Karpathy.md"
   ],
@@ -268,7 +300,10 @@
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt3-mixed-review-rulings.md",
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt4-callback-fallback-prototype.md",
     "wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md",
-    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
+    "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
+    "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md",
+    "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md",
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
@@ -303,12 +338,14 @@
     "wiki/repos/LLM Obsidian 2.6 skill workstream A.md",
     "wiki/repos/LLM Obsidian 2.6 skill workstream C.md",
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
-    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
+    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
+    "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
     "wiki/meta/sessions/LLM Obsidian 2.5.0 implementation.md",
-    "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md"
+    "wiki/meta/sessions/LLM Obsidian v2.0.8 RD upstream audit.md",
+    "wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md"
   ],
   "release-spec": [
     "wiki/plans/2026-07-30-224926-llm-obsidian-2-4-typed-pipeline-composition.md",
@@ -336,7 +373,8 @@
     "wiki/repos/LLM Obsidian 2.6 skill workstream A.md",
     "wiki/repos/LLM Obsidian 2.6 skill workstream C.md",
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
-    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md"
+    "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
+    "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md"
   ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -351,6 +389,7 @@
     "wiki/meta/reviews/Cross-model review — 49137cfd-5cb4-4ec0-a555-cf0a882c9c42 — 27f3e34be030.md",
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
     "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
+    "wiki/meta/reviews/Cross-model review — 55ae92aa-33f1-411d-b2c4-a3f88441bb18 — 3b5a88d6a4a6.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
     "wiki/meta/reviews/Cross-model review — 7ccfc543-9d3f-4e0d-9a44-89378ec073cd — 7d7bbd1d3ef8.md",
@@ -389,6 +428,9 @@
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 03ced8bcc75e.md",
     "wiki/meta/reviews/Cross-model review — v2.1.2-acceptance-final-fixes — 2bb75362ff9c.md"
   ],
+  "review-recovery": [
+    "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md"
+  ],
   "rt10": [
     "wiki/runbooks/RT10 Foundation Verification.md"
   ],
@@ -417,6 +459,9 @@
   "todo": [
     "wiki/backlog.md"
   ],
+  "unattended": [
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
+  ],
   "upstream": [
     "wiki/comparisons/Superpowers vs Matt Pocock Skills.md"
   ],
@@ -438,6 +483,15 @@
   ],
   "v2-6-2": [
     "wiki/plans/2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress.md"
+  ],
+  "v2-6-3": [
+    "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md",
+    "wiki/decisions/LLM Obsidian 2.6.3 — manual parallel task documentation amendment.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — E5 capability disposition.md",
+    "wiki/meta/LLM Obsidian 2.6.3 — review recovery inclusion disposition.md"
+  ],
+  "v2-6-4": [
+    "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md"
   ],
   "v2.6": [
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",

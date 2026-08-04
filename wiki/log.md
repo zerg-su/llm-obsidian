@@ -2,7 +2,7 @@
 type: meta
 title: "Operation Log"
 created: 2026-07-05
-updated: 2026-08-03
+updated: 2026-08-04
 tags:
   - meta
   - log
@@ -26,6 +26,40 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 Парсинг недавних записей: `grep "^## \[" wiki/log.md | head -10`
 
 ---
+
+## [2026-08-04] reap | llm-obsidian-2-6-3-docs-v2
+
+`c-000105` [[LLM Obsidian 2.6.3 Russian technical documentation]]. ## Outcome
+
+- Final HEAD `99c4658562e868c9659c6722631f21d1228fa37a` contains the 24-page Russian handbook, complete 34-skill input/output/permission/example reference, documentation quality/source contracts, compiled existing-registry PipelineSpec, protected-source rulings, deterministic docs gates, dogfood evidence, and 2.6.3 RC documentation. The handbook includes a full manual task-parallelism workflow: independent plan ownership, concurrent dispatch, exact task/operation identity, `final` ve
+
+## [2026-08-04] decision | LLM Obsidian 2.6.3 MCP runtime bootstrap authorization
+
+`c-000103` [[LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization]] — bounded default runtime.env bootstrap authority.
+
+## [2026-08-04] decision | LLM Obsidian 2.6.3 — manual parallel task documentation amendment
+
+- Добавить практический manual multi-plan dispatch/join guide без runtime task-graph scope.
+
+## [2026-08-04] decision | 2.6.3 review recovery inclusion — D-264-06 и D-264-08 входят в текущий релиз как узкие regression-covered repairs
+
+## [2026-08-04 06:12] dispatch | llm-obsidian-2-6-3-docs-v2
+
+Spawned an approved unattended task session (cmux `AF07B0D4-A097-49C0-B8D4-265E7F97698C`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-3-docs-v2`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-3-docs-v2` from `v2.6.2`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-03 10:38] dispatch | llm-obsidian-2-6-1-fresh-review-selector
+
+Spawned an approved unattended task session (cmux `56206135-9D63-4051-9061-CC041C3A18A3`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-1-fresh-review-selector`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-1-fresh-review-selector` from `task/llm-obsidian-2-6-1-review-topology`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-03 04:05] backlog | add — llm-obsidian-2-7-project-scoped-task-namespaces
+
+## [2026-08-03 04:00] backlog | add — llm-obsidian-2-7-project-task-system
+
+## [2026-08-03 02:50] dispatch | llm-obsidian-2-6-1-review-topology
+
+Spawned an approved unattended task session (cmux `32CE8F51-F5FC-42A2-860A-F6E979E7B472`, runtime codex, model gpt-5.6-sol) in split placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-1-review-topology`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-1-review-topology` from `release/2.6.1`. Plan: `/Users/zak/Projects/llm-obsidian/wiki/plans/2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review.md`. Pre-loaded context: none. Awaiting typed review and final reap.
+
+## [2026-08-03] backlog | add — llm-obsidian-2-7-code-owned-task-graph
 
 ## [2026-08-03 19:57] dispatch | llm-obsidian-2-6-2-status-v4
 

@@ -14,11 +14,14 @@ sessions: []
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_18 pages, updated 2026-08-03_
+_21 pages, updated 2026-08-04_
 
+- [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-04 `c-000097`
+- [[2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya]] — executed, 2026-08-04 `c-000107`
+- [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]] — pending, 2026-08-04 `c-000099`
 - [[2026-07-19-v2-1-1-code-owned-optimization-plan]] — executed, 2026-08-03 `c-000098`
 - [[2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review]] — pending, 2026-08-03 `c-000096`
-- [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-03 `c-000097`
+- [[2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs]] — pending, 2026-08-03 `c-000106`
 - [[2026-08-01-134355-llm-obsidian-2-6-0-edinyy-reliz-technical-foundation-i]] — pending, 2026-08-02 `c-000059`
 - [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog]] — executed, 2026-08-02 `c-000079`
 - [[2026-08-02-010436-llm-obsidian-2-6-dogfood-rt2-fresh-review-packet]] — executed, 2026-08-02 `c-000080`

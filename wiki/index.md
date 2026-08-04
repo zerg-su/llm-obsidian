@@ -26,7 +26,7 @@ sessions:
 
 # Wiki Index
 
-Last updated: <!-- AUTO-DATE --> 2026-08-03 | Контекст: свежий вольт из шаблона llm-obsidian
+Last updated: <!-- AUTO-DATE --> 2026-08-04 | Контекст: свежий вольт из шаблона llm-obsidian
 
 Navigation: [[overview]] | [[log]] | [[hot]] | [[dashboard]] | [[Wiki Map]] | [[getting-started]]
 
