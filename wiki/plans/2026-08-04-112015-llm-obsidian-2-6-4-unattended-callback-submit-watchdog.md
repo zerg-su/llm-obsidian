@@ -133,6 +133,7 @@ Writer inventory frozen before change: `task_escalation.py`, `runtime_worker_cus
 - dispatched lifecycle берёт base из trusted `initial_head_sha`;
 - записывает exact base/head OIDs в ContextPacket и literal `review-inspect status/log/diff/commit` commands;
 - invalid/ambiguous boundary завершается до `RuntimeSessionManager.start`, что доказывается zero provider sessions.
+- plan subject и control boundary разделены: Outcome Contract digest остаётся frozen, а resolution связывает reviewed/resolved plan digests и exact Git delta; изменение только plan subject не делает control-plan stale и verification продолжается в тех же retained lanes без нового provider/session.
 
 Legacy `current --plan` без явного compatible purpose/boundary больше не молча default'ится в implementation: он возвращает actionable typed error до provider launch и предлагает `plan`. `review-inspect.py` сохраняет strict lowercase-OID ingress. `config/dcg/task.toml` получает anchored allow только если whole-command negative matrix доказывает безопасное поведение установленной DCG; broad Bash запрещён.
 
@@ -252,11 +253,11 @@ Shared-file rules:
 
 - **files/responsibility:** `task-review-runner.py`, `task_review_current.py`, new `task_review_plan.py`, `task_review_request.py`, `task_review_context.py`, `review-inspect.py` only if bounded metadata is necessary, `config/dcg/task.toml`, `dcg-test-suite.sh`, new `test_plan_review_facade.py`, `test_review_inspect.py`, `test_dcg_assets.sh`, review skill/docs.
 - **consumes:** plan bytes/Outcome Contract, exact current/dispatched lifecycle base source, existing runtime manager and strict OID validator.
-- **produces:** `plan` subcommand with automatic intent boundary; literal exact commands; pre-provider typed rejection for ambiguous legacy invocation; anchored escalation allow.
-- **failing evidence:** `current --plan` defaults to implementation and starts two providers; current review missing base; dispatched/current exact command snapshots; shell/destructive negative controls.
+- **produces:** `plan` subcommand with automatic intent boundary; distinct frozen control digest and mutable subject-plan reviewed/resolved digests; literal exact commands; pre-provider typed rejection for ambiguous legacy invocation; anchored escalation allow.
+- **failing evidence:** `current --plan` defaults to implementation and starts two providers; resolving its findings changes plan bytes and current verification rejects `review program plan digest is stale`; current review missing base; dispatched/current exact command snapshots; shell/destructive negative controls.
 - **minimal green:** common single-parent plan commit auto base, otherwise explicit exact base; no symbolic resolver/broad Bash.
 - **refactor seam:** plan boundary compiler is deep module; current facade delegates once.
-- **focused verification:** assert zero `RuntimeSessionManager.start` on invalid combinations and correct two-lane same-session verification; E9, E11.
+- **focused verification:** assert zero `RuntimeSessionManager.start` on invalid combinations; unchanged Outcome plus exact plan delta continues both retained lanes with zero new sessions; Outcome mutation still fails closed; E9, E11.
 
 ### Slice 8 — one-shot Wiki self-heal
 
@@ -364,6 +365,7 @@ Findings use same-session verification. Scope/public-interface/security/migratio
 | D-264-09 | Reviewer improvises symbolic ref because exact base absent | review boundary | `included`, Slice 7 |
 | D-264-10 | Inline reviewer Python assumes tuple is dict | ad-hoc probe | `not-a-defect` until repo contract reproducer exists |
 | D-264-11 | Plan review defaulted to implementation, launched two expensive Opus sessions and rejected missing code | plan-review facade | `included`, Slice 7; wrong/ambiguous invocation must start zero providers |
+| D-264-12 | Same-session plan finding resolution rejects the corrected plan as stale because control-plan and review subject share one digest | plan-review facade | `included`, Slice 7; frozen Outcome, exact plan delta, retained lanes, zero new sessions |
 
 New D-264 entry is recorded before task continuation. Disposition changes only through Slice 6 authority record and never grants unrelated fix scope.
 
