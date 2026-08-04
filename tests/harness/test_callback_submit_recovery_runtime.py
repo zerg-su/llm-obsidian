@@ -458,6 +458,24 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
         and not input_path.exists(),
         accepted,
     )
+    rearm_receipt["status"] = "prepared"
+    (state_root / "callback-timeout-rearm.json").write_text(
+        json.dumps(rearm_receipt, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    worker.callback_handled = False
+    worker.inspect_callback()
+    repaired_rearm = json.loads(
+        (state_root / "callback-timeout-rearm.json").read_text(encoding="utf-8")
+    )
+    check(
+        "accepted callback replay repairs a prepared rearm receipt without effect",
+        repaired_rearm["status"] == "accepted"
+        and json.loads(
+            (state_root / "callback-receipt.json").read_text(encoding="utf-8")
+        )["status"]
+        == "duplicate",
+        repaired_rearm,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
