@@ -42,6 +42,8 @@ test-harness:
 	@python3 tests/harness/test_runtime_task_summary.py
 	@python3 tests/harness/test_runtime_research.py
 	@python3 tests/harness/test_review_finalization.py
+	@python3 tests/harness/test_task_review_mechanism_recovery.py
+	@python3 tests/harness/test_task_review_flow_units.py
 	@python3 tests/harness/test_dispatch_runtime.py
 	@python3 tests/harness/test_runtime_inventory.py
 	@python3 tests/harness/test_release_blocker_runtime.py

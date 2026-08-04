@@ -36,7 +36,7 @@ typed summary и approved review.
 
 ```bash
 python3 scripts/harness-cli.py status
-python3 scripts/harness-cli.py inspect
+python3 scripts/harness-cli.py inspect <operation-id>
 git status --short
 ```
 
@@ -49,12 +49,13 @@ Diff содержит только утверждённые файлы; evidence
 - План ещё не утверждён: не dispatch; вернитесь к clarify/plan review.
 - cmux недоступен: видимый dispatch заблокирован; обычную read-only работу можно
   продолжить вручную, но нельзя имитировать harness lifecycle.
-- Неизвестная ownership/callback state: `inspect`, затем `reconcile`; при
+- Неизвестная ownership/callback state: `inspect <operation-id>`, затем
+  `reconcile`; при
   `attention-required` остановитесь и следуйте typed reason.
 - Review нашёл scope/security boundary: не чините за пределами плана; поднимите
   escalation.
-- Executor завершился: используйте `resume` exact operation, не создавайте
-  новый task с тем же смыслом.
+- Executor завершился: используйте `resume <operation-id>` для exact operation,
+  не создавайте новый task с тем же смыслом.
 
 ## Источники истины
 

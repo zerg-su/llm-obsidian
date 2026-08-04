@@ -20,11 +20,15 @@
 
 ### Добавлено
 
-- Добавлен версионированный русский технический handbook из 23 страниц с
+- Добавлен версионированный русский технический handbook из 24 страниц с
   маршрутами для новичка, оператора, автора PipelineSpec и maintainer'а;
   полным каталогом 34 skills и обоих invocation branches; runnable examples с
   expected result, verification, failure, recovery и authority; а также
   документацией release candidate.
+- Добавлено практическое руководство по ручному fan-out/join: одна большая цель
+  делится на независимо владеемые планы, одновременно исполняется в нескольких
+  task worktree и собирается из принятых exact HEAD без заявления об
+  автоматическом task graph.
 - Добавлены `make test-docs`, mutation-sensitive проверки handbook,
   source/coverage matrix, три walkthrough в disposable checkout и строгий
   documentation PipelineSpec, компилируемый только из существующих primitives,
@@ -34,8 +38,9 @@
 
 ### Исправлено
 
-- Accepted protected-research callback сохраняется как terminal completion при
-  exact cleanup. Exact-identity cancelled fetch receipt может восстановиться
+- Любой exact accepted callback сохраняется как terminal completion при owned
+  cleanup; protected research служит release-регрессией. Exact-identity
+  cancelled fetch receipt может восстановиться
   только при nonterminal research parent; mismatch digest, run, request или
   artifact не создаёт synthesis child и не запускает provider. Terminal
   composition никогда не возобновляется, cancelled-synthesis recovery не

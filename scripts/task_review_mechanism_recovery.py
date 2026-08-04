@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,100 +31,110 @@ from task_review_shared import (
     TaskReviewError,
     _read_json,
 )
-from task_review_recovery_support import (
-    _RecoveryRoundStore,
-    _approved_summary_resolution,
-    _authorization_payload,
-    _persist_authorization,
+from task_review_boundary_authorization import (
+    authorization_payload,
+    persist_authorization,
 )
+from task_review_legacy_rounds import RecoveryRoundStore
+from task_review_resolution_evidence import approved_summary_resolution
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
 
 
+@dataclass(frozen=True)
+class _RecoveryContext:
+    state: dict[str, Any]
+    attention: dict[str, Any]
+    attention_path: Path
+    meta: dict[str, Any]
+    vault: Path
+    worktree: Path
+    runtime_root: Path
+    task_id: str
+    gate: ReviewGateController
+    run: Any
+    store: OperationStore
+    current_context: Any
+    context_manifest: Path
+
+
 def _running_recovery_receipt(
-    *,
-    state: dict[str, Any],
-    attention_id: str,
-    meta: dict[str, Any],
-    vault: Path,
-    worktree: Path,
-    runtime_root: Path,
-    run: Any,
+    recovery: _RecoveryContext,
 ) -> dict[str, Any] | None:
-    stored_boundary = state.get("fresh_boundary")
+    stored_boundary = recovery.state.get("fresh_boundary")
     if not (
-        state.get("fresh_reevaluation_used") is True
-        and state.get("status") in {"fresh-reevaluation", "reviewing", "verifying"}
+        recovery.state.get("fresh_reevaluation_used") is True
+        and recovery.state.get("status")
+        in {"fresh-reevaluation", "reviewing", "verifying"}
         and isinstance(stored_boundary, dict)
-        and attention_id in str(stored_boundary.get("reason") or "")
+        and str(recovery.attention.get("id") or "")
+        in str(stored_boundary.get("reason") or "")
     ):
         return None
     return _receipt(
-        status="verifying" if state.get("status") == "verifying" else "reviewing",
-        meta=meta,
-        vault=vault,
-        worktree=worktree,
-        runtime_root=runtime_root,
-        context_manifest=runtime_root / run.execution.request.context.manifest,
-        run=run,
+        status=(
+            "verifying"
+            if recovery.state.get("status") == "verifying"
+            else "reviewing"
+        ),
+        meta=recovery.meta,
+        vault=recovery.vault,
+        worktree=recovery.worktree,
+        runtime_root=recovery.runtime_root,
+        context_manifest=(
+            recovery.runtime_root
+            / recovery.run.execution.request.context.manifest
+        ),
+        run=recovery.run,
     )
 
 
 def _approved_summary_recovery(
-    *,
-    state: dict[str, Any],
-    attention: dict[str, Any],
-    attention_path: Path,
-    meta: dict[str, Any],
-    vault: Path,
-    worktree: Path,
-    runtime_root: Path,
-    task_id: str,
-    gate: ReviewGateController,
-    run: Any,
-    current_context: Any,
+    recovery: _RecoveryContext,
 ) -> dict[str, Any] | None:
-    previous_context = run.execution.request.context
-    axes = run.execution.request.policy.axes
+    previous_context = recovery.run.execution.request.context
+    axes = recovery.run.execution.request.policy.axes
     simple_axis = axes[0] if len(axes) == 1 else ""
     is_summary_recovery = (
-        state.get("status") == "approved"
-        and state.get("fresh_reevaluation_used") is not True
-        and state.get("final_results") not in ({}, None)
-        and run.execution.request.policy.depth == "simple"
+        recovery.state.get("status") == "approved"
+        and recovery.state.get("fresh_reevaluation_used") is not True
+        and recovery.state.get("final_results") not in ({}, None)
+        and recovery.run.execution.request.policy.depth == "simple"
         and bool(simple_axis)
         and review_axis_responsibility(simple_axis) == "holistic"
-        and previous_context.head_sha == current_context.head_sha
+        and previous_context.head_sha == recovery.current_context.head_sha
         and previous_context.verification_profile
-        == current_context.verification_profile
+        == recovery.current_context.verification_profile
         and previous_context.verification_profile_sha256
-        == current_context.verification_profile_sha256
+        == recovery.current_context.verification_profile_sha256
         and bool(previous_context.implementer_summary_sha256)
         and previous_context.implementer_summary_sha256
-        != current_context.implementer_summary_sha256
+        != recovery.current_context.implementer_summary_sha256
     )
     if not is_summary_recovery:
         return None
-    resolution = _approved_summary_resolution(
-        gate=gate,
-        state=state,
-        task_id=task_id,
+    resolution = approved_summary_resolution(
+        gate=recovery.gate,
+        state=recovery.state,
+        task_id=recovery.task_id,
         simple_axis=simple_axis,
-        current_head=current_context.head_sha,
+        current_head=recovery.current_context.head_sha,
     )
     bundle = _recovery_resolution_bundle(
-        worktree,
-        task_id,
+        recovery.worktree,
+        recovery.task_id,
         resolution,
-        current_context.head_sha,
-        str(state.get("resolution_transport_identity_sha256") or ""),
+        recovery.current_context.head_sha,
+        str(
+            recovery.state.get("resolution_transport_identity_sha256") or ""
+        ),
     )
     current_context, context_manifest = _context(
-        meta,
-        vault,
-        worktree,
-        runtime_root,
-        task_id,
+        recovery.meta,
+        recovery.vault,
+        recovery.worktree,
+        recovery.runtime_root,
+        recovery.task_id,
         resolution_bundle=bundle,
     )
     boundary = ReviewScopeBoundary(
@@ -132,35 +143,35 @@ def _approved_summary_recovery(
         review_context_sha256(current_context),
         (
             "resolved mechanism escalation "
-            f"{attention.get('id')}: review refreshed summary bytes only"
+            f"{recovery.attention.get('id')}: review refreshed summary bytes only"
         ),
     )
-    authorization = _authorization_payload(
-        task_id=task_id,
+    authorization = authorization_payload(
+        task_id=recovery.task_id,
         boundary=boundary,
-        attention=attention,
-        attention_path=attention_path,
+        attention=recovery.attention,
+        attention_path=recovery.attention_path,
     )
-    name, path = _persist_authorization(
-        gate,
+    name, path = persist_authorization(
+        recovery.gate,
         authorization,
         error_label="approved summary recovery",
     )
-    gate.authorize_fresh_summary_boundary(
-        run,
+    recovery.gate.authorize_fresh_summary_boundary(
+        recovery.run,
         boundary=boundary,
         context=current_context,
         authorization_pointer=name,
         authorization_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
     )
     return _launch_authorized_task_review(
-        meta=meta,
-        vault=vault,
-        worktree=worktree,
-        runtime_root=runtime_root,
-        task_id=task_id,
-        gate=gate,
-        run=run,
+        meta=recovery.meta,
+        vault=recovery.vault,
+        worktree=recovery.worktree,
+        runtime_root=recovery.runtime_root,
+        task_id=recovery.task_id,
+        gate=recovery.gate,
+        run=recovery.run,
         context=current_context,
         context_manifest=context_manifest,
         boundary=boundary,
@@ -210,66 +221,53 @@ def _assert_quiescent_stale_boundary(
 
 
 def _recover_stale_boundary(
-    *,
-    state: dict[str, Any],
-    attention: dict[str, Any],
-    attention_path: Path,
-    meta: dict[str, Any],
-    vault: Path,
-    worktree: Path,
-    runtime_root: Path,
-    task_id: str,
-    gate: ReviewGateController,
-    run: Any,
-    store: OperationStore,
-    current_context: Any,
-    context_manifest: Path,
+    recovery: _RecoveryContext,
 ) -> dict[str, Any]:
     _assert_quiescent_stale_boundary(
-        state=state,
-        run=run,
-        store=store,
-        task_id=task_id,
+        state=recovery.state,
+        run=recovery.run,
+        store=recovery.store,
+        task_id=recovery.task_id,
     )
     boundary = ReviewScopeBoundary(
         "context",
-        review_context_sha256(run.execution.request.context),
-        review_context_sha256(current_context),
+        review_context_sha256(recovery.run.execution.request.context),
+        review_context_sha256(recovery.current_context),
         (
             "resolved mechanism escalation "
-            f"{attention.get('id')}: replace the dead verification runtime"
+            f"{recovery.attention.get('id')}: replace the dead verification runtime"
         ),
     )
-    authorization = _authorization_payload(
-        task_id=task_id,
+    authorization = authorization_payload(
+        task_id=recovery.task_id,
         boundary=boundary,
-        attention=attention,
-        attention_path=attention_path,
+        attention=recovery.attention,
+        attention_path=recovery.attention_path,
     )
-    name, path = _persist_authorization(
-        gate,
+    name, path = persist_authorization(
+        recovery.gate,
         authorization,
         error_label="review mechanism recovery",
     )
-    if state.get("status") in {"verifying", "awaiting-resolution"}:
-        gate._mark_attention(run.execution.lanes)
-    if gate.read().get("status") != "fresh-boundary-authorized":
-        gate.authorize_fresh_boundary(
-            run,
+    if recovery.state.get("status") in {"verifying", "awaiting-resolution"}:
+        recovery.gate._mark_attention(recovery.run.execution.lanes)
+    if recovery.gate.read().get("status") != "fresh-boundary-authorized":
+        recovery.gate.authorize_fresh_boundary(
+            recovery.run,
             boundary=boundary,
             authorization_pointer=name,
             authorization_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
         )
     return _launch_authorized_task_review(
-        meta=meta,
-        vault=vault,
-        worktree=worktree,
-        runtime_root=runtime_root,
-        task_id=task_id,
-        gate=gate,
-        run=run,
-        context=current_context,
-        context_manifest=context_manifest,
+        meta=recovery.meta,
+        vault=recovery.vault,
+        worktree=recovery.worktree,
+        runtime_root=recovery.runtime_root,
+        task_id=recovery.task_id,
+        gate=recovery.gate,
+        run=recovery.run,
+        context=recovery.current_context,
+        context_manifest=recovery.context_manifest,
         boundary=boundary,
         max_verify_iterations=0,
     )
@@ -315,37 +313,11 @@ def recover_task_review_for_mechanism(
     gate = ReviewGateController(
         _gate_root(vault, task_id),
         runtime,
-        _RecoveryRoundStore(store),
+        RecoveryRoundStore(store),
     )
     state = gate.read()
     run = gate.rehydrate()
-    running = _running_recovery_receipt(
-        state=state,
-        attention_id=str(attention.get("id") or ""),
-        meta=meta,
-        vault=vault,
-        worktree=worktree,
-        runtime_root=runtime_root,
-        run=run,
-    )
-    if running is not None:
-        return running
-    summary_recovery = _approved_summary_recovery(
-        state=state,
-        attention=attention,
-        attention_path=attention_path,
-        meta=meta,
-        vault=vault,
-        worktree=worktree,
-        runtime_root=runtime_root,
-        task_id=task_id,
-        gate=gate,
-        run=run,
-        current_context=current_context,
-    )
-    if summary_recovery is not None:
-        return summary_recovery
-    return _recover_stale_boundary(
+    recovery = _RecoveryContext(
         state=state,
         attention=attention,
         attention_path=attention_path,
@@ -360,6 +332,13 @@ def recover_task_review_for_mechanism(
         current_context=current_context,
         context_manifest=context_manifest,
     )
+    running = _running_recovery_receipt(recovery)
+    if running is not None:
+        return running
+    summary_recovery = _approved_summary_recovery(recovery)
+    if summary_recovery is not None:
+        return summary_recovery
+    return _recover_stale_boundary(recovery)
 
 
 def restart_task_review_for_boundary(

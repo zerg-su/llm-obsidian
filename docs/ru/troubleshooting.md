@@ -22,7 +22,7 @@ pwd
 git branch --show-current
 git status --short
 python3 scripts/harness-cli.py status
-python3 scripts/harness-cli.py inspect
+python3 scripts/harness-cli.py inspect <operation-id>
 python3 scripts/validate-vault.py --summary
 ```
 

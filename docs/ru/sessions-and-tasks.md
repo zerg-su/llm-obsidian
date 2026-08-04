@@ -19,7 +19,7 @@ cmux surface не является источником истины.
 
 ```bash
 python3 scripts/harness-cli.py status
-python3 scripts/harness-cli.py inspect
+python3 scripts/harness-cli.py inspect <operation-id>
 python3 scripts/harness-cli.py doctor
 ```
 
@@ -48,5 +48,6 @@ worktree и state. Текущая ветка и cwd совпадают с task c
 
 - [`docs/task-sessions.md`](../task-sessions.md).
 - [`docs/unattended-pipeline-operations.md`](../unattended-pipeline-operations.md).
+- [`parallel-tasks.md`](parallel-tasks.md).
 - [`scripts/harness-cli.py`](../../scripts/harness-cli.py).
 - [`docs/skill-references/failure-repair-contract.md`](../skill-references/failure-repair-contract.md).

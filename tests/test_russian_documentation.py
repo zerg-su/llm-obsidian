@@ -31,6 +31,7 @@ REQUIRED_PAGES = (
     "first-project.md",
     "skills.md",
     "planning.md",
+    "parallel-tasks.md",
     "sessions-and-tasks.md",
     "review.md",
     "pipelines.md",
@@ -53,6 +54,7 @@ GUIDE_PAGES = (
     "getting-started.md",
     "first-project.md",
     "planning.md",
+    "parallel-tasks.md",
     "sessions-and-tasks.md",
     "documentation-pipeline.md",
     "wiki-memory.md",
@@ -75,6 +77,9 @@ GUIDE_SECTIONS = (
 )
 FENCE_RE = re.compile(r"```(json|toml)\s*\n(.*?)```", re.DOTALL)
 LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
+HARNESS_OPERATION_COMMAND_RE = re.compile(
+    r"python3 scripts/harness-cli\.py (inspect|resume|cancel|close)(?:\s|`|$)"
+)
 
 
 def skill_names(root: Path = ROOT) -> tuple[str, ...]:
@@ -129,6 +134,27 @@ def trailing_blank_line_failures(files: tuple[Path, ...]) -> list[str]:
         except ValueError:
             label = path
         failures.append(str(label))
+    return failures
+
+
+def harness_operation_argument_failures(files: tuple[Path, ...]) -> list[str]:
+    """Reject lifecycle examples that omit the required exact operation ID."""
+
+    failures: list[str] = []
+    for page in files:
+        for line_number, line in enumerate(
+            page.read_text(encoding="utf-8").splitlines(), 1
+        ):
+            if not HARNESS_OPERATION_COMMAND_RE.search(line):
+                continue
+            if "<operation-id>" not in line:
+                try:
+                    label = page.relative_to(ROOT)
+                except ValueError:
+                    label = page
+                failures.append(
+                    f"{label}:{line_number}: {line.strip()}"
+                )
     return failures
 
 
@@ -191,6 +217,10 @@ failures.extend(f"invalid fenced data: {item}" for item in fenced_data_failures(
 failures.extend(
     f"trailing blank line: {item}" for item in trailing_blank_line_failures(files)
 )
+failures.extend(
+    f"harness operation command missing <operation-id>: {item}"
+    for item in harness_operation_argument_failures(files)
+)
 
 skills_page = (DOCS / "skills.md")
 skills_body = skills_page.read_text(encoding="utf-8") if skills_page.is_file() else ""
@@ -236,6 +266,15 @@ required_page_tokens = {
         ".vault-meta/release-evidence/v2.6.3-<short-head>.json",
         "git diff --check v2.6.2..HEAD",
     ),
+    "parallel-tasks.md": (
+        "автоматического task graph",
+        "reap.plan_mode=shared",
+        "task_id",
+        "<operation-id>",
+        "integration plan",
+        "resolve-conflict",
+        "$llm-obsidian:dispatch",
+    ),
 }
 for relative, tokens in required_page_tokens.items():
     body = (DOCS / relative).read_text(encoding="utf-8")
@@ -262,6 +301,12 @@ with tempfile.TemporaryDirectory(prefix="russian-docs-gate.") as raw:
     trailing = scratch / "trailing.md"
     trailing.write_text("# Heading\n\n", encoding="utf-8")
     assert trailing_blank_line_failures((trailing,))
+
+    missing_operation = scratch / "missing-operation.md"
+    missing_operation.write_text(
+        "python3 scripts/harness-cli.py inspect\n", encoding="utf-8"
+    )
+    assert harness_operation_argument_failures((missing_operation,))
 
     assert skill_inventory_failures(
         "`save` `/save` `$llm-obsidian:save`",

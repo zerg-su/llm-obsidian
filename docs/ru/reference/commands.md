@@ -30,11 +30,11 @@
 | Команда | Назначение |
 |---|---|
 | `python3 scripts/harness-cli.py status` | Compact lifecycle status |
-| `python3 scripts/harness-cli.py inspect` | Exact ownership/state details |
-| `python3 scripts/harness-cli.py resume` | Resume owned operation |
+| `python3 scripts/harness-cli.py inspect <operation-id>` | Exact ownership/state details |
+| `python3 scripts/harness-cli.py resume <operation-id>` | Resume owned operation |
 | `python3 scripts/harness-cli.py reconcile` | Reconcile typed callback/terminal state |
-| `python3 scripts/harness-cli.py cancel` | Cancel exact operation |
-| `python3 scripts/harness-cli.py close` | Close exact allowed lifecycle |
+| `python3 scripts/harness-cli.py cancel <operation-id>` | Cancel exact operation |
+| `python3 scripts/harness-cli.py close <operation-id>` | Close exact allowed lifecycle |
 | `python3 scripts/harness-cli.py doctor` | Read-only harness diagnosis |
 
 Команды требуют собственные identifiers/arguments; используйте `--help` и

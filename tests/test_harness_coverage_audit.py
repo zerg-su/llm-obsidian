@@ -41,15 +41,19 @@ assert "scripts.task_session_cmux_layout" in audit.source_modules()
 assert "scripts.task_session_store" in audit.source_modules()
 assert "scripts.task_session_store_io" in audit.source_modules()
 for module in (
+    "boundary_authorization",
     "context",
     "current",
+    "delta_packet",
     "finalizing",
     "flow",
     "identity",
+    "legacy_rounds",
     "mechanism_recovery",
     "replay",
     "request",
     "resolution_bundle",
+    "resolution_evidence",
     "resolution_flow",
     "shared",
     "transport",
@@ -58,6 +62,17 @@ for module in (
     "verification_resubmit",
 ):
     assert f"scripts.task_review_{module}" in audit.source_modules()
+
+task_review_sources = {
+    str(path.relative_to(ROOT)) for path in (ROOT / "scripts").glob("task_review*.py")
+}
+manifest_sources = set(audit.MANIFEST.entrypoints) | {
+    path for path, _reason in audit.MANIFEST.excluded_entrypoints
+}
+assert task_review_sources <= manifest_sources, (
+    "task-review production modules missing from harness audit manifest: "
+    + ", ".join(sorted(task_review_sources - manifest_sources))
+)
 assert any(
     path == "scripts/review-runner.py" and reason
     for path, reason in audit.MANIFEST.excluded_entrypoints

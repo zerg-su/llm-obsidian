@@ -32,6 +32,48 @@
     `make test-docs` → existing-registry PipelineSpec compile → `review`.
 15. **Расширить Obsidian view:** `obsidian-markdown` + `obsidian-bases`; `canvas`
     только по явному visual request.
+16. **Ускорить крупную цель:** `implementation-plan` по независимым ownership →
+    отдельный `save-plan` и `dispatch` на каждую часть → отдельный `reap` →
+    approved integration plan. Полный сценарий: [параллельные задачи](parallel-tasks.md).
+
+### Runnable recipe: одна обычная длительная задача
+
+```text
+/save-plan сохрани утверждённый план изменения отчёта
+/dispatch wiki/plans/report-change.md как task report-change
+```
+
+Ожидаемый результат: dispatch возвращает отдельные `task_id`, worktree,
+operation и cmux surface. После terminal callback координатор запускает `reap`;
+готовность проверяется по typed summary и exact-HEAD review, а не по закрытому
+окну.
+
+### Runnable recipe: одна цель, три параллельные задачи
+
+```text
+Разрежь цель на планы report-core, report-cli и report-guide с непересекающимся
+ownership и отдельными evidence. Сохрани и проверь каждый план.
+
+/dispatch wiki/plans/report-core.md как task report-core
+/dispatch wiki/plans/report-cli.md как task report-cli
+/dispatch wiki/plans/report-guide.md как task report-guide
+```
+
+Ожидаемый результат: три независимых worktree выполняют три полных pipeline.
+После их отдельного review/reap создаётся четвёртый integration plan с exact
+child HEAD и общим test packet. Детали и recovery — в
+[руководстве по параллельным задачам](parallel-tasks.md).
+
+### Runnable recipe: документационный проект
+
+```text
+Составь implementation-plan по page slices, укажи источники истины и docs gate.
+Реализуй утверждённый план через TDD, выполни make test-docs и review результата.
+```
+
+Ожидаемый результат: обязательные страницы достижимы из index, примеры
+проверяются детерминированно, PipelineSpec компилируется, а terminal review
+связан с точными байтами документации.
 
 ## Ожидаемый результат и проверка
 

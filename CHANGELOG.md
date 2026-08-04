@@ -14,11 +14,14 @@ packages were published for them.
 
 ### Added
 
-- Added a versioned 23-page Russian technical handbook with explicit routes
+- Added a versioned 24-page Russian technical handbook with explicit routes
   for first-time users, operators, PipelineSpec authors, and maintainers; a
   complete 34-skill invocation catalog; runnable examples with expected,
   verification, failure, recovery, and authority fields; and release-candidate
   documentation.
+- Added a practical manual fan-out/join guide for splitting one large outcome
+  into independently owned plans, dispatching multiple task worktrees, and
+  integrating accepted exact HEADs without claiming an automatic task graph.
 - Added `make test-docs`, mutation-sensitive handbook checks, a source/coverage
   matrix, three disposable-checkout dogfood walkthroughs, and a strict
   documentation PipelineSpec example compiled entirely from the existing
@@ -28,8 +31,9 @@ packages were published for them.
 
 ### Fixed
 
-- Preserved an accepted protected-research callback as terminal completion
-  during exact cleanup. An exact-identity cancelled fetch receipt may recover
+- Preserved any exact accepted callback as terminal completion during owned
+  cleanup; protected research supplies the release regression. An exact-identity
+  cancelled fetch receipt may recover
   only while its research parent is nonterminal; a digest, run, request, or
   artifact mismatch starts no synthesis child or provider. A terminal
   composition is never resurrected, and cancelled-synthesis recovery remains

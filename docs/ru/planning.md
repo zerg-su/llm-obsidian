@@ -31,6 +31,12 @@ Stop: любое изменение CLI behavior требует отдельно
 Для multi-file работы вызовите `implementation-plan`; для сохранения approved
 version — `save-plan`. Review плана проверяет intent до product mutation.
 
+Если работа естественно делится на независимые ownership-зоны, не превращайте
+их в один многодневный task. Сформируйте отдельный approved plan для каждой
+части, запустите их как независимые dispatch task и соберите принятые exact HEAD
+через отдельный integration plan. Полный порядок и критерии безопасного разреза
+описаны в [руководстве по параллельным задачам](parallel-tasks.md).
+
 ## Ожидаемый результат и проверка
 
 Хороший план позволяет назначить каждый файл одному slice, объясняет порядок
@@ -53,4 +59,5 @@ version — `save-plan`. Review плана проверяет intent до produc
 - [`skills/implementation-plan/SKILL.md`](../../skills/implementation-plan/SKILL.md).
 - [`skills/save-plan/SKILL.md`](../../skills/save-plan/SKILL.md).
 - [`skills/review/SKILL.md`](../../skills/review/SKILL.md).
+- [`parallel-tasks.md`](parallel-tasks.md).
 - [`AGENTS.md`](../../AGENTS.md), Failure-to-repair и Core rules.

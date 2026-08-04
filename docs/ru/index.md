@@ -8,6 +8,7 @@
 
 - Новый пользователь: [быстрый старт](getting-started.md) → [ментальная модель](mental-model.md) → [первый проект](first-project.md).
 - Постоянный пользователь и оператор: [skills](skills.md) → [wiki и память](wiki-memory.md) → [операции](operations.md) → [устранение неполадок](troubleshooting.md).
+- Координатор крупной работы: [планирование](planning.md) → [ручная декомпозиция и параллельные задачи](parallel-tasks.md) → [сессии и задачи](sessions-and-tasks.md).
 - Автор pipeline: [pipeline](pipelines.md) → [PipelineSpec DSL](pipeline-dsl.md) → [документационный pipeline](documentation-pipeline.md).
 - Разработчик и maintainer: [разработка](development.md) → [тестирование](testing.md) → [расширение](extending.md) → [обновление и релиз](upgrading-and-releasing.md).
 
@@ -18,6 +19,7 @@
 - [Первый проект от идеи до reap](first-project.md)
 - [Полный каталог skills](skills.md)
 - [Планирование](planning.md)
+- [Ручная декомпозиция и параллельные задачи](parallel-tasks.md)
 - [Сессии и задачи](sessions-and-tasks.md)
 - [Review](review.md)
 - [Pipeline и встроенные профили](pipelines.md)

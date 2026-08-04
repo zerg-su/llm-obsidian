@@ -44,7 +44,7 @@ make test-docs
 ## Ожидаемый результат и проверка
 
 Первый тест печатает `published documentation pipeline compiles through the
-strict contract` и завершает suite без ошибок. `make test-docs` проверяет 23
+strict contract` и завершает suite без ошибок. `make test-docs` проверяет 24
 страницы, 34 skills, relative links, structured examples, source matrix и
 повторно компилирует spec. Никакая operation при этих командах не запускается.
 

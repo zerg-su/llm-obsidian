@@ -24,7 +24,7 @@ from harness.contracts import (  # noqa: E402
 )
 from harness.pipeline_builtins import compiled_builtin  # noqa: E402
 from harness.state_machine import TERMINAL  # noqa: E402
-from harness.store import OperationStore  # noqa: E402
+from harness.store import OperationStore, StoreError  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewOperationRequest,
@@ -40,6 +40,10 @@ from task_review_context import (  # noqa: E402
 )
 from task_review_mechanism_recovery import (  # noqa: E402
     recover_task_review_for_mechanism,
+)
+from task_review_legacy_rounds import RecoveryRoundStore  # noqa: E402
+from task_review_resolution_evidence import (  # noqa: E402
+    approved_summary_resolution,
 )
 from task_review_shared import TaskReviewError  # noqa: E402
 
@@ -146,6 +150,34 @@ class LegacyRoundStore:
         return self.store.create(
             stored_spec, lane_id=lane_id, run_id=run_id
         )
+
+
+class RejectingRoundStore:
+    """Force the compatibility path while retaining the original error."""
+
+    def __init__(
+        self,
+        existing: OperationRecord | None,
+        original: StoreError,
+        *,
+        read_error: StoreError | None = None,
+    ) -> None:
+        self.existing = existing
+        self.original = original
+        self.read_error = read_error
+        self.create_calls = 0
+        self.read_calls = 0
+
+    def create(self, *_args: object, **_kwargs: object) -> OperationRecord:
+        self.create_calls += 1
+        raise self.original
+
+    def read(self, *_args: object, **_kwargs: object) -> OperationRecord:
+        self.read_calls += 1
+        if self.read_error is not None:
+            raise self.read_error
+        assert self.existing is not None
+        return self.existing
 
 
 @dataclass(frozen=True)
@@ -382,6 +414,199 @@ def replace_record(
     fixture.store.save(
         replace(record, **updates, revision=record.revision + 1),
         expected_revision=record.revision,
+    )
+
+
+def check_legacy_round_rejection(
+    label: str,
+    *,
+    requested_spec: object,
+    existing: OperationRecord | None,
+    lane_id: str,
+    run_id: str,
+    read_error: StoreError | None = None,
+) -> None:
+    original = StoreError(f"original {label}")
+    store = RejectingRoundStore(existing, original, read_error=read_error)
+    adapter = RecoveryRoundStore(store)  # type: ignore[arg-type]
+    try:
+        adapter.create(requested_spec, lane_id=lane_id, run_id=run_id)
+    except StoreError as exc:
+        check(
+            f"legacy round adapter preserves original error for {label}",
+            exc is original and store.create_calls == 1 and store.read_calls == 1,
+        )
+    else:
+        raise AssertionError(f"legacy round adapter accepted {label}")
+
+
+with tempfile.TemporaryDirectory(prefix="legacy-round-guards.") as raw:
+    fixture = build_fixture(
+        Path(raw), gate_status="awaiting-resolution", legacy_round_specs=True
+    )
+    terminalize(fixture.store, fixture.task_id, fixture.child_id)
+    stored = fixture.store.read(fixture.task_id, fixture.child_id)
+    requested = replace(
+        stored.spec,
+        parent_operation_id=fixture.parent_id,
+    )
+    original_record = stored
+
+    success_error = StoreError("compatibility candidate")
+    success_store = RejectingRoundStore(stored, success_error)
+    recovered = RecoveryRoundStore(success_store).create(
+        requested, lane_id=stored.lane_id, run_id=stored.run_id
+    )
+    check(
+        "legacy round adapter rehydrates exact terminal identity in memory only",
+        recovered.spec == requested
+        and stored == original_record
+        and success_store.create_calls == 1
+        and success_store.read_calls == 1,
+    )
+
+    guard_cases = (
+        (
+            "wrong kind",
+            replace(requested, kind="verification"),
+            stored,
+            stored.lane_id,
+            stored.run_id,
+        ),
+        (
+            "empty parent identity",
+            replace(requested, parent_operation_id=""),
+            stored,
+            stored.lane_id,
+            stored.run_id,
+        ),
+        (
+            "additional specification drift",
+            requested,
+            replace(
+                stored,
+                spec=replace(stored.spec, context_manifest="drift.json"),
+            ),
+            stored.lane_id,
+            stored.run_id,
+        ),
+        (
+            "lane mismatch",
+            requested,
+            stored,
+            "different-lane",
+            stored.run_id,
+        ),
+        (
+            "run mismatch",
+            requested,
+            stored,
+            stored.lane_id,
+            "different-run",
+        ),
+        (
+            "nonterminal state",
+            requested,
+            replace(stored, state="created"),
+            stored.lane_id,
+            stored.run_id,
+        ),
+        (
+            "owned resources",
+            requested,
+            replace(
+                stored,
+                resources=OwnedResources(surface_id="legacy-surface"),
+            ),
+            stored.lane_id,
+            stored.run_id,
+        ),
+        (
+            "pending effect",
+            requested,
+            replace(
+                stored,
+                pending_effect="callback-write",
+                effect_id="callback-write",
+                effect_outcome=EffectOutcome.PENDING,
+            ),
+            stored.lane_id,
+            stored.run_id,
+        ),
+    )
+    for label, spec, existing, lane_id, run_id in guard_cases:
+        check_legacy_round_rejection(
+            label,
+            requested_spec=spec,
+            existing=existing,
+            lane_id=lane_id,
+            run_id=run_id,
+        )
+
+    check_legacy_round_rejection(
+        "unreadable existing record",
+        requested_spec=requested,
+        existing=None,
+        lane_id=stored.lane_id,
+        run_id=stored.run_id,
+        read_error=StoreError("unreadable existing record"),
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="summary-resolution-evidence.") as raw:
+    fixture = build_fixture(Path(raw))
+    current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fixture.product,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    evidence_name = "summary-resolution.json"
+    write_json(
+        fixture.gate.root / evidence_name,
+        {
+            "schema_version": 1,
+            "operation_id": fixture.task_id,
+            "axis": "openai-holistic",
+            "reviewed_head_sha": "a" * 40,
+            "resolved_head_sha": current_head,
+            "fix_delta_sha256": "b" * 64,
+            "previous_finding_ids": ["finding-1"],
+            "resolutions": [
+                {
+                    "finding_id": "finding-1",
+                    "disposition": "applied",
+                    "rationale": "The exact summary boundary was repaired.",
+                    "follow_up": "",
+                }
+            ],
+        },
+    )
+    resolution = approved_summary_resolution(
+        gate=fixture.gate,
+        state={"resolution_evidence": {"openai-holistic:0": evidence_name}},
+        task_id=fixture.task_id,
+        simple_axis="openai-holistic",
+        current_head=current_head,
+    )
+    check(
+        "approved summary resolution binds one safe relative evidence pointer",
+        resolution.operation_id == fixture.task_id
+        and resolution.axis == "openai-holistic"
+        and resolution.resolved_head_sha == current_head,
+    )
+
+    expect_error(
+        "approved summary resolution rejects ambiguous evidence",
+        lambda: approved_summary_resolution(
+            gate=fixture.gate,
+            state={"resolution_evidence": {}},
+            task_id=fixture.task_id,
+            simple_axis="openai-holistic",
+            current_head=current_head,
+        ),
+        "resolution boundary is invalid",
     )
 
 
