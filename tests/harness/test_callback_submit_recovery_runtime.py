@@ -57,7 +57,9 @@ def check(label: str, value: bool, detail: object = "") -> None:
 
 fixture = json.loads(
     (
-        ROOT / "tests/harness/fixtures/v2.6.3-missing-review-submit.json"
+        ROOT
+        / "tests/harness/fixtures/callback-submit"
+        / "v2.6.3-missing-review-submit.json"
     ).read_text(encoding="utf-8")
 )
 incident = fixture["incident"]
