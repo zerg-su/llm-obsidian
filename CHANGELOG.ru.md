@@ -39,6 +39,8 @@
   subscription-compatible профиль. User/project/local setting sources и
   обычная Claude memory исключены; skills, marketplace autoinstall, MCP, сеть,
   product writes и произвольная status-line command остаются отключены.
+- Зафиксировано, что неопределённость чужого stale controller сохраняет
+  текущий bar и устраняется только exact harness diagnose/reconcile/cancel.
 
 ### Изменено
 

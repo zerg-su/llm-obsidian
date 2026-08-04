@@ -1,4 +1,11 @@
-"""Content-free aggregation for the cmux harness workspace progress bar."""
+"""Content-free aggregation for the cmux harness workspace progress bar.
+
+Selection, rendering, and publication intentionally remain one projection
+boundary: the same uncertainty decision that selects a truthful label must
+also decide whether clearing the existing UI is safe.  Splitting those steps
+would permit transport code to erase progress after selection failed closed.
+The reusable cmux hierarchy decoder remains isolated in the adapter layer.
+"""
 
 from __future__ import annotations
 

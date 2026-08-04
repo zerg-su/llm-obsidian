@@ -34,6 +34,8 @@ packages were published for them.
   subscription-compatible profile. User/project/local setting sources and
   ordinary Claude memory are excluded; skills, marketplace autoinstall, MCP,
   network, product writes, and arbitrary status-line commands stay disabled.
+- Documented that foreign stale-controller uncertainty preserves the current
+  bar and must be recovered through exact harness diagnose/reconcile/cancel.
 
 ### Changed
 

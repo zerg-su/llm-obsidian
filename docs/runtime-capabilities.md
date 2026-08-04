@@ -46,10 +46,13 @@ task counter. It aggregates only nonterminal top-level dispatch, review, and
 research controllers whose exact origin belongs to the target coordinator
 workspace. A controller with a recorded exact surface that is known missing is
 excluded in every state; a failed live-tree probe preserves the existing bar and
-never changes operation state. Terminal controllers are authoritative over
-stale descendants, and an empty selection issues workspace-scoped
-`clear-progress`. Claude and Codex use the same content-free label and the same
-`set-progress`/`clear-progress` transport.
+never changes operation state. Unscoped uncertainty from another owner's stale
+nonterminal controller also preserves the existing bar. Diagnose that exact
+owner with `harness-cli.py diagnose`, then use its exact `reconcile` or `cancel`
+path; never hand-edit OperationStore records. Terminal controllers are
+authoritative over stale descendants, and an empty selection issues
+workspace-scoped `clear-progress`. Claude and Codex use the same content-free
+label and the same `set-progress`/`clear-progress` transport.
 
 Durable review pages are intentionally separate from telemetry. In unattended
 final reap, the lifecycle contract hashes the coordinator-generated marker,
