@@ -47,6 +47,14 @@ from .liveness import (
     LivenessEvidence,
     LivenessPolicy,
 )
+from .callback_submit_recovery import (
+    ArtifactEvidence,
+    CallbackSubmitEvidence,
+    CallbackSubmitPolicy,
+    callback_submit_binding_sha256,
+    classify_callback_prompt,
+    classify_callback_submit,
+)
 from .pipelines import reconcile_pipeline
 from .review_finalization import task_review_status
 from .state_machine import TERMINAL
@@ -109,7 +117,9 @@ from .runtime_callback_io import (
     _research_input_provenance,
     _submit_failure_requires_attention,
     _write_once_json,
+    observe_review_artifact,
     publish_callback_wake,
+    submit_stable_review_input,
 )
 from .runtime_provider import (
     RESEARCH_PATH,
@@ -344,11 +354,11 @@ def enforce_callback_deadline(
     return False
 
 
-def run(spec_path: Path, *, poll_seconds: float=0.1, checkpoint_probe: Callable[[str, str], str] | None=None, cmux_adapter: object | None=None, review_launcher: Callable[[Path, Path], None] | None=None, verification_runner: Callable[..., subprocess.CompletedProcess[str]] | None=None) -> int:
+def run(spec_path: Path, *, poll_seconds: float=0.1, checkpoint_probe: Callable[[str, str], str] | None=None, cmux_adapter: object | None=None, review_launcher: Callable[[Path, Path], None] | None=None, verification_runner: Callable[..., subprocess.CompletedProcess[str]] | None=None, callback_submit_policy: CallbackSubmitPolicy | None=None, clock: Callable[[], float] | None=None) -> int:
     from .runtime_worker_execution import RuntimeWorkerExecution
     worker = RuntimeWorkerExecution()
     worker.contain_provider_start_failure = _contain_provider_start_failure
-    return worker.execute(spec_path, poll_seconds=poll_seconds, checkpoint_probe=checkpoint_probe, cmux_adapter=cmux_adapter, review_launcher=review_launcher, verification_runner=verification_runner)
+    return worker.execute(spec_path, poll_seconds=poll_seconds, checkpoint_probe=checkpoint_probe, cmux_adapter=cmux_adapter, review_launcher=review_launcher, verification_runner=verification_runner, callback_submit_policy=callback_submit_policy, clock=clock)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
 
-from ..contracts import OwnedResources
+from ..contracts import OwnedResources, to_dict
 from ..state_machine import TERMINAL
 from .review import (
     ReviewContext,
@@ -25,6 +26,7 @@ from .review_gate_contracts import (
     ReviewGateDecision,
     ReviewGateRun,
     ReviewScopeBoundary,
+    _atomic_json,
     _read_json,
     _result_from_payload,
     review_context_sha256,
@@ -44,6 +46,113 @@ class ReviewGateRecoveryMixin(
     ReviewGateResolutionMixin,
 ):
     """Stable recovery mixin combining exact recovery policy seams."""
+
+    def _superseded_cleanup_receipts(
+        self,
+        previous: ReviewGateRun,
+        replacement: ReviewGateRun,
+        authorization: Mapping[str, object],
+    ) -> tuple[Path, ...]:
+        """Publish exact cleanup authority only after replacement startup."""
+
+        store_root = Path(self.round_store.root).resolve()
+        source_authorization_path = (
+            self.root / str(authorization.get("pointer") or "")
+        ).resolve()
+        source_authorization = _read_json(source_authorization_path)
+        authorization_path = (
+            store_root
+            / "review-supersession-authorizations"
+            / (
+                previous.execution.request.policy.operation_id
+                + ".json"
+            )
+        )
+        if authorization_path.exists():
+            if _read_json(authorization_path) != source_authorization:
+                raise ValueError(
+                    "review supersession authorization changed"
+                )
+        else:
+            _atomic_json(authorization_path, source_authorization)
+        authorization_pointer = authorization_path.relative_to(
+            store_root
+        ).as_posix()
+        authorization_sha256 = hashlib.sha256(
+            authorization_path.read_bytes()
+        ).hexdigest()
+        replacement_by_axis = {
+            lane.axis: lane for lane in replacement.execution.lanes
+        }
+        receipts: list[Path] = []
+        for old_lane in previous.execution.lanes:
+            new_lane = replacement_by_axis.get(old_lane.axis)
+            if new_lane is None:
+                raise ValueError("fresh review replacement lane is missing")
+            old_record = self.round_store.read(
+                old_lane.owner_id, old_lane.operation_id
+            )
+            new_record = self.round_store.read(
+                new_lane.owner_id, new_lane.operation_id
+            )
+            old_sha256 = hashlib.sha256(
+                json.dumps(
+                    to_dict(old_record),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            receipt = {
+                "schema_version": 1,
+                "status": "authorized",
+                "superseded_owner_id": old_lane.owner_id,
+                "superseded_review_operation_id": (
+                    previous.execution.request.policy.operation_id
+                ),
+                "superseded_operation_id": old_lane.operation_id,
+                "superseded_run_id": old_record.run_id,
+                "superseded_record_sha256": old_sha256,
+                "replacement_owner_id": new_lane.owner_id,
+                "replacement_review_operation_id": (
+                    replacement.execution.request.policy.operation_id
+                ),
+                "replacement_operation_id": new_lane.operation_id,
+                "replacement_run_id": new_record.run_id,
+                "store_sha256": hashlib.sha256(
+                    str(store_root).encode()
+                ).hexdigest(),
+                "authorization_pointer": authorization_pointer,
+                "authorization_sha256": str(
+                    authorization_sha256
+                ),
+            }
+            path = (
+                self.root
+                / "superseded-review-cleanup"
+                / f"{old_lane.operation_id}.json"
+            )
+            if path.exists():
+                if _read_json(path) != receipt:
+                    raise ValueError(
+                        "superseded review cleanup receipt changed"
+                    )
+            else:
+                _atomic_json(path, receipt)
+            receipts.append(path)
+        return tuple(receipts)
+
+    def reconcile_superseded_review_cleanup(self) -> tuple[object, ...]:
+        """Retry every durable superseded-review cleanup receipt."""
+
+        root = self.root / "superseded-review-cleanup"
+        if not root.is_dir() or root.is_symlink():
+            return ()
+        results: list[object] = []
+        for path in sorted(root.glob("*.json")):
+            if path.name.endswith("-result.json"):
+                continue
+            results.append(self.runtime.cleanup_superseded_review(path))
+        return tuple(results)
 
     def stage_finalizing_reverification(
         self,
@@ -319,7 +428,7 @@ class ReviewGateRecoveryMixin(
             evidence={},
         )
         try:
-            return self._start_execution(
+            fresh = self._start_execution(
                 request=request,
                 origin_surface=origin_surface,
                 cwd=cwd,
@@ -330,6 +439,11 @@ class ReviewGateRecoveryMixin(
                 prompt_pointers=prompt_pointers,
                 prepare_lane=prepare_lane,
             )
+            for receipt in self._superseded_cleanup_receipts(
+                run, fresh, authorization
+            ):
+                self.runtime.cleanup_superseded_review(receipt)
+            return fresh
         except Exception:
             self._mark_attention(run.execution.lanes)
             raise

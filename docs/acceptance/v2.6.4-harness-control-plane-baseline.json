@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "base_ref": "v2.6.3",
+  "stages": [
+    {"stage":"plan-step","owner":"harness","module":"scripts/harness/runtime_worker_spec.py","test":"tests/harness/test_custom_runtime.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"loop","owner":"harness","module":"scripts/harness/runtime_worker_loop.py","test":"tests/harness/test_contract_state_edge_matrix.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"review","owner":"harness","module":"scripts/harness/runtime_worker_review_bridge.py","test":"tests/harness/test_runtime_task_summary.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"verification","owner":"harness","module":"scripts/harness/runtime_worker_verification.py","test":"tests/harness/test_runtime_task_summary.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"bounded-fix-retry","owner":"harness","module":"scripts/harness/runtime_worker_fix.py","test":"tests/harness/test_contract_state_edge_matrix.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"checkpoint","owner":"harness","module":"scripts/harness/runtime_session_checkpoint.py","test":"tests/harness/test_runtime_sessions.py","manual_ingress_required":false,"disposition":"already-green"},
+    {"stage":"callback-submit","owner":"model-prose-gap","module":"scripts/harness/runtime_worker_liveness.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":true,"disposition":"baseline-red"},
+    {"stage":"callback-ingestion","owner":"harness","module":"scripts/harness/runtime_callback_io.py","test":"tests/harness/test_review_vertical.py","manual_ingress_required":false,"disposition":"baseline-red-fast-path"},
+    {"stage":"terminal-cleanup","owner":"harness","module":"scripts/harness/runtime_session_cleanup.py","test":"tests/harness/test_runtime_sessions.py","manual_ingress_required":true,"disposition":"baseline-red-superseded"}
+  ]
+}

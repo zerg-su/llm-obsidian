@@ -133,6 +133,18 @@ class FakeRuntime:
             )
         )
 
+    def cleanup_superseded_review(self, receipt_path: Path) -> SessionResult:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        record = self.store.read(
+            receipt["superseded_owner_id"],
+            receipt["superseded_operation_id"],
+        )
+        if record.state not in TERMINAL:
+            raise AssertionError(
+                "mechanism fixture expected a quiescent superseded review"
+            )
+        return SessionResult(record, "", action="terminal")
+
 
 class LegacyRoundStore:
     """Create pre-parent-identity round records for recovery coverage."""

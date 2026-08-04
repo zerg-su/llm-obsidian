@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -39,6 +40,17 @@ from harness.state_machine import (  # noqa: E402
     begin_effect,
     resolve_effect,
     transition,
+)
+from harness.callback_submit_recovery import (  # noqa: E402
+    ArtifactEvidence,
+    CallbackSubmitEvidence,
+    CallbackSubmitPolicy,
+    classify_callback_submit,
+)
+from harness.liveness import (  # noqa: E402
+    LivenessController,
+    LivenessEvidence,
+    LivenessPolicy,
 )
 
 
@@ -336,9 +348,152 @@ def state_machine_matrix() -> None:
     assert fresh.effect_id == "effect-b" and fresh.effect_outcome == EffectOutcome.PENDING
 
 
+def callback_recovery_transition_matrix() -> None:
+    artifact = ArtifactEvidence
+    base = CallbackSubmitEvidence(
+        observed_at=1_000,
+        generation_progress_at=100,
+        callback_deadline_at=1_300,
+        operation_id="review-round",
+        run_id="review-run",
+        lane_id="openai-holistic",
+        generation=3,
+        expected_operation_id="review-round",
+        expected_run_id="review-run",
+        expected_lane_id="openai-holistic",
+        expected_generation=3,
+        target_sha256=DIGEST,
+        expected_target_sha256=DIGEST,
+        operation_state="awaiting-callback",
+        process_status="alive",
+        surface_status="alive",
+        prompt_class="idle-prompt",
+        stable_idle_observations=2,
+    )
+    policy = CallbackSubmitPolicy.default()
+    cases = (
+        (
+            "callback before reservation",
+            {"callback_artifact": artifact("stable", "b" * 64)},
+            "accept-callback",
+            "",
+        ),
+        (
+            "callback between reservation and send",
+            {
+                "callback_artifact": artifact("stable", "b" * 64),
+                "nudge_count": 1,
+                "recovery_status": "reserved",
+            },
+            "accept-callback",
+            "",
+        ),
+        (
+            "receipt after send",
+            {
+                "receipt_artifact": artifact("stable", "c" * 64),
+                "nudge_count": 1,
+                "recovery_status": "sent",
+            },
+            "none",
+            "",
+        ),
+        (
+            "deadline expires after reservation",
+            {
+                "callback_deadline_at": 1_059,
+                "nudge_count": 1,
+                "recovery_status": "reserved",
+            },
+            "attention-required",
+            "callback-submit-deadline-insufficient",
+        ),
+        (
+            "terminal after reservation",
+            {
+                "operation_state": "complete",
+                "nudge_count": 1,
+                "recovery_status": "reserved",
+            },
+            "attention-required",
+            "callback-submit-terminal",
+        ),
+        (
+            "generation changes after reservation",
+            {
+                "expected_generation": 4,
+                "nudge_count": 1,
+                "recovery_status": "reserved",
+            },
+            "attention-required",
+            "callback-submit-stale-generation",
+        ),
+        (
+            "ownership becomes unknown after reservation",
+            {
+                "surface_status": "unknown",
+                "nudge_count": 1,
+                "recovery_status": "reserved",
+            },
+            "attention-required",
+            "callback-submit-ownership-lost",
+        ),
+        (
+            "send result is uncertain",
+            {"nudge_count": 1, "recovery_status": "uncertain"},
+            "attention-required",
+            "callback-submit-effect-uncertain",
+        ),
+    )
+    for label, changes, expected_action, expected_reason in cases:
+        decision = classify_callback_submit(replace(base, **changes), policy)
+        assert (decision.action, decision.reason) == (
+            expected_action,
+            expected_reason,
+        ), (label, decision)
+
+    with tempfile.TemporaryDirectory(prefix="callback-shared-ceiling.") as raw:
+        generic_first = LivenessController(Path(raw) / "generic-first")
+        initial = LivenessEvidence(
+            0, "alive", 1, "awaiting-callback", prompt_state="non-interactive"
+        )
+        generic_first.observe(initial, LivenessPolicy.default())
+        generic = generic_first.observe(
+            replace(initial, observed_at=1_000), LivenessPolicy.default()
+        )
+        assert generic.action == "nudge"
+        assert not generic_first.reserve_callback_submit("d" * 64)
+
+        submit_first = LivenessController(Path(raw) / "submit-first")
+        submit_first.observe(initial, LivenessPolicy.default())
+        assert submit_first.reserve_callback_submit("e" * 64)
+        generic = submit_first.observe(
+            replace(initial, observed_at=1_000), LivenessPolicy.default()
+        )
+        assert generic.action == "suspected-idle"
+        assert submit_first.current_state().nudge_count == 1
+        receipt_path = (
+            submit_first.root
+            / "receipts"
+            / f"callback-submit-{'e' * 64}.json"
+        )
+        tampered = json.loads(receipt_path.read_text(encoding="utf-8"))
+        tampered["nudge_count"] = 99
+        receipt_path.write_text(
+            json.dumps(tampered, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        expect_error(
+            "callback reservation receipt tamper",
+            "receipt changed",
+            lambda: submit_first.mark_callback_submit_sent("e" * 64),
+        )
+
+
 contract_primitive_matrix()
 resource_and_record_matrix()
 remaining_contract_matrix()
 serialization_and_hydration_matrix()
 state_machine_matrix()
+callback_recovery_transition_matrix()
 print("contract/state edge matrix passed")

@@ -19,11 +19,11 @@ from .runtime_worker_loop import RuntimeWorkerLoopMixin
 
 
 class RuntimeWorkerExecution(
+    RuntimeWorkerReviewBridgeMixin,
     RuntimeWorkerControlMixin,
     RuntimeWorkerFixMixin,
     RuntimeWorkerCustomMixin,
     RuntimeWorkerSummaryMixin,
-    RuntimeWorkerReviewBridgeMixin,
     RuntimeWorkerVerificationMixin,
     RuntimeWorkerLivenessMixin,
     RuntimeWorkerLoopMixin,
@@ -39,6 +39,8 @@ class RuntimeWorkerExecution(
         verification_runner: (
             Callable[..., subprocess.CompletedProcess[str]] | None
         ) = None,
+        callback_submit_policy: CallbackSubmitPolicy | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> int:
         self.spec_path = spec_path
         self.poll_seconds = poll_seconds
@@ -46,6 +48,7 @@ class RuntimeWorkerExecution(
         self.cmux_adapter = cmux_adapter
         self.review_launcher = review_launcher
         self.verification_runner = verification_runner
+        self.clock = clock or time.time
         self.spec = load_spec(self.spec_path.resolve())
         self.ready = self.spec["ready_path"]
         self.exit_path = self.spec["exit_path"]
@@ -142,6 +145,8 @@ class RuntimeWorkerExecution(
         self.active_target: tuple[int, str, str, Path] | None = None
         self.last_digest = ""
         self.stable_reads = 0
+        self.review_input_digest = ""
+        self.review_input_stable_reads = 0
         self.callback_handled = False
         self.registration_invalid = False
         self.summary_digest = ""
@@ -183,10 +188,22 @@ class RuntimeWorkerExecution(
         self.latest_prompt_state = "unknown"
         self.next_prompt_probe = 0.0
         self.liveness_policy = LivenessPolicy.default()
+        self.callback_submit_policy = (
+            callback_submit_policy or CallbackSubmitPolicy.default()
+        )
         self.liveness_controller = LivenessController(
             self.spec_path.parent / "liveness"
         )
         self.next_liveness_probe = 0.0
+        self.latest_callback_prompt_class = "unknown"
+        self.callback_idle_observations = 0
+        self.callback_prompt_observations = 0
+        self.callback_generation_identity = ""
+        self.callback_generation_progress_at = 0.0
+        self.callback_recovery_input_digest = ""
+        self.callback_recovery_input_reads = 0
+        self.callback_recovery_digest = ""
+        self.callback_recovery_reads = 0
         self.handled_control_id = ""
         self.invalid_control_digest = ""
         self.fix_callback_digest = ""

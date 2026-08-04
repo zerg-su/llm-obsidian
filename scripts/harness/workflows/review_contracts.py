@@ -331,6 +331,8 @@ class ReviewRuntimePort(Protocol):
 
     def cleanup(self, owner_id: str, operation_id: str) -> object: ...
 
+    def cleanup_superseded_review(self, receipt_path: Path) -> object: ...
+
 
 @dataclass(frozen=True)
 class ReviewLaneSession:

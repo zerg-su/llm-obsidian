@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
 from time import time
+
+from review_contract import REVIEW_PARENT_KINDS
 
 from .contracts import (
     AttentionReason,
     EffectOutcome,
     OperationRecord,
     OwnedResources,
+    to_dict,
 )
 from .runtime_session_contracts import (
     RuntimeSessionError,
@@ -20,6 +26,246 @@ from .supervisor import OperationSupervisor
 
 class RuntimeSessionCleanupMixin:
     """Own observation, exit requests, and exact cleanup effects."""
+
+    _SUPERSEDED_REVIEW_RECEIPT_KEYS = frozenset(
+        {
+            "schema_version",
+            "status",
+            "superseded_owner_id",
+            "superseded_review_operation_id",
+            "superseded_operation_id",
+            "superseded_run_id",
+            "superseded_record_sha256",
+            "replacement_owner_id",
+            "replacement_review_operation_id",
+            "replacement_operation_id",
+            "replacement_run_id",
+            "store_sha256",
+            "authorization_pointer",
+            "authorization_sha256",
+        }
+    )
+
+    @staticmethod
+    def _bounded_regular_json(path: Path, *, label: str) -> tuple[dict[str, object], bytes]:
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeSessionError(f"{label} is unavailable")
+        raw = path.read_bytes()
+        if not raw or len(raw) > 65_536:
+            raise RuntimeSessionError(f"{label} must be non-empty and bounded")
+        try:
+            value = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeSessionError(f"{label} is invalid JSON") from exc
+        if not isinstance(value, dict):
+            raise RuntimeSessionError(f"{label} must be an object")
+        return value, raw
+
+    def _store_relative_regular_path(self, pointer: str, *, label: str) -> Path:
+        if not isinstance(pointer, str) or not pointer:
+            raise RuntimeSessionError(f"{label} pointer is invalid")
+        relative = Path(pointer)
+        candidate_path = self.store.root / relative
+        if relative.is_absolute() or candidate_path.is_symlink():
+            raise RuntimeSessionError(f"{label} pointer is invalid")
+        candidate = candidate_path.resolve()
+        try:
+            candidate.relative_to(self.store.root)
+        except ValueError as exc:
+            raise RuntimeSessionError(f"{label} escapes harness state") from exc
+        if candidate.is_symlink() or not candidate.is_file():
+            raise RuntimeSessionError(f"{label} is unavailable")
+        return candidate
+
+    def cleanup_superseded_review(
+        self, receipt_path: Path
+    ) -> RuntimeSessionResult:
+        """Clean one superseded reviewer only with exact durable authority."""
+
+        receipt_path = receipt_path.expanduser().absolute()
+        if receipt_path.is_symlink():
+            raise RuntimeSessionError("superseded review receipt is unavailable")
+        receipt_path = receipt_path.resolve()
+        try:
+            receipt_path.relative_to(self.store.root)
+        except ValueError as exc:
+            raise RuntimeSessionError(
+                "superseded review receipt escapes harness state"
+            ) from exc
+        receipt, receipt_raw = self._bounded_regular_json(
+            receipt_path, label="superseded review receipt"
+        )
+        if (
+            frozenset(receipt) != self._SUPERSEDED_REVIEW_RECEIPT_KEYS
+            or receipt.get("schema_version") != 1
+            or receipt.get("status") != "authorized"
+            or receipt.get("store_sha256")
+            != hashlib.sha256(str(self.store.root).encode()).hexdigest()
+        ):
+            raise RuntimeSessionError("superseded review receipt is not authorized")
+
+        old_owner = str(receipt["superseded_owner_id"])
+        old_review_operation = str(
+            receipt["superseded_review_operation_id"]
+        )
+        old_operation = str(receipt["superseded_operation_id"])
+        old_run = str(receipt["superseded_run_id"])
+        replacement_owner = str(receipt["replacement_owner_id"])
+        replacement_review_operation = str(
+            receipt["replacement_review_operation_id"]
+        )
+        replacement_operation = str(receipt["replacement_operation_id"])
+        replacement_run = str(receipt["replacement_run_id"])
+        if (
+            old_review_operation == replacement_review_operation
+            or (old_owner, old_operation, old_run) == (
+            replacement_owner,
+            replacement_operation,
+            replacement_run,
+            )
+        ):
+            raise RuntimeSessionError("review supersession identities must differ")
+
+        authorization_path = self._store_relative_regular_path(
+            str(receipt["authorization_pointer"]),
+            label="review supersession authorization",
+        )
+        authorization, authorization_raw = self._bounded_regular_json(
+            authorization_path, label="review supersession authorization"
+        )
+        expected_authorization_keys = {
+            "schema_version",
+            "operation_id",
+            "kind",
+            "previous_context_sha256",
+            "next_context_sha256",
+            "reason",
+            "authorization_provenance",
+            "verification_operation_id",
+            "verification_receipt_sha256",
+            "status",
+        }
+        if (
+            hashlib.sha256(authorization_raw).hexdigest()
+            != receipt["authorization_sha256"]
+            or set(authorization) != expected_authorization_keys
+            or authorization.get("schema_version") != 1
+            or authorization.get("status") != "authorized"
+            or authorization.get("operation_id") != old_review_operation
+            or authorization.get("kind") not in {"scope", "context"}
+            or authorization.get("previous_context_sha256")
+            == authorization.get("next_context_sha256")
+            or not all(
+                isinstance(authorization.get(key), str)
+                and bool(str(authorization[key]).strip())
+                for key in (
+                    "reason",
+                    "authorization_provenance",
+                    "verification_operation_id",
+                )
+            )
+            or authorization.get("authorization_provenance")
+            not in {"coordinator-approved", "pipeline-verification"}
+            or not all(
+                isinstance(authorization.get(key), str)
+                and len(str(authorization[key])) == 64
+                for key in (
+                    "previous_context_sha256",
+                    "next_context_sha256",
+                    "verification_receipt_sha256",
+                )
+            )
+        ):
+            raise RuntimeSessionError("review supersession authorization mismatch")
+
+        old_record = self.store.read(old_owner, old_operation)
+        replacement = self.store.read(replacement_owner, replacement_operation)
+        for label, record, run_id in (
+            ("superseded", old_record, old_run),
+            ("replacement", replacement, replacement_run),
+        ):
+            if (
+                record.run_id != run_id
+                or record.spec.kind not in REVIEW_PARENT_KINDS
+                or record.spec.route.profile != "reviewer-callback"
+            ):
+                raise RuntimeSessionError(f"{label} review identity mismatch")
+        receipt_sha256 = hashlib.sha256(receipt_raw).hexdigest()
+        result_path = receipt_path.with_name(f"{receipt_path.stem}-result.json")
+        result_status = ""
+        if result_path.exists():
+            result, _raw = self._bounded_regular_json(
+                result_path, label="superseded review cleanup result"
+            )
+            expected_result = {
+                "schema_version": 1,
+                "receipt_sha256": receipt_sha256,
+                "superseded_operation_id": old_operation,
+                "superseded_run_id": old_run,
+            }
+            result_status = str(result.get("status") or "")
+            if (
+                result_status not in {"started", "cleaned"}
+                or {key: result.get(key) for key in expected_result}
+                != expected_result
+                or set(result) != {*expected_result, "status"}
+            ):
+                raise RuntimeSessionError("superseded review cleanup result mismatch")
+            if (
+                result_status == "cleaned"
+                and (
+                    old_record.state not in TERMINAL
+                    or old_record.resources != OwnedResources()
+                )
+            ):
+                raise RuntimeSessionError("superseded review cleanup result is stale")
+            if result_status == "cleaned":
+                return self._result(old_record, "terminal")
+
+        if not result_status and replacement.state in TERMINAL:
+            raise RuntimeSessionError("replacement review is no longer active")
+
+        if result_status != "started":
+            canonical_old = json.dumps(
+                to_dict(old_record), sort_keys=True, separators=(",", ":")
+            ).encode()
+            if (
+                hashlib.sha256(canonical_old).hexdigest()
+                != receipt["superseded_record_sha256"]
+            ):
+                raise RuntimeSessionError(
+                    "superseded review record changed after authorization"
+                )
+            self._write_json(
+                result_path,
+                {
+                    "schema_version": 1,
+                    "status": "started",
+                    "receipt_sha256": receipt_sha256,
+                    "superseded_operation_id": old_operation,
+                    "superseded_run_id": old_run,
+                },
+            )
+
+        exit_result = self.request_exit(old_owner, old_operation)
+        if exit_result.action not in {"exit-requested", "terminal"}:
+            return exit_result
+        cleanup_result = self.cleanup(old_owner, old_operation)
+        if (
+            cleanup_result.record.state in TERMINAL
+            and cleanup_result.record.resources == OwnedResources()
+        ):
+            self._write_json(
+                result_path,
+                {
+                    "schema_version": 1,
+                    "status": "cleaned",
+                    "receipt_sha256": receipt_sha256,
+                    "superseded_operation_id": old_operation,
+                    "superseded_run_id": old_run,
+                },
+            )
+        return cleanup_result
 
 
     def _owner_for_operation(self, operation_id: str) -> str:

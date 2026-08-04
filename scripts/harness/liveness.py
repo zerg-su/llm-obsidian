@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import tempfile
+import fcntl
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -121,6 +123,8 @@ class LivenessState:
     stable_result_reads: int = 0
     nudge_count: int = 0
     restart_count: int = 0
+    callback_submit_binding: str = ""
+    callback_submit_status: str = ""
     schema_version: int = 1
 
     @classmethod
@@ -260,6 +264,20 @@ class LivenessController:
     def __init__(self, root: Path | str):
         self.root = Path(root)
 
+    @contextmanager
+    def _locked(self):
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.root, 0o700)
+        lock_path = self.root / ".lock"
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.chmod(lock_path, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
     @staticmethod
     def _write(path: Path, value: object) -> None:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -298,37 +316,174 @@ class LivenessController:
         evidence: LivenessEvidence,
         policy: LivenessPolicy,
     ) -> LivenessDecision:
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
-        previous = self._state()
-        if previous is None:
-            current = LivenessState.start(evidence)
-            decision = _decision("observe", evidence, current)
-        else:
-            decision, current = observe_liveness(previous, evidence, policy)
-        self._write(self.root / "state.json", to_dict(current))
-        if decision.action != "observe":
-            receipt = {
-                "schema_version": 1,
-                "action": decision.action,
-                "action_id": decision.action_id,
-                "observed_at": evidence.observed_at,
-                "operation_revision": evidence.operation_revision,
-                "operation_state": evidence.operation_state,
-                "screen_sha256": evidence.screen_sha256,
-                "typed_result_sha256": evidence.typed_result_sha256,
-                "callback_sha256": evidence.callback_sha256,
-                "receipt_sha256": evidence.receipt_sha256,
-                "nudge_count": current.nudge_count,
-                "restart_count": current.restart_count,
-            }
-            path = self.root / "receipts" / f"{decision.action_id}.json"
-            if path.is_file() and not path.is_symlink():
-                existing = json.loads(path.read_text(encoding="utf-8"))
-                if existing != receipt:
-                    raise ContractError("liveness receipt changed during replay")
-            elif path.exists() or path.is_symlink():
-                raise ContractError("liveness receipt is not a regular file")
+        with self._locked():
+            previous = self._state()
+            if previous is None:
+                current = LivenessState.start(evidence)
+                decision = _decision("observe", evidence, current)
             else:
-                self._write(path, receipt)
-        return decision
+                decision, current = observe_liveness(previous, evidence, policy)
+            self._write(self.root / "state.json", to_dict(current))
+            if decision.action != "observe":
+                receipt = {
+                    "schema_version": 1,
+                    "action": decision.action,
+                    "action_id": decision.action_id,
+                    "observed_at": evidence.observed_at,
+                    "operation_revision": evidence.operation_revision,
+                    "operation_state": evidence.operation_state,
+                    "screen_sha256": evidence.screen_sha256,
+                    "typed_result_sha256": evidence.typed_result_sha256,
+                    "callback_sha256": evidence.callback_sha256,
+                    "receipt_sha256": evidence.receipt_sha256,
+                    "nudge_count": current.nudge_count,
+                    "restart_count": current.restart_count,
+                }
+                path = self.root / "receipts" / f"{decision.action_id}.json"
+                if path.is_file() and not path.is_symlink():
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if existing != receipt:
+                        raise ContractError("liveness receipt changed during replay")
+                elif path.exists() or path.is_symlink():
+                    raise ContractError("liveness receipt is not a regular file")
+                else:
+                    self._write(path, receipt)
+            return decision
+
+    def current_state(self) -> LivenessState | None:
+        """Read the content-free state under the same process-safe lock."""
+
+        with self._locked():
+            return self._state()
+
+    @staticmethod
+    def _callback_submit_receipt(
+        binding_sha256: str, state: LivenessState
+    ) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "binding_sha256": binding_sha256,
+            "nudge_count": state.nudge_count,
+            "status": state.callback_submit_status,
+        }
+
+    def _write_callback_submit_receipt(
+        self,
+        binding_sha256: str,
+        state: LivenessState,
+        *,
+        allowed_existing: tuple[dict[str, object], ...] = (),
+    ) -> None:
+        path = (
+            self.root
+            / "receipts"
+            / f"callback-submit-{binding_sha256}.json"
+        )
+        target = self._callback_submit_receipt(binding_sha256, state)
+        if path.is_file() and not path.is_symlink():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ContractError("callback submit receipt is invalid") from exc
+            if existing != target and existing not in allowed_existing:
+                raise ContractError("callback submit receipt changed during replay")
+            if existing == target:
+                return
+        elif path.exists() or path.is_symlink():
+            raise ContractError("callback submit receipt is not a regular file")
+        self._write(path, target)
+
+    def reserve_callback_submit(self, binding_sha256: str) -> bool:
+        """Atomically consume the existing nudge ceiling for one generation."""
+
+        _sha(binding_sha256, "callback submit binding", optional=False)
+        with self._locked():
+            current = self._state()
+            if current is None:
+                raise ContractError("callback submit reservation has no liveness state")
+            if current.callback_submit_binding:
+                if current.callback_submit_binding != binding_sha256:
+                    return False
+                self._write_callback_submit_receipt(binding_sha256, current)
+                return False
+            if current.nudge_count >= 1:
+                return False
+            reserved = replace(
+                current,
+                nudge_count=current.nudge_count + 1,
+                callback_submit_binding=binding_sha256,
+                callback_submit_status="reserved",
+            )
+            self._write(self.root / "state.json", to_dict(reserved))
+            self._write_callback_submit_receipt(binding_sha256, reserved)
+            return True
+
+    def mark_callback_submit_sent(self, binding_sha256: str) -> None:
+        """Idempotently mark the exact reserved generation effect sent."""
+
+        _sha(binding_sha256, "callback submit binding", optional=False)
+        with self._locked():
+            current = self._state()
+            if (
+                current is None
+                or current.callback_submit_binding != binding_sha256
+                or current.callback_submit_status not in {"reserved", "sent"}
+            ):
+                raise ContractError("callback submit reservation identity changed")
+            reserved_receipt = self._callback_submit_receipt(
+                binding_sha256,
+                replace(current, callback_submit_status="reserved"),
+            )
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                current,
+                allowed_existing=(reserved_receipt,),
+            )
+            sent = (
+                current
+                if current.callback_submit_status == "sent"
+                else replace(current, callback_submit_status="sent")
+            )
+            self._write(self.root / "state.json", to_dict(sent))
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                sent,
+                allowed_existing=(
+                    reserved_receipt,
+                ),
+            )
+
+    def mark_callback_submit_uncertain(self, binding_sha256: str) -> None:
+        """Fail closed when transport may have partially delivered the nudge."""
+
+        _sha(binding_sha256, "callback submit binding", optional=False)
+        with self._locked():
+            current = self._state()
+            if (
+                current is None
+                or current.callback_submit_binding != binding_sha256
+                or current.callback_submit_status not in {"reserved", "uncertain"}
+            ):
+                raise ContractError("callback submit reservation identity changed")
+            reserved_receipt = self._callback_submit_receipt(
+                binding_sha256,
+                replace(current, callback_submit_status="reserved"),
+            )
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                current,
+                allowed_existing=(reserved_receipt,),
+            )
+            uncertain = (
+                current
+                if current.callback_submit_status == "uncertain"
+                else replace(current, callback_submit_status="uncertain")
+            )
+            self._write(self.root / "state.json", to_dict(uncertain))
+            self._write_callback_submit_receipt(
+                binding_sha256,
+                uncertain,
+                allowed_existing=(
+                    reserved_receipt,
+                ),
+            )
