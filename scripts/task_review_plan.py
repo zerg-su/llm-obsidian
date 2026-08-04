@@ -82,7 +82,36 @@ def _failure(message: str) -> PlanReviewError:
     return PlanReviewError(BOUNDARY_INVALID, message)
 
 
-def _relative_file(root: Path, value: str, label: str) -> tuple[str, bytes]:
+def _regular_file_identity(
+    root: Path,
+    source: Path,
+    label: str,
+    *,
+    lexical_root: Path | None = None,
+) -> tuple[Path, tuple[int, int]]:
+    supplied_root = (lexical_root or root).expanduser().absolute()
+    lexical = source.expanduser().absolute()
+    try:
+        relative = lexical.relative_to(supplied_root)
+    except ValueError:
+        raise _failure(f"{label} pointer is unavailable")
+    if not relative.parts:
+        raise _failure(f"{label} pointer is unavailable")
+    cursor = supplied_root
+    for part in relative.parts:
+        cursor /= part
+        if cursor.is_symlink():
+            raise _failure(f"{label} pointer is unavailable")
+    target = lexical.resolve()
+    if target == root or root not in target.parents or not target.is_file():
+        raise _failure(f"{label} pointer is unavailable")
+    stat = target.stat()
+    return target, (stat.st_dev, stat.st_ino)
+
+
+def _relative_file(
+    root: Path, value: str, label: str
+) -> tuple[tuple[int, int], bytes]:
     if not isinstance(value, str) or not value or "\x00" in value:
         raise _failure(f"{label} pointer must be repository-relative")
     relative = PurePosixPath(value)
@@ -93,16 +122,8 @@ def _relative_file(root: Path, value: str, label: str) -> tuple[str, bytes]:
         or any(part in {"", "."} for part in relative.parts)
     ):
         raise _failure(f"{label} pointer must be repository-relative")
-    source = root / value
-    target = source.resolve()
-    if (
-        target == root
-        or root not in target.parents
-        or not target.is_file()
-        or source.is_symlink()
-    ):
-        raise _failure(f"{label} pointer is unavailable")
-    return value, target.read_bytes()
+    target, identity = _regular_file_identity(root, root / value, label)
+    return identity, target.read_bytes()
 
 
 def _section_spans(raw: bytes) -> dict[str, tuple[int, int] | None]:
@@ -170,7 +191,9 @@ def _compile_bytes(
         "success_evidence": success_evidence_map,
     }
     protected: dict[str, bytes] = {"outcome": section_contract.canonical}
-    explicit_paths: dict[str, str] = {}
+    explicit_identities: dict[str, tuple[int, int]] = {}
+    plan_stat = plan.stat()
+    plan_identity = (plan_stat.st_dev, plan_stat.st_ino)
     for name in ("capability_dispositions", "success_evidence"):
         span = spans[name]
         pointer = explicit[name]
@@ -181,12 +204,12 @@ def _compile_bytes(
         if span is not None:
             protected[name] = raw[slice(*span)]
         else:
-            exact, content = _relative_file(root, pointer, name)
-            explicit_paths[name] = exact
+            identity, content = _relative_file(root, pointer, name)
+            explicit_identities[name] = identity
             protected[name] = content
-    if len(set(explicit_paths.values())) != len(explicit_paths):
+    if len(set(explicit_identities.values())) != len(explicit_identities):
         raise _failure("explicit protected artifacts overlap")
-    if any(path == plan.relative_to(root).as_posix() for path in explicit_paths.values()):
+    if plan_identity in explicit_identities.values():
         raise _failure("the plan cannot also be an explicit protected artifact")
 
     protected_sha = {
@@ -252,17 +275,17 @@ def compile_plan_review(
     capability_dispositions: str = "",
     success_evidence_map: str = "",
 ) -> PlanReviewCompilation:
-    root = worktree.expanduser().resolve()
-    source = plan_file.expanduser()
-    plan = source.resolve()
-    if (
-        not root.is_dir()
-        or plan == root
-        or root not in plan.parents
-        or not plan.is_file()
-        or source.is_symlink()
-    ):
+    supplied_root = worktree.expanduser().absolute()
+    root = supplied_root.resolve()
+    if not root.is_dir():
         raise _failure("plan must be one exact regular file inside the checkout")
+    source = plan_file.expanduser()
+    try:
+        plan, _identity = _regular_file_identity(
+            root, source, "plan", lexical_root=supplied_root
+        )
+    except PlanReviewError as exc:
+        raise _failure("plan must be one exact regular file inside the checkout") from exc
     return _compile_bytes(
         root,
         plan,
@@ -315,7 +338,7 @@ def resolve_plan_oids(
                 _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", head).splitlines(),
             )
         )
-        if len(parents) != 2 or compilation.plan_relative_path not in changed:
+        if len(parents) != 2 or changed != {compilation.plan_relative_path}:
             raise PlanReviewError(
                 BASE_INVALID,
                 "current plan review requires --base unless HEAD is a single-parent commit changing the exact plan",

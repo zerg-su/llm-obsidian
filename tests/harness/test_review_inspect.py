@@ -166,6 +166,41 @@ with tempfile.TemporaryDirectory(prefix="review-inspect.") as raw:
     check("review-inspect rejects uppercase object ids", uppercase.returncode == 2)
     check("review-inspect rejects non-commit object ids", tree_object.returncode == 4)
 
+    sha1_abbreviations = {
+        length: inspect(repo, "log", "--ref", head[:length]).returncode
+        for length in range(1, len(head))
+    }
+    check(
+        "review-inspect rejects every SHA-1 abbreviation",
+        set(sha1_abbreviations.values()) == {2},
+        sha1_abbreviations,
+    )
+
+    sha256_repo = Path(raw) / "sha256-repo"
+    sha256_repo.mkdir()
+    git(sha256_repo, "init", "--object-format=sha256", "-b", "main")
+    git(sha256_repo, "config", "user.email", "review-inspect@example.invalid")
+    git(sha256_repo, "config", "user.name", "Review Inspect Test")
+    (sha256_repo / "tracked.txt").write_text("sha256\n", encoding="utf-8")
+    git(sha256_repo, "add", "tracked.txt")
+    git(sha256_repo, "commit", "-m", "sha256 commit")
+    sha256_head = git(sha256_repo, "rev-parse", "HEAD")
+    sha256_full = inspect(sha256_repo, "log", "--ref", sha256_head)
+    check(
+        "review-inspect accepts one complete lowercase SHA-256 commit id",
+        len(sha256_head) == 64 and sha256_full.returncode == 0,
+        (sha256_head, sha256_full.stderr),
+    )
+    sha256_abbreviations = {
+        length: inspect(sha256_repo, "log", "--ref", sha256_head[:length]).returncode
+        for length in range(1, len(sha256_head))
+    }
+    check(
+        "review-inspect rejects every SHA-256 abbreviation",
+        set(sha256_abbreviations.values()) == {2},
+        sha256_abbreviations,
+    )
+
     for label, args in (
         ("symbolic refs", ("log", "--ref", "HEAD")),
         (

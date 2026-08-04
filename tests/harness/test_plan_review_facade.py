@@ -214,10 +214,39 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         capability_dispositions="wiki/dispositions.md",
         success_evidence_map="wiki/dispositions.md",
     )
+    alias_root = worktree / "wiki-alias"
+    alias_root.symlink_to(worktree / "wiki", target_is_directory=True)
+    rejected(
+        "9 symlinked parent aliases cannot duplicate a protected artifact",
+        plan_text(disposition_headings=0, evidence_headings=0),
+        capability_dispositions="wiki/dispositions.md",
+        success_evidence_map="wiki-alias/dispositions.md",
+    )
+    alias_sessions = SessionCounter()
+    try:
+        plan_review.run_plan_review(
+            worktree,
+            plan_file=alias_root / "plans/approved.md",
+            runtime_manager=alias_sessions,
+            apply_finalizing_recovery=lambda **_ignored: {},
+        )
+    except plan_review.PlanReviewError as exc:
+        aliased_plan_rejected = (
+            exc.code == "plan-review-artifact-boundary-invalid"
+            and alias_sessions.starts == 0
+        )
+    except AssertionError:
+        aliased_plan_rejected = False
+    else:
+        aliased_plan_rejected = False
+    check(
+        "10 a plan reached through a symlinked parent is rejected before launch",
+        aliased_plan_rejected,
+    )
 
     base_sha, head_sha = plan_review.resolve_plan_oids(worktree, compiled)
     check(
-        "9 single-parent exact plan commit derives HEAD parent",
+        "11 single-parent exact plan commit derives HEAD parent",
         base_sha == baseline
         and head_sha
         == subprocess.run(
@@ -284,7 +313,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         )
     else:
         symbolic_rejected = False
-    check("10 symbolic base is rejected before launch", symbolic_rejected)
+    check("12 symbolic base is rejected before launch", symbolic_rejected)
 
     (worktree / "README.md").write_text("baseline\nunrelated\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=worktree, check=True)
@@ -301,7 +330,46 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         missing_base_rejected = exc.code == "plan-review-base-invalid"
     else:
         missing_base_rejected = False
-    check("11 current plan review without a safe base fails closed", missing_base_rejected)
+    check("13 current plan review without a safe base fails closed", missing_base_rejected)
+
+    plan.write_text(
+        plan_text(design="Plan and product changed together."), encoding="utf-8"
+    )
+    (worktree / "README.md").write_text(
+        "baseline\nunrelated\nmixed\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "add", plan.relative_to(worktree), "README.md"],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "mixed plan and product head"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    mixed_sessions = SessionCounter()
+    try:
+        plan_review.run_plan_review(
+            worktree,
+            plan_file=plan,
+            runtime_manager=mixed_sessions,
+            apply_finalizing_recovery=lambda **_ignored: {},
+        )
+    except plan_review.PlanReviewError as exc:
+        mixed_base_rejected = (
+            exc.code == "plan-review-base-invalid" and mixed_sessions.starts == 0
+        )
+    except AssertionError:
+        mixed_base_rejected = False
+    else:
+        mixed_base_rejected = False
+    check(
+        "14 mixed plan and product HEAD requires an explicit trusted base",
+        mixed_base_rejected,
+    )
 
     legacy = subprocess.run(
         [
@@ -318,13 +386,22 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         check=False,
     )
     check(
-        "12 legacy current --plan rejects the ambiguous implementation default",
+        "15 legacy current --plan rejects the ambiguous implementation default",
         legacy.returncode == 3
         and "use the plan facade" in legacy.stderr
         and not (worktree / ".vault-meta").exists(),
         (legacy.stdout, legacy.stderr),
     )
 
+    plan.write_text(plan_text(), encoding="utf-8")
+    subprocess.run(["git", "add", plan.relative_to(worktree)], cwd=worktree, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "restore approved plan"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     reviewed_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=worktree,
