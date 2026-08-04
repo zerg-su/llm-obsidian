@@ -367,6 +367,13 @@ for label, mutation, state, action, reason in (
         "callback-submit-terminal",
     ),
     (
+        "non-awaiting parent cannot start submit recovery",
+        {"operation_state": "running"},
+        "attention",
+        "attention-required",
+        "callback-submit-state-invalid",
+    ),
+    (
         "insufficient deadline fails closed",
         {"callback_deadline_at": 1119},
         "attention",
