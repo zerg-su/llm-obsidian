@@ -375,6 +375,7 @@ def _run_review(
     )
     gate_root = _gate_root(vault, task_id)
     gate = ReviewGateController(gate_root, runtime, store)
+    gate.reconcile_superseded_review_cleanup()
     gate_exists = gate.state_path.exists()
     initial_state = gate.read() if gate_exists else {}
     resolution_bundle = _preload_resolution_bundle(

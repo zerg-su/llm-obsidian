@@ -360,13 +360,41 @@ def _callback_target(spec: dict[str, Any]) -> tuple[int, str, str, Path]:
     raw_pointer = value.get("callback_pointer")
     if not isinstance(raw_pointer, str) or not raw_pointer:
         raise RuntimeWorkerError("callback target pointer is invalid")
+    cwd = Path(spec["cwd"]).expanduser().resolve()
     pointer = Path(raw_pointer).expanduser()
     if not pointer.is_absolute():
-        pointer = spec["cwd"] / pointer
-    pointer = pointer.resolve()
+        pointer = cwd / pointer
+    # Normalize lexical traversal without dereferencing the callback artifact.
+    # observe_review_artifact() must retain the chance to classify a symlink
+    # leaf instead of silently reading its target.
+    pointer = Path(os.path.abspath(pointer))
     try:
-        pointer.relative_to(spec["cwd"])
-    except ValueError as exc:
+        relative = pointer.relative_to(cwd)
+    except ValueError:
+        # macOS commonly exposes a lexical /var path whose exact cwd ancestor
+        # resolves to /private/var. Preserve the leaf and only normalize that
+        # already-owned cwd alias; an in-cwd alias is handled by the strict
+        # component walk below.
+        lexical_cwd = next(
+            (
+                ancestor
+                for ancestor in (pointer.parent, *pointer.parents)
+                if ancestor.resolve(strict=False) == cwd
+            ),
+            None,
+        )
+        if lexical_cwd is None:
+            raise RuntimeWorkerError("callback target pointer escapes cwd")
+        relative = pointer.relative_to(lexical_cwd)
+        pointer = cwd / relative
+    current = cwd
+    for component in relative.parts[:-1]:
+        current /= component
+        if current.is_symlink():
+            raise RuntimeWorkerError("callback target parent is a symlink")
+    try:
+        pointer.resolve(strict=False).relative_to(cwd)
+    except (OSError, ValueError) as exc:
         raise RuntimeWorkerError("callback target pointer escapes cwd") from exc
     return int(value["generation"]), operation_id, run_id, pointer
 

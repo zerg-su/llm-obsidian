@@ -548,6 +548,7 @@ class FakeRuntime:
         self.rearmed: list[tuple[str, str]] = []
         self.exits: list[tuple[str, str]] = []
         self.cleanups: list[tuple[str, str]] = []
+        self.superseded_cleanups: list[Path] = []
         self.cleanup_attention = False
         self.cleanup_terminate_once = False
 
@@ -697,6 +698,14 @@ class FakeRuntime:
                 expected_revision=completed.revision,
             )
         return self.store.read(owner_id, operation_id)
+
+    def cleanup_superseded_review(self, receipt_path: Path) -> object:
+        self.superseded_cleanups.append(receipt_path)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        owner_id = receipt["superseded_owner_id"]
+        operation_id = receipt["superseded_operation_id"]
+        self.request_exit(owner_id, operation_id)
+        return self.cleanup(owner_id, operation_id)
 
 
 class EffectRecordingRuntime(FakeRuntime):
@@ -2284,6 +2293,19 @@ with tempfile.TemporaryDirectory(prefix="review-gate-budget.") as raw:
         and repeated is not None
         and fresh.execution.request.policy.max_verify_iterations == 0
         and fresh.execution.lanes[0].max_verify_iterations == 0
+        and len(runtime.superseded_cleanups) == 1
+        and store.read("owner-1", first.lane.operation_id).state
+        == "complete"
+        and store.read("owner-1", first.lane.operation_id).resources
+        == OwnedResources()
+        and store.read(
+            "owner-1", fresh.execution.lanes[0].operation_id
+        ).state not in TERMINAL
+        and bool(
+            store.read(
+                "owner-1", fresh.execution.lanes[0].operation_id
+            ).resources.surface_id
+        )
         and controller.read()["status"] == "reviewing",
     )
     assert fresh is not None

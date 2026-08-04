@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -39,6 +40,8 @@ from harness.liveness import (  # noqa: E402
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
+from harness.runtime_callback_io import _callback_target  # noqa: E402
+from harness.runtime_worker import enforce_callback_deadline  # noqa: E402
 from harness.runtime_worker_liveness import RuntimeWorkerLivenessMixin  # noqa: E402
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
@@ -88,6 +91,114 @@ check(
     and current.last_progress_at == incident["second_observed_at"],
     (decision, current),
 )
+
+
+for base_path, expected_key in (
+    (
+        "scripts/harness/runtime_worker.py",
+        "base_runtime_worker_sha256",
+    ),
+    (
+        "scripts/harness/runtime_worker_liveness.py",
+        "base_runtime_worker_liveness_sha256",
+    ),
+):
+    base_bytes = subprocess.check_output(
+        ["git", "show", f"{fixture['base_commit']}:{base_path}"],
+        cwd=ROOT,
+    )
+    check(
+        f"frozen reproducer binds exact {base_path}",
+        hashlib.sha256(base_bytes).hexdigest() == fixture[expected_key],
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="v263-reviewer-deadline.") as raw:
+    root = Path(raw)
+    store = OperationStore(root / "store")
+    callback_dir = root / "callbacks" / incident["lane_id"]
+    callback_dir.mkdir(parents=True)
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "6" * 64
+    )
+    spec = OperationSpec(
+        incident["operation_id"],
+        "v263-missing-submit-key",
+        "simple-review-holistic",
+        "v263-review-owner",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(
+        spec,
+        lane_id=incident["lane_id"],
+        run_id=incident["run_id"],
+    )
+    supervisor = OperationSupervisor(
+        store, "v263-review-owner", incident["operation_id"]
+    )
+    supervisor.configure_budget(
+        attempt_limit=1,
+        model_restart_limit=0,
+        time_budget_seconds=(
+            incident["second_observed_at"]
+            + incident["deadline_remaining_seconds"]
+        ),
+        token_limit=100,
+        now=0,
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("v263-review-owner", incident["operation_id"], state)
+
+    class V263CompatibilityHarness:
+        def __init__(self) -> None:
+            self.provider_sends = 0
+            self.callbacks_accepted = 0
+
+        def observe_wait(self) -> str:
+            state = LivenessState.start(first)
+            observed, _state = observe_liveness(state, second, policy)
+            if observed.action == "model-call":
+                self.provider_sends += 1
+            return observed.action
+
+        def cross_deadline(self) -> bool:
+            return enforce_callback_deadline(
+                store,
+                "v263-review-owner",
+                incident["operation_id"],
+                callback_handled=False,
+                now=(
+                    incident["second_observed_at"]
+                    + incident["deadline_remaining_seconds"]
+                    + 1
+                ),
+            )
+
+    compatibility = V263CompatibilityHarness()
+    observed_action = compatibility.observe_wait()
+    timed_out = compatibility.cross_deadline()
+    terminal = store.read("v263-review-owner", incident["operation_id"])
+    input_path = callback_dir / ".review-input.json"
+    callback_path = callback_dir / ".review-callback.json"
+    receipt_path = callback_dir / ".review-callback-receipt.json"
+    check(
+        "v2.6.3 full-runtime wait reaches typed timeout with zero effects",
+        observed_action == fixture["v2_6_3_observed"]["liveness_action"]
+        and timed_out
+        and terminal.state == "attention-required"
+        and terminal.attention_reason == AttentionReason.CALLBACK_TIMEOUT
+        and compatibility.provider_sends
+        == fixture["v2_6_3_observed"]["provider_sends"]
+        and compatibility.callbacks_accepted
+        == fixture["v2_6_3_observed"]["callbacks_accepted"]
+        and not input_path.exists()
+        and not callback_path.exists()
+        and not receipt_path.exists()
+        and not terminal.accepted_callback_id,
+        terminal,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
@@ -166,9 +277,15 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     )
     authorization = {
         "schema_version": 1,
+        "operation_id": "review-boundary-old-1",
+        "kind": "context",
+        "previous_context_sha256": "8" * 64,
+        "next_context_sha256": "9" * 64,
+        "reason": "authorized review context replacement",
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-old-1",
+        "verification_receipt_sha256": "a" * 64,
         "status": "authorized",
-        "superseded_review_operation_id": "review-old-1",
-        "active_review_operation_id": "review-new-1",
     }
     authorization_path = store.root / "supersession/authorization.json"
     authorization_path.parent.mkdir()
@@ -182,10 +299,12 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         "schema_version": 1,
         "status": "authorized",
         "superseded_owner_id": "review-old-owner-1",
+        "superseded_review_operation_id": "review-boundary-old-1",
         "superseded_operation_id": "review-old-1",
         "superseded_run_id": "review-old-run-1",
         "superseded_record_sha256": old_sha256,
         "replacement_owner_id": "review-new-owner-1",
+        "replacement_review_operation_id": "review-boundary-new-1",
         "replacement_operation_id": "review-new-1",
         "replacement_run_id": "review-new-run-1",
         "store_sha256": hashlib.sha256(str(store.root).encode()).hexdigest(),
@@ -201,9 +320,11 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
     current_receipt.update(
         {
             "superseded_owner_id": "review-new-owner-1",
+            "superseded_review_operation_id": "review-boundary-new-1",
             "superseded_operation_id": "review-new-1",
             "superseded_run_id": "review-new-run-1",
             "replacement_owner_id": "review-new-owner-1",
+            "replacement_review_operation_id": "review-boundary-new-1",
             "replacement_operation_id": "review-new-1",
             "replacement_run_id": "review-new-run-1",
         }
@@ -266,17 +387,10 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
         and cleanup_cmux.closed == [],
         ownership_wait,
     )
-    current_old = store.read("review-old-owner-1", "review-old-1")
-    receipt["superseded_record_sha256"] = hashlib.sha256(
-        json.dumps(
-            to_dict(current_old), sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-    receipt_path.write_text(
-        json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8"
-    )
     cleanup_process.status = "dead"
     cleaned = manager.cleanup_superseded_review(receipt_path)
+    for state in ("finalizing", "exiting", "complete"):
+        store.transition("review-new-owner-1", "review-new-1", state)
     replay = manager.cleanup_superseded_review(receipt_path)
     check(
         "authorized superseded review cleanup reaches resource-free terminal once",
@@ -296,6 +410,146 @@ class FastPathWorker(RuntimeWorkerReviewBridgeMixin):
 class RecoveryWorker(RuntimeWorkerLivenessMixin):
     def inspect_callback(self) -> None:
         raise AssertionError("missing-artifact recovery must not ingest a callback")
+
+
+class SymlinkWorker(RuntimeWorkerReviewBridgeMixin):
+    def summary_attention(
+        self,
+        status: str,
+        reason: AttentionReason = AttentionReason.CALLBACK_INVALID,
+        *,
+        write_error: bool = True,
+    ) -> None:
+        self.callback_handled = True
+        self.store.transition(
+            self.spec["owner_id"],
+            self.spec["operation_id"],
+            "attention-required",
+            reason=reason,
+        )
+        self.attention_statuses.append(status)
+
+
+with tempfile.TemporaryDirectory(prefix="callback-pointer-symlink.") as raw:
+    root = Path(raw)
+    scratch = (root / "scratch").resolve()
+    product = (root / "product").resolve()
+    state_root = (root / "worker-state").resolve()
+    callback_dir = scratch / "callbacks" / "openai-holistic"
+    for directory in (scratch, product, state_root, callback_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    target_path = callback_dir / "target.json"
+    target_path.write_text("{}\n", encoding="utf-8")
+    callback_path = callback_dir / ".review-callback.json"
+    callback_path.symlink_to(target_path)
+    registration = state_root / "callback-target.json"
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 1,
+                "operation_id": "symlink-round-1",
+                "run_id": "symlink-round-run-1",
+                "callback_pointer": str(callback_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "b" * 64
+    )
+    store = OperationStore(root / "store")
+    parent = OperationSpec(
+        "symlink-parent-1",
+        "symlink-parent-key-1",
+        "simple-review-holistic",
+        "symlink-owner-1",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    child = OperationSpec(
+        "symlink-round-1",
+        "symlink-round-key-1",
+        "review-round",
+        "symlink-owner-1",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(parent, lane_id="openai-holistic", run_id="symlink-parent-run-1")
+    store.create(child, lane_id="openai-holistic", run_id="symlink-round-run-1")
+    for operation_id in ("symlink-parent-1", "symlink-round-1"):
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            store.transition("symlink-owner-1", operation_id, state)
+    cmux_effects: list[object] = []
+    worker = SymlinkWorker()
+    worker.spec_path = state_root / "launch.json"
+    worker.spec = {
+        "owner_id": "symlink-owner-1",
+        "operation_id": "symlink-parent-1",
+        "run_id": "symlink-parent-run-1",
+        "cwd": scratch,
+        "product_root": product,
+        "callback_registration": registration,
+    }
+    worker.store = store
+    worker.trusted_vault = ROOT
+    worker.active_target = None
+    worker.last_digest = ""
+    worker.stable_reads = 0
+    worker.review_input_digest = ""
+    worker.review_input_stable_reads = 0
+    worker.callback_handled = False
+    worker.registration_invalid = False
+    worker.cmux_adapter = cmux_effects
+    worker.attention_statuses = []
+    worker.inspect_callback()
+    worker.inspect_callback()
+    parent_record = store.read("symlink-owner-1", "symlink-parent-1")
+    child_record = store.read("symlink-owner-1", "symlink-round-1")
+    check(
+        "symlink callback pointer fails closed with zero runtime effects",
+        callback_path.is_symlink()
+        and worker.attention_statuses == ["callback-artifact-invalid"]
+        and parent_record.state == "attention-required"
+        and child_record.state == "awaiting-callback"
+        and not child_record.accepted_callback_id
+        and not (state_root / "callback-receipt.json").exists()
+        and not (callback_dir / ".review-input.json").exists()
+        and cmux_effects == [],
+        (parent_record, child_record, worker.attention_statuses),
+    )
+
+    aliased_parent = scratch / "aliased-callbacks"
+    aliased_parent.symlink_to(callback_dir, target_is_directory=True)
+    parent_registration = state_root / "parent-symlink-target.json"
+    parent_registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 2,
+                "operation_id": "symlink-round-1",
+                "run_id": "symlink-round-run-1",
+                "callback_pointer": str(
+                    aliased_parent / ".review-callback.json"
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        _callback_target(
+            {"cwd": scratch, "callback_registration": parent_registration}
+        )
+    except Exception as exc:
+        parent_rejected = "parent is a symlink" in str(exc)
+    else:
+        parent_rejected = False
+    check(
+        "symlinked callback parent is rejected before artifact observation",
+        parent_rejected,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
