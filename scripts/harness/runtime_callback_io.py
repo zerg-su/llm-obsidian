@@ -6,15 +6,94 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import CallbackEnvelope
+from .callback_submit_recovery import ArtifactEvidence
 from .runtime_worker_contracts import IDENTIFIER, RuntimeWorkerError
 from research_contract import load_artifact
 
 
 MAX_OUTBOX_BYTES = 70_000
+
+
+def observe_review_artifact(
+    path: Path,
+    previous_sha256: str,
+    stable_reads: int,
+    *,
+    limit: int = MAX_OUTBOX_BYTES,
+) -> tuple[ArtifactEvidence, str, int]:
+    """Classify one canonical artifact without retaining its contents."""
+
+    try:
+        if path.is_symlink():
+            return ArtifactEvidence("symlink"), "", 0
+        if not path.exists():
+            return ArtifactEvidence(), "", 0
+        if not path.is_file():
+            return ArtifactEvidence("malformed"), "", 0
+        size = path.stat().st_size
+        if size <= 0:
+            return ArtifactEvidence("unstable"), "", 0
+        if size > limit:
+            return ArtifactEvidence("oversize"), "", 0
+        raw = path.read_bytes()
+    except OSError:
+        return ArtifactEvidence("malformed"), "", 0
+    if not raw or len(raw) > limit:
+        return ArtifactEvidence("oversize"), "", 0
+    digest = hashlib.sha256(raw).hexdigest()
+    reads = stable_reads + 1 if digest == previous_sha256 else 1
+    state = "stable" if reads >= 2 else "unstable"
+    return ArtifactEvidence(state, digest), digest, reads
+
+
+def submit_stable_review_input(
+    *,
+    vault_root: Path,
+    worktree: Path,
+    callback_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Publish a canonical stable reviewer input through review_submit.py."""
+
+    state_dir = callback_path.parent
+    input_path = state_dir / ".review-input.json"
+    if (
+        callback_path.name != ".review-callback.json"
+        or callback_path.is_symlink()
+        or state_dir.is_symlink()
+        or not state_dir.is_dir()
+        or worktree.is_symlink()
+        or not worktree.is_dir()
+    ):
+        raise RuntimeWorkerError("review callback fast path identity is invalid")
+    if callback_path.is_file():
+        if not _bounded_file_sha256(callback_path):
+            raise RuntimeWorkerError("existing review callback is invalid")
+        return subprocess.CompletedProcess((), 0, "callback-ready\n", "")
+    submit = vault_root / "scripts/harness/review_submit.py"
+    if submit.is_symlink() or not submit.is_file():
+        raise RuntimeWorkerError("trusted review submit validator is unavailable")
+    return subprocess.run(
+        [
+            sys.executable,
+            str(submit),
+            "--worktree",
+            str(worktree),
+            "--state-dir",
+            str(state_dir),
+            "--input-file",
+            str(input_path),
+        ],
+        cwd=vault_root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
 
 
 def _atomic_json(path: Path, value: object) -> None:

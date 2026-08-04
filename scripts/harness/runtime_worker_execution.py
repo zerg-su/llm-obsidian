@@ -142,6 +142,8 @@ class RuntimeWorkerExecution(
         self.active_target: tuple[int, str, str, Path] | None = None
         self.last_digest = ""
         self.stable_reads = 0
+        self.review_input_digest = ""
+        self.review_input_stable_reads = 0
         self.callback_handled = False
         self.registration_invalid = False
         self.summary_digest = ""

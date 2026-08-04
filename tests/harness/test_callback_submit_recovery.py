@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import sys
+import json
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,6 +18,10 @@ from harness.callback_submit_recovery import (  # noqa: E402
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
     classify_callback_submit,
+)
+from harness.runtime_callback_io import (  # noqa: E402
+    observe_review_artifact,
+    submit_stable_review_input,
 )
 
 
@@ -74,6 +80,84 @@ check(
     and len(decision.action_id) == 64,
     decision,
 )
+
+with tempfile.TemporaryDirectory(prefix="callback-input-fast-path.") as raw:
+    root = Path(raw)
+    state_dir = root / "callbacks" / "openai-holistic"
+    worktree = root / "product"
+    state_dir.mkdir(parents=True)
+    worktree.mkdir()
+    review_input = state_dir / ".review-input.json"
+    callback = state_dir / ".review-callback.json"
+    meta = {
+        "schema_version": 1,
+        "transport": "review-round",
+        "operation_id": "review-round-1",
+        "run_id": "review-run-1",
+        "review_id": "review-parent-1",
+        "parent_session_operation_id": "review-parent-1",
+        "axis": "openai-holistic",
+        "verification_iteration": 0,
+        "verification_profile": {"name": "scoped", "sha256": "b" * 64},
+        "worktree": str(worktree),
+    }
+    result = {
+        "schema_version": 1,
+        "axis": "openai-holistic",
+        "verdict": "approve",
+        "verification_iteration": 0,
+        "findings": [],
+    }
+    (state_dir / ".review-meta.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    review_input.write_text(json.dumps(result), encoding="utf-8")
+    first, digest, reads = observe_review_artifact(review_input, "", 0)
+    second, digest, reads = observe_review_artifact(review_input, digest, reads)
+    check(
+        "typed input requires two stable bounded reads",
+        first.state == "unstable"
+        and second.state == "stable"
+        and reads == 2,
+        (first, second, reads),
+    )
+    submitted = submit_stable_review_input(
+        vault_root=ROOT,
+        worktree=worktree,
+        callback_path=callback,
+    )
+    check(
+        "stable typed input publishes through the authoritative validator",
+        submitted.returncode == 0
+        and callback.is_file()
+        and not review_input.exists(),
+        submitted,
+    )
+    duplicate, _digest, _reads = observe_review_artifact(callback, "", 0)
+    duplicate, _digest, _reads = observe_review_artifact(
+        callback, _digest, _reads
+    )
+    replay = submit_stable_review_input(
+        vault_root=ROOT,
+        worktree=worktree,
+        callback_path=callback,
+    )
+    check(
+        "existing callback fast path needs no repeated submit",
+        duplicate.state == "stable" and replay.returncode == 0,
+        replay,
+    )
+    callback.unlink()
+    review_input.symlink_to(state_dir / "missing.json")
+    symlink, _digest, _reads = observe_review_artifact(review_input, "", 0)
+    check("symlink input is typed invalid evidence", symlink.state == "symlink")
+    review_input.unlink()
+    review_input.write_bytes(b"x" * 70_001)
+    oversize, _digest, _reads = observe_review_artifact(review_input, "", 0)
+    check(
+        "oversize input is typed invalid evidence",
+        oversize.state == "oversize",
+    )
 check(
     "screen identity is not part of generation-bound action identity",
     decision.action_id

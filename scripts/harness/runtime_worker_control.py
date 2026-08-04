@@ -176,25 +176,89 @@ class RuntimeWorkerControlMixin:
             self.active_target = target
             self.last_digest = ""
             self.stable_reads = 0
+            self.review_input_digest = ""
+            self.review_input_stable_reads = 0
             self.callback_handled = False
         if self.callback_handled:
             return
         generation, operation_id, run_id, callback_path = target
+        review_input = callback_path.with_name(".review-input.json")
+        input_evidence, self.review_input_digest, self.review_input_stable_reads = (
+            observe_review_artifact(
+                review_input,
+                self.review_input_digest,
+                self.review_input_stable_reads,
+            )
+        )
+        if input_evidence.state in {"symlink", "oversize", "malformed"}:
+            self.callback_handled = True
+            try:
+                self.store.transition(
+                    self.spec["owner_id"],
+                    self.spec["operation_id"],
+                    "attention-required",
+                    reason=AttentionReason.CALLBACK_INVALID,
+                )
+            except Exception:
+                pass
+            _atomic_json(
+                self.spec_path.parent / "callback-error.json",
+                {"schema_version": 1, "status": "review-input-invalid"},
+            )
+            return
+        if input_evidence.state == "stable" and not callback_path.exists():
+            try:
+                submitted = submit_stable_review_input(
+                    vault_root=self.trusted_vault,
+                    worktree=self.spec["product_root"],
+                    callback_path=callback_path,
+                )
+            except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired):
+                submitted = subprocess.CompletedProcess((), 3, "", "")
+            if _submit_failure_requires_attention(submitted, callback_path):
+                self.callback_handled = True
+                try:
+                    self.store.transition(
+                        self.spec["owner_id"],
+                        self.spec["operation_id"],
+                        "attention-required",
+                        reason=AttentionReason.CALLBACK_INVALID,
+                    )
+                except Exception:
+                    pass
+                _atomic_json(
+                    self.spec_path.parent / "callback-error.json",
+                    {"schema_version": 1, "status": "review-input-invalid"},
+                )
+                return
+        callback_evidence, self.last_digest, self.stable_reads = (
+            observe_review_artifact(
+                callback_path,
+                self.last_digest,
+                self.stable_reads,
+            )
+        )
+        if callback_evidence.state in {"symlink", "oversize", "malformed"}:
+            self.callback_handled = True
+            try:
+                self.store.transition(
+                    self.spec["owner_id"],
+                    self.spec["operation_id"],
+                    "attention-required",
+                    reason=AttentionReason.CALLBACK_INVALID,
+                )
+            except Exception:
+                pass
+            _atomic_json(
+                self.spec_path.parent / "callback-error.json",
+                {"schema_version": 1, "status": "callback-artifact-invalid"},
+            )
+            return
+        if callback_evidence.state != "stable":
+            return
         try:
             raw = callback_path.read_bytes()
-        except FileNotFoundError:
-            return
         except OSError:
-            raw = b""
-        if not raw or len(raw) > MAX_OUTBOX_BYTES:
-            return
-        digest = hashlib.sha256(raw).hexdigest()
-        if digest != self.last_digest:
-            self.last_digest = digest
-            self.stable_reads = 1
-            return
-        self.stable_reads += 1
-        if self.stable_reads < 2:
             return
         self.callback_handled = True
         try:

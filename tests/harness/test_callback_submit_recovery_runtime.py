@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 
@@ -21,6 +23,10 @@ from harness.callback_submit_recovery import (  # noqa: E402
     CallbackSubmitEvidence,
     classify_callback_submit,
 )
+from harness.contracts import OperationSpec, RuntimeRoute  # noqa: E402
+from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
+from harness.store import OperationStore  # noqa: E402
+from harness.supervisor import OperationSupervisor  # noqa: E402
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -62,6 +68,151 @@ check(
     and current.last_progress_at == incident["second_observed_at"],
     (decision, current),
 )
+
+
+class FastPathWorker(RuntimeWorkerControlMixin):
+    pass
+
+
+with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
+    root = Path(raw)
+    scratch = root / "scratch"
+    product = root / "product"
+    state_root = root / "worker-state"
+    scratch.mkdir()
+    product.mkdir()
+    state_root.mkdir()
+    callback_dir = scratch / "callbacks" / "openai-holistic"
+    callback_dir.mkdir(parents=True)
+    callback_path = callback_dir / ".review-callback.json"
+    input_path = callback_dir / ".review-input.json"
+    registration = state_root / "callback-target.json"
+    registration.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generation": 3,
+                "operation_id": "review-round-1",
+                "run_id": "review-round-run-1",
+                "callback_pointer": str(callback_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (callback_dir / ".review-meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "transport": "review-round",
+                "operation_id": "review-round-1",
+                "run_id": "review-round-run-1",
+                "review_id": "review-parent-1",
+                "parent_session_operation_id": "review-parent-1",
+                "axis": "openai-holistic",
+                "verification_iteration": 0,
+                "verification_profile": {
+                    "name": "scoped",
+                    "sha256": "d" * 64,
+                },
+                "worktree": str(product),
+            }
+        ),
+        encoding="utf-8",
+    )
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "axis": "openai-holistic",
+                "verdict": "approve",
+                "verification_iteration": 0,
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "e" * 64
+    )
+    store = OperationStore(root / "store")
+    parent = OperationSpec(
+        "review-parent-1",
+        "review-parent-key-1",
+        "review-session",
+        "review-owner-1",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    child = OperationSpec(
+        "review-round-1",
+        "review-round-key-1",
+        "review-round",
+        "review-owner-1",
+        route,
+        "packets/review.json",
+        "scoped",
+    )
+    store.create(parent, lane_id="openai-holistic", run_id="review-parent-run-1")
+    OperationSupervisor(store, "review-owner-1", "review-parent-1").configure_budget(
+        attempt_limit=1,
+        model_restart_limit=0,
+        time_budget_seconds=3600,
+        token_limit=100,
+        now=time.time(),
+    )
+    store.create(
+        child, lane_id="openai-holistic", run_id="review-round-run-1"
+    )
+    for operation_id in ("review-parent-1", "review-round-1"):
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            store.transition("review-owner-1", operation_id, state)
+    worker = FastPathWorker()
+    worker.spec_path = state_root / "launch.json"
+    worker.spec = {
+        "owner_id": "review-owner-1",
+        "operation_id": "review-parent-1",
+        "run_id": "review-parent-run-1",
+        "cwd": scratch.resolve(),
+        "product_root": product.resolve(),
+        "callback_registration": registration,
+    }
+    worker.store = store
+    worker.trusted_vault = ROOT
+    worker.active_target = None
+    worker.last_digest = ""
+    worker.stable_reads = 0
+    worker.review_input_digest = ""
+    worker.review_input_stable_reads = 0
+    worker.callback_handled = False
+    worker.registration_invalid = False
+    worker.cmux_adapter = object()
+    worker.inspect_callback()
+    worker.inspect_callback()
+    worker.inspect_callback()
+    accepted = store.read("review-owner-1", "review-round-1")
+    check(
+        "runtime consumes stable typed input and accepts its callback without model input",
+        accepted.state == "finalizing"
+        and bool(accepted.accepted_callback_id)
+        and (state_root / "callback-receipt.json").is_file()
+        and not input_path.exists(),
+        {
+            "record": accepted,
+            "callback_exists": callback_path.exists(),
+            "input_exists": input_path.exists(),
+            "callback_error": (
+                (state_root / "callback-error.json").read_text(encoding="utf-8")
+                if (state_root / "callback-error.json").is_file()
+                else ""
+            ),
+            "callback_receipt": (
+                (state_root / "callback-receipt.json").read_text(encoding="utf-8")
+                if (state_root / "callback-receipt.json").is_file()
+                else ""
+            ),
+        },
+    )
 
 # RED until the reviewer-specific generation-bound recovery policy is wired.
 recovery = classify_callback_submit(

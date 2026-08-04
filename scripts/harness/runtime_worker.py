@@ -109,7 +109,9 @@ from .runtime_callback_io import (
     _research_input_provenance,
     _submit_failure_requires_attention,
     _write_once_json,
+    observe_review_artifact,
     publish_callback_wake,
+    submit_stable_review_input,
 )
 from .runtime_provider import (
     RESEARCH_PATH,
