@@ -5203,6 +5203,34 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             }
             == {item.name for item in intent_inputs},
         )
+        reviewed_artifact_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        reviewed_design = boundary_artifacts["design"].read_bytes()
+        boundary_artifacts["design"].write_text(
+            "# resolved design evidence\n", encoding="utf-8"
+        )
+        rebound_inputs = task_review_runner._purpose_boundary_inputs(
+            product.resolve(),
+            review_plan,
+            intent_boundary,
+            pointer_root=scratch / "pointers-rebound",
+            artifact_head=reviewed_artifact_head,
+        )
+        rebound_design = next(
+            item for item in rebound_inputs if item.name == "review-design"
+        )
+        check(
+            "resolution rebind preserves purpose evidence from the exact reviewed HEAD",
+            rebound_design.content == reviewed_design
+            and rebound_design.source
+            == f"git:{reviewed_artifact_head}:wiki/design.md",
+        )
+        boundary_artifacts["design"].write_bytes(reviewed_design)
         try:
             task_review_runner._purpose_boundary_inputs(
                 product.resolve(),

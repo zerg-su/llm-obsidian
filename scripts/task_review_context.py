@@ -49,8 +49,10 @@ from task_review_shared import (
     ResolutionBundle,
     StaleRoundCallbackError,
     TaskReviewError,
+    _atomic_bytes,
     _atomic_text,
     _git,
+    _git_bytes,
     _load_review_boundary_input,
     _read_json,
 )
@@ -72,6 +74,42 @@ _BOUNDARY_ARTIFACTS = {
 }
 
 
+def _reviewed_artifact_input(
+    worktree: Path,
+    relative: Path,
+    *,
+    name: str,
+    artifact_head: str,
+    expected_sha256: str,
+    pointer_root: Path,
+) -> ContextInput:
+    if relative.is_absolute() or relative == Path(".") or ".." in relative.parts:
+        raise TaskReviewError(
+            f"review boundary artifact is unavailable: {relative}"
+        )
+    raw = _git_bytes(
+        worktree,
+        "show",
+        f"{artifact_head}:{relative.as_posix()}",
+    )
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != expected_sha256:
+        raise TaskReviewError(
+            f"review boundary artifact digest is stale: {relative}"
+        )
+    source = f"git:{artifact_head}:{relative.as_posix()}"
+    if len(raw) <= 65_536:
+        return ContextInput(name, source, raw, role="outcome")
+    _atomic_bytes(pointer_root / name, raw)
+    return ContextInput.pointer(
+        name,
+        source,
+        byte_count=len(raw),
+        content_sha256=digest,
+        role="outcome",
+    )
+
+
 def _purpose_boundary_inputs(
     worktree: Path,
     plan: Path,
@@ -79,6 +117,7 @@ def _purpose_boundary_inputs(
     *,
     pointer_root: Path,
     artifact_root: Path | None = None,
+    artifact_head: str = "",
 ) -> tuple[ContextInput, ...]:
     """Validate and materialize every exact artifact named by a purpose boundary."""
 
@@ -96,6 +135,22 @@ def _purpose_boundary_inputs(
     source_root = (artifact_root or worktree).resolve()
     for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:
         relative = Path(str(getattr(boundary, path_field)))
+        if artifact_head:
+            if artifact_root is not None:
+                raise TaskReviewError(
+                    f"review boundary artifact is unavailable: {relative}"
+                )
+            inputs.append(
+                _reviewed_artifact_input(
+                    worktree,
+                    relative,
+                    name=name,
+                    artifact_head=artifact_head,
+                    expected_sha256=str(getattr(boundary, digest_field)),
+                    pointer_root=pointer_root,
+                )
+            )
+            continue
         candidate = source_root / relative
         target = candidate.resolve()
         if (
@@ -301,6 +356,11 @@ def _context(
                 boundary,
                 pointer_root=runtime_root / "pointers",
                 artifact_root=plan_artifact_root,
+                artifact_head=(
+                    boundary_head
+                    if exact_resolution_rebind and plan_artifact_root is None
+                    else ""
+                ),
             )
         )
     elif purpose != "implementation":
