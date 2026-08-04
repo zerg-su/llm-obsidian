@@ -24,7 +24,7 @@ tags:
 ## Outcome Contract
 
 ```json
-{"schema_version":1,"purpose":"Закрыть подтверждённые unattended gaps 2.6.3, из-за которых завершённая reviewer-сессия, принятый callback, coordinator decision или однозначно исправимая Wiki-ссылка не продолжают pipeline без присутствия пользователя.","desired_outcome":"LLM Obsidian 2.6.4 сохраняет единственного harness lifecycle owner и автоматически продолжает безопасные exact-identity случаи: принимает уже созданный typed artifact без model call, выполняет не более одного generation-bound submit-only nudge в той же reviewer-сессии, публикует принятый resource-free callback, сохраняет coordinator decisions append-only, делает одну атомарную попытку исправить только однозначный unresolved wikilink через vault-write и оставляет typed attention для всего неизвестного. Reviewer tooling получает copy-paste exact OID evidence без ослабления read-only Git boundary. Работа пользователя офлайн либо продвигается, либо останавливается один раз с полной durable причиной, но не зависает молча.","success_evidence":[{"evidence_id":"E1-missing-submit-red","observable":"Детерминированный full-runtime fixture воспроизводит reviewer generation, где exact provider жив, экран стабильно idle, input/callback/receipt отсутствуют, а v2.6.3 до исправления завершается callback-timeout без continuation."},{"evidence_id":"E2-generation-classifier","observable":"Чистый code-owned classifier принимает только exact operation/run/lane/generation, stable typed-file digests, process/surface ownership и content-free prompt class; active, permission, unknown, stale и malformed evidence никогда не становятся recovery."},{"evidence_id":"E3-bounded-submit-recovery","observable":"Stable idle current generation резервирует один write-ahead submit-only effect, отправляет один фиксированный nudge в ту же exact session, не создаёт reviewer/surface и после валидного callback автоматически продолжает pipeline."},{"evidence_id":"E4-artifact-and-race-safety","observable":"Уже существующие stable input/callback/receipt обрабатываются без model call; callback races до reservation, между reservation/send и после send, restart и concurrent reconcile не дублируют prompt, submit, callback, review или provider effect."},{"evidence_id":"E5-terminal-fail-closed","observable":"Terminal parent, exhausted existing ceilings, lost ownership, dead/unknown provider, stale generation, symlink, oversize и malformed artifacts дают отдельную typed attention reason; budgets nudges/restarts/provider calls не увеличены."},{"evidence_id":"E6-unattended-dogfood","observable":"Один изолированный end-to-end dogfood с offline coordinator проходит намеренно пропущенный reviewer submit, ровно один same-session recovery, accepted receipt и следующую pipeline stage без ручного current/resume/send/callback write и без повторного review."},{"evidence_id":"E7-wikilink-self-heal","observable":"Stop fixture с уникальным frontmatter title или H1 атомарно канонизируется через optimistic vault-write и проходит повторную strict validation; ambiguous, missing, malformed, embed-unsupported и concurrently changed cases не мутируются."},{"evidence_id":"E8-durable-decisions","observable":"Каждая escalation/decision получает append-only identity-bound record, latest marker содержит только authoritative chain pointer, legacy full marker читается только для deterministic backfill, а amendment-record workflow связывает frozen plan/Outcome digests с coordinator decision без потери прежних решений."},{"evidence_id":"E9-reviewer-tools","observable":"Review ContextPacket/prompt предоставляет exact base/head OID и готовые bounded review-inspect invocations; symbolic/non-OID ref по-прежнему отклоняется, а точный task_escalation raise argv проходит task DCG только через узкий anchored allow contract, тогда как shell composition и destructive variants блокируются."},{"evidence_id":"E10-defect-ledger","observable":"Все D-264 entries имеют reproducer/evidence, owner, release disposition included/already-shipped/deferred/not-a-defect и regression/evidence pointer; новая escalation не перезаписывает историю, а release review доказывает отсутствие потерянных unresolved entries."},{"evidence_id":"E11-no-regression","observable":"Focused unit/transition tests, full harness coverage, make test, vault validation, Codex/MCP sync, permission/provider snapshots and release acceptance green on one exact candidate HEAD; no public DSL, model routing or permission-budget drift."},{"evidence_id":"E12-plan-review-lifecycle","observable":"Code-owned plan-review facade строит purpose=intent boundary из валидированного плана; invalid или ambiguous invocation завершается до RuntimeSessionManager.start; Outcome, dispositions и evidence-map остаются fail-closed, а разрешённая design-only правка связывается reviewed/resolved plan digests и exact Git delta и продолжается в retained lanes без новой reviewer session."},{"evidence_id":"E13-superseded-review-cleanup","observable":"После durable callback/finding/resolution receipts terminal или identity-bound superseded review boundary автоматически закрывает только exact-owned provider process/surface и reconcile доводит parent до resource-free terminal state; active/current boundary и unknown ownership никогда не закрываются; cleanup failure становится typed attention, повтор идемпотентен и не удаляет evidence bytes."},{"evidence_id":"E14-harness-control-plane","observable":"Deterministic lifecycle trace доказывает, что Harness после запуска сам ведёт plan steps, loops, review, verification, bounded fix/retry, checkpoint, callback, join и terminal cleanup по PipelineSpec; LLM публикует только валидированные typed artifacts и не выбирает, не повторяет и не исполняет lifecycle effects; terminal prose не меняет state, а нормальный unattended path не требует ручного current/resume."}],"non_goals":["Парсить terminal prose или синтезировать verdict/callback без typed reviewer artifact и штатного validator.","Добавлять scheduler, второй lifecycle owner, новую публичную FSM или model-owned watchdog.","Делать периодические model calls во время видимой активности или увеличивать nudge/restart/review/verification/provider budgets.","Обходить dontAsk, sandbox, exact-generation ownership, callback validation или разрешать произвольный Bash через DCG.","Создавать отсутствующие Wiki-страницы, применять fuzzy matching, угадывать неоднозначную ссылку или писать vault в обход vault-write.","Переделывать PipelineSpec DSL, Project Spaces/Task Orchestration 2.7, model routing или review topology.","Повторно реализовывать D-264-06/D-264-08, уже поставленные в 2.6.3, либо превращать одноразовую ошибку ad-hoc reviewer Python probe в product fix без воспроизводимого contract seam.","Push, publish, tag, release или удаление safety branches/worktrees в рамках реализации плана."]}
+{"schema_version":1,"purpose":"Закрыть подтверждённые unattended gaps 2.6.3, из-за которых завершённая reviewer-сессия, принятый callback, coordinator decision или однозначно исправимая Wiki-ссылка не продолжают pipeline без присутствия пользователя.","desired_outcome":"LLM Obsidian 2.6.4 сохраняет единственного harness lifecycle owner и автоматически продолжает безопасные exact-identity случаи: принимает уже созданный typed artifact без model call, выполняет не более одного generation-bound submit-only nudge в той же reviewer-сессии, публикует принятый resource-free callback, сохраняет coordinator decisions append-only, делает одну атомарную попытку исправить только однозначный unresolved wikilink через vault-write и оставляет typed attention для всего неизвестного. Reviewer tooling получает copy-paste exact OID evidence без ослабления read-only Git boundary. Работа пользователя офлайн либо продвигается, либо останавливается один раз с полной durable причиной, но не зависает молча.","success_evidence":[{"evidence_id":"E1-missing-submit-red","observable":"Детерминированный full-runtime fixture воспроизводит reviewer generation, где exact provider жив, экран стабильно idle, input/callback/receipt отсутствуют, а v2.6.3 до исправления завершается callback-timeout без continuation."},{"evidence_id":"E2-generation-classifier","observable":"Чистый code-owned classifier принимает только exact operation/run/lane/generation, stable typed-file digests, process/surface ownership и content-free prompt class; active, permission, unknown, stale и malformed evidence никогда не становятся recovery."},{"evidence_id":"E3-bounded-submit-recovery","observable":"Stable idle current generation резервирует один write-ahead submit-only effect, отправляет один фиксированный nudge в ту же exact session, не создаёт reviewer/surface и после валидного callback автоматически продолжает pipeline."},{"evidence_id":"E4-artifact-and-race-safety","observable":"Уже существующие stable input/callback/receipt обрабатываются без model call; callback races до reservation, между reservation/send и после send, restart и concurrent reconcile не дублируют prompt, submit, callback, review или provider effect."},{"evidence_id":"E5-terminal-fail-closed","observable":"Terminal parent, exhausted existing ceilings, lost ownership, dead/unknown provider, stale generation, symlink, oversize и malformed artifacts дают отдельную typed attention reason; budgets nudges/restarts/provider calls не увеличены."},{"evidence_id":"E6-unattended-dogfood","observable":"Один изолированный end-to-end dogfood с offline coordinator проходит намеренно пропущенный reviewer submit, ровно один same-session recovery, accepted receipt и следующую pipeline stage без ручного current/resume/send/callback write и без повторного review."},{"evidence_id":"E7-wikilink-self-heal","observable":"Stop fixture с уникальным frontmatter title или H1 атомарно канонизируется через optimistic vault-write и проходит повторную strict validation; ambiguous, missing, malformed, embed-unsupported и concurrently changed cases не мутируются."},{"evidence_id":"E8-durable-decisions","observable":"Каждая escalation/decision получает append-only identity-bound record, latest marker содержит только authoritative chain pointer, legacy full marker читается только для deterministic backfill, а amendment-record workflow связывает frozen plan/Outcome digests с coordinator decision без потери прежних решений."},{"evidence_id":"E9-reviewer-tools","observable":"Review ContextPacket/prompt предоставляет exact base/head OID и готовые bounded review-inspect invocations; symbolic/non-OID ref по-прежнему отклоняется, а точный task_escalation raise argv проходит task DCG только через узкий anchored allow contract, тогда как shell composition и destructive variants блокируются."},{"evidence_id":"E10-defect-ledger","observable":"Все D-264 entries имеют reproducer/evidence, owner, release disposition included/already-shipped/deferred/not-a-defect и regression/evidence pointer; новая escalation не перезаписывает историю, а release review доказывает отсутствие потерянных unresolved entries."},{"evidence_id":"E11-no-regression","observable":"Focused unit/transition tests, full harness coverage, make test, vault validation, Codex/MCP sync, permission/provider snapshots and release acceptance green on one exact candidate HEAD; no public DSL, model routing or permission-budget drift."},{"evidence_id":"E12-plan-review-lifecycle","observable":"Code-owned plan-review facade строит purpose=intent boundary из валидированного плана; invalid или ambiguous invocation завершается до RuntimeSessionManager.start; Outcome, dispositions и evidence-map остаются fail-closed, а разрешённая design-only правка связывается reviewed/resolved plan digests и exact Git delta и продолжается в retained lanes без новой reviewer session."},{"evidence_id":"E13-superseded-review-cleanup","observable":"После durable callback/finding/resolution receipts terminal или identity-bound superseded review boundary автоматически закрывает только exact-owned provider process/surface и reconcile доводит parent до resource-free terminal state; active/current boundary и unknown ownership никогда не закрываются; cleanup failure становится typed attention, повтор идемпотентен и не удаляет evidence bytes."},{"evidence_id":"E14-harness-control-plane","observable":"Deterministic lifecycle trace доказывает, что после запуска утверждённого PipelineSpec Harness сам ведёт lifecycle: plan steps, loops, review, verification, bounded fix/retry, checkpoint, callback и terminal cleanup; LLM публикует только валидированные typed artifacts и не выбирает, не повторяет и не исполняет lifecycle effects; terminal prose не меняет state, а нормальный unattended path не требует ручного current/resume. Workstream integration join остаётся coordinator-owned и не объявляется PipelineSpec stage."}],"non_goals":["Парсить terminal prose или синтезировать verdict/callback без typed reviewer artifact и штатного validator.","Добавлять scheduler, второй lifecycle owner, новую публичную FSM или model-owned watchdog.","Делать периодические model calls во время видимой активности или увеличивать nudge/restart/review/verification/provider budgets.","Обходить dontAsk, sandbox, exact-generation ownership, callback validation или разрешать произвольный Bash через DCG.","Создавать отсутствующие Wiki-страницы, применять fuzzy matching, угадывать неоднозначную ссылку или писать vault в обход vault-write.","Переделывать PipelineSpec DSL, Project Spaces/Task Orchestration 2.7, model routing или review topology.","Повторно реализовывать D-264-06/D-264-08, уже поставленные в 2.6.3, либо превращать одноразовую ошибку ad-hoc reviewer Python probe в product fix без воспроизводимого contract seam.","Push, publish, tag, release или удаление safety branches/worktrees в рамках реализации плана."]}
 ```
 
 ## 1. Контекст и подтверждённый дефект
@@ -41,7 +41,7 @@ tags:
 
 ## 2. Граница patch-релиза
 
-2.6.4 добавляет два узких unattended recovery capability: для harness-owned reviewer callbacks и для однозначно исправимой адресации wikilink в Stop hook. Callback recovery использует существующие `OperationStore`, `RuntimeSessionManager`, `LivenessController`, callback target/receipt и cmux exact ownership. Vault recovery использует существующие schema/index/validator и единственный разрешённый writer. Новый scheduler, controller, state store или public DSL не создаются.
+2.6.4 добавляет два product recovery capability: для harness-owned reviewer callbacks и для однозначно исправимой адресации wikilink в Stop hook. Их безопасное unattended завершение требует supporting harness work, уже зафиксированного в ledger: append-only coordinator decisions, safe plan-review facade, exact superseded-review cleanup и проверяемый Harness/LLM control-plane invariant. Callback recovery использует существующие `OperationStore`, `RuntimeSessionManager`, `LivenessController`, callback target/receipt и cmux exact ownership. Vault recovery использует существующие schema/index/validator и единственный разрешённый writer. Новый scheduler, controller, state store или public DSL не создаются.
 
 Сначала capability включается только для `reviewer-callback` и его verification continuation. Общий detector оформляется без привязки к Opus/Fable, но расширение на research, task-summary и произвольные pipeline result modes требует отдельного evidence и не входит в 2.6.4.
 
@@ -101,7 +101,7 @@ Observer принимает решение только из bounded набор�
 
 ### 6.0 Ownership invariant: Harness управляет lifecycle, LLM — содержанием
 
-Harness является единственным owner открытия/закрытия provider processes и cmux surfaces, сборки и передачи ContextPacket, checkpoint/callback identities, content-free progress observation, timeout/nudge/restart policy, supersession и cleanup. После запуска утверждённого PipelineSpec он также единолично продвигает plan steps, loops, review, verification, bounded fix/retry, join и terminal state. LLM отвечает только за reasoning и генерацию содержательного результата внутри переданных Outcome/Context contracts и завершает шаг валидированным typed artifact: implementer result, review verdict, verification result или escalation request. LLM не выбирает lifecycle effect, окно или session continuation; Harness не выводит состояние из terminal prose и не синтезирует смысловой результат. Нормальный unattended path не требует ручного `current/resume`; такие команды остаются диагностическим/recovery ingress. Любой transition test обязан отдельно доказывать эту границу: lifecycle effects приходят только из code-owned policy, model output влияет только через валидированный typed artifact. Семантическая декомпозиция большой цели на отдельные планы остаётся scope 2.7 и не добавляет scheduler в 2.6.4.
+Harness является единственным owner открытия/закрытия provider processes и cmux surfaces, сборки и передачи ContextPacket, checkpoint/callback identities, content-free progress observation, timeout/nudge/restart policy, supersession и cleanup. После запуска утверждённого PipelineSpec он также единолично продвигает plan steps, loops, review, verification и bounded fix/retry; checkpoint, callback, supersession и terminal cleanup остаются code-owned lifecycle effects. Workstream integration join выполняет coordinator поверх отдельных pipeline runs и не является PipelineSpec stage. LLM отвечает только за reasoning и генерацию содержательного результата внутри переданных Outcome/Context contracts и завершает шаг валидированным typed artifact: implementer result, review verdict, verification result или escalation request. LLM не выбирает lifecycle effect, окно или session continuation; Harness не выводит состояние из terminal prose и не синтезирует смысловой результат. Нормальный unattended path не требует ручного `current/resume`; такие команды остаются диагностическим/recovery ingress. Любой transition test обязан отдельно доказывать эту границу: lifecycle effects приходят только из code-owned policy, model output влияет только через валидированный typed artifact. Семантическая декомпозиция большой цели на отдельные планы остаётся scope 2.7 и не добавляет scheduler в 2.6.4.
 
 ### 6.1 Callback recovery
 
@@ -118,7 +118,7 @@ Callback submit effect не имеет отдельного model-call counter. 
 
 ### 6.2 Decision history и amendment records
 
-Contract amendment authority: [[LLM Obsidian 2.6.4 — amendment plan-review outcome]] и [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]]. Они добавляют E12/E13 и подтверждают literal pointer-only disposition E8.
+Contract amendment authority: [[LLM Obsidian 2.6.4 — amendment plan-review outcome]], [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]] и [[LLM Obsidian 2.6.4 — amendment Harness control plane]]. Они добавляют E12/E13/E14 и подтверждают literal pointer-only disposition E8.
 
 | Модуль | Ответственность | Интерфейс | Test seam |
 |---|---|---|---|
@@ -135,12 +135,12 @@ Writer inventory frozen before change: `task_escalation.py`, `runtime_worker_cus
 
 - всегда задаёт `purpose=intent`;
 - validates exactly one Outcome Contract;
-- deterministic compiler требует ровно по одному exact heading anchor `## Outcome Contract`, `## 12. Incidental defect ledger` и `## 13. Requirement-to-slice coverage`; Outcome берётся из единственного fenced JSON, dispositions и evidence-map — из соответствующих non-overlapping sections, а design artifact — из остальных plan bytes с тремя protected regions заменёнными их digests. Отсутствующий, duplicated или overlapping region даёт typed `plan-review-artifact-boundary-invalid` до provider start; plan без dispositions/evidence-map обязан передать explicit repository-relative artifact pointers, иначе тот же fail-closed result;
+- deterministic compiler требует ровно по одному semantic exact heading anchor `## Outcome Contract`, `## Capability Dispositions and Defect Ledger` и `## Success Evidence Map`; Outcome берётся из единственного fenced JSON, dispositions и evidence-map — из соответствующих non-overlapping sections, а design artifact — из остальных plan bytes с тремя protected regions заменёнными их digests. Отсутствующий, duplicated или overlapping region даёт typed `plan-review-artifact-boundary-invalid` до provider start; plan без dispositions/evidence-map обязан передать explicit repository-relative artifact pointers, иначе тот же fail-closed result;
 - для current single-parent plan commit выводит base=`HEAD^` только когда exact plan path изменён в этом commit; иначе требует explicit exact `--base` и fail closed;
 - dispatched lifecycle берёт base из trusted `initial_head_sha`;
 - записывает exact base/head OIDs в ContextPacket и literal `review-inspect status/log/diff/commit` commands;
 - invalid/ambiguous boundary завершается до `RuntimeSessionManager.start`, что доказывается zero provider sessions.
-- plan subject и control boundary разделены: same-session resolution может rebind только design artifact вместе с reviewed/resolved plan digests и exact Git delta; Outcome, section 12 dispositions и section 13 evidence map остаются frozen и любое их изменение fail closed. Их изменение разрешается только отдельным amendment record и fresh boundary; design-only resolution продолжается в retained lanes без нового provider/session.
+- plan subject и control boundary разделены: same-session resolution может rebind только design artifact вместе с reviewed/resolved plan digests и exact Git delta; Outcome, `Capability Dispositions and Defect Ledger` и `Success Evidence Map` остаются frozen и любое их изменение fail closed. Их изменение разрешается только отдельным amendment record и fresh boundary; design-only resolution продолжается в retained lanes без нового provider/session.
 
 Legacy `current --plan` без явного compatible purpose/boundary больше не молча default'ится в implementation: он возвращает actionable typed error до provider launch и предлагает `plan`. `review-inspect.py` сохраняет strict lowercase-OID ingress. `config/dcg/task.toml` получает anchored allow только если whole-command negative matrix доказывает безопасное поведение установленной DCG; broad Bash запрещён.
 
@@ -171,7 +171,7 @@ User-visible output сообщает repaired page paths/count; content-free eve
 
 После Slice 0 независимы:
 
-- Workstream A: Slices 1–5 callback continuity;
+- Workstream A: Slices 1–5 callback continuity, затем Slice 5b harness control-plane gap closure;
 - Workstream B: Slice 6 decision/amendment history;
 - Workstream C: Slice 7 plan-review/OID/DCG;
 - Workstream D: Slice 8 Wiki self-heal.
@@ -188,13 +188,13 @@ Shared-file rules:
 
 ### Slice 0 — frozen v2.6.3 RED и triage
 
-- **files/responsibility:** новый `tests/harness/test_callback_submit_recovery_runtime.py` + fixture files — deterministic real-runtime/fake-provider incident; `docs/acceptance/v2.6.4-baseline.md` — failed receipt, exact base и D-264 dispositions.
-- **consumes:** clean `v2.6.3`, existing fake-provider process seam, retained incident identity.
-- **produces:** runnable test that fails on v2.6.3 because callback generation reaches timeout without continuation; evidence names exact suppressing guard among prompt-state, screen churn, deadline ordering and records existing generic nudge behavior.
+- **files/responsibility:** новый `tests/harness/test_callback_submit_recovery_runtime.py` + fixture files — deterministic real-runtime/fake-provider incident; `docs/acceptance/v2.6.4-baseline.md` — failed receipt, exact base и D-264 dispositions; `docs/acceptance/v2.6.4-harness-control-plane-baseline.md` + JSON — stage-by-stage authority trace.
+- **consumes:** clean `v2.6.3`, existing fake-provider process seam, retained incident identity, OperationStore/current-review receipts for the four manual-current incidents.
+- **produces:** runnable callback RED plus an E14 authority matrix for plan steps, loops, review, verification, bounded fix/retry, checkpoint, callback and terminal cleanup; every row records current owner, exact module/test, whether manual current/resume is required, and a durable receipt/command digest.
 - **failing evidence:** preserved command/exit/output digest on v2.6.3; active reviewer negative control.
-- **minimal green:** none in this slice; RED commit/receipt is the deliverable and Slices 1–4 own GREEN. Production code remains unchanged.
+- **minimal green:** none in this slice; RED commit/receipt is the deliverable, Slices 1–4 own callback GREEN, а Slice 5b — только подтверждённые E14 gaps. Production code remains unchanged.
 - **refactor seam:** none.
-- **focused verification:** run fixture in preserved v2.6.3 worktree without wall-clock sleeps above injected poll seam; E1, E10 baseline.
+- **focused verification:** run fixture in preserved v2.6.3 worktree without wall-clock sleeps above injected poll seam; validate every E14 stage row has evidence and a disposition; E1, E10, E14 baseline.
 
 ### Slice 1 — pure generation/deadline classifier
 
@@ -246,6 +246,16 @@ Shared-file rules:
 - **refactor seam:** fixture consolidation without losing independent expectations.
 - **focused verification:** oracle and callback suites plus model-output/lifecycle-effect separation; E2, E4, E5, E11, E13, E14.
 
+### Slice 5b — Harness control-plane gap closure
+
+- **files/responsibility:** new `tests/harness/test_harness_control_plane.py`; only baseline-red owners among `runtime_worker_loop.py`, `runtime_worker_spec.py`, `runtime_worker_review_bridge.py`, `runtime_worker_verification.py`, `runtime_worker_fix.py`, `runtime_session_checkpoint.py`, `runtime_callback_io.py`, `runtime_session_cleanup.py`; no PipelineSpec schema/DSL change.
+- **consumes:** Slice 0 stage matrix and green Slices 1–5.
+- **produces:** each baseline-red stage advances only from code-owned policy plus validated typed artifact; manual `current/resume` is recovery ingress, never normal progression; model prose alone produces zero transition. Already-green stages receive regression tests only.
+- **failing evidence:** one independent RED per baseline gap; all already-green stages have prose-only and duplicate-effect negative controls.
+- **minimal green:** modify only modules named by red stage rows; if a gap requires scheduler/DSL/public FSM change, stop for amendment instead of implementing it here.
+- **refactor seam:** shared typed-artifact-to-transition adapter only when two real stage owners duplicate identical validation.
+- **focused verification:** stage matrix and full control-plane suite; E11, E14.
+
 ### Slice 6 — append-only coordinator authority
 
 - **files/responsibility:** new `task_escalation_records.py`, `task_escalation.py`, `runtime_worker_custom.py`, `runtime_worker_control.py`, new Workstream-B-owned records/marker fixture, `test_task_lifecycle.py`, `test_task_review_mechanism_recovery.py`, focused custom/fix marker tests and docs; it does not edit `test_runtime_task_summary.py`.
@@ -280,7 +290,7 @@ Shared-file rules:
 
 - **files/responsibility:** `Makefile`, `config/harness-audit-manifest.json`, transition oracle/release matrix; no feature code.
 - **consumes:** green Workstreams A–D and their expected suite counts.
-- **produces:** every new suite reachable from standing `make test`/`make test-harness`; every production module in honest coverage denominator; joined counts retained.
+- **produces:** every `tests/harness/test_*.py` suite, including pre-existing unregistered `test_contract_state_edge_matrix.py` and `test_task_session_store_io.py`, reachable from standing `make test`/`make test-harness`; join assertion compares the filesystem suite set to Makefile registration; every production module is in the honest coverage denominator.
 - **failing evidence:** unregistered test/module or dropped shared assertion fails join.
 - **minimal green:** registration/conflict correction only.
 - **refactor seam:** none after join.
@@ -302,6 +312,9 @@ Shared-file rules:
 python3 tests/harness/test_callback_submit_recovery.py
 python3 tests/harness/test_callback_submit_recovery_runtime.py
 python3 tests/harness/test_liveness.py
+python3 tests/harness/test_contract_state_edge_matrix.py
+python3 tests/harness/test_task_session_store_io.py
+python3 tests/harness/test_harness_control_plane.py
 python3 tests/harness/test_review_resolution_bundle.py
 python3 tests/harness/test_review_vertical.py
 python3 tests/harness/test_runtime_sessions.py
@@ -357,28 +370,29 @@ Findings use same-session verification. Scope/public-interface/security/migratio
 - Dogfood needs manual current/resume/send/callback write or budget change → E6 missing.
 - Before publish rollback is branch/worktree lifecycle only; after merge one revert commit, evidence chain retained.
 
-## 12. Incidental defect ledger
+## Capability Dispositions and Defect Ledger
 
-| ID | Defect | Owner | Disposition |
-|---|---|---|---|
-| D-264-01 | Reviewer idle without typed submit | callback recovery | `included`, Slices 0–5 |
-| D-264-02 | Accepted resource-free child not published | review bridge | `included`, Slice 4 |
-| D-264-03 | Latest attention marker overwrites decisions | escalation records | `included`, Slice 6 |
-| D-264-04 | Unique title/H1 link blocks Stop | vault/Stop | `included`, Slice 8 |
-| D-264-05 | No frozen-plan amendment workflow | escalation records | `included`, Slice 6 |
-| D-264-06 | Quiescent recovery rejected | review recovery | `already-shipped-in-2.6.3`, `68a13ef` |
-| D-264-07 | Exact escalation CLI blocked by task DCG | permission policy | `included-if-matrix-green`; otherwise amendment + RC block because E9 partial |
-| D-264-08 | Legacy spec rehydrate mismatch | review recovery | `already-shipped-in-2.6.3`, `f3212cd` |
-| D-264-09 | Reviewer improvises symbolic ref because exact base absent | review boundary | `included`, Slice 7 |
-| D-264-10 | Inline reviewer Python assumes tuple is dict | ad-hoc probe | `not-a-defect` until repo contract reproducer exists |
-| D-264-11 | Plan review defaulted to implementation, launched two expensive Opus sessions and rejected missing code | plan-review facade | `included`, Slice 7; wrong/ambiguous invocation must start zero providers |
-| D-264-12 | Same-session plan finding resolution rejects the corrected plan as stale because control-plan and review subject share one digest | plan-review facade | `included`, Slice 7; frozen Outcome, exact plan delta, retained lanes, zero new sessions |
-| D-264-13 | Superseded review boundaries retain five unusable provider surfaces after durable callbacks/findings | review lifecycle cleanup | `included`, Slices 4–5; exact supersession receipt, evidence-preserving close/reconcile, active/unknown fail closed |
-| D-264-14 | Lifecycle progress still depends on manual current/resume and model-visible prose in failure paths | harness control-plane invariant | `included-as-regression-invariant`, Slices 5, 9, 10; no new scheduler/DSL |
 
-New D-264 entry is recorded before task continuation. Disposition changes only through Slice 6 authority record and never grants unrelated fix scope.
+| ID | Defect | Owner | Disposition | Reproducer / evidence |
+|---|---|---|---|---|
+| D-264-01 | Reviewer idle without typed submit | callback recovery | `included` | E1 / Slice 0 full-runtime fixture |
+| D-264-02 | Accepted resource-free child not published | review bridge | `included` | E4 / Slice 4 accepted-child fixture |
+| D-264-03 | Latest attention marker overwrites decisions | escalation records | `included` | E8 / Slice 6 chain test |
+| D-264-04 | Unique title/H1 link blocks Stop | vault/Stop | `included` | E7 / Slice 8 Stop fixture |
+| D-264-05 | No frozen-plan amendment workflow | escalation records | `included` | [[LLM Obsidian 2.6.4 — amendment plan-review outcome]] |
+| D-264-06 | Quiescent recovery rejected | review recovery | `already-shipped` | commit `68a13ef` |
+| D-264-07 | Exact escalation CLI blocked by task DCG | permission policy | `included` | E9 whole-command matrix; red matrix requires amendment and blocks RC |
+| D-264-08 | Legacy spec rehydrate mismatch | review recovery | `already-shipped` | commit `f3212cd` |
+| D-264-09 | Reviewer improvises symbolic ref because exact base absent | review boundary | `included` | E9 / Slice 7 exact-OID fixture |
+| D-264-10 | Inline reviewer Python assumes tuple is dict | ad-hoc probe | `not-a-defect` | two ad-hoc probe errors; no repository contract reproducer |
+| D-264-11 | Plan review defaulted to implementation and launched two expensive Opus sessions | plan-review facade | `included` | task `fd726638-2f84-4dd5-b9ff-418fa0c99d1b`; Slice 7 zero-provider fixture |
+| D-264-12 | Same-session plan resolution rejects corrected plan because control and subject share one digest | plan-review facade | `included` | task `15388886-a4e5-49f8-be9b-e964a0220c58`; stale-plan rejection |
+| D-264-13 | Superseded boundaries retained five unusable provider surfaces | review lifecycle cleanup | `included` | [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]] / E13 |
+| D-264-14 | Failure paths required manual current/resume despite Harness control-plane vision | harness control plane | `included` | tasks `15388886-a4e5-49f8-be9b-e964a0220c58`, `fb1e4842-17d9-40a8-9a9e-a0bf6e0fdebc`, `7cbf9c6d-375a-4b70-b672-408a0df7e8bb`, `43e4919e-9c0e-4705-afa1-8641923bba93`; Slice 0 stage baseline |
 
-## 13. Requirement-to-slice coverage
+New D-264 entry is recorded before task continuation. Disposition is exactly one of `included`, `already-shipped`, `deferred`, `not-a-defect`; qualifiers live only in the evidence column. Changes require Slice 6 amendment authority and never grant unrelated fix scope.
+
+## Success Evidence Map
 
 | Evidence | Exact slices |
 |---|---|
@@ -392,13 +406,13 @@ New D-264 entry is recorded before task continuation. Disposition changes only t
 | E8 | 6 |
 | E9 | 7 |
 | E10 | 0, 6, 9, 10 |
-| E11 | 3, 5, 7, 8, 9, 10 |
+| E11 | 3, 5, 5b, 7, 8, 9, 10 |
 | E12 | 7 |
 | E13 | 4, 5, 9 |
-| E14 | 5, 9, 10 |
+| E14 | 0, 5, 5b, 9, 10 |
 
-E12/E13 и re-freeze authority закреплены в [[LLM Obsidian 2.6.4 — amendment plan-review outcome]] и [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]]. Table is the authority consumed by join/release evidence. Every slice-level focused verification matches it exactly.
+E12/E13/E14 и re-freeze authority закреплены в [[LLM Obsidian 2.6.4 — amendment plan-review outcome]], [[LLM Obsidian 2.6.4 — amendment superseded review cleanup]] и [[LLM Obsidian 2.6.4 — amendment Harness control plane]]. Table is the authority consumed by join/release evidence. Every slice-level focused verification matches it exactly.
 
-## 14. Завершение
+## Завершение
 
 2.6.4 becomes RC only when E1–E14 are established on one exact HEAD; all D-264 dispositions are durable; one shared nudge budget, callback deadline and accepted-timeout rearm are proven; offline dogfood advances without manual action; normal review has zero extra effects; plan-review mistakes fail before provider launch; Wiki repair rebuilds derived state through the sole writer; and provider/permission/model budgets match v2.6.3. Push, tag and GitHub release remain separate explicit user actions after terminal approval.
