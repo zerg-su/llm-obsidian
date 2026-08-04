@@ -219,6 +219,146 @@ def _approved_implementation_enters_release(
     )
 
 
+def _active_current_review(
+    worktree: Path,
+    vault: Path,
+    active_path: Path,
+    requested_policy: Mapping[str, Any],
+    boundary_input: ReviewBoundaryInput | None,
+    *,
+    plan_file: Path | None,
+    plan_compilation: PlanReviewCompilation | None,
+    plan_base_sha: str,
+    plan_head_sha: str,
+    scratch_root: Path | None,
+) -> dict[str, Any] | None:
+    if not active_path.is_file() or active_path.is_symlink():
+        return None
+    candidate = _read_json(active_path, "current review state")
+    if (
+        candidate.get("lifecycle") != "current-checkout"
+        or candidate.get("worktree") != str(worktree)
+    ):
+        raise TaskReviewError("current review state belongs to another checkout")
+    try:
+        task_id = str(uuid.UUID(str(candidate.get("task_id") or "")))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise TaskReviewError("current review identity is invalid") from exc
+    gate_state_path = _gate_root(vault, task_id) / "review-gate.json"
+    stored_policy = candidate.get("review_policy")
+    same_policy = isinstance(stored_policy, dict) and _same_requested_policy(
+        stored_policy, requested_policy
+    )
+    terminal_stale = False
+    if gate_state_path.is_file() and not gate_state_path.is_symlink():
+        gate_state = _read_json(gate_state_path, "current review gate")
+        status = str(gate_state.get("status") or "")
+        bound = gate_state.get("context")
+        bound_head = str(bound.get("head_sha") or "") if isinstance(bound, dict) else ""
+        current_head = _git(worktree, "rev-parse", "HEAD")
+        requested_purpose = str(
+            requested_policy.get("purpose") or "implementation"
+        )
+        if (
+            plan_compilation is not None
+            and not same_policy
+            and isinstance(candidate.get("plan_review"), Mapping)
+        ):
+            from task_review_plan import guard_active_protected_artifacts
+
+            candidate_runtime_root = Path(
+                str(candidate.get("runtime_root") or "")
+            ).resolve()
+            expected_runtime_root = _current_runtime_root(
+                worktree, task_id, scratch_root
+            )
+            if candidate_runtime_root != expected_runtime_root:
+                raise TaskReviewError(
+                    "current review scratch root changed during plan rebind"
+                )
+            guard_active_protected_artifacts(
+                candidate_runtime_root,
+                candidate,
+                plan_compilation,
+            )
+        if (
+            plan_compilation is not None
+            and not same_policy
+            and status == "awaiting-resolution"
+        ):
+            from task_review_plan import rebind_active_plan_review
+
+            candidate = rebind_active_plan_review(
+                worktree,
+                active_path,
+                candidate,
+                gate_state,
+                requested_policy,
+                plan_compilation,
+                requested_base_sha=plan_base_sha,
+                requested_head_sha=plan_head_sha,
+            )
+            stored_policy = candidate.get("review_policy")
+            same_policy = isinstance(
+                stored_policy, dict
+            ) and _same_requested_policy(stored_policy, requested_policy)
+        approved_stale = status == "approved" and (
+            _approved_implementation_enters_release(
+                worktree,
+                candidate,
+                stored_policy,
+                requested_policy,
+                boundary_input,
+                operation_id=task_id,
+                bound_head=bound_head,
+                current_head=current_head,
+            )
+            if requested_purpose == "release"
+            else bound_head != current_head or not same_policy
+        )
+        skipped_stale = (
+            status == "skipped"
+            and requested_purpose != "release"
+            and (bound_head != current_head or not same_policy)
+        )
+        quiescent = _current_review_is_quiescent(vault, task_id)
+        terminal_stale = approved_stale or skipped_stale or (
+            status == "stopped"
+            and _stopped_release_enters_implementation(
+                stored_policy,
+                requested_policy,
+                boundary_input,
+                bound_head=bound_head,
+                current_head=current_head,
+            )
+        ) or (status == "attention-required" and quiescent) or (
+            status in {"pending", "reviewing", "verifying"}
+            and not gate_state.get("round_results")
+            and not gate_state.get("final_results")
+            and _same_review_purpose(stored_policy, requested_policy)
+            and quiescent
+        ) or stale_resolution_boundary(
+            status,
+            bound_head,
+            current_head,
+            quiescent,
+        )
+    elif gate_state_path.exists():
+        raise TaskReviewError("current review gate is not a regular file")
+    if terminal_stale:
+        return None
+    if not same_policy:
+        raise TaskReviewError(
+            "an active current review uses another preset or override"
+        )
+    if plan_file is not None and (
+        Path(str(candidate.get("plan_file") or "")).resolve()
+        != plan_file.expanduser().resolve()
+    ):
+        raise TaskReviewError("an active current review uses another plan")
+    return candidate
+
+
 def run_current_review(
     worktree: Path,
     *,
@@ -292,134 +432,18 @@ def run_current_review(
         / "current-review"
         / "active.json"
     )
-    meta: dict[str, Any] | None = None
-    if active_path.is_file() and not active_path.is_symlink():
-        candidate = _read_json(active_path, "current review state")
-        if (
-            candidate.get("lifecycle") != "current-checkout"
-            or candidate.get("worktree") != str(worktree)
-        ):
-            raise TaskReviewError("current review state belongs to another checkout")
-        try:
-            task_id = str(uuid.UUID(str(candidate.get("task_id") or "")))
-        except (ValueError, TypeError, AttributeError) as exc:
-            raise TaskReviewError("current review identity is invalid") from exc
-        gate_state_path = _gate_root(vault, task_id) / "review-gate.json"
-        stored_policy = candidate.get("review_policy")
-        same_policy = isinstance(stored_policy, dict) and _same_requested_policy(stored_policy, requested_policy)
-        terminal_stale = False
-        if gate_state_path.is_file() and not gate_state_path.is_symlink():
-            gate_state = _read_json(gate_state_path, "current review gate")
-            status = str(gate_state.get("status") or "")
-            bound = gate_state.get("context")
-            bound_head = (
-                str(bound.get("head_sha") or "")
-                if isinstance(bound, dict)
-                else ""
-            )
-            current_head = _git(worktree, "rev-parse", "HEAD")
-            requested_purpose = str(
-                requested_policy.get("purpose") or "implementation"
-            )
-            candidate_runtime_root: Path | None = None
-            if (
-                plan_compilation is not None
-                and not same_policy
-                and isinstance(candidate.get("plan_review"), Mapping)
-            ):
-                from task_review_plan import guard_active_protected_artifacts
-
-                candidate_runtime_root = Path(
-                    str(candidate.get("runtime_root") or "")
-                ).resolve()
-                expected_runtime_root = _current_runtime_root(
-                    worktree, task_id, scratch_root
-                )
-                if candidate_runtime_root != expected_runtime_root:
-                    raise TaskReviewError(
-                        "current review scratch root changed during plan rebind"
-                    )
-                guard_active_protected_artifacts(
-                    candidate_runtime_root,
-                    candidate,
-                    plan_compilation,
-                )
-            if (
-                plan_compilation is not None
-                and not same_policy
-                and status == "awaiting-resolution"
-            ):
-                from task_review_plan import rebind_active_plan_review
-
-                candidate = rebind_active_plan_review(
-                    worktree,
-                    active_path,
-                    candidate,
-                    gate_state,
-                    requested_policy,
-                    plan_compilation,
-                    requested_base_sha=plan_base_sha,
-                    requested_head_sha=plan_head_sha,
-                )
-                stored_policy = candidate.get("review_policy")
-                same_policy = isinstance(
-                    stored_policy, dict
-                ) and _same_requested_policy(
-                    stored_policy, requested_policy
-                )
-            approved_stale = status == "approved" and (
-                _approved_implementation_enters_release(
-                    worktree,
-                    candidate,
-                    stored_policy,
-                    requested_policy,
-                    boundary_input,
-                    operation_id=task_id,
-                    bound_head=bound_head,
-                    current_head=current_head,
-                )
-                if requested_purpose == "release"
-                else bound_head != current_head or not same_policy
-            )
-            skipped_stale = (
-                status == "skipped"
-                and requested_purpose != "release"
-                and (bound_head != current_head or not same_policy)
-            )
-            terminal_stale = approved_stale or skipped_stale or (
-                status == "stopped"
-                and _stopped_release_enters_implementation(
-                    stored_policy,
-                    requested_policy,
-                    boundary_input,
-                    bound_head=bound_head,
-                    current_head=current_head,
-                )
-            ) or (
-                status == "attention-required"
-                and _current_review_is_quiescent(vault, task_id)
-            ) or (
-                status in {"pending", "reviewing", "verifying"}
-                and not gate_state.get("round_results")
-                and not gate_state.get("final_results")
-                and _same_review_purpose(stored_policy, requested_policy)
-                and _current_review_is_quiescent(vault, task_id)
-            ) or stale_resolution_boundary(status, bound_head, _git(worktree, "rev-parse", "HEAD"), _current_review_is_quiescent(vault, task_id))
-        elif gate_state_path.exists():
-            raise TaskReviewError("current review gate is not a regular file")
-        if not terminal_stale:
-            if not same_policy:
-                raise TaskReviewError(
-                    "an active current review uses another preset or override"
-                )
-            if plan_file is not None and (
-                Path(str(candidate.get("plan_file") or "")).resolve()
-                != plan_file.expanduser().resolve()
-            ):
-                raise TaskReviewError(
-                    "an active current review uses another plan"
-                )
-            meta = candidate
+    meta = _active_current_review(
+        worktree,
+        vault,
+        active_path,
+        requested_policy,
+        boundary_input,
+        plan_file=plan_file,
+        plan_compilation=plan_compilation,
+        plan_base_sha=plan_base_sha,
+        plan_head_sha=plan_head_sha,
+        scratch_root=scratch_root,
+    )
 
     if meta is None:
         task_id = str(uuid.uuid4())

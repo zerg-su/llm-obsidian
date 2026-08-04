@@ -121,6 +121,21 @@ def _purpose_boundary_inputs(
         inputs.append(item)
     return tuple(inputs)
 
+
+def _head_diff_input(worktree: Path) -> ContextInput:
+    diff = _git(
+        worktree,
+        "show",
+        "--format=fuller",
+        "--stat",
+        "--patch",
+        "--find-renames",
+        "HEAD",
+    ).encode()
+    if len(diff) > 65_536:
+        diff = diff[:65_000] + b"\n[diff truncated; inspect product HEAD]\n"
+    return ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
+
 def _context(
     meta: Mapping[str, Any],
     vault: Path,
@@ -323,20 +338,7 @@ def _context(
                 pointer_root=runtime_root / "pointers",
             )
         )
-    diff = _git(
-        worktree,
-        "show",
-        "--format=fuller",
-        "--stat",
-        "--patch",
-        "--find-renames",
-        "HEAD",
-    ).encode()
-    if len(diff) > 65_536:
-        diff = diff[:65_000] + b"\n[diff truncated; inspect product HEAD]\n"
-    inputs.append(
-        ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
-    )
+    inputs.append(_head_diff_input(worktree))
     if resolution_bundle is not None:
         delta_packet = build_delta_packet(
             resolution_bundle.fix_delta,
