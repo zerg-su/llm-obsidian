@@ -30,10 +30,10 @@ packages were published for them.
 - Preserved bounded hot-thread cache eviction: a full Active Threads cache now
   evicts its oldest entry instead of rejecting a new current thread.
 - Restored reviewer-local Claude usage visibility with a code-owned standard
-  status line for model, effort, context, 5-hour, and 7-day limits through the
-  supported `--bare` profile, without inheriting user/project instructions,
-  settings, hooks, skills, plugins, memory, MCP servers, permissions, or
-  arbitrary commands.
+  status line for model, effort, context, 5-hour, and 7-day limits through a
+  subscription-compatible profile. User/project/local setting sources and
+  ordinary Claude memory are excluded; skills, marketplace autoinstall, MCP,
+  network, product writes, and arbitrary status-line commands stay disabled.
 
 ### Changed
 

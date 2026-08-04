@@ -161,6 +161,11 @@ def reviewer_sandbox_settings(
     git_common = _git_common_dir(product)
     return {
         "autoMemoryEnabled": False,
+        "claudeMdExcludes": [
+            "**/CLAUDE.md",
+            "**/CLAUDE.local.md",
+            "**/.claude/rules/**",
+        ],
         "disableArtifact": True,
         "disableClaudeAiConnectors": True,
         "includeGitInstructions": False,
@@ -225,7 +230,6 @@ def validate_reviewer_sandbox_command(
     add_dir_index = one("--add-dir")
     mcp_index = one("--mcp-config")
     for flag in (
-        "--bare",
         "--strict-mcp-config",
         "--no-chrome",
         "--disable-slash-commands",
@@ -236,6 +240,7 @@ def validate_reviewer_sandbox_command(
         for flag in (
             "--dangerously-skip-permissions",
             "--allow-dangerously-skip-permissions",
+            "--bare",
             "--safe-mode",
             "--plugin-dir",
             "--plugin-url",
@@ -403,7 +408,6 @@ class ClaudeDriver:
                         json.dumps(settings, sort_keys=True, separators=(",", ":")),
                         "--setting-sources",
                         "",
-                        "--bare",
                         "--strict-mcp-config",
                         "--mcp-config",
                         '{"mcpServers":{}}',

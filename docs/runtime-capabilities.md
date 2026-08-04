@@ -165,9 +165,11 @@ project settings, external network domains, Unix sockets, MCPs, hooks,
 arbitrary status-line commands, and credential reads are disabled fail-closed.
 A pinned repository-owned Claude `statusLine` shows only model, effort,
 context usage, and native 5H/7D limit percentages inside the reviewer
-workspace; it has no lifecycle or cmux authority. Claude's supported `--bare`
-profile suppresses ambient hooks, skills, plugins, MCP, memory, and
-`CLAUDE.md` while still allowing that exact inline status line. Codex keeps its
+workspace; it has no lifecycle or cmux authority. The subscription-compatible
+profile keeps OAuth/keychain authentication available while excluding
+user/project/local setting sources and ordinary `CLAUDE.md`, disabling skills,
+marketplace autoinstall and MCP, and retaining the exact native sandbox. Host
+managed policy, when present, remains authoritative. Codex keeps its
 private scratch directory, exact loopback access/binding, disabled web search,
 and no product writable root. `tests/test_task_lifecycle.py` and
 the harness adapter and task lifecycle suites reject command, environment,

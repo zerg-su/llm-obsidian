@@ -2510,11 +2510,13 @@ check(
     and "input file's exact session-relative alias" in callback_instruction
     and "Bash" in claude_callback
     and not any(item.startswith("Bash(") for item in claude_callback)
-    and "--bare" in claude_callback
+    and "--bare" not in claude_callback
     and "--safe-mode" not in claude_callback
     and "--strict-mcp-config" in claude_callback
     and claude_callback[claude_callback.index("--setting-sources") + 1] == ""
     and "disableAllHooks" not in sandbox_settings
+    and sandbox_settings.get("claudeMdExcludes")
+    == ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/rules/**"]
     and sandbox_settings.get("sandbox", {}).get("enabled") is True
     and sandbox_settings.get("sandbox", {}).get("failIfUnavailable") is True
     and sandbox_settings.get("sandbox", {}).get("autoAllowBashIfSandboxed") is True
@@ -2763,10 +2765,9 @@ changed_root[changed_root.index("--add-dir") + 1] = "/tmp/foreign-product"
 expect_sandbox_rejection(
     "review sandbox rejects a foreign product path", tuple(changed_root)
 )
-missing_bare_mode = list(claude_callback)
-missing_bare_mode.remove("--bare")
 expect_sandbox_rejection(
-    "review sandbox rejects a missing bare isolation gate", tuple(missing_bare_mode)
+    "review sandbox rejects bare because subscription OAuth is unavailable",
+    (*claude_callback, "--bare"),
 )
 expect_sandbox_rejection(
     "review sandbox rejects safe mode because it suppresses status line",
@@ -2803,12 +2804,23 @@ with tempfile.TemporaryDirectory(prefix="review-sandbox-paths.") as raw:
             "callback_pointer": sandbox_callback,
             "product_root": sandbox_product,
         },
-        env={"PATH": "/usr/bin:/bin", "GITHUB_TOKEN": "secret"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "GITHUB_TOKEN": "secret",
+            "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1",
+            "CLAUDE_CODE_SAFE_MODE": "1",
+            "CLAUDE_CODE_SIMPLE": "1",
+        },
     )
     test_tmp = (sandbox_callbacks / ".review-test-tmp").resolve()
     check(
         "review sandbox provisions one owned ephemeral test root",
         sandbox_env["TMPDIR"] == str(test_tmp)
+        and sandbox_env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] == "0"
+        and sandbox_env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"]
+        == "1"
+        and "CLAUDE_CODE_SAFE_MODE" not in sandbox_env
+        and "CLAUDE_CODE_SIMPLE" not in sandbox_env
         and test_tmp.is_dir()
         and not test_tmp.is_symlink()
         and test_tmp.stat().st_mode & 0o077 == 0,

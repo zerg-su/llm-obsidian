@@ -232,7 +232,11 @@ def provider_environment(
         reviewer["TMPDIR"] = str(temporary)
         if spec.get("runtime") == "claude":
             reviewer["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+            reviewer["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "0"
+            reviewer["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"] = "1"
             reviewer["DISABLE_AUTOUPDATER"] = "1"
+            reviewer.pop("CLAUDE_CODE_SAFE_MODE", None)
+            reviewer.pop("CLAUDE_CODE_SIMPLE", None)
         return reviewer
     if spec.get("callback_mode") not in {
         "research-fetch",

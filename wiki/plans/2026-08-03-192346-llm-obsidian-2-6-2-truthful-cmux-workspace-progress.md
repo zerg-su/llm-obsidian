@@ -54,7 +54,7 @@ tags:
     },
     {
       "evidence_id": "anthropic-reviewer-usage-visible",
-      "observable": "Каждый sandboxed Anthropic reviewer через стандартный Claude statusLine показывает model, effort, context usage, 5H и 7D limits; поддерживаемый --bare профиль отключает ambient instructions/extensions, renderer code-owned и content-free, user settings/hooks/MCP остаются отключёнными, а подмена statusLine отклоняется fail-closed."
+      "observable": "Каждый sandboxed Anthropic reviewer через стандартный Claude statusLine показывает model, effort, context usage, 5H и 7D limits; subscription-compatible профиль сохраняет OAuth/keychain, но явно подавляет ambient instructions, skills, marketplace autoinstall и MCP, renderer code-owned и content-free, product write/network остаются запрещены OS sandbox, а подмена statusLine отклоняется fail-closed."
     },
     {
       "evidence_id": "release-ready",
@@ -109,12 +109,13 @@ tags:
 6. Удалить terminal-owner fallback, который сохраняет 100% bar после окончания. Последняя terminal transition обязана очистить progress.
 7. На coordinator SessionStart/resume/clear/compact выполнить silent best-effort refresh. Task worktree SessionStart не получает coordinator status authority.
 8. Сохранить content-free compact label и документировать его как harness-step status. UI не должен читать prompts, paths, model output или user content.
-9. Для sandboxed Anthropic reviewer явно скомпилировать стандартный Claude `statusLine` с code-owned renderer model/effort/context/5H/7D. Использовать поддерживаемый `--bare` профиль; не наследовать user/project instructions, setting sources, hooks, skills, plugins, memory, MCP или произвольную statusLine command.
+9. Для sandboxed Anthropic reviewer явно скомпилировать стандартный Claude `statusLine` с code-owned renderer model/effort/context/5H/7D. Использовать subscription-compatible профиль без `--bare` и `--safe-mode`: не наследовать user/project/local instructions и setting sources, отключить skills, marketplace autoinstall, memory и MCP, сохранить OAuth/keychain, а product write, network и credentials ограничить существующим OS sandbox.
 
 ## Одобренные уточнения 2026-08-04
 
 - Пользователь явно одобрил reviewer-local Claude model/effort/context/5H/7D statusLine как UI самой reviewer-сессии, а не как rate-limit metadata в cmux workspace progress.
 - Для этого bounded patch после полного deterministic gate пользователь явно выбрал один обычный независимый Opus review вместо Deep topology; это не меняет глобальные Simple/Deep/Full review semantics.
+- Live-smoke подтвердил, что `--bare` несовместим с подписочной OAuth-сессией Claude: статуслайн отображался, но reviewer получал `Not logged in`. Пользователь одобрил не ослабление sandbox, а замену только auth-boundary на subscription-compatible explicit suppression.
 
 ## TDD slices
 

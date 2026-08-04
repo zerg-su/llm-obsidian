@@ -36,9 +36,9 @@
   вытесняет самую старую запись вместо отказа добавить новый актуальный thread.
 - Возвращена reviewer-local видимость Claude usage: code-owned стандартная
   status line показывает model, effort, context, 5H и 7D limits через
-  поддерживаемый `--bare`-профиль, без наследования user/project instructions,
-  settings, hooks, skills, plugins, memory, MCP, permissions или произвольных
-  команд.
+  subscription-compatible профиль. User/project/local setting sources и
+  обычная Claude memory исключены; skills, marketplace autoinstall, MCP, сеть,
+  product writes и произвольная status-line command остаются отключены.
 
 ### Изменено
 
