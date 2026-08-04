@@ -2510,9 +2510,11 @@ check(
     and "input file's exact session-relative alias" in callback_instruction
     and "Bash" in claude_callback
     and not any(item.startswith("Bash(") for item in claude_callback)
-    and "--safe-mode" in claude_callback
+    and "--bare" in claude_callback
+    and "--safe-mode" not in claude_callback
     and "--strict-mcp-config" in claude_callback
     and claude_callback[claude_callback.index("--setting-sources") + 1] == ""
+    and "disableAllHooks" not in sandbox_settings
     and sandbox_settings.get("sandbox", {}).get("enabled") is True
     and sandbox_settings.get("sandbox", {}).get("failIfUnavailable") is True
     and sandbox_settings.get("sandbox", {}).get("autoAllowBashIfSandboxed") is True
@@ -2761,10 +2763,14 @@ changed_root[changed_root.index("--add-dir") + 1] = "/tmp/foreign-product"
 expect_sandbox_rejection(
     "review sandbox rejects a foreign product path", tuple(changed_root)
 )
-missing_safe_mode = list(claude_callback)
-missing_safe_mode.remove("--safe-mode")
+missing_bare_mode = list(claude_callback)
+missing_bare_mode.remove("--bare")
 expect_sandbox_rejection(
-    "review sandbox rejects a missing hard gate", tuple(missing_safe_mode)
+    "review sandbox rejects a missing bare isolation gate", tuple(missing_bare_mode)
+)
+expect_sandbox_rejection(
+    "review sandbox rejects safe mode because it suppresses status line",
+    (*claude_callback, "--safe-mode"),
 )
 check(
     "redirect subprocess and git-write attempts inherit the same native sandbox",

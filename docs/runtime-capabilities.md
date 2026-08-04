@@ -165,9 +165,11 @@ project settings, external network domains, Unix sockets, MCPs, hooks,
 arbitrary status-line commands, and credential reads are disabled fail-closed.
 A pinned repository-owned Claude `statusLine` shows only model, effort,
 context usage, and native 5H/7D limit percentages inside the reviewer
-workspace; it has no lifecycle or cmux authority. Codex keeps its private scratch
-directory, exact loopback access/binding, disabled web search, and no product
-writable root. `tests/test_task_lifecycle.py` and
+workspace; it has no lifecycle or cmux authority. Claude's supported `--bare`
+profile suppresses ambient hooks, skills, plugins, MCP, memory, and
+`CLAUDE.md` while still allowing that exact inline status line. Codex keeps its
+private scratch directory, exact loopback access/binding, disabled web search,
+and no product writable root. `tests/test_task_lifecycle.py` and
 the harness adapter and task lifecycle suites reject command, environment,
 writable-root, domain, and socket drift.
 
