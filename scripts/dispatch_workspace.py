@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from lifecycle_telemetry import emit_lifecycle_event
@@ -18,7 +18,7 @@ from harness.finalization_policy import (
     FinalizationPolicy,
     finalization_policy_payload,
 )
-from dispatch_contracts import TASK_LOCAL_GIT_EXCLUDES
+from dispatch_contracts import TASK_LOCAL_GIT_EXCLUDES, _validated_context
 from dispatch_custom_contracts import (
     approved_outcome_contract_sha256,
     approved_plan_file,
@@ -267,7 +267,16 @@ def write_task_files(
 
 
 def dispatch_log(request: dict[str, Any], effective: dict[str, Any], child: dict[str, str]) -> None:
-    links = ", ".join(f"[[{item['title']}]]" for item in request["wiki_context"]) or "none"
+    context = _validated_context(
+        {"wiki_context": request["wiki_context"]},
+        request["vault_root"],
+        request["plan_file"],
+        None,
+    )
+    links = ", ".join(
+        f"[[{PurePosixPath(item['context_path']).stem}|{item['title']}]]"
+        for item in context
+    ) or "none"
     entry = (
         f"## [{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')}] dispatch | {request['task_name']}\n\n"
         f"Spawned an approved unattended task session (cmux `{child['surface']}`, runtime "

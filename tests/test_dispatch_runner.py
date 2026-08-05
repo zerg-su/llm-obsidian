@@ -192,6 +192,48 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     config = runner.load_dispatch_config(vault, target)
     session, effective = runner.resolved_routes(request, persist=False)
+    alias_raw = json.loads(json.dumps(raw_request))
+    alias_raw["wiki_context"][0]["title"] = "Human display title"
+    alias_raw["wiki_context"][0]["context_path"] = (
+        "wiki/context/Dispatch Context.md"
+    )
+    alias_request = runner.validate_request(alias_raw)
+    child_fixture = {
+        "surface": "22222222-2222-4222-8222-222222222222",
+    }
+    with mock.patch(
+        "dispatch_workspace.run_command",
+        return_value=subprocess.CompletedProcess([], 0, "", ""),
+    ) as log_write:
+        runner.dispatch_log(alias_request, effective, child_fixture)
+    logged = json.loads(log_write.call_args.kwargs["input_text"])["log_entry"]
+    check(
+        "dispatch log links the exact context stem with the display title as alias",
+        "[[Dispatch Context|Human display title]]" in logged
+        and "[[Human display title]]" not in logged,
+        logged,
+    )
+    context_file = vault / "wiki" / "context" / "Dispatch Context.md"
+    context_bytes = context_file.read_bytes()
+    context_file.unlink()
+    try:
+        with mock.patch("dispatch_workspace.run_command") as missing_write:
+            expect_error(
+                "dispatch log fails closed if the exact context target disappears",
+                lambda: runner.dispatch_log(
+                    alias_request,
+                    effective,
+                    child_fixture,
+                ),
+                "must exist exactly",
+            )
+            check(
+                "missing exact context target reaches no vault write",
+                missing_write.call_count == 0,
+                str(missing_write.call_args_list),
+            )
+    finally:
+        context_file.write_bytes(context_bytes)
     prompt = runner.render_task_prompt(request, config)
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
