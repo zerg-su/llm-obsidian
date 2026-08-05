@@ -154,6 +154,17 @@ remains recorded in operation metadata. The bounded
 daily summarizer inherits the current session's exact model and changes only
 effort to the centrally configured daily value.
 
+D-265-EPH-01 permits a registered code-owned ephemeral adapter for bounded
+review and schema-producing steps without cmux. The adapter must complete a
+subscription/ChatGPT billing-profile preflight before effect, compile fixed
+provider-specific argv, receive only a minimal ContextPacket, accept only a
+schema-validated result, enforce bounded capabilities, and persist durable
+receipts. The public PipelineSpec records `execution: ephemeral` and logical
+route aliases, never CLI transport names. Ambiguous auth, nonzero exit, or an
+invalid result is terminal/typed and never falls back to paid credits, another
+provider, or a hidden interactive session. Arbitrary direct print-mode commands
+remain prohibited; continuable work stays in visible cmux sessions.
+
 Reviewers remain product-read-only but are no longer toolchain-starved. Review
 specs, callbacks, baselines, watchdog state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share

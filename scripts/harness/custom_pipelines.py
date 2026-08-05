@@ -239,6 +239,16 @@ def compile_custom_spec(
         raise ContractError(
             "PipelineSpec baseline differs from the deterministic baseline"
         )
+    if spec.finalization_policy is not None:
+        from .finalization_policy import (
+            FinalizationPolicyError,
+            require_registered_finalization_routes,
+        )
+
+        try:
+            require_registered_finalization_routes(spec.finalization_policy)
+        except FinalizationPolicyError as exc:
+            raise ContractError(str(exc)) from exc
     if _built_in_semantically_fits(spec):
         raise ContractError("built-in already fits; custom pipeline is unnecessary")
 
@@ -378,8 +388,7 @@ def render_custom_approval(
             if step.step_id == item.from_step
         )
     )
-    rendered = "\n".join(
-        (
+    lines = [
             f"Custom pipeline: {spec.spec_id}@{spec.version}",
             f"Definition: {compiled.definition_sha256}",
             f"Baseline: {spec.baseline_pipeline}",
@@ -411,11 +420,26 @@ def render_custom_approval(
             + (", ".join(spec.requested_side_effects) or "none"),
             "Effective side effects: "
             + (", ".join(compiled.side_effect_bindings) or "none"),
+    ]
+    if spec.finalization_policy is not None:
+        finalization = spec.finalization_policy
+        lines.append(
+            "Finalization: "
+            f"cycles<={finalization.max_cycles}; "
+            "independent-after="
+            f"{finalization.add_independent_model_after}; "
+            f"execution={finalization.execution}; routes="
+            f"{finalization.primary_route_alias},"
+            f"{finalization.independent_route_alias}"
+        )
+    lines.extend(
+        [
             f"Review: {spec.review_mode}; completion: {spec.completion_policy}",
             "Stops: " + ", ".join(spec.terminal_outcomes),
             "Explicit user approval required before freeze or execution.",
-        )
-    ) + "\n"
+        ]
+    )
+    rendered = "\n".join(lines) + "\n"
     if len(rendered.encode()) > 8_192:
         raise ContractError("custom approval summary exceeds size cap")
     return rendered
