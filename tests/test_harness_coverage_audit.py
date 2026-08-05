@@ -50,6 +50,7 @@ for module in (
     "identity",
     "legacy_rounds",
     "mechanism_recovery",
+    "plan_rebind",
     "replay",
     "request",
     "resolution_bundle",

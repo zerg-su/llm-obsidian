@@ -690,3 +690,11 @@ This coordinator-owned amendment records the last full repair iteration authoriz
 | D-264-73 | coordinator finalization policy | repeated late lifecycle findings consumed disproportionate time and model budget without a stable completion estimate | `deferred` | after D-264-71/D-264-72, run the exact full local gate once and the already-retained single-model verification once; any new substantial lifecycle defect or failure to continue normally ends 2.6.4 as `RC-attention`, preserves a clean safety branch and moves evolutionary simplification to 2.6.5 without rewriting the harness or starting another review/fix loop |
 
 The D-264-72 implementation is isolated in `task_review_plan_rebind.py`; the existing public facade and review topology remain unchanged. No scheduler, public DSL/FSM, routing, model or retry-budget expansion, permission change, migration, push, tag, publish or release is authorized.
+
+## Append-only coverage-registration amendment D-264-74
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-74 | harness coverage manifest | the first bounded exact-HEAD gate passed `make test` and then stopped before coverage measurement because the newly extracted `task_review_plan_rebind.py` was absent from the explicit audit manifest | `included` | register the module in `config/harness-audit-manifest.json` and assert its discovery in `test_harness_coverage_audit.py`; this is the final permitted local correction before the one repeated gate and retained verification |
+
+The failed gate produced no provider, callback, review, lifecycle, push, tag, publish or release effect. No coverage floor, source denominator, production behavior, retry budget, routing or permission changed.
