@@ -17,6 +17,7 @@ from .review_program_contracts import (
     ReviewProgramError,
     require_sha256,
 )
+from .review_attempt import EXACT_HEAD_REVIEW_PROTOCOL
 from .review_program_results import ReviewBoundaryReceipt
 from .review_program_resolution import resolved_terminal_head
 from .workflows.review_gate import authorize_task_finalization
@@ -254,6 +255,23 @@ def _trusted_review_receipt(
         if not authorization.approved:
             raise ReviewProgramError("trusted review callback is not terminal approval")
         return ReviewBoundaryReceipt.approved(
+            operation_id=operation_id,
+            boundary=boundary,
+            result_sha256=digest,
+        )
+    if (
+        status in {"changes-requested", "blocked"}
+        and gate.get("execution_protocol") == EXACT_HEAD_REVIEW_PROTOCOL
+    ):
+        result_digests = _result_files(
+            gate_root, gate.get("final_results"), "exact attempt results"
+        )
+        digest = hashlib.sha256(
+            json.dumps(
+                result_digests, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        return ReviewBoundaryReceipt.stopped(
             operation_id=operation_id,
             boundary=boundary,
             result_sha256=digest,

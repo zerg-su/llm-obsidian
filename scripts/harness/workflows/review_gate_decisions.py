@@ -131,7 +131,11 @@ class ReviewGateDecisionMixin:
             for axis in execution.request.policy.axes
         }
 
-    def _approve(self, execution: ReviewExecution) -> Path | None:
+    def _approval_artifacts(
+        self, execution: ReviewExecution
+    ) -> tuple[Path, dict[str, object]] | None:
+        """Prepare approval files without making them authoritative."""
+
         results = self._final_results(execution)
         if results is None:
             return None
@@ -172,15 +176,23 @@ class ReviewGateDecisionMixin:
             },
         )
         digest = hashlib.sha256(callback_path.read_bytes()).hexdigest()
+        return callback_path, {
+            "pointer": callback_path.relative_to(self.root).as_posix(),
+            "sha256": digest,
+            "operation_id": envelope.operation_id,
+            "run_id": envelope.run_id,
+        }
+
+    def _approve(self, execution: ReviewExecution) -> Path | None:
+        prepared = self._approval_artifacts(execution)
+        if prepared is None:
+            return None
+        callback_path, evidence = prepared
+        context = execution.request.context
         self._replace(
             status="approved",
             context=self._context(context),
-            evidence={
-                "pointer": callback_path.relative_to(self.root).as_posix(),
-                "sha256": digest,
-                "operation_id": envelope.operation_id,
-                "run_id": envelope.run_id,
-            },
+            evidence=evidence,
         )
         return callback_path
 

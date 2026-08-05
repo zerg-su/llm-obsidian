@@ -22,6 +22,13 @@ from ..contracts import (
     to_dict,
 )
 from ..state_machine import TERMINAL
+from ..review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
+    ReviewAttempt,
+    ReviewAttemptError,
+    ReviewAttemptLaneResult,
+    ReviewAttemptTerminalResult,
+)
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -69,6 +76,7 @@ from .review_gate_contracts import (
     review_context_sha256,
 )
 from .review_gate_decisions import ReviewGateDecisionMixin
+from .review_gate_attempt import ReviewGateAttemptMixin
 from .review_gate_continuation import ReviewGateContinuationMixin
 from .review_gate_recovery import ReviewGateRecoveryMixin
 from .review_gate_state import ReviewGateStateMixin
@@ -87,6 +95,7 @@ EFFORTS = {
 
 
 class ReviewGateController(
+    ReviewGateAttemptMixin,
     ReviewGateRecoveryMixin,
     ReviewGateContinuationMixin,
     ReviewGateDecisionMixin,
@@ -118,7 +127,13 @@ class ReviewGateController(
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
+        attempt: ReviewAttempt | None = None,
     ) -> ReviewGateRun:
+        running_attempt = attempt.start(attempt.identity) if attempt else None
+        if running_attempt is not None:
+            self._replace(
+                status="running", attempt=running_attempt.payload()
+            )
         captured: dict[str, ReviewRound] = {}
 
         def prepared(
@@ -131,29 +146,49 @@ class ReviewGateController(
             if prepare_lane is not None:
                 prepare_lane(axis, session_request, result, round_)
 
-        execution = start_review(
-            request,
-            self.runtime,
-            origin_surface=origin_surface,
-            cwd=cwd,
-            product_root=product_root,
-            prompt_pointer=prompt_pointer,
-            callback_root=callback_root,
-            callback_wake=callback_wake,
-            round_store=self.round_store,
-            prompt_pointers=prompt_pointers,
-            prepare_lane=prepared,
-        )
+        try:
+            execution = start_review(
+                request,
+                self.runtime,
+                origin_surface=origin_surface,
+                cwd=cwd,
+                product_root=product_root,
+                prompt_pointer=prompt_pointer,
+                callback_root=callback_root,
+                callback_wake=callback_wake,
+                round_store=self.round_store,
+                prompt_pointers=prompt_pointers,
+                prepare_lane=prepared,
+            )
+        except Exception:
+            if running_attempt is not None:
+                failed_attempt = running_attempt.fail_attention(
+                    running_attempt.identity
+                )
+                self._replace(
+                    status="attention-required",
+                    attempt=failed_attempt.payload(),
+                )
+            raise
         for lane in execution.lanes:
             if lane.axis not in captured:
                 captured[lane.axis] = prepare_review_round(
                     self.round_store, lane
                 )
+        attempt_update: dict[str, object] = {}
+        if running_attempt is not None:
+            for lane in execution.lanes:
+                self._attempt_lane(running_attempt.identity, lane)
+            waiting_attempt = running_attempt.await_callback(
+                running_attempt.identity
+            )
+            attempt_update["attempt"] = waiting_attempt.payload()
         self._replace(
             status="reviewing",
             active_review_operation_id=request.policy.operation_id,
             context=self._context(request.context),
             lanes=[self._lane(lane) for lane in execution.lanes],
+            **attempt_update,
         )
         return ReviewGateRun(execution, captured)
 
@@ -229,6 +264,33 @@ class ReviewGateController(
         _atomic_json(path, state)
 
 
+def _approved_attempt_results(
+    state: Mapping[str, object], expected_head_sha: str
+) -> dict[str, ReviewAttemptLaneResult]:
+    protocol = state.get("execution_protocol", "")
+    if protocol not in {"", EXACT_HEAD_REVIEW_PROTOCOL}:
+        raise ValueError("review gate execution protocol is invalid")
+    if protocol != EXACT_HEAD_REVIEW_PROTOCOL and "attempt" not in state:
+        return {}
+    raw_attempt = state.get("attempt")
+    if not isinstance(raw_attempt, Mapping):
+        raise ValueError("approved review attempt identity is invalid")
+    try:
+        attempt = ReviewAttempt.from_mapping(raw_attempt)
+    except ReviewAttemptError as exc:
+        raise ValueError("approved review attempt identity is invalid") from exc
+    terminal = attempt.terminal
+    if (
+        attempt.status != "terminal"
+        or terminal is None
+        or terminal.result != ReviewAttemptTerminalResult.APPROVED
+        or attempt.identity.attempt_id != state.get("active_review_operation_id")
+        or attempt.identity.exact_head_sha != expected_head_sha
+    ):
+        raise ValueError("task finalization requires a terminal approved attempt")
+    return {item.axis: item for item in terminal.lane_results}
+
+
 def authorize_task_finalization(
     root: Path,
     *,
@@ -267,6 +329,7 @@ def authorize_task_finalization(
         and policy.get("enabled") is False
     ):
         return ReviewGateAuthorization(False, True, {})
+    attempt_results = _approved_attempt_results(state, expected_head_sha)
     if state.get("status") != "approved":
         raise ValueError("task finalization requires an approved review gate")
     evidence = state.get("evidence")
@@ -341,6 +404,7 @@ def authorize_task_finalization(
         len(expected_axes) != len(raw_lanes)
         or not isinstance(pointers, dict)
         or set(pointers) != set(expected_axes)
+        or (attempt_results and set(attempt_results) != set(expected_axes))
     ):
         raise ValueError("approved review final axes are incomplete")
     axes = {
@@ -356,6 +420,13 @@ def authorize_task_finalization(
             raise ValueError("review result pointer escapes the gate") from exc
         if not result_path.is_file() or result_path.is_symlink():
             raise ValueError("approved review result is unavailable")
+        result_bytes = result_path.read_bytes()
+        attempt_result = attempt_results.get(axis)
+        if attempt_result is not None and (
+            hashlib.sha256(result_bytes).hexdigest()
+            != attempt_result.result_sha256
+        ):
+            raise ValueError("approved review attempt result digest is stale")
         result = _result_payload(_result_from_payload(_read_json(result_path)))
         if len(expected_axes) > 1:
             result["findings"] = [
