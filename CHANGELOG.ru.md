@@ -84,6 +84,8 @@
   тест ограниченно ждёт точный packet и join'ит responder до cleanup.
 - Устранены ещё две гонки task-summary fixtures: helper readiness/completion
   синхронизированы, а atomic recovery receipts ограниченно ожидаются до cleanup.
+- Устранена проявлявшаяся под trace гонка summary refresh: оба responder-потока
+  используют документированное ограниченное окно и join до проверок.
 - Sent binding поколения callback recovery теперь снимается только после
   точного durable broker acceptance. Следующее поколение в той же retained
   session остаётся наблюдаемым в active-состоянии, но не получает второй

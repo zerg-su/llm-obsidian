@@ -2319,6 +2319,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     asynchronous_verification_heads: list[str] = []
     asynchronous_verification_calls: list[tuple[str, ...]] = []
     asynchronous_review_summary_shas: list[str] = []
+    asynchronous_helpers: list[threading.Thread] = []
 
     def record_asynchronous_verification(
         argv: list[str], **kwargs: object
@@ -2457,7 +2458,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 import time
 
                 packets: list[Path] = []
-                for _ in range(100):
+                for _ in range(500):
                     packet = worktree / ".task-review.json"
                     packets = [packet] if packet.is_file() else []
                     if packets:
@@ -2518,7 +2519,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     / f"state-{asynchronous_task}"
                     / "pipeline-summary-refresh-notify.json"
                 )
-                for _ in range(100):
+                for _ in range(500):
                     if refresh.is_file():
                         break
                     time.sleep(0.02)
@@ -2533,7 +2534,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 )
                 write_json(summary_path, refreshed)
 
-            threading.Thread(target=resolve_after_packet).start()
+            helper = threading.Thread(target=resolve_after_packet)
+            asynchronous_helpers.append(helper)
+            helper.start()
             return
         if len(asynchronous_calls) == 4:
             result_pointer = (
@@ -2591,7 +2594,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 import time
 
                 packet_path = worktree / ".task-review.json"
-                for _ in range(100):
+                for _ in range(500):
                     if packet_path.is_file():
                         decision_packet = json.loads(
                             packet_path.read_text(encoding="utf-8")
@@ -2652,7 +2655,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     / f"state-{asynchronous_task}"
                     / "pipeline-summary-refresh-notify.json"
                 )
-                for _ in range(100):
+                for _ in range(500):
                     if refresh.is_file():
                         refresh_payload = json.loads(
                             refresh.read_text(encoding="utf-8")
@@ -2675,7 +2678,9 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 )
                 write_json(summary_path, refreshed)
 
-            threading.Thread(target=resolve_verified_packet).start()
+            helper = threading.Thread(target=resolve_verified_packet)
+            asynchronous_helpers.append(helper)
+            helper.start()
             return
         asynchronous_review_summary_shas.append(
             hashlib.sha256(
@@ -2711,6 +2716,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         pipeline_name="engineering/change",
         verification_runner=record_asynchronous_verification,
     )
+    for helper in asynchronous_helpers:
+        helper.join(timeout=10.0)
+    asynchronous_helpers_stopped = all(
+        not helper.is_alive() for helper in asynchronous_helpers
+    )
     asynchronous_record = asynchronous_store.read(
         "owner-1", asynchronous_task
     )
@@ -2722,6 +2732,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     check(
         "summary-only refresh reuses the exact-HEAD verification identity and effect",
         asynchronous_rc == 0
+        and asynchronous_helpers_stopped
         and len(asynchronous_calls) == 5
         and len(asynchronous_verification_heads) == 3
         and len(set(asynchronous_verification_heads)) == 3

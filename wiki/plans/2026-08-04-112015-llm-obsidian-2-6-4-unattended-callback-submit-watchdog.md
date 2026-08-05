@@ -522,3 +522,13 @@ This coordinator-owned amendment records a pre-provider exact-boundary rejection
 | D-264-49 | release evidence | the D-264-47 documentation transaction replaced four UTF-8 characters in one frozen non-goal with replacement characters, changing the canonical Outcome digest and correctly blocking same-session verification before provider effect | `included` | restore exactly `применять`; canonical Outcome SHA-256 again equals the initially reviewed `af24873e06669632c5c45e9818a8646918e3a086a358285d1781a1a5540660ae`; vault validation and the final exact-HEAD ladder must remain green |
 
 No review finding, disposition, runtime behavior, budget, route, permission, or public interface changes. The failed continuation produced zero provider, prompt, callback, or review effect.
+
+## Append-only coverage-fixture repair amendment D-264-50
+
+This coordinator-owned amendment records the only failure in the final exact-HEAD ladder. It preserves the frozen Outcome Contract and changes no production/runtime behavior.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-50 | test harness | under stdlib trace, the summary-only review fixture allowed two untracked responder threads only two seconds to observe exact decision/refresh artifacts; the second helper could return before the fifth launch call and made honest harness coverage fail nondeterministically | `included` | track both helper threads, use the existing bounded ten-second eventual window, join them before assertions, and require zero live helper threads; standalone `test_runtime_task_summary.py` and `make test-harness-coverage` are green at 75.98% across 128 modules with all critical floors and 4,370 transition cases |
+
+The repair is test-only. It does not change provider behavior, pipeline budgets, lifecycle state, routing, review topology, public interfaces, or release authority. The final candidate must still repeat the complete exact-HEAD ladder and continue the same two Sol verification parents before the separate purpose=release audit.

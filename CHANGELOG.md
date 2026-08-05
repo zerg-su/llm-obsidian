@@ -81,6 +81,8 @@ packages were published for them.
   exact packet with a bounded deadline and joining its responder before cleanup.
 - Removed two additional task-summary fixture races by synchronizing helper
   readiness/completion and waiting for atomic recovery receipts before cleanup.
+- Removed a trace-only summary refresh race by giving both bounded responder
+  threads the documented eventual window and joining them before assertions.
 - Retired a sent callback-recovery generation only after exact durable broker
   acceptance, so the next retained-session generation remains observable while
   active without gaining another prompt, Enter, nudge, or restart budget.
