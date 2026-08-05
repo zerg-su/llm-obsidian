@@ -191,6 +191,19 @@ def sparse_fingerprint() -> str:
     return str(index.get("source_fingerprint") or "")
 
 
+def retrieval_quality_pending_stale(fingerprint: str) -> bool:
+    """Detect an existing marker that lags an asynchronously rebuilt index."""
+
+    if not RETRIEVAL_QUALITY_PENDING.is_file():
+        return False
+    marker = read_json_object(RETRIEVAL_QUALITY_PENDING)
+    return (
+        marker.get("schema_version") != 1
+        or not fingerprint
+        or str(marker.get("corpus_sha256") or "") != fingerprint
+    )
+
+
 def dense_cache_current() -> tuple[bool, str]:
     """Return whether dense exactly covers the current sparse snapshot."""
     sparse = read_json_object(META / "retrieval" / "index.json")
@@ -539,7 +552,7 @@ def main() -> int:
             sparse_before, sparse_after = refresh_derived(timings, required_timeout)
             corpus_changed = dirty or bool(
                 sparse_before and sparse_after and sparse_before != sparse_after
-            )
+            ) or retrieval_quality_pending_stale(sparse_after)
             if corpus_changed:
                 mark_retrieval_quality_pending()
             dense_needed = dense_refresh_due()

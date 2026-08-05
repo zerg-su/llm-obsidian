@@ -378,6 +378,8 @@ out=$(run_hook)
 printf '\nnew committed corpus term\n' >> "$SANDBOX/wiki/index.md"
 git -C "$SANDBOX" add wiki/index.md
 git -C "$SANDBOX" commit -qm "test: committed corpus drift"
+CLAUDE_PROJECT_DIR="$SANDBOX" python3 "$SANDBOX/scripts/retrieve.py" ensure --quiet
+[[ "$?" == 0 ]] || bad "sh-clean-committed-corpus-sparse-pre-catchup" "sparse pre-catchup failed"
 python3 - "$SANDBOX/.vault-meta/dense-refresh.pending.json" <<'PY'
 import json
 import sys
