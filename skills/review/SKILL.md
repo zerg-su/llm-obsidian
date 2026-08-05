@@ -1,6 +1,6 @@
 ---
 name: review
-description: Harness-owned intent, implementation, or release review with simple, adaptive deep, and explicit full presets. Use for outcome, code, architecture, security, or specs.
+description: Review outcomes, code, architecture, security, or specs through harness-owned Simple, Deep, or Full presets. Use before finalization.
 ---
 
 # Review
@@ -15,9 +15,8 @@ summary bytes. Only `--no-review` persists a typed bypass.
 ## Presets
 
 - `review`: one holistic session on the selected model;
-- `review --deep`: by default, independent Anthropic and OpenAI holistic
-  sessions at
-  `xhigh`; with an explicit alias-backed `--runtime` or `--model`, independent
+- `review --deep`: independent Anthropic and OpenAI holistic sessions at
+  `xhigh` by default; with an alias-backed `--runtime` or `--model`, independent
   intent and engineering sessions on that selected model only;
 - `review --full`: only when explicitly requested, the four-lane
   `{Anthropic, OpenAI} × {intent, engineering}` grid at `xhigh`;
@@ -26,29 +25,13 @@ summary bytes. Only `--no-review` persists a typed bypass.
   flag does not change their topology; explicit runtime/model overrides remain
   authoritative.
 
-Deep/Full use `review_profiles.deep`; model overrides accept only routing-config
-aliases. `--deep --full` is invalid. Full is never inferred and rejects a
-runtime/model override before launch, recommending single-model Deep.
-Public lane IDs use stable `anthropic-*` and `openai-*` prefixes. Concrete
-runtime/model values remain separate operation metadata; registered routing
-aliases never become lane identity.
+Deep/Full use `review_profiles.deep`; overrides accept routing aliases only.
+`--deep --full` is invalid. Full is never inferred and rejects model/runtime
+overrides. Lane IDs use `anthropic-*`/`openai-*`; concrete routes stay metadata.
 
-Standalone Deep remains the public preset above: default Anthropic+OpenAI
-holistic sessions and explicit single-model Deep intent+engineering sessions.
-Finalization uses a separate frozen matrix. Its cycles 1–3 select only
-`finalization-primary`; cycles 4–5 may add `finalization-independent` only when
-policy permits it and fresh typed availability proves it. An explicit
-single-model selection always wins. These aliases never reinterpret standalone
-Deep.
-
-## Finalization boundary
-
-Reserve every finalization cycle atomically in `FinalizationLedger` before a
-review effect. One cycle owns one fresh exact-HEAD attempt and one immutable
-terminal result. A changed HEAD closes the old reviewers and requires the next
-cycle; it never rearms, resumes, or rebinds their sessions. After a fifth
-unsuccessful result the lineage is `finalization-budget-exhausted`; a sixth
-cycle creates no model call, session, or ledger entry.
+Standalone Deep remains unchanged. Finalization is separate: cycles 1–3 use
+only `finalization-primary`; cycles 4–5 may add `finalization-independent` on
+permission plus fresh typed availability. Explicit single-model always wins.
 
 ## Purpose boundaries
 
@@ -88,9 +71,11 @@ completely. Verify findings against code; rejection requires technical evidence.
    The facade starts, resumes, or returns a receipt; `review-runner.py` is low-level.
 2. Keep ContextPacket/outbox in owner-only scratch and product read-only. Submit
    axis JSON only through its generated `harness/review_submit.py` command.
-3. Keep lanes independent. Material findings persist `awaiting-resolution`.
-   Standalone operations retain their preset budget; a finalization finding is
-   terminal for its exact HEAD and any corrected HEAD uses a fresh cycle.
+3. Keep lanes independent. Before effect, finalization reserves
+   `FinalizationLedger`; each cycle owns one fresh exact-HEAD attempt and an
+   immutable terminal result. A changed HEAD uses the next cycle. Fifth failure
+   exhausts the lineage; a sixth cycle has zero effect. Standalone operations
+   keep their preset budgets.
 4. The executor records typed rulings/checks and escalates protected boundaries.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes
