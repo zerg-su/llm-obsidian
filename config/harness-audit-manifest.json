@@ -54,6 +54,7 @@
     "scripts/task_sessions.py",
     "scripts/verification_diagnostics.py",
     "scripts/verification_receipt.py",
+    "scripts/verification_staging.py",
     "scripts/wiki_summary_contract.py"
   ],
   "coverage_test_roots": [

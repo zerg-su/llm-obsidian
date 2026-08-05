@@ -9,10 +9,8 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +20,10 @@ from verification_diagnostics import (
     FailureDiagnosticStore,
     VerificationDiagnosticError,
     canonical_attempt_id,
+)
+from verification_staging import (
+    ExternalPublicationStaging,
+    VerificationStagingError,
 )
 
 
@@ -257,6 +259,7 @@ def execute_gate(
     root: Path,
     output_dir: Path,
     diagnostic_root: Path,
+    staging_root: Path,
     attempt_id: str,
     expected_head: str,
     execution_relation: str,
@@ -279,20 +282,38 @@ def execute_gate(
     tree = _git(root, "rev-parse", "HEAD^{tree}")
     try:
         attempt_id = canonical_attempt_id(attempt_id)
+        git_roots = []
+        for value in (
+            _git(root, "rev-parse", "--git-dir"),
+            _git(root, "rev-parse", "--git-common-dir"),
+        ):
+            path = Path(value)
+            git_roots.append(path if path.is_absolute() else root / path)
+        staging_store = ExternalPublicationStaging(
+            staging_root,
+            subject_root=root,
+            git_roots=git_roots,
+            publication_dir=output_dir,
+        )
         diagnostics = FailureDiagnosticStore(
             diagnostic_root,
             attempt_id=attempt_id,
             subject_root=root,
             publication_dir=output_dir,
         )
-    except VerificationDiagnosticError as exc:
+        if (
+            staging_store.root == diagnostics.root
+            or staging_store.root in diagnostics.root.parents
+            or diagnostics.root in staging_store.root.parents
+        ):
+            raise ReceiptError(
+                "verification staging and diagnostics must be physically separate"
+            )
+    except (VerificationDiagnosticError, VerificationStagingError) as exc:
         raise ReceiptError(str(exc)) from exc
     started_at = _utc_now()
     runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=output_dir.parent)
-    )
-    staging.chmod(0o700)
+    staging = staging_store.create(attempt_id)
     commands: list[dict[str, object]] = []
     try:
         for index, command in enumerate(profile.commands, 1):
@@ -425,10 +446,10 @@ def execute_gate(
             encoding="utf-8",
         )
         write_path.chmod(0o644)
-        os.replace(staging, output_dir)
+        staging_store.publish(staging, output_dir)
         return receipt
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
+        staging_store.cleanup(staging)
         raise
 
 
@@ -518,6 +539,7 @@ def main() -> int:
     run.add_argument("--root", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
     run.add_argument("--diagnostic-root", type=Path, required=True)
+    run.add_argument("--staging-root", type=Path, required=True)
     run.add_argument("--attempt-id", required=True)
     run.add_argument("--expected-head", required=True)
     run.add_argument(
@@ -535,6 +557,7 @@ def main() -> int:
                 root=args.root,
                 output_dir=args.output_dir,
                 diagnostic_root=args.diagnostic_root,
+                staging_root=args.staging_root,
                 attempt_id=args.attempt_id,
                 expected_head=args.expected_head,
                 execution_relation=args.execution_relation,
@@ -560,6 +583,7 @@ def main() -> int:
         ReceiptError,
         ValueError,
         VerificationDiagnosticError,
+        VerificationStagingError,
     ) as exc:
         die(str(exc))
 

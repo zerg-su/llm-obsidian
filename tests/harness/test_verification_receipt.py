@@ -9,12 +9,14 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import verification_receipt as receipts  # noqa: E402
+import verification_staging as staging_module  # noqa: E402
 
 
 PASS_ATTEMPT = "11111111-1111-4111-8111-111111111111"
@@ -23,6 +25,8 @@ ISOLATED_ATTEMPT = "33333333-3333-4333-8333-333333333333"
 WRONG_HEAD_ATTEMPT = "44444444-4444-4444-8444-444444444444"
 BOOTSTRAP_ATTEMPT = "55555555-5555-4555-8555-555555555555"
 BOOTSTRAP_FAIL_ATTEMPT = "66666666-6666-4666-8666-666666666666"
+INSIDE_STAGING_ATTEMPT = "77777777-7777-4777-8777-777777777777"
+SYMLINK_STAGING_ATTEMPT = "88888888-8888-4888-8888-888888888888"
 
 
 def git(root: Path, *argv: str) -> str:
@@ -102,15 +106,34 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     receipts.PROFILES[test_profile.name] = test_profile
     output = root / "passed"
     diagnostic_root = root / "diagnostics"
-    receipt = receipts.execute_gate(
-        test_profile,
-        root=subject,
-        output_dir=output,
-        diagnostic_root=diagnostic_root,
-        attempt_id=PASS_ATTEMPT,
-        expected_head=head,
-        execution_relation="release-candidate",
-    )
+    staging_root = root / "staging"
+    atomic_publications: list[Path] = []
+    original_replace = staging_module.os.replace
+
+    def observe_atomic_publication(source: object, target: object) -> None:
+        original_replace(source, target)
+        target_path = Path(target)
+        assert target_path == output.resolve()
+        assert (target_path / "receipt.json").is_file()
+        assert (target_path / "01-proof-output.log").is_file()
+        assert (target_path / "02-clean-status.log").is_file()
+        atomic_publications.append(target_path)
+
+    with mock.patch.object(
+        staging_module.os,
+        "replace",
+        side_effect=observe_atomic_publication,
+    ):
+        receipt = receipts.execute_gate(
+            test_profile,
+            root=subject,
+            output_dir=output,
+            diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
+            attempt_id=PASS_ATTEMPT,
+            expected_head=head,
+            execution_relation="release-candidate",
+        )
     verified = receipts.verify_receipt(output / "receipt.json")
     assert verified == receipt
     assert verified["attempt_id"] == PASS_ATTEMPT
@@ -120,6 +143,10 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     assert (output / "01-proof-output.log").read_text(encoding="utf-8") == (
         "bounded output\n"
     )
+    assert (output / "02-clean-status.log").read_bytes() == b""
+    assert atomic_publications == [output.resolve()]
+    assert list(staging_root.iterdir()) == []
+    print("OK   external staging is invisible to Git until atomic publication")
     print("OK   receipt retains and binds exact command output")
 
     (output / "01-proof-output.log").write_text("tampered\n", encoding="utf-8")
@@ -146,6 +173,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             root=subject,
             output_dir=failed_output,
             diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
             attempt_id=FAIL_ATTEMPT,
             expected_head=head,
             execution_relation="exact-head-reconstruction",
@@ -155,6 +183,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     else:
         raise AssertionError("failed gate command was accepted")
     assert not failed_output.exists()
+    assert list(staging_root.iterdir()) == []
     failed_receipt_path = (
         diagnostic_root / FAIL_ATTEMPT / "diagnostic-receipt.json"
     )
@@ -185,6 +214,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             root=subject,
             output_dir=isolated_output,
             diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
             attempt_id=ISOLATED_ATTEMPT,
             expected_head=head,
             execution_relation="exact-head-reconstruction",
@@ -201,6 +231,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             root=subject,
             output_dir=reuse_output,
             diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
             attempt_id=FAIL_ATTEMPT,
             expected_head=head,
             execution_relation="exact-head-reconstruction",
@@ -223,6 +254,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             root=subject,
             output_dir=root / "wrong-head",
             diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
             attempt_id=WRONG_HEAD_ATTEMPT,
             expected_head=wrong_head,
             execution_relation="release-candidate",
@@ -232,6 +264,44 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     else:
         raise AssertionError("wrong subject HEAD was accepted")
     print("OK   expected HEAD mismatch fails before command execution")
+
+    inside_staging = subject / "unpublished-staging"
+    try:
+        receipts.execute_gate(
+            test_profile,
+            root=subject,
+            output_dir=root / "inside-staging-output",
+            diagnostic_root=diagnostic_root,
+            staging_root=inside_staging,
+            attempt_id=INSIDE_STAGING_ATTEMPT,
+            expected_head=head,
+            execution_relation="release-candidate",
+        )
+    except receipts.ReceiptError as exc:
+        assert "outside subject and Git roots" in str(exc)
+    else:
+        raise AssertionError("inside-subject staging was accepted")
+    assert not inside_staging.exists()
+    print("OK   staging inside the subject is rejected before commands")
+
+    symlink_staging = root / "staging-symlink"
+    symlink_staging.symlink_to(subject, target_is_directory=True)
+    try:
+        receipts.execute_gate(
+            test_profile,
+            root=subject,
+            output_dir=root / "symlink-staging-output",
+            diagnostic_root=diagnostic_root,
+            staging_root=symlink_staging,
+            attempt_id=SYMLINK_STAGING_ATTEMPT,
+            expected_head=head,
+            execution_relation="release-candidate",
+        )
+    except receipts.ReceiptError as exc:
+        assert "cannot be a symlink" in str(exc)
+    else:
+        raise AssertionError("symlink staging was accepted")
+    print("OK   symlink staging cannot resolve into the subject")
 
     stability = receipts.PROFILES["stability-gate"]
     stability_ids = tuple(item.command_id for item in stability.commands)
@@ -260,6 +330,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
         root=fresh,
         output_dir=bootstrap_output,
         diagnostic_root=diagnostic_root,
+        staging_root=staging_root,
         attempt_id=BOOTSTRAP_ATTEMPT,
         expected_head=fresh_head,
         execution_relation="exact-head-reconstruction",
@@ -287,6 +358,7 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             root=failing_subject,
             output_dir=failing_bootstrap_output,
             diagnostic_root=diagnostic_root,
+            staging_root=staging_root,
             attempt_id=BOOTSTRAP_FAIL_ATTEMPT,
             expected_head=failing_head,
             execution_relation="exact-head-reconstruction",
