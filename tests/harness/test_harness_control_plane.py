@@ -140,6 +140,8 @@ check(
     == dogfood_observations["next_child_state"]
     and integrated_trace["terminal_resources_owned"]
     == dogfood_observations["terminal_resources_owned"]
+    and integrated_trace["review_gate_entrypoint_count"] == 1
+    and integrated_trace["summary_entrypoint_count"] == 1
     and integrated_trace["manual_current_count"]
     == dogfood_observations["manual_current_count"]
     and integrated_trace["manual_resume_count"]

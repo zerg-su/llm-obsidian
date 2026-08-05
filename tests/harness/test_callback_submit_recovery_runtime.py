@@ -25,6 +25,7 @@ from harness.callback_submit_recovery import (  # noqa: E402
     CallbackSubmitPolicy,
     classify_callback_submit,
 )
+from harness.callbacks import CallbackBroker  # noqa: E402
 from harness.contracts import (  # noqa: E402
     AttentionReason,
     CallbackEnvelope,
@@ -55,9 +56,18 @@ from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.supervisor import OperationSupervisor  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
+    ReviewContext,
     ReviewLaneSession,
+    ReviewOperationRequest,
+    ReviewRequest,
+    ReviewResult,
     ReviewRound,
     accept_review_round,
+    review_round_envelope,
+)
+from harness.workflows.review_gate import (  # noqa: E402
+    ReviewGateController,
+    ReviewPreset,
 )
 
 
@@ -1556,15 +1566,32 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and not callback_worker.registration_invalid,
         (cmux.sent, cmux.keys, joined_child, joined_receipt),
     )
+    accepted_mixed_receipt = {
+        **json.loads(submit_receipt_path.read_text(encoding="utf-8")),
+        "status": "reserved",
+    }
+    submit_receipt_path.write_text(
+        json.dumps(accepted_mixed_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     worker.inspect_liveness()
     accepted_parent = store.read("review-owner-3", "review-parent-3")
+    accepted_healed_receipt = json.loads(
+        submit_receipt_path.read_text(encoding="utf-8")
+    )
     check(
-        "accepted callback receipt cannot become stale-generation attention",
+        "accepted callback first heals the sent/reserved crash phase without replay",
         accepted_parent.state == "awaiting-callback"
+        and accepted_healed_receipt["status"] == "sent"
         and not (state_root / "callback-submit-attention.json").exists()
         and len(cmux.sent) == 1
         and cmux.keys == [(SURFACE, "Enter")],
-        (accepted_parent, cmux.sent, cmux.keys),
+        (
+            accepted_parent,
+            accepted_healed_receipt,
+            cmux.sent,
+            cmux.keys,
+        ),
     )
 
     next_child = OperationSpec(
@@ -1845,46 +1872,11 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         and cmux.closed == [SURFACE],
         trace_receipt,
     )
-    expected_observations = dogfood_evidence["observations"]
     check(
-        "tracked E6 receipt binds the exact integrated unattended sequence",
-        dogfood_evidence["base_commit"] == fixture["base_commit"]
-        and dogfood_evidence["parent_operation_id"] == "review-parent-3"
-        and dogfood_evidence["child_operation_id"] == "review-round-3"
-        and expected_observations
-        == {
-            "coordinator_online": False,
-            "initial_submit_intentionally_omitted": True,
-            "same_session_recovery_count": recovery_state.nudge_count,
-            "provider_prompt_count": len(cmux.sent),
-            "provider_enter_count": len(cmux.keys),
-            "provider_typed_artifact_count": trace_receipt["effect_counts"][
-                "provider-callback-write"
-            ],
-            "accepted_receipt_count": int(joined_receipt["status"] == "accepted"),
-            "next_child_state": terminal_child.state,
-            "parent_state": terminal_parent.state,
-            "terminal_resources_owned": terminal_parent.resources
-            != OwnedResources(),
-            "next_pipeline_action": "reap-ready" if pipeline_ready else "wait",
-            "next_pipeline_step": "",
-            "manual_current_count": trace_receipt["effect_counts"][
-                "manual-current"
-            ],
-            "manual_resume_count": trace_receipt["effect_counts"][
-                "manual-resume"
-            ],
-            "manual_send_count": trace_receipt["effect_counts"][
-                "manual-send"
-            ],
-            "manual_callback_write_count": trace_receipt["effect_counts"][
-                "manual-callback-write"
-            ],
-            "repeated_review_count": 0,
-        }
-        and dogfood_evidence["trace_receipt_sha256"]
-        == trace_receipt_sha256,
-        expected_observations,
+        "legacy recovery unit remains terminal but is not release evidence",
+        trace_receipt_sha256
+        == "2c64a851c6cbee6c6b9e3245f4ae4a08aff59108e0121603deab1fc6a172aa0c",
+        trace_receipt,
     )
 
     def invalid_target_has_zero_effect(
@@ -1940,6 +1932,404 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     )
     invalid_target_has_zero_effect(
         "review-round-3", "wrong-run-3", "wrong-run"
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="e6-production-entrypoint.") as raw:
+    root = Path(raw).resolve()
+    scratch = root / "scratch"
+    product = root / "product"
+    state_root = root / "worker-state"
+    callback_root = scratch / "callbacks"
+    for directory in (scratch, product, state_root, callback_root):
+        directory.mkdir(parents=True, exist_ok=True)
+    store = OperationStore(root / "store")
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "9" * 64
+    )
+    origin_surface = "22222222-2222-4222-8222-222222222222"
+    reviewer_surface = SURFACE
+    effects: list[str] = []
+    registration = state_root / "callback-target.json"
+    base_now = time.time()
+
+    class GateRuntime:
+        """Production review-gate port with effect-recording adapters."""
+
+        def __init__(self) -> None:
+            self.session_request = None
+
+        def start(self, request: object, *, on_surface_opened=None) -> object:
+            self.session_request = request
+            record = store.create(
+                request.spec, lane_id=request.lane_id, run_id=request.run_id
+            )
+            supervisor = OperationSupervisor(
+                store, request.spec.owner_id, request.spec.operation_id
+            )
+            supervisor.configure_budget(
+                attempt_limit=1,
+                model_restart_limit=0,
+                time_budget_seconds=300,
+                token_limit=100,
+                now=base_now,
+            )
+            for state in ("preflight", "starting"):
+                store.transition(
+                    request.spec.owner_id, request.spec.operation_id, state
+                )
+            supervisor.bind_resources(
+                OwnedResources(
+                    reviewer_surface,
+                    321,
+                    322,
+                    "1" * 64,
+                    "2" * 64,
+                )
+            )
+            opened = SimpleNamespace(
+                record=store.read(
+                    request.spec.owner_id, request.spec.operation_id
+                ),
+                checkpoint="checkpoint-e6",
+            )
+            if on_surface_opened is not None:
+                on_surface_opened(opened)
+            for state in ("running", "awaiting-callback"):
+                store.transition(
+                    request.spec.owner_id, request.spec.operation_id, state
+                )
+            effects.append("harness-review-start")
+            return SimpleNamespace(
+                record=store.read(
+                    request.spec.owner_id, request.spec.operation_id
+                ),
+                checkpoint="checkpoint-e6",
+            )
+
+        def register_callback_target(
+            self,
+            owner_id: str,
+            parent_operation_id: str,
+            child_operation_id: str,
+            child_run_id: str,
+            callback_pointer: str,
+        ) -> None:
+            callback_path = (scratch / callback_pointer).resolve()
+            callback_path.parent.mkdir(parents=True, exist_ok=True)
+            registration.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "generation": 1,
+                        "operation_id": child_operation_id,
+                        "run_id": child_run_id,
+                        "callback_pointer": str(callback_path),
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            effects.append("harness-callback-register")
+
+        def status(self, owner_id: str, operation_id: str) -> object:
+            return SimpleNamespace(
+                record=store.read(owner_id, operation_id),
+                checkpoint="checkpoint-e6",
+                action="observed",
+                process_status="alive",
+                surface_status="alive",
+            )
+
+        def accept_callback(self, envelope: CallbackEnvelope) -> object:
+            return CallbackBroker(store, "e6-owner").accept(envelope)
+
+        def request_exit(self, owner_id: str, operation_id: str) -> object:
+            record = store.read(owner_id, operation_id)
+            if record.state not in {"finalizing", "exiting", "complete"}:
+                store.transition(owner_id, operation_id, "finalizing")
+            if store.read(owner_id, operation_id).state != "exiting":
+                store.transition(owner_id, operation_id, "exiting")
+            effects.append("harness-request-exit")
+            return store.read(owner_id, operation_id)
+
+        def cleanup(self, owner_id: str, operation_id: str) -> object:
+            record = store.read(owner_id, operation_id)
+            if record.state != "complete":
+                store.transition(owner_id, operation_id, "complete")
+            completed = store.read(owner_id, operation_id)
+            if completed.resources != OwnedResources():
+                store.save(
+                    replace(
+                        completed,
+                        resources=OwnedResources(),
+                        revision=completed.revision + 1,
+                    ),
+                    expected_revision=completed.revision,
+                )
+            effects.append("harness-cleanup")
+            return store.read(owner_id, operation_id)
+
+    runtime = GateRuntime()
+    preset = ReviewPreset.from_flags(
+        runtime="codex", model="sol", effort="high"
+    )
+    context = ReviewContext(
+        manifest="packets/e6/manifest.json",
+        head_sha="a" * 40,
+        verification_profile="scoped",
+        verification_profile_sha256="b" * 64,
+        implementer_summary_sha256="c" * 64,
+    )
+    request = ReviewOperationRequest(
+        ReviewRequest(
+            "e6-review",
+            depth=preset.depth,
+            runtime=preset.runtime,
+            model=preset.model,
+            effort=preset.effort,
+            max_verify_iterations=preset.max_verify_iterations,
+            selected_provider="openai",
+        ),
+        "e6-owner",
+        route,
+        context,
+    )
+    gate = ReviewGateController(root / "gate", runtime, store)
+    run = gate.begin(
+        dispatch_operation_id="e6-dispatch",
+        request=request,
+        origin_surface=origin_surface,
+        cwd=scratch,
+        product_root=product,
+        prompt_pointer="packets/e6/review.md",
+        callback_root="callbacks",
+        callback_wake="resume exact E6 review gate",
+    )
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    callback_path = Path(
+        json.loads(registration.read_text(encoding="utf-8"))[
+            "callback_pointer"
+        ]
+    )
+    now = base_now + 100.0
+    os.utime(registration, (now - 60, now - 60))
+    result = ReviewResult(lane.axis, "approve", (), 0)
+    envelope = review_round_envelope(round_, result)
+    gate_decisions: list[str] = []
+
+    class GateProcess:
+        def process_status(self, process_group: int, identity: str) -> str:
+            return "alive"
+
+        def pid_status(self, supervisor_pid: int, identity: str) -> str:
+            return "alive"
+
+    class GateCmux:
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, str]] = []
+            self.keys: list[tuple[str, str]] = []
+
+        def status(self, surface_id: str) -> str:
+            return "alive"
+
+        def send(self, surface_id: str, message: str) -> None:
+            self.sent.append((surface_id, message))
+            effects.append(
+                "harness-provider-prompt"
+                if surface_id == reviewer_surface
+                else "harness-callback-wake"
+            )
+
+        def send_key(self, surface_id: str, key: str) -> None:
+            self.keys.append((surface_id, key))
+            if surface_id == reviewer_surface:
+                callback_path.write_text(
+                    json.dumps(to_dict(envelope), sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                effects.extend(
+                    ("harness-provider-enter", "provider-callback-write")
+                )
+                return
+            effects.append("harness-callback-wake-enter")
+            active = gate.rehydrate()
+            decision = gate.complete_round(
+                active,
+                active.execution.lanes[0],
+                active.rounds[lane.axis],
+                result,
+            )
+            gate_decisions.append(decision.action)
+            effects.append("harness-review-gate-entrypoint")
+
+    cmux = GateCmux()
+    recovery_worker = RecoveryWorker()
+    recovery_worker.spec_path = state_root / "launch.json"
+    recovery_worker.spec = {
+        "owner_id": "e6-owner",
+        "operation_id": lane.operation_id,
+        "run_id": lane.run_id,
+        "cwd": scratch,
+        "product_root": product,
+        "callback_registration": registration,
+        "surface_id": reviewer_surface,
+        "origin_surface": origin_surface,
+        "callback_wake": "resume exact E6 review gate",
+        "runtime": "codex",
+    }
+    recovery_worker.store = store
+    recovery_worker.process = GateProcess()
+    recovery_worker.handle = SimpleNamespace(
+        process_group=321, process_identity="1" * 64
+    )
+    recovery_worker.provider_exited = False
+    recovery_worker.cmux_adapter = cmux
+    recovery_worker.clock = lambda: now
+    recovery_worker.liveness_policy = LivenessPolicy.default()
+    recovery_worker.callback_submit_policy = CallbackSubmitPolicy(30, 60, 1)
+    recovery_worker.liveness_controller = LivenessController(
+        state_root / "liveness"
+    )
+    recovery_worker.latest_callback_prompt_class = "idle-prompt"
+    recovery_worker.callback_idle_observations = 0
+    recovery_worker.callback_prompt_observations = 0
+    recovery_worker.callback_generation_identity = ""
+    recovery_worker.callback_generation_progress_at = 0.0
+    recovery_worker.callback_recovery_input_digest = ""
+    recovery_worker.callback_recovery_input_reads = 0
+    recovery_worker.callback_recovery_digest = ""
+    recovery_worker.callback_recovery_reads = 0
+    recovery_worker.trusted_vault = ROOT
+    recovery_worker.inspect_liveness()
+    recovery_worker.inspect_liveness()
+    recovery_worker.inspect_liveness()
+    recovery_state = recovery_worker.liveness_controller.current_state()
+
+    callback_worker = FastPathWorker()
+    callback_worker.spec_path = recovery_worker.spec_path
+    callback_worker.spec = recovery_worker.spec
+    callback_worker.store = store
+    callback_worker.trusted_vault = ROOT
+    callback_worker.active_target = None
+    callback_worker.last_digest = ""
+    callback_worker.stable_reads = 0
+    callback_worker.review_input_digest = ""
+    callback_worker.review_input_stable_reads = 0
+    callback_worker.callback_handled = False
+    callback_worker.registration_invalid = False
+    callback_worker.cmux_adapter = cmux
+    callback_worker.inspect_callback()
+    callback_worker.inspect_callback()
+
+    class SummaryEntrypoint(RuntimeWorkerSummaryMixin):
+        def summary_is_stable(self, raw: bytes) -> bool:
+            return True
+
+        def build_summary_pipeline_state(
+            self, raw: bytes
+        ) -> SummaryPipelineState:
+            return SummaryPipelineState(
+                summary={"schema_version": 1},
+                marker=None,
+                steps=self.pipeline.definition.steps,
+                verify_step=None,
+                existing_verification=None,
+            )
+
+        def review_gate_state(self) -> dict[str, object]:
+            return {"status": "approved"}
+
+        def wait_for_summary_refresh_after_resolution(
+            self, gate_state: object, *, target_head: str = ""
+        ) -> bool:
+            return False
+
+        def publish_summary_callback(self, summary: dict[str, object]) -> None:
+            effects.append("harness-summary-publish")
+
+        def summary_attention(self, status: str, *args, **kwargs) -> None:
+            raise AssertionError(status)
+
+    summary_entrypoint = SummaryEntrypoint()
+    summary_entrypoint.pipeline = compiled_builtin("lifecycle/default")
+    summary_entrypoint.review = SimpleNamespace(status="approved")
+    summary_entrypoint.finish_task_summary(b"{}")
+
+    parent = store.read("e6-owner", lane.operation_id)
+    child = store.read("e6-owner", round_.operation_id)
+    callback_receipt = json.loads(
+        (state_root / "callback-receipt.json").read_text(encoding="utf-8")
+    )
+    trace_receipt = {
+        "schema_version": 2,
+        "parent_operation_id": lane.operation_id,
+        "parent_state": parent.state,
+        "child_operation_id": round_.operation_id,
+        "child_state": child.state,
+        "accepted_callback_id": child.accepted_callback_id,
+        "accepted_callback_sha256": child.accepted_callback_sha256,
+        "next_action": (
+            "reap-ready"
+            if "harness-summary-publish" in effects
+            else "wait"
+        ),
+        "resources_released": parent.resources == OwnedResources(),
+        "effects": effects,
+    }
+    encoded_trace = (
+        json.dumps(trace_receipt, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode()
+    trace_receipt_sha256 = hashlib.sha256(encoded_trace).hexdigest()
+    expected = dogfood_evidence["observations"]
+    check(
+        "production entrypoints carry missing submit through callback to reap-ready",
+        recovery_state is not None
+        and recovery_state.nudge_count == 1
+        and callback_receipt["status"] == "accepted"
+        and gate_decisions == ["approved"]
+        and gate.read()["status"] == "approved"
+        and parent.state == "complete"
+        and child.state == "complete"
+        and parent.resources == OwnedResources()
+        and trace_receipt["next_action"] == "reap-ready"
+        and effects.count("harness-provider-prompt") == 1
+        and effects.count("harness-provider-enter") == 1
+        and effects.count("provider-callback-write") == 1
+        and effects.count("harness-review-gate-entrypoint") == 1
+        and effects.count("harness-summary-publish") == 1
+        and dogfood_evidence["owner_id"] == lane.owner_id
+        and dogfood_evidence["parent_operation_id"] == lane.operation_id
+        and dogfood_evidence["child_operation_id"] == round_.operation_id
+        and dogfood_evidence["child_run_id"] == round_.run_id
+        and dogfood_evidence["lane_id"] == lane.lane_id
+        and dogfood_evidence["generation"] == 1
+        and expected
+        == {
+            "coordinator_online": False,
+            "initial_submit_intentionally_omitted": True,
+            "same_session_recovery_count": 1,
+            "provider_prompt_count": 1,
+            "provider_enter_count": 1,
+            "provider_typed_artifact_count": 1,
+            "accepted_receipt_count": 1,
+            "next_child_state": "complete",
+            "parent_state": "complete",
+            "terminal_resources_owned": False,
+            "next_pipeline_action": "reap-ready",
+            "next_pipeline_step": "",
+            "manual_current_count": 0,
+            "manual_resume_count": 0,
+            "manual_send_count": 0,
+            "manual_callback_write_count": 0,
+            "repeated_review_count": 0,
+        }
+        and dogfood_evidence["trace_receipt_sha256"]
+        == trace_receipt_sha256,
+        (trace_receipt, trace_receipt_sha256, expected),
     )
 
 

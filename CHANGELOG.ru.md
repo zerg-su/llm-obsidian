@@ -58,6 +58,12 @@
 
 ### Исправлено
 
+- Exact-фаза `sent` state плюс `reserved` callback-submit receipt теперь
+  согласуется до accepted-callback fast return, поэтому callback, принятый до
+  restart, не может заблокировать следующее reviewer generation.
+- Release-доказательство E6/E14 переведено на production review-gate и
+  task-summary entrypoints, а iteration barrier проверяется через публичный
+  Deep facade; прямые вызовы lifecycle helper больше не считаются unattended.
 - Устранена точная crash-фаза callback-submit, где durable state уже был
   `sent`, а отдельный receipt оставался `reserved`: restart продвигает только
   совпадающий receipt, не повторяет provider input и fail closed на повреждённых

@@ -5658,6 +5658,262 @@ with tempfile.TemporaryDirectory(prefix="fresh-review-preflight.") as raw:
             "scratch isolation preflight precedes fresh intent persistence"
         )
 
+with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
+    base = Path(raw)
+    product = base / "product"
+    scratch = base / "scratch"
+    for directory in (
+        product / "wiki",
+        product / "skills/review",
+        product / "scripts/harness",
+        product / "config",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    (product / "skills/review/SKILL.md").write_text(
+        "# Review\n\nInspect the exact ContextPacket and product HEAD.\n",
+        encoding="utf-8",
+    )
+    (product / "scripts/harness/review_submit.py").write_text(
+        "# test fixture\n", encoding="utf-8"
+    )
+    for name in ("model-routing.toml", "verification-profiles.toml"):
+        (product / "config" / name).write_bytes((ROOT / "config" / name).read_bytes())
+    plan = product / "wiki/plan.md"
+    plan.write_text(
+        """# Iteration barrier plan
+
+```json
+{"schema_version":1,"desired_outcome":"Persist the exact newer Deep review iteration.","success_evidence":[{"evidence_id":"iteration-two","observable":"Both verification callbacks are accepted once."}],"non_goals":["Changing review topology."]}
+```
+""",
+        encoding="utf-8",
+    )
+    evidence = product / "wiki/verification.md"
+    evidence.write_text("# Verification\n\nExact fixture evidence.\n", encoding="utf-8")
+    (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "review@example.invalid"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Review Gate Test"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    reviewed_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    boundary = ReviewBoundaryInput(
+        purpose="implementation",
+        outcome_contract_sha256=extract_from_bytes(plan.read_bytes()).sha256,
+        plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
+        product_head_sha=reviewed_head,
+        verification_evidence_sha256=hashlib.sha256(evidence.read_bytes()).hexdigest(),
+        verification_evidence_path="wiki/verification.md",
+    )
+    boundary_path = base / "boundary.json"
+    boundary_path.write_text(
+        json.dumps(boundary.payload(), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    store = OperationStore(product / ".vault-meta/harness")
+    runtime = EffectRecordingRuntime(store)
+    saved_route = {
+        name: os.environ.get(name)
+        for name in (
+            "LLM_OBSIDIAN_SESSION_RUNTIME",
+            "LLM_OBSIDIAN_SESSION_MODEL",
+            "LLM_OBSIDIAN_SESSION_EFFORT",
+        )
+    }
+    os.environ["LLM_OBSIDIAN_SESSION_RUNTIME"] = "codex"
+    os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
+    os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
+    try:
+        started = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            runtime="codex",
+            model="sol",
+            effort="high",
+            purpose="implementation",
+            boundary_input_file=boundary_path,
+            plan_file=plan,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=runtime,
+        )
+        gate_root = (
+            product
+            / ".vault-meta/harness/review-data"
+            / started["task_id"]
+            / started["task_id"]
+        )
+        finding_ids: list[str] = []
+        for lane in started["lanes"]:
+            axis = str(lane["axis"])
+            active = task_review_runner.load_active_round(
+                gate_root, store, runtime, axis=axis
+            )
+            finding_id = f"iteration-{axis}"
+            finding_ids.append(finding_id)
+            callback = review_round_envelope(
+                active.round,
+                ReviewResult(
+                    axis,
+                    "changes-requested",
+                    (
+                        ReviewFinding(
+                            finding_id,
+                            axis,
+                            "important",
+                            "advance the exact verification iteration",
+                            "the initial fixture HEAD still needs its bounded fix",
+                            file="product.py",
+                        ),
+                    ),
+                    0,
+                ),
+            )
+            Path(lane["callback_path"]).write_text(
+                json.dumps(to_dict(callback), sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        awaiting = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            runtime="codex",
+            model="sol",
+            effort="high",
+            purpose="implementation",
+            boundary_input_file=boundary_path,
+            plan_file=plan,
+            scratch_root=scratch,
+            runtime_manager=runtime,
+        )
+        (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "resolve review"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        resolved_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        gate = ReviewGateController(gate_root, runtime, store)
+        gate_state = gate.read()
+        resolutions = [
+            {
+                "finding_id": finding_id,
+                "disposition": "applied",
+                "rationale": "The exact fixture fix is committed.",
+                "follow_up": "",
+            }
+            for boundary_item in gate_state["awaiting_resolution"].values()
+            for finding_id in boundary_item["material_finding_ids"]
+        ]
+        (product / ".task-review-resolution.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "operation_id": started["task_id"],
+                    "review_identity_sha256": resolution_transport_identity(gate),
+                    "reviewed_head_sha": reviewed_head,
+                    "resolved_head_sha": resolved_head,
+                    "resolutions": resolutions,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        verifying = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            runtime="codex",
+            model="sol",
+            effort="high",
+            purpose="implementation",
+            boundary_input_file=boundary_path,
+            plan_file=plan,
+            scratch_root=scratch,
+            runtime_manager=runtime,
+        )
+        for lane in verifying["lanes"]:
+            axis = str(lane["axis"])
+            active = task_review_runner.load_active_round(
+                gate_root, store, runtime, axis=axis
+            )
+            callback = review_round_envelope(
+                active.round, ReviewResult(axis, "approve", (), 1)
+            )
+            Path(lane["callback_path"]).write_text(
+                json.dumps(to_dict(callback), sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        approved = task_review_runner.run_current_review(
+            product,
+            deep=True,
+            runtime="codex",
+            model="sol",
+            effort="high",
+            purpose="implementation",
+            boundary_input_file=boundary_path,
+            plan_file=plan,
+            scratch_root=scratch,
+            runtime_manager=runtime,
+        )
+        final_state = gate.read()
+        final_iterations = {
+            json.loads((gate_root / pointer).read_text(encoding="utf-8"))[
+                "verification_iteration"
+            ]
+            for pointer in final_state["final_results"].values()
+        }
+        check(
+            "Deep facade persists and advances the exact newer iteration once",
+            awaiting["status"] == "awaiting-resolution"
+            and verifying["status"] == "verifying"
+            and approved["status"] == "approved"
+            and final_iterations == {1}
+            and len(final_state["final_results"]) == 2
+            and len(runtime.continued) == 2,
+        )
+    finally:
+        for name, value in saved_route.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 if regression_failures:
     raise AssertionError(
         "RED review recovery regressions: "

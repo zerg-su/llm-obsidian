@@ -208,6 +208,14 @@ class RuntimeWorkerLivenessMixin:
                 )
                 == receipt_sha256
             ):
+                current = self.liveness_controller.current_state()
+                if (
+                    current is not None
+                    and current.callback_submit_status == "sent"
+                ):
+                    self._reconcile_sent_callback_submit(
+                        current.callback_submit_binding, current
+                    )
                 return
             self.callback_submit_attention("callback-submit-stale-generation")
             return

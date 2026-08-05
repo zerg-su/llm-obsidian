@@ -619,3 +619,16 @@ This coordinator-owned amendment records the final retained-review lifecycle def
 | D-264-60 | review gate | during verification iteration 2, `round_results` still pointed to iteration 1 for the same axis; axis-only filtering therefore hid the newly accepted callback and reconciliation re-entered against its `finalizing` child | `included` | ready callbacks are filtered only when the stored result has the same axis and exact `verification_iteration`; a deterministic unit regression proves iteration 1 does not hide ready iteration 2 and exact iteration 2 remains idempotently filtered |
 
 The defect was observed after the provider had legitimately completed and the typed callback was durably accepted. The repair does not replay provider input, widen retry/model budgets, change routing or topology, weaken callback identity, add public interfaces, or authorize push, tag, publish or release. The corrected exact HEAD repeats the complete gate ladder and uses a fresh bounded Sol review boundary before the separate purpose=`release` audit.
+
+
+## Append-only final release-audit amendments D-264-61 through D-264-63
+
+This coordinator-owned amendment records the final purpose=`release` findings against candidate `28fdbdd01abc9bc22e58bab48748a3cf487dfa03`. It preserves the frozen Outcome Contract and closes one callback crash ordering plus two evidence-quality gaps.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-61 | callback watchdog | an accepted callback receipt could trigger the fast return before the exact `callback_submit_status=sent` plus submit-receipt `reserved` crash phase was reconciled, leaving the next generation stale | `included` | `inspect_liveness` reconciles the exact sent receipt before accepted-receipt classification; the runtime regression drives send, mixed crash, provider acceptance, worker restart and the next generation with zero duplicate provider effect |
+| D-264-62 | release evidence | the claimed E6/E14 terminal trace created a later child and called lifecycle helpers directly from the fixture while its manual counters ignored those calls | `included` | the release-bound E6 trace now starts through `ReviewGateController`, performs one missing-submit recovery, re-enters the gate through the callback wake, reaches exact resource-free cleanup, and enters `RuntimeWorkerSummaryMixin.finish_task_summary` to publish `reap-ready`; the former direct-helper tail remains unit coverage only |
+| D-264-63 | review gate tests | D-264-60 tested the private exact-iteration predicate but not durable Deep collection and replay wiring | `included` | the public current-review facade drives two Deep lanes from iteration 0 findings through exact resolution and iteration 1 approvals; both final results persist at iteration 1 and each retained continuation effect occurs once |
+
+No routing, review topology, public DSL, provider/model budget, retry budget, permission boundary, migration, push, tag, publish or release authority changes. The new exact HEAD must repeat the complete release ladder, fresh Sol Deep implementation review and separate purpose=`release` audit.

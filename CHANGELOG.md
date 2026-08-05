@@ -54,6 +54,12 @@ packages were published for them.
 
 ### Fixed
 
+- Reconciled the exact `sent` state plus `reserved` callback-submit receipt
+  before the accepted-callback fast return, so acceptance-before-restart cannot
+  strand the next reviewer generation.
+- Replaced the release-bound E6/E14 fixture tail with production review-gate
+  and task-summary entrypoints, and added a public Deep-facade iteration test;
+  direct lifecycle-helper calls are no longer counted as unattended evidence.
 - Healed the exact callback-submit crash phase where durable state was already
   `sent` but its separate receipt remained `reserved`; restart advances only
   the matching receipt, never repeats provider input, and fails closed on

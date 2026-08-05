@@ -6,8 +6,8 @@
       "evidence_id": "E6-unattended-callback-to-reap-ready",
       "command": "python3 tests/harness/test_callback_submit_recovery_runtime.py",
       "exit_code": 0,
-      "output_sha256": "c7918c998698b4dc60ed518e938a70f701048c1de7414a181fe2f445e8335089",
-      "result": "69 passed, 0 failed",
+      "output_sha256": "197ef6bb83c7c5538f56bfa7b8c98ff4a4c28fa9f2050a95833610419487ded8",
+      "result": "92 passed, 0 failed",
       "required_observables": [
         "exact v2.6.3 callback-timeout reproduced",
         "one same-session submit-only recovery",
@@ -16,7 +16,7 @@
         "parent and callback child complete",
         "terminal resources_owned false",
         "next pipeline action reap-ready",
-        "tracked E6 receipt binds the integrated sequence"
+        "production review-gate and summary entrypoints bind the E6 sequence"
       ]
     },
     {
@@ -58,7 +58,7 @@
       "command": "python3 tests/harness/test_harness_control_plane.py",
       "exit_code": 0,
       "output_sha256": "951ca96df4ebdd6b5f4a91e1d0708ce61592e473d7cd860a64b83610be28aa6b",
-      "result": "13 passed, 0 failed",
+      "result": "12 passed, 0 failed",
       "required_observables": [
         "historical manual-ingress rows retained as baseline",
         "final authority trace closes every baseline row",
