@@ -160,6 +160,9 @@ class RuntimeWorkerExecution(
         ) = None,
         callback_submit_policy: CallbackSubmitPolicy | None = None,
         clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> int:
         self.spec_path = spec_path
         self.poll_seconds = poll_seconds
@@ -167,7 +170,12 @@ class RuntimeWorkerExecution(
         self.cmux_adapter = cmux_adapter
         self.review_launcher = review_launcher
         self.verification_runner = verification_runner
-        self.clock = clock or time.time
+        self.wall_clock = wall_clock or clock or time.time
+        self.monotonic_clock = monotonic_clock or time.monotonic
+        self.sleeper = sleeper or time.sleep
+        # Compatibility owner for existing callback-timeout code.  New test
+        # seams name wall and monotonic clocks independently.
+        self.clock = self.wall_clock
         self.spec = load_spec(self.spec_path.resolve())
         self.ready = self.spec["ready_path"]
         self.exit_path = self.spec["exit_path"]

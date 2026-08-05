@@ -552,12 +552,16 @@ class RuntimeWorkerLivenessMixin:
                     old_handle.process_identity,
                     signal.SIGTERM,
                 )
-                deadline = time.monotonic() + 2.0
-                while time.monotonic() < deadline:
+                monotonic_clock = getattr(
+                    self, "monotonic_clock", time.monotonic
+                )
+                sleeper = getattr(self, "sleeper", time.sleep)
+                deadline = monotonic_clock() + 2.0
+                while monotonic_clock() < deadline:
                     waited, _status = os.waitpid(old_handle.pid, os.WNOHANG)
                     if waited == old_handle.pid:
                         break
-                    time.sleep(0.05)
+                    sleeper(0.05)
                 else:
                     self.process.signal_owned_child_group(
                         old_handle.process_group,
@@ -685,7 +689,7 @@ class RuntimeWorkerLivenessMixin:
                     callback_sha256 = ""
             decision = self.liveness_controller.observe(
                 LivenessEvidence(
-                    observed_at=time.time(),
+                    observed_at=getattr(self, "wall_clock", time.time)(),
                     process_status=process_status,
                     operation_revision=record.revision,
                     operation_state=record.state,

@@ -35,7 +35,8 @@ class RuntimeWorkerLoopMixin:
                     "status": "attention-required",
                 },
             )
-        now = time.monotonic()
+        monotonic_clock = getattr(self, "monotonic_clock", time.monotonic)
+        now = monotonic_clock()
         if now >= self.next_liveness_probe:
             self.next_liveness_probe = now + self.liveness_policy.probe_seconds
             self.inspect_liveness()
@@ -296,21 +297,31 @@ class RuntimeWorkerLoopMixin:
             self.inspect_transport()
             if self.callback_handled:
                 break
-            time.sleep(max(0.02, self.poll_seconds))
+            getattr(self, "sleeper", time.sleep)(max(0.02, self.poll_seconds))
+
+    def poll_once(self) -> bool:
+        """Run one production transport/observer/exit-observation iteration."""
+
+        self.inspect_transport()
+        self.tick_observers()
+        return self.observe_provider_exit()
+
+    def settle_exit_once(self) -> bool:
+        """Classify one observed exit and decide restart versus finality."""
+
+        self.mark_failed_research_runtime()
+        if self.needs_provider_restart():
+            self.restart_provider()
+        return self.provider_exit_is_final()
 
     def run_provider_loop(self) -> int:
         while True:
-            self.inspect_transport()
-            self.tick_observers()
-            if not self.observe_provider_exit():
-                time.sleep(max(0.02, self.poll_seconds))
+            if not self.poll_once():
+                self.sleeper(max(0.02, self.poll_seconds))
                 continue
-            self.mark_failed_research_runtime()
-            if self.needs_provider_restart():
-                self.restart_provider()
-            if self.provider_exit_is_final():
+            if self.settle_exit_once():
                 break
-            time.sleep(max(0.02, self.poll_seconds))
+            self.sleeper(max(0.02, self.poll_seconds))
         self.drain_callbacks()
         _atomic_json(
             self.exit_path,
