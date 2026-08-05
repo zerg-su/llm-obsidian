@@ -609,3 +609,13 @@ This coordinator-owned amendment records the two exact verification findings fro
 | D-264-59 | review context | `INT-D57-TRACKED-GIT-FALLBACK` / `ENG-264-reviewed-artifact-fallback`: the ignored-evidence fallback caught every reviewed-artifact error, so a tracked reviewed blob with a stale digest could be replaced by mutable current worktree bytes | `included` | reviewed-tree absence is now a distinct typed condition; only that condition permits the existing path-confined exact-digest fallback, while tracked Git resolution, path and digest failures remain fail-closed; the negative regression supplies matching current bytes beside a mismatched tracked blob and proves rejection before provider effect |
 
 Both findings were discovered during bounded same-session verification and produced no product-write, provider-replay, callback-replay, routing, permission, push, tag, publish or release effect. The focused review-gate and runtime-session suites pass after the fixes; the exact-HEAD full gate ladder and bounded verification are repeated before the separate purpose=`release` no-loss audit.
+
+## Append-only lane-barrier callback amendment D-264-60
+
+This coordinator-owned amendment records the final retained-review lifecycle defect after D-264-58 and D-264-59. It preserves the frozen Outcome Contract and changes only exact callback collection at an already active Deep/Full lane barrier.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-60 | review gate | during verification iteration 2, `round_results` still pointed to iteration 1 for the same axis; axis-only filtering therefore hid the newly accepted callback and reconciliation re-entered against its `finalizing` child | `included` | ready callbacks are filtered only when the stored result has the same axis and exact `verification_iteration`; a deterministic unit regression proves iteration 1 does not hide ready iteration 2 and exact iteration 2 remains idempotently filtered |
+
+The defect was observed after the provider had legitimately completed and the typed callback was durably accepted. The repair does not replay provider input, widen retry/model budgets, change routing or topology, weaken callback identity, add public interfaces, or authorize push, tag, publish or release. The corrected exact HEAD repeats the complete gate ladder and uses a fresh bounded Sol review boundary before the separate purpose=`release` audit.

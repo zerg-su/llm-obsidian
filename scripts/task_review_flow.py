@@ -208,6 +208,35 @@ def _requires_lane_barrier(preset: ReviewPreset) -> bool:
     return preset.depth in {"deep", "full"}
 
 
+def _ready_result_is_recorded(
+    gate: ReviewGateController,
+    state: Mapping[str, Any],
+    result: ReviewResult,
+) -> bool:
+    """Match the exact axis iteration, not merely an axis seen before."""
+
+    raw_results = state.get("round_results")
+    if not isinstance(raw_results, dict):
+        return False
+    pointer = raw_results.get(result.axis)
+    if not isinstance(pointer, str) or not pointer:
+        return False
+    path = (gate.root / pointer).resolve()
+    if gate.root not in path.parents or not path.is_file() or path.is_symlink():
+        raise TaskReviewError("recorded review result pointer is invalid")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TaskReviewError("recorded review result is invalid") from exc
+    if not isinstance(payload, dict):
+        raise TaskReviewError("recorded review result is invalid")
+    return (
+        payload.get("axis") == result.axis
+        and payload.get("verification_iteration")
+        == result.verification_iteration
+    )
+
+
 def _should_defer_ready_results(
     preset: ReviewPreset,
     *,
@@ -444,13 +473,12 @@ def _run_review(
     run = gate.rehydrate()
     if status == "awaiting-resolution":
         if _requires_lane_barrier(preset):
-            recorded_axes = set((state.get("round_results") or {}).keys())
             ready = [
                 item
                 for item in _collect_ready_results(
                     run, runtime_root, worktree, vault
                 )
-                if item[2].axis not in recorded_axes
+                if not _ready_result_is_recorded(gate, state, item[2])
             ]
             if ready:
                 _complete_ready_results(

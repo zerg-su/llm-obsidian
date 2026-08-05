@@ -115,6 +115,9 @@ packages were published for them.
 - Made continuation retry stage publication crash-safe: the exact generation
   binding reaches durable `sent` before the `submit-retried` receipt, so replay
   cannot inherit a more advanced receipt with a reserved liveness effect.
+- Kept same-axis verification callbacks visible across Deep/Full lane barriers:
+  an older recorded iteration no longer hides a newly accepted iteration, while
+  exact recorded iterations remain idempotently filtered.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative

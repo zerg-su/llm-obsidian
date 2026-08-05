@@ -21,12 +21,16 @@ from harness.store import OperationStore  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
     ReviewOperationRequest,
+    ReviewResult,
 )
 from harness.workflows.review_gate import (  # noqa: E402
     ReviewGateController,
     ReviewPreset,
 )
-from task_review_flow import _resume_bound_attention  # noqa: E402
+from task_review_flow import (  # noqa: E402
+    _ready_result_is_recorded,
+    _resume_bound_attention,
+)
 from task_review_request import _callback_path  # noqa: E402
 from task_review_resolution_flow import _prompt_effect_id  # noqa: E402
 from harness.runtime_session_contracts import continuation_effect_id  # noqa: E402
@@ -80,6 +84,38 @@ class FakeRuntime:
 
     def register_callback_target(self, *_args: object) -> None:
         return None
+
+
+with tempfile.TemporaryDirectory(prefix="review-flow-recorded.") as raw:
+    base = Path(raw)
+    store = OperationStore(base / "store")
+    gate = ReviewGateController(base / "gate", FakeRuntime(store), store)
+    result = ReviewResult("openai-intent", "approve", (), 2)
+    result_path = gate.root / "review" / "round-openai-intent-1.json"
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text(
+        '{"axis":"openai-intent","verdict":"changes-requested",'
+        '"findings":[],"verification_iteration":1}\n',
+        encoding="utf-8",
+    )
+    state = {
+        "round_results": {
+            "openai-intent": "review/round-openai-intent-1.json"
+        }
+    }
+    check(
+        "older result for the same axis does not hide a ready iteration",
+        not _ready_result_is_recorded(gate, state, result),
+    )
+    result_path.write_text(
+        '{"axis":"openai-intent","verdict":"approve",'
+        '"findings":[],"verification_iteration":2}\n',
+        encoding="utf-8",
+    )
+    check(
+        "the exact recorded axis iteration remains idempotently filtered",
+        _ready_result_is_recorded(gate, state, result),
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:

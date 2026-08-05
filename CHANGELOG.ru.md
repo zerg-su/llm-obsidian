@@ -118,6 +118,9 @@
 - Публикация continuation retry теперь crash-safe: exact generation binding
   становится durable `sent` раньше receipt `submit-retried`, поэтому replay не
   получает продвинутый receipt рядом с всё ещё reserved liveness effect.
+- Callback новой verification iteration той же axis больше не скрывается
+  старым записанным результатом на Deep/Full lane barrier; уже записанная
+  точная iteration по-прежнему фильтруется идемпотентно.
 - После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
   материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся
