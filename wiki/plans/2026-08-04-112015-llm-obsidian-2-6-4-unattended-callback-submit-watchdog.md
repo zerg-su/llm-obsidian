@@ -542,3 +542,13 @@ This coordinator-owned amendment resolves `REL-SCOPE-001` from the exact-HEAD So
 | D-264-51 | release scope | exact diff inspection found three 2.7 TaskGraph/project-task entries in `wiki/backlog.md` that were not named by the D-264-21 accepted-deviation path | `included` | `docs/acceptance/v2.6.4-accepted-deviations.json` binds `wiki/backlog.md` plus `llm-obsidian-2-7-code-owned-task-graph`, `llm-obsidian-2-7-project-task-system`, and `llm-obsidian-2-7-project-scoped-task-namespaces`; the entries are planning-only and introduce no 2.7 runtime, scheduler, DSL, routing, or review-topology behavior |
 
 No production code, pipeline contract, provider behavior, budget, permission, public interface, push, tag, publish, or release effect is changed. The corrected documentation-only candidate must pass the exact-HEAD gates and a fresh implementation/release evidence boundary before handoff.
+
+## Append-only crash-replay amendment D-264-52
+
+This coordinator-owned amendment resolves `REL-CRASH-001` from the exact-HEAD Sol release audit of candidate `48a315251ef9d7a51c385c67916bc433ca321910`. It preserves the frozen Outcome Contract and closes only the durable sent-state/reserved-receipt crash phase.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-52 | callback watchdog | a crash after persisting `callback_submit_status=sent` but before advancing the separate callback-submit receipt left `state=sent + receipt=reserved`; restart classified recovery as already sent without healing the receipt, and accepted retirement could strand the next retained generation | `included` | runtime restart idempotently replays only the exact sent-receipt write before classification, performs zero provider prompt/Enter, preserves consumed budgets, and emits typed `callback-submit-evidence-malformed` attention for a corrupt receipt; `test_liveness.py` injects the exact kill point and `test_callback_submit_recovery_runtime.py` proves healing plus malformed fail-closed behavior |
+
+No provider effect, callback, model call, retry-budget expansion, route change, review-topology change, public-interface change, migration, push, tag, publish or release is introduced. The corrected candidate must repeat the complete exact-HEAD gate ladder and fresh Sol implementation/release reviews.

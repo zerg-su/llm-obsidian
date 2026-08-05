@@ -153,6 +153,20 @@ class RuntimeWorkerLivenessMixin:
                 "callback submit attention transition failed"
             ) from exc
 
+    def _reconcile_sent_callback_submit(
+        self, binding_sha256: str, current: object
+    ) -> object | None:
+        """Heal the exact sent-state/reserved-receipt crash phase."""
+
+        if getattr(current, "callback_submit_status", "") != "sent":
+            return current
+        try:
+            self.liveness_controller.mark_callback_submit_sent(binding_sha256)
+            return self.liveness_controller.current_state()
+        except (ContractError, OSError, TypeError, ValueError):
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return None
+
     def inspect_callback_submit_recovery(
         self, record: object, process_status: str
     ) -> None:
@@ -327,6 +341,11 @@ class RuntimeWorkerLivenessMixin:
             return
         binding_sha256 = callback_submit_binding_sha256(evidence)
         if current.callback_submit_binding == binding_sha256:
+            current = self._reconcile_sent_callback_submit(
+                binding_sha256, current
+            )
+            if current is None:
+                return
             evidence = replace(
                 evidence, recovery_status=current.callback_submit_status
             )

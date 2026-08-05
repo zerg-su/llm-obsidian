@@ -54,6 +54,10 @@ packages were published for them.
 
 ### Fixed
 
+- Healed the exact callback-submit crash phase where durable state was already
+  `sent` but its separate receipt remained `reserved`; restart advances only
+  the matching receipt, never repeats provider input, and fails closed on
+  malformed bytes.
 - Prevented silent pipeline stalls after completed reviewer output, accepted
   callback races, callback-rearm crashes, and retained prompt text that was not
   actually submitted.

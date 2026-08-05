@@ -338,6 +338,49 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
     else:
         check("malformed callback submit receipt fails closed", False)
 
+with tempfile.TemporaryDirectory(prefix="callback-submit-sent-crash.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    controller.reserve_callback_submit(
+        callback_submit_binding, callback_submit_identity
+    )
+    original_write = controller._write
+    crash_injected = False
+
+    def crash_before_sent_receipt(path: Path, value: object) -> None:
+        is_sent_receipt = (
+            isinstance(value, dict)
+            and path.name
+            == f"callback-submit-{callback_submit_binding}.json"
+            and value.get("status") == "sent"
+        )
+        if is_sent_receipt:
+            raise OSError("injected sent receipt crash")
+        original_write(path, value)
+
+    controller._write = crash_before_sent_receipt  # type: ignore[method-assign]
+    try:
+        controller.mark_callback_submit_sent(callback_submit_binding)
+    except OSError:
+        crash_injected = True
+    finally:
+        controller._write = original_write  # type: ignore[method-assign]
+    sent_state = controller.current_state()
+    reserved_receipt = json.loads(
+        (
+            Path(raw)
+            / "receipts"
+            / f"callback-submit-{callback_submit_binding}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "sent transition kill point persists the exact replay-healable phase",
+        crash_injected
+        and sent_state is not None
+        and sent_state.callback_submit_status == "sent"
+        and reserved_receipt["status"] == "reserved",
+    )
+
 with tempfile.TemporaryDirectory(prefix="callback-submit-retire-crash.") as raw:
     controller = LivenessController(Path(raw))
     controller.observe(base, policy)

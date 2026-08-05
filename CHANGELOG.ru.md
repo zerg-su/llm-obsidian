@@ -58,6 +58,10 @@
 
 ### Исправлено
 
+- Устранена точная crash-фаза callback-submit, где durable state уже был
+  `sent`, а отдельный receipt оставался `reserved`: restart продвигает только
+  совпадающий receipt, не повторяет provider input и fail closed на повреждённых
+  байтах.
 - Устранены молчаливые остановки после готового reviewer output, callback races,
   сбоев callback rearm и случая, когда prompt остался в editor и не был запущен.
 - Unattended Codex review больше не зависает на нативном предложении сменить

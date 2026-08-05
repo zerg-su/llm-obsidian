@@ -1281,6 +1281,67 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         (cmux.sent, cmux.keys, recovery_state),
     )
 
+    submit_receipt_path = (
+        state_root
+        / "liveness"
+        / "receipts"
+        / f"callback-submit-{recovery_state.callback_submit_binding}.json"
+    )
+    mixed_receipt = json.loads(submit_receipt_path.read_text(encoding="utf-8"))
+    mixed_receipt["status"] = "reserved"
+    submit_receipt_path.write_text(
+        json.dumps(mixed_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    replay_cmux = Cmux()
+    replay_worker = RecoveryWorker()
+    replay_worker.__dict__.update(worker.__dict__)
+    replay_worker.liveness_controller = LivenessController(
+        state_root / "liveness"
+    )
+    replay_worker.cmux_adapter = replay_cmux
+    replay_worker.inspect_liveness()
+    healed_receipt = json.loads(
+        submit_receipt_path.read_text(encoding="utf-8")
+    )
+    check(
+        "runtime restart heals sent state with reserved receipt without replay",
+        healed_receipt["status"] == "sent"
+        and replay_cmux.sent == []
+        and replay_cmux.keys == [],
+        (healed_receipt, replay_cmux.sent, replay_cmux.keys),
+    )
+
+    class SentReceiptAttentionWorker(RecoveryWorker):
+        def callback_submit_attention(self, reason: str) -> None:
+            self.attention_reason = reason
+
+    submit_receipt_path.write_text("not-json\n", encoding="utf-8")
+    attention_cmux = Cmux()
+    attention_worker = SentReceiptAttentionWorker()
+    attention_worker.__dict__.update(worker.__dict__)
+    attention_worker.liveness_controller = LivenessController(
+        state_root / "liveness"
+    )
+    attention_worker.cmux_adapter = attention_cmux
+    attention_worker.inspect_liveness()
+    check(
+        "malformed sent recovery receipt raises typed attention without effect",
+        attention_worker.attention_reason
+        == "callback-submit-evidence-malformed"
+        and attention_cmux.sent == []
+        and attention_cmux.keys == [],
+        (
+            attention_worker.attention_reason,
+            attention_cmux.sent,
+            attention_cmux.keys,
+        ),
+    )
+    submit_receipt_path.write_text(
+        json.dumps(healed_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     class AttentionOnlyRecoveryWorker(RecoveryWorker):
         def callback_submit_attention(self, reason: str) -> None:
             self.attention_reason = reason
