@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
+
+from verification_diagnostics import (
+    FailureDiagnosticStore,
+    VerificationDiagnosticError,
+    canonical_attempt_id,
+)
 
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -249,6 +256,8 @@ def execute_gate(
     *,
     root: Path,
     output_dir: Path,
+    diagnostic_root: Path,
+    attempt_id: str,
     expected_head: str,
     execution_relation: str,
 ) -> dict[str, object]:
@@ -268,7 +277,18 @@ def execute_gate(
     if head != expected_head or GIT_SHA.fullmatch(head) is None:
         raise ReceiptError("gate subject HEAD changed before execution")
     tree = _git(root, "rev-parse", "HEAD^{tree}")
+    try:
+        attempt_id = canonical_attempt_id(attempt_id)
+        diagnostics = FailureDiagnosticStore(
+            diagnostic_root,
+            attempt_id=attempt_id,
+            subject_root=root,
+            publication_dir=output_dir,
+        )
+    except VerificationDiagnosticError as exc:
+        raise ReceiptError(str(exc)) from exc
     started_at = _utc_now()
+    runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     staging = Path(
         tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=output_dir.parent)
     )
@@ -286,30 +306,94 @@ def execute_gate(
                 flush=True,
             )
             with log_path.open("wb") as output:
-                result = subprocess.run(
-                    list(command.argv),
-                    cwd=root,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                    env={**os.environ, "PYTHONHASHSEED": "0"},
-                )
+                try:
+                    result = subprocess.run(
+                        list(command.argv),
+                        cwd=root,
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        check=False,
+                        env={**os.environ, "PYTHONHASHSEED": "0"},
+                    )
+                    exit_code = result.returncode
+                    failure_kind = "command-exit"
+                except OSError:
+                    output.write(
+                        b"verification-receipt: command could not start\n"
+                    )
+                    exit_code = 127
+                    failure_kind = "command-start"
                 output.flush()
                 os.fsync(output.fileno())
             command_finished = _utc_now()
             log_path.chmod(0o644)
             output_sha256, output_bytes = _file_sha256(log_path)
-            if result.returncode:
+            if exit_code:
+                try:
+                    diagnostic = diagnostics.publish(
+                        subject_head_sha=head,
+                        subject_tree_sha=tree,
+                        profile=profile.name,
+                        profile_sha256=profile.sha256,
+                        attempt_started_at=started_at,
+                        command_index=index,
+                        command_count=len(profile.commands),
+                        command_id=command.command_id,
+                        command_argv=command.argv,
+                        command_text=shlex.join(command.argv),
+                        command_started_at=command_started,
+                        command_finished_at=command_finished,
+                        exit_code=exit_code,
+                        failure_kind=failure_kind,
+                        output_path=log_path,
+                        runner=Path(__file__).name,
+                        runner_sha256=runner_sha256,
+                    )
+                except VerificationDiagnosticError as exc:
+                    raise ReceiptError(
+                        "failed command diagnostic could not be retained"
+                    ) from exc
                 raise ReceiptError(
-                    f"{command.command_id} exited {result.returncode}; no evidence was published"
+                    f"{command.command_id} exited {exit_code}; diagnostic: "
+                    f"{diagnostic}; no evidence was published"
                 )
-            observations = _observations(command, log_path.read_bytes())
+            try:
+                observations = _observations(command, log_path.read_bytes())
+            except ReceiptError as exc:
+                try:
+                    diagnostic = diagnostics.publish(
+                        subject_head_sha=head,
+                        subject_tree_sha=tree,
+                        profile=profile.name,
+                        profile_sha256=profile.sha256,
+                        attempt_started_at=started_at,
+                        command_index=index,
+                        command_count=len(profile.commands),
+                        command_id=command.command_id,
+                        command_argv=command.argv,
+                        command_text=shlex.join(command.argv),
+                        command_started_at=command_started,
+                        command_finished_at=command_finished,
+                        exit_code=exit_code,
+                        failure_kind="validator-rejected",
+                        output_path=log_path,
+                        runner=Path(__file__).name,
+                        runner_sha256=runner_sha256,
+                    )
+                except VerificationDiagnosticError as diagnostic_exc:
+                    raise ReceiptError(
+                        "failed validator diagnostic could not be retained"
+                    ) from diagnostic_exc
+                raise ReceiptError(
+                    f"{command.command_id} output was rejected; diagnostic: "
+                    f"{diagnostic}; no evidence was published"
+                ) from exc
             commands.append(
                 {
                     "command_id": command.command_id,
                     "argv": list(command.argv),
                     "cwd": ".",
-                    "exit_code": result.returncode,
+                    "exit_code": exit_code,
                     "started_at": command_started,
                     "finished_at": command_finished,
                     "output_pointer": log_name,
@@ -320,9 +404,9 @@ def execute_gate(
             )
         if _git(root, "rev-parse", "HEAD") != head:
             raise ReceiptError("gate subject HEAD changed during execution")
-        runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         receipt = {
             "schema_version": 1,
+            "attempt_id": attempt_id,
             "profile": profile.name,
             "profile_sha256": profile.sha256,
             "subject_head_sha": head,
@@ -358,6 +442,7 @@ def verify_receipt(receipt_path: Path) -> dict[str, object]:
         raise ReceiptError("verification receipt is invalid JSON") from exc
     expected = {
         "schema_version",
+        "attempt_id",
         "profile",
         "profile_sha256",
         "subject_head_sha",
@@ -370,11 +455,17 @@ def verify_receipt(receipt_path: Path) -> dict[str, object]:
         "commands",
         "status",
     }
+    if not isinstance(value, dict):
+        raise ReceiptError("verification receipt schema is invalid")
+    try:
+        attempt_id = canonical_attempt_id(str(value.get("attempt_id") or ""))
+    except VerificationDiagnosticError as exc:
+        raise ReceiptError("verification receipt schema is invalid") from exc
     if (
-        not isinstance(value, dict)
-        or set(value) != expected
+        set(value) != expected
         or value.get("schema_version") != 1
         or value.get("status") != "passed"
+        or attempt_id != value.get("attempt_id")
         or not SHA256.fullmatch(str(value.get("profile_sha256") or ""))
         or not GIT_SHA.fullmatch(str(value.get("subject_head_sha") or ""))
         or not GIT_SHA.fullmatch(str(value.get("subject_tree_sha") or ""))
@@ -426,6 +517,8 @@ def main() -> int:
     run.add_argument("--profile", choices=sorted(PROFILES), required=True)
     run.add_argument("--root", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
+    run.add_argument("--diagnostic-root", type=Path, required=True)
+    run.add_argument("--attempt-id", required=True)
     run.add_argument("--expected-head", required=True)
     run.add_argument(
         "--execution-relation",
@@ -441,6 +534,8 @@ def main() -> int:
                 PROFILES[args.profile],
                 root=args.root,
                 output_dir=args.output_dir,
+                diagnostic_root=args.diagnostic_root,
+                attempt_id=args.attempt_id,
                 expected_head=args.expected_head,
                 execution_relation=args.execution_relation,
             )
@@ -453,13 +548,19 @@ def main() -> int:
                         "schema_version": 1,
                         "status": "valid",
                         "profile": receipt["profile"],
+                        "attempt_id": receipt["attempt_id"],
                         "subject_head_sha": receipt["subject_head_sha"],
                     },
                     sort_keys=True,
                 )
             )
         return 0
-    except (OSError, ReceiptError, ValueError) as exc:
+    except (
+        OSError,
+        ReceiptError,
+        ValueError,
+        VerificationDiagnosticError,
+    ) as exc:
         die(str(exc))
 
 

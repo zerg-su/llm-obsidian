@@ -52,6 +52,7 @@
     "scripts/task_session_store.py",
     "scripts/task_session_store_io.py",
     "scripts/task_sessions.py",
+    "scripts/verification_diagnostics.py",
     "scripts/verification_receipt.py",
     "scripts/wiki_summary_contract.py"
   ],
