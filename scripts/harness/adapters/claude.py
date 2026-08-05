@@ -9,8 +9,20 @@ import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from ..contracts import RuntimeRoute
+from ..ephemeral_provider import (
+    AuthPreflightResult,
+    AuthProbeCommand,
+    EphemeralCommand,
+    EphemeralProcessResult,
+    EphemeralProviderError,
+    EphemeralRunResult,
+    EphemeralRunSpec,
+    normalized_run_result,
+    validate_output_instance,
+)
 
 
 class ClaudeDriverError(ValueError):
@@ -48,6 +60,10 @@ REVIEW_CREDENTIAL_ENV = (
     "OPENAI_API_KEY",
     "PYPI_TOKEN",
     "SSH_AUTH_SOCK",
+)
+
+_EPHEMERAL_ENV_ALLOWLIST = frozenset(
+    {"HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "TZ", "USER"}
 )
 
 
@@ -485,4 +501,166 @@ class ClaudeDriver:
             and status.get("apiProvider") == "firstParty"
             and str(status.get("subscriptionType") or "").casefold()
             in {"pro", "max", "team", "enterprise"}
+        )
+
+
+def _claude_ephemeral_environment(env: Mapping[str, str]) -> dict[str, str]:
+    """Keep native account discovery while dropping ambient credential paths."""
+
+    child = {
+        key: value
+        for key, value in env.items()
+        if key in _EPHEMERAL_ENV_ALLOWLIST and isinstance(value, str)
+    }
+    child.update(
+        {
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL": "1",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            "DISABLE_AUTOUPDATER": "1",
+        }
+    )
+    return child
+
+
+def _claude_failure_disposition(stderr: bytes) -> str:
+    status = stderr.decode("utf-8", errors="replace").casefold()
+    if any(marker in status for marker in ("usage limit", "rate limit", "quota")):
+        return "usage-exhausted"
+    if any(marker in status for marker in ("not logged", "authentication", "unauthorized")):
+        return "auth-expired"
+    if any(marker in status for marker in ("permission denied", "policy denied")):
+        return "policy-denied"
+    return "transport-failed"
+
+
+@dataclass(frozen=True)
+class ClaudeEphemeralAdapter:
+    """Subscription-backed Claude print compiler and output normalizer."""
+
+    binary: Path
+    logical_provider: str = "anthropic"
+    transport: str = "claude-print"
+
+    def __post_init__(self) -> None:
+        if not self.binary.is_absolute():
+            raise EphemeralProviderError("Claude ephemeral binary must be absolute")
+
+    def compile(
+        self, spec: EphemeralRunSpec, *, env: Mapping[str, str]
+    ) -> EphemeralCommand:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Claude adapter received another provider")
+        schema = json.dumps(spec.schema, sort_keys=True, separators=(",", ":"))
+        argv = (
+            str(self.binary),
+            "--model",
+            spec.model,
+            "--effort",
+            spec.effort,
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            "",
+            "--setting-sources",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--disable-slash-commands",
+            "--no-chrome",
+            "--no-session-persistence",
+            "--max-turns",
+            str(spec.turn_budget),
+            "--output-format",
+            "json",
+            "--json-schema",
+            schema,
+            "--print",
+            "--",
+        )
+        return EphemeralCommand(
+            argv,
+            spec.context_packet.read_bytes(),
+            _claude_ephemeral_environment(env),
+            self.transport,
+        )
+
+    def auth_command(
+        self, spec: EphemeralRunSpec, *, env: Mapping[str, str]
+    ) -> AuthProbeCommand:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Claude auth probe provider changed")
+        return AuthProbeCommand(
+            ClaudeDriver.auth_command(self.binary),
+            _claude_ephemeral_environment(env),
+        )
+
+    def preflight(
+        self,
+        spec: EphemeralRunSpec,
+        *,
+        stdout: str,
+        stderr: str,
+        returncode: int,
+    ) -> AuthPreflightResult:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Claude auth probe provider changed")
+        ready = ClaudeDriver.authenticated_subscription(stdout, stderr, returncode)
+        return AuthPreflightResult(
+            spec.logical_provider,
+            spec.auth_profile,
+            "ready" if ready else "billing-profile-unverified",
+            "native-subscription-ready" if ready else "billing-profile-unverified",
+            ready,
+        )
+
+    def normalize(
+        self, spec: EphemeralRunSpec, process: EphemeralProcessResult
+    ) -> EphemeralRunResult:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Claude result provider changed")
+        if process.timed_out:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition="timeout",
+                gap_reason="timeout",
+            )
+        if process.returncode:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition=_claude_failure_disposition(process.stderr),
+            )
+        try:
+            payload = json.loads(process.stdout)
+            result = payload["structured_output"]
+            valid = (
+                isinstance(payload, dict)
+                and payload.get("type") == "result"
+                and payload.get("subtype") == "success"
+                and payload.get("is_error") is False
+                and isinstance(result, dict)
+                and validate_output_instance(result, spec.schema)
+            )
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            valid = False
+            result = None
+        if not valid:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition="schema-invalid",
+                gap_reason="schema-invalid",
+            )
+        return normalized_run_result(
+            spec,
+            process,
+            transport=self.transport,
+            disposition="succeeded",
+            result=result,
         )

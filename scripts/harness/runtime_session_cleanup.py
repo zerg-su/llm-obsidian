@@ -20,6 +20,11 @@ from .runtime_session_contracts import (
     RuntimeSessionError,
     RuntimeSessionResult,
 )
+from .runtime_session_liveness import (
+    ResourceClosureLedger,
+    ResourceIdentity,
+    ResourceObservation,
+)
 from .state_machine import TERMINAL
 from .supervisor import OperationSupervisor
 
@@ -282,6 +287,60 @@ class RuntimeSessionCleanupMixin:
             raise RuntimeSessionError("callback operation owner is ambiguous or unknown")
         return matches[0]
 
+    def _record_resource_closed(
+        self,
+        record: OperationRecord,
+        metadata: dict[str, object],
+        *,
+        process_status: str,
+        supervisor_status: str,
+        surface_status: str,
+        workspace_status: str,
+    ) -> None:
+        """Publish the exact close receipt before clearing durable ownership."""
+
+        target_path = self._callback_target_path(record)
+        if not target_path.is_file():
+            # Historical records created before provider-event generations remain
+            # cleanup-compatible but cannot manufacture a typed event identity.
+            return
+        target = self._callback_target(record)
+        resources = record.resources
+        workspace_id = str(metadata.get("workspace_id") or "")
+        if not all(
+            (
+                resources.process_identity,
+                resources.supervisor_identity,
+                resources.surface_id,
+                workspace_id,
+            )
+        ):
+            # Compatibility records may prove disappearance without carrying
+            # the complete new provider/resource identity. Cleanup remains
+            # possible, but no typed close receipt is fabricated for them.
+            return
+        identity = ResourceIdentity(
+            owner_id=record.spec.owner_id,
+            operation_id=record.spec.operation_id,
+            run_id=record.run_id,
+            generation=int(target["generation"]),
+            provider_session_id=record.run_id,
+            process_identity=resources.process_identity,
+            supervisor_identity=resources.supervisor_identity,
+            source_id=f"process:{resources.process_identity}",
+            workspace_id=workspace_id,
+            surface_id=resources.surface_id,
+        )
+        observation = ResourceObservation(
+            process_status=process_status,
+            supervisor_status=supervisor_status,
+            surface_status=surface_status,
+            workspace_status=workspace_status,
+        )
+        ResourceClosureLedger(
+            self._state_root(record) / "provider-events"
+        ).close(identity, observation)
+
     def status(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
         """Read exact resource liveness without mutating durable state."""
 
@@ -533,6 +592,7 @@ class RuntimeSessionCleanupMixin:
                         process_status="dead",
                         surface_status=surface_status,
                     )
+                surface_status = "missing"
         elif surface_status == "alive":
             supervisor.effect(
                 "close-surface",
@@ -540,6 +600,15 @@ class RuntimeSessionCleanupMixin:
                     resources.surface_id
                 ),
             )
+            surface_status = "missing"
+        self._record_resource_closed(
+            supervisor.read(),
+            metadata,
+            process_status="dead",
+            supervisor_status="dead",
+            surface_status=surface_status,
+            workspace_status=workspace_status,
+        )
         supervisor.bind_resources(OwnedResources())
         current = supervisor.transition("complete")
         self._notify(current.spec.owner_id, current.spec.operation_id)

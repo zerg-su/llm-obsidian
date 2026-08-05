@@ -12,15 +12,18 @@ from typing import Any, Mapping
 
 from .adapters.process import ProcessAdapter, ProcessError, ProcessHandle
 from .adapters.claude import (
+    ClaudeEphemeralAdapter,
     ClaudeDriverError,
     review_test_directory,
     validate_reviewer_sandbox_command,
 )
 from .adapters.codex import (
+    CodexEphemeralAdapter,
     CodexDriverError,
     validate_reviewer_sandbox_command as validate_codex_reviewer_sandbox_command,
 )
 from .contracts import AttentionReason
+from .ephemeral_provider import EphemeralTransportRegistry
 from .prompts import PromptDecision, classify
 from .runtime_worker_contracts import (
     IDENTIFIER,
@@ -32,6 +35,19 @@ from .store import OperationStore
 
 
 RESEARCH_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def default_ephemeral_transport_registry(
+    *, claude_binary: Path, codex_binary: Path
+) -> EphemeralTransportRegistry:
+    """Bind logical routes to replaceable local transports below workflow policy."""
+
+    return EphemeralTransportRegistry(
+        {
+            "anthropic": ClaudeEphemeralAdapter(claude_binary),
+            "openai": CodexEphemeralAdapter(codex_binary),
+        }
+    )
 
 
 def provider_argv(
