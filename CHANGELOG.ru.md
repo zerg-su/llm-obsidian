@@ -85,6 +85,8 @@
 - Retirement теперь безопасно повторяется после crash между записью accepted
   receipt и очисткой liveness state: снимается только точный совпавший sent
   binding, а общие recovery budgets остаются израсходованными.
+- После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
+  материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся
   authoritative state transition, а не оставляет operation молча зависшей.
 - Канонический одноразовый wikilink repair может изменить writer-owned log/hot

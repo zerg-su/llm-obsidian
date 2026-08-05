@@ -444,4 +444,26 @@ with tempfile.TemporaryDirectory(prefix="review-resolution-bundle.") as raw:
         "persisted review resolution finding rulings changed",
     )
 
+with tempfile.TemporaryDirectory(prefix="review-resolution-large-input.") as raw:
+    root = Path(raw)
+    source = root / "approved-plan.md"
+    pointer_root = root / "pointers"
+    payload = b"x" * 65_537
+    source.write_bytes(payload)
+    bounded = runner._bounded_input(
+        "approved-plan.md",
+        source,
+        role="plan",
+        pointer_root=pointer_root,
+    )
+    pointer = pointer_root / "approved-plan.md"
+    check(
+        "large resolution input is atomically materialized as a pointer",
+        bounded.content is None
+        and bounded.source == str(pointer)
+        and bounded.byte_count == len(payload)
+        and bounded.content_sha256 == hashlib.sha256(payload).hexdigest()
+        and pointer.read_bytes() == payload,
+    )
+
 print("\nAll review resolution bundle tests passed.")

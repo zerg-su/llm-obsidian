@@ -23,6 +23,7 @@ from task_review_delta_packet import build_delta_packet
 from task_review_shared import (
     ResolutionBundle,
     TaskReviewError,
+    _atomic_bytes,
     _git,
     _git_bytes,
     _read_json,

@@ -81,6 +81,8 @@ packages were published for them.
 - Made that retirement replayable across a crash between the accepted receipt
   write and liveness-state clear; replay retires only the exact matching sent
   binding and leaves all shared recovery budgets consumed.
+- Restored atomic pointer materialization for resolution-bound review inputs
+  larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative
   state transition instead of silently leaving the operation stranded.
 - Allowed the canonical one-shot wikilink repair to update a writer-owned
