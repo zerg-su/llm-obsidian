@@ -458,6 +458,7 @@ def run_case(
     bind_runtime_resources: bool = False,
     typed_review: bool = False,
     atomic_publication_barrier: bool = False,
+    phase_callback_publication_barrier_step: str = "",
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -658,7 +659,9 @@ def run_case(
             "summary=pathlib.Path(sys.argv[1])\n"
             "publish_summary(summary,sys.argv[2])\n"
             "state=pathlib.Path(sys.argv[4])\n"
-            "restart_after=sys.argv[5]\n"
+            "callback_barrier=sys.argv[5] if len(sys.argv)>7 else ''\n"
+            "callback_barrier_step=sys.argv[6] if len(sys.argv)>7 else ''\n"
+            "restart_after=sys.argv[7] if len(sys.argv)>7 else sys.argv[5]\n"
             "request=root/'.task-pipeline-step-request.json'\n"
             "outbox=root/'.task-pipeline-step-callback.json'\n"
             "log=root/'.provider-step-log.json'\n"
@@ -678,7 +681,8 @@ def run_case(
             "    encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
             "    digest=hashlib.sha256(encoded).hexdigest()\n"
             "    callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
-            "    outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "    callback_text=json.dumps(callback,sort_keys=True)+'\\n'\n"
+            "    publish_summary(outbox,callback_text,callback_barrier if row['step_id']==callback_barrier_step else '')\n"
             "    for _ in range(500):\n"
             "      if not outbox.exists(): break\n"
             "      time.sleep(0.01)\n"
@@ -731,7 +735,7 @@ def run_case(
             "    encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
             "    digest=hashlib.sha256(encoded).hexdigest()\n"
             "    callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
-            "    outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "    publish_summary(outbox,json.dumps(callback,sort_keys=True)+'\\n')\n"
             "    for _ in range(500):\n"
             "      if not outbox.exists(): break\n"
             "      time.sleep(0.01)\n"
@@ -777,7 +781,7 @@ def run_case(
             "  encoded=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()\n"
             "  digest=hashlib.sha256(encoded).hexdigest()\n"
             "  callback={'schema_version':1,'callback_id':'result-'+digest[:24],'operation_id':row['operation_id'],'run_id':row['run_id'],'kind':'result','payload':payload,'payload_sha256':digest}\n"
-            "  outbox.write_text(json.dumps(callback,sort_keys=True)+'\\n',encoding='utf-8')\n"
+            "  publish_summary(outbox,json.dumps(callback,sort_keys=True)+'\\n')\n"
             "  for _ in range(2000):\n"
             "    if not outbox.exists(): break\n"
             "    time.sleep(0.01)\n"
@@ -836,6 +840,14 @@ def run_case(
                 else ()
             ),
             *(
+                (
+                    str(worktree / ".atomic-phase-callback-publication"),
+                    phase_callback_publication_barrier_step,
+                )
+                if phase_callback_publication_barrier_step
+                else ()
+            ),
+            *(
                 (fix_restart_after,)
                 if pipeline_name == "engineering/fix"
                 and fix_restart_after
@@ -867,6 +879,8 @@ def run_case(
     result: list[int] = []
     watcher_observed = threading.Event()
     original_inspect_task_summary = None
+    phase_callback_watcher_observed = threading.Event()
+    original_accept_fix_callback = None
     if atomic_publication_barrier:
         if pipeline_name != "lifecycle/default":
             raise AssertionError(
@@ -886,6 +900,34 @@ def run_case(
         RuntimeWorkerExecution.inspect_task_summary = (
             observe_atomic_publication
         )
+    if phase_callback_publication_barrier_step:
+        if pipeline_name != "engineering/fix" or not fix_restart_after:
+            raise AssertionError(
+                "phase callback barrier requires the restart fixture"
+            )
+        original_accept_fix_callback = (
+            RuntimeWorkerExecution.accept_fix_callback
+        )
+
+        def observe_atomic_phase_callback(
+            worker: RuntimeWorkerExecution,
+            state: object,
+            round_: object,
+            callback_path: Path,
+        ) -> None:
+            if (
+                worker.spec["operation_id"] == operation_id
+                and getattr(round_, "step_id", "")
+                == phase_callback_publication_barrier_step
+            ):
+                phase_callback_watcher_observed.set()
+            original_accept_fix_callback(
+                worker, state, round_, callback_path
+            )
+
+        RuntimeWorkerExecution.accept_fix_callback = (
+            observe_atomic_phase_callback
+        )
     thread = threading.Thread(
         target=lambda: result.append(
             run_worker(
@@ -900,6 +942,7 @@ def run_case(
     )
     thread.start()
     atomic_publication_evidence: dict[str, object] = {}
+    phase_callback_publication_evidence: dict[str, object] = {}
     if atomic_publication_barrier:
         barrier = worktree / ".atomic-summary-publication"
         ready = barrier.with_suffix(".ready")
@@ -940,6 +983,48 @@ def run_case(
             }
         finally:
             release.write_text("release\n", encoding="utf-8")
+    if phase_callback_publication_barrier_step:
+        barrier = worktree / ".atomic-phase-callback-publication"
+        ready = barrier.with_suffix(".ready")
+        release = barrier.with_suffix(".release")
+        try:
+            deadline = time.monotonic() + 4.0
+            while not ready.is_file():
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        "synthetic phase callback did not reach its barrier"
+                    )
+                time.sleep(0.005)
+            phase_callback_watcher_observed.clear()
+            if not phase_callback_watcher_observed.wait(timeout=1.0):
+                raise AssertionError(
+                    "phase callback watcher did not inspect the pre-replace window"
+                )
+            temporary = worktree / ready.read_text(
+                encoding="utf-8"
+            ).strip()
+            callback_path = worktree / ".task-pipeline-step-callback.json"
+            phase_callback_publication_evidence = {
+                "callback_absent": not callback_path.exists(),
+                "temporary_is_local": (
+                    temporary.parent.resolve() == worktree.resolve()
+                    and temporary.name.startswith(
+                        "..task-pipeline-step-callback.json."
+                    )
+                ),
+                "temporary_is_partial": (
+                    temporary.is_file()
+                    and temporary.read_text(encoding="utf-8") == "{"
+                ),
+                "operation_state": store.read(
+                    "owner-1", operation_id
+                ).state,
+                "callback_error_absent": not (
+                    launch.spec_path.parent / "callback-error.json"
+                ).exists(),
+            }
+        finally:
+            release.write_text("release\n", encoding="utf-8")
     if review_state == "delayed-skip":
         # The provider exits after 0.3s; approval arrives later. The runtime
         # worker must remain alive as the code-owned finalization watcher.
@@ -969,6 +1054,10 @@ def run_case(
         RuntimeWorkerExecution.inspect_task_summary = (
             original_inspect_task_summary
         )
+    if original_accept_fix_callback is not None:
+        RuntimeWorkerExecution.accept_fix_callback = (
+            original_accept_fix_callback
+        )
     if atomic_publication_barrier:
         check(
             "task-summary watcher never observes partial synthetic JSON",
@@ -979,6 +1068,22 @@ def run_case(
             == "awaiting-callback"
             and atomic_publication_evidence.get("callback_error_absent") is True,
             atomic_publication_evidence,
+        )
+    if phase_callback_publication_barrier_step:
+        check(
+            "phase callback watcher never observes partial synthetic JSON",
+            phase_callback_publication_evidence.get("callback_absent") is True
+            and phase_callback_publication_evidence.get("temporary_is_local")
+            is True
+            and phase_callback_publication_evidence.get("temporary_is_partial")
+            is True
+            and phase_callback_publication_evidence.get("operation_state")
+            == "awaiting-callback"
+            and phase_callback_publication_evidence.get(
+                "callback_error_absent"
+            )
+            is True,
+            phase_callback_publication_evidence,
         )
     return store, cmux, launch.spec_path.parent, result[0]
 
@@ -1447,6 +1552,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         fix_restart_after="root-cause",
         model_restart_limit=1,
         verification_runner=pass_verification,
+        phase_callback_publication_barrier_step="regression-test",
     )
     restart_parent = restart_store.read("owner-1", restart_task)
     restart_receipt = json.loads(
