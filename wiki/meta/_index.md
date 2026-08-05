@@ -15,8 +15,9 @@ sessions:
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_56 pages, updated 2026-08-05_
+_57 pages, updated 2026-08-05_
 
+- [[Cross-model review — 03f9158c-f5c6-43dd-b750-f8bbacb79a48 — 9b677c01c100]] — active, 2026-08-05 `c-000125`
 - [[Cross-model review — 5b3b36e7-206d-4fb0-940b-65832d14032f — 40c1f82a1995]] — active, 2026-08-05 `c-000123`
 - [[LLM Obsidian 2.6.3 — E5 capability disposition]] — active, 2026-08-04 `c-000100`
 - [[LLM Obsidian 2.6.3 — review recovery inclusion disposition]] — active, 2026-08-04 `c-000101`

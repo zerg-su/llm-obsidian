@@ -144,6 +144,7 @@
   "harness": [
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment Harness control plane.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md",
+    "wiki/meta/reviews/Cross-model review — 03f9158c-f5c6-43dd-b750-f8bbacb79a48 — 9b677c01c100.md",
     "wiki/meta/reviews/Cross-model review — 0af457a5-5e5a-4b7b-a359-35d03ab5a7a4 — 79b318806913.md",
     "wiki/meta/reviews/Cross-model review — 133542f0-7e4f-47c2-9c86-673fd877ddb1 — eead86d4aecb.md",
     "wiki/meta/reviews/Cross-model review — 182326f6-532b-4cfa-a638-c230fdadf18a — 87f543018833.md",
@@ -403,7 +404,8 @@
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
     "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md",
     "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md",
-    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md"
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md",
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan C bounded finalization and DSL.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -440,7 +442,8 @@
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
     "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md",
     "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md",
-    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md"
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md",
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan C bounded finalization and DSL.md"
   ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -449,6 +452,7 @@
   "review": [
     "wiki/concepts/Unattended Pipeline.md",
     "wiki/decisions/LLM Obsidian 2.6.4 — amendment plan-review outcome.md",
+    "wiki/meta/reviews/Cross-model review — 03f9158c-f5c6-43dd-b750-f8bbacb79a48 — 9b677c01c100.md",
     "wiki/meta/reviews/Cross-model review — 0af457a5-5e5a-4b7b-a359-35d03ab5a7a4 — 79b318806913.md",
     "wiki/meta/reviews/Cross-model review — 133542f0-7e4f-47c2-9c86-673fd877ddb1 — eead86d4aecb.md",
     "wiki/meta/reviews/Cross-model review — 182326f6-532b-4cfa-a638-c230fdadf18a — 87f543018833.md",

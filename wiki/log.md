@@ -27,6 +27,18 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-05 16:20] dispatch | llm-obsidian-2-6-5-join
+
+Spawned an approved unattended task session (cmux `C2A464F2-E264-44D7-95AA-918B6C12A26C`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-join`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-join` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-join-stability-activation-release.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.
+
+## [2026-08-05] reap | llm-obsidian-2-6-5-finalization-dsl
+
+`c-000126` [[LLM Obsidian 2.6.5 Subplan C bounded finalization and DSL]]. ## Delivered
+
+- C1: owner-only `FinalizationLedger` atomically reserves exact-HEAD cycles 1–5, preserves lineage across mutable execution identity, records immutable terminal results, and denies the sixth attempt without mutation.
+- C2: registered finalization-only primary/independent routes compile cycles 1–3 primary-only and cycles 4–5 adaptively from typed availability; explicit single-model policy wins and standalone Deep remains Anthropic+OpenAI holistic.
+- C3: PipelineSpec v1 and task meta
+
 ## [2026-08-05] reap | llm-obsidian-2-6-5-provider-events
 
 `c-000124` [[LLM Obsidian 2.6.5 Subplan B provider events and delivery]]. Exact HEAD `84ecb3bad198053468f1ceb15f69bbea06510e3a`.
