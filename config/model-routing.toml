@@ -62,6 +62,18 @@ effort = "xhigh"
 model = "fable"
 effort = "xhigh"
 
+# Finalization-only logical routes. These do not alter public review presets:
+# standalone Deep continues to compile its independent provider topology.
+[finalization_routes.finalization-primary]
+runtime = "codex"
+model = "sol"
+effort = "xhigh"
+
+[finalization_routes.finalization-independent]
+runtime = "claude"
+model = "fable"
+effort = "xhigh"
+
 # Historical stock values accepted by the clean-cut upgrade gate without
 # creating a local override.
 [legacy_review_defaults.codex]
