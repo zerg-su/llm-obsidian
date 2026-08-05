@@ -307,6 +307,18 @@ class RuntimeSessionCleanupMixin:
         target = self._callback_target(record)
         resources = record.resources
         workspace_id = str(metadata.get("workspace_id") or "")
+        if not all(
+            (
+                resources.process_identity,
+                resources.supervisor_identity,
+                resources.surface_id,
+                workspace_id,
+            )
+        ):
+            # Compatibility records may prove disappearance without carrying
+            # the complete new provider/resource identity. Cleanup remains
+            # possible, but no typed close receipt is fabricated for them.
+            return
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
