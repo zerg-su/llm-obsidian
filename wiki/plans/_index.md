@@ -14,11 +14,21 @@ sessions: []
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_21 pages, updated 2026-08-04_
+_31 pages, updated 2026-08-05_
 
+- [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]] — pending, 2026-08-05 `c-000099`
+- [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]] — pending, 2026-08-05 `c-000117`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-join-stability-activation-release]] — pending, 2026-08-05 `c-000122`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-a-exact-head-review-attempt]] — pending, 2026-08-05 `c-000118`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery]] — pending, 2026-08-05 `c-000119`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl]] — pending, 2026-08-05 `c-000120`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components]] — pending, 2026-08-05 `c-000121`
 - [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-04 `c-000097`
 - [[2026-08-04-044240-llm-obsidian-2-6-3-russkaya-tekhnicheskaya-dokumentatsiya]] — executed, 2026-08-04 `c-000107`
-- [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]] — pending, 2026-08-04 `c-000099`
+- [[2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane]] — pending, 2026-08-04 `c-000111`
+- [[2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions]] — pending, 2026-08-04 `c-000112`
+- [[2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety]] — pending, 2026-08-04 `c-000113`
+- [[2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal]] — executed, 2026-08-04 `c-000114`
 - [[2026-07-19-v2-1-1-code-owned-optimization-plan]] — executed, 2026-08-03 `c-000098`
 - [[2026-08-03-012708-llm-obsidian-2-6-1-complete-independent-review]] — pending, 2026-08-03 `c-000096`
 - [[2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs]] — pending, 2026-08-03 `c-000106`
