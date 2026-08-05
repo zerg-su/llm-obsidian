@@ -5211,8 +5211,14 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             text=True,
         ).stdout.strip()
         reviewed_design = boundary_artifacts["design"].read_bytes()
+        reviewed_plan = review_plan.read_bytes()
+        reviewed_outcome = extract_from_bytes(reviewed_plan).canonical
         boundary_artifacts["design"].write_text(
             "# resolved design evidence\n", encoding="utf-8"
+        )
+        review_plan.write_bytes(
+            reviewed_plan
+            + b"\n## Append-only resolution amendment\n\nExact repair evidence.\n"
         )
         rebound_inputs = task_review_runner._purpose_boundary_inputs(
             product.resolve(),
@@ -5224,13 +5230,21 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         rebound_design = next(
             item for item in rebound_inputs if item.name == "review-design"
         )
+        rebound_outcome = next(
+            item for item in rebound_inputs
+            if item.name == "outcome-contract.json"
+        )
         check(
-            "resolution rebind preserves purpose evidence from the exact reviewed HEAD",
+            "resolution rebind preserves plan and purpose evidence from the exact reviewed HEAD",
             rebound_design.content == reviewed_design
             and rebound_design.source
-            == f"git:{reviewed_artifact_head}:wiki/design.md",
+            == f"git:{reviewed_artifact_head}:wiki/design.md"
+            and rebound_outcome.content == reviewed_outcome
+            and rebound_outcome.source
+            == f"git:{reviewed_artifact_head}:wiki/review-plan.md",
         )
         boundary_artifacts["design"].write_bytes(reviewed_design)
+        review_plan.write_bytes(reviewed_plan)
         try:
             task_review_runner._purpose_boundary_inputs(
                 product.resolve(),

@@ -105,6 +105,9 @@ packages were published for them.
 - Added a direct fail-closed liveness assertion for an uncertain callback
   submit without an exact reservation; the standing coverage floor was not
   lowered.
+- Bound resolution-time plan and Outcome semantics to the exact reviewed Git
+  object, allowing append-only fix amendments without weakening fresh-plan
+  digest validation.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative

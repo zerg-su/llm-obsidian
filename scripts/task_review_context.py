@@ -11,7 +11,12 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from harness.context import ContextBuilder, ContextInput, outcome_contract_input
+from harness.context import (
+    OUTCOME_POINTER_ID,
+    ContextBuilder,
+    ContextInput,
+    outcome_contract_input,
+)
 from harness.contracts import CallbackEnvelope, ContractError as HarnessContractError, RuntimeRoute
 from harness.review_program import QUESTIONS as REVIEW_QUESTIONS, ReviewBoundaryInput
 from harness.review_submit import round_schema_lines
@@ -27,6 +32,7 @@ from harness.workflows.review import (
 )
 from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
+from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
 from task_review_delta_packet import build_delta_packet
 from task_review_resolution_bundle import _bounded_input
@@ -110,6 +116,43 @@ def _reviewed_artifact_input(
     )
 
 
+def _reviewed_plan_outcome_input(
+    worktree: Path,
+    plan: Path,
+    boundary: ReviewBoundaryInput,
+    *,
+    artifact_head: str,
+) -> ContextInput:
+    """Bind resolution semantics to the exact plan bytes originally reviewed."""
+
+    root = worktree.expanduser().resolve()
+    resolved_plan = plan.expanduser().resolve()
+    try:
+        relative = resolved_plan.relative_to(root)
+    except ValueError as exc:
+        raise TaskReviewError("review program plan is outside the worktree") from exc
+    raw = _git_bytes(
+        worktree,
+        "show",
+        f"{artifact_head}:{relative.as_posix()}",
+    )
+    if hashlib.sha256(raw).hexdigest() != boundary.plan_sha256:
+        raise TaskReviewError("review program plan digest is stale")
+    try:
+        contract = extract_from_bytes(raw)
+    except OutcomeContractError as exc:
+        raise TaskReviewError(f"review Outcome Contract is invalid: {exc}") from exc
+    if contract.sha256 != boundary.outcome_contract_sha256:
+        raise TaskReviewError("review Outcome Contract input digest changed")
+    return ContextInput(
+        "outcome-contract.json",
+        f"git:{artifact_head}:{relative.as_posix()}",
+        contract.canonical,
+        role="outcome",
+        pointer_id=OUTCOME_POINTER_ID,
+    )
+
+
 def _purpose_boundary_inputs(
     worktree: Path,
     plan: Path,
@@ -121,16 +164,26 @@ def _purpose_boundary_inputs(
 ) -> tuple[ContextInput, ...]:
     """Validate and materialize every exact artifact named by a purpose boundary."""
 
-    try:
-        contract = outcome_contract_input(
+    if artifact_head and artifact_root is None:
+        contract = _reviewed_plan_outcome_input(
+            worktree,
             plan,
-            expected_sha256=boundary.outcome_contract_sha256,
+            boundary,
+            artifact_head=artifact_head,
         )
-        plan_bytes = plan.read_bytes()
-    except (OSError, HarnessContractError) as exc:
-        raise TaskReviewError(f"review Outcome Contract is invalid: {exc}") from exc
-    if hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256:
-        raise TaskReviewError("review program plan digest is stale")
+    else:
+        try:
+            contract = outcome_contract_input(
+                plan,
+                expected_sha256=boundary.outcome_contract_sha256,
+            )
+            plan_bytes = plan.read_bytes()
+        except (OSError, HarnessContractError) as exc:
+            raise TaskReviewError(
+                f"review Outcome Contract is invalid: {exc}"
+            ) from exc
+        if hashlib.sha256(plan_bytes).hexdigest() != boundary.plan_sha256:
+            raise TaskReviewError("review program plan digest is stale")
     inputs = [contract]
     source_root = (artifact_root or worktree).resolve()
     for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:

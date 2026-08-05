@@ -108,6 +108,9 @@
   `fsync` раньше, чем заменяется latest pointer.
 - Добавлена прямая fail-closed проверка uncertain callback submit без точной
   reservation; установленный порог покрытия не снижался.
+- Во время resolution исходный план и Outcome теперь читаются из точного
+  reviewed Git object: append-only amendment передаётся как fix delta, а
+  обычная stale/dirty граница по-прежнему блокируется.
 - После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
   материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся

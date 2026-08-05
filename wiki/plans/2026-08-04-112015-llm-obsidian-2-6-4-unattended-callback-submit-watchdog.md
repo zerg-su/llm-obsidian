@@ -575,3 +575,14 @@ This coordinator-owned amendment records the final exact-HEAD coverage rejection
 | D-264-55 | test harness | honest stdlib tracing measured `scripts.harness.liveness` at 85.8%, below the standing 86.0% critical floor, because the fail-closed transition from an observed liveness state to `mark_callback_submit_uncertain` without an exact reservation had no direct behavioral assertion | `included` | `test_liveness.py` now proves the unreserved uncertain transition is rejected without state mutation; `make test-harness-coverage` is green at 76.02% across 128 modules, liveness is 86.1%, and all 4,370 transition cases remain complete |
 
 The repair is test-only. It does not lower a coverage floor or change provider behavior, callback effects, budgets, routing, review topology, public interfaces, migration, push, tag, publish or release authority. The new exact HEAD must repeat the complete release ladder before bounded implementation verification and the separate purpose=release audit.
+
+
+## Append-only resolution-rebind repair amendment D-264-56
+
+This coordinator-owned amendment records a pre-provider mechanism failure while continuing the retained Sol implementation review after D-264-53 through D-264-55. It preserves the frozen Outcome Contract and tightens the existing exact-HEAD resolution path.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-56 | review context | resolution correctly rebound verification evidence to the reviewed Git HEAD, but still compared the current amended plan bytes with the original boundary plan digest; any required append-only defect amendment therefore stopped before verification with `review program plan digest is stale` | `included` | during an exact reviewed-to-resolved rebind, Outcome and original plan identity are read from `git show <reviewed-head>:<plan-path>` and checked against the frozen plan and Outcome digests; the current amended plan remains visible as the resolved plan plus exact fix delta; ordinary fresh reviews still reject dirty/stale plan bytes |
+
+The live failure occurred before ContextPacket completion and before provider, prompt, callback or review effect. The regression changes both plan and purpose evidence after the reviewed commit, proves the rebind sources both from the exact reviewed Git HEAD, and preserves the existing stale-plan rejection outside resolution. No budget, routing, topology, permission, public interface, migration, push, tag, publish or release authority changes.
