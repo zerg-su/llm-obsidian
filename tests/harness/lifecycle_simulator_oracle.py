@@ -94,7 +94,8 @@ def load_scenario(path: Path) -> dict[str, object]:
         "initial_snapshot",
         "actions",
     }
-    if set(scenario) != required or scenario.get("schema_version") != 1:
+    allowed = required | {"ordering_constraints", "max_schedules", "tags"}
+    if not required <= set(scenario) or not set(scenario) <= allowed or scenario.get("schema_version") != 1:
         _fail("SIM-INV-SCHEMA", "scenario fields or version are invalid")
     _identifier(scenario.get("scenario_id"), "scenario_id")
     if type(scenario.get("seed")) is not int or scenario["seed"] < 0:
@@ -115,6 +116,20 @@ def load_scenario(path: Path) -> dict[str, object]:
             _fail("SIM-INV-SCHEMA", f"actions[{index}] is not in the closed vocabulary")
         if any(callable(item) for item in action.values()):
             _fail("SIM-INV-SCHEMA", "scenario actions cannot contain callbacks")
+        after = action.get("after", [])
+        if not isinstance(after, list) or any(
+            not isinstance(item, str) or not IDENTIFIER.fullmatch(item)
+            for item in after
+        ):
+            _fail("SIM-INV-SCHEMA", "scenario dependencies are invalid")
+    constraints = scenario.get("ordering_constraints", [])
+    if not isinstance(constraints, list) or any(
+        not isinstance(item, list)
+        or len(item) != 2
+        or any(not isinstance(part, str) or not IDENTIFIER.fullmatch(part) for part in item)
+        for item in constraints
+    ):
+        _fail("SIM-INV-SCHEMA", "scenario ordering constraints are invalid")
     terminals = scenario.get("expected_terminal_states")
     forbidden = scenario.get("forbidden_effects")
     if (
