@@ -27,6 +27,7 @@
     "scripts/task_contract.py",
     "scripts/task_review_context.py",
     "scripts/task_review_current.py",
+    "scripts/task_review_delta_chunks.py",
     "scripts/task_review_delta_packet.py",
     "scripts/task_review_boundary_authorization.py",
     "scripts/task_review_finalizing.py",

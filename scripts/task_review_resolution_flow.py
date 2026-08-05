@@ -117,6 +117,9 @@ def _resolution_packet_ready(
             expected_resolved_head=(
                 bundle.resolution.resolved_head_sha
             ),
+            expected_review_identity_sha256=(
+                bundle.review_identity_sha256
+            ),
         )
         if delta != bundle.fix_delta:
             raise DeltaPacketError(

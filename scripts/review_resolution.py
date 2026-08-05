@@ -25,6 +25,7 @@ MAX_RATIONALE_CHARS = 2_000
 MAX_FOLLOW_UP_CHARS = 500
 MAX_FIX_DELTA_BYTES = 65_536
 MAX_FIX_DELTA_TOTAL_BYTES = 131_072
+MAX_FIX_DELTA_CANONICAL_BYTES = 1_048_576
 
 
 class ResolutionError(ValueError):
@@ -387,9 +388,16 @@ def build_resolution_evidence(
     fix_delta: bytes,
     finding_ids: Sequence[str] | None = None,
 ) -> ReviewResolutionEvidence:
-    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_TOTAL_BYTES:
+    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_CANONICAL_BYTES:
         raise ResolutionError(
-            "fix delta must be non-empty and at most 131072 bytes"
+            "fix delta must be non-empty and at most 1048576 bytes"
+        )
+    if (
+        len(fix_delta) > MAX_FIX_DELTA_TOTAL_BYTES
+        and not resolution.review_identity_sha256
+    ):
+        raise ResolutionError(
+            "large fix delta requires the exact review identity"
         )
     all_items = {item.finding_id: item for item in resolution.resolutions}
     ids = (
