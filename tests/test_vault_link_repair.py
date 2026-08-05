@@ -11,7 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from vault_link_repair import build_repair_plan  # noqa: E402
+from vault_link_repair import (  # noqa: E402
+    ExactBindingError,
+    build_repair_plan,
+    parse_exact_binding,
+)
 from vault_write_contract import ConflictError, PayloadError  # noqa: E402
 from vault_write_mutations import MutationPlanner  # noqa: E402
 
@@ -147,6 +151,167 @@ with tempfile.TemporaryDirectory(prefix="vault-link-repair-log-") as raw:
         check("forged writer-owned repair remains rejected", True)
     else:
         raise AssertionError("forged writer-owned repair remains rejected")
+
+
+def binding(display_target: str, context_path: str):
+    return parse_exact_binding(
+        {
+            "schema_version": 1,
+            "display_target": display_target,
+            "context_path": context_path,
+        }
+    )
+
+
+def binding_rejected(name: str, action) -> None:
+    try:
+        action()
+    except ExactBindingError:
+        check(name, True)
+    else:
+        raise AssertionError(name)
+
+
+with tempfile.TemporaryDirectory(prefix="vault-link-repair-binding-") as raw:
+    root = Path(raw)
+    wiki = fixture(root)
+    (wiki / "plans").mkdir()
+    target = wiki / "plans" / "2026-exact-context.md"
+    target.write_text(
+        page("Different durable title", heading="Different durable heading"),
+        encoding="utf-8",
+    )
+    log = wiki / "log.md"
+    log.write_text(
+        page("Log", "[[Human display target]]"), encoding="utf-8"
+    )
+    exact = binding(
+        "Human display target",
+        "wiki/plans/2026-exact-context.md",
+    )
+    check(
+        "title/stem mismatch remains noop without an exact binding",
+        build_repair_plan(root) is None,
+    )
+    exact_plan = build_repair_plan(root, exact_binding=exact)
+    assert exact_plan is not None
+    check(
+        "exact binding derives only the filename stem and display alias",
+        exact_plan.paths == ("wiki/log.md",)
+        and "[[2026-exact-context|Human display target]]"
+        in exact_plan.payload["pages"][0]["content"]
+        and exact_plan.payload["exact_binding"]
+        == {
+            "schema_version": 1,
+            "display_target": "Human display target",
+            "context_path": "wiki/plans/2026-exact-context.md",
+        },
+    )
+    applied = MutationPlanner(root).plan(exact_plan.payload, "2026-08-05")
+    check(
+        "sole writer accepts only the byte-identical bound plan",
+        applied.writes
+        == [(log.resolve(), exact_plan.payload["pages"][0]["content"])],
+    )
+
+    binding_rejected(
+        "exact binding rejects path traversal",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target", "wiki/plans/../escape.md"
+            ),
+        ),
+    )
+    binding_rejected(
+        "exact binding rejects non-wiki paths",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target", "docs/2026-exact-context.md"
+            ),
+        ),
+    )
+    binding_rejected(
+        "exact binding rejects non-Markdown paths",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target", "wiki/plans/2026-exact-context.txt"
+            ),
+        ),
+    )
+    binding_rejected(
+        "exact binding rejects a missing exact target",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target", "wiki/plans/missing.md"
+            ),
+        ),
+    )
+    binding_rejected(
+        "exact binding rejects non-exact path casing",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target",
+                "wiki/plans/2026-Exact-Context.md",
+            ),
+        ),
+    )
+    symlink = wiki / "plans" / "linked-context.md"
+    symlink.symlink_to(target)
+    binding_rejected(
+        "exact binding rejects a symlink target",
+        lambda: build_repair_plan(
+            root,
+            exact_binding=binding(
+                "Human display target", "wiki/plans/linked-context.md"
+            ),
+        ),
+    )
+    symlink.unlink()
+
+    log.write_text(
+        page("Log", "[[Human display target]] [[Human display target]]"),
+        encoding="utf-8",
+    )
+    binding_rejected(
+        "exact binding rejects duplicate unresolved display targets",
+        lambda: build_repair_plan(root, exact_binding=exact),
+    )
+    log.write_text(
+        page("Log", "[[Human display target]] [[Unbound missing target]]"),
+        encoding="utf-8",
+    )
+    binding_rejected(
+        "exact binding rejects any unbound repair",
+        lambda: build_repair_plan(root, exact_binding=exact),
+    )
+    log.write_text(
+        page("Log", "[[Human display target]]"), encoding="utf-8"
+    )
+    duplicate = wiki / "concepts" / "2026-exact-context.md"
+    duplicate.write_text(page("Duplicate stem"), encoding="utf-8")
+    binding_rejected(
+        "exact binding rejects an ambiguous filename stem",
+        lambda: build_repair_plan(root, exact_binding=exact),
+    )
+    duplicate.unlink()
+
+    stable_plan = build_repair_plan(root, exact_binding=exact)
+    assert stable_plan is not None
+    log.write_text(
+        log.read_text(encoding="utf-8") + "\nconcurrent\n",
+        encoding="utf-8",
+    )
+    try:
+        MutationPlanner(root).plan(stable_plan.payload, "2026-08-05")
+    except (ConflictError, PayloadError):
+        check("bound repair rejects source/hash drift", True)
+    else:
+        raise AssertionError("bound repair rejects source/hash drift")
 
 
 def no_plan(name: str, source_body: str, targets: list[tuple[str, str, str | None]]) -> None:
