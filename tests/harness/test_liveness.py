@@ -22,6 +22,7 @@ from harness.liveness import (  # noqa: E402
     LivenessState,
     observe_liveness,
 )
+from harness.contracts import to_dict  # noqa: E402
 from harness.runtime_worker import (  # noqa: E402
     _current_callback_receipt_sha256,
 )
@@ -402,6 +403,32 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-retire-crash.") as raw:
         and replayed_state.callback_submit_status == ""
         and replayed_state.nudge_count == 1,
     )
+    foreign_state = replace(
+        replayed_state,
+        callback_submit_binding="f" * 64,
+        callback_submit_status="sent",
+    )
+    controller._write(  # type: ignore[attr-defined]
+        Path(raw) / "state.json",
+        to_dict(foreign_state),
+    )
+    try:
+        controller.retire_callback_submit_after_acceptance(
+            callback_submit_binding,
+            "6" * 64,
+            generation=3,
+            operation_id="review-round",
+            run_id="review-run",
+            lane_id="openai-holistic",
+        )
+    except Exception as exc:
+        check(
+            "accepted retirement never clears a foreign live binding",
+            "acceptance identity changed" in str(exc)
+            and controller.current_state() == foreign_state,
+        )
+    else:
+        check("accepted retirement never clears a foreign live binding", False)
 
 with tempfile.TemporaryDirectory(prefix="callback-submit-identity.") as raw:
     controller = LivenessController(Path(raw))
