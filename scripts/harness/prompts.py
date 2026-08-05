@@ -133,6 +133,7 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
                 "Press enter",
                 "Press enter to continue",
                 "Press ent",
+                "Press enter to confirm or esc to go back",
             ),
         )
         trust = (
@@ -149,6 +150,24 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
         )
         if region and _has(region, first_run):
             return PromptDecision(True, "first-run-style", ("Enter",), True)
+        rate_limit_switch = (
+            "Approaching rate limits",
+            "Switch to",
+            "for lower credit usage?",
+            "› 1. Switch to",
+            "2. Keep current model",
+            "3. Keep current model (never show again)",
+            "Press enter to confirm or esc to go back",
+        )
+        if region and _has(region, rate_limit_switch):
+            # The bound review route is authoritative. Select the temporary
+            # "keep" option, but leave the user's future reminder setting alone.
+            return PromptDecision(
+                True,
+                "rate-limit-keep-current",
+                ("down", "Enter"),
+                True,
+            )
     if runtime in {"claude", "codex"} and _unknown_interactive(screen):
         return PromptDecision(False, interactive=True)
     return PromptDecision(False)

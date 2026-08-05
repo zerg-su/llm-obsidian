@@ -312,7 +312,14 @@ class CmuxAdapter:
 
     def send_key(self, surface_id: str, key: str) -> None:
         self._require_surface(surface_id)
-        if key not in {"Enter", "Tab", "Escape", "Backspace", "ctrl+u"}:
+        if key not in {
+            "Enter",
+            "Tab",
+            "Escape",
+            "Backspace",
+            "ctrl+u",
+            "down",
+        }:
             raise CmuxError("key is not allowlisted")
         self._run(["send-key", "--surface", surface_id, key])
 

@@ -60,6 +60,9 @@
 
 - Устранены молчаливые остановки после готового reviewer output, callback races,
   сбоев callback rearm и случая, когда prompt остался в editor и не был запущен.
+- Unattended Codex review больше не зависает на нативном предложении сменить
+  модель при приближении к лимиту. Точный prompt сохраняет route-bound модель и
+  будущие напоминания; неизвестные варианты по-прежнему не получают ввода.
 - Закрыт пробел release evidence между callback acceptance и lifecycle
   completion: dogfood trace доходит до terminal resource-free parent/child и
   фактической границы `reap-ready`; отдельный финальный trace фиксирует

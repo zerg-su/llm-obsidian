@@ -580,6 +580,14 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         "1. Exit anyway\n2. Move to background and exit\n3. Stay\n"
         "Enter to confirm\n"
     )
+    codex_rate_limit_switch = (
+        "Approaching rate limits\n"
+        "Switch to gpt-5.6-luna for lower credit usage?\n"
+        "› 1. Switch to gpt-5.6-luna\n"
+        "2. Keep current model\n"
+        "3. Keep current model (never show again)\n"
+        "Press enter to confirm or esc to go back\n"
+    )
     check(
         "known production dialogs have exact deterministic key sequences",
         classify("claude", claude_workspace).keys == ("Enter",)
@@ -588,7 +596,8 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         and classify("codex", codex_clipped_workspace).keys == ("Enter",)
         and classify("claude", claude_mcp).keys == ("Tab", "Tab", "Enter")
         and classify("claude", claude_first_run).keys == ("Enter",)
-        and classify("claude", claude_exit, closure_armed=True).keys == ("Enter",),
+        and classify("claude", claude_exit, closure_armed=True).keys == ("Enter",)
+        and classify("codex", codex_rate_limit_switch).keys == ("down", "Enter"),
     )
     clipped_near_match = codex_clipped_workspace.replace(
         "trust the", "inspect the", 1
@@ -597,6 +606,14 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         "clipped Codex trust footer rejects near-match",
         not classify("codex", clipped_near_match).recognized
         and not classify("codex", clipped_near_match).keys,
+    )
+    rate_limit_near_match = codex_rate_limit_switch.replace(
+        "2. Keep current model", "2. Switch automatically", 1
+    )
+    check(
+        "Codex rate-limit choice rejects changed safe option",
+        not classify("codex", rate_limit_near_match).recognized
+        and not classify("codex", rate_limit_near_match).keys,
     )
     unknown = (
         "A new provider decision appeared\n"
@@ -646,6 +663,41 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
         attention.state == "attention-required"
         and attention.attention_reason == AttentionReason.PROMPT_UNKNOWN
         and fake_cmux.keys == [],
+    )
+
+    codex_route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "xhigh", "executor", FINGERPRINT
+    )
+    rate_limit_spec = OperationSpec(
+        "op-rate-limit",
+        "key-rate-limit",
+        "dispatch",
+        "owner-1",
+        codex_route,
+        "packet.json",
+        "scoped",
+    )
+    store.create(rate_limit_spec, lane_id="lane-1", run_id="run-rate-limit")
+    for state in ("preflight", "starting", "running"):
+        store.transition("owner-1", "op-rate-limit", state)
+    rate_limit_cmux = FakeCmux()
+    automate_prompt(
+        store,
+        "owner-1",
+        "op-rate-limit",
+        codex_route.runtime,
+        "11111111-1111-1111-1111-111111111111",
+        codex_rate_limit_switch,
+        rate_limit_cmux,
+    )
+    check(
+        "Codex rate-limit prompt keeps the bound model without disabling reminders",
+        rate_limit_cmux.keys
+        == [
+            ("11111111-1111-1111-1111-111111111111", "down"),
+            ("11111111-1111-1111-1111-111111111111", "Enter"),
+        ]
+        and store.read("owner-1", "op-rate-limit").state == "running",
     )
 
     budget_spec = OperationSpec(

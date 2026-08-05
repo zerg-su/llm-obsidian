@@ -500,3 +500,14 @@ This coordinator-owned amendment records a pre-provider mechanism failure encoun
 | D-264-47 | review context | a resolution-bound plan larger than 65,536 bytes entered `_bounded_input()`, whose extracted module no longer imported the existing `_atomic_bytes` owner and raised `NameError` before ContextPacket completion | `included` | import the existing sole atomic writer from `task_review_shared`; `test_review_resolution_bundle.py` passes a 65,537-byte plan and verifies pointer bytes, size and SHA-256; focused resolution/gate suites remain green |
 
 The failed resume occurred before ContextPacket completion and before any provider, prompt, callback or reviewer effect. After the corrected exact HEAD passes the complete release ladder, the same two Sol parent sessions may receive the bounded verification continuation; no new review lane, widened budget, push, tag, publish or release is authorized.
+
+
+## Append-only unattended prompt amendment D-264-48
+
+This coordinator-owned amendment records a live unattended stall observed in both retained Sol review parents. It preserves the frozen Outcome Contract and adds only an exact provider-dialog policy.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-48 | provider prompt policy | Codex displayed the native `Approaching rate limits` model-switch dialog in both unattended Sol lanes; the unknown-choice policy supplied no safe answer, so review waited indefinitely for an operator | `included` | recognize only the exact dialog while option 1 is selected; send one `down` plus `Enter` to choose `Keep current model`, retain future reminders, preserve the route-bound Sol model, and keep changed or unknown choices at zero input; `test_release_blocker_runtime.py` and `test_adapters.py` are green |
+
+The repair does not change routing, model budgets, retry budgets, review topology, or unknown-prompt fail-closed behavior. Both already-owned review sessions were manually unblocked once without switching model; the final exact-HEAD ladder and same-session verification must use the tracked policy before release audit.

@@ -57,6 +57,9 @@ packages were published for them.
 - Prevented silent pipeline stalls after completed reviewer output, accepted
   callback races, callback-rearm crashes, and retained prompt text that was not
   actually submitted.
+- Prevented unattended Codex reviews from stalling at the native rate-limit
+  model-switch dialog. The exact prompt keeps the route-bound model without
+  disabling future reminders; unknown choices still receive no input.
 - Closed the release-evidence gap between callback acceptance and lifecycle
   completion: the dogfood trace reaches resource-free terminal parent/child
   states and an actual `reap-ready` pipeline boundary, with a separate final
