@@ -11,7 +11,6 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +38,7 @@ from harness.review_program_resolution import (  # noqa: E402
     resolved_terminal_head,
 )
 from harness.runtime_worker_review_bridge import (  # noqa: E402
-    RuntimeWorkerReviewBridgeMixin,
+    publish_review_resolution_transport,
 )
 from harness.store import OperationStore  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
@@ -683,18 +682,19 @@ with tempfile.TemporaryDirectory(
         "accepted callback crash prefix has no executor packet",
         not packet_path.exists(),
     )
-    bridge = RuntimeWorkerReviewBridgeMixin()
-    bridge.spec = {
-        "cwd": base,
-        "operation_id": "task-1",
-        "surface_id": "task-surface",
-    }
-    bridge.spec_path = base / "runtime/launch.json"
-    bridge.spec_path.parent.mkdir(parents=True)
-    bridge.review = SimpleNamespace(gate_root=gate.root)
-    bridge.digest = "d" * 64
-    bridge.cmux_adapter = FakeCmux()
-    bridge.notify_review_resolution(recovered_state)
+    runtime_spec_path = base / "runtime/launch.json"
+    runtime_spec_path.parent.mkdir(parents=True)
+    cmux = FakeCmux()
+    publish_review_resolution_transport(
+        gate_state=recovered_state,
+        gate_root=gate.root,
+        worktree=base,
+        operation_id="task-1",
+        surface_id="task-surface",
+        summary_sha256="d" * 64,
+        runtime_spec_path=runtime_spec_path,
+        cmux_adapter=cmux,
+    )
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
     check(
         "exact accepted callbacks materialize one typed executor packet",
@@ -709,8 +709,8 @@ with tempfile.TemporaryDirectory(
         == accepted_identities
         and packet["material_finding_ids"]
         == [f"{active.execution.lanes[0].axis}:accepted-0"]
-        and len(bridge.cmux_adapter.messages) == 1
-        and bridge.cmux_adapter.keys == [("task-surface", "Enter")]
+        and len(cmux.messages) == 1
+        and cmux.keys == [("task-surface", "Enter")]
         and runtime.started == started_before,
     )
 

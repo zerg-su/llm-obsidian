@@ -393,11 +393,22 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch recovery review gate is invalid"
         ) from exc
-    if not isinstance(gate, dict) or gate.get("status") not in {
-        "verifying",
-        "recovery-verification-required",
-        "fresh-boundary-authorized",
-    }:
+    exact_callback_recovery = (
+        isinstance(gate, dict)
+        and gate.get("status") == "reviewing"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and isinstance(gate.get("attempt"), dict)
+        and gate["attempt"].get("status") == "awaiting-callback"
+    )
+    if not isinstance(gate, dict) or (
+        not exact_callback_recovery
+        and gate.get("status")
+        not in {
+            "verifying",
+            "recovery-verification-required",
+            "fresh-boundary-authorized",
+        }
+    ):
         return False
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
@@ -411,7 +422,14 @@ def _recover_finalizing_review_if_present(
     module = importlib.util.module_from_spec(module_spec)
     try:
         module_spec.loader.exec_module(module)
-        recover = getattr(module, "recover_finalizing_review")
+        recover = getattr(
+            module,
+            (
+                "recover_task_review_for_mechanism"
+                if exact_callback_recovery
+                else "recover_finalizing_review"
+            ),
+        )
         runtime = runtime_manager or RuntimeSessionManager.for_root(
             vault,
             store_root=store_root,
@@ -423,6 +441,7 @@ def _recover_finalizing_review_if_present(
         ) from exc
     if not isinstance(receipt, dict) or receipt.get("status") not in {
         "approved",
+        "changes-requested",
         "verifying",
         "reviewing",
     }:

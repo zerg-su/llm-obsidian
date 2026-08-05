@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from harness.contracts import OwnedResources
 from harness.runtime_sessions import RuntimeSessionManager
+from harness.runtime_worker_review_bridge import (
+    publish_review_resolution_transport,
+)
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.workflows.review_gate import (
@@ -17,11 +22,14 @@ from harness.workflows.review_gate import (
     review_context_sha256,
 )
 from task_review_context import (
+    _callback_path,
     _context,
+    _envelope,
     _gate_root,
     _runtime_root,
     _validate_task,
 )
+from task_review_finalization_attempt import finalization_ledger
 from task_review_finalizing import (
     _dispatched_review_is_quiescent,
     _launch_authorized_task_review,
@@ -40,6 +48,222 @@ from task_review_resolution_evidence import approved_summary_resolution
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
 from task_escalation_records import EscalationRecordError, load_latest
+
+
+_ACCEPTED_CALLBACK_RECOVERY_PREFIX = (
+    "Classified as an eligible repository-owned callback-ingestion "
+    "mechanism failure."
+)
+
+
+def _authorized_accepted_callback_head(
+    attention: dict[str, Any], worktree: Path
+) -> str:
+    decision = str(attention.get("decision") or "")
+    match = re.search(r"clean HEAD ([0-9a-f]{40,64})", decision)
+    if (
+        attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_ACCEPTED_CALLBACK_RECOVERY_PREFIX)
+        or "Preserve and ingest the existing callback identities and findings"
+        not in decision
+        or "do not relaunch reviewers" not in decision
+        or match is None
+    ):
+        return ""
+    return match.group(1)
+
+
+def _clean_descendant_head(worktree: Path, reviewed_head: str) -> str:
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    descendant = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reviewed_head, "HEAD"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    current = head.stdout.strip()
+    if (
+        head.returncode
+        or re.fullmatch(r"[0-9a-f]{40,64}", current) is None
+        or status.returncode
+        or status.stdout
+        or descendant.returncode
+    ):
+        raise TaskReviewError(
+            "accepted callback recovery requires a clean descendant HEAD"
+        )
+    return current
+
+
+def _recover_accepted_exact_callbacks(
+    *,
+    attention: dict[str, Any],
+    meta: dict[str, Any],
+    vault: Path,
+    worktree: Path,
+    task_id: str,
+    runtime_manager: object | None,
+) -> dict[str, Any]:
+    """Ingest an exact accepted callback set without any reviewer relaunch."""
+
+    reviewed_head = _authorized_accepted_callback_head(attention, worktree)
+    if not reviewed_head:
+        raise TaskReviewError(
+            "accepted callback recovery lacks exact coordinator authorization"
+        )
+    _clean_descendant_head(worktree, reviewed_head)
+    runtime_root = _runtime_root(vault, task_id)
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(_gate_root(vault, task_id), runtime, store)
+    state = gate.read()
+    attempt = state.get("attempt")
+    identity = attempt.get("identity") if isinstance(attempt, dict) else None
+    terminal = attempt.get("terminal") if isinstance(attempt, dict) else None
+    if (
+        state.get("execution_protocol") != "exact-head-attempt-v1"
+        or not isinstance(attempt, dict)
+        or not isinstance(identity, dict)
+        or identity.get("exact_head_sha") != reviewed_head
+    ):
+        raise TaskReviewError(
+            "accepted callback recovery gate identity is invalid"
+        )
+    if (
+        attempt.get("status") == "terminal"
+        and isinstance(terminal, dict)
+        and terminal.get("result") == "changes-requested"
+        and state.get("status") == "changes-requested"
+    ):
+        completed_state = state
+    else:
+        if (
+            attempt.get("status") != "awaiting-callback"
+            or state.get("status") != "reviewing"
+        ):
+            raise TaskReviewError(
+                "accepted callback recovery is not at its callback boundary"
+            )
+        run = gate.rehydrate_attempt()
+        ready = []
+        for lane in run.execution.lanes:
+            round_ = run.rounds[lane.axis]
+            callback = _callback_path(runtime_root, lane.axis)
+            if not callback.is_file() or callback.is_symlink():
+                raise TaskReviewError(
+                    "accepted callback recovery artifact is unavailable"
+                )
+            envelope, result = _envelope(callback, round_)
+            child = store.read(round_.owner_id, round_.operation_id)
+            if (
+                child.spec != round_.spec
+                or child.lane_id != round_.lane_id
+                or child.run_id != round_.run_id
+                or child.state
+                not in {"verifying", "finalizing", "exiting", "complete"}
+                or child.pending_effect
+                or child.accepted_callback_id != envelope.callback_id
+                or child.accepted_callback_kind != envelope.kind
+                or child.accepted_callback_sha256 != envelope.payload_sha256
+            ):
+                raise TaskReviewError(
+                    "accepted callback recovery identity changed"
+                )
+            ready.append((lane, round_, result))
+        if len(ready) != len(run.execution.lanes):
+            raise TaskReviewError(
+                "accepted callback recovery set is incomplete"
+            )
+        for lane, round_, result in ready:
+            gate.complete_attempt_round(run, lane, round_, result)
+        completed_state = gate.read()
+        completed_attempt = completed_state.get("attempt")
+        completed_terminal = (
+            completed_attempt.get("terminal")
+            if isinstance(completed_attempt, dict)
+            else None
+        )
+        if (
+            completed_state.get("status") != "changes-requested"
+            or not isinstance(completed_attempt, dict)
+            or completed_attempt.get("status") != "terminal"
+            or not isinstance(completed_terminal, dict)
+            or completed_terminal.get("result") != "changes-requested"
+            or not isinstance(
+                completed_state.get("awaiting_resolution"), dict
+            )
+        ):
+            raise TaskReviewError(
+                "accepted callback recovery did not reach typed resolution"
+            )
+        finalization_ledger(meta, vault, task_id).record_terminal(
+            attempt_id=str(identity.get("attempt_id") or ""),
+            terminal_result="changes-requested",
+        )
+
+    dispatch = store.read(task_id, task_id)
+    surface_id = dispatch.resources.surface_id
+    if not surface_id or surface_id != str(meta.get("task_surface") or ""):
+        raise TaskReviewError(
+            "accepted callback recovery task surface identity changed"
+        )
+    summary_path = worktree / ".task-summary.json"
+    if not summary_path.is_file() or summary_path.is_symlink():
+        raise TaskReviewError(
+            "accepted callback recovery summary is unavailable"
+        )
+    cmux = getattr(runtime, "cmux", None)
+    if cmux is None:
+        raise TaskReviewError(
+            "accepted callback recovery notification adapter is unavailable"
+        )
+    publish_review_resolution_transport(
+        gate_state=completed_state,
+        gate_root=gate.root,
+        worktree=worktree,
+        operation_id=task_id,
+        surface_id=surface_id,
+        summary_sha256=hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+        runtime_spec_path=(
+            store_root
+            / "owners"
+            / task_id
+            / "runtime"
+            / task_id
+            / "launch.json"
+        ),
+        cmux_adapter=cmux,
+    )
+    context = completed_state.get("context")
+    manifest = str(context.get("manifest") or "") if isinstance(context, dict) else ""
+    return _receipt(
+        status="changes-requested",
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=runtime_root / manifest,
+        run=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -290,6 +514,15 @@ def recover_task_review_for_mechanism(
     if attention_record is None:
         raise TaskReviewError("task escalation record is unavailable")
     attention = attention_record.payload
+    if _authorized_accepted_callback_head(attention, worktree):
+        return _recover_accepted_exact_callbacks(
+            attention=attention,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+        )
     runtime_root = _runtime_root(vault, task_id)
     current_context, context_manifest = _context(
         meta,
