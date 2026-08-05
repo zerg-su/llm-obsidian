@@ -168,6 +168,7 @@ _attachments/
 .vault-meta/retrieval-experiment.json
 .vault-meta/memory-backup.json
 .task-session-binding.json
+/.task-escalation-records/
 /.acceptance-sandbox.json
 /.task-review-resolution.json
 
