@@ -643,3 +643,14 @@ This coordinator-owned amendment records the exact-HEAD gate failure exposed onl
 | D-264-64 | test harness | `test_runtime_task_summary.py` used a two-second default eventual-read window for `pipeline-fix/pass-1/retry-intent.json`; the standalone suite passed, but the complete `make test` load exceeded that fixture-only window and raised `FileNotFoundError` after all product effects had completed | `included` | the existing atomic-publication observer now uses the same bounded ten-second test window already established for slow full-suite responders; standalone task-summary passes and the complete exact-HEAD gate ladder is repeated |
 
 The repair changes only a test helper timeout. It does not alter product/provider deadlines, lifecycle budgets, routing, review topology, callback behavior, public interfaces, permissions, migration, push, tag, publish or release authority.
+
+
+## Append-only traced-provider stability amendment D-264-65
+
+This coordinator-owned amendment records the next honest-coverage failure after D-264-64. It preserves the frozen Outcome Contract and changes only fixture-owned provider polling.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-65 | test harness | after preceding coverage processes, the embedded engineering/fix fake provider could exhaust its five-second request/outbox/finalization polling before the stdlib-traced worker consumed the first typed phase; the parent then correctly failed with `callback-invalid`, while standalone trace and ordinary `make test` remained green | `included` | only the embedded fake provider uses a bounded twenty-second polling ceiling for typed request, outbox consumption and finalization publication; production worker/provider deadlines are unchanged, and `make test-harness-coverage` is green at 76.04% across 128 modules with all 4,370 transition cases |
+
+No runtime/provider budget, route, callback semantics, review topology, public interface, permission, migration, push, tag, publish or release authority changes.

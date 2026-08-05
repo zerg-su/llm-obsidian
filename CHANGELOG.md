@@ -97,6 +97,8 @@ packages were published for them.
   threads the documented eventual window and joining them before assertions.
 - Removed a full-suite-only pipeline-fix retry fixture race by applying the
   same bounded atomic-publication window to its retry-intent receipt.
+- Removed a traced full-suite fake-provider race with a bounded fixture-only
+  polling ceiling; production provider and callback deadlines are unchanged.
 - Retired a sent callback-recovery generation only after exact durable broker
   acceptance, so the next retained-session generation remains observable while
   active without gaining another prompt, Enter, nudge, or restart budget.

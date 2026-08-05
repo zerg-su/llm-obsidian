@@ -100,6 +100,8 @@
   используют документированное ограниченное окно и join до проверок.
 - Устранена проявлявшаяся только в полном suite гонка pipeline-fix retry:
   retry-intent receipt ожидается в том же ограниченном окне атомарной публикации.
+- Устранена гонка fake provider под полным trace-прогоном: увеличен только
+  ограниченный fixture polling, production provider/callback deadlines не менялись.
 - Sent binding поколения callback recovery теперь снимается только после
   точного durable broker acceptance. Следующее поколение в той же retained
   session остаётся наблюдаемым в active-состоянии, но не получает второй
