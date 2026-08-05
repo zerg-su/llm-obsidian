@@ -99,6 +99,14 @@ PROFILES = {
         (
             *COMMON_GATE,
             GateCommand(
+                "mcp-sync-config",
+                (
+                    "scripts/mcp-gateway/mcp-gateway.sh",
+                    "sync-config",
+                    "--apply",
+                ),
+            ),
+            GateCommand(
                 "codex-mcp-sync",
                 ("scripts/mcp-gateway/mcp-gateway.sh", "codex-sync", "--check"),
             ),

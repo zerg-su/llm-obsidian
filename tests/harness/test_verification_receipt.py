@@ -27,6 +27,40 @@ def git(root: Path, *argv: str) -> str:
     return result.stdout.strip()
 
 
+def bootstrap_subject(root: Path, *, bootstrap_exit: int = 0) -> tuple[Path, str]:
+    subject = root
+    gateway = subject / "scripts" / "mcp-gateway" / "mcp-gateway.sh"
+    gateway.parent.mkdir(parents=True)
+    git(subject, "init", "-b", "task/bootstrap")
+    git(subject, "config", "user.name", "Bootstrap Test")
+    git(subject, "config", "user.email", "bootstrap@example.invalid")
+    (subject / ".gitignore").write_text(
+        "scripts/mcp-gateway/runtime.env\n"
+        "scripts/mcp-gateway/codex-sync-ran\n",
+        encoding="utf-8",
+    )
+    gateway.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "if [ \"$1:$2\" = \"sync-config:--apply\" ]; then\n"
+        f"  [ {bootstrap_exit} -eq 0 ] || exit {bootstrap_exit}\n"
+        "  printf '%s\\n' initialized > scripts/mcp-gateway/runtime.env\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1:$2\" = \"codex-sync:--check\" ]; then\n"
+        "  printf '%s\\n' ran > scripts/mcp-gateway/codex-sync-ran\n"
+        "  test -f scripts/mcp-gateway/runtime.env\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 64\n",
+        encoding="utf-8",
+    )
+    gateway.chmod(0o755)
+    git(subject, "add", ".gitignore", "scripts/mcp-gateway/mcp-gateway.sh")
+    git(subject, "commit", "-m", "bootstrap fixture")
+    return subject, git(subject, "rev-parse", "HEAD")
+
+
 with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     root = Path(raw)
     subject = root / "subject"
@@ -122,5 +156,69 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     else:
         raise AssertionError("wrong subject HEAD was accepted")
     print("OK   expected HEAD mismatch fails before command execution")
+
+    stability = receipts.PROFILES["stability-gate"]
+    stability_ids = tuple(item.command_id for item in stability.commands)
+    bootstrap_index = stability_ids.index("mcp-sync-config")
+    assert stability_ids[bootstrap_index : bootstrap_index + 2] == (
+        "mcp-sync-config",
+        "codex-mcp-sync",
+    )
+    bootstrap_profile = receipts.GateProfile(
+        "test-stability-bootstrap",
+        (
+            stability.commands[bootstrap_index],
+            stability.commands[bootstrap_index + 1],
+            receipts.GateCommand(
+                "clean-status",
+                ("git", "status", "--short"),
+                "empty-output",
+            ),
+        ),
+    )
+    receipts.PROFILES[bootstrap_profile.name] = bootstrap_profile
+    fresh, fresh_head = bootstrap_subject(root / "fresh-bootstrap")
+    bootstrap_output = root / "bootstrap-passed"
+    bootstrap_receipt = receipts.execute_gate(
+        bootstrap_profile,
+        root=fresh,
+        output_dir=bootstrap_output,
+        expected_head=fresh_head,
+        execution_relation="exact-head-reconstruction",
+    )
+    runtime_env = fresh / "scripts" / "mcp-gateway" / "runtime.env"
+    assert runtime_env.read_text(encoding="utf-8") == "initialized\n"
+    assert git(fresh, "status", "--short") == ""
+    assert subprocess.run(
+        ["git", "check-ignore", "scripts/mcp-gateway/runtime.env"],
+        cwd=fresh,
+        check=False,
+    ).returncode == 0
+    assert [
+        item["command_id"] for item in bootstrap_receipt["commands"]
+    ] == ["mcp-sync-config", "codex-mcp-sync", "clean-status"]
+    print("OK   fresh stability checkout bootstraps ignored config before sync")
+
+    failing_subject, failing_head = bootstrap_subject(
+        root / "failed-bootstrap", bootstrap_exit=9
+    )
+    failing_bootstrap_output = root / "bootstrap-failed"
+    try:
+        receipts.execute_gate(
+            bootstrap_profile,
+            root=failing_subject,
+            output_dir=failing_bootstrap_output,
+            expected_head=failing_head,
+            execution_relation="exact-head-reconstruction",
+        )
+    except receipts.ReceiptError as exc:
+        assert "mcp-sync-config exited 9" in str(exc)
+    else:
+        raise AssertionError("failed stability bootstrap was accepted")
+    assert not failing_bootstrap_output.exists()
+    assert not (
+        failing_subject / "scripts" / "mcp-gateway" / "codex-sync-ran"
+    ).exists()
+    print("OK   failed stability bootstrap publishes nothing and stops sync")
 
 print("verification receipt matrix: ok")
