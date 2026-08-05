@@ -98,6 +98,8 @@
   синхронизированы, а atomic recovery receipts ограниченно ожидаются до cleanup.
 - Устранена проявлявшаяся под trace гонка summary refresh: оба responder-потока
   используют документированное ограниченное окно и join до проверок.
+- Устранена проявлявшаяся только в полном suite гонка pipeline-fix retry:
+  retry-intent receipt ожидается в том же ограниченном окне атомарной публикации.
 - Sent binding поколения callback recovery теперь снимается только после
   точного durable broker acceptance. Следующее поколение в той же retained
   session остаётся наблюдаемым в active-состоянии, но не получает второй

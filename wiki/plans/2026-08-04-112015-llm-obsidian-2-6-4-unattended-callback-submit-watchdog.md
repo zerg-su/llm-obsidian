@@ -632,3 +632,14 @@ This coordinator-owned amendment records the final purpose=`release` findings ag
 | D-264-63 | review gate tests | D-264-60 tested the private exact-iteration predicate but not durable Deep collection and replay wiring | `included` | the public current-review facade drives two Deep lanes from iteration 0 findings through exact resolution and iteration 1 approvals; both final results persist at iteration 1 and each retained continuation effect occurs once |
 
 No routing, review topology, public DSL, provider/model budget, retry budget, permission boundary, migration, push, tag, publish or release authority changes. The new exact HEAD must repeat the complete release ladder, fresh Sol Deep implementation review and separate purpose=`release` audit.
+
+
+## Append-only full-suite stability amendment D-264-64
+
+This coordinator-owned amendment records the exact-HEAD gate failure exposed only under the complete `make test` load after D-264-61 through D-264-63. It preserves the frozen Outcome Contract and changes no production or runtime behavior.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-64 | test harness | `test_runtime_task_summary.py` used a two-second default eventual-read window for `pipeline-fix/pass-1/retry-intent.json`; the standalone suite passed, but the complete `make test` load exceeded that fixture-only window and raised `FileNotFoundError` after all product effects had completed | `included` | the existing atomic-publication observer now uses the same bounded ten-second test window already established for slow full-suite responders; standalone task-summary passes and the complete exact-HEAD gate ladder is repeated |
+
+The repair changes only a test helper timeout. It does not alter product/provider deadlines, lifecycle budgets, routing, review topology, callback behavior, public interfaces, permissions, migration, push, tag, publish or release authority.

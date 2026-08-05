@@ -122,7 +122,7 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def read_json_eventually(path: Path, *, timeout: float = 2.0) -> object:
+def read_json_eventually(path: Path, *, timeout: float = 10.0) -> object:
     """Read one worker artifact after its bounded atomic-publication window."""
 
     deadline = time.monotonic() + timeout
