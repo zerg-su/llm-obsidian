@@ -3,6 +3,8 @@
   "scenario_id": "extended-pairwise-lifecycle-boundaries",
   "seed": 26599,
   "max_steps": 8,
+  "max_depth": 8,
+  "max_waves": 5,
   "max_schedules": 16,
   "expected_initial_invariant": "SIM-INV-CALLBACK-ONCE",
   "expected_terminal_states": ["complete"],

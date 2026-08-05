@@ -67,11 +67,70 @@ check(
     all(item.action_ids[-1] == "liveness" for item in first),
 )
 
-different = compile_schedules(scenario, seed=72, max_schedules=16)
+coverage_scenario = {
+    **scenario,
+    "scenario_id": "scheduler-three-way-pair-coverage",
+    "max_steps": 3,
+    "actions": [
+        {"action_id": "a", "action": "advance-clock", "delta": 1},
+        {"action_id": "b", "action": "advance-clock", "delta": 2},
+        {"action_id": "c", "action": "advance-clock", "delta": 3},
+    ],
+}
+coverage = compile_schedules(
+    coverage_scenario,
+    seed=71,
+    max_schedules=2,
+)
+pair_orientations = {
+    pair: {
+        order.index(pair[0]) < order.index(pair[1])
+        for order in (item.action_ids for item in coverage)
+    }
+    for pair in (("a", "b"), ("a", "c"), ("b", "c"))
+}
 check(
-    "different seed changes deterministic traversal without changing coverage",
-    [item.action_ids for item in different] != [item.action_ids for item in first]
-    and {item.action_ids for item in different} == {item.action_ids for item in first},
+    "the schedule ceiling cannot starve an independent pair orientation",
+    len(coverage) == 2
+    and all(orientations == {False, True} for orientations in pair_orientations.values()),
+    {
+        "orders": [item.action_ids for item in coverage],
+        "pair_orientations": pair_orientations,
+    },
+)
+
+for bounded_scenario, bound, value in (
+    (coverage_scenario, "max_depth", 2),
+    (scenario, "max_waves", 1),
+):
+    try:
+        compile_schedules(
+            {**bounded_scenario, bound: value},
+            seed=71,
+            max_schedules=2,
+        )
+    except ValueError:
+        check(f"scheduler enforces the declared {bound} ceiling", True)
+    else:
+        raise AssertionError(f"scheduler ignored the declared {bound} ceiling")
+
+different = compile_schedules(
+    coverage_scenario,
+    seed=72,
+    max_schedules=2,
+)
+check(
+    "different seed changes selection before truncation without losing coverage",
+    [item.action_ids for item in different]
+    != [item.action_ids for item in coverage]
+    and all(
+        {
+            order.index(pair[0]) < order.index(pair[1])
+            for order in (item.action_ids for item in different)
+        }
+        == {False, True}
+        for pair in (("a", "b"), ("a", "c"), ("b", "c"))
+    ),
 )
 
 selected = first[-1]

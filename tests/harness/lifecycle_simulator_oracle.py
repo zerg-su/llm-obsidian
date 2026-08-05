@@ -95,20 +95,33 @@ def load_scenario(path: Path) -> dict[str, object]:
         "initial_snapshot",
         "actions",
     }
-    allowed = required | {"ordering_constraints", "max_schedules", "tags"}
+    allowed = required | {
+        "ordering_constraints",
+        "max_schedules",
+        "max_depth",
+        "max_waves",
+        "tags",
+    }
     if not required <= set(scenario) or not set(scenario) <= allowed or scenario.get("schema_version") != 1:
         _fail("SIM-INV-SCHEMA", "scenario fields or version are invalid")
     _identifier(scenario.get("scenario_id"), "scenario_id")
     if type(scenario.get("seed")) is not int or scenario["seed"] < 0:
         _fail("SIM-INV-SCHEMA", "seed must be a non-negative integer")
     maximum = scenario.get("max_steps")
+    maximum_depth = scenario.get("max_depth", maximum)
+    maximum_waves = scenario.get("max_waves", maximum)
     actions = scenario.get("actions")
     if (
         type(maximum) is not int
         or not 1 <= maximum <= 256
+        or type(maximum_depth) is not int
+        or not 1 <= maximum_depth <= maximum
+        or type(maximum_waves) is not int
+        or not 1 <= maximum_waves <= maximum
         or not isinstance(actions, list)
         or not actions
         or len(actions) > maximum
+        or len(actions) > maximum_depth
     ):
         _fail("SIM-INV-SCHEMA", "scenario actions exceed their bound")
     for index, raw_action in enumerate(actions):

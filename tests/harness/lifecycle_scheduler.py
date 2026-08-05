@@ -100,35 +100,208 @@ def _normalized_actions(
     return tuple(normalized)
 
 
-def _topological_orders(
-    actions: Sequence[Mapping[str, object]], maximum: int
-) -> list[tuple[str, ...]]:
-    by_id = {str(action["action_id"]): action for action in actions}
-    dependencies = {
-        action_id: frozenset(str(item) for item in action.get("after", []))
-        for action_id, action in by_id.items()
+def _dependency_map(
+    actions: Sequence[Mapping[str, object]],
+) -> dict[str, frozenset[str]]:
+    return {
+        str(action["action_id"]): frozenset(
+            str(item) for item in action.get("after", [])
+        )
+        for action in actions
     }
-    orders: list[tuple[str, ...]] = []
 
-    def visit(prefix: tuple[str, ...], remaining: frozenset[str]) -> None:
-        if len(orders) >= maximum:
-            return
-        if not remaining:
-            orders.append(prefix)
-            return
+
+def _dependency_closure(
+    dependencies: Mapping[str, frozenset[str]],
+) -> dict[str, frozenset[str]]:
+    closure: dict[str, frozenset[str]] = {}
+
+    def ancestors(action_id: str, visiting: frozenset[str]) -> frozenset[str]:
+        if action_id in closure:
+            return closure[action_id]
+        if action_id in visiting:
+            raise ValueError("scenario action dependencies contain a cycle")
+        result: set[str] = set(dependencies[action_id])
+        for dependency in dependencies[action_id]:
+            result.update(ancestors(dependency, visiting | {action_id}))
+        closure[action_id] = frozenset(result)
+        return closure[action_id]
+
+    for action_id in dependencies:
+        ancestors(action_id, frozenset())
+    return closure
+
+
+def _independent_pairs(
+    dependencies: Mapping[str, frozenset[str]],
+) -> tuple[tuple[str, str], ...]:
+    closure = _dependency_closure(dependencies)
+    identifiers = sorted(dependencies)
+    return tuple(
+        (left, right)
+        for index, left in enumerate(identifiers)
+        for right in identifiers[index + 1 :]
+        if left not in closure[right] and right not in closure[left]
+    )
+
+
+def _seeded_rank(seed: int, salt: str, action_id: str) -> str:
+    return hashlib.sha256(f"{seed}:{salt}:{action_id}".encode()).hexdigest()
+
+
+def _topological_order(
+    dependencies: Mapping[str, frozenset[str]],
+    *,
+    seed: int,
+    salt: str,
+    extra_order: tuple[str, str] | None = None,
+    reverse: bool = False,
+) -> tuple[str, ...]:
+    selected = {key: set(value) for key, value in dependencies.items()}
+    if extra_order is not None:
+        before, after = extra_order
+        selected[after].add(before)
+    _dependency_closure(
+        {key: frozenset(value) for key, value in selected.items()}
+    )
+    prefix: list[str] = []
+    remaining = set(selected)
+    while remaining:
         completed = frozenset(prefix)
-        ready = sorted(
+        ready = [
+            action_id
+            for action_id in remaining
+            if selected[action_id] <= completed
+        ]
+        if not ready:
+            raise ValueError("scenario action dependencies contain a cycle")
+        ready.sort(
+            key=lambda action_id: (
+                _seeded_rank(seed, salt, action_id),
+                action_id,
+            ),
+            reverse=reverse,
+        )
+        chosen = ready[0]
+        prefix.append(chosen)
+        remaining.remove(chosen)
+    return tuple(prefix)
+
+
+def _pairwise_coverage(
+    order: Sequence[str], pairs: Sequence[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    positions = {action_id: index for index, action_id in enumerate(order)}
+    return frozenset(
+        (left, right)
+        if positions[left] < positions[right]
+        else (right, left)
+        for left, right in pairs
+    )
+
+
+def _wave_count(dependencies: Mapping[str, frozenset[str]]) -> int:
+    remaining = set(dependencies)
+    completed: set[str] = set()
+    waves = 0
+    while remaining:
+        ready = {
             action_id
             for action_id in remaining
             if dependencies[action_id] <= completed
-        )
+        }
         if not ready:
             raise ValueError("scenario action dependencies contain a cycle")
-        for action_id in ready:
-            visit(prefix + (action_id,), remaining - {action_id})
+        waves += 1
+        completed.update(ready)
+        remaining.difference_update(ready)
+    return waves
 
-    visit((), frozenset(by_id))
-    return orders
+
+def _coverage_first_orders(
+    actions: Sequence[Mapping[str, object]],
+    *,
+    seed: int,
+    maximum: int,
+) -> list[tuple[str, ...]]:
+    by_id = {str(action["action_id"]): action for action in actions}
+    dependencies = _dependency_map(actions)
+    pairs = _independent_pairs(dependencies)
+    candidates: list[tuple[str, ...]] = []
+
+    def add(order: tuple[str, ...]) -> None:
+        if order not in candidates:
+            candidates.append(order)
+
+    add(
+        _topological_order(
+            dependencies,
+            seed=seed,
+            salt="baseline",
+        )
+    )
+    add(
+        _topological_order(
+            dependencies,
+            seed=seed,
+            salt="baseline",
+            reverse=True,
+        )
+    )
+    for left, right in pairs:
+        for before, after in ((left, right), (right, left)):
+            salt = f"pair:{before}:{after}"
+            add(
+                _topological_order(
+                    dependencies,
+                    seed=seed,
+                    salt=salt,
+                    extra_order=(before, after),
+                )
+            )
+            add(
+                _topological_order(
+                    dependencies,
+                    seed=seed,
+                    salt=salt,
+                    extra_order=(before, after),
+                    reverse=True,
+                )
+            )
+
+    obligations = {
+        orientation
+        for left, right in pairs
+        for orientation in ((left, right), (right, left))
+    }
+    selected: list[tuple[str, ...]] = []
+    uncovered = set(obligations)
+    while candidates and (uncovered or not selected):
+        candidates.sort(
+            key=lambda order: (
+                -len(_pairwise_coverage(order, pairs) & uncovered),
+                hashlib.sha256(
+                    f"{seed}:selection:{','.join(order)}".encode()
+                ).hexdigest(),
+                order,
+            )
+        )
+        best = candidates.pop(0)
+        gain = _pairwise_coverage(best, pairs) & uncovered
+        if selected and not gain:
+            break
+        selected.append(best)
+        uncovered.difference_update(gain)
+        if len(selected) >= maximum:
+            break
+    if uncovered:
+        missing = ",".join(f"{left}<{right}" for left, right in sorted(uncovered))
+        raise ValueError(
+            "schedule ceiling cannot satisfy pairwise coverage: " + missing
+        )
+    if not selected:
+        raise ValueError("scenario has no legal schedule")
+    return selected
 
 
 def _trace_sha256(
@@ -168,10 +341,22 @@ def compile_schedules(
     maximum_steps = scenario.get("max_steps")
     if type(maximum_steps) is not int or len(actions) > maximum_steps:
         raise ValueError("scenario action count exceeds max_steps")
+    maximum_depth = scenario.get("max_depth", maximum_steps)
+    if type(maximum_depth) is not int or len(actions) > maximum_depth:
+        raise ValueError("scenario action count exceeds max_depth")
+    maximum_waves = scenario.get("max_waves", len(actions))
+    if (
+        type(maximum_waves) is not int
+        or maximum_waves < 1
+        or _wave_count(_dependency_map(actions)) > maximum_waves
+    ):
+        raise ValueError("scenario dependency graph exceeds max_waves")
     by_id = {str(action["action_id"]): action for action in actions}
-    orders = _topological_orders(actions, max_schedules)
-    if len(orders) > 1 and selected_seed % 2:
-        orders.reverse()
+    orders = _coverage_first_orders(
+        actions,
+        seed=selected_seed,
+        maximum=max_schedules,
+    )
     result: list[Schedule] = []
     for order in orders:
         ordered_actions = tuple(dict(by_id[action_id]) for action_id in order)
