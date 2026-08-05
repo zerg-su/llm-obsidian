@@ -7,9 +7,17 @@
       "status": "accepted",
       "owner": "coordinator",
       "scope": "planning-only-vault-artifact",
-      "path": "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
+      "paths": [
+        "wiki/plans/2026-08-03-041641-llm-obsidian-2-7-project-scoped-task-programs.md",
+        "wiki/backlog.md"
+      ],
+      "backlog_entries": [
+        "llm-obsidian-2-7-code-owned-task-graph",
+        "llm-obsidian-2-7-project-task-system",
+        "llm-obsidian-2-7-project-scoped-task-namespaces"
+      ],
       "authority": "explicit-user-request",
-      "constraint": "No 2.7 scheduler, orchestration runtime, public DSL, model routing, or review topology change is included in 2.6.4."
+      "constraint": "The listed plan and three exact backlog entries are planning-only. No 2.7 scheduler, orchestration runtime, public DSL, model routing, or review topology change is included in 2.6.4."
     },
     {
       "id": "D-264-31",

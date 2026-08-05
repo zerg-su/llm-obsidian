@@ -63,6 +63,8 @@ packages were published for them.
 - Restored the frozen plan's exact UTF-8 Outcome bytes after an intermediate
   documentation transaction introduced replacement characters and correctly
   triggered a pre-provider digest rejection.
+- Bound the user-requested 2.7 TaskGraph/project-task backlog entries to the
+  exact planning-only accepted-deviation ledger.
 - Closed the release-evidence gap between callback acceptance and lifecycle
   completion: the dogfood trace reaches resource-free terminal parent/child
   states and an actual `reap-ready` pipeline boundary, with a separate final

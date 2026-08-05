@@ -66,6 +66,8 @@
 - Восстановлены точные UTF-8-байты frozen Outcome в плане после того, как
   промежуточная документационная транзакция внесла replacement characters и
   корректно вызвала отказ до provider effect.
+- Пользовательские backlog-записи про 2.7 TaskGraph/project tasks теперь точно
+  перечислены в planning-only accepted-deviation ledger.
 - Закрыт пробел release evidence между callback acceptance и lifecycle
   completion: dogfood trace доходит до terminal resource-free parent/child и
   фактической границы `reap-ready`; отдельный финальный trace фиксирует

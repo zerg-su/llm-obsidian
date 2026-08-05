@@ -532,3 +532,13 @@ This coordinator-owned amendment records the only failure in the final exact-HEA
 | D-264-50 | test harness | under stdlib trace, the summary-only review fixture allowed two untracked responder threads only two seconds to observe exact decision/refresh artifacts; the second helper could return before the fifth launch call and made honest harness coverage fail nondeterministically | `included` | track both helper threads, use the existing bounded ten-second eventual window, join them before assertions, and require zero live helper threads; standalone `test_runtime_task_summary.py` and `make test-harness-coverage` are green at 75.98% across 128 modules with all critical floors and 4,370 transition cases |
 
 The repair is test-only. It does not change provider behavior, pipeline budgets, lifecycle state, routing, review topology, public interfaces, or release authority. The final candidate must still repeat the complete exact-HEAD ladder and continue the same two Sol verification parents before the separate purpose=release audit.
+
+## Append-only release-scope amendment D-264-51
+
+This coordinator-owned amendment resolves `REL-SCOPE-001` from the exact-HEAD Sol release audit. It preserves the frozen Outcome Contract and records the user-requested 2.7 material as planning-only scope rather than deleting it.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-51 | release scope | exact diff inspection found three 2.7 TaskGraph/project-task entries in `wiki/backlog.md` that were not named by the D-264-21 accepted-deviation path | `included` | `docs/acceptance/v2.6.4-accepted-deviations.json` binds `wiki/backlog.md` plus `llm-obsidian-2-7-code-owned-task-graph`, `llm-obsidian-2-7-project-task-system`, and `llm-obsidian-2-7-project-scoped-task-namespaces`; the entries are planning-only and introduce no 2.7 runtime, scheduler, DSL, routing, or review-topology behavior |
+
+No production code, pipeline contract, provider behavior, budget, permission, public interface, push, tag, publish, or release effect is changed. The corrected documentation-only candidate must pass the exact-HEAD gates and a fresh implementation/release evidence boundary before handoff.
