@@ -99,6 +99,8 @@ class VirtualClock:
 class FakeProvider:
     """External provider boundary that records only idempotency identities."""
 
+    EVENT_KINDS = frozenset({"input-accepted"})
+
     def __init__(self, root: Path) -> None:
         self.root = root
 
@@ -211,10 +213,22 @@ class FakeCmux:
 class DeterministicEventSource:
     """Closed FIFO source; the scheduler owns ordering, never callbacks."""
 
+    EVENT_KINDS = frozenset(
+        {
+            "turn-stopped",
+            "result-published",
+            "process-exited",
+            "event-gap",
+            "resource-closed",
+        }
+    )
+
     def __init__(self) -> None:
         self.events: list[dict[str, object]] = []
 
     def publish(self, event: Mapping[str, object]) -> None:
+        if event.get("kind") not in self.EVENT_KINDS:
+            raise ValueError("event source kind is outside the closed vocabulary")
         self.events.append(dict(event))
 
     def pop(self) -> dict[str, object] | None:

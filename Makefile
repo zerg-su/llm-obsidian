@@ -3,10 +3,25 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+.PHONY: test-lifecycle-simulator test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+
+test-lifecycle-simulator:
+	@echo "=== deterministic lifecycle simulator (fast) ==="
+	@python3 tests/harness/test_lifecycle_simulator_oracle.py
+	@python3 tests/harness/test_lifecycle_simulator_world.py
+	@python3 tests/harness/test_lifecycle_scheduler.py
+	@python3 tests/harness/test_lifecycle_crash_matrix.py
+	@python3 tests/harness/test_lifecycle_regression_corpus.py
+	@python3 tests/harness/test_lifecycle_provider_conformance.py
+	@python3 tests/harness/lifecycle_gate.py --mode fast
+
+test-lifecycle-simulator-extended: test-lifecycle-simulator
+	@echo "=== deterministic lifecycle simulator (extended) ==="
+	@python3 tests/harness/lifecycle_gate.py --mode extended
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
+	@$(MAKE) --no-print-directory test-lifecycle-simulator
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_contract_boundaries.py
 	@python3 tests/harness/test_contract_state_edge_matrix.py
@@ -112,6 +127,8 @@ test-upgrade-preflight:
 help:
 	@echo "llm-obsidian developer targets:"
 	@echo "  make test              Run all vault + retrieval + hook tests"
+	@echo "  make test-lifecycle-simulator  Run the fast deterministic lifecycle gate"
+	@echo "  make test-lifecycle-simulator-extended  Run the bounded extended sweep"
 	@echo "  make test-harness-coverage  Audit statement-line coverage and ratchet critical floors"
 	@echo "  make test-docs          Validate the Russian handbook, examples, inventory, and PipelineSpec"
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"

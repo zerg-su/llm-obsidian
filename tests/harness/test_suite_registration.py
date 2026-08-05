@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -25,6 +27,38 @@ def main() -> int:
         "Makefile test-harness registration drift: "
         f"missing={missing}, unknown={unknown}"
     )
+    lifecycle = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in HARNESS_TESTS.glob("test_lifecycle_*.py")
+    )
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    fast_target = makefile.split("test-lifecycle-simulator:", 1)[1].split(
+        "test-lifecycle-simulator-extended:", 1
+    )[0]
+    assert all(path in fast_target for path in lifecycle), (
+        "fast lifecycle target does not own every ordinary lifecycle test: "
+        f"expected={lifecycle}"
+    )
+    dry_run = subprocess.run(
+        ["make", "-n", "test-lifecycle-simulator-extended"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert "lifecycle_gate.py --mode fast" in dry_run
+    assert "lifecycle_gate.py --mode extended" in dry_run
+    summaries = [
+        subprocess.run(
+            [sys.executable, "tests/harness/lifecycle_gate.py", "--mode", "fast"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        for _ in range(2)
+    ]
+    assert summaries[0] == summaries[1], "fast lifecycle summary is not deterministic"
     print(f"harness suite registration: ok ({len(expected)} files)")
     return 0
 
