@@ -7,9 +7,10 @@ allowed-tools: Read Bash
 
 # Split
 
-Produce a governed SplitManifest preview for an already approved plan. Invoke
-this skill only through explicit `$split`; ordinary requests to divide prose,
-files, or data do not select it.
+Produce a governed SplitManifest preview for an already approved plan and,
+only when the invocation includes `--dispatch`, activate its bounded child
+workflow through the harness. Invoke this skill only through explicit `$split`;
+ordinary requests to divide prose, files, or data do not select it.
 
 ## 1. Freeze the parent contract
 
@@ -41,12 +42,42 @@ Accept only `validation.accepted: true`, four zero effect counters, and a
 lowercase `manifest_sha256` that round-trips through the exact schema. On any
 typed rejection, report its code and stop before child effects.
 
-## 4. Report bounded evidence
+## 4. Stop at preview or compile activation
 
 Return the manifest SHA-256, selection mode/reason, ordered child IDs, waves
-implied by the DAG, and the validation receipt. State that preview success does
-not authorize dispatch, execution, merge, release, or parent completion.
+implied by the DAG, and the validation receipt. Without an explicit
+`$split --dispatch`, stop here and state that preview success does not authorize
+dispatch, execution, merge, release, or parent completion.
 
-Completion requires the exact manifest plus zero-effect validation. A clean
-diff, plausible decomposition, or local schema pass is only a proxy; the parent
-outcome still requires approved child receipts and deterministic join evidence.
+For `$split --dispatch`, require the approved plan to authorize child effects.
+Bind every child to one existing dispatch request with `placement: workspace`,
+the exact manifest slice, registered pipeline and route alias, disjoint owned
+files, assigned evidence, dependencies, and a frozen token/time ceiling. Run
+`python3 scripts/split-runner.py validate --spec <activation.json>` and continue
+only from `status: valid` with four zero effect counters. Validation failure or
+policy/budget drift stops before any child effect.
+
+Complete this step only when every child request is exact, the activation waves
+equal the preview DAG, and the existing dispatch contract carries the same
+manifest SHA-256.
+
+## 5. Drive waves and join exact receipts
+
+Run `split-runner.py start` with the complete prior launch and terminal receipt
+sets. Let the runner call the existing dispatch adapter; use `harness-cli.py`
+for status, inspect, resume, reconcile, cancel, or close. Never orchestrate
+cmux or a provider directly. A current wave may launch at most `max_parallel`;
+later waves require exact approved, resource-closed dependency receipts.
+
+After every child is terminal, run `split-runner.py join` with the immutable
+launch receipts, terminal receipts, and current child HEAD map. Accept only
+`disposition: ready` and use its manifest-order integration list. Attention,
+failure, cancellation, conflict, stale HEAD, receipt drift, incomplete evidence,
+or open resources stops the join without another child/provider effect.
+
+Preview completion requires the exact manifest plus zero-effect validation.
+Dispatch completion additionally requires all exact approved resource-free
+child receipts and a ready deterministic join. A clean diff, plausible
+decomposition, local schema pass, or launched wave is only a proxy; the parent
+outcome still requires its declared evidence and does not authorize merge,
+release, push, tag, or publish.
