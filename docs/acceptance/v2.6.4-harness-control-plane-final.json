@@ -31,7 +31,7 @@
     "pipeline": "engineering/fix",
     "pipeline_definition_sha256": "6c22e6280105af8c239ece8cf6c6289079a83ae1404d974af2f4b86def321d1d",
     "parent_operation_id": "edeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-    "parent_state": "finalizing",
+    "parent_state": "complete",
     "parent_resources_owned": false,
     "plan_step_receipts": [
       {"iteration":0,"step_id":"minimal-fix","status":"complete"},
@@ -42,12 +42,53 @@
       {"iteration":1,"step_id":"regression-test","status":"complete"},
       {"iteration":1,"step_id":"root-cause","status":"complete"}
     ],
-    "verification_states": ["complete", "failed"],
-    "review_gate_started": true,
-    "checkpoint_recorded": true,
-    "callback_receipt_status": "accepted",
+    "receipt_manifest": {
+      "plan_steps": {
+        "count": 7,
+        "identity_fields": ["operation_id", "run_id", "parent_operation_id", "definition_sha256", "input_head_sha", "head_sha"],
+        "digest_fields": ["output_sha256", "receipt_sha256"],
+        "all_identity_bound": true
+      },
+      "verification": {
+        "count": 2,
+        "states": ["complete", "failed"],
+        "identity_fields": ["operation_id", "run_id", "parent_operation_id", "verification_profile", "identity_sha256"],
+        "all_identity_bound": true
+      },
+      "review": {
+        "status": "approved",
+        "axis": "openai-holistic",
+        "lane_state": "complete",
+        "identity_fields": ["operation_id", "run_id", "lane_operation_id", "lane_run_id", "sha256"],
+        "evidence_digest_bound": true
+      },
+      "checkpoint": {
+        "status": "recorded",
+        "identity_fields": ["operation_id", "run_id", "runtime", "checkpoint", "sha256"],
+        "digest_bound": true
+      },
+      "callback": {
+        "status": "accepted",
+        "kind": "wiki-summary",
+        "digest_bound": true
+      },
+      "reap": {
+        "status": "complete",
+        "effect_replayed": false,
+        "digest_bound": true
+      },
+      "terminal_cleanup": {
+        "exit_action": "exit-requested",
+        "cleanup_action": "cleaned",
+        "state": "complete",
+        "resources_owned": false,
+        "guardian_effects": ["request-exit"],
+        "surface_state": "missing",
+        "digest_bound": true
+      }
+    },
     "accepted_callback_kind": "wiki-summary",
-    "next_action": "reap-ready"
+    "next_action": "closed"
   },
   "integrated_trace": {
     "dogfood_trace_receipt_sha256": "501f3e146441b0fc838f2b698c658174d1ea936bf9489793163221254b7af2ae",

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
@@ -20,11 +21,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.adapters.process import ProcessAdapter
+from harness.callbacks import CallbackBroker
 from harness.contracts import (
     DEFAULT_TIME_BUDGET_SECONDS,
     DEFAULT_TOKEN_LIMIT,
     AttentionReason,
     OperationSpec,
+    OwnedResources,
     RuntimeRoute,
 )
 from harness.pipeline_builtins import (
@@ -33,7 +36,7 @@ from harness.pipeline_builtins import (
     compiled_builtin,
 )
 from harness.pipelines import compile_pipeline
-from harness.runtime_sessions import RuntimeSessionRequest
+from harness.runtime_sessions import RuntimeSessionManager, RuntimeSessionRequest
 from harness.runtime_worker import (
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
@@ -43,7 +46,12 @@ from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
-from harness.workflows.review import ReviewContext
+from harness.workflows.reap import run_reap
+from harness.workflows.review import (
+    ReviewContext,
+    ReviewOperationRequest,
+    ReviewResult,
+)
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 from outcome_contract import extract_from_bytes
 from review_resolution import review_transport_identity_sha256
@@ -74,6 +82,146 @@ class FakeCmux:
 
     def send_key(self, surface_id: str, key: str) -> None:
         self.keys.append((surface_id, key))
+
+
+@dataclass(frozen=True)
+class FakeReviewSessionResult:
+    record: object
+    checkpoint: str
+
+
+class TypedReviewRuntime:
+    """Deterministic provider port; the real review gate owns all transitions."""
+
+    def __init__(self, store: OperationStore, owner_id: str) -> None:
+        self.store = store
+        self.owner_id = owner_id
+
+    def start(
+        self, request: object, *, on_surface_opened=None
+    ) -> FakeReviewSessionResult:
+        record = self.store.create(
+            request.spec, lane_id=request.lane_id, run_id=request.run_id
+        )
+        record = replace(
+            record,
+            resources=OwnedResources(surface_id=CHILD),
+            revision=record.revision + 1,
+        )
+        self.store.save(record, expected_revision=record.revision - 1)
+        result = FakeReviewSessionResult(record, "checkpoint-typed-review")
+        if on_surface_opened is not None:
+            on_surface_opened(result)
+        return result
+
+    def status(self, owner_id: str, operation_id: str) -> FakeReviewSessionResult:
+        return FakeReviewSessionResult(
+            self.store.read(owner_id, operation_id),
+            "checkpoint-typed-review",
+        )
+
+    def register_callback_target(self, *_args: object) -> None:
+        return None
+
+    def accept_callback(self, envelope: object) -> object:
+        return CallbackBroker(self.store, self.owner_id).accept(envelope)
+
+    def request_exit(self, owner_id: str, operation_id: str) -> object:
+        record = self.store.read(owner_id, operation_id)
+        if record.state in {"complete", "failed", "cancelled"}:
+            return record
+        if record.state in {
+            "created",
+            "preflight",
+            "starting",
+            "attention-required",
+        }:
+            self.store.transition(owner_id, operation_id, "cancelling")
+        elif record.state != "finalizing":
+            self.store.transition(owner_id, operation_id, "finalizing")
+        self.store.transition(owner_id, operation_id, "exiting")
+        return self.store.read(owner_id, operation_id)
+
+    def cleanup(self, owner_id: str, operation_id: str) -> object:
+        record = self.store.read(owner_id, operation_id)
+        if record.state == "exiting":
+            self.store.transition(owner_id, operation_id, "complete")
+        completed = self.store.read(owner_id, operation_id)
+        if completed.resources != OwnedResources():
+            updated = replace(
+                completed,
+                resources=OwnedResources(),
+                revision=completed.revision + 1,
+            )
+            self.store.save(updated, expected_revision=completed.revision)
+            completed = updated
+        return completed
+
+
+class TerminalCmuxPort:
+    """Exact owned surface port for the production cleanup state machine."""
+
+    def __init__(self, surface_id: str) -> None:
+        self.surface_id = surface_id
+        self.state = "alive"
+
+    def status(self, surface_id: str) -> str:
+        if surface_id != self.surface_id:
+            raise AssertionError("cleanup probed another surface")
+        return self.state
+
+    def close_exact(self, surface_id: str) -> None:
+        if surface_id != self.surface_id:
+            raise AssertionError("cleanup closed another surface")
+        self.state = "missing"
+
+
+class TerminalProcessPort:
+    """Exact owned process port that records one guardian exit effect."""
+
+    def __init__(self, resources: OwnedResources) -> None:
+        self.resources = resources
+        self.process_state = "alive"
+        self.supervisor_state = "alive"
+        self.effects: list[str] = []
+
+    def process_status(self, process_group: int, identity: str) -> str:
+        if (
+            process_group != self.resources.process_group
+            or identity != self.resources.process_identity
+        ):
+            raise AssertionError("cleanup probed another process")
+        return self.process_state
+
+    def pid_status(self, pid: int, identity: str) -> str:
+        if (
+            pid != self.resources.supervisor_pid
+            or identity != self.resources.supervisor_identity
+        ):
+            raise AssertionError("cleanup probed another supervisor")
+        return self.supervisor_state
+
+    def capture_identity(self, pid: int, *, process_group: int = 0) -> str:
+        if pid == self.resources.process_group and process_group == pid:
+            return self.resources.process_identity
+        if pid == self.resources.supervisor_pid and process_group == 0:
+            return self.resources.supervisor_identity
+        return ""
+
+    def request_guardian_signal(self, _control_path: Path, **kwargs: object) -> None:
+        if (
+            kwargs.get("action") != "request-exit"
+            or kwargs.get("process_group") != self.resources.process_group
+            or kwargs.get("process_identity")
+            != self.resources.process_identity
+            or kwargs.get("supervisor_pid") != self.resources.supervisor_pid
+            or kwargs.get("supervisor_identity")
+            != self.resources.supervisor_identity
+        ):
+            raise AssertionError("cleanup exit identity changed")
+        self.effects.append("request-exit")
+        self.process_state = "dead"
+        self.supervisor_state = "dead"
 
 
 def assert_summary_refresh_notification_replays_without_effect(root: Path) -> None:
@@ -124,6 +272,12 @@ def assert_summary_refresh_notification_replays_without_effect(root: Path) -> No
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def read_json_eventually(path: Path, *, timeout: float = 10.0) -> object:
@@ -270,6 +424,8 @@ def run_case(
     verification_runner: Callable[..., subprocess.CompletedProcess[str]]
     | None = None,
     task_version: int = 3,
+    bind_runtime_resources: bool = False,
+    typed_review: bool = False,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -341,6 +497,46 @@ def run_case(
         bind_contract=bind_contract,
         pipeline_name=pipeline_name,
     )
+    if bind_runtime_resources:
+        resources = OwnedResources(
+            surface_id=CHILD,
+            process_group=4101,
+            supervisor_pid=4102,
+            process_identity="1" * 64,
+            supervisor_identity="2" * 64,
+        )
+        OperationSupervisor(
+            store, "owner-1", operation_id
+        ).bind_resources(resources)
+        write_json(
+            store.root
+            / "owners"
+            / "owner-1"
+            / "runtime"
+            / operation_id
+            / "session.json",
+            {
+                "schema_version": 1,
+                "operation_id": operation_id,
+                "run_id": f"run-{operation_id}",
+                "placement": "split",
+            },
+        )
+        write_json(
+            store.root
+            / "owners"
+            / "owner-1"
+            / "runtime"
+            / operation_id
+            / "callback-target.json",
+            {
+                "schema_version": 1,
+                "generation": 1,
+                "operation_id": operation_id,
+                "run_id": f"run-{operation_id}",
+                "callback_pointer": ".task-summary.json",
+            },
+        )
     if model_restart_limit is not None:
         OperationSupervisor(
             store, "owner-1", operation_id
@@ -364,6 +560,19 @@ def run_case(
         total_pass_limit,
         task_version,
     )
+    if typed_review:
+        meta["review_policy"] = {
+            "mode": "simple",
+            "cross_model": False,
+            "runtime": "codex",
+            "model": "sol",
+            "effort": "high",
+            "max_verify_iterations": 1,
+            "verification_profile": "scoped",
+            "verification_profile_sha256": profile_sha,
+            "auto_resolve_severities": ["warning", "nit"],
+            "escalate_severities": ["blocking"],
+        }
     write_json(worktree / ".task-meta.json", meta)
     if review_state == "skipped":
         head = subprocess.run(
@@ -1226,26 +1435,64 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             capture_output=True,
             check=True,
         ).stdout.strip()
-        ReviewGateController.skip(
+        review_root = (
             vault
             / ".vault-meta"
             / "harness"
             / "review-data"
             / retry_task
-            / retry_task,
-            dispatch_operation_id=retry_task,
-            owner_id=retry_task,
-            preset=ReviewPreset.from_flags(no_review=True),
-            context=ReviewContext(
-                "packets/task/manifest.json",
-                retry_head,
-                "scoped",
-                retry_meta["review_policy"][
-                    "verification_profile_sha256"
-                ],
-            ),
-            product_root=worktree,
+            / retry_task
         )
+        review_store = OperationStore(vault / ".vault-meta" / "harness")
+        runtime = TypedReviewRuntime(review_store, retry_task)
+        gate = ReviewGateController(review_root, runtime, review_store)
+        review_scratch = review_root / "runtime-scratch"
+        review_scratch.mkdir(parents=True, exist_ok=True)
+        context = ReviewContext(
+            "packets/task/manifest.json",
+            retry_head,
+            "scoped",
+            retry_meta["review_policy"]["verification_profile_sha256"],
+            purpose="implementation",
+        )
+        preset = ReviewPreset.from_flags(model="sol", effort="high")
+        policy = preset.request(
+            f"{retry_task}-review",
+            purpose="implementation",
+            selected_provider="openai",
+        )
+        route = RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "reviewer-callback",
+            "3" * 64,
+        )
+        run = gate.begin(
+            dispatch_operation_id=retry_task,
+            request=ReviewOperationRequest(
+                policy,
+                retry_task,
+                route,
+                context,
+            ),
+            origin_surface=ORIGIN,
+            cwd=review_scratch,
+            product_root=worktree,
+            prompt_pointer=".task-prompt.md",
+            callback_root="callbacks/review",
+        )
+        lane = run.execution.lanes[0]
+        decision = gate.complete_round(
+            run,
+            lane,
+            run.rounds[lane.axis],
+            ReviewResult(lane.axis, "approve"),
+        )
+        if decision.action != "approved":
+            raise AssertionError(
+                f"typed retry review did not approve: {decision.action} {gate.read()}"
+            )
 
     retry_store, _retry_cmux, retry_state, retry_rc = run_case(
         root,
@@ -1260,6 +1507,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         review_state="missing",
         review_launcher=approve_retry,
         verification_runner=fail_once_verification,
+        bind_runtime_resources=True,
+        typed_review=True,
     )
     retry_parent = retry_store.read("owner-1", retry_task)
     retry_receipts = list(
@@ -1274,12 +1523,104 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         retry_state / "pipeline-fix" / "pass-1" / "retry-intent.json"
     )
     retry_step_rows = [
-        json.loads(path.read_text(encoding="utf-8"))
+        (
+            path,
+            json.loads(path.read_text(encoding="utf-8")),
+        )
         for path in sorted(retry_receipts)
     ]
-    retry_callback_receipt = json.loads(
-        (retry_state / "callback-receipt.json").read_text(encoding="utf-8")
+    retry_callback_path = retry_state / "callback-receipt.json"
+    if not retry_callback_path.is_file():
+        raise AssertionError(
+            (
+                "typed retry did not publish its final callback",
+                retry_rc,
+                retry_parent,
+                sorted(path.relative_to(retry_state).as_posix() for path in retry_state.rglob("*.json")),
+            )
+        )
+    retry_callback_receipt = read_json_eventually(retry_callback_path)
+    review_root = (
+        root
+        / f"vault-{retry_task}"
+        / ".vault-meta"
+        / "harness"
+        / "review-data"
+        / retry_task
+        / retry_task
     )
+    review_gate = json.loads(
+        (review_root / "review-gate.json").read_text(encoding="utf-8")
+    )
+    review_evidence = review_gate["evidence"]
+    review_lane_record = retry_store.read(
+        retry_task, review_gate["lanes"][0]["operation_id"]
+    )
+    checkpoint_path = retry_state / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    final_summary = json.loads(
+        (root / f"worktree-{retry_task}" / ".task-summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    reap_receipt_path = retry_state / "reap-finalize-receipt.json"
+
+    def finalize_retry(record: object) -> dict[str, object]:
+        receipt = {
+            "schema_version": 1,
+            "operation_id": record.spec.operation_id,
+            "run_id": record.run_id,
+            "summary_sha256": canonical_sha256(final_summary),
+            "status": "complete",
+        }
+        write_json(reap_receipt_path, receipt)
+        return receipt
+
+    reap_result = run_reap(
+        retry_store,
+        owner_id="owner-1",
+        operation_id=retry_task,
+        summary=final_summary,
+        finalize=finalize_retry,
+    )
+    terminal_resources = retry_store.read(
+        "owner-1", retry_task
+    ).resources
+    terminal_cmux = TerminalCmuxPort(terminal_resources.surface_id)
+    terminal_process = TerminalProcessPort(terminal_resources)
+    terminal_runtime = RuntimeSessionManager(
+        retry_store,
+        terminal_cmux,
+        terminal_process,
+    )
+    exit_result = terminal_runtime.request_exit("owner-1", retry_task)
+    cleanup_result = terminal_runtime.cleanup("owner-1", retry_task)
+    retry_parent = retry_store.read("owner-1", retry_task)
+    terminal_cleanup_receipt = {
+        "schema_version": 1,
+        "operation_id": retry_task,
+        "run_id": retry_parent.run_id,
+        "exit_action": exit_result.action,
+        "cleanup_action": cleanup_result.action,
+        "state": retry_parent.state,
+        "resources_owned": retry_parent.resources != OwnedResources(),
+        "guardian_effects": terminal_process.effects,
+        "surface_state": terminal_cmux.state,
+    }
+    terminal_cleanup_path = retry_state / "terminal-cleanup-receipt.json"
+    write_json(terminal_cleanup_path, terminal_cleanup_receipt)
+    verification_receipts = []
+    for record in retry_verifications:
+        projection = {
+            "operation_id": record.spec.operation_id,
+            "run_id": record.run_id,
+            "parent_operation_id": record.spec.parent_operation_id,
+            "state": record.state,
+            "verification_profile": record.spec.verification_profile,
+        }
+        verification_receipts.append(
+            {**projection, "identity_sha256": canonical_sha256(projection)}
+        )
     normalized_effect_trace = {
         "schema_version": 1,
         "pipeline": "engineering/fix",
@@ -1288,32 +1629,203 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         ).definition_sha256,
         "parent_operation_id": retry_task,
         "parent_state": retry_parent.state,
-        "parent_resources_owned": bool(
-            retry_parent.resources.surface_id
-            or retry_parent.resources.process_group
-            or retry_parent.resources.supervisor_pid
-        ),
+        "parent_resources_owned": retry_parent.resources != OwnedResources(),
         "plan_step_receipts": sorted(
             [
                 {
+                    "operation_id": row["operation_id"],
+                    "run_id": row["run_id"],
+                    "parent_operation_id": row["parent_operation_id"],
+                    "definition_sha256": row["definition_sha256"],
                     "iteration": row["iteration"],
                     "step_id": row["step_id"],
                     "status": row["status"],
+                    "input_head_sha": row["input_head_sha"],
+                    "head_sha": row["head_sha"],
+                    "output_sha256": row["output_sha256"],
+                    "receipt_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                 }
-                for row in retry_step_rows
+                for path, row in retry_step_rows
             ],
             key=lambda row: (row["iteration"], row["step_id"]),
         ),
-        "verification_states": sorted(
-            record.state for record in retry_verifications
+        "verification_receipts": sorted(
+            verification_receipts,
+            key=lambda row: row["operation_id"],
         ),
-        "review_gate_started": (
-            retry_state / "pipeline-review-start.json"
-        ).is_file(),
-        "checkpoint_recorded": (retry_state / "checkpoint.json").is_file(),
-        "callback_receipt_status": retry_callback_receipt["status"],
+        "review_receipt": {
+            "status": review_gate["status"],
+            "operation_id": review_evidence["operation_id"],
+            "run_id": review_evidence["run_id"],
+            "sha256": review_evidence["sha256"],
+            "axis": review_gate["lanes"][0]["axis"],
+            "lane_operation_id": review_gate["lanes"][0]["operation_id"],
+            "lane_run_id": review_gate["lanes"][0]["run_id"],
+            "lane_state": review_lane_record.state,
+        },
+        "checkpoint_receipt": {
+            **checkpoint,
+            "sha256": hashlib.sha256(checkpoint_path.read_bytes()).hexdigest(),
+        },
+        "callback_receipt": {
+            **retry_callback_receipt,
+            "sha256": hashlib.sha256(
+                (retry_state / "callback-receipt.json").read_bytes()
+            ).hexdigest(),
+        },
+        "reap_receipt": {
+            **json.loads(reap_receipt_path.read_text(encoding="utf-8")),
+            "sha256": hashlib.sha256(reap_receipt_path.read_bytes()).hexdigest(),
+            "effect_replayed": reap_result.result is None,
+        },
+        "terminal_cleanup_receipt": {
+            **terminal_cleanup_receipt,
+            "sha256": hashlib.sha256(
+                terminal_cleanup_path.read_bytes()
+            ).hexdigest(),
+        },
         "accepted_callback_kind": retry_parent.accepted_callback_kind,
-        "next_action": "reap-ready",
+        "next_action": (
+            "closed"
+            if retry_parent.state == "complete"
+            and retry_parent.resources == OwnedResources()
+            else cleanup_result.action
+        ),
+    }
+    exact_trace_path = retry_state / "engineering-fix-effect-trace.json"
+    write_json(exact_trace_path, normalized_effect_trace)
+    trace_contract_projection = {
+        "schema_version": 1,
+        "pipeline": normalized_effect_trace["pipeline"],
+        "pipeline_definition_sha256": normalized_effect_trace[
+            "pipeline_definition_sha256"
+        ],
+        "parent_operation_id": normalized_effect_trace[
+            "parent_operation_id"
+        ],
+        "parent_state": normalized_effect_trace["parent_state"],
+        "parent_resources_owned": normalized_effect_trace[
+            "parent_resources_owned"
+        ],
+        "plan_step_receipts": [
+            {
+                "iteration": row["iteration"],
+                "step_id": row["step_id"],
+                "status": row["status"],
+            }
+            for row in normalized_effect_trace["plan_step_receipts"]
+        ],
+        "receipt_manifest": {
+            "plan_steps": {
+                "count": len(normalized_effect_trace["plan_step_receipts"]),
+                "identity_fields": [
+                    "operation_id",
+                    "run_id",
+                    "parent_operation_id",
+                    "definition_sha256",
+                    "input_head_sha",
+                    "head_sha",
+                ],
+                "digest_fields": ["output_sha256", "receipt_sha256"],
+                "all_identity_bound": all(
+                    len(row["run_id"]) == 32
+                    and len(row["definition_sha256"]) == 64
+                    and len(row["output_sha256"]) == 64
+                    and len(row["receipt_sha256"]) == 64
+                    for row in normalized_effect_trace[
+                        "plan_step_receipts"
+                    ]
+                ),
+            },
+            "verification": {
+                "count": len(verification_receipts),
+                "states": sorted(row["state"] for row in verification_receipts),
+                "identity_fields": [
+                    "operation_id",
+                    "run_id",
+                    "parent_operation_id",
+                    "verification_profile",
+                    "identity_sha256",
+                ],
+                "all_identity_bound": all(
+                    len(row["run_id"]) == 32
+                    and len(row["identity_sha256"]) == 64
+                    for row in verification_receipts
+                ),
+            },
+            "review": {
+                "status": normalized_effect_trace["review_receipt"]["status"],
+                "axis": normalized_effect_trace["review_receipt"]["axis"],
+                "lane_state": normalized_effect_trace["review_receipt"][
+                    "lane_state"
+                ],
+                "identity_fields": [
+                    "operation_id",
+                    "run_id",
+                    "lane_operation_id",
+                    "lane_run_id",
+                    "sha256",
+                ],
+                "evidence_digest_bound": len(
+                    normalized_effect_trace["review_receipt"]["sha256"]
+                )
+                == 64,
+            },
+            "checkpoint": {
+                "status": "recorded",
+                "identity_fields": [
+                    "operation_id",
+                    "run_id",
+                    "runtime",
+                    "checkpoint",
+                    "sha256",
+                ],
+                "digest_bound": len(
+                    normalized_effect_trace["checkpoint_receipt"]["sha256"]
+                )
+                == 64,
+            },
+            "callback": {
+                "status": normalized_effect_trace["callback_receipt"]["status"],
+                "kind": retry_parent.accepted_callback_kind,
+                "digest_bound": len(
+                    normalized_effect_trace["callback_receipt"]["sha256"]
+                )
+                == 64,
+            },
+            "reap": {
+                "status": normalized_effect_trace["reap_receipt"]["status"],
+                "effect_replayed": normalized_effect_trace["reap_receipt"][
+                    "effect_replayed"
+                ],
+                "digest_bound": len(
+                    normalized_effect_trace["reap_receipt"]["sha256"]
+                )
+                == 64,
+            },
+            "terminal_cleanup": {
+                "exit_action": terminal_cleanup_receipt["exit_action"],
+                "cleanup_action": terminal_cleanup_receipt["cleanup_action"],
+                "state": terminal_cleanup_receipt["state"],
+                "resources_owned": terminal_cleanup_receipt[
+                    "resources_owned"
+                ],
+                "guardian_effects": terminal_cleanup_receipt[
+                    "guardian_effects"
+                ],
+                "surface_state": terminal_cleanup_receipt["surface_state"],
+                "digest_bound": len(
+                    normalized_effect_trace["terminal_cleanup_receipt"][
+                        "sha256"
+                    ]
+                )
+                == 64,
+            },
+        },
+        "accepted_callback_kind": normalized_effect_trace[
+            "accepted_callback_kind"
+        ],
+        "next_action": normalized_effect_trace["next_action"],
     }
     trace_contract = json.loads(
         (
@@ -1323,8 +1835,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     )["engineering_fix_effect_trace"]
     check(
         "engineering fix records one exact two-pass lifecycle trace",
-        normalized_effect_trace == trace_contract
-        and len({row["operation_id"] for row in retry_step_rows}) == 7
+        trace_contract_projection == trace_contract
+        and len({row["operation_id"] for _path, row in retry_step_rows}) == 7
         and all(
             row["parent_operation_id"] == retry_task
             and row["definition_sha256"]
@@ -1338,16 +1850,20 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                 ).hexdigest()
             )
             == 64
-            for row in retry_step_rows
+            for _path, row in retry_step_rows
         )
         and len({record.spec.operation_id for record in retry_verifications})
-        == 2,
-        normalized_effect_trace,
+        == 2
+        and review_gate["status"] == "approved"
+        and retry_parent.state == "complete"
+        and retry_parent.resources == OwnedResources()
+        and terminal_process.effects == ["request-exit"],
+        trace_contract_projection,
     )
     check(
         "engineering fix retries once from the original reproduction receipt",
         retry_rc == 0
-        and retry_parent.state == "finalizing"
+        and retry_parent.state == "complete"
         and retry_parent.accepted_callback_kind == "wiki-summary"
         and len(retry_receipts) == 7
         and len(retry_verifications) == 2

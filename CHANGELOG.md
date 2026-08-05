@@ -61,8 +61,9 @@ packages were published for them.
   and task-summary entrypoints, and added a public Deep-facade iteration test;
   direct lifecycle-helper calls are no longer counted as unattended evidence.
 - Bound E14 to an effect-recorded two-pass `engineering/fix` traversal with
-  seven typed step receipts, fail-to-pass verification, review, checkpoint,
-  accepted summary callback, released resources, and `reap-ready`.
+  seven typed step receipts, fail-to-pass verification, a real typed Sol
+  approval, checkpoint, accepted summary callback, reap effect, and production
+  cleanup to a resource-free `complete` parent.
 - Ignored stale prior-generation callback receipts during current-generation
   recovery and settled typed artifacts that win after reservation without a
   duplicate provider prompt or Enter.

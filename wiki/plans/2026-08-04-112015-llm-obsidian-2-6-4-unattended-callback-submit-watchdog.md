@@ -664,10 +664,10 @@ This append-only amendment records the material findings from Deep implementatio
 |---|---|---|---|---|
 | D-264-66 | callback watchdog | an accepted receipt from generation N could be treated as evidence for active generation N+1 and suppress its only bounded recovery submit | `included` | current-target receipt validation ignores the stale receipt; the runtime regression sends exactly one prompt/Enter for N+1 with no attention |
 | D-264-67 | callback watchdog | callback-submit state and receipts used file fsync plus atomic replace without syncing containing directory entries | `included` | first-use directories and every reserve/sent/uncertain/settled/accepted publication complete file fsync, replace and directory fsync before provider effect |
-| D-264-68 | release evidence | E14 described an authority matrix but did not bind an effect-recorded `engineering/fix` traversal | `included` | production runtime fixture records seven exact model-step receipts, failed-to-passed verification, review start, checkpoint, accepted summary callback and resource-free `reap-ready` |
-| D-264-69 | release evidence | implementation review cannot contain the future terminal E10 no-loss release receipt | `pending release gate` | handoff remains blocked until one separate exact-HEAD `purpose=release` Sol review audits D-264-01 through D-264-69 with no fix loop |
+| D-264-68 | release evidence | E14 described an authority matrix but did not bind an effect-recorded `engineering/fix` traversal | `included` | production runtime fixture records seven exact model-step receipts, failed-to-passed verification, a real typed Sol approval, checkpoint, accepted summary callback, reap effect and production cleanup to resource-free `complete` |
+| D-264-69 | release evidence | implementation review cannot contain the future terminal E10 no-loss release receipt | `not-a-defect` | this is a stage-ordering constraint rather than a product defect; handoff remains blocked until one separate exact-HEAD `purpose=release` Sol review audits D-264-01 through D-264-70 with no fix loop |
 
-Focused callback-runtime, liveness, task-summary, harness-control-plane and code-quality gates are green. D-264-69 is stage ordering, not a waived finding: it becomes `included` only after the terminal release receipt exists on the final committed HEAD.
+Focused callback-runtime, liveness, task-summary, harness-control-plane and code-quality gates are green. D-264-69 is terminally classified as `not-a-defect` because it records stage ordering, not waived behavior; the separate exact-HEAD release review remains mandatory and must persist the E10 no-loss receipt before handoff.
 
 ## Amendment 2026-08-05 — exact coverage closure
 
