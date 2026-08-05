@@ -1508,6 +1508,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             assert surface_id == SURFACE
             return "✻ Resuming…(1s · ↓10 tokens)"
 
+    class RetryReceiptCrashCmux(FakeCmux):
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            if not self.sent:
+                return "❯"
+            anchor = next(
+                (
+                    line.strip()
+                    for line in self.sent[-1][1].splitlines()
+                    if line.strip()
+                ),
+                "",
+            )
+            return f"❯ {anchor}"
+
     retry_child_spec = OperationSpec(
         "retry-round-1",
         "retry-round-key-1",
@@ -1621,6 +1636,125 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and replay_cmux.sent == []
         and replay_cmux.submit_count == 0,
         (resumed, replay_state, replay_cmux.sent, replay_cmux.submit_count),
+    )
+
+    late_cwd = root / "late-retry-crash"
+    late_cwd.mkdir()
+    (late_cwd / "callbacks").mkdir()
+    (late_cwd / "prompt.md").write_text(
+        "perform the bounded task", encoding="utf-8"
+    )
+    (late_cwd / "continue.md").write_text(
+        "verify the bounded fix", encoding="utf-8"
+    )
+    late_store = OperationStore(root / "late-retry-store")
+    late_cmux = RetryReceiptCrashCmux([])
+    late_manager = RuntimeSessionManager(
+        late_store,
+        late_cmux,
+        FakeProcess([]),
+        {"claude": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            route, True, ("provider:profile-valid",)
+        ),
+    )
+    late_manager.start(
+        replace(request, cwd=late_cwd, product_root=late_cwd)
+    )
+    late_child_spec = OperationSpec(
+        "late-retry-round-1",
+        "late-retry-round-key-1",
+        "review-round",
+        "owner-1",
+        route,
+        "packets/late-retry-round.json",
+        "scoped",
+    )
+    late_store.create(
+        late_child_spec,
+        lane_id="lane-shared",
+        run_id="late-retry-round-run-1",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        late_store.transition("owner-1", "late-retry-round-1", state)
+    late_parent = late_store.read("owner-1", "runtime-1")
+    late_liveness = LivenessController(
+        late_manager._state_root(late_parent) / "liveness"
+    )
+    late_liveness.observe(
+        LivenessEvidence(
+            observed_at=time.time(),
+            process_status="alive",
+            operation_revision=late_parent.revision,
+            operation_state=late_parent.state,
+        ),
+        LivenessPolicy.default(),
+    )
+
+    def crash_before_sent_state(
+        _controller: LivenessController, _binding_sha256: str
+    ) -> None:
+        raise SimulatedContinuationCrash()
+
+    with patch.object(
+        LivenessController,
+        "mark_callback_submit_sent",
+        crash_before_sent_state,
+    ):
+        try:
+            late_manager.continue_same_session_round(
+                "owner-1",
+                "runtime-1",
+                "checkpoint-1",
+                "continue.md",
+                "late-retry-round-1",
+                "late-retry-round-run-1",
+                "callbacks/late-retry-round.json",
+            )
+        except SimulatedContinuationCrash:
+            pass
+        else:
+            raise AssertionError(
+                "late retry crash seam must stop before sent-state publication"
+            )
+    late_parent = late_store.read("owner-1", "runtime-1")
+    late_receipt = next(
+        (
+            late_manager._state_root(late_parent)
+            / "continuation-deliveries"
+        ).glob("*.json")
+    )
+    check(
+        "late retry crash cannot publish submit-retried before sent-state durability",
+        json.loads(late_receipt.read_text(encoding="utf-8"))["status"]
+        == "submit-retry-reserved",
+        late_receipt.read_text(encoding="utf-8"),
+    )
+    late_replay_cmux = ReplayActivityCmux([])
+    late_manager.cmux = late_replay_cmux
+    late_resumed = late_manager.continue_same_session_round(
+        "owner-1",
+        "runtime-1",
+        "checkpoint-1",
+        "continue.md",
+        "late-retry-round-1",
+        "late-retry-round-run-1",
+        "callbacks/late-retry-round.json",
+    )
+    late_replay_state = late_liveness.current_state()
+    check(
+        "late retry crash replay promotes the exact reservation without duplicate input",
+        late_resumed.record.state == "awaiting-callback"
+        and late_replay_state is not None
+        and late_replay_state.callback_submit_status == "sent"
+        and late_replay_cmux.sent == []
+        and late_replay_cmux.submit_count == 0,
+        (
+            late_resumed,
+            late_replay_state,
+            late_replay_cmux.sent,
+            late_replay_cmux.submit_count,
+        ),
     )
     retry_payload = {
         "verdict": "approve",

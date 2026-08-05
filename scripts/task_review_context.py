@@ -80,6 +80,10 @@ _BOUNDARY_ARTIFACTS = {
 }
 
 
+class _ReviewedArtifactMissing(TaskReviewError):
+    """The exact reviewed tree has no entry for a boundary artifact."""
+
+
 def _reviewed_artifact_input(
     worktree: Path,
     relative: Path,
@@ -92,6 +96,18 @@ def _reviewed_artifact_input(
     if relative.is_absolute() or relative == Path(".") or ".." in relative.parts:
         raise TaskReviewError(
             f"review boundary artifact is unavailable: {relative}"
+        )
+    tracked_path = _git(
+        worktree,
+        "ls-tree",
+        "--name-only",
+        artifact_head,
+        "--",
+        relative.as_posix(),
+    )
+    if tracked_path != relative.as_posix():
+        raise _ReviewedArtifactMissing(
+            f"review boundary artifact has no reviewed Git blob: {relative}"
         )
     raw = _git_bytes(
         worktree,
@@ -241,7 +257,7 @@ def _purpose_boundary_inputs(
                     expected_sha256=expected_sha256,
                     pointer_root=pointer_root,
                 )
-            except TaskReviewError:
+            except _ReviewedArtifactMissing:
                 # Ignored release receipts have no Git blob. Their frozen
                 # boundary digest remains authoritative, and exact path
                 # confinement prevents substituting a foreign artifact.

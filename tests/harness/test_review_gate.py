@@ -5227,6 +5227,24 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             pointer_root=scratch / "pointers-rebound",
             artifact_head=reviewed_artifact_head,
         )
+        tracked_fallback_boundary = replace(
+            intent_boundary,
+            design_sha256=hashlib.sha256(
+                boundary_artifacts["design"].read_bytes()
+            ).hexdigest(),
+        )
+        try:
+            task_review_runner._purpose_boundary_inputs(
+                product.resolve(),
+                review_plan,
+                tracked_fallback_boundary,
+                pointer_root=scratch / "pointers-tracked-fallback",
+                artifact_head=reviewed_artifact_head,
+            )
+        except task_review_runner.TaskReviewError as exc:
+            tracked_fallback_rejected = "artifact digest is stale" in str(exc)
+        else:
+            tracked_fallback_rejected = False
         ignored_evidence = product / ".vault-meta/release-evidence.json"
         ignored_evidence.parent.mkdir(parents=True, exist_ok=True)
         ignored_evidence.write_text(
@@ -5270,6 +5288,10 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             == f"git:{reviewed_artifact_head}:wiki/review-plan.md"
             and ignored_rebound.content == ignored_evidence.read_bytes()
             and ignored_rebound.source == str(ignored_evidence.resolve()),
+        )
+        check(
+            "resolution rebind never replaces a stale tracked blob with mutable worktree bytes",
+            tracked_fallback_rejected,
         )
         boundary_artifacts["design"].write_bytes(reviewed_design)
         review_plan.write_bytes(reviewed_plan)

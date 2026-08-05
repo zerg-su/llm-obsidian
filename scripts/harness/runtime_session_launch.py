@@ -672,6 +672,12 @@ class RuntimeSessionLaunchMixin:
                 pre_send_editor_sha256: str,
                 paste_screen_sha256: str,
             ) -> None:
+                if status == "submit-retried":
+                    # Publish the exact generation effect before the more
+                    # advanced delivery receipt. A crash can therefore leave
+                    # a replayable reserved receipt, never a submit-retried
+                    # receipt paired with a still-reserved liveness binding.
+                    liveness.mark_callback_submit_sent(retry_binding)
                 self._write_json(
                     receipt_path,
                     {
@@ -683,8 +689,6 @@ class RuntimeSessionLaunchMixin:
                         "paste_screen_sha256": paste_screen_sha256,
                     },
                 )
-                if status == "submit-retried":
-                    liveness.mark_callback_submit_sent(retry_binding)
 
             class ContinuationUnconfirmed(RuntimeError):
                 pass

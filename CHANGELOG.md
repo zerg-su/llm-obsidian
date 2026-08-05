@@ -110,7 +110,11 @@ packages were published for them.
   digest validation.
 - Preserved ignored release evidence during resolution only when its confined
   file bytes match the original frozen boundary digest; tracked evidence stays
-  Git-backed.
+  Git-backed, and only a positively absent reviewed-tree entry may use the
+  fallback.
+- Made continuation retry stage publication crash-safe: the exact generation
+  binding reaches durable `sent` before the `submit-retried` receipt, so replay
+  cannot inherit a more advanced receipt with a reserved liveness effect.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative
