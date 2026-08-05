@@ -586,3 +586,14 @@ This coordinator-owned amendment records a pre-provider mechanism failure while 
 | D-264-56 | review context | resolution correctly rebound verification evidence to the reviewed Git HEAD, but still compared the current amended plan bytes with the original boundary plan digest; any required append-only defect amendment therefore stopped before verification with `review program plan digest is stale` | `included` | during an exact reviewed-to-resolved rebind, Outcome and original plan identity are read from `git show <reviewed-head>:<plan-path>` and checked against the frozen plan and Outcome digests; the current amended plan remains visible as the resolved plan plus exact fix delta; ordinary fresh reviews still reject dirty/stale plan bytes |
 
 The live failure occurred before ContextPacket completion and before provider, prompt, callback or review effect. The regression changes both plan and purpose evidence after the reviewed commit, proves the rebind sources both from the exact reviewed Git HEAD, and preserves the existing stale-plan rejection outside resolution. No budget, routing, topology, permission, public interface, migration, push, tag, publish or release authority changes.
+
+
+## Append-only ignored-evidence rebind amendment D-264-57
+
+This coordinator-owned amendment records the second pre-provider boundary exposed after D-264-56. It preserves the frozen Outcome Contract and the tracked-artifact exact-Git rule.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-57 | review context | the original implementation-gate receipt is intentionally ignored under `.vault-meta/release-evidence` and therefore has no blob at the reviewed Git HEAD; resolution attempted only `git show` and stopped before ContextPacket construction | `included` | tracked boundary artifacts still come from the exact reviewed Git object; only when no reviewed blob can be materialized may the existing path-confined regular file be used, and only when its bytes exactly match the frozen boundary SHA-256; missing, symlinked, foreign-path or changed bytes remain fail-closed |
+
+The live failure produced no provider, prompt, callback, verification or reviewer effect. The integrated regression changes the current plan and tracked purpose evidence, supplies an ignored receipt with its frozen digest, and proves resolution materializes the original Git-backed inputs plus the exact ignored receipt without accepting substitutions. No budget, routing, topology, permission, public interface, migration, push, tag, publish or release authority changes.

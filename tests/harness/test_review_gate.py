@@ -5227,12 +5227,38 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             pointer_root=scratch / "pointers-rebound",
             artifact_head=reviewed_artifact_head,
         )
+        ignored_evidence = product / ".vault-meta/release-evidence.json"
+        ignored_evidence.parent.mkdir(parents=True, exist_ok=True)
+        ignored_evidence.write_text(
+            '{"status":"passed"}\n', encoding="utf-8"
+        )
+        ignored_boundary = ReviewBoundaryInput(
+            purpose="implementation",
+            outcome_contract_sha256=intent_boundary.outcome_contract_sha256,
+            plan_sha256=intent_boundary.plan_sha256,
+            product_head_sha=reviewed_artifact_head,
+            verification_evidence_sha256=hashlib.sha256(
+                ignored_evidence.read_bytes()
+            ).hexdigest(),
+            verification_evidence_path=".vault-meta/release-evidence.json",
+        )
+        ignored_rebound_inputs = task_review_runner._purpose_boundary_inputs(
+            product.resolve(),
+            review_plan,
+            ignored_boundary,
+            pointer_root=scratch / "pointers-ignored-rebound",
+            artifact_head=reviewed_artifact_head,
+        )
         rebound_design = next(
             item for item in rebound_inputs if item.name == "review-design"
         )
         rebound_outcome = next(
             item for item in rebound_inputs
             if item.name == "outcome-contract.json"
+        )
+        ignored_rebound = next(
+            item for item in ignored_rebound_inputs
+            if item.name == "review-verification-evidence"
         )
         check(
             "resolution rebind preserves plan and purpose evidence from the exact reviewed HEAD",
@@ -5241,7 +5267,9 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             == f"git:{reviewed_artifact_head}:wiki/design.md"
             and rebound_outcome.content == reviewed_outcome
             and rebound_outcome.source
-            == f"git:{reviewed_artifact_head}:wiki/review-plan.md",
+            == f"git:{reviewed_artifact_head}:wiki/review-plan.md"
+            and ignored_rebound.content == ignored_evidence.read_bytes()
+            and ignored_rebound.source == str(ignored_evidence.resolve()),
         )
         boundary_artifacts["design"].write_bytes(reviewed_design)
         review_plan.write_bytes(reviewed_plan)

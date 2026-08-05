@@ -108,6 +108,9 @@ packages were published for them.
 - Bound resolution-time plan and Outcome semantics to the exact reviewed Git
   object, allowing append-only fix amendments without weakening fresh-plan
   digest validation.
+- Preserved ignored release evidence during resolution only when its confined
+  file bytes match the original frozen boundary digest; tracked evidence stays
+  Git-backed.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative

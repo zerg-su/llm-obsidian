@@ -153,6 +153,46 @@ def _reviewed_plan_outcome_input(
     )
 
 
+def _boundary_file_input(
+    source_root: Path,
+    relative: Path,
+    *,
+    name: str,
+    expected_sha256: str,
+    pointer_root: Path,
+) -> ContextInput:
+    """Materialize one path-confined artifact with its frozen digest."""
+
+    source_root = source_root.resolve()
+    candidate = source_root / relative
+    target = candidate.resolve()
+    if (
+        target == source_root
+        or source_root not in target.parents
+        or not target.is_file()
+        or candidate.is_symlink()
+    ):
+        raise TaskReviewError(
+            f"review boundary artifact is unavailable: {relative}"
+        )
+    try:
+        item = _bounded_input(
+            name,
+            target,
+            role="outcome",
+            pointer_root=pointer_root,
+        )
+    except OSError as exc:
+        raise TaskReviewError(
+            f"review boundary artifact is unavailable: {relative}"
+        ) from exc
+    if item.content_sha256 != expected_sha256:
+        raise TaskReviewError(
+            f"review boundary artifact digest is stale: {relative}"
+        )
+    return item
+
+
 def _purpose_boundary_inputs(
     worktree: Path,
     plan: Path,
@@ -188,45 +228,41 @@ def _purpose_boundary_inputs(
     source_root = (artifact_root or worktree).resolve()
     for name, path_field, digest_field in _BOUNDARY_ARTIFACTS[boundary.purpose]:
         relative = Path(str(getattr(boundary, path_field)))
+        expected_sha256 = str(getattr(boundary, digest_field))
         if artifact_head:
             if artifact_root is not None:
                 raise TaskReviewError(
                     f"review boundary artifact is unavailable: {relative}"
                 )
-            inputs.append(
-                _reviewed_artifact_input(
+            try:
+                item = _reviewed_artifact_input(
+                    worktree, relative, name=name,
+                    artifact_head=artifact_head,
+                    expected_sha256=expected_sha256,
+                    pointer_root=pointer_root,
+                )
+            except TaskReviewError:
+                # Ignored release receipts have no Git blob. Their frozen
+                # boundary digest remains authoritative, and exact path
+                # confinement prevents substituting a foreign artifact.
+                item = _boundary_file_input(
                     worktree,
                     relative,
                     name=name,
-                    artifact_head=artifact_head,
-                    expected_sha256=str(getattr(boundary, digest_field)),
+                    expected_sha256=expected_sha256,
                     pointer_root=pointer_root,
                 )
-            )
+            inputs.append(item)
             continue
-        candidate = source_root / relative
-        target = candidate.resolve()
-        if (
-            target == source_root
-            or source_root not in target.parents
-            or not target.is_file()
-            or candidate.is_symlink()
-        ):
-            raise TaskReviewError(f"review boundary artifact is unavailable: {relative}")
-        try:
-            item = _bounded_input(
-                name,
-                target,
-                role="outcome",
+        inputs.append(
+            _boundary_file_input(
+                source_root,
+                relative,
+                name=name,
+                expected_sha256=expected_sha256,
                 pointer_root=pointer_root,
             )
-        except OSError as exc:
-            raise TaskReviewError(
-                f"review boundary artifact is unavailable: {relative}"
-            ) from exc
-        if item.content_sha256 != getattr(boundary, digest_field):
-            raise TaskReviewError(f"review boundary artifact digest is stale: {relative}")
-        inputs.append(item)
+        )
     return tuple(inputs)
 
 

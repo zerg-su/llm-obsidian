@@ -111,6 +111,9 @@
 - Во время resolution исходный план и Outcome теперь читаются из точного
   reviewed Git object: append-only amendment передаётся как fix delta, а
   обычная stale/dirty граница по-прежнему блокируется.
+- Игнорируемый release receipt без Git blob сохраняется при resolution только
+  из path-confined regular file с точным frozen digest; tracked evidence
+  остаётся привязанным к reviewed commit.
 - После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
   материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся
