@@ -60,6 +60,9 @@ packages were published for them.
 - Prevented unattended Codex reviews from stalling at the native rate-limit
   model-switch dialog. The exact prompt keeps the route-bound model without
   disabling future reminders; unknown choices still receive no input.
+- Restored the frozen plan's exact UTF-8 Outcome bytes after an intermediate
+  documentation transaction introduced replacement characters and correctly
+  triggered a pre-provider digest rejection.
 - Closed the release-evidence gap between callback acceptance and lifecycle
   completion: the dogfood trace reaches resource-free terminal parent/child
   states and an actual `reap-ready` pipeline boundary, with a separate final
