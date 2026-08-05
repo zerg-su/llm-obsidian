@@ -46,6 +46,10 @@ from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
+from harness.verification_attempt import (  # noqa: E402
+    VerificationAttempt,
+    mechanism_flake_decision_text,
+)
 from harness.workflows.reap import run_reap
 from harness.workflows.review import (
     ReviewContext,
@@ -55,7 +59,11 @@ from harness.workflows.review import (
 from harness.workflows.review_gate import ReviewGateController, ReviewPreset
 from outcome_contract import extract_from_bytes
 from review_resolution import review_transport_identity_sha256
-from task_escalation_records import load_attention
+from task_escalation_records import (
+    append_raise,
+    append_resolution,
+    load_attention,
+)
 
 
 ORIGIN = "11111111-1111-1111-1111-111111111111"
@@ -2219,7 +2227,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         and failed_packet["step_id"] == "verify"
         and failed_packet["safe_boundary"] == "tdd-slices-complete"
         and failed_packet["allowed_responses"]
-        == ["fix-and-resubmit", "escalate"]
+        == ["fix-and-resubmit", "retry-mechanism-flake", "escalate"]
         and failed_packet["evidence"][0]["command_id"]
         == "scoped-1"
         and failed_packet["response_pointer"]
@@ -2243,6 +2251,241 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
             commands_before_resubmission,
             failed_cmux.sent,
         ),
+    )
+
+    def same_head_authorizer(
+        task_id: str, completed: threading.Event
+    ) -> Callable[[Path, Path, Path, str], None]:
+        def arrange(
+            _vault: Path,
+            worktree: Path,
+            _state: Path,
+            _profile_sha: str,
+        ) -> None:
+            def authorize() -> None:
+                packet = read_json_eventually(
+                    worktree / ".task-verification.json", timeout=3
+                )
+                attempt = VerificationAttempt.from_dict(
+                    packet["verification_attempt"]
+                )
+                escalation_id = f"mechanism-flake-{task_id[:8]}"
+                meta = json.loads(
+                    (worktree / ".task-meta.json").read_text(encoding="utf-8")
+                )
+                append_raise(
+                    worktree,
+                    {
+                        "version": 1,
+                        "id": escalation_id,
+                        "status": "pending",
+                        "task_name": "same-head verification runtime",
+                        "category": "mechanism-failure",
+                        "reason": (
+                            "verification-mechanism-flake: exact isolated "
+                            "profile passed"
+                        ),
+                        "question": (
+                            "Authorize one exact same-HEAD verification retry?"
+                        ),
+                        "worktree": str(worktree.resolve()),
+                        "task_surface": str(meta["task_surface"]),
+                        "raised_at": "2026-08-05T12:00:00Z",
+                        "coordinator_policy": (
+                            "classify-and-auto-repair-if-eligible"
+                        ),
+                    },
+                )
+                resolution = append_resolution(
+                    worktree,
+                    mechanism_flake_decision_text(
+                        attempt, str(packet["verification_operation_id"])
+                    ),
+                    resolved_at="2026-08-05T12:01:00Z",
+                )
+                packet_sha256 = hashlib.sha256(
+                    json.dumps(
+                        packet, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                next_attempt = attempt.same_head_retry()
+                write_json(
+                    worktree / ".task-verification-response.json",
+                    {
+                        "schema_version": 2,
+                        "operation_id": task_id,
+                        "verification_operation_id": packet[
+                            "verification_operation_id"
+                        ],
+                        "failed_head_sha": packet["head_sha"],
+                        "packet_sha256": packet_sha256,
+                        "response": "retry-mechanism-flake",
+                        "resubmitted_head_sha": packet["head_sha"],
+                        "failed_attempt_sha256": attempt.sha256,
+                        "next_attempt": next_attempt.as_dict(),
+                        "next_attempt_sha256": next_attempt.sha256,
+                        "mechanism_flake_decision_id": escalation_id,
+                        "mechanism_flake_decision_sha256": resolution.sha256,
+                    },
+                )
+                completed.set()
+
+            threading.Thread(target=authorize).start()
+
+        return arrange
+
+    same_head_task = "abaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    same_head_commands: list[tuple[str, ...]] = []
+    same_head_first_command = [True]
+    same_head_authorized = threading.Event()
+
+    def fail_once_same_head(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        same_head_commands.append(tuple(argv))
+        failed = same_head_first_command[0]
+        same_head_first_command[0] = False
+        return subprocess.CompletedProcess(
+            argv, 1 if failed else 0, "ok\n" if not failed else "", ""
+        )
+
+    same_head_store, _same_head_cmux, same_head_state, same_head_rc = run_case(
+        root,
+        same_head_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=fail_once_same_head,
+        before_start=same_head_authorizer(
+            same_head_task, same_head_authorized
+        ),
+    )
+    if not same_head_authorized.wait(timeout=1):
+        raise AssertionError("same-HEAD authorization was not published")
+    same_head_parent = same_head_store.read("owner-1", same_head_task)
+    same_head_children = [
+        record
+        for record in same_head_store.list("owner-1")
+        if record.spec.kind == "pipeline-verify"
+    ]
+    same_head_receipts = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(
+            (same_head_state / "pipeline-verification").glob("*/receipt.json")
+        )
+    ]
+    same_head_response_receipts = list(
+        (same_head_state / "pipeline-verification").glob(
+            "*/response-receipt.json"
+        )
+    )
+    same_head_commit_count = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=root / f"worktree-{same_head_task}",
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    check(
+        "one authorized same-HEAD attempt preserves attempt-zero evidence",
+        same_head_rc == 0
+        and same_head_parent.state == "finalizing"
+        and same_head_parent.accepted_callback_kind == "wiki-summary"
+        and len(same_head_children) == 2
+        and sorted(record.state for record in same_head_children)
+        == ["complete", "failed"]
+        and {row["head_sha"] for row in same_head_receipts}
+        == {same_head_receipts[0]["head_sha"]}
+        and sorted(
+            row["verification_attempt"]["attempt_index"]
+            for row in same_head_receipts
+        )
+        == [0, 1]
+        and len(same_head_response_receipts) == 1
+        and json.loads(
+            same_head_response_receipts[0].read_text(encoding="utf-8")
+        )["schema_version"]
+        == 2
+        and same_head_commit_count == "1"
+        and same_head_commands
+        == [
+            ("make", "test-harness"),
+            ("make", "test-harness"),
+            ("make", "test-model-routing"),
+            ("git", "diff", "--check"),
+        ]
+        and all(
+            command[0] not in {"codex", "claude"}
+            for command in same_head_commands
+        ),
+        (
+            same_head_parent,
+            same_head_children,
+            same_head_receipts,
+            same_head_commands,
+            same_head_commit_count,
+        ),
+    )
+
+    exhausted_task = "acaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    exhausted_authorized = threading.Event()
+
+    def always_fail_same_head(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return subprocess.run(
+                argv,
+                cwd=kwargs["cwd"],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        return subprocess.CompletedProcess(argv, 1, "", "failed\n")
+
+    exhausted_store, _exhausted_cmux, exhausted_state, _exhausted_rc = run_case(
+        root,
+        exhausted_task,
+        valid_summary,
+        pipeline_name="engineering/change",
+        verification_runner=always_fail_same_head,
+        before_start=same_head_authorizer(
+            exhausted_task, exhausted_authorized
+        ),
+    )
+    if not exhausted_authorized.wait(timeout=1):
+        raise AssertionError("exhaustion authorization was not published")
+    exhausted_parent = exhausted_store.read("owner-1", exhausted_task)
+    exhausted_packet = json.loads(
+        (
+            root
+            / f"worktree-{exhausted_task}"
+            / ".task-verification.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "a second same-HEAD retry stops at typed attention",
+        exhausted_parent.state == "attention-required"
+        and exhausted_parent.attention_reason == AttentionReason.RETRY_EXHAUSTED
+        and exhausted_packet["verification_attempt"]["attempt_index"] == 1
+        and "retry-mechanism-flake"
+        not in exhausted_packet["allowed_responses"]
+        and len(
+            [
+                record
+                for record in exhausted_store.list("owner-1")
+                if record.spec.kind == "pipeline-verify"
+            ]
+        )
+        == 2,
+        (exhausted_parent, exhausted_packet),
     )
 
     crash_task = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"

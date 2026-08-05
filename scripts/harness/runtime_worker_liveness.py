@@ -393,20 +393,22 @@ class RuntimeWorkerLivenessMixin:
             if receipt_sha256
             else ArtifactEvidence()
         )
+        # The OperationStore is the lifecycle authority. Refresh the durable
+        # liveness projection on every callback observation so a worker resumed
+        # after a succeeded continuation cannot retain an older `starting`
+        # revision and misclassify the current awaiting-callback generation.
+        self.liveness_controller.observe(
+            LivenessEvidence(
+                observed_at=observed_at,
+                process_status=process_status,
+                operation_revision=record.revision,
+                operation_state=record.state,
+                callback_sha256=callback_artifact.sha256,
+                receipt_sha256=receipt_artifact.sha256,
+            ),
+            self.liveness_policy,
+        )
         current = self.liveness_controller.current_state()
-        if current is None:
-            self.liveness_controller.observe(
-                LivenessEvidence(
-                    observed_at=observed_at,
-                    process_status=process_status,
-                    operation_revision=record.revision,
-                    operation_state=record.state,
-                    callback_sha256=callback_artifact.sha256,
-                    receipt_sha256=receipt_artifact.sha256,
-                ),
-                self.liveness_policy,
-            )
-            current = self.liveness_controller.current_state()
         if current is None:
             self.callback_submit_attention("callback-submit-evidence-malformed")
             return

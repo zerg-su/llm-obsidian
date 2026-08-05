@@ -10,6 +10,7 @@ from .runtime_worker import (
     _current_callback_receipt_sha256,
     _envelope,
     _normalize_fetch_errors_at_provider_boundary,
+    _pipeline_verify_effect_id,
     _pipeline_verify_identity,
     _research_input_provenance,
     _review_resolution_handoff_ready,
@@ -18,6 +19,43 @@ from .runtime_worker import (
 
 
 class RuntimeWorkerVerificationMixin:
+
+    def verification_attempt_from_receipt(
+        self, receipt: dict[str, object]
+    ) -> VerificationAttempt:
+        try:
+            if receipt.get("schema_version") == 2:
+                attempt = VerificationAttempt.from_dict(
+                    receipt.get("verification_attempt")
+                )
+                if receipt.get("verification_attempt_sha256") != attempt.sha256:
+                    raise VerificationAttemptError(
+                        "verification attempt digest is invalid"
+                    )
+            else:
+                attempt = VerificationAttempt(
+                    parent_operation_id=str(
+                        receipt.get("parent_operation_id") or ""
+                    ),
+                    profile=str(receipt.get("profile") or ""),
+                    profile_sha256=str(receipt.get("profile_sha256") or ""),
+                    exact_head_sha=str(receipt.get("head_sha") or ""),
+                    attempt_index=0,
+                )
+        except VerificationAttemptError as exc:
+            raise RuntimeWorkerError(
+                "pipeline verification attempt identity is invalid"
+            ) from exc
+        if (
+            attempt.parent_operation_id != self.spec["operation_id"]
+            or attempt.profile != self.profile.name
+            or attempt.profile_sha256 != self.profile.sha256
+            or attempt.exact_head_sha != receipt.get("head_sha")
+        ):
+            raise RuntimeWorkerError(
+                "pipeline verification attempt identity is invalid"
+            )
+        return attempt
 
     def load_verification_receipt(self, receipt_path: Path) -> dict[str, object] | None:
         if not receipt_path.exists():
@@ -28,7 +66,7 @@ class RuntimeWorkerVerificationMixin:
         evidence = receipt.get("evidence") if isinstance(receipt, dict) else None
         if (
             not isinstance(receipt, dict)
-            or receipt.get("schema_version") != 1
+            or receipt.get("schema_version") not in {1, 2}
             or receipt.get("parent_operation_id") != self.spec["operation_id"]
             or (receipt.get("definition_sha256") != self.pipeline.definition_sha256)
             or (receipt.get("step_id") != "verify")
@@ -44,6 +82,7 @@ class RuntimeWorkerVerificationMixin:
         ):
             raise RuntimeWorkerError("pipeline verification receipt is invalid")
         receipt_head = str(receipt["head_sha"])
+        attempt = self.verification_attempt_from_receipt(receipt)
         receipt_input_sha256 = str(receipt.get("input_sha256") or "")
         if not re.fullmatch("[0-9a-f]{64}", receipt_input_sha256):
             raise RuntimeWorkerError("pipeline verification input identity is invalid")
@@ -52,6 +91,7 @@ class RuntimeWorkerVerificationMixin:
             definition_sha256=self.pipeline.definition_sha256,
             input_sha256=receipt_input_sha256,
             profile=self.profile.name,
+            attempt_index=attempt.attempt_index,
         )
         if (
             receipt.get("input_sha256") != receipt_input_sha256
@@ -60,7 +100,9 @@ class RuntimeWorkerVerificationMixin:
             or (receipt.get("run_id") != expected_run_id)
             or (
                 receipt.get("effect_id")
-                != "pipeline-verify-" + receipt_input_sha256[:32]
+                != _pipeline_verify_effect_id(
+                    receipt_input_sha256, attempt.attempt_index
+                )
             )
         ):
             raise RuntimeWorkerError("pipeline verification replay identity is invalid")
@@ -223,7 +265,7 @@ class RuntimeWorkerVerificationMixin:
         accepted = json.loads(response_receipt_path.read_text(encoding="utf-8"))
         if (
             not isinstance(accepted, dict)
-            or accepted.get("schema_version") != 1
+            or accepted.get("schema_version") not in {1, 2}
             or accepted.get("operation_id") != self.spec["operation_id"]
             or (accepted.get("verification_operation_id") != receipt["operation_id"])
             or (accepted.get("failed_head_sha") != receipt["head_sha"])
@@ -233,11 +275,38 @@ class RuntimeWorkerVerificationMixin:
                     "[0-9a-f]{40,64}", str(accepted.get("resubmitted_head_sha") or "")
                 )
             )
-            or (accepted.get("resubmitted_head_sha") == receipt["head_sha"])
             or (
                 not re.fullmatch(
                     "[0-9a-f]{64}", str(accepted.get("response_sha256") or "")
                 )
+            )
+        ):
+            raise RuntimeWorkerError("verification response receipt is invalid")
+        if accepted["schema_version"] == 1:
+            if accepted.get("resubmitted_head_sha") == receipt["head_sha"]:
+                raise RuntimeWorkerError("verification response receipt is invalid")
+            return True
+        failed_attempt = self.verification_attempt_from_receipt(receipt)
+        try:
+            next_attempt = VerificationAttempt.from_dict(
+                accepted.get("next_attempt")
+            )
+        except VerificationAttemptError as exc:
+            raise RuntimeWorkerError(
+                "verification response receipt is invalid"
+            ) from exc
+        if (
+            failed_attempt.attempt_index != 0
+            or accepted.get("resubmitted_head_sha") != receipt["head_sha"]
+            or accepted.get("failed_attempt_sha256") != failed_attempt.sha256
+            or accepted.get("next_attempt_sha256") != next_attempt.sha256
+            or next_attempt != failed_attempt.same_head_retry()
+            or not IDENTIFIER.fullmatch(
+                str(accepted.get("mechanism_flake_decision_id") or "")
+            )
+            or not re.fullmatch(
+                "[0-9a-f]{64}",
+                str(accepted.get("mechanism_flake_decision_sha256") or ""),
             )
         ):
             raise RuntimeWorkerError("verification response receipt is invalid")
@@ -258,6 +327,25 @@ class RuntimeWorkerVerificationMixin:
         for path in receipts_root.glob("*/receipt.json"):
             receipt = self.load_verification_receipt(path)
             if receipt is not None and receipt["status"] == "failed":
+                count += 1
+        return count
+
+    def changed_head_resubmit_count(self) -> int:
+        count = 0
+        receipts_root = self.spec_path.parent / "pipeline-verification"
+        if not receipts_root.is_dir():
+            return 0
+        for path in receipts_root.glob("*/response-receipt.json"):
+            if path.is_symlink() or not path.is_file():
+                raise RuntimeWorkerError("verification response receipt is invalid")
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(value, dict)
+                and value.get("schema_version") == 1
+                and value.get("status") == "accepted"
+                and value.get("resubmitted_head_sha")
+                != value.get("failed_head_sha")
+            ):
                 count += 1
         return count
 
@@ -420,7 +508,11 @@ class RuntimeWorkerVerificationMixin:
         return True
 
     def verification_attention_packet(
-        self, receipt: dict[str, object], *, allow_resubmit: bool
+        self,
+        receipt: dict[str, object],
+        *,
+        allow_resubmit: bool,
+        allow_same_head_retry: bool = False,
     ) -> tuple[dict[str, object], str]:
         raw_evidence = receipt.get("evidence")
         if not isinstance(raw_evidence, list):
@@ -438,9 +530,18 @@ class RuntimeWorkerVerificationMixin:
         ]
         if len(packet_evidence) != len(raw_evidence):
             raise RuntimeWorkerError("verification attention evidence is invalid")
-        allowed = ["fix-and-resubmit", "escalate"] if allow_resubmit else ["escalate"]
+        attempt = self.verification_attempt_from_receipt(receipt)
+        allowed = [
+            *(["fix-and-resubmit"] if allow_resubmit else []),
+            *(
+                ["retry-mechanism-flake"]
+                if allow_same_head_retry and attempt.attempt_index == 0
+                else []
+            ),
+            "escalate",
+        ]
         packet = {
-            "schema_version": 1,
+            "schema_version": 2,
             "operation_id": self.spec["operation_id"],
             "verification_operation_id": str(receipt["operation_id"]),
             "verification_lane_id": str(receipt["lane_id"]),
@@ -462,6 +563,8 @@ class RuntimeWorkerVerificationMixin:
                 ).resolve()
             ),
             "evidence": packet_evidence,
+            "verification_attempt": attempt.as_dict(),
+            "verification_attempt_sha256": attempt.sha256,
         }
         encoded = json.dumps(packet, sort_keys=True, separators=(",", ":")).encode()
         if len(encoded) > MAX_OUTBOX_BYTES:
@@ -469,10 +572,16 @@ class RuntimeWorkerVerificationMixin:
         return (packet, hashlib.sha256(encoded).hexdigest())
 
     def notify_verification_attention(
-        self, receipt: dict[str, object], *, allow_resubmit: bool
+        self,
+        receipt: dict[str, object],
+        *,
+        allow_resubmit: bool,
+        allow_same_head_retry: bool = False,
     ) -> str:
         packet, packet_sha256 = self.verification_attention_packet(
-            receipt, allow_resubmit=allow_resubmit
+            receipt,
+            allow_resubmit=allow_resubmit,
+            allow_same_head_retry=allow_same_head_retry,
         )
         packet_path = self.spec["cwd"] / ".task-verification.json"
         if packet_path.is_symlink():
@@ -513,7 +622,7 @@ class RuntimeWorkerVerificationMixin:
         )
         self.cmux_adapter.send(
             self.spec["surface_id"],
-            f"Typed pipeline verification attention is ready in .task-verification.json. For fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`; otherwise use task_escalation.py. Do not launch review or reap.",
+            f"Typed pipeline verification attention is ready in .task-verification.json. For changed-HEAD fix-and-resubmit, commit the fix and run `python3 {self.trusted_vault}/scripts/pipeline-verification-resubmit.py --worktree {self.spec['cwd']}`. A same-HEAD retry requires a resolved mechanism-failure escalation whose exact decision is bound by D-265-VRF-01, then the same command with `--same-head-mechanism-flake <escalation-id>`. Do not create an empty commit, launch review, or invoke reap.",
         )
         self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
         _atomic_json(
@@ -531,7 +640,11 @@ class RuntimeWorkerVerificationMixin:
         if self.verification_head == failed["head_sha"]:
             return False
         _, packet_sha256 = self.verification_attention_packet(
-            failed, allow_resubmit=True
+            failed,
+            allow_resubmit=True,
+            allow_same_head_retry=(
+                self.verification_attempt_from_receipt(failed).attempt_index == 0
+            ),
         )
         response_path = self.spec["cwd"] / ".task-verification-response.json"
         try:
@@ -588,6 +701,141 @@ class RuntimeWorkerVerificationMixin:
                 raise RuntimeWorkerError("verification response receipt is invalid")
         else:
             _atomic_json(response_receipt_path, response_receipt)
+        failed_record = self.store.read(
+            self.spec["owner_id"], str(failed["operation_id"])
+        )
+        if failed_record.state == "attention-required":
+            self.store.transition(
+                self.spec["owner_id"], failed_record.spec.operation_id, "failed"
+            )
+        elif failed_record.state != "failed":
+            raise RuntimeWorkerError("failed verification operation cannot resume")
+        return True
+
+    def accept_same_head_verification_retry(
+        self, failed: dict[str, object]
+    ) -> bool:
+        failed_attempt = self.verification_attempt_from_receipt(failed)
+        if (
+            failed_attempt.exact_head_sha != self.verification_head
+            or failed_attempt.attempt_index != 0
+        ):
+            return False
+        _, packet_sha256 = self.verification_attention_packet(
+            failed,
+            allow_resubmit=(
+                self.changed_head_resubmit_count()
+                < MAX_PIPELINE_VERIFY_RESUBMITS
+            ),
+            allow_same_head_retry=True,
+        )
+        response_path = self.spec["cwd"] / ".task-verification-response.json"
+        try:
+            raw = response_path.read_bytes()
+        except FileNotFoundError:
+            return False
+        if response_path.is_symlink() or not raw or len(raw) > MAX_OUTBOX_BYTES:
+            raise RuntimeWorkerError("verification resubmission response is invalid")
+        response = json.loads(raw)
+        expected_keys = {
+            "schema_version",
+            "operation_id",
+            "verification_operation_id",
+            "failed_head_sha",
+            "packet_sha256",
+            "response",
+            "resubmitted_head_sha",
+            "failed_attempt_sha256",
+            "next_attempt",
+            "next_attempt_sha256",
+            "mechanism_flake_decision_id",
+            "mechanism_flake_decision_sha256",
+        }
+        try:
+            next_attempt = VerificationAttempt.from_dict(
+                response.get("next_attempt") if isinstance(response, dict) else None
+            )
+        except VerificationAttemptError as exc:
+            raise RuntimeWorkerError(
+                "verification resubmission response is invalid"
+            ) from exc
+        if (
+            not isinstance(response, dict)
+            or set(response) != expected_keys
+            or response.get("schema_version") != 2
+            or response.get("operation_id") != self.spec["operation_id"]
+            or response.get("verification_operation_id")
+            != failed["operation_id"]
+            or response.get("failed_head_sha") != failed["head_sha"]
+            or response.get("packet_sha256") != packet_sha256
+            or response.get("response") != "retry-mechanism-flake"
+            or response.get("resubmitted_head_sha") != self.verification_head
+            or response.get("failed_attempt_sha256") != failed_attempt.sha256
+            or response.get("next_attempt_sha256") != next_attempt.sha256
+            or next_attempt != failed_attempt.same_head_retry()
+            or not IDENTIFIER.fullmatch(
+                str(response.get("mechanism_flake_decision_id") or "")
+            )
+            or not re.fullmatch(
+                "[0-9a-f]{64}",
+                str(response.get("mechanism_flake_decision_sha256") or ""),
+            )
+        ):
+            raise RuntimeWorkerError("verification resubmission response is invalid")
+        try:
+            decision_record = load_latest_escalation(self.spec["cwd"])
+        except EscalationRecordError as exc:
+            raise RuntimeWorkerError(
+                "verification mechanism-flake decision is invalid"
+            ) from exc
+        payload = decision_record.payload if decision_record is not None else {}
+        if (
+            decision_record is None
+            or decision_record.record_type != "resolution"
+            or decision_record.sha256
+            != response["mechanism_flake_decision_sha256"]
+            or payload.get("status") != "resolved"
+            or payload.get("category") != "mechanism-failure"
+            or payload.get("id") != response["mechanism_flake_decision_id"]
+            or Path(str(payload.get("worktree") or "")).expanduser().resolve()
+            != self.spec["cwd"]
+            or not str(payload.get("reason") or "").startswith(
+                "verification-mechanism-flake:"
+            )
+            or payload.get("decision")
+            != mechanism_flake_decision_text(
+                failed_attempt, str(failed["operation_id"])
+            )
+        ):
+            raise RuntimeWorkerError(
+                "verification mechanism-flake decision is invalid"
+            )
+        response_sha256 = hashlib.sha256(
+            json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        response_receipt_path = (
+            self.spec_path.parent
+            / "pipeline-verification"
+            / str(failed["operation_id"])
+            / "response-receipt.json"
+        )
+        response_receipt = {
+            "schema_version": 2,
+            "operation_id": self.spec["operation_id"],
+            "verification_operation_id": failed["operation_id"],
+            "failed_head_sha": failed["head_sha"],
+            "resubmitted_head_sha": self.verification_head,
+            "failed_attempt_sha256": failed_attempt.sha256,
+            "next_attempt": next_attempt.as_dict(),
+            "next_attempt_sha256": next_attempt.sha256,
+            "mechanism_flake_decision_id": response[
+                "mechanism_flake_decision_id"
+            ],
+            "mechanism_flake_decision_sha256": decision_record.sha256,
+            "response_sha256": response_sha256,
+            "status": "accepted",
+        }
+        self.write_immutable_json(response_receipt_path, response_receipt)
         failed_record = self.store.read(
             self.spec["owner_id"], str(failed["operation_id"])
         )
@@ -695,7 +943,7 @@ class RuntimeWorkerVerificationMixin:
                 _atomic_json(
                     self.verification_receipt_path,
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "operation_id": self.verification_spec.operation_id,
                         "parent_operation_id": self.spec["operation_id"],
                         "lane_id": self.verification_lane_id,
@@ -707,6 +955,12 @@ class RuntimeWorkerVerificationMixin:
                         "profile": self.profile.name,
                         "profile_sha256": self.profile.sha256,
                         "effect_id": self.verification_effect_id,
+                        "verification_attempt": (
+                            self.verification_attempt.as_dict()
+                        ),
+                        "verification_attempt_sha256": (
+                            self.verification_attempt.sha256
+                        ),
                         "status": (
                             "complete"
                             if all((row["exit_code"] == 0 for row in rows))
