@@ -564,3 +564,14 @@ This coordinator-owned amendment resolves the two important engineering findings
 | D-264-54 | escalation records | the immutable decision file was fsynced, but its records-directory entry was not made durable before the latest pointer could be published | `included` | first-use records-directory creation is fsynced in the worktree and every immutable record entry is fsynced in its parent before pointer replacement; the ordered regression proves both directory barriers precede publication |
 
 Focused runtime-session, continuation-delivery, callback-recovery, liveness and escalation-record suites are green. The corrected candidate must repeat the complete exact-HEAD gate ladder, continue the same Sol implementation review for verification, and then pass the separate purpose=release audit. No new review lane, provider budget, retry budget, route, permission, public interface, migration, push, tag, publish or release is authorized.
+
+
+## Append-only coverage closure amendment D-264-55
+
+This coordinator-owned amendment records the final exact-HEAD coverage rejection after D-264-53 and D-264-54. It preserves the frozen Outcome Contract and changes no production/runtime behavior.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-55 | test harness | honest stdlib tracing measured `scripts.harness.liveness` at 85.8%, below the standing 86.0% critical floor, because the fail-closed transition from an observed liveness state to `mark_callback_submit_uncertain` without an exact reservation had no direct behavioral assertion | `included` | `test_liveness.py` now proves the unreserved uncertain transition is rejected without state mutation; `make test-harness-coverage` is green at 76.02% across 128 modules, liveness is 86.1%, and all 4,370 transition cases remain complete |
+
+The repair is test-only. It does not lower a coverage floor or change provider behavior, callback effects, budgets, routing, review topology, public interfaces, migration, push, tag, publish or release authority. The new exact HEAD must repeat the complete release ladder before bounded implementation verification and the separate purpose=release audit.

@@ -529,6 +529,18 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-no-reservation.") as ra
         )
     else:
         check("callback submit cannot be marked sent without reservation", False)
+    try:
+        controller.mark_callback_submit_uncertain(callback_submit_binding)
+    except Exception as exc:
+        check(
+            "callback submit cannot be marked uncertain without reservation",
+            "reservation identity changed" in str(exc),
+        )
+    else:
+        check(
+            "callback submit cannot be marked uncertain without reservation",
+            False,
+        )
 
 with tempfile.TemporaryDirectory(prefix="callback-submit-uncertain.") as raw:
     controller = LivenessController(Path(raw))

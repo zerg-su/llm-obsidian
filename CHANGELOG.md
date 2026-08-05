@@ -102,6 +102,9 @@ packages were published for them.
 - Made append-only escalation publication directory-durable: first-use records
   directory creation and every immutable record entry are fsynced before the
   latest pointer can be replaced.
+- Added a direct fail-closed liveness assertion for an uncertain callback
+  submit without an exact reservation; the standing coverage floor was not
+  lowered.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative

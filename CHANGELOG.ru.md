@@ -106,6 +106,8 @@
 - Публикация append-only escalation стала directory-durable: создание каталога
   records при первом использовании и каждая immutable directory entry получают
   `fsync` раньше, чем заменяется latest pointer.
+- Добавлена прямая fail-closed проверка uncertain callback submit без точной
+  reservation; установленный порог покрытия не снижался.
 - После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
   материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся
