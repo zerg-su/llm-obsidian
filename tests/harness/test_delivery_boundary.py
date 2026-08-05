@@ -225,6 +225,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
     for label, terminal_kind in (
         ("ephemeral exit without result is terminal attention", "process-exited"),
         ("explicit event gap is terminal attention", "event-gap"),
+        ("ephemeral resource close without result preserves attention", "resource-closed"),
     ):
         controller = DeliveryController(
             root / terminal_kind,

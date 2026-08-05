@@ -312,6 +312,8 @@ class DeliveryController:
                     )
                 elif event.kind == "process-exited" and not cursor.result_published:
                     state = replace(state, attention_reason="result-missing")
+                elif event.kind == "resource-closed" and not cursor.result_published:
+                    state = replace(state, attention_reason="result-missing")
 
                 self._write(state)
                 if state.attention_reason:
