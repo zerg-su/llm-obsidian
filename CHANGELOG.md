@@ -10,6 +10,45 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.5] - 2026-08-05
+
+### Added
+
+- Added immutable exact-HEAD `ReviewAttempt` and bounded
+  `VerificationAttempt` records. One coordinator-authorized mechanism-flake
+  decision may create same-HEAD attempt 1 without a model call; attempt 0 stays
+  durable and a second retry stops with typed attention.
+- Added a closed, cursor-bound `ProviderEvent` stream for delivery, progress,
+  exit and resource closure, with equal Claude print and Codex exec ephemeral
+  adapter contracts.
+- Added atomic five-cycle finalization, freshness-bounded independent-provider
+  availability and additive PipelineSpec finalization metadata.
+- Added governed Split manifests. `$split` remains a zero-effect preview;
+  explicit `$split --dispatch` drives bounded workspace-local waves through the
+  existing dispatch adapter and joins exact approved resource-free receipts in
+  manifest order.
+
+### Changed
+
+- Cross-HEAD same-session review continuation is removed from the active path.
+  Changed product HEADs start a distinct attempt; legacy records remain
+  inspectable but cannot trigger a provider effect.
+- Time, screen content and physical resource disappearance are observations,
+  never lifecycle authority. Durable typed events repair stale liveness state,
+  and Stop remains the sole callback-submit owner.
+- Task metadata v4 optionally carries an immutable Split child policy without
+  changing v1-v3 read compatibility or ordinary dispatch behavior.
+
+### Fixed
+
+- Made the synthetic task-summary publisher used by runtime tests atomic, and
+  proved the stable-read watcher cannot observe partial JSON.
+- Kept immutable escalation records durable while ignoring their runtime
+  directory, so raised and resolved evidence survives with a clean Git status.
+- Bound Split activation to a green pre-activation Stability Gate and stopped
+  every invalid manifest, budget, receipt, dependency, HEAD or resource state
+  before replaying a child or provider effect.
+
 ## [2.6.4] - 2026-08-04
 
 ### Added

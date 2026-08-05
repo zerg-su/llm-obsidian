@@ -77,11 +77,12 @@ The canonical state is ordinary Markdown, JSON/TOML contracts, Git history, and 
 
 1. **Understand.** `clarify` (the built-in “grill me” workflow) inspects repository facts and asks one material question at a time before code or a plan.
 2. **Plan.** Important decisions become a saved plan with provenance and a stable DragonScale address.
-3. **Dispatch.** The restartable harness captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
-4. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
-5. **Review.** Simple review uses one selected read-only holistic lane. Default Deep review runs independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
-6. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
-7. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The supervisor closes that exact surface after the agent process exits; it never guesses another tab.
+3. **Split when explicitly approved.** `$split` is a zero-effect manifest preview. `$split --dispatch` activates only an approved bounded DAG, launches dependency-ready workspace children through the existing dispatch adapter, and joins exact approved resource-free receipts in manifest order.
+4. **Dispatch.** The restartable harness captures project/task/session IDs, the exact model route, approved plan hash, permission domain, worktree, and caller cmux surface. It opens the task to the right of the correct coordinator instead of whichever tab happens to be selected later.
+5. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
+6. **Review.** Simple review uses one selected read-only holistic lane. Default Deep review runs independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
+7. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
+8. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The supervisor closes that exact surface after the agent process exits; it never guesses another tab.
 
 Review approval finishes a **round**, not the whole task. The task remains resumable until final reap. Archived sessions are never silently attached to another task ID.
 
@@ -97,6 +98,7 @@ In Codex, use the explicit `$llm-obsidian:<skill>` name.
 | Save the agreed plan | “Save this approved implementation plan.” | `save-plan` writes the canonical plan; `implementation-plan` structures multi-file TDD slices and ownership. |
 | Review a plan | “Review this plan for intent and outcome before dispatch.” | `review` with the intent boundary checks that the plan still serves the goal before implementation mechanics. |
 | Start ordinary work | “Dispatch this approved plan with `engineering/change`.” | `dispatch` validates the exact repo, plan, route, worktree, permissions, review preset, and visible cmux session. |
+| Split approved work | “Use `$split` to preview,” or explicitly “Use `$split --dispatch`.” | Preview is zero-effect. Activation binds disjoint workspace children, bounded waves and exact receipts to one sealed manifest; deterministic join never merges, releases or replays a provider. |
 | Open or continue a visible session | “Open this task in a separate visible session,” or “continue the existing task session.” | `dispatch` creates the owned cmux lane when requested; later work resumes its exact stored checkpoint instead of opening an unrelated window. |
 | Read cmux progress | Look at the thin workspace progress line while a pipeline is active. | It counts only live harness steps owned by the current coordinator workspace. It clears at idle and deliberately does not report project-backlog tasks, model limits, or history from missing surfaces. |
 | Fix a reproducible defect | “Dispatch this approved plan with `engineering/fix`.” | The built-in bounded loop runs reproduce → root cause → regression → minimal fix and stops on architecture or budget boundaries. |
@@ -395,6 +397,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints and reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| v2.6.5 exact-HEAD lifecycle and bounded Split activation | [v2.6.5 release notes](docs/releases/v2.6.5.md) |
 | v2.6.4 unattended callback continuity and durable decisions | [v2.6.4 release notes](docs/releases/v2.6.4.md) |
 | v2.6.3 complete Russian technical handbook and deterministic documentation gates | [v2.6.3 release notes](docs/releases/v2.6.3.md) |
 | v2.6.2 truthful cmux workspace progress and lifecycle fixes | [v2.6.2 release notes](docs/releases/v2.6.2.md) |

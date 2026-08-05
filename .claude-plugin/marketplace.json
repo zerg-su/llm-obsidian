@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Marketplace for llm-obsidian: an Obsidian second brain with restartable Claude/Codex workflows.",
-    "version": "2.6.4"
+    "version": "2.6.5"
   },
   "plugins": [
     {
@@ -17,7 +17,7 @@
         "ref": "main"
       },
       "description": "Wiki skills, hybrid retrieval, protected research, DragonScale memory, and harness-owned Claude/Codex orchestration.",
-      "version": "2.6.4",
+      "version": "2.6.5",
       "author": {
         "name": "zerg-su",
         "url": "https://github.com/zerg-su"

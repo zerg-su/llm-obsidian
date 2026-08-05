@@ -31,7 +31,8 @@ terminal harness cleanup and final `reap` are the normal boundaries.
   state; a duplicate accepted callback is a no-op, while wrong-run and late
   terminal callbacks are rejected.
 
-Task-meta v3 carries `project_id` and `task_id`. v1/v2 remain readable and keep
+Task-meta v4 carries `project_id`, `task_id`, and an optional immutable
+`split_policy`. v1-v3 remain readable and keep
 their exact legacy origin-session and worktree-local artifact rules. Running
 legacy sessions are never adopted during an overlay.
 
@@ -51,7 +52,7 @@ the existing resolver/runner only as internal adapters. The coordinator still
 resolves the repository, context, exact result title, and user approval; after
 approval it submits one typed request. The operation captures the exact current
 session route, claims the request UUID, creates one branch/worktree/task
-binding, renders and validates task-meta v3, opens one split anchored to the
+binding, renders and validates task-meta v4, opens one split anchored to the
 caller, launches the supervisor, verifies the surface, and writes the dispatch
 log transaction.
 
@@ -76,9 +77,31 @@ already-executed recovery cases stay visible and use the diagnostic contract
 rather than an implicit retry.
 
 The provider worker validates `.task-summary.json` against the task contract
-and delivers it through the internal callback broker. A v3 unattended handoff
+and delivers it through the internal callback broker. A v3/v4 unattended handoff
 never asks the coordinator to resolve the task from `wiki/log.md` or
 reconstruct reap phases from prose.
+
+## Governed Split activation
+
+`$split` is zero-effect by default. `scripts/split-preview.py` freezes an
+approved parent contract into a canonical `SplitManifest` and reports four
+zero effect counters. Only an explicit `$split --dispatch` may pass that
+manifest to `scripts/split-runner.py`.
+
+Activation binds each child to an existing dispatch request with
+`placement=workspace`, one disjoint ownership slice, assigned evidence,
+dependencies, a registered pipeline/route and a frozen token/time ceiling.
+The runner calls the existing dispatch execution adapter; it never opens cmux
+or invokes a provider directly. Immutable launch receipts prevent replay, and
+only exact approved resource-free terminal receipts unlock later dependency
+waves. Attention, failure, cancellation, policy drift, stale HEADs, conflicts
+or open resources stop the graph without another child effect.
+
+The final join is resource-free. It requires the original launch receipt for
+every child, exact terminal receipts and the current child HEAD map, then emits
+one manifest-order integration list. It does not merge, push, publish, release
+or infer success from a clean worktree. All live lifecycle operations remain
+owned by `scripts/harness-cli.py`.
 
 ## Layout and concurrency
 

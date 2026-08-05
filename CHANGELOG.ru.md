@@ -16,6 +16,46 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.5] — 2026-08-05
+
+### Добавлено
+
+- Immutable exact-HEAD записи `ReviewAttempt` и bounded
+  `VerificationAttempt`. Одно coordinator-authorized решение о mechanism-flake
+  может создать same-HEAD attempt 1 без model call; attempt 0 сохраняется, а
+  второй retry заканчивается typed attention.
+- Закрытый cursor-bound поток `ProviderEvent` для delivery, progress, exit и
+  resource closure с одинаковыми контрактами Claude print и Codex exec
+  ephemeral adapters.
+- Atomic five-cycle finalization, freshness-bounded availability независимого
+  provider и additive finalization metadata в PipelineSpec.
+- Governed Split manifests. `$split` остаётся zero-effect preview; явный
+  `$split --dispatch` запускает bounded workspace-local waves через
+  существующий dispatch adapter и соединяет exact approved resource-free
+  receipts в порядке manifest.
+
+### Изменено
+
+- Cross-HEAD same-session review continuation удалён из active path. Новый
+  product HEAD создаёт отдельный attempt; legacy records доступны для inspect,
+  но не могут вызвать provider effect.
+- Time, screen content и физическое исчезновение ресурса остаются наблюдениями,
+  а не lifecycle authority. Durable typed events исправляют stale liveness;
+  Stop остаётся единственным владельцем callback submit.
+- Task metadata v4 опционально несёт immutable Split child policy, сохраняя
+  read compatibility v1-v3 и обычное поведение dispatch.
+
+### Исправлено
+
+- Synthetic task-summary publisher в runtime-тестах переведён на atomic
+  publication; regression доказывает, что stable-read watcher не видит partial
+  JSON.
+- Immutable escalation records остаются durable, а их runtime-каталог
+  игнорируется Git: raise/resolve evidence сохраняется при чистом status.
+- Split activation разрешается только после зелёного Stability Gate; любая
+  ошибка manifest, budget, receipt, dependency, HEAD или resource state
+  останавливается до повторного child/provider effect.
+
 ## [2.6.4] — 2026-08-04
 
 ### Добавлено

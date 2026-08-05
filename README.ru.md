@@ -89,11 +89,12 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 
 1. **Понять.** `clarify` — встроенный аналог “grill me”: сначала смотрит факты репозитория, затем задаёт по одному действительно важному вопросу до кода или плана.
 2. **Спланировать.** Решения становятся сохранённым планом с provenance и стабильным DragonScale-адресом.
-3. **Dispatch.** Restartable harness фиксирует project/task/session ID, точный model route, hash утверждённого плана, permission domain, worktree и cmux surface вызывающего координатора. Окно открывается справа от правильной сессии, а не рядом со случайно выбранной позже вкладкой.
-4. **Выполнить.** Claude или Codex работает в отдельном Git worktree. Ограниченную работу той же моделью по умолчанию берёт внутренний агент; явный запрос отдельного окна создаёт долговременную видимую lane.
-5. **Review.** Simple review использует одну выбранную read-only holistic lane. Default Deep запускает независимые holistic lanes Anthropic и OpenAI; каждая проверяет и intent/outcome, и engineering quality. Явный single-model Deep вместо этого разделяет одну модель на intent и engineering lanes. Full review запускается только явно и использует четыре provider-by-responsibility lanes. Verify возобновляет точную lane и surface.
-6. **Reap.** Проверяются typed summary, approved review archive, hash плана, result path и session provenance. Одна vault-транзакция пишет результат и закрывает plan.
-7. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Supervisor закрывает точную surface после выхода процесса и никогда не угадывает соседнюю вкладку.
+3. **Разделить только явно.** `$split` строит zero-effect preview manifest. `$split --dispatch` активирует только approved bounded DAG, запускает dependency-ready workspace children через существующий dispatch adapter и принимает exact approved resource-free receipts в порядке manifest.
+4. **Dispatch.** Restartable harness фиксирует project/task/session ID, точный model route, hash утверждённого плана, permission domain, worktree и cmux surface вызывающего координатора. Окно открывается справа от правильной сессии, а не рядом со случайно выбранной позже вкладкой.
+5. **Выполнить.** Claude или Codex работает в отдельном Git worktree. Ограниченную работу той же моделью по умолчанию берёт внутренний агент; явный запрос отдельного окна создаёт долговременную видимую lane.
+6. **Review.** Simple review использует одну выбранную read-only holistic lane. Default Deep запускает независимые holistic lanes Anthropic и OpenAI; каждая проверяет и intent/outcome, и engineering quality. Явный single-model Deep вместо этого разделяет одну модель на intent и engineering lanes. Full review запускается только явно и использует четыре provider-by-responsibility lanes. Verify возобновляет точную lane и surface.
+7. **Reap.** Проверяются typed summary, approved review archive, hash плана, result path и session provenance. Одна vault-транзакция пишет результат и закрывает plan.
+8. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Supervisor закрывает точную surface после выхода процесса и никогда не угадывает соседнюю вкладку.
 
 Успешный review заканчивает **раунд**, а не всю задачу. Task остаётся возобновляемой до final reap. Архивная сессия никогда автоматически не привязывается к другому task ID.
 
@@ -109,6 +110,7 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 | Сохранить договорённость | «Сохрани этот утверждённый implementation plan». | `save-plan` пишет канонический план; `implementation-plan` раскладывает multi-file работу на TDD slices и ownership. |
 | Проверить план | «Проведи intent review плана до dispatch». | `review` на intent boundary проверяет соответствие цели до разбора реализации. |
 | Запустить обычную разработку | «Dispatch утверждённого плана через `engineering/change`». | `dispatch` проверяет repo, plan, route, worktree, permissions, review preset и открывает видимую cmux-сессию. |
+| Разделить approved работу | «Сделай preview через `$split`» или явно «Запусти `$split --dispatch`». | Preview не имеет effects. Activation связывает disjoint workspace children, bounded waves и exact receipts с одним sealed manifest; deterministic join не выполняет merge, release или provider replay. |
 | Открыть или продолжить видимую сессию | «Открой задачу в отдельной видимой сессии» или «продолжи существующую task session». | `dispatch` по запросу создаёт owned cmux lane; продолжение использует её точный сохранённый checkpoint, а не открывает постороннее окно. |
 | Прочитать cmux progress | Посмотрите на тонкую строку progress, пока pipeline активен. | Она считает только живые harness steps текущего coordinator workspace, очищается в idle и намеренно не показывает project backlog, model limits или историю missing surfaces. |
 | Исправить воспроизводимый дефект | «Dispatch через `engineering/fix`». | Bounded loop выполняет reproduce → root cause → regression → minimal fix и останавливается на архитектурной или бюджетной границе. |
@@ -227,7 +229,7 @@ task/isolation domain, поэтому follow-up research не стартует �
 операции свежий scratch. `unsafe-research` — отдельный явно разрешаемый
 single-context escape hatch; он не является fallback защищённого режима.
 
-## 34 скилла из коробки
+## 35 скиллов из коробки
 
 Claude вызывает их через plugin UI (`/skill`), Codex — через repo-local marketplace (`$llm-obsidian:skill`). Механика лежит в `skills/<name>/SKILL.md`, поэтому другой coding agent может следовать ей вручную.
 
@@ -404,6 +406,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |
 | Acceptance fingerprints и reuse | [Acceptance architecture](docs/acceptance-architecture.md) |
+| Exact-HEAD lifecycle и bounded Split activation 2.6.5 | [Release notes 2.6.5](docs/releases/v2.6.5.md) |
 | Unattended callback continuity и durable decisions 2.6.4 | [Release notes 2.6.4](docs/releases/v2.6.4.md) |
 | Полный русский технический handbook и deterministic docs gates 2.6.3 | [Release notes 2.6.3](docs/releases/v2.6.3.md) |
 | Truthful cmux workspace progress и lifecycle fixes 2.6.2 | [Release notes 2.6.2](docs/releases/v2.6.2.md) |
