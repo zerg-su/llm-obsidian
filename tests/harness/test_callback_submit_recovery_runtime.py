@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from harness.callback_submit_recovery import (  # noqa: E402
     CallbackSubmitEvidence,
     CallbackSubmitPolicy,
+    classify_callback_prompt,
     classify_callback_submit,
 )
 from harness.callbacks import CallbackBroker  # noqa: E402
@@ -294,9 +295,11 @@ class FakeCmux:
         self.sends = []
         self.keys = []
         self.reads = 0
+        self.screens = []
     def read(self, surface_id):
         self.reads += 1
-        return f"provider working {self.reads}"
+        self.screens.append("›")
+        return self.screens[-1]
     def send(self, surface_id, message):
         self.sends.append((surface_id, message))
     def send_key(self, surface_id, key):
@@ -356,6 +359,7 @@ print(json.dumps({
     "provider_sends": len(cmux.sends),
     "provider_keys": len(cmux.keys),
     "provider_reads": cmux.reads,
+    "provider_screens": cmux.screens,
     "broker_calls": broker_calls[0],
     "accepted_callback_id": record.accepted_callback_id,
     "input_exists": callback_path.with_name(".review-input.json").exists(),
@@ -400,7 +404,15 @@ print(json.dumps({
         and observed["attention_reason"]
         == fixture["v2_6_3_observed"]["terminal_reason"]
         and observed["provider_starts"] == 1
-        and observed["provider_reads"] > 0
+        and observed["provider_reads"] >= 2
+        and len(set(observed["provider_screens"])) == 1
+        and classify_callback_prompt(
+            "codex",
+            observed["provider_screens"][-1],
+            interactive=False,
+            recognized=False,
+        )
+        == "idle-prompt"
         and observed["provider_sends"]
         == fixture["v2_6_3_observed"]["provider_sends"]
         and observed["provider_keys"] == 0
@@ -1178,6 +1190,7 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         def __init__(self, effects: list[str] | None = None) -> None:
             self.sent: list[tuple[str, str]] = []
             self.keys: list[tuple[str, str]] = []
+            self.reads = 0
             self.provider_artifact_writes = 0
             self.closed: list[str] = []
             self.effects = effects if effects is not None else []
@@ -1195,6 +1208,11 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         def send(self, surface_id: str, message: str) -> None:
             self.sent.append((surface_id, message))
             self.effects.append("harness-provider-prompt")
+
+        def read(self, surface_id: str) -> str:
+            check("recovery screen read uses exact surface", surface_id == SURFACE)
+            self.reads += 1
+            return "›"
 
         def send_key(self, surface_id: str, key: str) -> None:
             self.keys.append((surface_id, key))
@@ -1232,7 +1250,7 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     worker.liveness_policy = LivenessPolicy.default()
     worker.callback_submit_policy = CallbackSubmitPolicy(30, 60, 1)
     worker.liveness_controller = LivenessController(state_root / "liveness")
-    worker.latest_callback_prompt_class = "idle-prompt"
+    worker.latest_callback_prompt_class = "unknown"
     worker.callback_idle_observations = 0
     worker.callback_prompt_observations = 0
     worker.callback_generation_identity = ""
@@ -1283,6 +1301,8 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         "runtime reserves and sends one same-session submit-only nudge",
         len(cmux.sent) == 1
         and cmux.keys == [(SURFACE, "Enter")]
+        and cmux.reads >= 2
+        and worker.latest_callback_prompt_class == "idle-prompt"
         and ".review-input.json" in cmux.sent[0][1]
         and "review_submit.py" in cmux.sent[0][1]
         and recovery_state is not None

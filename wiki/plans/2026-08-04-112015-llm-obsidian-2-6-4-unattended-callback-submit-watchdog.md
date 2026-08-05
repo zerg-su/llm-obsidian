@@ -678,3 +678,15 @@ The exact-HEAD coverage gate found one final evidence gap after D-264-66 through
 | D-264-70 | test harness | artifact-settlement crash branches lowered the critical `liveness` coverage floor to 84.4% even though the full behavior suite was green | `included` | in-process tests now cover normal retirement, idempotent replay, the retired-state/reserved-receipt kill point and changed-artifact fail-closed behavior; `make test-harness-coverage` is green at 76.04% overall, 86.2% for `scripts.harness.liveness`, and all 4,370 transition cases |
 
 This is test-only evidence closure. It changes no provider effect, runtime route, budget, permission, callback topology, public interface, push, tag, publish or release authority.
+
+## Append-only final bounded-repair amendment D-264-71 through D-264-73
+
+This coordinator-owned amendment records the last full repair iteration authorized for 2.6.4. It preserves the frozen Outcome Contract and establishes a hard stop after one retained verification round.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-71 | callback watchdog evidence | the v2.6.3 RED compatibility fixture returned a changing synthetic `provider working N` screen, so it did not prove the actual stable Codex idle marker; the current GREEN preseeded `idle-prompt` instead of exercising screen observation and classification | `included` | the frozen v2.6.3 worker now receives two or more stable `›` reads and still reaches callback timeout; the current worker observes the same screen through the production classifier, reserves one recovery and sends exactly one prompt plus Enter without a preseeded prompt class |
+| D-264-72 | plan-review rebind | a crash after publishing the resolved boundary but before current-review/active publication could make retry treat the new boundary as the reviewed subject and reject its own valid design-only delta | `included` | a durable owner-only rebind journal binds reviewed/resolved identities, old/new target digests and ordered publication stages; kill-point tests after boundary, current-review and active publication replay to one complete state with zero new reviewer session; file and parent-directory fsync preserve publication ordering |
+| D-264-73 | coordinator finalization policy | repeated late lifecycle findings consumed disproportionate time and model budget without a stable completion estimate | `deferred` | after D-264-71/D-264-72, run the exact full local gate once and the already-retained single-model verification once; any new substantial lifecycle defect or failure to continue normally ends 2.6.4 as `RC-attention`, preserves a clean safety branch and moves evolutionary simplification to 2.6.5 without rewriting the harness or starting another review/fix loop |
+
+The D-264-72 implementation is isolated in `task_review_plan_rebind.py`; the existing public facade and review topology remain unchanged. No scheduler, public DSL/FSM, routing, model or retry-budget expansion, permission change, migration, push, tag, publish or release is authorized.

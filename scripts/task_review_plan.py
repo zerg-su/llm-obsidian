@@ -23,6 +23,14 @@ from task_review_shared import (
     _load_review_boundary_input,
     _read_json,
 )
+from task_review_plan_rebind import (
+    advance_stage as _advance_rebind_stage,
+    canonical_json_bytes as _canonical_json_bytes,
+    finalize_active as _finalize_active_plan_rebind,
+    publish_target as _publish_rebind_target,
+    regular_target_sha256 as _regular_target_sha256,
+    validate_transaction as _validate_rebind_transaction,
+)
 
 
 BOUNDARY_INVALID = "plan-review-artifact-boundary-invalid"
@@ -568,6 +576,65 @@ def validate_design_rebind(
     }
 
 
+def _rebind_target_payloads(
+    runtime_root: Path,
+    active_path: Path,
+    compilation: PlanReviewCompilation,
+    boundary: ReviewBoundaryInput,
+    updated: Mapping[str, Any],
+    *,
+    base_sha: str,
+    head_sha: str,
+) -> dict[str, tuple[Path, bytes]]:
+    commands = review_inspection_commands(
+        compilation.worktree, base_sha, head_sha
+    )
+    return {
+        "design": (
+            runtime_root / ARTIFACT_PATHS["design"],
+            compilation.artifacts["design"],
+        ),
+        "capability-dispositions": (
+            runtime_root / ARTIFACT_PATHS["capability_dispositions"],
+            compilation.artifacts["capability_dispositions"],
+        ),
+        "success-evidence": (
+            runtime_root / ARTIFACT_PATHS["success_evidence"],
+            compilation.artifacts["success_evidence"],
+        ),
+        "inspection": (
+            runtime_root / "inputs/plan-review-inspection.json",
+            _canonical_json_bytes(
+                {
+                    "schema_version": 1,
+                    "base_sha": base_sha,
+                    "head_sha": head_sha,
+                    "commands": list(commands),
+                }
+            ),
+        ),
+        "boundary": (
+            runtime_root / "inputs/review-boundary-input.json",
+            _canonical_json_bytes(boundary.payload()),
+        ),
+        "current-review": (
+            runtime_root / "current-review.json",
+            _canonical_json_bytes(updated),
+        ),
+        "active": (active_path, _canonical_json_bytes(updated)),
+    }
+
+
+def finalize_active_plan_rebind(
+    candidate: Mapping[str, Any], active_path: Path
+) -> dict[str, Any]:
+    return _finalize_active_plan_rebind(
+        candidate,
+        active_path,
+        error=lambda message: PlanReviewError(PROTECTED_CHANGED, message),
+    )
+
+
 def rebind_active_plan_review(
     worktree: Path,
     active_path: Path,
@@ -597,10 +664,19 @@ def rebind_active_plan_review(
     original_base = str(plan_meta.get("base_sha") or "")
     relative = str(plan_meta.get("plan_relative_path") or "")
     runtime_root = Path(str(candidate.get("runtime_root") or "")).resolve()
+    transaction_path = runtime_root / "plan-review-rebind.json"
+    transaction_exists = (
+        transaction_path.is_file() and not transaction_path.is_symlink()
+    )
     if (
         requested_base_sha != reviewed_head
         or requested_head_sha != _git(worktree, "rev-parse", "HEAD")
-        or str(plan_meta.get("head_sha") or "") != reviewed_head
+        or str(plan_meta.get("head_sha") or "")
+        not in (
+            {reviewed_head, requested_head_sha}
+            if transaction_exists
+            else {reviewed_head}
+        )
         or relative != compilation.plan_relative_path
         or runtime_root == worktree
         or worktree in runtime_root.parents
@@ -616,29 +692,49 @@ def rebind_active_plan_review(
             PROTECTED_CHANGED,
             "plan rebind boundary pointer is outside exact review scratch",
         )
-    old_boundary = _load_review_boundary_input(boundary_path, purpose="intent")
-    old_artifacts = {
-        "outcome": b"",
-        "design": (runtime_root / ARTIFACT_PATHS["design"]).read_bytes(),
-        "capability_dispositions": (
-            runtime_root / ARTIFACT_PATHS["capability_dispositions"]
-        ).read_bytes(),
-        "success_evidence": (
-            runtime_root / ARTIFACT_PATHS["success_evidence"]
-        ).read_bytes(),
-    }
+    transaction = (
+        _read_json(transaction_path, "plan rebind transaction")
+        if transaction_exists
+        else None
+    )
+    if transaction is None:
+        old_boundary = _load_review_boundary_input(
+            boundary_path, purpose="intent"
+        )
+        reviewed_digests = {
+            "outcome": old_boundary.outcome_contract_sha256,
+            "design": old_boundary.design_sha256,
+            "capability_dispositions": (
+                old_boundary.capability_dispositions_sha256
+            ),
+            "success_evidence": old_boundary.success_evidence_map_sha256,
+        }
+        reviewed_plan_sha256 = old_boundary.plan_sha256
+    else:
+        reviewed_value = transaction.get("reviewed")
+        if not isinstance(reviewed_value, Mapping):
+            raise PlanReviewError(
+                PROTECTED_CHANGED,
+                "plan rebind transaction identity changed",
+            )
+        reviewed_digests = dict(
+            reviewed_value.get("artifact_sha256") or {}
+        )
+        reviewed_plan_sha256 = str(
+            reviewed_value.get("plan_sha256") or ""
+        )
     reviewed = PlanReviewCompilation(
         worktree.expanduser().resolve(),
         compilation.plan_path,
         relative,
-        old_boundary.plan_sha256,
-        old_artifacts,
+        reviewed_plan_sha256,
         {
-            "outcome": old_boundary.outcome_contract_sha256,
-            "design": old_boundary.design_sha256,
-            "capability_dispositions": old_boundary.capability_dispositions_sha256,
-            "success_evidence": old_boundary.success_evidence_map_sha256,
+            "outcome": b"",
+            "design": b"",
+            "capability_dispositions": b"",
+            "success_evidence": b"",
         },
+        reviewed_digests,
         {},
     )
     delta = validate_design_rebind(
@@ -662,12 +758,7 @@ def rebind_active_plan_review(
             PROTECTED_CHANGED,
             "typed plan resolution does not bind the exact reviewed/resolved OIDs",
         )
-    new_boundary = materialize_plan_review(
-        runtime_root,
-        compilation,
-        base_sha=original_base,
-        head_sha=requested_head_sha,
-    )
+    new_boundary = compilation.boundary()
     updated = dict(candidate)
     updated["review_policy"] = dict(requested_policy)
     updated["plan_review"] = {
@@ -675,9 +766,98 @@ def rebind_active_plan_review(
         "head_sha": requested_head_sha,
         **delta,
     }
-    _atomic_json(boundary_path, new_boundary.payload())
-    _atomic_json(runtime_root / "current-review.json", updated)
-    _atomic_json(active_path, updated)
+    payloads = _rebind_target_payloads(
+        runtime_root,
+        active_path,
+        compilation,
+        new_boundary,
+        updated,
+        base_sha=original_base,
+        head_sha=requested_head_sha,
+    )
+    if transaction is None:
+        targets = {
+            name: {
+                "path": str(path.resolve()),
+                "old_sha256": _regular_target_sha256(
+                    path,
+                    lambda message: PlanReviewError(PROTECTED_CHANGED, message),
+                ),
+                "new_sha256": hashlib.sha256(value).hexdigest(),
+            }
+            for name, (path, value) in payloads.items()
+        }
+        transaction = {
+            "schema_version": 1,
+            "task_id": task_id,
+            "reviewed_head_sha": reviewed_head,
+            "resolved_head_sha": requested_head_sha,
+            "plan_relative_path": relative,
+            "reviewed": {
+                "plan_sha256": reviewed.plan_sha256,
+                "artifact_sha256": dict(reviewed.artifact_sha256),
+            },
+            "resolved_boundary_input_sha256": new_boundary.input_sha256,
+            "requested_policy_sha256": hashlib.sha256(
+                _canonical_json_bytes(requested_policy)
+            ).hexdigest(),
+            "resolved_meta_sha256": hashlib.sha256(
+                _canonical_json_bytes(updated)
+            ).hexdigest(),
+            "delta": delta,
+            "targets": targets,
+            "stage": "prepared",
+        }
+        _atomic_json(transaction_path, transaction)
+    _validate_rebind_transaction(
+        transaction,
+        task_id=task_id,
+        reviewed_head=reviewed_head,
+        resolved_head=requested_head_sha,
+        relative=relative,
+        requested_policy=requested_policy,
+        boundary_input_sha256=new_boundary.input_sha256,
+        updated=updated,
+        delta=delta,
+        payloads=payloads,
+        error=lambda message: PlanReviewError(PROTECTED_CHANGED, message),
+    )
+    for name in (
+        "design",
+        "capability-dispositions",
+        "success-evidence",
+        "inspection",
+    ):
+        path, value = payloads[name]
+        target = transaction["targets"][name]
+        _publish_rebind_target(
+            path,
+            value,
+            old_sha256=str(target["old_sha256"]),
+            new_sha256=str(target["new_sha256"]),
+            error=lambda message: PlanReviewError(PROTECTED_CHANGED, message),
+        )
+    transaction = _advance_rebind_stage(
+        transaction_path, transaction, "artifacts-published"
+    )
+    for name, stage in (
+        ("boundary", "boundary-published"),
+        ("current-review", "current-review-published"),
+        ("active", "active-published"),
+    ):
+        path, value = payloads[name]
+        target = transaction["targets"][name]
+        _publish_rebind_target(
+            path,
+            value,
+            old_sha256=str(target["old_sha256"]),
+            new_sha256=str(target["new_sha256"]),
+            error=lambda message: PlanReviewError(PROTECTED_CHANGED, message),
+        )
+        transaction = _advance_rebind_stage(
+            transaction_path, transaction, stage
+        )
+    _advance_rebind_stage(transaction_path, transaction, "complete")
     return updated
 
 

@@ -50,25 +50,27 @@ class FinalizingRecovery(NamedTuple):
 
 
 def _atomic_text(path: Path, value: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.parent.chmod(0o700)
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    try:
-        tmp.write_text(value, encoding="utf-8")
-        tmp.chmod(0o600)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)
+    _atomic_bytes(path, value.encode("utf-8"))
 
 
 def _atomic_bytes(path: Path, value: bytes) -> None:
+    """Publish owner-only bytes with durable file and directory ordering."""
+
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.parent.chmod(0o700)
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
     try:
-        tmp.write_bytes(value)
+        with tmp.open("wb") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
         tmp.chmod(0o600)
         os.replace(tmp, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         tmp.unlink(missing_ok=True)
 

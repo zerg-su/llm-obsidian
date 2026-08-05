@@ -118,6 +118,7 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
 
     try:
         plan_review = importlib.import_module("task_review_plan")
+        plan_rebind = importlib.import_module("task_review_plan_rebind")
     except ModuleNotFoundError as exc:
         raise AssertionError(
             "RED: task_review_plan must provide the code-owned compiler/facade"
@@ -617,6 +618,117 @@ with tempfile.TemporaryDirectory(prefix="plan-review-facade.") as raw:
         == resolved.artifact_sha256["design"]
         and sessions.starts == 0,
         rebound,
+    )
+
+    class RebindCrash(RuntimeError):
+        pass
+
+    crash_replay: dict[str, bool] = {}
+    original_atomic_json = plan_review._atomic_json
+    original_atomic_bytes = plan_review._atomic_bytes
+    original_rebind_atomic_json = plan_rebind._atomic_json
+    original_rebind_atomic_bytes = plan_rebind._atomic_bytes
+    for stage in ("boundary", "current-review", "active"):
+        crash_runtime = tmp / f"crash-{stage}-scratch"
+        crash_boundary = plan_review.materialize_plan_review(
+            crash_runtime,
+            compiled,
+            base_sha=baseline,
+            head_sha=reviewed_head,
+        )
+        crash_boundary_path = (
+            crash_runtime / "inputs/review-boundary-input.json"
+        )
+        original_atomic_json(crash_boundary_path, crash_boundary.payload())
+        crash_active_path = tmp / f"crash-{stage}-active.json"
+        crash_candidate = {
+            **candidate,
+            "runtime_root": str(crash_runtime),
+            "review_boundary_input_file": str(crash_boundary_path),
+        }
+        original_atomic_json(
+            crash_runtime / "current-review.json", crash_candidate
+        )
+        original_atomic_json(crash_active_path, crash_candidate)
+        target = {
+            "boundary": crash_boundary_path,
+            "current-review": crash_runtime / "current-review.json",
+            "active": crash_active_path,
+        }[stage].resolve()
+        crashed = [False]
+
+        def crash_after_json(path: Path, value: object) -> None:
+            original_rebind_atomic_json(path, value)
+            if path.resolve() == target and not crashed[0]:
+                crashed[0] = True
+                raise RebindCrash(stage)
+
+        def crash_after_bytes(path: Path, value: bytes) -> None:
+            original_rebind_atomic_bytes(path, value)
+            if path.resolve() == target and not crashed[0]:
+                crashed[0] = True
+                raise RebindCrash(stage)
+
+        plan_rebind._atomic_json = crash_after_json
+        plan_rebind._atomic_bytes = crash_after_bytes
+        try:
+            plan_review.rebind_active_plan_review(
+                worktree,
+                crash_active_path,
+                crash_candidate,
+                gate_state,
+                requested_policy,
+                resolved,
+                requested_base_sha=reviewed_head,
+                requested_head_sha=resolved_head,
+            )
+        except RebindCrash:
+            pass
+        finally:
+            plan_rebind._atomic_json = original_rebind_atomic_json
+            plan_rebind._atomic_bytes = original_rebind_atomic_bytes
+        try:
+            replayed = plan_review.rebind_active_plan_review(
+                worktree,
+                crash_active_path,
+                crash_candidate,
+                gate_state,
+                requested_policy,
+                resolved,
+                requested_base_sha=reviewed_head,
+                requested_head_sha=resolved_head,
+            )
+            replay_boundary = json.loads(
+                crash_boundary_path.read_text(encoding="utf-8")
+            )
+            replay_current = json.loads(
+                (crash_runtime / "current-review.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            replay_active = json.loads(
+                crash_active_path.read_text(encoding="utf-8")
+            )
+            transaction = json.loads(
+                (crash_runtime / "plan-review-rebind.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            crash_replay[stage] = (
+                crashed[0]
+                and replay_boundary["design_sha256"]
+                == resolved.artifact_sha256["design"]
+                and replay_current == replayed
+                and replay_active == replayed
+                and transaction["stage"] == "complete"
+            )
+        except (OSError, ValueError, plan_review.PlanReviewError):
+            crash_replay[stage] = False
+    check(
+        "retained plan rebind replays every authoritative publication crash",
+        crash_replay
+        == {"boundary": True, "current-review": True, "active": True},
+        crash_replay,
     )
 
     mutations = {

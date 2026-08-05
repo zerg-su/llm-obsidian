@@ -366,6 +366,10 @@ def _active_current_review(
         != plan_file.expanduser().resolve()
     ):
         raise TaskReviewError("an active current review uses another plan")
+    if isinstance(candidate.get("plan_review"), Mapping):
+        from task_review_plan import finalize_active_plan_rebind
+
+        candidate = finalize_active_plan_rebind(candidate, active_path)
     return candidate
 
 
