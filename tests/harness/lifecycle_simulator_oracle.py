@@ -24,6 +24,7 @@ ACTIONS = frozenset(
         "reserve-effect",
         "resolve-effect",
         "publish-callback",
+        "queue-callback",
         "publish-summary",
         "publish-resolution",
         "publish-liveness",
@@ -108,6 +109,8 @@ def load_scenario(path: Path) -> dict[str, object]:
         "route_profile",
         "expected_callback_identity_sha256",
         "expected_production_paths",
+        "source_fixture",
+        "source_sha256",
     }
     if not required <= set(scenario) or not set(scenario) <= allowed or scenario.get("schema_version") != 1:
         _fail("SIM-INV-SCHEMA", "scenario fields or version are invalid")
@@ -179,6 +182,20 @@ def load_scenario(path: Path) -> dict[str, object]:
         for item in production_paths
     ):
         _fail("SIM-INV-SCHEMA", "expected production paths are invalid")
+    source_fixture = scenario.get("source_fixture", "")
+    source_sha256 = scenario.get("source_sha256", "")
+    if bool(source_fixture) != bool(source_sha256):
+        _fail("SIM-INV-SCHEMA", "historical source path and digest must be paired")
+    if source_fixture:
+        if (
+            not isinstance(source_fixture, str)
+            or not re.fullmatch(
+                r"tests/fixtures/v2\.6\.5/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json",
+                source_fixture,
+            )
+        ):
+            _fail("SIM-INV-SCHEMA", "historical source fixture path is invalid")
+        _sha256(source_sha256, "source_sha256")
     return scenario
 
 

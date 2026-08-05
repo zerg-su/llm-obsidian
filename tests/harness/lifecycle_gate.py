@@ -20,7 +20,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harness"))
 
 from lifecycle_scheduler import compile_schedules, replay_trace, run_schedule  # noqa: E402
-from lifecycle_historical import run_historical_schedule  # noqa: E402
+from lifecycle_historical import (  # noqa: E402
+    assert_no_forbidden_effects,
+    load_historical_scenario,
+    run_historical_schedule,
+)
 from lifecycle_simulator import LifecycleWorld  # noqa: E402
 from lifecycle_simulator_oracle import load_scenario  # noqa: E402
 
@@ -52,7 +56,12 @@ def _scenario_paths() -> list[Path]:
 
 
 def _scenario(identity: str) -> dict[str, object]:
-    loaded = [load_scenario(path) for path in _scenario_paths()]
+    loaded = [
+        load_historical_scenario(path)
+        if path.parent == HISTORICAL
+        else load_scenario(path)
+        for path in _scenario_paths()
+    ]
     matches = [item for item in loaded if item["scenario_id"] == identity]
     if len(matches) != 1:
         raise ValueError("scenario identity is unknown or ambiguous")
@@ -60,7 +69,10 @@ def _scenario(identity: str) -> dict[str, object]:
 
 
 def _historical_summary() -> dict[str, int]:
-    scenarios = [load_scenario(path) for path in sorted(HISTORICAL.glob("*.json"))]
+    scenarios = [
+        load_historical_scenario(path)
+        for path in sorted(HISTORICAL.glob("*.json"))
+    ]
     if len(scenarios) != 7:
         raise RuntimeError("fast lifecycle corpus must contain exactly seven scenarios")
     schedules = 0
@@ -81,6 +93,7 @@ def _historical_summary() -> dict[str, int]:
                 )
                 if execution.state not in scenario["expected_terminal_states"]:
                     raise RuntimeError("historical lifecycle schedule did not converge")
+                assert_no_forbidden_effects(scenario, execution.effect_ids)
                 if execution.real_effects != {
                     "provider": 0,
                     "model": 0,

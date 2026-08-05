@@ -3,6 +3,8 @@
   "scenario_id": "d264-73-mixed-head-terminal-boundary",
   "seed": 26473,
   "max_steps": 8,
+  "source_fixture": "tests/fixtures/v2.6.5/d264-73-terminal-parent-child.json",
+  "source_sha256": "74936e09ae3ddc45aabbf7ccc8e1044a1322a16df08a3a04c8a5286a5bfebe2c",
   "expected_initial_invariant": "SIM-INV-TERMINAL-MONOTONIC",
   "expected_terminal_states": ["complete"],
   "forbidden_effects": ["rearm-parent", "continue-provider-session"],

@@ -309,6 +309,7 @@ def _trace_sha256(
     seed: int,
     action_ids: Sequence[str],
     actions: Sequence[Mapping[str, object]],
+    source_sha256: str = "",
 ) -> str:
     payload = json.dumps(
         {
@@ -316,6 +317,7 @@ def _trace_sha256(
             "seed": seed,
             "action_ids": list(action_ids),
             "actions": list(actions),
+            "source_sha256": source_sha256,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -367,7 +369,11 @@ def compile_schedules(
                 ordered_actions,
                 order,
                 _trace_sha256(
-                    scenario_id, selected_seed, order, ordered_actions
+                    scenario_id,
+                    selected_seed,
+                    order,
+                    ordered_actions,
+                    str(scenario.get("source_sha256") or ""),
                 ),
             )
         )

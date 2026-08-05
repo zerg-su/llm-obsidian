@@ -3,6 +3,8 @@
   "scenario_id": "d265-stale-exiting-resource-gone",
   "seed": 26501,
   "max_steps": 8,
+  "source_fixture": "tests/fixtures/v2.6.5/stale-exiting-resource-gone.json",
+  "source_sha256": "4366081fc997f5f266c8896f7399753707e7a5a901d6e8a554ce62142e09df0e",
   "expected_initial_invariant": "SIM-INV-CLEANUP-RECEIPT",
   "expected_terminal_states": ["complete"],
   "forbidden_effects": ["physical-disappearance-completion"],

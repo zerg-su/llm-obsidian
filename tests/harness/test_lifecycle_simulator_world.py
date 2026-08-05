@@ -223,6 +223,20 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
         restarted.snapshot(),
     )
 
+with tempfile.TemporaryDirectory(prefix="lifecycle-resource-restart.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    world.apply({"action": "start-worker"})
+    world.apply({"action": "resource-disappears"})
+    world.apply({"action": "restart-worker"})
+    world.apply({"action": "reconcile"})
+    check(
+        "restart preserves independently disappeared process and cmux resources",
+        world.process.process_status(4101, "a" * 64) == "dead"
+        and world.cmux.status("sim-surface") == "missing"
+        and world.record().state == "awaiting-callback",
+        world.snapshot(),
+    )
+
 with tempfile.TemporaryDirectory(prefix="lifecycle-real-effect-mutation.") as raw:
     world = LifecycleWorld.fresh(Path(raw))
     world.provider = NonFakeProvider(world.provider)

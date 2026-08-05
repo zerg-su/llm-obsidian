@@ -165,6 +165,7 @@ class OracleAudit:
                     replay_snapshot.get("head_boundary", {})
                 ),
                 "production_paths": [],
+                "semantic_effects": [],
             },
         )
 
@@ -180,6 +181,7 @@ class OracleAudit:
             or not isinstance(value.get("terminal_history"), list)
             or not isinstance(value.get("head_boundary"), dict)
             or not isinstance(value.get("production_paths"), list)
+            or not isinstance(value.get("semantic_effects"), list)
         ):
             raise RuntimeError("oracle audit is invalid")
         return value
@@ -222,6 +224,13 @@ class OracleAudit:
         if identity not in observed:
             observed.append(identity)
             self._write({**value, "production_paths": observed})
+
+    def semantic_effect(self, identity: str) -> None:
+        value = self._read()
+        effects = list(value["semantic_effects"])
+        if identity not in effects:
+            effects.append(identity)
+            self._write({**value, "semantic_effects": effects})
 
 
 class CrashController:
@@ -326,11 +335,63 @@ class FakeProvider:
         return result
 
 
+class ExternalWorldState:
+    """Independent durable fake-adapter facts that survive worker restart."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    @classmethod
+    def create(cls, path: Path) -> "ExternalWorldState":
+        state = cls(path)
+        _atomic_json(
+            path,
+            {
+                "schema_version": 1,
+                "process_status": "alive",
+                "supervisor_status": "alive",
+                "surface_status": "alive",
+                "workspace_status": "missing",
+            },
+        )
+        return state
+
+    def read(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("external world state is unavailable") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != 1
+            or value.get("process_status") not in {"alive", "dead"}
+            or value.get("supervisor_status") not in {"alive", "dead"}
+            or value.get("surface_status") not in {"alive", "missing"}
+            or value.get("workspace_status") not in {"alive", "missing"}
+        ):
+            raise RuntimeError("external world state is invalid")
+        return {key: str(item) for key, item in value.items() if key != "schema_version"}
+
+    def update(self, **changes: str) -> None:
+        value = self.read()
+        if not set(changes) <= set(value):
+            raise RuntimeError("external world state field is unknown")
+        value.update(changes)
+        _atomic_json(self.path, {"schema_version": 1, **value})
+
+
 class FakeProcess:
-    def __init__(self) -> None:
-        self.process_status_value = "alive"
-        self.supervisor_status_value = "alive"
+    def __init__(self, state: ExternalWorldState) -> None:
+        self.state = state
         self.simulated_signals = 0
+
+    @property
+    def process_status_value(self) -> str:
+        return self.state.read()["process_status"]
+
+    @property
+    def supervisor_status_value(self) -> str:
+        return self.state.read()["supervisor_status"]
 
     def process_status(self, process_group: int, identity: str) -> str:
         if process_group != 4101 or identity != PROCESS_IDENTITY:
@@ -351,20 +412,29 @@ class FakeProcess:
 
     def request_guardian_signal(self, _path: Path, **_identity: object) -> None:
         self.simulated_signals += 1
-        self.process_status_value = "dead"
-        self.supervisor_status_value = "dead"
+        self.state.update(process_status="dead", supervisor_status="dead")
 
     def disappear(self) -> None:
-        self.process_status_value = "dead"
-        self.supervisor_status_value = "dead"
+        self.state.update(process_status="dead", supervisor_status="dead")
 
 
 class FakeCmux:
-    def __init__(self, effect_observer: Callable[[], None] | None = None) -> None:
-        self.surface_status_value = "alive"
-        self.workspace_status_value = "missing"
+    def __init__(
+        self,
+        state: ExternalWorldState,
+        effect_observer: Callable[[], None] | None = None,
+    ) -> None:
+        self.state = state
         self.simulated_closes = 0
         self.effect_observer = effect_observer or (lambda: None)
+
+    @property
+    def surface_status_value(self) -> str:
+        return self.state.read()["surface_status"]
+
+    @property
+    def workspace_status_value(self) -> str:
+        return self.state.read()["workspace_status"]
 
     def status(self, surface_id: str) -> str:
         return self.surface_status_value if surface_id == SURFACE_ID else "missing"
@@ -374,7 +444,7 @@ class FakeCmux:
             raise RuntimeError("fake cmux surface identity changed")
         self.effect_observer()
         self.simulated_closes += 1
-        self.surface_status_value = "missing"
+        self.state.update(surface_status="missing")
 
     def workspace_status(self, workspace_id: str, _window_id: str) -> str:
         return (
@@ -388,11 +458,10 @@ class FakeCmux:
             raise RuntimeError("fake cmux workspace identity changed")
         self.effect_observer()
         self.simulated_closes += 1
-        self.workspace_status_value = "missing"
+        self.state.update(workspace_status="missing")
 
     def disappear(self) -> None:
-        self.surface_status_value = "missing"
-        self.workspace_status_value = "missing"
+        self.state.update(surface_status="missing", workspace_status="missing")
 
 
 class DeterministicEventSource:
@@ -414,6 +483,21 @@ class DeterministicEventSource:
     def publish(self, event: Mapping[str, object]) -> None:
         if event.get("kind") not in self.EVENT_KINDS:
             raise ValueError("event source kind is outside the closed vocabulary")
+        self.events.append(dict(event))
+
+    def pop(self) -> dict[str, object] | None:
+        return self.events.pop(0) if self.events else None
+
+
+class DeterministicCallbackSource:
+    """Closed callback transport, separate from provider event vocabulary."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def publish(self, event: Mapping[str, object]) -> None:
+        if event.get("kind") != "callback-ready":
+            raise ValueError("callback source kind is outside the closed vocabulary")
         self.events.append(dict(event))
 
     def pop(self) -> dict[str, object] | None:
@@ -446,7 +530,7 @@ class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
         self.monotonic_clock = world.clock
         self.sleeper = world.clock.sleep
         self.liveness_policy = LivenessPolicy.default()
-        self.next_liveness_probe = float("inf")
+        self.next_liveness_probe = world.clock()
         self.next_prompt_probe = float("inf")
         self.next_checkpoint_probe = float("inf")
         self.checkpoint = ""
@@ -456,12 +540,22 @@ class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
         return None
 
     def inspect_callback(self) -> None:
-        event = self.world.events.pop()
-        if event is not None:
-            self.world._publish_provider_event(event)
+        event = self.world.callback_events.pop()
+        if event is None:
+            return
+        acceptance = self.world._publish_callback(
+            {
+                **event,
+                "kind": str(event.get("callback_kind") or "result"),
+            }
+        )
+        self.callback_handled = acceptance.accepted or acceptance.duplicate
 
     def inspect_prompt(self) -> None:
         return None
+
+    def inspect_liveness(self) -> None:
+        self.world._publish_liveness()
 
     def capture_checkpoint(self) -> None:
         return None
@@ -489,12 +583,17 @@ class LifecycleWorld:
             self.root / "harness", fault_observer=self.crashes.observe
         )
         state = self._world_state()
-        self.process = FakeProcess()
+        self.external_world = ExternalWorldState(
+            self.root / "simulator" / "external-world.json"
+        )
+        self.process = FakeProcess(self.external_world)
         self.cmux = FakeCmux(
+            self.external_world,
             lambda: self.effect_audit.observe("cmux", real=False)
         )
         self.provider = FakeProvider(self.root / "external" / "provider-effects")
         self.events = DeterministicEventSource()
+        self.callback_events = DeterministicCallbackSource()
         self.clock = VirtualClock(self, float(state["clock"]))
         self.manager = RuntimeSessionManager(
             self.store,
@@ -545,6 +644,7 @@ class LifecycleWorld:
         )
         EffectAudit.create(root / "simulator" / "effect-audit.json")
         OracleAudit.create(root / "simulator" / "oracle-audit.json")
+        ExternalWorldState.create(root / "simulator" / "external-world.json")
         controller = LivenessController(root / "runtime" / "liveness")
         controller.observe(
             LivenessEvidence(0.0, "alive", record.revision, record.state),
@@ -831,8 +931,9 @@ class LifecycleWorld:
             self.cmux.disappear()
         else:
             raise ValueError("provider event kind is outside the simulator vocabulary")
+        self.oracle_audit.semantic_effect(str(kind))
 
-    def _publish_callback(self, action: Mapping[str, object]) -> None:
+    def _publish_callback(self, action: Mapping[str, object]):
         kind = str(action.get("kind") or "result")
         payload = (
             {"verdict": str(action.get("verdict") or "approve")}
@@ -859,8 +960,14 @@ class LifecycleWorld:
             expected_identity_sha256=expected_identity,
             accepted=acceptance.accepted,
         )
+        self.oracle_audit.semantic_effect(
+            "callback-accepted"
+            if acceptance.accepted
+            else "callback-duplicate-rejected"
+        )
         self.oracle_audit.production_path("CallbackBroker.accept")
         self._publish_liveness()
+        return acceptance
 
     def _close(self) -> None:
         result = self.manager.request_exit(OWNER_ID, OPERATION_ID)
@@ -871,6 +978,7 @@ class LifecycleWorld:
             if cleaned.action not in {"cleaned", "terminal"}:
                 raise RuntimeError(f"runtime cleanup did not converge: {cleaned.action}")
             self.oracle_audit.production_path("RuntimeSessionManager.cleanup")
+            self.oracle_audit.semantic_effect("resource-cleanup")
         self._publish_liveness()
 
     def _publish_stable_artifact(
@@ -898,6 +1006,7 @@ class LifecycleWorld:
         self.oracle_audit.production_path(
             "RuntimeWorkerSummaryMixin.summary_is_stable"
         )
+        self.oracle_audit.semantic_effect(f"stable-{name}-accepted")
 
     def _reject_cross_head_continuation(
         self, action: Mapping[str, object]
@@ -936,6 +1045,7 @@ class LifecycleWorld:
         else:
             raise RuntimeError("terminal review attempt accepted cross-HEAD continuation")
         self.oracle_audit.production_path("ReviewAttempt.rearm")
+        self.oracle_audit.semantic_effect("cross-head-continuation-rejected")
 
     def apply(self, action: Mapping[str, object]) -> dict[str, object]:
         name = action.get("action")
@@ -952,9 +1062,12 @@ class LifecycleWorld:
             outcome = EffectOutcome(str(action.get("outcome") or "succeeded"))
             self.store.resolve_effect(OWNER_ID, OPERATION_ID, outcome)
             self.oracle_audit.production_path("OperationStore.resolve_effect")
+            self.oracle_audit.semantic_effect("effect-resolved")
             self._publish_liveness()
         elif name == "publish-callback":
             self._publish_callback(action)
+        elif name == "queue-callback":
+            self.callback_events.publish({**action, "kind": "callback-ready"})
         elif name in {"publish-summary", "publish-resolution"}:
             self._publish_stable_artifact(name.removeprefix("publish-"), action)
         elif name == "publish-liveness":
@@ -994,11 +1107,13 @@ class LifecycleWorld:
                 worker.settle_exit_once()
             self.oracle_audit.production_path("RuntimeWorkerLoopMixin.poll_once")
             self.oracle_audit.production_path("enforce_callback_deadline")
+            self.oracle_audit.semantic_effect("deadline-recheck")
         elif name == "restart-worker":
-            # Rebuild volatile adapters only; the caller can retain the returned
-            # object or use LifecycleWorld.restart explicitly.
             restarted = type(self).restart(self.root)
             self.__dict__.update(restarted.__dict__)
+            LifecycleWorker(self).poll_once()
+            self.oracle_audit.production_path("RuntimeWorkerLoopMixin.poll_once")
+            self.oracle_audit.semantic_effect("liveness-reconciled")
         elif name == "reconcile":
             reconcile(self.record(), self.process, self.cmux)
         elif name == "close":
@@ -1151,6 +1266,20 @@ class LifecycleWorld:
 
     def production_paths(self) -> tuple[str, ...]:
         return tuple(str(item) for item in self.oracle_audit._read()["production_paths"])
+
+    def semantic_effects(self) -> frozenset[str]:
+        return frozenset(
+            str(item) for item in self.oracle_audit._read()["semantic_effects"]
+        )
+
+    def provider_result_sha256s(self) -> tuple[str, ...]:
+        events = self.runtime_root / "provider-events" / "generation-1" / "events"
+        results: list[str] = []
+        for path in sorted(events.glob("*.json")) if events.is_dir() else ():
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(value, Mapping) and value.get("kind") == "result-published":
+                results.append(str(value.get("result_sha256") or ""))
+        return tuple(results)
 
     def resource_close_count(self) -> int:
         path = self.runtime_root / "provider-events" / "resource-closed.json"

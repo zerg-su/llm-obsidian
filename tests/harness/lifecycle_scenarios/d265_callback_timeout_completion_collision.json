@@ -3,6 +3,7 @@
   "scenario_id": "d265-callback-timeout-completion-collision",
   "seed": 26503,
   "max_steps": 8,
+  "max_schedules": 2,
   "expected_initial_invariant": "SIM-INV-CALLBACK-DEADLINE",
   "expected_terminal_states": ["complete"],
   "forbidden_effects": ["second-terminal-disposition"],
@@ -22,10 +23,10 @@
     "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": []
   },
   "actions": [
-    {"action_id": "callback", "action": "publish-callback"},
-    {"action_id": "clock", "action": "advance-clock", "delta": 4102444801, "after": ["callback"]},
-    {"action_id": "timeout-tick", "action": "worker-tick", "after": ["clock"]},
-    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["timeout-tick"]},
-    {"action_id": "close", "action": "close", "after": ["result"]}
+    {"action_id": "clock", "action": "advance-clock", "delta": 4102444801},
+    {"action_id": "callback-ready", "action": "queue-callback", "after": ["clock"]},
+    {"action_id": "timeout-tick", "action": "worker-tick", "after": ["callback-ready"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["callback-ready"]},
+    {"action_id": "close", "action": "close", "after": ["timeout-tick", "result"]}
   ]
 }

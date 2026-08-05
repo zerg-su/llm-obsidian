@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harness"))
 
-from harness.contracts import AttentionReason  # noqa: E402
 from harness.runtime_sessions import RuntimeSessionManager  # noqa: E402
 from harness.runtime_worker import run as runtime_worker_run  # noqa: E402
 from harness.runtime_worker_execution import RuntimeWorkerExecution  # noqa: E402
@@ -129,16 +128,16 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-operation-crash.") as raw:
         ),
         "operation-transition-published",
     )
-    world = LifecycleWorld.restart(root)
-    check("restart observes the persisted operation transition", world.record().state == "preflight")
-    world.store.transition(
-        "sim-owner",
-        "sim-operation",
-        "attention-required",
-        reason=AttentionReason.ATTENTION_REQUIRED,
+    world.apply({"action": "restart-worker"})
+    restarted = world.snapshot()
+    check(
+        "restart worker converges the published operation through its production poll",
+        restarted["operation"]["state"] == "preflight"
+        and restarted["liveness"]["operation_state"] == "preflight"
+        and restarted["liveness"]["operation_revision"]
+        == restarted["operation"]["revision"],
+        restarted,
     )
-    world._publish_liveness()
-    assert_snapshot(world.snapshot())
 
 
 with tempfile.TemporaryDirectory(prefix="lifecycle-effect-crash.") as raw:
