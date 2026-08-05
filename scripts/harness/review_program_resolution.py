@@ -17,6 +17,7 @@ from review_resolution import (
 
 from .review_program_contracts import ReviewBoundaryInput, ReviewProgramError
 from .review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
     ReviewAttemptError,
     ReviewAttemptTerminalResult,
@@ -293,6 +294,59 @@ def _require_final_iterations(
         )
 
 
+def _require_exact_attempt_results(
+    gate_root: Path,
+    store: OperationStore,
+    operation_id: str,
+    gate: Mapping[str, object],
+    lanes: Mapping[str, Mapping[str, object]],
+    attempt: ReviewAttempt,
+) -> None:
+    terminal = attempt.terminal
+    pointers = gate.get("final_results")
+    if terminal is None or not isinstance(pointers, dict):
+        raise ReviewProgramError("trusted review attempt results are unavailable")
+    terminal_results = {item.axis: item for item in terminal.lane_results}
+    frozen_lanes = {item.axis: item for item in attempt.identity.lanes}
+    if set(pointers) != set(lanes) or set(terminal_results) != set(lanes):
+        raise ReviewProgramError("trusted review attempt results are incomplete")
+    for axis, lane_result in terminal_results.items():
+        pointer = pointers.get(axis)
+        if not isinstance(pointer, str):
+            raise ReviewProgramError("trusted review attempt result is unavailable")
+        relative = Path(pointer)
+        path = (gate_root / relative).resolve()
+        if (
+            relative.is_absolute()
+            or path == gate_root
+            or gate_root not in path.parents
+            or not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ReviewProgramError("trusted review attempt result is unavailable")
+        raw = path.read_bytes()
+        result = _object(path, "trusted review attempt result")
+        findings = result.get("findings")
+        if (
+            result.get("axis") != axis
+            or result.get("verdict") != lane_result.verdict
+            or result.get("verification_iteration") != 0
+            or hashlib.sha256(raw).hexdigest() != lane_result.result_sha256
+            or not isinstance(findings, list)
+            or tuple(
+                str(item.get("finding_id") or "")
+                for item in findings
+                if isinstance(item, dict)
+            )
+            != lane_result.finding_ids
+            or len(findings) != len(lane_result.finding_ids)
+        ):
+            raise ReviewProgramError("trusted review attempt result is stale")
+        _accepted_round_result(
+            store, frozen_lanes[axis].owner_id, lanes[axis], result, axis, 0
+        )
+
+
 def _exact_attempt_terminal_head(
     root: Path,
     gate_root: Path,
@@ -311,6 +365,7 @@ def _exact_attempt_terminal_head(
     except ReviewAttemptError as exc:
         raise ReviewProgramError("trusted review attempt identity is invalid") from exc
     identity = attempt.identity
+    terminal = attempt.terminal
     reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
     if (
         identity.attempt_id != operation_id
@@ -322,6 +377,13 @@ def _exact_attempt_terminal_head(
         or context.get("boundary_input_sha256") != boundary.input_sha256
     ):
         raise ReviewProgramError("trusted review attempt HEAD or identity is stale")
+    if (
+        attempt.status != "terminal"
+        or terminal is None
+        or terminal.result == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+        or gate.get("status") != terminal.result.value
+    ):
+        raise ReviewProgramError("trusted review attempt is not terminal")
     lanes = _lane_identities(gate, operation_id)
     frozen_lanes = {lane.axis: lane for lane in identity.lanes}
     if set(lanes) != set(frozen_lanes):
@@ -335,20 +397,14 @@ def _exact_attempt_terminal_head(
             or raw_lane.get("verification_iteration") != 0
         ):
             raise ReviewProgramError("trusted review attempt lane identity is stale")
-    if attempt.status != "terminal":
-        return reviewed_head
-    terminal = attempt.terminal
-    if terminal is None or gate.get("status") != terminal.result.value:
-        raise ReviewProgramError("trusted review attempt terminal result changed")
-    if terminal.result == ReviewAttemptTerminalResult.APPROVED:
-        _require_final_iterations(
-            gate_root,
-            OperationStore(root / ".vault-meta/harness"),
-            operation_id,
-            gate,
-            lanes,
-            {axis: 0 for axis in lanes},
-        )
+    _require_exact_attempt_results(
+        gate_root,
+        OperationStore(root / ".vault-meta/harness"),
+        operation_id,
+        gate,
+        lanes,
+        attempt,
+    )
     return reviewed_head
 
 
@@ -361,6 +417,13 @@ def resolved_terminal_head(
 ) -> str:
     """Bind a moved implementation HEAD to material rounds and exact Git deltas."""
 
+    protocol = gate.get("execution_protocol", "")
+    if protocol not in {"", EXACT_HEAD_REVIEW_PROTOCOL}:
+        raise ReviewProgramError("trusted review execution protocol is invalid")
+    if protocol == EXACT_HEAD_REVIEW_PROTOCOL and not isinstance(
+        gate.get("attempt"), Mapping
+    ):
+        raise ReviewProgramError("trusted review attempt identity is unavailable")
     if isinstance(gate.get("attempt"), Mapping):
         return _exact_attempt_terminal_head(
             root, gate_root, gate, boundary, operation_id

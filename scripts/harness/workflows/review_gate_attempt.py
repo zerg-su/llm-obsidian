@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from ..review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
     ReviewAttempt,
     ReviewAttemptError,
     ReviewAttemptIdentity,
@@ -155,6 +156,7 @@ class ReviewGateAttemptMixin:
         attempt = ReviewAttempt.pending(identity)
         initial = {
             "schema_version": 1,
+            "execution_protocol": EXACT_HEAD_REVIEW_PROTOCOL,
             "dispatch_operation_id": dispatch_operation_id,
             "owner_id": request.owner_id,
             "status": "pending",
@@ -198,6 +200,7 @@ class ReviewGateAttemptMixin:
                     )
                 for field in (
                     "schema_version",
+                    "execution_protocol",
                     "dispatch_operation_id",
                     "owner_id",
                     "policy",
@@ -452,18 +455,32 @@ class ReviewGateAttemptMixin:
             lane_results,
         )
         if terminal_result == ReviewAttemptTerminalResult.APPROVED:
-            evidence_path = self._approve(run.execution)
-            if evidence_path is None:
+            prepared = self._approval_artifacts(run.execution)
+            if prepared is None:
                 terminal = ReviewAttemptTerminal(
                     ReviewAttemptTerminalResult.ATTENTION_REQUIRED,
                     attempt.identity.exact_head_sha,
                     lane_results,
                 )
                 terminal_result = ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+                evidence_path = None
+                evidence: dict[str, object] = {}
+            else:
+                evidence_path, evidence = prepared
         else:
             evidence_path = None
+            evidence = {}
         finished = attempt.finish(attempt.identity, terminal)
-        self._replace(status=terminal_result.value, attempt=finished.payload())
+        updates: dict[str, object] = {
+            "status": terminal_result.value,
+            "attempt": finished.payload(),
+        }
+        if terminal_result == ReviewAttemptTerminalResult.APPROVED:
+            updates.update(
+                context=self._context(run.execution.request.context),
+                evidence=evidence,
+            )
+        self._replace(**updates)
         return ReviewGateDecision(
             terminal_result.value,
             lane,

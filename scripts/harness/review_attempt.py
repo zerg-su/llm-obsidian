@@ -17,6 +17,7 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 GIT_SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 ATTEMPT_STATES = {"pending", "running", "awaiting-callback", "terminal"}
 LANE_VERDICTS = {"approve", "changes-requested", "blocked"}
+EXACT_HEAD_REVIEW_PROTOCOL = "exact-head-attempt-v1"
 
 
 class ReviewAttemptError(ValueError):
@@ -518,6 +519,7 @@ LEGACY_CROSS_HEAD_RESUME_DISABLED = LegacyCrossHeadResumeDisposition()
 
 
 __all__ = (
+    "EXACT_HEAD_REVIEW_PROTOCOL",
     "LEGACY_CROSS_HEAD_RESUME_DISABLED",
     "LegacyCrossHeadResumeDisposition",
     "ReviewAttempt",

@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from harness.contracts import AttentionReason
 from harness.review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
     ReviewAttempt,
     ReviewAttemptError,
@@ -204,9 +205,6 @@ def _start_review(
         context_manifest=context_manifest,
         run=run,
     )
-
-
-EXACT_HEAD_REVIEW_PROTOCOL = "exact-head-attempt-v1"
 
 
 def _exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
