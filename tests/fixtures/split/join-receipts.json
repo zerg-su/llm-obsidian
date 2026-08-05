@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "expected_disposition": "ready",
+  "manifest_sha256": "1c9eec607d58d77255321c318a4366cd97b3928a9461042fc817a04481b5c78a",
+  "receipts": [
+    {
+      "subplan_id": "contracts",
+      "branch": "task/contracts",
+      "head_sha": "1111111111111111111111111111111111111111",
+      "evidence_ids": ["D1-governed-split-preview"]
+    },
+    {
+      "subplan_id": "validation",
+      "branch": "task/validation",
+      "head_sha": "2222222222222222222222222222222222222222",
+      "evidence_ids": ["D2-eight-rejections"]
+    },
+    {
+      "subplan_id": "execution",
+      "branch": "task/execution",
+      "head_sha": "3333333333333333333333333333333333333333",
+      "evidence_ids": ["D3-bounded-waves-locality"]
+    },
+    {
+      "subplan_id": "join",
+      "branch": "task/join",
+      "head_sha": "4444444444444444444444444444444444444444",
+      "evidence_ids": ["D4-deterministic-join"]
+    }
+  ],
+  "stop_dispositions": [
+    "attention-required",
+    "failed",
+    "cancelled",
+    "conflict",
+    "stale-head",
+    "receipt-invalid"
+  ]
+}
