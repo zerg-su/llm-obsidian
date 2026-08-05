@@ -27,6 +27,22 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-05 15:02] dispatch | llm-obsidian-2-6-5-split-components
+
+Spawned an approved unattended task session (cmux `EA694194-167B-454F-852D-94C70B281004`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-split-components`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-split-components` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.
+
+## [2026-08-05 15:02] dispatch | llm-obsidian-2-6-5-provider-events
+
+Spawned an approved unattended task session (cmux `C6DDFDF5-6481-4605-8C3F-C1132D5D6C82`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-provider-events`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-provider-events` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.
+
+## [2026-08-05 15:02] dispatch | llm-obsidian-2-6-5-review-attempt
+
+Spawned an approved unattended task session (cmux `E0E25A0C-A70F-4C83-A335-D69914D42E1B`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-review-attempt`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-review-attempt` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-a-exact-head-review-attempt.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.
+
+## [2026-08-05 15:02] dispatch | llm-obsidian-2-6-5-finalization-dsl
+
+Spawned an approved unattended task session (cmux `391F916D-6C5A-40E0-A0BE-00C8392FCDBD`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-finalization-dsl`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-finalization-dsl` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.
+
 ## [2026-08-05] plan amendment | LLM Obsidian 2.6.4 D-264-41
 
 [[2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog]]. The E7 wikilink planner produced a valid optimistic repair for a broken link in writer-owned wiki/log.md, but the sole writer rejected its own payload. D-264-41 is included through exact planner-payload authorization: only the canonical current stop-hook-link-repair bytes may update log/hot, while forged and ordinary direct writes remain blocked. The original failed repair and the GREEN strict validation provide end-to-end evidence.
