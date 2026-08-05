@@ -241,6 +241,34 @@ def render_task_prompt(request: dict[str, Any], config: dict[str, Any]) -> str:
         body = body.replace(old, new)
     if request["placement"] == "workspace":
         body = body.replace("the left wiki split", "the coordinator workspace")
+    split_policy = request.get("split")
+    if isinstance(split_policy, dict):
+        budget = split_policy["budget"]
+        assert isinstance(budget, dict)
+        body += "\n".join(
+            (
+                "\n\n## Frozen Split child contract\n",
+                f"- Manifest: `{split_policy['manifest_sha256']}`",
+                f"- Subplan: `{split_policy['subplan_id']}`",
+                f"- Route alias: `{split_policy['route_alias']}`",
+                "- Owned files: " + ", ".join(
+                    f"`{item}`" for item in split_policy["owned_paths"]
+                ),
+                "- Evidence: " + ", ".join(
+                    f"`{item}`" for item in split_policy["evidence_ids"]
+                ),
+                "- Dependencies: " + (
+                    ", ".join(f"`{item}`" for item in split_policy["dependencies"])
+                    or "none"
+                ),
+                "- Frozen ceiling: "
+                f"{budget['token_limit']} tokens / "
+                f"{budget['time_budget_seconds']} seconds.",
+                "Work, review, and verification remain in this child workspace. "
+                "Do not touch paths outside the exact owned-file list; do not weaken "
+                "the inherited parent non-goals or claim unassigned evidence.",
+            )
+        )
     if request["pipeline"] == "custom":
         _spec, compiled, _policy, _card = custom_contract_for_request(request)
         phase_contract = "\n".join(

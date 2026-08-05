@@ -252,6 +252,8 @@ def write_task_files(
         ],
         "suggested_agents": request["suggested_agents"],
     }
+    if request.get("split") is not None:
+        meta["split_policy"] = request["split"]
     if request["executor"]["model"]:
         meta["model"] = request["executor"]["model"]
     if request["executor"]["effort"]:

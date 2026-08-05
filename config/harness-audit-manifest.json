@@ -23,6 +23,7 @@
     "scripts/review_contract.py",
     "scripts/review_resolution.py",
     "scripts/review_telemetry.py",
+    "scripts/split_dispatch.py",
     "scripts/task_contract.py",
     "scripts/task_review_context.py",
     "scripts/task_review_current.py",
@@ -74,6 +75,10 @@
     {
       "path": "scripts/live-acceptance-runner.py",
       "reason": "provider/OS acceptance adapter; covered by the separate four-cell live release gate"
+    },
+    {
+      "path": "scripts/split-runner.py",
+      "reason": "provider/worktree activation facade; core paths are traced through split_dispatch and the bounded Split integration suite"
     }
   ]
 }

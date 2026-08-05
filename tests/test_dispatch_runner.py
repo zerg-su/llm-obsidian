@@ -23,6 +23,15 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 from harness.contracts import OwnedResources
 from harness.finalization_ledger import FinalizationLedger
+from harness.split_activation import split_child_policy, split_child_policy_payload
+from harness.split_contracts import (
+    ChildBudget,
+    FrozenSplitBudget,
+    JoinSpec,
+    ParentContract,
+    SplitCandidate,
+    build_split_preview,
+)
 from harness.review_finalization import task_finalization_policy
 from harness.runtime_sessions import RuntimeSessionResult
 from harness.store import OperationStore
@@ -249,6 +258,56 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "workspace dispatch remains an explicit placement",
         workspace_request["placement"] == "workspace"
         and "scripts/harness-cli.py" in workspace_prompt,
+    )
+    split_parent = ParentContract(
+        plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
+        outcome_contract_sha256=workspace_request["outcome_contract_sha256"],
+        evidence_ids=("fixture-green",),
+        non_goals=("No external effects.",),
+    )
+    split_candidate = SplitCandidate(
+        subplan_id="whole-plan",
+        title="Whole plan",
+        pipeline="lifecycle/default",
+        route_alias="task-default",
+        owned_paths=("README.md",),
+        evidence_ids=("fixture-green",),
+        dependencies=(),
+        inherited_non_goals=split_parent.non_goals,
+        budget=ChildBudget(200_000, 1_800),
+        independence_proven=True,
+    )
+    split_manifest = build_split_preview(
+        parent=split_parent,
+        candidates=(split_candidate,),
+        frozen_budget=FrozenSplitBudget(1, 1, 200_000, 1_800),
+        requested_max_parallel=1,
+        coordination_cost=0,
+        parallel_benefit=1,
+        fallback_pipeline="lifecycle/default",
+        fallback_route_alias="task-default",
+        join=JoinSpec(),
+    ).manifest
+    split_raw = json.loads(json.dumps(workspace_raw))
+    split_raw["split"] = split_child_policy_payload(
+        split_child_policy(split_manifest, split_manifest.subplans[0])
+    )
+    split_request = runner.validate_request(split_raw)
+    split_prompt = runner.render_task_prompt(split_request, config)
+    check(
+        "Split child dispatch persists a frozen child-local policy",
+        split_request["placement"] == "workspace"
+        and split_request["split"]["manifest_sha256"]
+        == split_manifest.manifest_sha256
+        and "## Frozen Split child contract" in split_prompt
+        and "`README.md`" in split_prompt,
+    )
+    wrong_split_placement = json.loads(json.dumps(split_raw))
+    wrong_split_placement["placement"] = "split"
+    expect_error(
+        "Split child cannot fall back into the coordinator split",
+        lambda: runner.validate_request(wrong_split_placement),
+        "requires workspace placement",
     )
     unknown_reap = json.loads(json.dumps(raw_request))
     unknown_reap["reap"]["mode"] = "shared"
@@ -1251,6 +1310,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and workspace_meta["task_workspace"] == "44444444-4444-4444-8444-444444444444"
         and workspace_meta["task_window"] == "55555555-5555-4555-8555-555555555555"
         and workspace_meta["reap_policy"]["mode"] == "shared",
+    )
+    split_meta = {**workspace_meta, "split_policy": split_request["split"]}
+    check(
+        "task-session metadata preserves the exact Split manifest slice",
+        runner.normalize_task_contract(split_meta)["split_policy"]
+        == split_request["split"],
     )
 
     duplicate = json.loads(json.dumps(raw_request))

@@ -29,6 +29,10 @@ from harness.custom_pipelines import (
 )
 from harness.pipeline_builtins import EXECUTABLE_BUILTINS, builtin_registry, compiled_builtin
 from harness.workflows.dispatch import ReviewPolicy
+from harness.split_activation import (
+    parse_split_child_policy,
+    split_child_policy_payload,
+)
 from dispatch_io import (
     DispatchError,
     _approval_lock,
@@ -325,6 +329,17 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     placement = str(raw.get("placement") or "split").strip()
     if placement not in {"split", "workspace"}:
         raise DispatchError("placement must be split or workspace")
+    raw_split = raw.get("split")
+    split_policy: dict[str, object] | None = None
+    if raw_split is not None:
+        try:
+            split_policy = split_child_policy_payload(
+                parse_split_child_policy(raw_split)
+            )
+        except HarnessContractError as exc:
+            raise DispatchError(f"split child policy is invalid: {exc}") from exc
+        if placement != "workspace":
+            raise DispatchError("Split child dispatch requires workspace placement")
     pipeline = str(raw.get("pipeline") or "lifecycle/default").strip()
     if pipeline not in {*EXECUTABLE_BUILTINS, "custom"}:
         raise DispatchError("pipeline must name an executable pipeline")
@@ -437,6 +452,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "outcome_contract_sha256": outcome_contract_sha256,
         "origin_surface": origin_surface,
         "placement": placement,
+        "split": split_policy,
         "pipeline": pipeline,
         "custom_pipeline_spec": custom_pipeline_spec,
         "completion_policy": completion_policy,
