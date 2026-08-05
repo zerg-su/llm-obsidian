@@ -99,6 +99,13 @@
 - Retirement теперь безопасно повторяется после crash между записью accepted
   receipt и очисткой liveness state: снимается только точный совпавший sent
   binding, а общие recovery budgets остаются израсходованными.
+- Continuation Enter retry теперь использует тот же digest callback target и
+  полную generation identity, что и worker liveness. Replay pending effect
+  подтверждает activity и переводит только точную reservation в `sent`, не
+  расходуя ещё одну попытку и не повторяя prompt или key.
+- Публикация append-only escalation стала directory-durable: создание каталога
+  records при первом использовании и каждая immutable directory entry получают
+  `fsync` раньше, чем заменяется latest pointer.
 - После декомпозиции lifecycle-модулей восстановлена атомарная pointer-
   материализация resolution review inputs, превышающих inline-лимит пакета.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся

@@ -33,6 +33,7 @@ from .runtime_session_contracts import (
     continuation_effect_id,
 )
 from .runtime_session_continuation import deliver_continuation
+from .runtime_callback_io import _bounded_file_sha256
 from .store import StoreError
 from .supervisor import OperationSupervisor
 
@@ -549,7 +550,15 @@ class RuntimeSessionLaunchMixin:
             current.effect_id == effect_id
             and current.effect_outcome == EffectOutcome.SUCCEEDED
         )
-        if not effect_succeeded and not already_acknowledged:
+        effect_pending = (
+            current.effect_id == effect_id
+            and current.effect_outcome == EffectOutcome.PENDING
+        )
+        if (
+            not effect_succeeded
+            and not effect_pending
+            and not already_acknowledged
+        ):
             time_budget_seconds = metadata.get("time_budget_seconds")
             if (
                 not isinstance(time_budget_seconds, (int, float))
@@ -621,17 +630,24 @@ class RuntimeSessionLaunchMixin:
             liveness = LivenessController(
                 self._state_root(record) / "liveness"
             )
+            target_sha256 = _bounded_file_sha256(
+                self._callback_target_path(record)
+            )
+            if not target_sha256:
+                raise RuntimeSessionError(
+                    "continuation callback target digest is unavailable"
+                )
             retry_identity = {
                 "operation_id": str(target["operation_id"]),
                 "run_id": str(target["run_id"]),
                 "lane_id": record.lane_id,
                 "generation": int(target["generation"]),
-                "target_sha256": effect_id,
+                "target_sha256": target_sha256,
                 "expected_operation_id": str(target["operation_id"]),
                 "expected_run_id": str(target["run_id"]),
                 "expected_lane_id": record.lane_id,
                 "expected_generation": int(target["generation"]),
-                "expected_target_sha256": effect_id,
+                "expected_target_sha256": target_sha256,
             }
             retry_binding = hashlib.sha256(
                 json.dumps(
@@ -694,6 +710,17 @@ class RuntimeSessionLaunchMixin:
                     pre_send_editor_sha256=prior_pre_send_editor_sha256,
                     paste_screen_sha256=prior_paste_screen_sha256,
                 )
+                if (
+                    result.acknowledged
+                    and receipt
+                    and receipt.get("status") == "submit-retry-reserved"
+                ):
+                    try:
+                        liveness.mark_callback_submit_sent(retry_binding)
+                    except ContractError as exc:
+                        raise ContinuationUnconfirmed(
+                            "submit-retry-receipt-unconfirmed"
+                        ) from exc
                 status = "acknowledged" if result.acknowledged else "unconfirmed"
                 self._write_json(
                     receipt_path,

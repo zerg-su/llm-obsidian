@@ -36,6 +36,7 @@ from harness.adapters.codex import (
     validate_reviewer_sandbox_command as validate_codex_reviewer_sandbox_command,
 )
 from harness.callbacks import CallbackBroker, CallbackTimeoutError
+from harness.liveness import LivenessController, LivenessEvidence, LivenessPolicy
 from harness.adapters.process import (
     ProcessAdapter,
     ProcessError,
@@ -1478,49 +1479,175 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and legacy_cmux.submit_count == legacy_cmux.submits_at_last_send,
         (legacy, legacy_cmux.sent, legacy_cmux.submit_count, legacy_cmux.submits_at_last_send),
     )
-    child_spec = OperationSpec(
-        "round-1",
-        "round-key-1",
+
+    class SimulatedContinuationCrash(BaseException):
+        pass
+
+    class RetryCrashCmux(FakeCmux):
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            if not self.sent:
+                return "❯"
+            anchor = next(
+                (
+                    line.strip()
+                    for line in self.sent[-1][1].splitlines()
+                    if line.strip()
+                ),
+                "",
+            )
+            return f"❯ {anchor}"
+
+        def send_key(self, surface_id: str, key: str) -> None:
+            super().send_key(surface_id, key)
+            if self.submit_count == 2:
+                raise SimulatedContinuationCrash()
+
+    class ReplayActivityCmux(FakeCmux):
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            return "✻ Resuming…(1s · ↓10 tokens)"
+
+    retry_child_spec = OperationSpec(
+        "retry-round-1",
+        "retry-round-key-1",
         "review-round",
         "owner-1",
         route,
-        "packets/round.json",
+        "packets/retry-round.json",
         "scoped",
     )
-    store.create(child_spec, lane_id="lane-shared", run_id="run-round-1")
+    store.create(
+        retry_child_spec,
+        lane_id="lane-shared",
+        run_id="retry-round-run-1",
+    )
     for state in ("preflight", "starting", "running", "awaiting-callback"):
-        store.transition("owner-1", "round-1", state)
-    registered = manager.continue_same_session_round(
+        store.transition("owner-1", "retry-round-1", state)
+    retry_parent = store.read("owner-1", "runtime-1")
+    retry_liveness = LivenessController(
+        manager._state_root(retry_parent) / "liveness"
+    )
+    retry_liveness.observe(
+        LivenessEvidence(
+            observed_at=time.time(),
+            process_status="alive",
+            operation_revision=retry_parent.revision,
+            operation_state=retry_parent.state,
+        ),
+        LivenessPolicy.default(),
+    )
+    seeded_retry_state = retry_liveness.current_state()
+    check(
+        "continuation retry fixture starts with one unused recovery budget",
+        seeded_retry_state is not None
+        and seeded_retry_state.nudge_count == 0
+        and not seeded_retry_state.callback_submit_binding,
+        seeded_retry_state,
+    )
+    retry_cmux = RetryCrashCmux([])
+    manager.cmux = retry_cmux
+    try:
+        manager.continue_same_session_round(
+            "owner-1",
+            "runtime-1",
+            "checkpoint-1",
+            "continue.md",
+            "retry-round-1",
+            "retry-round-run-1",
+            "callbacks/retry-round.json",
+        )
+    except SimulatedContinuationCrash:
+        pass
+    else:
+        raise AssertionError("retry crash seam must stop after the second Enter")
+    retry_target_path = manager._callback_target_path(
+        store.read("owner-1", "runtime-1")
+    )
+    retry_target_sha256 = hashlib.sha256(
+        retry_target_path.read_bytes()
+    ).hexdigest()
+    retry_identity = {
+        "operation_id": "retry-round-1",
+        "run_id": "retry-round-run-1",
+        "lane_id": "lane-shared",
+        "generation": 2,
+        "target_sha256": retry_target_sha256,
+        "expected_operation_id": "retry-round-1",
+        "expected_run_id": "retry-round-run-1",
+        "expected_lane_id": "lane-shared",
+        "expected_generation": 2,
+        "expected_target_sha256": retry_target_sha256,
+    }
+    retry_binding = hashlib.sha256(
+        json.dumps(
+            retry_identity, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    crash_state = retry_liveness.current_state()
+    retry_receipt = next(
+        (
+            manager._state_root(store.read("owner-1", "runtime-1"))
+            / "continuation-deliveries"
+        ).glob("*.json")
+    )
+    check(
+        "continuation retry crash preserves the worker generation binding",
+        crash_state is not None
+        and crash_state.callback_submit_binding == retry_binding
+        and crash_state.callback_submit_status == "reserved"
+        and json.loads(retry_receipt.read_text(encoding="utf-8"))["status"]
+        == "submit-retry-reserved",
+        crash_state,
+    )
+    replay_cmux = ReplayActivityCmux([])
+    manager.cmux = replay_cmux
+    resumed = manager.continue_same_session_round(
         "owner-1",
         "runtime-1",
         "checkpoint-1",
         "continue.md",
-        "round-1",
-        "run-round-1",
-        "callbacks/round.json",
+        "retry-round-1",
+        "retry-round-run-1",
+        "callbacks/retry-round.json",
     )
-    child_payload = {"status": "ok"}
-    child_encoded = json.dumps(
-        child_payload, sort_keys=True, separators=(",", ":")
+    replay_state = retry_liveness.current_state()
+    check(
+        "confirmed retry replay promotes the reservation without duplicate input",
+        resumed.record.state == "awaiting-callback"
+        and replay_state is not None
+        and replay_state.callback_submit_binding == retry_binding
+        and replay_state.callback_submit_status == "sent"
+        and replay_cmux.sent == []
+        and replay_cmux.submit_count == 0,
+        (resumed, replay_state, replay_cmux.sent, replay_cmux.submit_count),
+    )
+    retry_payload = {
+        "verdict": "approve",
+        "findings": [],
+        "parent_session_operation_id": "runtime-1",
+    }
+    retry_encoded = json.dumps(
+        retry_payload, sort_keys=True, separators=(",", ":")
     ).encode()
-    child_callback = CallbackEnvelope(
-        "callback-round-1",
-        "round-1",
-        "run-round-1",
-        "result",
-        child_payload,
-        hashlib.sha256(child_encoded).hexdigest(),
+    retry_accepted = manager.accept_callback(
+        CallbackEnvelope(
+            "callback-retry-round-1",
+            "retry-round-1",
+            "retry-round-run-1",
+            "review",
+            retry_payload,
+            hashlib.sha256(retry_encoded).hexdigest(),
+        )
     )
-    child_accepted = manager.accept_callback(child_callback)
     check(
         "serial child callback target reuses parent ownership",
-        registered.callback_pointer == "callbacks/round.json"
-        and registered.record.state == "awaiting-callback"
-        and registered.record.resources.surface_id == SURFACE
-        and child_accepted.record.spec.operation_id == "round-1"
-        and child_accepted.record.state == "finalizing"
+        retry_accepted.record.spec.operation_id == "retry-round-1"
+        and retry_accepted.record.state == "finalizing"
         and store.read("owner-1", "runtime-1").resources.surface_id == SURFACE,
+        retry_accepted,
     )
+    manager.cmux = cmux
 
     artifact_spec = OperationSpec(
         "artifact-round-1",

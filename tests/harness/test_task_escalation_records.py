@@ -10,6 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,7 @@ from task_escalation_records import (  # noqa: E402
     load_latest,
     record_path,
 )
+import task_escalation_records as escalation_records  # noqa: E402
 from harness.runtime_worker_control import RuntimeWorkerControlMixin  # noqa: E402
 from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
 
@@ -130,6 +132,47 @@ with tempfile.TemporaryDirectory(prefix="task-escalation-records.") as raw:
     worktree = Path(raw) / "task"
     worktree.mkdir()
     meta(worktree)
+
+    durability_worktree = Path(raw) / "durability-task"
+    durability_worktree.mkdir()
+    meta(durability_worktree, task_id="durability-task")
+    durability_order: list[str] = []
+    real_sync_directory = escalation_records._fsync_directory
+    real_write_pointer = escalation_records._write_pointer
+
+    def record_directory_sync(path: Path) -> None:
+        durability_order.append(f"sync:{path.name}")
+        real_sync_directory(path)
+
+    def record_pointer_write(task_root: Path, record: object) -> None:
+        durability_order.append("pointer")
+        real_write_pointer(task_root, record)
+
+    with patch.object(
+        escalation_records,
+        "_fsync_directory",
+        side_effect=record_directory_sync,
+    ), patch.object(
+        escalation_records,
+        "_write_pointer",
+        side_effect=record_pointer_write,
+    ):
+        durable = append_raise(
+            durability_worktree,
+            raised_payload(
+                durability_worktree,
+                "durable-escalation",
+                "durable decision",
+            ),
+        )
+    check(
+        "record directory entries are durable before pointer publication",
+        durability_order.index(f"sync:{escalation_records.RECORDS_NAME}")
+        < durability_order.index("pointer")
+        and durability_order.index(f"sync:{durability_worktree.name}")
+        < durability_order.index("pointer")
+        and load_latest(durability_worktree).sha256 == durable.sha256,
+    )
 
     first = append_raise(
         worktree,

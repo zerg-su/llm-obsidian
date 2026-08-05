@@ -552,3 +552,15 @@ This coordinator-owned amendment resolves `REL-CRASH-001` from the exact-HEAD So
 | D-264-52 | callback watchdog | a crash after persisting `callback_submit_status=sent` but before advancing the separate callback-submit receipt left `state=sent + receipt=reserved`; restart classified recovery as already sent without healing the receipt, and accepted retirement could strand the next retained generation | `included` | runtime restart idempotently replays only the exact sent-receipt write before classification, performs zero provider prompt/Enter, preserves consumed budgets, and emits typed `callback-submit-evidence-malformed` attention for a corrupt receipt; `test_liveness.py` injects the exact kill point and `test_callback_submit_recovery_runtime.py` proves healing plus malformed fail-closed behavior |
 
 No provider effect, callback, model call, retry-budget expansion, route change, review-topology change, public-interface change, migration, push, tag, publish or release is introduced. The corrected candidate must repeat the complete exact-HEAD gate ladder and fresh Sol implementation/release reviews.
+
+
+## Append-only final implementation-review amendment D-264-53 through D-264-54
+
+This coordinator-owned amendment resolves the two important engineering findings from the independent Sol implementation review of candidate `dc2c2dcbd6c403971a51848740e85661f9a5a587`. It preserves the frozen Outcome Contract and changes only exact crash-replay identity plus record-publication durability.
+
+| ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
+|---|---|---|---|---|
+| D-264-53 | continuation transport | the bounded continuation Enter retry reserved liveness with the continuation effect identifier rather than the current callback-target digest; worker polling therefore observed a foreign generation and could enter stale-generation attention | `included` | retry reservation now uses the same bounded callback-target SHA-256 and complete generation identity as worker liveness; an integrated crash after the retry Enter leaves an exact reserved binding, pending-effect replay confirms provider activity, advances it to `sent`, reaches `awaiting-callback`, and sends zero duplicate prompt or Enter |
+| D-264-54 | escalation records | the immutable decision file was fsynced, but its records-directory entry was not made durable before the latest pointer could be published | `included` | first-use records-directory creation is fsynced in the worktree and every immutable record entry is fsynced in its parent before pointer replacement; the ordered regression proves both directory barriers precede publication |
+
+Focused runtime-session, continuation-delivery, callback-recovery, liveness and escalation-record suites are green. The corrected candidate must repeat the complete exact-HEAD gate ladder, continue the same Sol implementation review for verification, and then pass the separate purpose=release audit. No new review lane, provider budget, retry budget, route, permission, public interface, migration, push, tag, publish or release is authorized.

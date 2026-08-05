@@ -137,6 +137,16 @@ def _marker_path(worktree: Path) -> Path:
     return worktree / MARKER_NAME
 
 
+def _fsync_directory(path: Path) -> None:
+    """Make directory-entry mutations durable before publishing dependants."""
+
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _record_from_value(
     worktree: Path,
     path: Path,
@@ -412,7 +422,10 @@ def attention_record_sha256(worktree: Path) -> str:
 @contextmanager
 def _writer_lock(worktree: Path) -> Iterator[None]:
     records = _records_root(worktree)
+    records_existed = records.exists()
     records.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not records_existed:
+        _fsync_directory(worktree)
     lock_path = records / ".lock"
     if lock_path.is_symlink() or (lock_path.exists() and not lock_path.is_file()):
         raise EscalationRecordError("decision records lock is invalid")
@@ -511,6 +524,7 @@ def _persist_record(worktree: Path, value: dict[str, Any]) -> DecisionRecord:
     record_id = _valid_record_id(value.get("record_id"))
     path = record_path(worktree, record_id)
     raw = _write_immutable(path, value)
+    _fsync_directory(path.parent)
     return _record_from_value(worktree, path, value, raw)
 
 

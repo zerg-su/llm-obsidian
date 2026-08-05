@@ -95,6 +95,13 @@ packages were published for them.
 - Made that retirement replayable across a crash between the accepted receipt
   write and liveness-state clear; replay retires only the exact matching sent
   binding and leaves all shared recovery budgets consumed.
+- Bound continuation Enter retry to the same callback-target digest and full
+  generation identity used by worker liveness. Pending-effect replay now
+  confirms activity and marks the exact reservation sent without another
+  attempt, prompt, or key.
+- Made append-only escalation publication directory-durable: first-use records
+  directory creation and every immutable record entry are fsynced before the
+  latest pointer can be replaced.
 - Restored atomic pointer materialization for resolution-bound review inputs
   larger than the inline packet limit after the lifecycle-module extraction.
 - Made equal attention-marker replay retry an earlier failed authoritative
