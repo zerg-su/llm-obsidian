@@ -1,0 +1,49 @@
+=== test_instruction_lint.py ===
+OK   repository instructions align
+OK   protected web-tool regression detected
+OK   direct wiki mutation regression detected
+OK   Claude subscription fallback regression detected
+OK   missing daily skill handled without traceback
+OK   legacy skill lint ignores bytecode cache but rejects source
+OK   failure-repair auto-repair boundary drift detected
+OK   finalization and ephemeral policy drift detected
+OK   defuddle fallback requires actual cleanup
+OK   dispatch delegates anchored mechanics to typed runner
+OK   task summary delegates to the internal callback broker
+
+All instruction lint tests passed.
+=== test_skill_budget.py ===
+OK   repository description and body budgets
+OK   oversized budget rejected
+OK   unapproved body growth rejected
+
+All skill budget tests passed.
+=== test_codex_adapter.sh ===
+A. syntax/session helper
+  OK   A1 codex-adapter.py compiles
+  OK   A2 helper prefers Claude
+  OK   A3 helper falls back to Codex
+  OK   A4 helper unknown fallback
+  OK   A5 task helper preserves exact origin binding
+  OK   A6 invalid task binding falls back safely
+  OK   A7 public Claude package metadata is aligned
+  OK   A8 repo model defaults are aligned
+B. check/apply
+  OK   B1 initial check reports drift
+  OK   B2 check mentions plugin manifest
+  OK   B3 check mentions marketplace
+  OK   B4 apply exits 0
+  OK   B5 root manifest written
+  OK   B6 marketplace written
+C. generated shape
+  OK   C1 generated shape
+  OK   C2 second check clean
+  OK   C3 no changes message
+  OK   C4 cachebuster apply exits 0
+  OK   C5 cachebuster preserved
+D. fork plugin names
+  OK   D1 fork source updated
+  OK   D2 fork apply exits 0
+  OK   D3 fork generated shape
+
+codex-adapter tests: 22 passed, 0 failed
