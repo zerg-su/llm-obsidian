@@ -186,6 +186,7 @@ def finalization_parity_issues(
             "code-owned ephemeral adapter",
             "subscription preflight",
             "arbitrary direct print-mode",
+            "но не отправляет input",
         ),
         "docs/runtime-capabilities.md": (
             "D-265-EPH-01",

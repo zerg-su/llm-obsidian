@@ -22,6 +22,8 @@ assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 from harness.contracts import OwnedResources
+from harness.finalization_ledger import FinalizationLedger
+from harness.review_finalization import task_finalization_policy
 from harness.runtime_sessions import RuntimeSessionResult
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
@@ -382,6 +384,13 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                 "review_mode": "simple",
                 "human_gates": ["initial-approval"],
                 "terminal_outcomes": ["completed", "attention-required"],
+                "finalization_policy": {
+                    "max_cycles": 1,
+                    "add_independent_model_after": 4,
+                    "execution": "ephemeral",
+                    "primary_route_alias": "finalization-primary",
+                    "independent_route_alias": "finalization-independent",
+                },
             },
             sort_keys=True,
         ),
@@ -522,6 +531,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and "Inherited harness permissions: cmux-target:policy-only"
         in custom_contract["summary"]
         and "Inherited harness side effects: cmux-surface:policy-only"
+        in custom_contract["summary"]
+        and "Finalization: cycles<=1; independent-after=4"
         in custom_contract["summary"]
         and request["origin_surface"] in custom_contract["summary"]
         and request["origin_session"] in custom_contract["summary"]
@@ -997,6 +1008,73 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             "primary_route_alias": "finalization-primary",
             "independent_route_alias": "finalization-independent",
         },
+    )
+    custom_meta = runner.write_task_files(
+        approved_custom_request,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
+    )
+    normalized_custom = runner.normalize_task_contract(custom_meta)
+    custom_finalization = task_finalization_policy(custom_meta)
+    custom_spec_value, custom_compiled, custom_ceiling, _custom_card = (
+        runner.custom_contract_for_request(approved_custom_request)
+    )
+    custom_ledger = FinalizationLedger(
+        tmp / "custom-finalization-ledger",
+        lineage_id=str(uuid.UUID(int=900)),
+        origin_task_id=str(uuid.UUID(int=901)),
+        plan_sha256=custom_meta["approved_plan_sha256"],
+        outcome_contract_sha256=custom_meta["outcome_contract_sha256"],
+        max_cycles=custom_meta["finalization_policy"]["max_cycles"],
+    )
+    check(
+        "dispatch preserves an approved lower custom finalization ceiling",
+        custom_spec_value.finalization_policy is not None
+        and custom_meta["finalization_policy"]
+        == runner.pipeline_spec_payload(custom_spec_value)["finalization_policy"]
+        == normalized_custom["finalization_policy"]
+        and custom_finalization == custom_spec_value.finalization_policy
+        and custom_ledger.max_cycles == custom_spec_value.finalization_policy.max_cycles
+        and custom_meta["pipeline_policy"]["definition_sha256"]
+        == custom_compiled.definition_sha256,
+        custom_meta,
+    )
+    legacy_payload = json.loads(json.dumps(custom_payload))
+    legacy_payload.pop("finalization_policy")
+    legacy_spec = runner.parse_pipeline_spec(legacy_payload)
+    legacy_compiled = runner.compile_custom_spec(
+        legacy_spec,
+        runner.builtin_registry(),
+        policy=custom_ceiling,
+        capabilities=("route:resolved",),
+    )
+    legacy_request = dict(approved_custom_request)
+    legacy_request["_approved_custom_contract"] = (
+        legacy_spec,
+        legacy_compiled,
+        custom_ceiling,
+        runner.render_custom_approval(
+            legacy_spec, legacy_compiled, policy=custom_ceiling
+        ),
+    )
+    legacy_meta = runner.write_task_files(
+        legacy_request,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
+    )
+    check(
+        "custom specs without the additive policy retain the code-owned default",
+        legacy_spec.finalization_policy is None
+        and legacy_meta["finalization_policy"] == meta["finalization_policy"],
+        legacy_meta,
     )
     expert_meta = runner.write_task_files(
         expert,

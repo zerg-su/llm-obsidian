@@ -142,6 +142,19 @@ def sync_codex_profile(request: dict[str, Any], config: dict[str, Any], effectiv
     )
 
 
+def finalization_policy_for_request(
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Project the exact approved custom policy or the compatibility default."""
+
+    policy = FinalizationPolicy()
+    if request.get("pipeline") == "custom":
+        declared = custom_contract_for_request(request)[0].finalization_policy
+        if declared is not None:
+            policy = declared
+    return finalization_policy_payload(policy)
+
+
 def write_task_files(
     request: dict[str, Any], config: dict[str, Any], session: dict[str, Any],
     effective: dict[str, Any], identity: dict[str, str], origin: dict[str, str],
@@ -204,9 +217,7 @@ def write_task_files(
         "approved_plan_sha256": plan_hash,
         "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",
-        "finalization_policy": finalization_policy_payload(
-            FinalizationPolicy()
-        ),
+        "finalization_policy": finalization_policy_for_request(request),
         "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
             "mode": review.mode,
