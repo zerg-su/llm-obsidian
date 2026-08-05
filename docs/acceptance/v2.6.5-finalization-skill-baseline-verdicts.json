@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "implementation-plan",
+      "verdict": "defer",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "D265-FIN-PLAN",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved Outcome Contract and design for multi-file work.",
+      "overall_outcome": "An owned, approved TDD plan whose slices cover every declared success-evidence item without replacing the Outcome.",
+      "local_subgoal": "Map exact responsibilities, interfaces, RED/GREEN seams, and verification to the unchanged Outcome Contract.",
+      "completion_proxies": [
+        "The plan is written.",
+        "Every slice names a focused test.",
+        "The plan review is green."
+      ],
+      "required_outcome_evidence": [
+        "Every requirement and evidence ID maps to an owned runnable slice, and the approved plan preserves all non-goals."
+      ],
+      "evidence": "skills/implementation-plan/SKILL.md; docs/acceptance/v2.6.5-finalization-skill-baseline.md",
+      "change": "Defer five-cycle/finalization-only planning semantics because they alter workflow behavior; apply only through the separately approved product-change workflow.",
+      "behavior_proof": "Improve Skills makes no quality-only edit; read-only planning, exact ownership, approval, and Outcome evidence coverage remain frozen."
+    },
+    {
+      "skill": "dispatch",
+      "verdict": "defer",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "D265-FIN-DISPATCH",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "One approved plan, exact repository/worktree identity, code-owned pipeline selection, and frozen route/review/reap policy.",
+      "overall_outcome": "One isolated, bounded task launch whose exact lifecycle remains owned by the harness.",
+      "local_subgoal": "Validate and launch the approved task once with exact identities, permissions, callbacks, and forbidden effects.",
+      "completion_proxies": [
+        "The launch result is typed.",
+        "A child process or cmux surface exists.",
+        "The task metadata validates."
+      ],
+      "required_outcome_evidence": [
+        "The task reaches its declared terminal handoff without identity drift, duplicate effects, or forbidden external actions."
+      ],
+      "evidence": "skills/dispatch/SKILL.md; skills/dispatch/references/task-prompt-template.md; docs/acceptance/v2.6.5-finalization-skill-baseline.md",
+      "change": "Defer code-owned ephemeral execution and five-cycle metadata because placement and lifecycle are protected semantics; apply only through the separately approved product-change workflow.",
+      "behavior_proof": "Improve Skills makes no quality-only edit; approved-plan, runner ownership, continuable cmux, permission, callback, and external-effect boundaries remain frozen."
+    },
+    {
+      "skill": "review",
+      "verdict": "defer",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "D265-FIN-REVIEW",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Exact product HEAD, approved Outcome Contract, purpose boundary, verification profile, and unverified implementation claims.",
+      "overall_outcome": "An independent, exact-identity verdict on Outcome attainment, engineering quality, non-goals, and material risk.",
+      "local_subgoal": "Inspect evidence and publish one bounded read-only review result per configured lane.",
+      "completion_proxies": [
+        "A callback is accepted.",
+        "The focused checks pass.",
+        "A review archive exists."
+      ],
+      "required_outcome_evidence": [
+        "Every declared evidence item is classified, non-goals are checked, and final authorization binds the exact HEAD/profile/summary bytes."
+      ],
+      "evidence": "skills/review/SKILL.md; tests/harness/test_review_topology.py; docs/acceptance/v2.6.5-finalization-skill-baseline.md",
+      "change": "Defer terminal exact-HEAD attempts, five-cycle lineage, and finalization-only adaptive routing because they alter review lifecycle semantics; apply only through the separately approved product-change workflow.",
+      "behavior_proof": "Improve Skills makes no quality-only edit; standalone Deep dual-provider topology, read-only reviewers, lane independence, and exact authorization remain frozen."
+    }
+  ]
+}
