@@ -113,22 +113,54 @@ check(
 )
 
 effect_trace = final["engineering_fix_effect_trace"]
+receipt_manifest = effect_trace["receipt_manifest"]
 check(
     "final trace binds the effect-recorded engineering fix traversal",
     effect_trace["pipeline"] == "engineering/fix"
     and effect_trace["pipeline_definition_sha256"]
     == fix_pipeline.definition_sha256
-    and effect_trace["parent_state"] == "finalizing"
+    and effect_trace["parent_state"] == "complete"
     and not effect_trace["parent_resources_owned"]
     and len(effect_trace["plan_step_receipts"]) == 7
     and {row["iteration"] for row in effect_trace["plan_step_receipts"]}
     == {0, 1}
-    and effect_trace["verification_states"] == ["complete", "failed"]
-    and effect_trace["review_gate_started"]
-    and effect_trace["checkpoint_recorded"]
-    and effect_trace["callback_receipt_status"] == "accepted"
+    and receipt_manifest["plan_steps"]["count"] == 7
+    and receipt_manifest["plan_steps"]["all_identity_bound"]
+    and receipt_manifest["verification"]["states"]
+    == ["complete", "failed"]
+    and receipt_manifest["verification"]["all_identity_bound"]
+    and receipt_manifest["review"]
+    == {
+        "status": "approved",
+        "axis": "openai-holistic",
+        "lane_state": "complete",
+        "identity_fields": [
+            "operation_id",
+            "run_id",
+            "lane_operation_id",
+            "lane_run_id",
+            "sha256",
+        ],
+        "evidence_digest_bound": True,
+    }
+    and receipt_manifest["checkpoint"]["status"] == "recorded"
+    and receipt_manifest["checkpoint"]["digest_bound"]
+    and receipt_manifest["callback"]
+    == {"status": "accepted", "kind": "wiki-summary", "digest_bound": True}
+    and receipt_manifest["reap"]
+    == {"status": "complete", "effect_replayed": False, "digest_bound": True}
+    and receipt_manifest["terminal_cleanup"]
+    == {
+        "exit_action": "exit-requested",
+        "cleanup_action": "cleaned",
+        "state": "complete",
+        "resources_owned": False,
+        "guardian_effects": ["request-exit"],
+        "surface_state": "missing",
+        "digest_bound": True,
+    }
     and effect_trace["accepted_callback_kind"] == "wiki-summary"
-    and effect_trace["next_action"] == "reap-ready",
+    and effect_trace["next_action"] == "closed",
     effect_trace,
 )
 
