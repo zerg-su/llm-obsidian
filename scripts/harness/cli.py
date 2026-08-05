@@ -337,6 +337,32 @@ def _cancel_or_close(
     return store.transition(owner, operation_id, terminal_state)
 
 
+def _review_recovery_kind(
+    gate: object, response_path: Path
+) -> str:
+    """Select exact callback recovery before the legacy response boundary."""
+
+    if not isinstance(gate, dict):
+        return ""
+    attempt = gate.get("attempt")
+    if (
+        gate.get("status") == "reviewing"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and isinstance(attempt, dict)
+        and attempt.get("status") == "awaiting-callback"
+    ):
+        return "accepted-exact-callbacks"
+    if not response_path.is_file():
+        return ""
+    if gate.get("status") in {
+        "verifying",
+        "recovery-verification-required",
+        "fresh-boundary-authorized",
+    }:
+        return "legacy-finalizing"
+    return ""
+
+
 def _recover_finalizing_review_if_present(
     store: OperationStore,
     owner: str,
@@ -373,7 +399,6 @@ def _recover_finalizing_review_if_present(
     if (
         session.get("operation_id") != operation_id
         or not worktree.is_absolute()
-        or not response_path.is_file()
     ):
         return False
     gate_path = (
@@ -393,22 +418,8 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch recovery review gate is invalid"
         ) from exc
-    exact_callback_recovery = (
-        isinstance(gate, dict)
-        and gate.get("status") == "reviewing"
-        and gate.get("execution_protocol") == "exact-head-attempt-v1"
-        and isinstance(gate.get("attempt"), dict)
-        and gate["attempt"].get("status") == "awaiting-callback"
-    )
-    if not isinstance(gate, dict) or (
-        not exact_callback_recovery
-        and gate.get("status")
-        not in {
-            "verifying",
-            "recovery-verification-required",
-            "fresh-boundary-authorized",
-        }
-    ):
+    recovery_kind = _review_recovery_kind(gate, response_path)
+    if not recovery_kind:
         return False
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
@@ -426,7 +437,7 @@ def _recover_finalizing_review_if_present(
             module,
             (
                 "recover_task_review_for_mechanism"
-                if exact_callback_recovery
+                if recovery_kind == "accepted-exact-callbacks"
                 else "recover_finalizing_review"
             ),
         )

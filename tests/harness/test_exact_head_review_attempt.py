@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker  # noqa: E402
+from harness import cli as harness_cli  # noqa: E402
 from harness.contracts import (  # noqa: E402
     AttentionReason,
     OperationSpec,
@@ -656,6 +657,35 @@ with tempfile.TemporaryDirectory(
         }
         == accepted_identities,
     )
+    missing_response = base / ".task-verification-response.json"
+    check(
+        "two accepted callbacks route before the legacy response precondition",
+        harness_cli._review_recovery_kind(
+            gate.read(), missing_response
+        )
+        == "accepted-exact-callbacks"
+        and not missing_response.exists(),
+    )
+    legacy_gate = {
+        "status": "verifying",
+        "execution_protocol": "legacy",
+    }
+    check(
+        "legacy recovery still requires its verification response",
+        harness_cli._review_recovery_kind(
+            legacy_gate, missing_response
+        )
+        == "",
+    )
+    missing_response.write_text("{}\n", encoding="utf-8")
+    check(
+        "legacy recovery remains eligible with its verification response",
+        harness_cli._review_recovery_kind(
+            legacy_gate, missing_response
+        )
+        == "legacy-finalizing",
+    )
+    missing_response.unlink()
     decisions = []
     for lane in recovered.execution.lanes:
         decisions.append(
