@@ -58,6 +58,7 @@ from harness.runtime_sessions import (
     RuntimeSessionRequest,
 )
 from harness.runtime_session_contracts import continuation_effect_id
+from harness.runtime_session_continuation import await_initial_input_ready
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -132,7 +133,7 @@ class FakeCmux:
     def read(self, surface_id: str) -> str:
         assert surface_id == SURFACE
         if not self.sent:
-            return "›"
+            return "❯\n›"
         prompt = self.sent[-1][1]
         anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
         if self.submit_count == self.submits_at_last_send:
@@ -178,6 +179,37 @@ class FakeCmux:
             surface_id == SURFACE and runtime in {"claude", "codex"},
         )
         return self.checkpoint
+
+
+class InitialReadyPort:
+    def __init__(self, screens: list[str]) -> None:
+        self.screens = list(screens)
+        self.reads = 0
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        self.reads += 1
+        return self.screens.pop(0) if self.screens else ""
+
+
+initial_ready_port = InitialReadyPort(
+    ["", "Starting MCP servers", "› Implement {feature}"]
+)
+initial_ready_waits: list[float] = []
+check(
+    "initial provider input waits for the native idle editor",
+    await_initial_input_ready(
+        initial_ready_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=3,
+        observation_interval_seconds=0.01,
+        wait=initial_ready_waits.append,
+    )
+    and initial_ready_port.reads == 3
+    and initial_ready_waits == [0.01, 0.01],
+    (initial_ready_port.reads, initial_ready_waits),
+)
 
 
 class FakeProcess:

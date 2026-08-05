@@ -13,6 +13,7 @@ from .runtime_provider_events import (
     RuntimeProviderEventStream,
 )
 from .runtime_session_contracts import MAX_PROMPT_BYTES
+from .runtime_session_continuation import await_initial_input_ready
 from .runtime_worker_control import RuntimeWorkerControlMixin
 from .runtime_worker_fix import RuntimeWorkerFixMixin
 from .runtime_worker_custom import RuntimeWorkerCustomMixin
@@ -254,6 +255,14 @@ class RuntimeWorkerExecution(
                 if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
                     raise RuntimeWorkerError("initial provider input is invalid")
                 input_text = raw_input.decode("utf-8")
+                if not await_initial_input_ready(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    runtime=self.spec["runtime"],
+                ):
+                    raise RuntimeWorkerError(
+                        "initial provider editor did not become ready"
+                    )
                 stream = self._create_provider_stream(
                     generation=self._initial_generation(),
                     input_sha256=hashlib.sha256(raw_input).hexdigest(),
