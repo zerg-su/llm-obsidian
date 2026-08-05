@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
@@ -38,6 +39,7 @@ from .review_gate_contracts import (
     _read_json,
     _result_from_payload,
 )
+from .review_results import namespace_review_result
 from review_contract import MATERIAL_SEVERITIES
 
 
@@ -315,7 +317,7 @@ class ReviewGateAttemptMixin:
         )
 
     def rehydrate_attempt(self) -> ReviewGateRun:
-        """Rehydrate only an iteration-zero attempt; never resurrect a checkpoint."""
+        """Rehydrate iteration zero without resurrecting a reviewer effect."""
 
         attempt = self._attempt()
         state = self.read()
@@ -326,23 +328,47 @@ class ReviewGateAttemptMixin:
             or not raw_lanes
         ):
             raise ReviewAttemptError("review attempt cannot be rehydrated")
+        checkpointless_axes: set[str] = set()
         for raw_lane in raw_lanes:
             if (
                 not isinstance(raw_lane, dict)
                 or raw_lane.get("verification_iteration") != 0
-                or (
-                    attempt.status == "awaiting-callback"
-                    and not str(raw_lane.get("checkpoint") or "")
-                )
             ):
                 raise ReviewAttemptError(
                     "review attempt checkpoint cannot be resurrected"
                 )
+            if (
+                attempt.status == "awaiting-callback"
+                and not str(raw_lane.get("checkpoint") or "")
+            ):
+                checkpointless_axes.add(str(raw_lane.get("axis") or ""))
         run = self.rehydrate()
         if run.execution.request.context.head_sha != attempt.identity.exact_head_sha:
             raise ReviewAttemptError("review attempt cannot bind a changed HEAD")
         for lane in run.execution.lanes:
             self._attempt_lane(attempt.identity, lane)
+            if lane.axis not in checkpointless_axes:
+                continue
+            round_ = run.rounds[lane.axis]
+            accepted = self.round_store.read(
+                round_.owner_id, round_.operation_id
+            )
+            if (
+                accepted.spec != round_.spec
+                or accepted.lane_id != lane.lane_id
+                or accepted.run_id != round_.run_id
+                or accepted.state
+                not in {"verifying", "finalizing", "exiting", "complete"}
+                or accepted.accepted_callback_kind != "review"
+                or not accepted.accepted_callback_id
+                or re.fullmatch(
+                    r"[0-9a-f]{64}", accepted.accepted_callback_sha256
+                )
+                is None
+            ):
+                raise ReviewAttemptError(
+                    "review attempt checkpoint cannot be resurrected"
+                )
         return run
 
     @staticmethod
@@ -407,6 +433,75 @@ class ReviewGateAttemptMixin:
         if "changes-requested" in verdicts:
             return ReviewAttemptTerminalResult.CHANGES_REQUESTED
         return ReviewAttemptTerminalResult.APPROVED
+
+    def _attempt_resolution_boundaries(
+        self,
+        run: ReviewGateRun,
+        pointers: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Bind exact-attempt findings to their already accepted callbacks."""
+
+        boundaries: dict[str, object] = {}
+        material_count = 0
+        for lane in run.execution.lanes:
+            pointer = pointers.get(lane.axis)
+            if not isinstance(pointer, str) or not pointer:
+                raise ReviewAttemptError(
+                    "review attempt resolution result is unavailable"
+                )
+            path = (self.root / pointer).resolve()
+            if self.root not in path.parents or not path.is_file() or path.is_symlink():
+                raise ReviewAttemptError(
+                    "review attempt resolution result is unavailable"
+                )
+            result = _result_from_payload(_read_json(path))
+            qualified = namespace_review_result(
+                run.execution.request.policy, result
+            )
+            material_ids = [
+                finding.finding_id
+                for finding in qualified.findings
+                if finding.severity in MATERIAL_SEVERITIES
+            ]
+            material_count += len(material_ids)
+            round_ = run.rounds[lane.axis]
+            envelope = review_round_envelope(round_, result)
+            accepted = self.round_store.read(
+                round_.owner_id, round_.operation_id
+            )
+            if (
+                accepted.spec != round_.spec
+                or accepted.lane_id != round_.lane_id
+                or accepted.run_id != round_.run_id
+                or accepted.state != "complete"
+                or accepted.pending_effect
+                or accepted.accepted_callback_id != envelope.callback_id
+                or accepted.accepted_callback_kind != envelope.kind
+                or accepted.accepted_callback_sha256
+                != envelope.payload_sha256
+            ):
+                raise ReviewAttemptError(
+                    "review attempt resolution callback identity changed"
+                )
+            boundaries[lane.axis] = {
+                "pointer": pointer,
+                "reviewed_head_sha": (
+                    run.execution.request.context.head_sha
+                ),
+                "review_operation_id": (
+                    run.execution.request.policy.operation_id
+                ),
+                "round_operation_id": round_.operation_id,
+                "round_run_id": round_.run_id,
+                "callback_id": envelope.callback_id,
+                "callback_sha256": envelope.payload_sha256,
+                "material_finding_ids": material_ids,
+            }
+        if material_count == 0:
+            raise ReviewAttemptError(
+                "changes-requested attempt has no material resolution boundary"
+            )
+        return boundaries
 
     def complete_attempt_round(
         self,
@@ -528,6 +623,10 @@ class ReviewGateAttemptMixin:
             updates.update(
                 context=self._context(run.execution.request.context),
                 evidence=evidence,
+            )
+        elif terminal_result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
+            updates["awaiting_resolution"] = (
+                self._attempt_resolution_boundaries(run, rounds)
             )
         self._replace(**updates)
         return ReviewGateDecision(

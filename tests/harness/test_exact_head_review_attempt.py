@@ -11,6 +11,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,9 @@ from harness.contracts import (  # noqa: E402
     to_dict,
 )
 from harness.review_attempt import ReviewAttemptError  # noqa: E402
+from harness.runtime_session_contracts import (  # noqa: E402
+    RuntimeCheckpointEvidenceMissing,
+)
 from harness.review_program import (  # noqa: E402
     ReviewBoundaryInput,
     compile_review_program,
@@ -33,6 +37,9 @@ from harness.review_program import (  # noqa: E402
 from harness.review_program_authority import trusted_review_receipt  # noqa: E402
 from harness.review_program_resolution import (  # noqa: E402
     resolved_terminal_head,
+)
+from harness.runtime_worker_review_bridge import (  # noqa: E402
+    RuntimeWorkerReviewBridgeMixin,
 )
 from harness.store import OperationStore  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
@@ -89,6 +96,7 @@ class FakeRuntime:
         self.accepted = 0
         self.continued = 0
         self.rearmed = 0
+        self.checkpoint = "checkpoint-1"
 
     def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
         self.started += 1
@@ -115,7 +123,22 @@ class FakeRuntime:
 
     def status(self, owner_id: str, operation_id: str) -> SessionResult:
         return SessionResult(
-            self.store.read(owner_id, operation_id), "checkpoint-1"
+            self.store.read(owner_id, operation_id), self.checkpoint
+        )
+
+    def hydrate_durable_checkpoint(
+        self, owner_id: str, operation_id: str, _lane_id: str
+    ) -> SessionResult:
+        if not self.checkpoint:
+            raise RuntimeCheckpointEvidenceMissing(
+                "the exact reviewer checkpoint was never materialized"
+            )
+        return SessionResult(
+            self.store.read(owner_id, operation_id),
+            self.checkpoint,
+            checkpoint_sha256=hashlib.sha256(
+                self.checkpoint.encode()
+            ).hexdigest(),
         )
 
     def accept_callback(self, envelope: object) -> object:
@@ -166,6 +189,18 @@ class FailingStartRuntime(FakeRuntime):
     def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
         self.started += 1
         raise RuntimeError("provider start failed")
+
+
+class FakeCmux:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str]] = []
+        self.keys: list[tuple[str, str]] = []
+
+    def send(self, surface_id: str, message: str) -> None:
+        self.messages.append((surface_id, message))
+
+    def send_key(self, surface_id: str, key: str) -> None:
+        self.keys.append((surface_id, key))
 
 
 BOUNDARY = ReviewBoundaryInput(
@@ -509,7 +544,8 @@ with tempfile.TemporaryDirectory(prefix="exact-head-attempt.") as raw:
             record.spec.operation_id for record in store.list("task-1")
         }
         == initial_operation_ids
-        and "awaiting_resolution" not in state
+        and set(state["awaiting_resolution"])
+        == {item.axis for item in run.execution.lanes}
         and "continuation_effects" not in state
         and runtime.continued == 0
         and runtime.rearmed == 0,
@@ -534,6 +570,149 @@ with tempfile.TemporaryDirectory(prefix="exact-head-attempt.") as raw:
     else:
         raise AssertionError("review-program accepted a cross-HEAD attempt")
     check("review-program rejects cross-HEAD attempt authority", True)
+
+
+with tempfile.TemporaryDirectory(
+    prefix="exact-head-accepted-checkpointless."
+) as raw:
+    base = Path(raw)
+    store = OperationStore(base / ".vault-meta/harness")
+    runtime = FakeRuntime(store)
+    gate = ReviewGateController(base / "gate", runtime, store)
+    active = gate.begin_attempt(
+        dispatch_operation_id="task-1",
+        finalization_lineage_id="task-1",
+        cycle=1,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+        request=request("a" * 40),
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=base,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-accepted",
+    )
+    state = gate.read()
+    gate._replace(
+        lanes=[
+            {
+                key: value
+                for key, value in lane.items()
+                if key not in {"checkpoint", "checkpoint_sha256"}
+            }
+            | {"checkpoint": ""}
+            for lane in state["lanes"]
+        ]
+    )
+    runtime.checkpoint = ""
+    started_before = runtime.started
+    try:
+        gate.rehydrate_attempt()
+    except (ReviewAttemptError, RuntimeCheckpointEvidenceMissing):
+        pass
+    else:
+        raise AssertionError("checkpointless unaccepted attempt rehydrated")
+    check(
+        "checkpointless unaccepted attempt stays fail-closed",
+        runtime.started == started_before,
+    )
+
+    results = {}
+    accepted_identities = {}
+    for index, lane in enumerate(active.execution.lanes):
+        finding = ReviewFinding(
+            f"accepted-{index}",
+            lane.axis,
+            "important",
+            "the accepted callback must survive checkpoint loss",
+            "the durable child receipt is the recovery authority",
+        )
+        result = ReviewResult(
+            lane.axis,
+            "changes-requested" if index == 0 else "approve",
+            (finding,) if index == 0 else (),
+            0,
+        )
+        round_ = active.rounds[lane.axis]
+        envelope = review_round_envelope(round_, result)
+        CallbackBroker(store, "task-1").accept(envelope)
+        child = store.read("task-1", round_.operation_id)
+        results[lane.axis] = result
+        accepted_identities[lane.axis] = (
+            child.accepted_callback_id,
+            child.accepted_callback_sha256,
+        )
+    recovered = gate.rehydrate_attempt()
+    check(
+        "two exact accepted callbacks rehydrate without reviewer checkpoints",
+        runtime.started == started_before
+        and {
+            lane.axis: (
+                store.read("task-1", recovered.rounds[lane.axis].operation_id)
+                .accepted_callback_id,
+                store.read("task-1", recovered.rounds[lane.axis].operation_id)
+                .accepted_callback_sha256,
+            )
+            for lane in recovered.execution.lanes
+        }
+        == accepted_identities,
+    )
+    decisions = []
+    for lane in recovered.execution.lanes:
+        decisions.append(
+            gate.complete_attempt_round(
+                recovered,
+                lane,
+                recovered.rounds[lane.axis],
+                results[lane.axis],
+            ).action
+        )
+    recovered_state = gate.read()
+    check(
+        "accepted checkpointless callback replay terminalizes without effects",
+        decisions == ["awaiting-axes", "changes-requested"]
+        and recovered_state["status"] == "changes-requested"
+        and recovered_state["attempt"]["terminal"]["result"]
+        == "changes-requested"
+        and runtime.started == started_before
+        and runtime.continued == 0
+        and runtime.rearmed == 0,
+    )
+    packet_path = base / ".task-review.json"
+    check(
+        "accepted callback crash prefix has no executor packet",
+        not packet_path.exists(),
+    )
+    bridge = RuntimeWorkerReviewBridgeMixin()
+    bridge.spec = {
+        "cwd": base,
+        "operation_id": "task-1",
+        "surface_id": "task-surface",
+    }
+    bridge.spec_path = base / "runtime/launch.json"
+    bridge.spec_path.parent.mkdir(parents=True)
+    bridge.review = SimpleNamespace(gate_root=gate.root)
+    bridge.digest = "d" * 64
+    bridge.cmux_adapter = FakeCmux()
+    bridge.notify_review_resolution(recovered_state)
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    check(
+        "exact accepted callbacks materialize one typed executor packet",
+        packet["reviewed_head_sha"] == "a" * 40
+        and len(packet["review_callbacks"]) == 2
+        and {
+            row["axis"]: (
+                row["callback_id"], row["callback_sha256"]
+            )
+            for row in packet["review_callbacks"]
+        }
+        == accepted_identities
+        and packet["material_finding_ids"]
+        == [f"{active.execution.lanes[0].axis}:accepted-0"]
+        and len(bridge.cmux_adapter.messages) == 1
+        and bridge.cmux_adapter.keys == [("task-surface", "Enter")]
+        and runtime.started == started_before,
+    )
 
 with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     base = Path(raw)
@@ -718,7 +897,8 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and runtime.started == 1
         and runtime.continued == 0
         and runtime.rearmed == 0
-        and "awaiting_resolution" not in exact_state
+        and set(exact_state["awaiting_resolution"])
+        == {lane.axis}
         and "continuation_effects" not in exact_state,
     )
     (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")

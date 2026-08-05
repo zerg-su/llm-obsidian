@@ -306,7 +306,26 @@ class RuntimeWorkerSummaryMixin:
         if not verification_complete:
             return False
         gate_state = self.review_gate_state()
-        if gate_state.get("status") == "awaiting-resolution":
+        awaiting_resolution = gate_state.get("awaiting_resolution")
+        raw_attempt = gate_state.get("attempt")
+        terminal = (
+            raw_attempt.get("terminal")
+            if isinstance(raw_attempt, dict)
+            else None
+        )
+        exact_attempt_resolution = (
+            gate_state.get("status") == "changes-requested"
+            and isinstance(raw_attempt, dict)
+            and raw_attempt.get("status") == "terminal"
+            and isinstance(terminal, dict)
+            and terminal.get("result") == "changes-requested"
+            and isinstance(awaiting_resolution, dict)
+            and bool(awaiting_resolution)
+        )
+        if (
+            gate_state.get("status") == "awaiting-resolution"
+            or exact_attempt_resolution
+        ):
             self.notify_review_resolution(gate_state)
             if self.review.status == "stale":
                 if not _review_resolution_handoff_ready(
