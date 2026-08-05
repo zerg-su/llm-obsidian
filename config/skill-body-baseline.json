@@ -191,6 +191,13 @@
       "closure_token_estimate": 1217,
       "token_estimate": 1217
     },
+    "split": {
+      "body_bytes": 2145,
+      "body_lines": 45,
+      "closure_bytes": 2145,
+      "closure_token_estimate": 537,
+      "token_estimate": 537
+    },
     "tdd": {
       "body_bytes": 1009,
       "body_lines": 18,

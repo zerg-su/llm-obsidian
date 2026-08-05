@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "subplan_count": 4,
+  "max_parallel": 2,
+  "waves": [
+    ["contracts", "validation"],
+    ["execution"],
+    ["join"]
+  ],
+  "placement": {
+    "executor": "child-workspace",
+    "review": "child-workspace",
+    "verification": "child-workspace"
+  }
+}

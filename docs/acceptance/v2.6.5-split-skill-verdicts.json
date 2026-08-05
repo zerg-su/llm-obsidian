@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "split",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Approved Subplan D parent plan, Outcome Contract, registered pipelines and frozen budgets.",
+      "overall_outcome": "A governed zero-effect Split preview with a natural count or one-child fallback, exact manifest and no activation authority.",
+      "local_subgoal": "Produce and validate one exact SplitManifest preview without child effects.",
+      "completion_proxies": [
+        "The split skill structural audit is green.",
+        "The preview manifest round-trips through the schema.",
+        "The focused Split component suite passes."
+      ],
+      "required_outcome_evidence": [
+        "D1-governed-split-preview",
+        "D2-eight-rejections",
+        "D3-bounded-waves-locality",
+        "D4-deterministic-join"
+      ],
+      "evidence": "skills/split/SKILL.md; tests/fixtures/split/skill-raw-baseline.json; docs/acceptance/v2.6.5-split-skill-audit.md; tests/test_split_components.py",
+      "change": "none after the five-pass audit",
+      "behavior_proof": "Explicit-only invocation, zero-effect authority, exact validation and outcome-evidence identity are preserved."
+    }
+  ]
+}

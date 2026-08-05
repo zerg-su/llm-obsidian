@@ -1,0 +1,6 @@
+interface:
+  display_name: "Split"
+  short_description: "Preview governed bounded split manifests"
+  default_prompt: "Use $split to preview a governed, zero-effect split manifest."
+policy:
+  allow_implicit_invocation: false
