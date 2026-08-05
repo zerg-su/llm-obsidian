@@ -668,3 +668,13 @@ This append-only amendment records the material findings from Deep implementatio
 | D-264-69 | release evidence | implementation review cannot contain the future terminal E10 no-loss release receipt | `pending release gate` | handoff remains blocked until one separate exact-HEAD `purpose=release` Sol review audits D-264-01 through D-264-69 with no fix loop |
 
 Focused callback-runtime, liveness, task-summary, harness-control-plane and code-quality gates are green. D-264-69 is stage ordering, not a waived finding: it becomes `included` only after the terminal release receipt exists on the final committed HEAD.
+
+## Amendment 2026-08-05 — exact coverage closure
+
+The exact-HEAD coverage gate found one final evidence gap after D-264-66 through D-264-68: the new artifact-settlement crash paths were behavior-tested through the runtime fixture but not sufficiently attributed in-process by the stdlib trace denominator.
+
+| ID | Owner | Finding | Disposition | Evidence |
+|---|---|---|---|---|
+| D-264-70 | test harness | artifact-settlement crash branches lowered the critical `liveness` coverage floor to 84.4% even though the full behavior suite was green | `included` | in-process tests now cover normal retirement, idempotent replay, the retired-state/reserved-receipt kill point and changed-artifact fail-closed behavior; `make test-harness-coverage` is green at 76.04% overall, 86.2% for `scripts.harness.liveness`, and all 4,370 transition cases |
+
+This is test-only evidence closure. It changes no provider effect, runtime route, budget, permission, callback topology, public interface, push, tag, publish or release authority.

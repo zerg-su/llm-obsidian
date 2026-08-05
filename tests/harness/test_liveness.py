@@ -25,7 +25,7 @@ from harness.liveness import (  # noqa: E402
     observe_liveness,
 )
 import harness.liveness as liveness_module  # noqa: E402
-from harness.contracts import to_dict  # noqa: E402
+from harness.contracts import ContractError, to_dict  # noqa: E402
 from harness.runtime_worker import (  # noqa: E402
     _current_callback_receipt_sha256,
 )
@@ -262,6 +262,110 @@ with tempfile.TemporaryDirectory(prefix="liveness-durability.") as raw:
     finally:
         liveness_module.os.fsync = original_fsync
         liveness_module.os.replace = original_replace
+
+with tempfile.TemporaryDirectory(prefix="liveness-artifact-settlement.") as raw:
+    settlement_root = Path(raw)
+    settlement_controller = LivenessController(settlement_root)
+    settlement_controller.observe(base, policy)
+    check(
+        "typed artifact settlement starts from one exact reservation",
+        settlement_controller.reserve_callback_submit(
+            callback_submit_binding, callback_submit_identity
+        ),
+    )
+    settlement_controller.settle_callback_submit_with_artifact(
+        callback_submit_binding,
+        "8" * 64,
+    )
+    settled_state = settlement_controller.current_state()
+    settled_receipt = json.loads(
+        (
+            settlement_root
+            / "receipts"
+            / f"callback-submit-{callback_submit_binding}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "typed artifact retires only the reserved submit without refunding nudge",
+        settled_state is not None
+        and settled_state.nudge_count == 1
+        and settled_state.callback_submit_binding == ""
+        and settled_state.callback_submit_status == ""
+        and settled_receipt["status"] == "settled-by-artifact"
+        and settled_receipt["artifact_sha256"] == "8" * 64,
+    )
+    settlement_controller.settle_callback_submit_with_artifact(
+        callback_submit_binding,
+        "8" * 64,
+    )
+    check(
+        "typed artifact settlement replays without another state transition",
+        settlement_controller.current_state() == settled_state,
+    )
+
+with tempfile.TemporaryDirectory(prefix="liveness-artifact-crash.") as raw:
+    class CrashAfterArtifactRetire(LivenessController):
+        crash_after_retire = False
+
+        @staticmethod
+        def _write(path: Path, value: object) -> None:
+            LivenessController._write(path, value)
+            if (
+                CrashAfterArtifactRetire.crash_after_retire
+                and path.name == "state.json"
+                and isinstance(value, dict)
+                and value.get("callback_submit_binding") == ""
+            ):
+                CrashAfterArtifactRetire.crash_after_retire = False
+                raise RuntimeError("kill after artifact retirement")
+
+    crash_root = Path(raw)
+    crash_controller = CrashAfterArtifactRetire(crash_root)
+    crash_controller.observe(base, policy)
+    crash_controller.reserve_callback_submit(
+        callback_submit_binding, callback_submit_identity
+    )
+    CrashAfterArtifactRetire.crash_after_retire = True
+    try:
+        crash_controller.settle_callback_submit_with_artifact(
+            callback_submit_binding,
+            "7" * 64,
+        )
+    except RuntimeError as exc:
+        check(
+            "artifact settlement kill point is deterministic",
+            str(exc) == "kill after artifact retirement",
+        )
+    else:
+        raise AssertionError("artifact settlement kill point did not fire")
+    crash_controller.settle_callback_submit_with_artifact(
+        callback_submit_binding,
+        "7" * 64,
+    )
+    crash_receipt = json.loads(
+        (
+            crash_root
+            / "receipts"
+            / f"callback-submit-{callback_submit_binding}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "artifact settlement repairs the retired-state reserved-receipt phase",
+        crash_receipt["status"] == "settled-by-artifact"
+        and crash_receipt["artifact_sha256"] == "7" * 64,
+    )
+    try:
+        crash_controller.settle_callback_submit_with_artifact(
+            callback_submit_binding,
+            "6" * 64,
+        )
+    except ContractError as exc:
+        check(
+            "artifact settlement rejects a changed replay artifact",
+            "settlement receipt changed" in str(exc),
+        )
+    else:
+        raise AssertionError("changed artifact settlement was accepted")
 
 with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
     runtime_root = Path(raw)
