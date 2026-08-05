@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "scenario_id": "v2-6-5-rearm-liveness-latch",
+  "seed": 26501,
+  "max_steps": 8,
+  "expected_initial_invariant": "SIM-INV-OP-LIVENESS",
+  "expected_terminal_states": [
+    "awaiting-callback",
+    "attention-required"
+  ],
+  "forbidden_effects": [
+    "provider-restart",
+    "provider-submit"
+  ],
+  "initial_snapshot": {
+    "operation": {
+      "operation_id": "join-root",
+      "run_id": "join-run",
+      "revision": 15,
+      "state": "awaiting-callback",
+      "attention_reason": null,
+      "pending_effect": "",
+      "effect_id": "start-provider",
+      "effect_outcome": "succeeded",
+      "accepted_callback_id": "",
+      "accepted_callback_sha256": "",
+      "resources": {
+        "surface_id": "join-surface",
+        "process_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "supervisor_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    },
+    "liveness": {
+      "operation_revision": 13,
+      "operation_state": "attention-required",
+      "callback_submit_binding": "",
+      "callback_submit_status": ""
+    },
+    "recovery": {
+      "status": "prepared",
+      "source_revision": 13,
+      "target_revision": 15,
+      "resume_state": "awaiting-callback",
+      "binding_sha256": "8d18d24fd70061406377021ee2e97e45dd2af528c065c0ef4b5948959da8fe9e"
+    },
+    "error_latch": {
+      "kind": "review-drive-failed",
+      "binding_sha256": "8d18d24fd70061406377021ee2e97e45dd2af528c065c0ef4b5948959da8fe9e",
+      "active": true
+    },
+    "effects": [
+      {
+        "effect_id": "start-provider",
+        "idempotency_key": "join-provider-start",
+        "outcome": "succeeded",
+        "deliveries": 1
+      }
+    ],
+    "callbacks": [],
+    "resource_receipts": [],
+    "terminal_history": []
+  },
+  "actions": [
+    {
+      "action": "restart-worker"
+    },
+    {
+      "action": "worker-tick"
+    }
+  ]
+}
