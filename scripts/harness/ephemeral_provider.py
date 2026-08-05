@@ -193,6 +193,7 @@ class EphemeralRunSpec:
     auth_profile: str
     turn_budget: int
     wall_clock_deadline: float
+    owner_id: str
     operation_id: str
     run_id: str
     generation: int
@@ -205,6 +206,7 @@ class EphemeralRunSpec:
         for value, label in (
             (self.model, "model"),
             (self.effort, "effort"),
+            (self.owner_id, "owner_id"),
             (self.operation_id, "operation_id"),
             (self.run_id, "run_id"),
             (self.effect_id, "effect_id"),
@@ -434,6 +436,7 @@ def normalized_run_result(
     """Build the shared closed event subset from provider-owned parsing."""
 
     identity = ProviderEventIdentity(
+        owner_id=spec.owner_id,
         operation_id=spec.operation_id,
         run_id=spec.run_id,
         generation=spec.generation,

@@ -44,6 +44,7 @@ def _identifier(value: str, label: str, *, optional: bool = False) -> None:
 class ProviderEventIdentity:
     """Immutable owner and transport-source identity shared by every event."""
 
+    owner_id: str
     operation_id: str
     run_id: str
     generation: int
@@ -58,6 +59,7 @@ class ProviderEventIdentity:
         if self.schema_version != 1:
             raise ProviderEventError("unsupported provider event identity schema")
         for value, label in (
+            (self.owner_id, "owner_id"),
             (self.operation_id, "operation_id"),
             (self.run_id, "run_id"),
             (self.provider_session_id, "provider_session_id"),
@@ -157,7 +159,11 @@ class ProviderEventCursor:
         return cls(profile=profile, identity=identity)
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1 or self.profile not in PROFILE_EVENT_KINDS:
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != 1
+            or self.profile not in PROFILE_EVENT_KINDS
+        ):
             raise ProviderEventError("provider event cursor profile is invalid")
         if not isinstance(self.identity, ProviderEventIdentity):
             raise ProviderEventError("provider event cursor identity is invalid")
@@ -173,6 +179,33 @@ class ProviderEventCursor:
             raise ProviderEventError("provider event cursor is invalid")
         if type(self.turn_stops) is not int or self.turn_stops < 0:
             raise ProviderEventError("provider turn-stop cursor is invalid")
+        flags = (
+            self.provider_started,
+            self.input_accepted,
+            self.result_published,
+            self.process_exited,
+            self.resource_closed,
+            self.event_gap,
+        )
+        if any(type(value) is not bool for value in flags):
+            raise ProviderEventError("provider event cursor flags must be booleans")
+        if self.profile == "ephemeral" and self.turn_stops:
+            raise ProviderEventError("ephemeral cursor cannot retain turn stops")
+        if (
+            (self.input_accepted and not self.provider_started)
+            or (self.result_published and not self.input_accepted)
+            or (self.process_exited and not self.provider_started)
+            or (self.resource_closed and not self.provider_started)
+            or (self.event_gap and not self.provider_started)
+            or (self.turn_stops and not self.input_accepted)
+            or (self.result_published and self.event_gap)
+        ):
+            raise ProviderEventError("provider event cursor state is unreachable")
+        projected_events = sum(int(value) for value in flags) + self.turn_stops
+        if self.last_sequence != projected_events:
+            raise ProviderEventError(
+                "provider event cursor sequence does not match its projection"
+            )
 
     def advance(self, event: ProviderEvent) -> "ProviderEventCursor":
         """Validate and project exactly one next source event."""

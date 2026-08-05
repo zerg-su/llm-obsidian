@@ -329,10 +329,18 @@ class CodexDriver:
     def authenticated_subscription(
         stdout: str, stderr: str, returncode: int
     ) -> bool:
-        if returncode:
+        if (
+            type(returncode) is not int
+            or returncode != 0
+            or not isinstance(stdout, str)
+            or not isinstance(stderr, str)
+            or stderr.strip()
+        ):
             return False
-        status = (stdout + stderr).casefold()
-        return "logged in" in status and "chatgpt" in status
+        status = " ".join(stdout.split()).casefold()
+        return bool(
+            re.fullmatch(r"logged in (?:using|with|to) chatgpt[.!]?", status)
+        )
 
 
 def _codex_ephemeral_environment(

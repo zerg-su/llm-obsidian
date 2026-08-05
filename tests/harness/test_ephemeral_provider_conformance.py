@@ -79,6 +79,7 @@ with tempfile.TemporaryDirectory(prefix="ephemeral-provider.") as raw:
             ),
             turn_budget=1,
             wall_clock_deadline=120.0,
+            owner_id="review-owner",
             operation_id="review-operation",
             run_id="review-run",
             generation=1,
@@ -207,6 +208,27 @@ with tempfile.TemporaryDirectory(prefix="ephemeral-provider.") as raw:
         and claude_ready.model_effect_allowed
         and codex_ready.model_effect_allowed,
     )
+    for label, stdout, stderr in (
+        ("negated ChatGPT login", "Not logged in to ChatGPT", ""),
+        (
+            "mixed ChatGPT and API-key status",
+            "Logged in using ChatGPT; API key also active",
+            "",
+        ),
+        (
+            "conflicting stderr evidence",
+            "Logged in using ChatGPT",
+            "Logged in using an API key",
+        ),
+    ):
+        blocked = registry.preflight(
+            spec("openai"), stdout=stdout, stderr=stderr, returncode=0
+        )
+        check(
+            f"Codex {label} fails closed before a model effect",
+            blocked.status == "billing-profile-unverified"
+            and not blocked.model_effect_allowed,
+        )
     for provider, stdout in (
         (
             "anthropic",

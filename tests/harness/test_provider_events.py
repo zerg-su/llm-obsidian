@@ -30,6 +30,7 @@ def check(label: str, value: bool) -> None:
 
 
 INTERACTIVE_IDENTITY = ProviderEventIdentity(
+    owner_id="review-owner",
     operation_id="review-attempt",
     run_id="review-run",
     generation=3,
@@ -40,6 +41,7 @@ INTERACTIVE_IDENTITY = ProviderEventIdentity(
     surface_id="surface-1",
 )
 EPHEMERAL_IDENTITY = ProviderEventIdentity(
+    owner_id="bounded-owner",
     operation_id="bounded-review",
     run_id="bounded-run",
     generation=1,
@@ -148,12 +150,12 @@ for label, candidate in (
     ("stale cursor rejected", event("input-accepted", 1)),
     ("implicit cursor gap rejected", event("input-accepted", 3)),
     (
-        "wrong operation owner rejected",
+        "wrong durable owner rejected",
         event(
             "input-accepted",
             2,
             identity=dataclasses.replace(
-                INTERACTIVE_IDENTITY, operation_id="other-attempt"
+                INTERACTIVE_IDENTITY, owner_id="other-owner"
             ),
         ),
     ),
@@ -213,6 +215,39 @@ rejected(
         observed_at=10,
     ),
 )
+
+for label, values in (
+    (
+        "cursor flags require exact booleans",
+        {
+            "last_sequence": 1,
+            "provider_started": 1,
+        },
+    ),
+    (
+        "cursor cannot claim unreachable terminal events",
+        {
+            "result_published": True,
+            "resource_closed": True,
+        },
+    ),
+    (
+        "cursor result cannot precede accepted input",
+        {
+            "last_sequence": 2,
+            "provider_started": True,
+            "result_published": True,
+        },
+    ),
+):
+    rejected(
+        label,
+        lambda values=values: ProviderEventCursor(
+            profile="interactive",
+            identity=INTERACTIVE_IDENTITY,
+            **values,
+        ),
+    )
 
 gap_stream = (
     event("provider-started", 1),

@@ -73,6 +73,7 @@ class ResourceIdentity:
 
     def provider_identity(self) -> ProviderEventIdentity:
         return ProviderEventIdentity(
+            owner_id=self.owner_id,
             operation_id=self.operation_id,
             run_id=self.run_id,
             generation=self.generation,

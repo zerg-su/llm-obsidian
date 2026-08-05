@@ -53,6 +53,7 @@ def rejected(label: str, action, error: type[Exception] = DeliveryError) -> None
 
 
 INTERACTIVE = ProviderEventIdentity(
+    owner_id="interactive-owner",
     operation_id="review-attempt",
     run_id="review-run",
     generation=1,
@@ -63,6 +64,7 @@ INTERACTIVE = ProviderEventIdentity(
     surface_id="surface-1",
 )
 EPHEMERAL = ProviderEventIdentity(
+    owner_id="ephemeral-owner",
     operation_id="bounded-attempt",
     run_id="bounded-run",
     generation=1,
@@ -135,6 +137,42 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         and "prompt" not in state_file.read_text(encoding="utf-8")
         and "screen" not in state_file.read_text(encoding="utf-8"),
     )
+
+    for label, cursor_changes in (
+        (
+            "durable reload rejects impossible terminal flags",
+            {"result_published": True, "resource_closed": True},
+        ),
+        (
+            "durable reload rejects wrong cursor scalar types",
+            {"last_sequence": 1, "provider_started": 1},
+        ),
+        (
+            "durable reload rejects result before accepted input",
+            {
+                "last_sequence": 2,
+                "provider_started": True,
+                "result_published": True,
+            },
+        ),
+    ):
+        corrupt_root = root / label.replace(" ", "-")
+        corrupt = DeliveryController(
+            corrupt_root,
+            profile="interactive",
+            identity=INTERACTIVE,
+            idempotency_key="delivery-key",
+        )
+        assert corrupt.decide().action == "send"
+        corrupt_path = corrupt_root / "delivery-state.json"
+        corrupt_payload = json.loads(corrupt_path.read_text(encoding="utf-8"))
+        corrupt_payload["cursor"].update(cursor_changes)
+        corrupt_path.write_text(
+            json.dumps(corrupt_payload, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        corrupt_path.chmod(0o600)
+        rejected(label, corrupt.current_state)
     concurrent = DeliveryController(
         root / "concurrent-send",
         profile="interactive",
@@ -268,7 +306,7 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
     )
 
     resource_identity = ResourceIdentity(
-        owner_id="owner-1",
+        owner_id=INTERACTIVE.owner_id,
         operation_id=INTERACTIVE.operation_id,
         run_id=INTERACTIVE.run_id,
         generation=INTERACTIVE.generation,
