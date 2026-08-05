@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "defect_id": "D-265-stale-exiting",
+  "root_classes": [
+    "R3-effect-liveness-conflation",
+    "R8-resource-state-divergence"
+  ],
+  "interleaving": [
+    {
+      "sequence": 1,
+      "fact": "result-published",
+      "result_schema_valid": true
+    },
+    {
+      "sequence": 2,
+      "fact": "process-physically-gone",
+      "process_present": false
+    },
+    {
+      "sequence": 3,
+      "fact": "workspace-physically-gone",
+      "workspace_present": false
+    },
+    {
+      "sequence": 4,
+      "fact": "durable-close-event-absent",
+      "resource_closed_event": false,
+      "operation_state": "exiting",
+      "parent_state": "awaiting-callback"
+    }
+  ],
+  "forbidden_inference": "physical-disappearance-implies-durable-close",
+  "expected_root_class": "R8-resource-state-divergence"
+}

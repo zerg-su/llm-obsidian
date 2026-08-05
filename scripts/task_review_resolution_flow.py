@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from harness.runtime_session_contracts import continuation_effect_id
+from harness.review_attempt import LEGACY_CROSS_HEAD_RESUME_DISABLED
 from harness.workflows.review import (
     ReviewContext,
     ReviewRound,
@@ -26,6 +27,12 @@ from task_review_delta_packet import (
 from task_review_resolution_bundle import _resolution_bundle
 from task_review_shared import ResolutionBundle, TaskReviewError, _git
 from task_review_transport import _receipt, _write_round_meta
+
+
+def legacy_cross_head_resume_disabled() -> dict[str, object]:
+    """Return the only resume disposition exposed to the exact-HEAD path."""
+
+    return LEGACY_CROSS_HEAD_RESUME_DISABLED.payload()
 
 
 def _prompt_effect_id(

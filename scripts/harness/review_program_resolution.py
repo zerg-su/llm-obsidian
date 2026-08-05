@@ -16,6 +16,11 @@ from review_resolution import (
 )
 
 from .review_program_contracts import ReviewBoundaryInput, ReviewProgramError
+from .review_attempt import (
+    ReviewAttempt,
+    ReviewAttemptError,
+    ReviewAttemptTerminalResult,
+)
 from .store import OperationStore, StoreError
 from .workflows.review import review_round_payload
 from .workflows.review_gate_contracts import _result_from_payload
@@ -288,6 +293,65 @@ def _require_final_iterations(
         )
 
 
+def _exact_attempt_terminal_head(
+    root: Path,
+    gate_root: Path,
+    gate: Mapping[str, object],
+    boundary: ReviewBoundaryInput,
+    operation_id: str,
+) -> str:
+    """Trust only iteration zero at the attempt's originally frozen HEAD."""
+
+    raw_attempt = gate.get("attempt")
+    context = gate.get("context")
+    if not isinstance(raw_attempt, Mapping) or not isinstance(context, dict):
+        raise ReviewProgramError("trusted review attempt identity is unavailable")
+    try:
+        attempt = ReviewAttempt.from_mapping(raw_attempt)
+    except ReviewAttemptError as exc:
+        raise ReviewProgramError("trusted review attempt identity is invalid") from exc
+    identity = attempt.identity
+    reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
+    if (
+        identity.attempt_id != operation_id
+        or identity.plan_sha256 != boundary.plan_sha256
+        or identity.outcome_sha256 != boundary.outcome_contract_sha256
+        or identity.exact_head_sha != reviewed_head
+        or context.get("head_sha") != reviewed_head
+        or identity.policy.purpose != boundary.purpose
+        or context.get("boundary_input_sha256") != boundary.input_sha256
+    ):
+        raise ReviewProgramError("trusted review attempt HEAD or identity is stale")
+    lanes = _lane_identities(gate, operation_id)
+    frozen_lanes = {lane.axis: lane for lane in identity.lanes}
+    if set(lanes) != set(frozen_lanes):
+        raise ReviewProgramError("trusted review attempt lanes are stale")
+    for axis, raw_lane in lanes.items():
+        frozen = frozen_lanes[axis]
+        if (
+            raw_lane.get("operation_id") != frozen.operation_id
+            or raw_lane.get("lane_id") != frozen.lane_id
+            or raw_lane.get("run_id") != frozen.run_id
+            or raw_lane.get("verification_iteration") != 0
+        ):
+            raise ReviewProgramError("trusted review attempt lane identity is stale")
+    if attempt.status != "terminal":
+        return reviewed_head
+    terminal = attempt.terminal
+    if terminal is None or gate.get("status") != terminal.result.value:
+        raise ReviewProgramError("trusted review attempt terminal result changed")
+    if terminal.result == ReviewAttemptTerminalResult.APPROVED:
+        _require_final_iterations(
+            gate_root,
+            OperationStore(root / ".vault-meta/harness"),
+            operation_id,
+            gate,
+            lanes,
+            {axis: 0 for axis in lanes},
+        )
+    return reviewed_head
+
+
 def resolved_terminal_head(
     root: Path,
     gate_root: Path,
@@ -297,6 +361,10 @@ def resolved_terminal_head(
 ) -> str:
     """Bind a moved implementation HEAD to material rounds and exact Git deltas."""
 
+    if isinstance(gate.get("attempt"), Mapping):
+        return _exact_attempt_terminal_head(
+            root, gate_root, gate, boundary, operation_id
+        )
     context = gate.get("context")
     if not isinstance(context, dict):
         raise ReviewProgramError("trusted review gate identity is stale")

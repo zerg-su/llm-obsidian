@@ -22,6 +22,7 @@ from ..contracts import (
     to_dict,
 )
 from ..state_machine import TERMINAL
+from ..review_attempt import ReviewAttempt
 from .review import (
     ReviewContext,
     ReviewExecution,
@@ -69,6 +70,7 @@ from .review_gate_contracts import (
     review_context_sha256,
 )
 from .review_gate_decisions import ReviewGateDecisionMixin
+from .review_gate_attempt import ReviewGateAttemptMixin
 from .review_gate_continuation import ReviewGateContinuationMixin
 from .review_gate_recovery import ReviewGateRecoveryMixin
 from .review_gate_state import ReviewGateStateMixin
@@ -87,6 +89,7 @@ EFFORTS = {
 
 
 class ReviewGateController(
+    ReviewGateAttemptMixin,
     ReviewGateRecoveryMixin,
     ReviewGateContinuationMixin,
     ReviewGateDecisionMixin,
@@ -118,7 +121,13 @@ class ReviewGateController(
         prepare_lane: (
             Callable[[str, object, object, ReviewRound], None] | None
         ) = None,
+        attempt: ReviewAttempt | None = None,
     ) -> ReviewGateRun:
+        running_attempt = attempt.start(attempt.identity) if attempt else None
+        if running_attempt is not None:
+            self._replace(
+                status="running", attempt=running_attempt.payload()
+            )
         captured: dict[str, ReviewRound] = {}
 
         def prepared(
@@ -131,29 +140,49 @@ class ReviewGateController(
             if prepare_lane is not None:
                 prepare_lane(axis, session_request, result, round_)
 
-        execution = start_review(
-            request,
-            self.runtime,
-            origin_surface=origin_surface,
-            cwd=cwd,
-            product_root=product_root,
-            prompt_pointer=prompt_pointer,
-            callback_root=callback_root,
-            callback_wake=callback_wake,
-            round_store=self.round_store,
-            prompt_pointers=prompt_pointers,
-            prepare_lane=prepared,
-        )
+        try:
+            execution = start_review(
+                request,
+                self.runtime,
+                origin_surface=origin_surface,
+                cwd=cwd,
+                product_root=product_root,
+                prompt_pointer=prompt_pointer,
+                callback_root=callback_root,
+                callback_wake=callback_wake,
+                round_store=self.round_store,
+                prompt_pointers=prompt_pointers,
+                prepare_lane=prepared,
+            )
+        except Exception:
+            if running_attempt is not None:
+                failed_attempt = running_attempt.fail_attention(
+                    running_attempt.identity
+                )
+                self._replace(
+                    status="attention-required",
+                    attempt=failed_attempt.payload(),
+                )
+            raise
         for lane in execution.lanes:
             if lane.axis not in captured:
                 captured[lane.axis] = prepare_review_round(
                     self.round_store, lane
                 )
+        attempt_update: dict[str, object] = {}
+        if running_attempt is not None:
+            for lane in execution.lanes:
+                self._attempt_lane(running_attempt.identity, lane)
+            waiting_attempt = running_attempt.await_callback(
+                running_attempt.identity
+            )
+            attempt_update["attempt"] = waiting_attempt.payload()
         self._replace(
             status="reviewing",
             active_review_operation_id=request.policy.operation_id,
             context=self._context(request.context),
             lanes=[self._lane(lane) for lane in execution.lanes],
+            **attempt_update,
         )
         return ReviewGateRun(execution, captured)
 

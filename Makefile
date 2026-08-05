@@ -40,6 +40,8 @@ test-harness:
 	@python3 tests/harness/test_review_delta_packet.py
 	@python3 tests/harness/test_review_telemetry.py
 	@python3 tests/harness/test_review_transport.py
+	@python3 tests/harness/test_review_attempt.py
+	@python3 tests/harness/test_exact_head_review_attempt.py
 	@python3 tests/harness/test_review_program.py
 	@python3 tests/harness/test_review_topology.py
 	@python3 tests/harness/test_review_vertical.py

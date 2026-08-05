@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "defect_id": "D-264-73",
+  "root_classes": [
+    "R1-cross-head-continuity",
+    "R2-multiple-writable-truths",
+    "R5-session-preserving-recovery"
+  ],
+  "reviewed_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "resolved_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "interleaving": [
+    {
+      "sequence": 1,
+      "fact": "parent-terminal",
+      "parent_state": "attention-required",
+      "attention_reason": "callback-timeout"
+    },
+    {
+      "sequence": 2,
+      "fact": "head-changed",
+      "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "sequence": 3,
+      "fact": "verification-child-prepared",
+      "child_state": "awaiting-callback",
+      "verification_iteration": 1,
+      "resources": {
+        "surface_id": "",
+        "process_group": 0,
+        "supervisor_pid": 0
+      }
+    }
+  ],
+  "forbidden_new_path_effects": [
+    "rearm-parent",
+    "create-verification-child",
+    "continue-provider-session"
+  ],
+  "expected_terminal": "legacy-cross-head-resume-disabled"
+}
