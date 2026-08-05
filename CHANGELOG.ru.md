@@ -82,6 +82,9 @@
   точного durable broker acceptance. Следующее поколение в той же retained
   session остаётся наблюдаемым в active-состоянии, но не получает второй
   prompt, Enter, nudge или restart budget.
+- Retirement теперь безопасно повторяется после crash между записью accepted
+  receipt и очисткой liveness state: снимается только точный совпавший sent
+  binding, а общие recovery budgets остаются израсходованными.
 - Повтор равного attention marker теперь заново выполняет ранее неудавшийся
   authoritative state transition, а не оставляет operation молча зависшей.
 - Канонический одноразовый wikilink repair может изменить writer-owned log/hot

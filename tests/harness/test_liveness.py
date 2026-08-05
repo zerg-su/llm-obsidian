@@ -337,6 +337,72 @@ with tempfile.TemporaryDirectory(prefix="callback-submit-corrupt.") as raw:
     else:
         check("malformed callback submit receipt fails closed", False)
 
+with tempfile.TemporaryDirectory(prefix="callback-submit-retire-crash.") as raw:
+    controller = LivenessController(Path(raw))
+    controller.observe(base, policy)
+    controller.reserve_callback_submit(
+        callback_submit_binding, callback_submit_identity
+    )
+    controller.mark_callback_submit_sent(callback_submit_binding)
+    original_write = controller._write
+    crash_injected = False
+
+    def crash_before_retired_state(path: Path, value: object) -> None:
+        is_retired_state = isinstance(value, dict) and path.name == "state.json"
+        if (
+            is_retired_state
+            and value.get("callback_submit_binding") == ""
+            and value.get("callback_submit_status") == ""
+        ):
+            raise OSError("injected retirement state crash")
+        original_write(path, value)
+
+    controller._write = crash_before_retired_state  # type: ignore[method-assign]
+    try:
+        controller.retire_callback_submit_after_acceptance(
+            callback_submit_binding,
+            "6" * 64,
+            generation=3,
+            operation_id="review-round",
+            run_id="review-run",
+            lane_id="openai-holistic",
+        )
+    except OSError:
+        crash_injected = True
+    finally:
+        controller._write = original_write  # type: ignore[method-assign]
+    mixed_state = controller.current_state()
+    mixed_receipt = json.loads(
+        (
+            Path(raw)
+            / "receipts"
+            / f"callback-submit-{callback_submit_binding}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "retirement kill point leaves one exact resumable mixed phase",
+        crash_injected
+        and mixed_state is not None
+        and mixed_state.callback_submit_status == "sent"
+        and mixed_receipt["status"] == "accepted",
+    )
+    controller.retire_callback_submit_after_acceptance(
+        callback_submit_binding,
+        "6" * 64,
+        generation=3,
+        operation_id="review-round",
+        run_id="review-run",
+        lane_id="openai-holistic",
+    )
+    replayed_state = controller.current_state()
+    check(
+        "accepted retirement replay completes without another provider effect",
+        replayed_state is not None
+        and replayed_state.callback_submit_binding == ""
+        and replayed_state.callback_submit_status == ""
+        and replayed_state.nudge_count == 1,
+    )
+
 with tempfile.TemporaryDirectory(prefix="callback-submit-identity.") as raw:
     controller = LivenessController(Path(raw))
     controller.observe(base, policy)

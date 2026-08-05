@@ -637,6 +637,20 @@ class LivenessController:
             }
             if existing == accepted_receipt:
                 if (
+                    current.callback_submit_binding == binding_sha256
+                    and current.callback_submit_status == "sent"
+                ):
+                    retired = replace(
+                        current,
+                        callback_submit_binding="",
+                        callback_submit_status="",
+                    )
+                    self._write(
+                        self.root / "state.json",
+                        to_dict(retired),
+                    )
+                    return
+                if (
                     current.callback_submit_binding
                     or current.callback_submit_status
                 ):

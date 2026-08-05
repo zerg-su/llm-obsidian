@@ -78,6 +78,9 @@ packages were published for them.
 - Retired a sent callback-recovery generation only after exact durable broker
   acceptance, so the next retained-session generation remains observable while
   active without gaining another prompt, Enter, nudge, or restart budget.
+- Made that retirement replayable across a crash between the accepted receipt
+  write and liveness-state clear; replay retires only the exact matching sent
+  binding and leaves all shared recovery budgets consumed.
 - Made equal attention-marker replay retry an earlier failed authoritative
   state transition instead of silently leaving the operation stranded.
 - Allowed the canonical one-shot wikilink repair to update a writer-owned
