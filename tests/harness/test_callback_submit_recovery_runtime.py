@@ -1624,6 +1624,144 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         encoding="utf-8",
     )
     os.utime(registration, (now, now))
+
+    stale_state_root = root / "stale-receipt-worker"
+    stale_state_root.mkdir()
+    stale_registration = stale_state_root / "callback-target.json"
+    stale_registration.write_bytes(registration.read_bytes())
+    stale_receipt = {**joined_receipt, "status": "accepted"}
+    (stale_state_root / "callback-receipt.json").write_text(
+        json.dumps(stale_receipt, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.utime(stale_registration, (now - 60, now - 60))
+    stale_cmux = Cmux()
+    stale_worker = RecoveryWorker()
+    stale_worker.__dict__.update(worker.__dict__)
+    stale_worker.spec_path = stale_state_root / "launch.json"
+    stale_worker.spec = {
+        **worker.spec,
+        "callback_registration": stale_registration,
+    }
+    stale_worker.liveness_controller = LivenessController(
+        stale_state_root / "liveness"
+    )
+    stale_worker.cmux_adapter = stale_cmux
+    stale_worker.callback_idle_observations = 0
+    stale_worker.callback_prompt_observations = 0
+    stale_worker.callback_generation_identity = ""
+    stale_worker.callback_generation_progress_at = 0.0
+    stale_worker.callback_recovery_input_digest = ""
+    stale_worker.callback_recovery_input_reads = 0
+    stale_worker.callback_recovery_digest = ""
+    stale_worker.callback_recovery_reads = 0
+    stale_worker.latest_callback_prompt_class = "idle-prompt"
+    stale_worker.inspect_liveness()
+    stale_worker.inspect_liveness()
+    stale_worker.inspect_liveness()
+    stale_recovery_state = stale_worker.liveness_controller.current_state()
+    check(
+        "stale prior-generation callback receipt does not strand current recovery",
+        len(stale_cmux.sent) == 1
+        and stale_cmux.keys == [(SURFACE, "Enter")]
+        and stale_recovery_state is not None
+        and stale_recovery_state.nudge_count == 1
+        and stale_recovery_state.callback_submit_status == "sent"
+        and not (stale_state_root / "callback-submit-attention.json").exists(),
+        (stale_cmux.sent, stale_cmux.keys, stale_recovery_state),
+    )
+
+    race_state_root = root / "artifact-race-worker"
+    race_state_root.mkdir()
+    race_registration = race_state_root / "callback-target.json"
+    race_registration.write_bytes(registration.read_bytes())
+    os.utime(race_registration, (now - 60, now - 60))
+    input_path.unlink(missing_ok=True)
+    callback_path.unlink(missing_ok=True)
+
+    class ArtifactRaceController(LivenessController):
+        def reserve_callback_submit(
+            self, binding_sha256: str, identity: dict[str, object]
+        ) -> bool:
+            reserved = super().reserve_callback_submit(
+                binding_sha256, identity
+            )
+            if reserved:
+                input_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "axis": "openai-holistic",
+                            "verdict": "approve",
+                            "verification_iteration": 1,
+                            "findings": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return reserved
+
+    class ArtifactRaceWorker(RecoveryWorker):
+        def inspect_callback(self) -> None:
+            self.callback_inspections += 1
+
+    race_cmux = Cmux()
+    race_worker = ArtifactRaceWorker()
+    race_worker.__dict__.update(worker.__dict__)
+    race_worker.spec_path = race_state_root / "launch.json"
+    race_worker.spec = {
+        **worker.spec,
+        "callback_registration": race_registration,
+    }
+    race_worker.liveness_controller = ArtifactRaceController(
+        race_state_root / "liveness"
+    )
+    race_worker.cmux_adapter = race_cmux
+    race_worker.callback_idle_observations = 0
+    race_worker.callback_prompt_observations = 0
+    race_worker.callback_generation_identity = ""
+    race_worker.callback_generation_progress_at = 0.0
+    race_worker.callback_recovery_input_digest = ""
+    race_worker.callback_recovery_input_reads = 0
+    race_worker.callback_recovery_digest = ""
+    race_worker.callback_recovery_reads = 0
+    race_worker.latest_callback_prompt_class = "idle-prompt"
+    race_worker.callback_inspections = 0
+    race_worker.inspect_liveness()
+    race_worker.inspect_liveness()
+    race_worker.inspect_liveness()
+    race_worker.inspect_liveness()
+    race_state = race_worker.liveness_controller.current_state()
+    race_receipts = list(
+        (race_state_root / "liveness" / "receipts").glob(
+            "callback-submit-*.json"
+        )
+    )
+    race_receipt = json.loads(race_receipts[0].read_text(encoding="utf-8"))
+    check(
+        "typed artifact winning after reservation prevents provider replay",
+        race_cmux.sent == []
+        and race_cmux.keys == []
+        and race_worker.callback_inspections >= 1
+        and race_state is not None
+        and race_state.nudge_count == 1
+        and race_state.callback_submit_binding == ""
+        and race_state.callback_submit_status == ""
+        and race_receipt["status"] == "settled-by-artifact"
+        and race_receipt["artifact_sha256"]
+        == hashlib.sha256(input_path.read_bytes()).hexdigest()
+        and not (race_state_root / "callback-submit-attention.json").exists(),
+        (
+            race_cmux.sent,
+            race_cmux.keys,
+            race_worker.callback_inspections,
+            race_state,
+            race_receipt,
+            hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        ),
+    )
+    input_path.unlink(missing_ok=True)
+
     worker.latest_callback_prompt_class = "active"
     worker.inspect_liveness()
     worker.inspect_liveness()

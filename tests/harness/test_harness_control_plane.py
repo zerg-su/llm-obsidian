@@ -112,6 +112,26 @@ check(
     final,
 )
 
+effect_trace = final["engineering_fix_effect_trace"]
+check(
+    "final trace binds the effect-recorded engineering fix traversal",
+    effect_trace["pipeline"] == "engineering/fix"
+    and effect_trace["pipeline_definition_sha256"]
+    == fix_pipeline.definition_sha256
+    and effect_trace["parent_state"] == "finalizing"
+    and not effect_trace["parent_resources_owned"]
+    and len(effect_trace["plan_step_receipts"]) == 7
+    and {row["iteration"] for row in effect_trace["plan_step_receipts"]}
+    == {0, 1}
+    and effect_trace["verification_states"] == ["complete", "failed"]
+    and effect_trace["review_gate_started"]
+    and effect_trace["checkpoint_recorded"]
+    and effect_trace["callback_receipt_status"] == "accepted"
+    and effect_trace["accepted_callback_kind"] == "wiki-summary"
+    and effect_trace["next_action"] == "reap-ready",
+    effect_trace,
+)
+
 dogfood = json.loads(
     (
         ROOT

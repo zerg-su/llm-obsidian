@@ -60,6 +60,14 @@ packages were published for them.
 - Replaced the release-bound E6/E14 fixture tail with production review-gate
   and task-summary entrypoints, and added a public Deep-facade iteration test;
   direct lifecycle-helper calls are no longer counted as unattended evidence.
+- Bound E14 to an effect-recorded two-pass `engineering/fix` traversal with
+  seven typed step receipts, fail-to-pass verification, review, checkpoint,
+  accepted summary callback, released resources, and `reap-ready`.
+- Ignored stale prior-generation callback receipts during current-generation
+  recovery and settled typed artifacts that win after reservation without a
+  duplicate provider prompt or Enter.
+- Made callback liveness state and receipt publications directory-durable
+  before provider-facing effects.
 - Healed the exact callback-submit crash phase where durable state was already
   `sent` but its separate receipt remained `reserved`; restart advances only
   the matching receipt, never repeats provider input, and fails closed on

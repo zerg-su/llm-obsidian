@@ -27,7 +27,11 @@ from harness.contracts import (
     OperationSpec,
     RuntimeRoute,
 )
-from harness.pipeline_builtins import builtin_definitions, builtin_registry
+from harness.pipeline_builtins import (
+    builtin_definitions,
+    builtin_registry,
+    compiled_builtin,
+)
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionRequest
 from harness.runtime_worker import (
@@ -1268,6 +1272,77 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     ]
     retry_intent = read_json_eventually(
         retry_state / "pipeline-fix" / "pass-1" / "retry-intent.json"
+    )
+    retry_step_rows = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(retry_receipts)
+    ]
+    retry_callback_receipt = json.loads(
+        (retry_state / "callback-receipt.json").read_text(encoding="utf-8")
+    )
+    normalized_effect_trace = {
+        "schema_version": 1,
+        "pipeline": "engineering/fix",
+        "pipeline_definition_sha256": compiled_builtin(
+            "engineering/fix"
+        ).definition_sha256,
+        "parent_operation_id": retry_task,
+        "parent_state": retry_parent.state,
+        "parent_resources_owned": bool(
+            retry_parent.resources.surface_id
+            or retry_parent.resources.process_group
+            or retry_parent.resources.supervisor_pid
+        ),
+        "plan_step_receipts": sorted(
+            [
+                {
+                    "iteration": row["iteration"],
+                    "step_id": row["step_id"],
+                    "status": row["status"],
+                }
+                for row in retry_step_rows
+            ],
+            key=lambda row: (row["iteration"], row["step_id"]),
+        ),
+        "verification_states": sorted(
+            record.state for record in retry_verifications
+        ),
+        "review_gate_started": (
+            retry_state / "pipeline-review-start.json"
+        ).is_file(),
+        "checkpoint_recorded": (retry_state / "checkpoint.json").is_file(),
+        "callback_receipt_status": retry_callback_receipt["status"],
+        "accepted_callback_kind": retry_parent.accepted_callback_kind,
+        "next_action": "reap-ready",
+    }
+    trace_contract = json.loads(
+        (
+            ROOT
+            / "docs/acceptance/v2.6.4-harness-control-plane-final.json"
+        ).read_text(encoding="utf-8")
+    )["engineering_fix_effect_trace"]
+    check(
+        "engineering fix records one exact two-pass lifecycle trace",
+        normalized_effect_trace == trace_contract
+        and len({row["operation_id"] for row in retry_step_rows}) == 7
+        and all(
+            row["parent_operation_id"] == retry_task
+            and row["definition_sha256"]
+            == normalized_effect_trace["pipeline_definition_sha256"]
+            and len(row["run_id"]) == 32
+            and len(
+                hashlib.sha256(
+                    json.dumps(
+                        row, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+            )
+            == 64
+            for row in retry_step_rows
+        )
+        and len({record.spec.operation_id for record in retry_verifications})
+        == 2,
+        normalized_effect_trace,
     )
     check(
         "engineering fix retries once from the original reproduction receipt",

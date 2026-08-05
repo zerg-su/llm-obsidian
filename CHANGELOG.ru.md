@@ -64,6 +64,14 @@
 - Release-доказательство E6/E14 переведено на production review-gate и
   task-summary entrypoints, а iteration barrier проверяется через публичный
   Deep facade; прямые вызовы lifecycle helper больше не считаются unattended.
+- E14 связан с реально исполненным двухпроходным `engineering/fix`: семь typed
+  step receipts, verification fail→pass, review, checkpoint, accepted summary
+  callback, освобождённые ресурсы и `reap-ready`.
+- Stale callback receipt предыдущего поколения больше не блокирует recovery
+  текущего, а typed artifact после reservation побеждает гонку без повторного
+  provider prompt или Enter.
+- Публикация liveness state и callback receipts стала directory-durable до
+  любого provider-facing effect.
 - Устранена точная crash-фаза callback-submit, где durable state уже был
   `sent`, а отдельный receipt оставался `reserved`: restart продвигает только
   совпадающий receipt, не повторяет provider input и fail closed на повреждённых

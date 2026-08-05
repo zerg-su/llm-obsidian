@@ -264,9 +264,22 @@ class LivenessController:
     def __init__(self, root: Path | str):
         self.root = Path(root)
 
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        """Make an atomic file or directory-entry publication durable."""
+
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
     @contextmanager
     def _locked(self):
+        root_existed = self.root.exists()
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not root_existed:
+            self._fsync_directory(self.root.parent)
         os.chmod(self.root, 0o700)
         lock_path = self.root / ".lock"
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -280,7 +293,10 @@ class LivenessController:
 
     @staticmethod
     def _write(path: Path, value: object) -> None:
+        parent_existed = path.parent.exists()
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not parent_existed:
+            LivenessController._fsync_directory(path.parent.parent)
         os.chmod(path.parent, 0o700)
         encoded = (
             json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
@@ -294,6 +310,7 @@ class LivenessController:
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
             os.replace(temporary, path)
+            LivenessController._fsync_directory(path.parent)
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -575,6 +592,71 @@ class LivenessController:
                 allowed_existing=(
                     reserved_receipt,
                 ),
+            )
+
+    def settle_callback_submit_with_artifact(
+        self,
+        binding_sha256: str,
+        artifact_sha256: str,
+    ) -> None:
+        """Clear a reserved submit when exact typed evidence wins the race.
+
+        No new provider effect is emitted.  The shared nudge remains consumed,
+        and the receipt records the exact artifact that made replay unnecessary.
+        """
+
+        _sha(binding_sha256, "callback submit binding", optional=False)
+        _sha(artifact_sha256, "callback submit artifact", optional=False)
+        with self._locked():
+            current = self._state()
+            if current is None:
+                raise ContractError("callback submit settlement identity changed")
+            existing = self._read_callback_submit_receipt(binding_sha256)
+            identity = existing["generation_identity"]
+            reserved_state = replace(
+                current,
+                callback_submit_binding=binding_sha256,
+                callback_submit_status="reserved",
+            )
+            reserved_receipt = self._callback_submit_receipt(
+                binding_sha256, reserved_state, identity
+            )
+            settled_receipt = {
+                **reserved_receipt,
+                "status": "settled-by-artifact",
+                "artifact_sha256": artifact_sha256,
+            }
+            if not current.callback_submit_binding:
+                if existing == settled_receipt:
+                    return
+                if existing != reserved_receipt:
+                    raise ContractError(
+                        "callback submit settlement receipt changed"
+                    )
+                self._write(
+                    self.root
+                    / "receipts"
+                    / f"callback-submit-{binding_sha256}.json",
+                    settled_receipt,
+                )
+                return
+            if (
+                current.callback_submit_binding != binding_sha256
+                or current.callback_submit_status != "reserved"
+                or existing != reserved_receipt
+            ):
+                raise ContractError("callback submit settlement identity changed")
+            retired = replace(
+                current,
+                callback_submit_binding="",
+                callback_submit_status="",
+            )
+            self._write(self.root / "state.json", to_dict(retired))
+            self._write(
+                self.root
+                / "receipts"
+                / f"callback-submit-{binding_sha256}.json",
+                settled_receipt,
             )
 
     def retire_callback_submit_after_acceptance(

@@ -654,3 +654,17 @@ This coordinator-owned amendment records the next honest-coverage failure after 
 | D-264-65 | test harness | after preceding coverage processes, the embedded engineering/fix fake provider could exhaust its five-second request/outbox/finalization polling before the stdlib-traced worker consumed the first typed phase; the parent then correctly failed with `callback-invalid`, while standalone trace and ordinary `make test` remained green | `included` | only the embedded fake provider uses a bounded twenty-second polling ceiling for typed request, outbox consumption and finalization publication; production worker/provider deadlines are unchanged, and `make test-harness-coverage` is green at 76.04% across 128 modules with all 4,370 transition cases |
 
 No runtime/provider budget, route, callback semantics, review topology, public interface, permission, migration, push, tag, publish or release authority changes.
+
+
+## Amendment 2026-08-05 — final Sol implementation findings
+
+This append-only amendment records the material findings from Deep implementation review task `e68a0b01-95aa-4077-a244-7ecf93139972`. It preserves the frozen Outcome Contract and adds only exact callback durability, race safety, integrated E14 evidence, and the mandatory stage-ordered E10 release audit.
+
+| ID | Owner | Finding | Disposition | Evidence |
+|---|---|---|---|---|
+| D-264-66 | callback watchdog | an accepted receipt from generation N could be treated as evidence for active generation N+1 and suppress its only bounded recovery submit | `included` | current-target receipt validation ignores the stale receipt; the runtime regression sends exactly one prompt/Enter for N+1 with no attention |
+| D-264-67 | callback watchdog | callback-submit state and receipts used file fsync plus atomic replace without syncing containing directory entries | `included` | first-use directories and every reserve/sent/uncertain/settled/accepted publication complete file fsync, replace and directory fsync before provider effect |
+| D-264-68 | release evidence | E14 described an authority matrix but did not bind an effect-recorded `engineering/fix` traversal | `included` | production runtime fixture records seven exact model-step receipts, failed-to-passed verification, review start, checkpoint, accepted summary callback and resource-free `reap-ready` |
+| D-264-69 | release evidence | implementation review cannot contain the future terminal E10 no-loss release receipt | `pending release gate` | handoff remains blocked until one separate exact-HEAD `purpose=release` Sol review audits D-264-01 through D-264-69 with no fix loop |
+
+Focused callback-runtime, liveness, task-summary, harness-control-plane and code-quality gates are green. D-264-69 is stage ordering, not a waived finding: it becomes `included` only after the terminal release receipt exists on the final committed HEAD.

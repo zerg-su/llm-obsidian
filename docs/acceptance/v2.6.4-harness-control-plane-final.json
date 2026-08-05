@@ -26,6 +26,29 @@
     {"stage":"callback-ingestion","owner":"harness","module":"scripts/harness/runtime_callback_io.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"},
     {"stage":"terminal-cleanup","owner":"harness","module":"scripts/harness/runtime_session_cleanup.py","test":"tests/harness/test_callback_submit_recovery_runtime.py","manual_ingress_required":false,"disposition":"established"}
   ],
+  "engineering_fix_effect_trace": {
+    "schema_version": 1,
+    "pipeline": "engineering/fix",
+    "pipeline_definition_sha256": "6c22e6280105af8c239ece8cf6c6289079a83ae1404d974af2f4b86def321d1d",
+    "parent_operation_id": "edeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    "parent_state": "finalizing",
+    "parent_resources_owned": false,
+    "plan_step_receipts": [
+      {"iteration":0,"step_id":"minimal-fix","status":"complete"},
+      {"iteration":0,"step_id":"regression-test","status":"complete"},
+      {"iteration":0,"step_id":"reproduce","status":"complete"},
+      {"iteration":0,"step_id":"root-cause","status":"complete"},
+      {"iteration":1,"step_id":"minimal-fix","status":"complete"},
+      {"iteration":1,"step_id":"regression-test","status":"complete"},
+      {"iteration":1,"step_id":"root-cause","status":"complete"}
+    ],
+    "verification_states": ["complete", "failed"],
+    "review_gate_started": true,
+    "checkpoint_recorded": true,
+    "callback_receipt_status": "accepted",
+    "accepted_callback_kind": "wiki-summary",
+    "next_action": "reap-ready"
+  },
   "integrated_trace": {
     "dogfood_trace_receipt_sha256": "501f3e146441b0fc838f2b698c658174d1ea936bf9489793163221254b7af2ae",
     "review_gate_entrypoint_count": 1,

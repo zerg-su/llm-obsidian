@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import replace
+from .callback_submit_recovery import INVALID_ARTIFACT_STATES
 from .runtime_worker import *
 from .runtime_worker import (
     _atomic_json,
@@ -167,6 +168,105 @@ class RuntimeWorkerLivenessMixin:
             self.callback_submit_attention("callback-submit-evidence-malformed")
             return None
 
+    def _settle_reserved_callback_submit(
+        self, binding_sha256: str, artifact_sha256: str
+    ) -> bool:
+        try:
+            self.liveness_controller.settle_callback_submit_with_artifact(
+                binding_sha256,
+                artifact_sha256,
+            )
+        except (ContractError, OSError, TypeError, ValueError):
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return False
+        return True
+
+    def _artifact_after_callback_reservation(
+        self, callback_path: Path, binding_sha256: str
+    ) -> str:
+        """Return send, wait, or handled after an exact post-reserve read."""
+
+        (
+            input_artifact,
+            self.callback_recovery_input_digest,
+            self.callback_recovery_input_reads,
+        ) = observe_review_artifact(
+            callback_path.with_name(".review-input.json"),
+            self.callback_recovery_input_digest,
+            self.callback_recovery_input_reads,
+        )
+        (
+            callback_artifact,
+            self.callback_recovery_digest,
+            self.callback_recovery_reads,
+        ) = observe_review_artifact(
+            callback_path,
+            self.callback_recovery_digest,
+            self.callback_recovery_reads,
+        )
+        current_receipt_sha256 = _current_callback_receipt_sha256(
+            self.spec_path.parent
+        )
+        if (
+            input_artifact.state in INVALID_ARTIFACT_STATES
+            or callback_artifact.state in INVALID_ARTIFACT_STATES
+        ):
+            self.callback_submit_attention("callback-submit-artifact-invalid")
+            return "handled"
+        winner = current_receipt_sha256
+        if not winner and input_artifact.state == "stable":
+            winner = input_artifact.sha256
+        if not winner and callback_artifact.state == "stable":
+            winner = callback_artifact.sha256
+        if winner:
+            if self._settle_reserved_callback_submit(binding_sha256, winner):
+                self.inspect_callback()
+            return "handled"
+        if (
+            input_artifact.state == "unstable"
+            or callback_artifact.state == "unstable"
+        ):
+            return "wait"
+        return "send"
+
+    def _send_callback_submit_recovery(
+        self, callback_path: Path, binding_sha256: str
+    ) -> None:
+        input_path = callback_path.with_name(".review-input.json")
+        submit_command = shlex.join(
+            (
+                sys.executable,
+                str(self.trusted_vault / "scripts/harness/review_submit.py"),
+                "--worktree",
+                str(self.spec["product_root"]),
+                "--state-dir",
+                str(callback_path.parent),
+                "--input-file",
+                str(input_path),
+            )
+        )
+        message = (
+            "Harness callback-submit recovery: write the already completed "
+            f"review JSON only to {input_path}, then run this exact command: "
+            f"{submit_command}. Do not write the callback manually."
+        )
+        if len(message.encode()) > 4096:
+            self.callback_submit_attention("callback-submit-evidence-malformed")
+            return
+        try:
+            self.cmux_adapter.send(self.spec["surface_id"], message)
+            self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        except Exception:
+            try:
+                self.liveness_controller.mark_callback_submit_uncertain(
+                    binding_sha256
+                )
+            except Exception:
+                pass
+            self.callback_submit_attention("callback-submit-effect-uncertain")
+            return
+        self.liveness_controller.mark_callback_submit_sent(binding_sha256)
+
     def inspect_callback_submit_recovery(
         self, record: object, process_status: str
     ) -> None:
@@ -215,6 +315,13 @@ class RuntimeWorkerLivenessMixin:
                 ):
                     self._reconcile_sent_callback_submit(
                         current.callback_submit_binding, current
+                    )
+                elif (
+                    current is not None
+                    and current.callback_submit_status == "reserved"
+                ):
+                    self._settle_reserved_callback_submit(
+                        current.callback_submit_binding, receipt_sha256
                     )
                 return
             self.callback_submit_attention("callback-submit-stale-generation")
@@ -381,6 +488,16 @@ class RuntimeWorkerLivenessMixin:
             )
         decision = classify_callback_submit(evidence, self.callback_submit_policy)
         if decision.action in {"submit-typed-input", "accept-callback"}:
+            if current.callback_submit_status == "reserved":
+                artifact_sha256 = (
+                    input_artifact.sha256
+                    if decision.action == "submit-typed-input"
+                    else callback_artifact.sha256
+                )
+                if not self._settle_reserved_callback_submit(
+                    current.callback_submit_binding, artifact_sha256
+                ):
+                    return
             self.inspect_callback()
             return
         if decision.action == "attention-required":
@@ -411,48 +528,14 @@ class RuntimeWorkerLivenessMixin:
         if self._expected_callback_child(record, operation_id, run_id) is None:
             self.callback_submit_attention("callback-submit-stale-generation")
             return
-        for artifact_path in (
-            callback_path.with_name(".review-input.json"),
-            callback_path,
-            self.spec_path.parent / "callback-receipt.json",
-        ):
-            if artifact_path.exists() or artifact_path.is_symlink():
-                self.inspect_callback()
-                return
-        input_path = callback_path.with_name(".review-input.json")
-        submit_command = shlex.join(
-            (
-                sys.executable,
-                str(self.trusted_vault / "scripts/harness/review_submit.py"),
-                "--worktree",
-                str(self.spec["product_root"]),
-                "--state-dir",
-                str(callback_path.parent),
-                "--input-file",
-                str(input_path),
+        if (
+            self._artifact_after_callback_reservation(
+                callback_path, binding_sha256
             )
-        )
-        message = (
-            "Harness callback-submit recovery: write the already completed "
-            f"review JSON only to {input_path}, then run this exact command: "
-            f"{submit_command}. Do not write the callback manually."
-        )
-        if len(message.encode()) > 4096:
-            self.callback_submit_attention("callback-submit-evidence-malformed")
+            != "send"
+        ):
             return
-        try:
-            self.cmux_adapter.send(self.spec["surface_id"], message)
-            self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        except Exception:
-            try:
-                self.liveness_controller.mark_callback_submit_uncertain(
-                    binding_sha256
-                )
-            except Exception:
-                pass
-            self.callback_submit_attention("callback-submit-effect-uncertain")
-            return
-        self.liveness_controller.mark_callback_submit_sent(binding_sha256)
+        self._send_callback_submit_recovery(callback_path, binding_sha256)
 
     def restart_for_liveness(self, action_id: str) -> None:
         supervisor = OperationSupervisor(

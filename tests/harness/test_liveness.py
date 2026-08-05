@@ -7,6 +7,8 @@ import sys
 import tempfile
 import hashlib
 import json
+import os
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +24,7 @@ from harness.liveness import (  # noqa: E402
     LivenessState,
     observe_liveness,
 )
+import harness.liveness as liveness_module  # noqa: E402
 from harness.contracts import to_dict  # noqa: E402
 from harness.runtime_worker import (  # noqa: E402
     _current_callback_receipt_sha256,
@@ -176,6 +179,89 @@ with tempfile.TemporaryDirectory(prefix="liveness-state.") as raw:
         (Path(raw) / "state.json").stat().st_mode & 0o077 == 0
         and all(path.stat().st_mode & 0o077 == 0 for path in receipts),
     )
+
+with tempfile.TemporaryDirectory(prefix="liveness-durability.") as raw:
+    events: list[str] = []
+    original_fsync = liveness_module.os.fsync
+    original_replace = liveness_module.os.replace
+
+    def recording_fsync(descriptor: int) -> None:
+        mode = os.fstat(descriptor).st_mode
+        events.append("dir-fsync" if stat.S_ISDIR(mode) else "file-fsync")
+        original_fsync(descriptor)
+
+    def recording_replace(source: object, target: object) -> None:
+        events.append("replace")
+        original_replace(source, target)
+
+    def durable_publications(label: str, action) -> None:
+        events.clear()
+        action()
+        replace_indexes = [
+            index for index, event in enumerate(events) if event == "replace"
+        ]
+        check(
+            label,
+            bool(replace_indexes)
+            and all(
+                "file-fsync" in events[:index]
+                and index + 1 < len(events)
+                and events[index + 1] == "dir-fsync"
+                for index in replace_indexes
+            ),
+        )
+
+    liveness_module.os.fsync = recording_fsync
+    liveness_module.os.replace = recording_replace
+    try:
+        durable_controller = LivenessController(Path(raw) / "liveness")
+        durable_publications(
+            "first liveness state publication fsyncs file and directory",
+            lambda: durable_controller.observe(base, policy),
+        )
+        durable_publications(
+            "callback reservation is durable before provider effect",
+            lambda: durable_controller.reserve_callback_submit(
+                callback_submit_binding, callback_submit_identity
+            ),
+        )
+        events.append("provider-effect")
+        check(
+            "provider effect follows the durable reservation receipt",
+            events[-2:] == ["dir-fsync", "provider-effect"],
+        )
+        durable_publications(
+            "sent callback transition fsyncs state and receipt",
+            lambda: durable_controller.mark_callback_submit_sent(
+                callback_submit_binding
+            ),
+        )
+        durable_publications(
+            "accepted callback retirement fsyncs state and receipt",
+            lambda: durable_controller.retire_callback_submit_after_acceptance(
+                callback_submit_binding,
+                "9" * 64,
+                generation=3,
+                operation_id="review-round",
+                run_id="review-run",
+                lane_id="openai-holistic",
+            ),
+        )
+
+        uncertain_controller = LivenessController(Path(raw) / "uncertain")
+        uncertain_controller.observe(base, policy)
+        uncertain_controller.reserve_callback_submit(
+            callback_submit_binding, callback_submit_identity
+        )
+        durable_publications(
+            "uncertain callback transition fsyncs state and receipt",
+            lambda: uncertain_controller.mark_callback_submit_uncertain(
+                callback_submit_binding
+            ),
+        )
+    finally:
+        liveness_module.os.fsync = original_fsync
+        liveness_module.os.replace = original_replace
 
 with tempfile.TemporaryDirectory(prefix="liveness-receipt.") as raw:
     runtime_root = Path(raw)
