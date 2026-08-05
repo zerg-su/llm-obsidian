@@ -33,6 +33,23 @@ Public lane IDs use stable `anthropic-*` and `openai-*` prefixes. Concrete
 runtime/model values remain separate operation metadata; registered routing
 aliases never become lane identity.
 
+Standalone Deep remains the public preset above: default Anthropic+OpenAI
+holistic sessions and explicit single-model Deep intent+engineering sessions.
+Finalization uses a separate frozen matrix. Its cycles 1–3 select only
+`finalization-primary`; cycles 4–5 may add `finalization-independent` only when
+policy permits it and fresh typed availability proves it. An explicit
+single-model selection always wins. These aliases never reinterpret standalone
+Deep.
+
+## Finalization boundary
+
+Reserve every finalization cycle atomically in `FinalizationLedger` before a
+review effect. One cycle owns one fresh exact-HEAD attempt and one immutable
+terminal result. A changed HEAD closes the old reviewers and requires the next
+cycle; it never rearms, resumes, or rebinds their sessions. After a fifth
+unsuccessful result the lineage is `finalization-budget-exhausted`; a sixth
+cycle creates no model call, session, or ledger entry.
+
 ## Purpose boundaries
 
 Keep review inside one explicit purpose:
@@ -69,12 +86,11 @@ completely. Verify findings against code; rejection requires technical evidence.
    unless a single-parent HEAD changes that plan); otherwise `current --worktree
    <checkout>` with requested preset/aliases and compatible purpose/boundary.
    The facade starts, resumes, or returns a receipt; `review-runner.py` is low-level.
-2. Keep ContextPacket/outbox in owner-only scratch and product read-only. Each
-   lane has one parent session and deterministic one-shot child round; submit
+2. Keep ContextPacket/outbox in owner-only scratch and product read-only. Submit
    axis JSON only through its generated `harness/review_submit.py` command.
-3. Keep lanes independent. Material findings persist `awaiting-resolution`; a
-   changed HEAD continues each same parent once (twice for Deep/Full). Every
-   parent verifies one shared HEAD; minor findings do not force a round.
+3. Keep lanes independent. Material findings persist `awaiting-resolution`.
+   Standalone operations retain their preset budget; a finalization finding is
+   terminal for its exact HEAD and any corrected HEAD uses a fresh cycle.
 4. The executor records typed rulings/checks and escalates protected boundaries.
    A plan finding may rebind retained lanes only when the exact Git delta changes
    the design artifact alone; Outcome, dispositions, or evidence-map changes

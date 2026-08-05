@@ -117,9 +117,13 @@ For local shell probes that need a wall-clock limit, do not use bare GNU
 default. Use `./scripts/with-timeout 8 <command> ...` from the repo root, or an
 MCP/API-native timeout parameter when the tool exposes one.
 
-Never use `claude -p` or `claude --print` for Claude reviewer, dispatch, or
-task-split sessions. Those flows must open an interactive Claude Code session in
-a cmux split so the user can see and continue the reviewer.
+D-265-EPH-01 permits `claude -p` only inside a registered code-owned ephemeral
+adapter for bounded review/schema work after subscription preflight, fixed argv
+compilation, minimal context, schema validation, bounded capability checks, and
+durable receipts. Arbitrary direct print-mode reviewer/dispatch commands remain
+forbidden. Continuable work and any interactive capability still require a
+visible Claude Code session in a cmux split; an ephemeral failure never triggers
+a hidden interactive or paid/provider fallback.
 
 Do not interrupt an interactive Claude reviewer while it is visibly active
 (spinner, token counters, tool activity, or changing screen). Wait at least

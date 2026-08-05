@@ -61,6 +61,16 @@ assert any("mechanism-failure category" in issue for issue in issues)
 assert any("reference missing" in issue for issue in issues)
 print("OK   failure-repair auto-repair boundary drift detected")
 
+issues = module.finalization_parity_issues("", "", "", "", "", "", "")
+assert any("implementation-plan" in issue for issue in issues)
+assert any("dispatch" in issue for issue in issues)
+assert any("review" in issue for issue in issues)
+assert any("AGENTS.md" in issue for issue in issues)
+assert any("CLAUDE.md" in issue for issue in issues)
+assert any("runtime-capabilities.md" in issue for issue in issues)
+assert any("feedback_no_claude_p_headless.md" in issue for issue in issues)
+print("OK   finalization and ephemeral policy drift detected")
+
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")
 assert "manual fallback" in defuddle
 assert "never describe raw" in defuddle

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "implementation-plan",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved Outcome Contract and design for multi-file work.",
+      "overall_outcome": "An owned, approved TDD plan whose slices cover every declared success-evidence item without replacing the Outcome.",
+      "local_subgoal": "Map exact responsibilities, interfaces, RED/GREEN seams, and verification to the unchanged Outcome Contract, including bounded stateful finalization when requested.",
+      "completion_proxies": [
+        "The plan is written.",
+        "Every slice names a focused test.",
+        "The plan review is green."
+      ],
+      "required_outcome_evidence": [
+        "Every requirement and evidence ID maps to an owned runnable slice, including zero-effect exhaustion proof, and the approved plan preserves all non-goals."
+      ],
+      "evidence": "skills/implementation-plan/SKILL.md; tests/test_instruction_lint.py; docs/acceptance/v2.6.5-finalization-skill-audit.md",
+      "change": "None after the approved Skill Creator product update.",
+      "behavior_proof": "Read-only planning, exact ownership, TDD evidence mapping, approval, and standalone Deep as a protected non-goal remain explicit."
+    },
+    {
+      "skill": "dispatch",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "One approved plan, exact repository/worktree identity, code-owned pipeline selection, and frozen route/review/reap policy.",
+      "overall_outcome": "One isolated, bounded task launch whose exact lifecycle remains owned by the harness.",
+      "local_subgoal": "Validate and launch the approved task once with exact identities, execution profile, permissions, callbacks, and forbidden effects.",
+      "completion_proxies": [
+        "The launch result is typed.",
+        "The selected execution resource exists.",
+        "The task metadata validates."
+      ],
+      "required_outcome_evidence": [
+        "The task reaches its declared terminal handoff without identity drift, duplicate effects, arbitrary provider commands, or forbidden external actions."
+      ],
+      "evidence": "skills/dispatch/SKILL.md; tests/test_instruction_lint.py; tests/test_skill_budget.py; docs/acceptance/v2.6.5-finalization-skill-audit.md",
+      "change": "None after the approved Skill Creator product update.",
+      "behavior_proof": "Approved-plan, runner ownership, continuable cmux, pre-effect policy checks, callback, permission, and external-effect boundaries remain explicit; only registered bounded adapters receive the ephemeral exception."
+    },
+    {
+      "skill": "review",
+      "verdict": "no-change",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "Exact product HEAD, approved Outcome Contract, purpose boundary, verification profile, and unverified implementation claims.",
+      "overall_outcome": "An independent, exact-identity verdict on Outcome attainment, engineering quality, non-goals, and material risk.",
+      "local_subgoal": "Inspect evidence and publish one bounded read-only terminal result per configured finalization lane or standalone preset lane.",
+      "completion_proxies": [
+        "A callback is accepted.",
+        "The focused checks pass.",
+        "A review archive exists."
+      ],
+      "required_outcome_evidence": [
+        "Every declared evidence item is classified, non-goals are checked, finalization exhaustion is bounded, and final authorization binds the exact HEAD/profile/summary bytes."
+      ],
+      "evidence": "skills/review/SKILL.md; tests/harness/test_finalization_routing.py; tests/harness/test_review_topology.py; docs/acceptance/v2.6.5-finalization-skill-audit.md",
+      "change": "None after the approved Skill Creator product update.",
+      "behavior_proof": "Standalone Deep dual-provider topology, explicit single-model precedence, product-read-only reviewers, lane independence, exact-HEAD finalization, and bounded authorization remain explicit."
+    }
+  ]
+}

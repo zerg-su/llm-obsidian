@@ -137,6 +137,87 @@ def failure_repair_issues(
     return issues
 
 
+def finalization_parity_issues(
+    implementation_plan: str,
+    dispatch: str,
+    review: str,
+    agents: str,
+    claude: str,
+    runtime: str,
+    memory: str,
+) -> list[str]:
+    """Keep bounded-finalization and ephemeral execution guidance aligned."""
+    issues: list[str] = []
+    required_by_source = {
+        "skills/implementation-plan": (
+            "FinalizationLedger",
+            "cycles 1–5",
+            "sixth reservation",
+            "standalone `review --deep`",
+            "finalization_policy",
+        ),
+        "skills/dispatch": (
+            "code-owned ephemeral adapter",
+            "subscription preflight",
+            "fixed argv",
+            "schema validation",
+            "durable receipts",
+            "continuable",
+            "arbitrary direct print-mode",
+        ),
+        "skills/review": (
+            "Standalone Deep",
+            "finalization-primary",
+            "finalization-independent",
+            "cycles 1–3",
+            "cycles 4–5",
+            "explicit single-model",
+            "fresh exact-HEAD attempt",
+            "sixth cycle",
+        ),
+        "AGENTS.md": (
+            "D-265-EPH-01",
+            "code-owned ephemeral adapter",
+            "subscription preflight",
+            "arbitrary direct print-mode",
+        ),
+        "CLAUDE.md": (
+            "D-265-EPH-01",
+            "code-owned ephemeral adapter",
+            "subscription preflight",
+            "arbitrary direct print-mode",
+        ),
+        "docs/runtime-capabilities.md": (
+            "D-265-EPH-01",
+            "code-owned ephemeral adapter",
+            "fixed provider-specific argv",
+            "schema-validated result",
+            "durable receipts",
+        ),
+        ".claude-memory/feedback_no_claude_p_headless.md": (
+            "D-265-EPH-01",
+            "supersedes",
+            "code-owned ephemeral adapter",
+            "arbitrary direct print-mode",
+        ),
+    }
+    texts = {
+        "skills/implementation-plan": implementation_plan,
+        "skills/dispatch": dispatch,
+        "skills/review": review,
+        "AGENTS.md": agents,
+        "CLAUDE.md": claude,
+        "docs/runtime-capabilities.md": runtime,
+        ".claude-memory/feedback_no_claude_p_headless.md": memory,
+    }
+    for source, required in required_by_source.items():
+        normalized = " ".join(texts[source].split()).lower()
+        for value in required:
+            if value.lower() not in normalized:
+                issues.append(f"{source} missing finalization parity invariant {value!r}")
+    return issues
+
+
 def check_repo(root: Path) -> list[str]:
     issues: list[str] = []
     repair_reference_path = root / "docs" / "skill-references" / "failure-repair-contract.md"
@@ -168,6 +249,18 @@ def check_repo(root: Path) -> list[str]:
 
     issues.extend(daily_runtime_repo_issues(root))
     issues.extend(legacy_skill_issues(root))
+    memory_path = root / ".claude-memory" / "feedback_no_claude_p_headless.md"
+    issues.extend(
+        finalization_parity_issues(
+            (root / "skills" / "implementation-plan" / "SKILL.md").read_text(encoding="utf-8"),
+            (root / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8"),
+            (root / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8"),
+            (root / "AGENTS.md").read_text(encoding="utf-8"),
+            (root / "CLAUDE.md").read_text(encoding="utf-8"),
+            (root / "docs" / "runtime-capabilities.md").read_text(encoding="utf-8"),
+            memory_path.read_text(encoding="utf-8") if memory_path.is_file() else "",
+        )
+    )
 
     ingest = (root / "skills" / "wiki-ingest" / "SKILL.md").read_text(encoding="utf-8")
     for forbidden in ("Use PATCH", "Save to `.raw", "Write the updated manifest back"):

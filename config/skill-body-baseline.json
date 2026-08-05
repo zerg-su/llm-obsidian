@@ -73,11 +73,11 @@
       "token_estimate": 236
     },
     "dispatch": {
-      "body_bytes": 8031,
-      "body_lines": 132,
-      "closure_bytes": 8031,
-      "closure_token_estimate": 2008,
-      "token_estimate": 2008
+      "body_bytes": 9179,
+      "body_lines": 148,
+      "closure_bytes": 9179,
+      "closure_token_estimate": 2295,
+      "token_estimate": 2295
     },
     "distill-runbook": {
       "body_bytes": 4343,
@@ -101,11 +101,11 @@
       "token_estimate": 1687
     },
     "implementation-plan": {
-      "body_bytes": 1706,
-      "body_lines": 31,
-      "closure_bytes": 1706,
-      "closure_token_estimate": 427,
-      "token_estimate": 427
+      "body_bytes": 2211,
+      "body_lines": 39,
+      "closure_bytes": 2211,
+      "closure_token_estimate": 553,
+      "token_estimate": 553
     },
     "improve-skills": {
       "body_bytes": 4322,
@@ -171,11 +171,11 @@
       "token_estimate": 185
     },
     "review": {
-      "body_bytes": 4766,
-      "body_lines": 88,
-      "closure_bytes": 4766,
-      "closure_token_estimate": 1192,
-      "token_estimate": 1192
+      "body_bytes": 5370,
+      "body_lines": 100,
+      "closure_bytes": 5370,
+      "closure_token_estimate": 1343,
+      "token_estimate": 1343
     },
     "save": {
       "body_bytes": 11970,

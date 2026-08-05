@@ -1,22 +1,25 @@
 ---
 name: dispatch
 metadata:
-  version: 1.6.0
-description: Spawn an isolated Claude/Codex task worktree in cmux and hand it an approved plan; requires cmux.
+  version: 1.7.0
+description: Dispatch approved work through cmux or registered ephemeral review/schema execution.
 allowed-tools: Read Write Edit Glob Grep Bash AskUserQuestion
 ---
 
 # /dispatch — approved task handoff
 
-Open an isolated task to the right of the cmux surface. The coordinator
-approves the plan; the task executes it. Inherit the current route. Prefer an
-internal agent unless the user requests a persistent session.
+Open an isolated task under an approved pipeline. The coordinator approves the
+plan; the task executes it. Inherit the current route. Continuable executor
+work opens to the right of the cmux surface. A bounded review or schema-producing
+step may instead use the compiled ephemeral profile below.
 
 ## Normal path
 
-1. Require `cmux` before parsing. If unavailable, explain the dependency and
-   offer to continue in the current session; do not substitute tmux/background
-   shell work.
+1. Read the approved execution profile before requiring `cmux`. Interactive or
+   continuable work requires cmux; if unavailable, explain the dependency and
+   offer to continue in the current session. Do not substitute tmux/background
+   shell work. Only a registered bounded review/schema step may use a code-owned
+   ephemeral adapter without cmux.
 2. Parse a bounded description, `task_name`, repo name/path, base/branch intent,
    optional runtime/model/effort override, and optional explicit plan.
 3. Resolve read-only Phase 1 through code:
@@ -52,6 +55,10 @@ internal agent unless the user requests a persistent session.
    typed transitions, bounded loops, `executor-default`, and approved context
    hashes. Reject commands, arbitrary paths/providers, and authority expansion.
    Custom is only for a proven semantic gap.
+   Persist the optional additive `finalization_policy` exactly as compiled:
+   at most five cycles, `execution=ephemeral`, and only the registered
+   `finalization-primary` and `finalization-independent` aliases. The public
+   spec never names a provider CLI transport.
    Omit caller identity fields normally: the
    runner binds `CMUX_SURFACE_ID`, current session ID, and host-confirmed route.
    It never inspects the globally focused surface.
@@ -113,6 +120,14 @@ notification; the task applies or rejects every finding in a new commit, or
 uses the normal escalation contract. The code-owned provider runtime, not the
 task or target repository, owns reviewer launch, routing, argv, trust prompts,
 watchdog, and close-after-exit.
+For an ephemeral step, that runtime may launch only through a registered
+code-owned ephemeral adapter after subscription preflight, fixed argv
+compilation, minimal ContextPacket construction, schema validation, bounded
+capability checks, and durable receipts. Ambiguous auth/billing or a missing
+capability returns the typed interactive disposition before model effect; it
+never falls back to paid credits, another provider, or a hidden cmux session.
+Arbitrary direct print-mode dispatch/reviewer commands remain forbidden, as do
+manually reproduced adapter commands.
 Unattended Codex stays `-a never` + `workspace-write`, with exact Git/session
 write roots plus localhost-only loopback and cmux-socket policy. `DCG_CONFIG`
 and trusted-`PATH` hardening currently belong to the classic compatibility
@@ -126,9 +141,10 @@ scope expansion remain forbidden.
 
 ## Output
 
-Report task name, branch, worktree, exact cmux surface, runtime/model, and that
-the task returns only for escalation or final lifecycle callbacks. Branch and
-worktree remain local. A successful dispatch is a launch, not task completion.
+Report task name, branch, worktree, execution profile, runtime/model, and the
+exact cmux surface when one exists. State that the task returns only for
+escalation or final lifecycle callbacks. Branch and worktree remain local. A
+successful dispatch is a launch, not task completion.
 
 ## Compatibility and recovery
 
