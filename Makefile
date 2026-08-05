@@ -206,6 +206,7 @@ test-pipeline-runners:
 	@python3 tests/test_dispatch_runner.py
 	@python3 tests/test_pipeline_step_submit.py
 	@python3 tests/test_reap_runner.py
+	@python3 tests/test_reap_effect_reconciliation.py
 	@python3 tests/test_queue_session_exit.py
 
 retrieval-experiment:
