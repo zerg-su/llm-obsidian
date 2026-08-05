@@ -11,6 +11,10 @@ from .runtime_worker import (
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
 )
+from .review_drive_rearm import (
+    ReviewDriveRearmError,
+    review_marker_path_after_rearm,
+)
 
 
 @dataclass
@@ -65,7 +69,14 @@ class RuntimeWorkerSummaryMixin:
         return summary
 
     def load_review_marker(self) -> dict[str, object] | None:
-        self.marker_path = self.spec_path.parent / "pipeline-review-start.json"
+        try:
+            self.marker_path = review_marker_path_after_rearm(
+                self.spec_path.parent, self.spec["operation_id"]
+            )
+        except ReviewDriveRearmError as exc:
+            raise RuntimeWorkerError(
+                "pipeline review rearm marker is invalid"
+            ) from exc
         if not self.marker_path.is_file() or self.marker_path.is_symlink():
             return None
         marker = json.loads(self.marker_path.read_text(encoding="utf-8"))

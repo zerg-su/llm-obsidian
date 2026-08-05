@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +34,9 @@ from harness.review_drive_rearm import (  # noqa: E402
     ReviewDriveRearmError,
     rearm_review_drive,
 )
+from harness.runtime_worker_custom import RuntimeWorkerCustomMixin  # noqa: E402
+from harness.runtime_worker_loop import RuntimeWorkerLoopMixin  # noqa: E402
+from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from outcome_contract import extract_from_bytes  # noqa: E402
 from review_resolution import review_transport_identity_sha256  # noqa: E402
@@ -69,7 +73,48 @@ def transition_to_waiting(store: OperationStore, owner: str, operation: str) -> 
         store.transition(owner, operation, state)
 
 
-def fixture(root: Path) -> dict[str, object]:
+class ProductionWorkerTick(
+    RuntimeWorkerLoopMixin,
+    RuntimeWorkerSummaryMixin,
+    RuntimeWorkerCustomMixin,
+):
+    """Exercise the real task-summary recovery phase without provider adapters."""
+
+    def __init__(self, data: dict[str, object], attention_revision: int) -> None:
+        self.store = data["store"]
+        self.spec_path = data["runtime_root"] / "runtime.json"
+        self.spec = {
+            "callback_mode": "task-summary",
+            "owner_id": data["task_id"],
+            "operation_id": data["task_id"],
+        }
+        self.callback_handled = True
+        self.summary_attention_revision = attention_revision
+        self.summary_digest = "stale"
+        self.summary_stable_reads = 7
+        self.summary_inspections = 0
+        self.loaded_marker = object()
+        self.pipeline = SimpleNamespace(definition_sha256="d" * 64)
+        self.next_liveness_probe = float("inf")
+        self.next_prompt_probe = float("inf")
+        self.next_checkpoint_probe = float("inf")
+        self.checkpoint = "retained-review-checkpoint"
+
+    def inspect_control(self) -> None:
+        return None
+
+    def drive_fix_transport(self) -> None:
+        return None
+
+    def drive_custom_transport(self) -> None:
+        return None
+
+    def inspect_task_summary(self) -> None:
+        self.summary_inspections += 1
+        self.loaded_marker = self.load_review_marker()
+
+
+def fixture(root: Path, *, mechanism_fix_commits: int = 1) -> dict[str, object]:
     vault = root / "vault"
     product = root / "product"
     plan = vault / "wiki" / "plans" / "approved.md"
@@ -86,6 +131,13 @@ def fixture(root: Path) -> dict[str, object]:
     (product / "product.txt").write_text("resolved\n", encoding="utf-8")
     git(product, "add", "product.txt")
     git(product, "commit", "-m", "resolved")
+    failed_drive_head = git(product, "rev-parse", "HEAD")
+    for index in range(mechanism_fix_commits):
+        (product / "mechanism.txt").write_text(
+            f"mechanism repair {index}\n", encoding="utf-8"
+        )
+        git(product, "add", "mechanism.txt")
+        git(product, "commit", "-m", f"mechanism repair {index}")
     resolved_head = git(product, "rev-parse", "HEAD")
 
     plan.write_text(
@@ -390,7 +442,7 @@ def fixture(root: Path) -> dict[str, object]:
     write_json(runtime_root / "pipeline-review-resolution-notify.json", notification)
     drive = hashlib.sha256()
     drive.update((gate_root / "review-gate.json").read_bytes())
-    drive.update(resolved_head.encode())
+    drive.update(failed_drive_head.encode())
     write_json(
         runtime_root / "pipeline-review-start.json",
         {
@@ -425,13 +477,19 @@ def fixture(root: Path) -> dict[str, object]:
         "runtime_root": runtime_root,
         "parent_digests": parent_digests,
         "lanes": lanes,
+        "reviewed_head": reviewed_head,
+        "failed_drive_head": failed_drive_head,
+        "resolved_head": resolved_head,
+        "drive_sha256": drive.hexdigest(),
     }
 
 
-def assert_rejected(label: str, action) -> None:
+def assert_rejected(label: str, action, expected: str = "") -> None:
     try:
         action()
-    except ReviewDriveRearmError:
+    except ReviewDriveRearmError as exc:
+        if expected and expected not in str(exc):
+            raise AssertionError(f"{label}: {exc}") from exc
         print(f"OK   {label}")
         return
     raise AssertionError(f"{label}: rearm unexpectedly succeeded")
@@ -445,25 +503,54 @@ def main() -> int:
         store = happy["store"]
         task_id = happy["task_id"]
         before_parents = dict(happy["parent_digests"])
-        receipt = rearm_review_drive(product, now=5_000.0)
+        failed_marker_path = happy["runtime_root"] / "pipeline-review-start.json"
+        failed_marker_sha256 = hashlib.sha256(failed_marker_path.read_bytes()).hexdigest()
+        progress_at = 2_000_000_000.0
+        receipt = rearm_review_drive(product, now=progress_at)
         record = store.read(task_id, task_id)
         live = LivenessController(happy["runtime_root"] / "liveness").current_state()
         check(
-            "rearm advances operation and liveness to one exact revision",
+            "rearm binds the unique failed-drive ancestor and one exact revision",
             receipt["status"] == "applied"
+            and receipt["failed_drive_head_sha"] == happy["failed_drive_head"]
+            and receipt["drive_sha256"] == happy["drive_sha256"]
+            and receipt["resolved_head_sha"] == happy["resolved_head"]
             and record.state == "awaiting-callback"
             and live is not None
             and live.operation_state == record.state
             and live.operation_revision == record.revision
-            and live.last_progress_at == 5_000.0
-            and record.deadline_at == 6_800.0,
+            and live.last_progress_at == progress_at
+            and record.deadline_at == progress_at + 1_800.0,
             (receipt, record, live),
+        )
+        worker = ProductionWorkerTick(happy, receipt["attention_revision"])
+        worker.inspect_transport()
+        worker.tick_observers()
+        after_tick = store.read(task_id, task_id)
+        check(
+            "next production worker tick consumes the latch without attention bounce",
+            after_tick.state == "awaiting-callback"
+            and after_tick.revision == receipt["target_revision"]
+            and not worker.callback_handled
+            and worker.summary_attention_revision == -1
+            and worker.summary_inspections == 1
+            and worker.loaded_marker is None
+            and worker.marker_path.name == "pipeline-review-rearm-start.json"
+            and hashlib.sha256(failed_marker_path.read_bytes()).hexdigest()
+            == failed_marker_sha256
+            and json.loads(
+                (happy["runtime_root"] / "callback-error.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            == {"schema_version": 1, "status": "review-drive-failed"},
+            (after_tick, worker.__dict__),
         )
         decision = LivenessController(
             happy["runtime_root"] / "liveness"
         ).observe(
             LivenessEvidence(
-                observed_at=5_001.0,
+                observed_at=progress_at + 1.0,
                 process_status="alive",
                 prompt_state="non-interactive",
                 operation_revision=record.revision,
@@ -497,7 +584,7 @@ def main() -> int:
             (before_parents, after_parents, record),
         )
         replay_revision = record.revision
-        replay = rearm_review_drive(product, now=6_000.0)
+        replay = rearm_review_drive(product, now=progress_at + 2.0)
         check(
             "applied rearm is idempotent",
             replay == receipt
@@ -519,6 +606,91 @@ def main() -> int:
             "code-owned CLI replays the same applied receipt",
             cli.returncode == 0 and json.loads(cli.stdout) == receipt,
             (cli.returncode, cli.stdout, cli.stderr),
+        )
+
+        no_match = fixture(base / "no-match")
+        marker_path = no_match["runtime_root"] / "pipeline-review-start.json"
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        marker["drive_sha256"] = "0" * 64
+        write_json(marker_path, marker)
+        assert_rejected(
+            "mismatched marker with no first-parent match fails closed",
+            lambda: rearm_review_drive(no_match["product"], now=progress_at),
+            "exactly one first-parent HEAD",
+        )
+
+        ambiguous = fixture(base / "ambiguous")
+        assert_rejected(
+            "multiple candidate matches fail closed as ambiguous",
+            lambda: rearm_review_drive(
+                ambiguous["product"],
+                now=progress_at,
+                _drive_digest=lambda _head: ambiguous["drive_sha256"],
+            ),
+            "exactly one first-parent HEAD",
+        )
+
+        nonancestor = fixture(base / "nonancestor")
+        git(
+            nonancestor["product"],
+            "checkout",
+            "-b",
+            "side-review",
+            nonancestor["reviewed_head"],
+        )
+        (nonancestor["product"] / "side.txt").write_text(
+            "foreign reviewed boundary\n", encoding="utf-8"
+        )
+        git(nonancestor["product"], "add", "side.txt")
+        git(nonancestor["product"], "commit", "-m", "side review")
+        foreign_reviewed = git(nonancestor["product"], "rev-parse", "HEAD")
+        git(nonancestor["product"], "checkout", "task/rearm")
+        nonancestor_gate_path = (
+            nonancestor["store"].root
+            / "review-data"
+            / nonancestor["task_id"]
+            / nonancestor["task_id"]
+            / "review-gate.json"
+        )
+        nonancestor_gate = json.loads(
+            nonancestor_gate_path.read_text(encoding="utf-8")
+        )
+        nonancestor_gate["context"]["head_sha"] = foreign_reviewed
+        for boundary in nonancestor_gate["awaiting_resolution"].values():
+            boundary["reviewed_head_sha"] = foreign_reviewed
+        write_json(nonancestor_gate_path, nonancestor_gate)
+        nonancestor_review_path = nonancestor["product"] / ".task-review.json"
+        nonancestor_review = json.loads(
+            nonancestor_review_path.read_text(encoding="utf-8")
+        )
+        nonancestor_review["reviewed_head_sha"] = foreign_reviewed
+        write_json(nonancestor_review_path, nonancestor_review)
+        nonancestor_resolution_path = (
+            nonancestor["product"] / ".task-review-resolution.json"
+        )
+        nonancestor_resolution = json.loads(
+            nonancestor_resolution_path.read_text(encoding="utf-8")
+        )
+        nonancestor_resolution["reviewed_head_sha"] = foreign_reviewed
+        write_json(nonancestor_resolution_path, nonancestor_resolution)
+        nonancestor_notification_path = (
+            nonancestor["runtime_root"]
+            / "pipeline-review-resolution-notify.json"
+        )
+        nonancestor_notification = json.loads(
+            nonancestor_notification_path.read_text(encoding="utf-8")
+        )
+        nonancestor_notification["reviewed_head_sha"] = foreign_reviewed
+        nonancestor_notification["packet_sha256"] = canonical_sha256(
+            nonancestor_review
+        )
+        write_json(nonancestor_notification_path, nonancestor_notification)
+        assert_rejected(
+            "non-ancestor reviewed HEAD fails closed before marker matching",
+            lambda: rearm_review_drive(
+                nonancestor["product"], now=progress_at
+            ),
+            "not an ancestor",
         )
 
         crash = fixture(base / "crash")

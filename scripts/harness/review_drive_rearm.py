@@ -35,6 +35,7 @@ from .store import OperationStore, StoreError
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 HEAD = re.compile(r"[0-9a-f]{40,64}\Z")
+MAX_FIRST_PARENT_HEADS = 256
 RECEIPT_FIELDS = {
     "schema_version",
     "status",
@@ -50,6 +51,7 @@ RECEIPT_FIELDS = {
     "callback_error_sha256",
     "drive_marker_sha256",
     "drive_sha256",
+    "failed_drive_head_sha",
     "notification_marker_sha256",
     "notification_packet_sha256",
     "review_packet_sha256",
@@ -275,6 +277,70 @@ def _drive_sha256(vault: Path, operation_id: str, gate_raw: bytes, head: str) ->
     return digest.hexdigest()
 
 
+def _first_parent_heads(
+    worktree: Path, reviewed_head: str, current_head: str
+) -> tuple[str, ...]:
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", reviewed_head, current_head],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise ReviewDriveRearmError(
+            "reviewed HEAD is not an ancestor of the current resolution"
+        )
+    descendants = _git(
+        worktree,
+        "rev-list",
+        "--first-parent",
+        f"--max-count={MAX_FIRST_PARENT_HEADS}",
+        f"{reviewed_head}..{current_head}",
+    ).splitlines()
+    if (
+        not descendants
+        or len(descendants) >= MAX_FIRST_PARENT_HEADS
+        or descendants[0] != current_head
+        or any(not HEAD.fullmatch(item) for item in descendants)
+    ):
+        raise ReviewDriveRearmError(
+            "reviewed-to-current first-parent ancestry is invalid or unbounded"
+        )
+    oldest_parent = _git(worktree, "rev-parse", f"{descendants[-1]}^1")
+    heads = (reviewed_head, *reversed(descendants))
+    if (
+        oldest_parent != reviewed_head
+        or heads[-1] != current_head
+        or len(heads) != len(set(heads))
+    ):
+        raise ReviewDriveRearmError(
+            "reviewed HEAD is not on the exact current first-parent ancestry"
+        )
+    return heads
+
+
+def _failed_drive_head(
+    worktree: Path,
+    reviewed_head: str,
+    current_head: str,
+    marker_sha256: str,
+    drive_digest: Callable[[str], str],
+) -> str:
+    matches: list[str] = []
+    for candidate in _first_parent_heads(worktree, reviewed_head, current_head):
+        digest = drive_digest(candidate)
+        if not SHA256.fullmatch(digest):
+            raise ReviewDriveRearmError("candidate review drive digest is invalid")
+        if digest == marker_sha256:
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise ReviewDriveRearmError(
+            "failed review drive must match exactly one first-parent HEAD"
+        )
+    return matches[0]
+
+
 def _static_bindings(
     *,
     worktree: Path,
@@ -286,6 +352,7 @@ def _static_bindings(
     runtime_root: Path,
     head: str,
     tree: str,
+    drive_digest: Callable[[str], str] | None,
 ) -> dict[str, object]:
     gate_path = store.root / "review-data" / operation_id / operation_id / "review-gate.json"
     gate, gate_raw = _regular_json(gate_path, "review gate")
@@ -379,16 +446,36 @@ def _static_bindings(
     drive_marker, drive_raw = _regular_json(
         runtime_root / "pipeline-review-start.json", "review drive marker"
     )
-    expected_drive = _drive_sha256(vault, operation_id, gate_raw, head)
     definition = str(meta.get("pipeline_policy", {}).get("definition_sha256") or "")
-    if drive_marker != {
-        "schema_version": 1,
-        "operation_id": operation_id,
-        "definition_sha256": definition,
-        "drive_sha256": expected_drive,
-        "status": "pending",
-    }:
+    marker_sha256 = str(drive_marker.get("drive_sha256") or "")
+    if (
+        set(drive_marker)
+        != {
+            "schema_version",
+            "operation_id",
+            "definition_sha256",
+            "drive_sha256",
+            "status",
+        }
+        or drive_marker.get("schema_version") != 1
+        or drive_marker.get("operation_id") != operation_id
+        or drive_marker.get("definition_sha256") != definition
+        or not SHA256.fullmatch(marker_sha256)
+        or drive_marker.get("status") != "pending"
+    ):
         raise ReviewDriveRearmError("failed review drive binding drifted")
+    digest_for_head = drive_digest or (
+        lambda candidate: _drive_sha256(
+            vault, operation_id, gate_raw, candidate
+        )
+    )
+    failed_drive_head = _failed_drive_head(
+        worktree,
+        reviewed_head,
+        head,
+        marker_sha256,
+        digest_for_head,
+    )
     notification, notification_raw = _regular_json(
         runtime_root / "pipeline-review-resolution-notify.json",
         "review resolution notification",
@@ -415,7 +502,8 @@ def _static_bindings(
     return {
         "callback_error_sha256": _sha256(callback_error_raw),
         "drive_marker_sha256": _sha256(drive_raw),
-        "drive_sha256": expected_drive,
+        "drive_sha256": marker_sha256,
+        "failed_drive_head_sha": failed_drive_head,
         "notification_marker_sha256": _sha256(notification_raw),
         "notification_packet_sha256": packet_sha256,
         "review_packet_sha256": _sha256(review_raw),
@@ -470,7 +558,37 @@ def _validated_receipt(path: Path) -> dict[str, object] | None:
     ):
         if not SHA256.fullmatch(str(receipt.get(field) or "")):
             raise ReviewDriveRearmError("review drive rearm receipt digest is invalid")
+    for field in (
+        "failed_drive_head_sha",
+        "reviewed_head_sha",
+        "resolved_head_sha",
+        "resolved_tree_sha",
+    ):
+        if not HEAD.fullmatch(str(receipt.get(field) or "")):
+            raise ReviewDriveRearmError("review drive rearm HEAD binding is invalid")
     return receipt
+
+
+def review_marker_path_after_rearm(
+    runtime_root: Path, operation_id: str
+) -> Path:
+    """Select a fresh drive marker while retaining the failed marker bytes."""
+
+    original = runtime_root / "pipeline-review-start.json"
+    receipt = _validated_receipt(runtime_root / "review-drive-rearm.json")
+    if receipt is None:
+        return original
+    if (
+        receipt.get("status") != "applied"
+        or receipt.get("operation_id") != operation_id
+        or not original.is_file()
+        or original.is_symlink()
+        or _sha256(original.read_bytes()) != receipt.get("drive_marker_sha256")
+    ):
+        raise ReviewDriveRearmError(
+            "applied review drive rearm no longer binds its failed marker"
+        )
+    return runtime_root / "pipeline-review-rearm-start.json"
 
 
 def _source_operation(record: OperationRecord) -> bool:
@@ -516,6 +634,7 @@ def _locked_rearm(
     time_budget: float,
     observed: float,
     fault: Callable[[str], None],
+    drive_digest: Callable[[str], str] | None,
 ) -> dict[str, object]:
     liveness = LivenessController(runtime_root / "liveness")
     receipt_path = runtime_root / "review-drive-rearm.json"
@@ -547,6 +666,7 @@ def _locked_rearm(
                 runtime_root=runtime_root,
                 head=head,
                 tree=tree,
+                drive_digest=drive_digest,
             )
             receipt = _validated_receipt(receipt_path)
             operation_raw = store._operation_path(operation_id, operation_id).read_bytes()
@@ -692,6 +812,7 @@ def rearm_review_drive(
     *,
     now: float | None = None,
     _fault_hook: Callable[[str], None] | None = None,
+    _drive_digest: Callable[[str], str] | None = None,
 ) -> dict[str, object]:
     """Consume one exact failed-drive latch without any provider-facing effect."""
 
@@ -750,4 +871,5 @@ def rearm_review_drive(
         time_budget=float(time_budget),
         observed=observed,
         fault=fault,
+        drive_digest=_drive_digest,
     )
