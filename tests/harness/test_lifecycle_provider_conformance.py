@@ -79,10 +79,12 @@ check(
     "fake external adapters contain no process, network, or real cmux launch primitive",
     all(token not in source for token in ("subprocess.", "socket.", "urlopen(", "CmuxAdapter(")),
 )
-check(
-    "conformance path reports zero real provider, model, cmux, and network effects",
-    LifecycleWorld.real_effect_counts()
-    == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
-)
+with tempfile.TemporaryDirectory(prefix="lifecycle-conformance-audit.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    check(
+        "conformance path reports measured zero real provider, model, cmux, and network effects",
+        world.real_effect_counts()
+        == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
+    )
 
 print("\nAll lifecycle provider-conformance tests passed.")

@@ -7,7 +7,7 @@ import json
 import os
 from dataclasses import asdict
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from harness.callbacks import CallbackBroker
 from harness.contracts import (
@@ -43,10 +43,69 @@ SUPERVISOR_IDENTITY = "b" * 64
 ROUTING_SHA256 = "c" * 64
 RESULT_SHA256 = "d" * 64
 CALLBACK_IDENTITY_SHA256 = "e" * 64
+EFFECT_CATEGORIES = ("provider", "model", "cmux", "network")
 
 
 class SimulatedCrash(RuntimeError):
     """The volatile simulator process stopped after a durable prefix."""
+
+
+class EffectAudit:
+    """Durable observations made immediately before external adapter calls."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    @classmethod
+    def create(cls, path: Path) -> "EffectAudit":
+        audit = cls(path)
+        _atomic_json(path, {"schema_version": 1, "observations": []})
+        return audit
+
+    def _read(self) -> list[dict[str, object]]:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("external effect audit is unavailable") from exc
+        observations = value.get("observations") if isinstance(value, dict) else None
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != 1
+            or not isinstance(observations, list)
+        ):
+            raise RuntimeError("external effect audit is invalid")
+        for index, item in enumerate(observations, start=1):
+            if (
+                not isinstance(item, dict)
+                or item.get("sequence") != index
+                or item.get("category") not in EFFECT_CATEGORIES
+                or item.get("adapter") not in {"fake", "real"}
+            ):
+                raise RuntimeError("external effect observation is invalid")
+        return observations
+
+    def observe(self, category: str, *, real: bool) -> None:
+        if category not in EFFECT_CATEGORIES:
+            raise ValueError("external effect category is invalid")
+        observations = self._read()
+        observations.append(
+            {
+                "sequence": len(observations) + 1,
+                "category": category,
+                "adapter": "real" if real else "fake",
+            }
+        )
+        _atomic_json(
+            self.path,
+            {"schema_version": 1, "observations": observations},
+        )
+
+    def counts(self, *, real_only: bool) -> dict[str, int]:
+        result = {category: 0 for category in EFFECT_CATEGORIES}
+        for item in self._read():
+            if not real_only or item["adapter"] == "real":
+                result[str(item["category"])] += 1
+        return result
 
 
 class CrashController:
@@ -185,10 +244,11 @@ class FakeProcess:
 
 
 class FakeCmux:
-    def __init__(self) -> None:
+    def __init__(self, effect_observer: Callable[[], None] | None = None) -> None:
         self.surface_status_value = "alive"
         self.workspace_status_value = "missing"
         self.simulated_closes = 0
+        self.effect_observer = effect_observer or (lambda: None)
 
     def status(self, surface_id: str) -> str:
         return self.surface_status_value if surface_id == SURFACE_ID else "missing"
@@ -196,6 +256,7 @@ class FakeCmux:
     def close_exact(self, surface_id: str) -> None:
         if surface_id != SURFACE_ID:
             raise RuntimeError("fake cmux surface identity changed")
+        self.effect_observer()
         self.simulated_closes += 1
         self.surface_status_value = "missing"
 
@@ -209,6 +270,7 @@ class FakeCmux:
     def close_workspace_exact(self, workspace_id: str, _window_id: str) -> None:
         if workspace_id != WORKSPACE_ID:
             raise RuntimeError("fake cmux workspace identity changed")
+        self.effect_observer()
         self.simulated_closes += 1
         self.workspace_status_value = "missing"
 
@@ -305,12 +367,15 @@ class LifecycleWorld:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.crashes = CrashController()
+        self.effect_audit = EffectAudit(self.root / "simulator" / "effect-audit.json")
         self.store = OperationStore(
             self.root / "harness", fault_observer=self.crashes.observe
         )
         state = self._world_state()
         self.process = FakeProcess()
-        self.cmux = FakeCmux()
+        self.cmux = FakeCmux(
+            lambda: self.effect_audit.observe("cmux", real=False)
+        )
         self.provider = FakeProvider(self.root / "external" / "provider-effects")
         self.events = DeterministicEventSource()
         self.clock = VirtualClock(self, float(state["clock"]))
@@ -361,6 +426,7 @@ class LifecycleWorld:
                 "clock": 0.0,
             },
         )
+        EffectAudit.create(root / "simulator" / "effect-audit.json")
         controller = LivenessController(root / "runtime" / "liveness")
         controller.observe(
             LivenessEvidence(0.0, "alive", record.revision, record.state),
@@ -510,12 +576,20 @@ class LifecycleWorld:
             raise RuntimeError("real delivery reducer did not reserve input")
         supervisor.effect(
             "provider-input",
-            lambda _record: self.provider.deliver(decision.effect_id, stream),
+            lambda _record: self._deliver_provider(decision.effect_id, stream),
         )
         supervisor.transition("running")
         supervisor.transition("awaiting-callback")
         self._write_runtime_metadata()
         self._publish_liveness()
+
+    def _deliver_provider(
+        self, effect_id: str, stream: RuntimeProviderEventStream
+    ) -> dict[str, object]:
+        self.effect_audit.observe(
+            "provider", real=not isinstance(self.provider, FakeProvider)
+        )
+        return self.provider.deliver(effect_id, stream)
 
     def _publish_provider_event(self, action: Mapping[str, object]) -> None:
         kind = action.get("kind")
@@ -763,9 +837,16 @@ class LifecycleWorld:
             digest.update(path.read_bytes())
         return digest.hexdigest()
 
-    @staticmethod
-    def real_effect_counts() -> dict[str, int]:
-        return {"provider": 0, "model": 0, "cmux": 0, "network": 0}
+    def real_effect_counts(self) -> dict[str, int]:
+        return self.effect_audit.counts(real_only=True)
+
+    def external_attempt_counts(self) -> dict[str, int]:
+        return self.effect_audit.counts(real_only=False)
+
+    def assert_no_real_effects(self) -> None:
+        counts = self.real_effect_counts()
+        if any(counts.values()):
+            raise AssertionError(f"simulator crossed a real effect boundary: {counts}")
 
     def resource_close_count(self) -> int:
         path = self.runtime_root / "provider-events" / "resource-closed.json"

@@ -146,7 +146,6 @@ def run_pass() -> dict[str, object]:
         "schedules": schedule_count + 1,
         "actions": action_count,
         "invariants": len(red_invariants),
-        "wall_seconds": 0.0,
         "fixture_sha256": digests,
         "trace_sha256": traces,
     }
@@ -189,5 +188,5 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-fixture-mutation.") as raw:
         mutation_detected = False
 check("one-byte fixture mutation is detected by digest plus oracle identity", mutation_detected)
 
-print(json.dumps({key: first[key] for key in ("scenarios", "schedules", "actions", "invariants", "wall_seconds")}, sort_keys=True, separators=(",", ":")))
+print(json.dumps({key: first[key] for key in ("scenarios", "schedules", "actions", "invariants")}, sort_keys=True, separators=(",", ":")))
 print("\nAll lifecycle regression-corpus tests passed.")

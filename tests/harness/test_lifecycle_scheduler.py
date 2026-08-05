@@ -143,7 +143,7 @@ check(
 summary_a = schedule_summary(first, invariants=7, actions=6)
 summary_b = schedule_summary(second, invariants=7, actions=6)
 check(
-    "deterministic summary is stable and reports virtual wall time",
+    "deterministic logical summary is stable and excludes wall telemetry",
     summary_a == summary_b
     and summary_a
     == {
@@ -151,7 +151,6 @@ check(
         "schedules": 2,
         "actions": 6,
         "invariants": 7,
-        "wall_seconds": 0.0,
     },
     summary_a,
 )

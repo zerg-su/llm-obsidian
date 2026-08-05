@@ -3,21 +3,25 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-lifecycle-simulator test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+.PHONY: test-lifecycle-simulator test-lifecycle-simulator-body test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
 
 test-lifecycle-simulator:
+	@./scripts/with-timeout 60 $(MAKE) --no-print-directory test-lifecycle-simulator-body
+
+test-lifecycle-simulator-body:
 	@echo "=== deterministic lifecycle simulator (fast) ==="
 	@python3 tests/harness/test_lifecycle_simulator_oracle.py
 	@python3 tests/harness/test_lifecycle_simulator_world.py
 	@python3 tests/harness/test_lifecycle_scheduler.py
 	@python3 tests/harness/test_lifecycle_crash_matrix.py
+	@python3 tests/harness/test_lifecycle_gate_budget.py
 	@python3 tests/harness/test_lifecycle_regression_corpus.py
 	@python3 tests/harness/test_lifecycle_provider_conformance.py
 	@python3 tests/harness/lifecycle_gate.py --mode fast
 
 test-lifecycle-simulator-extended: test-lifecycle-simulator
 	@echo "=== deterministic lifecycle simulator (extended) ==="
-	@python3 tests/harness/lifecycle_gate.py --mode extended
+	@./scripts/with-timeout 300 python3 tests/harness/lifecycle_gate.py --mode extended
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="

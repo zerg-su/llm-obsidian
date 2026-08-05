@@ -8,7 +8,9 @@ import json
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
+from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +22,28 @@ sys.path.insert(0, str(ROOT / "tests" / "harness"))
 from lifecycle_scheduler import compile_schedules, replay_trace, run_schedule  # noqa: E402
 from lifecycle_simulator import LifecycleWorld  # noqa: E402
 from lifecycle_simulator_oracle import load_scenario  # noqa: E402
+
+
+GATE_WALL_BUDGETS = {"fast": 60.0, "extended": 300.0}
+
+
+def run_with_wall_budget(
+    mode: str,
+    callback: Callable[[], dict[str, int]],
+    *,
+    monotonic: Callable[[], float] = time.perf_counter,
+) -> dict[str, int | float]:
+    budget = GATE_WALL_BUDGETS[mode]
+    started = monotonic()
+    logical = callback()
+    elapsed = monotonic() - started
+    if elapsed < 0:
+        raise RuntimeError("lifecycle gate monotonic clock moved backwards")
+    if elapsed > budget:
+        raise RuntimeError(
+            f"{mode} lifecycle gate exceeded {budget:.1f}s wall budget: {elapsed:.6f}s"
+        )
+    return {**logical, "wall_seconds": round(elapsed, 6)}
 
 
 def _scenario_paths() -> list[Path]:
@@ -34,7 +58,7 @@ def _scenario(identity: str) -> dict[str, object]:
     return matches[0]
 
 
-def _historical_summary() -> dict[str, int | float]:
+def _historical_summary() -> dict[str, int]:
     scenarios = [load_scenario(path) for path in sorted(HISTORICAL.glob("*.json"))]
     if len(scenarios) != 7:
         raise RuntimeError("fast lifecycle corpus must contain exactly seven scenarios")
@@ -56,11 +80,10 @@ def _historical_summary() -> dict[str, int | float]:
         "schedules": schedules,
         "actions": actions,
         "invariants": len(invariants),
-        "wall_seconds": 0.0,
     }
 
 
-def _extended_summary() -> dict[str, int | float]:
+def _extended_summary() -> dict[str, int]:
     summary = _historical_summary()
     initial_threads = threading.active_count()
     for path in sorted(SWEEPS.glob("*.json")):
@@ -127,7 +150,10 @@ def main() -> int:
             }
         print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
         return 0
-    summary = _historical_summary() if args.mode == "fast" else _extended_summary()
+    summary = run_with_wall_budget(
+        args.mode,
+        _historical_summary if args.mode == "fast" else _extended_summary,
+    )
     print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return 0
 

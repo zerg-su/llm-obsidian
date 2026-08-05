@@ -416,13 +416,10 @@ def run_schedule(
 
 def schedule_summary(
     schedules: Sequence[Schedule], *, invariants: int, actions: int
-) -> dict[str, int | float]:
+) -> dict[str, int]:
     return {
         "scenarios": len({item.scenario_id for item in schedules}),
         "schedules": len(schedules),
         "actions": actions,
         "invariants": invariants,
-        # Virtual pacing is the simulator's time authority.  External gate
-        # runners measure their own real wall clock separately.
-        "wall_seconds": 0.0,
     }

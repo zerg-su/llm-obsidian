@@ -260,10 +260,12 @@ check(
     and "fault_observer" not in inspect.signature(runtime_worker_run).parameters
     and "fault_observer" not in inspect.signature(RuntimeSessionManager.for_root).parameters,
 )
-check(
-    "the simulator performed no real external effects",
-    LifecycleWorld.real_effect_counts()
-    == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
-)
+with tempfile.TemporaryDirectory(prefix="lifecycle-crash-audit.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    check(
+        "the simulator performed no real external effects",
+        world.real_effect_counts()
+        == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
+    )
 
 print("\nAll lifecycle crash-matrix tests passed.")

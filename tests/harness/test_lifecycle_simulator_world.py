@@ -147,6 +147,19 @@ check(
 from lifecycle_simulator import LifecycleWorld  # noqa: E402
 
 
+class NonFakeProvider:
+    """Mutation probe: delegates safely but must be measured as non-fake."""
+
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+
+    def deliver(self, effect_id, stream):
+        return self.delegate.deliver(effect_id, stream)
+
+    def effects(self):
+        return self.delegate.effects()
+
+
 with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
     world = LifecycleWorld.fresh(Path(raw))
     check(
@@ -163,6 +176,11 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
         and world.real_effect_counts()
         == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
         started,
+    )
+    check(
+        "effect observations survive restart and count the fake attempt",
+        world.external_attempt_counts()["provider"] == 1,
+        world.external_attempt_counts(),
     )
     durable_before = world.durable_digest()
     restarted = LifecycleWorld.restart(Path(raw))
@@ -193,5 +211,25 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
         and restarted.resource_close_count() == 1,
         restarted.snapshot(),
     )
+
+with tempfile.TemporaryDirectory(prefix="lifecycle-real-effect-mutation.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    world.provider = NonFakeProvider(world.provider)
+    world.apply({"action": "start-worker"})
+    check(
+        "a non-fake provider mutation is measured instead of hidden by a constant",
+        world.real_effect_counts()["provider"] == 1
+        and world.external_attempt_counts()["provider"] == 1,
+        {
+            "real": world.real_effect_counts(),
+            "attempts": world.external_attempt_counts(),
+        },
+    )
+    try:
+        world.assert_no_real_effects()
+    except AssertionError:
+        check("a measured real effect makes the simulator gate red", True)
+    else:
+        raise AssertionError("measured real provider effect unexpectedly passed")
 
 print("\nAll lifecycle simulator world tests passed.")
