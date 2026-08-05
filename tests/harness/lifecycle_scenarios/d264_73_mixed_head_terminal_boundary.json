@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d264-73-mixed-head-terminal-boundary",
+  "seed": 26473,
+  "max_steps": 8,
+  "expected_initial_invariant": "SIM-INV-TERMINAL-MONOTONIC",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["rearm-parent", "continue-provider-session"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "mixed-head-parent", "run_id": "mixed-head-run", "revision": 9, "state": "complete", "attention_reason": null, "pending_effect": "", "effect_id": "review", "effect_outcome": "succeeded", "accepted_callback_id": "review-callback", "accepted_callback_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resources": {}},
+    "liveness": {"operation_revision": 9, "operation_state": "complete", "callback_submit_binding": "", "callback_submit_status": ""},
+    "head_boundary": {"reviewed_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resolved_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "attempt_terminal": true, "continuation_requested": true},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": ["complete"]
+  },
+  "actions": [
+    {"action_id": "start", "action": "start-worker"},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["start"]},
+    {"action_id": "callback", "action": "publish-callback", "after": ["result"]},
+    {"action_id": "resolution", "action": "publish-resolution", "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "from_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "to_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "after": ["callback"]},
+    {"action_id": "close", "action": "close", "after": ["resolution"]}
+  ]
+}

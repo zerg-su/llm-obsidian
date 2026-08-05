@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d265-reap-complete-pending-effect",
+  "seed": 26504,
+  "max_steps": 8,
+  "expected_initial_invariant": "SIM-INV-RESOURCE-FREE",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["terminal-reap-replay"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "reap-parent", "run_id": "reap-run", "revision": 11, "state": "complete", "attention_reason": null, "pending_effect": "reap-finalize", "effect_id": "reap-finalize", "effect_outcome": "pending", "accepted_callback_id": "summary-callback", "accepted_callback_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "resources": {}},
+    "liveness": {"operation_revision": 11, "operation_state": "complete", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": ["complete"]
+  },
+  "actions": [
+    {"action_id": "start", "action": "start-worker"},
+    {"action_id": "reserve", "action": "reserve-effect", "effect_id": "reap-finalize", "after": ["start"]},
+    {"action_id": "resolve", "action": "resolve-effect", "outcome": "succeeded", "after": ["reserve"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["resolve"]},
+    {"action_id": "callback", "action": "publish-callback", "after": ["result"]},
+    {"action_id": "close", "action": "close", "after": ["callback"]}
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d265-callback-timeout-completion-collision",
+  "seed": 26503,
+  "max_steps": 8,
+  "expected_initial_invariant": "SIM-INV-CALLBACK-DEADLINE",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["second-terminal-disposition"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "timeout-parent", "run_id": "timeout-run", "revision": 8, "state": "attention-required", "attention_reason": "callback-timeout", "pending_effect": "", "effect_id": "provider-input", "effect_outcome": "succeeded", "accepted_callback_id": "late-callback", "accepted_callback_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "resources": {"surface_id": "timeout-surface"}},
+    "liveness": {"operation_revision": 8, "operation_state": "attention-required", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [],
+    "callbacks": [{"callback_id": "late-callback", "identity_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "expected_identity_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "accepted": true}],
+    "resource_receipts": [], "terminal_history": []
+  },
+  "actions": [
+    {"action_id": "start", "action": "start-worker"},
+    {"action_id": "clock", "action": "advance-clock", "delta": 3600, "after": ["start"]},
+    {"action_id": "callback", "action": "publish-callback", "after": ["clock"]},
+    {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["callback"]},
+    {"action_id": "close", "action": "close", "after": ["result"]}
+  ]
+}

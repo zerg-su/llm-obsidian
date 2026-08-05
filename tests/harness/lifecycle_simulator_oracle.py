@@ -15,6 +15,7 @@ from typing import Mapping
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+GIT_SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 TERMINAL = frozenset({"complete", "failed", "cancelled"})
 ACTIONS = frozenset(
     {
@@ -192,6 +193,56 @@ def assert_snapshot(snapshot: Mapping[str, object]) -> None:
         if recovery_binding and recovery_binding == latch_binding:
             _fail("SIM-INV-LATCH-RETIRED", "applied recovery left its matching latch active")
 
+    head_boundary = _mapping(value.get("head_boundary", {}), "head_boundary")
+    if head_boundary:
+        reviewed = head_boundary.get("reviewed_head_sha")
+        resolved = head_boundary.get("resolved_head_sha")
+        if (
+            not isinstance(reviewed, str)
+            or GIT_SHA.fullmatch(reviewed) is None
+            or not isinstance(resolved, str)
+            or GIT_SHA.fullmatch(resolved) is None
+            or head_boundary.get("attempt_terminal") not in {True, False}
+            or head_boundary.get("continuation_requested") not in {True, False}
+        ):
+            _fail("SIM-INV-SCHEMA", "head boundary evidence is invalid")
+        if (
+            reviewed != resolved
+            and head_boundary["attempt_terminal"] is True
+            and head_boundary["continuation_requested"] is True
+        ):
+            _fail(
+                "SIM-INV-TERMINAL-MONOTONIC",
+                "a terminal exact-HEAD attempt requested cross-HEAD continuation",
+            )
+
+    attention_reason = operation.get("attention_reason")
+    accepted_callback_id = operation.get("accepted_callback_id", "")
+    _identifier(accepted_callback_id, "operation.accepted_callback_id", optional=True)
+    if (
+        state == "attention-required"
+        and attention_reason == "callback-timeout"
+        and accepted_callback_id
+    ):
+        _fail(
+            "SIM-INV-CALLBACK-DEADLINE",
+            "callback acceptance and callback-timeout attention both won",
+        )
+
+    artifacts = value.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        _fail("SIM-INV-SCHEMA", "artifacts must be an array")
+    for index, raw_artifact in enumerate(artifacts):
+        artifact = _mapping(raw_artifact, f"artifacts[{index}]")
+        _identifier(artifact.get("kind"), f"artifacts[{index}].kind")
+        _sha256(artifact.get("identity_sha256"), f"artifacts[{index}].identity_sha256")
+        status = _identifier(artifact.get("status"), f"artifacts[{index}].status")
+        if status not in {"absent", "published"}:
+            _fail(
+                "SIM-INV-ATOMIC-PUBLICATION",
+                f"{artifact['kind']} exposed a non-atomic {status} state",
+            )
+
     effects = value.get("effects", [])
     if not isinstance(effects, list):
         _fail("SIM-INV-SCHEMA", "effects must be an array")
@@ -272,3 +323,19 @@ def assert_snapshot(snapshot: Mapping[str, object]) -> None:
             if identity in closed:
                 _fail("SIM-INV-RESOURCE-CLOSE-ONCE", "resource close was published twice")
             closed.add(identity)
+    if state == "exiting":
+        owned = any(
+            resources.get(key) not in {"", 0, None}
+            for key in (
+                "surface_id",
+                "process_group",
+                "supervisor_pid",
+                "process_identity",
+                "supervisor_identity",
+            )
+        )
+        if not owned and not closed:
+            _fail(
+                "SIM-INV-CLEANUP-RECEIPT",
+                "resource-free exiting state lacks a durable close receipt",
+            )
