@@ -572,7 +572,7 @@ This coordinator-owned amendment records the final exact-HEAD coverage rejection
 
 | ID | Owner | Reproducer / finding | Release disposition | Regression / evidence |
 |---|---|---|---|---|
-| D-264-55 | test harness | honest stdlib tracing measured `scripts.harness.liveness` at 85.8%, below the standing 86.0% critical floor, because the fail-closed transition from an observed liveness state to `mark_callback_submit_uncertain` without an exact reservation had no direct behavioral assertion | `included` | `test_liveness.py` now proves the unreserved uncertain transition is rejected without state mutation; `make test-harness-coverage` is green at 76.02% across 128 modules, liveness is 86.1%, and all 4,370 transition cases remain complete |
+| D-264-55 | test harness | honest stdlib tracing measured `scripts.harness.liveness` at 85.8%, below the standing 86.0% critical floor, because the fail-closed transition from an observed liveness state to `mark_callback_submit_uncertain` without an exact reservation had no direct behavioral assertion | `included` | `test_liveness.py` now proves the unreserved uncertain transition is rejected without state mutation; `make test-harness-coverage` is green at 76.04% across 128 modules, liveness is 86.1%, and all 4,370 transition cases remain complete |
 
 The repair is test-only. It does not lower a coverage floor or change provider behavior, callback effects, budgets, routing, review topology, public interfaces, migration, push, tag, publish or release authority. The new exact HEAD must repeat the complete release ladder before bounded implementation verification and the separate purpose=release audit.
 
