@@ -52,6 +52,14 @@
   JSON.
 - Immutable escalation records остаются durable, а их runtime-каталог
   игнорируется Git: raise/resolve evidence сохраняется при чистом status.
+- Определение Codex subscription теперь требует нулевой exit code и точный
+  поддерживаемый logged-in marker в нормализованных stdout/stderr; одного
+  warning недостаточно.
+- Dispatch context alias привязан к точному stem wiki-пути; strict typed
+  exact-binding repair закрывает единственный случай, который нельзя безопасно
+  вывести автоматически.
+- Уже durable завершение reap согласуется только с точным pending effect и
+  идентификаторами receipts, без повтора vault или provider effect.
 - Split activation разрешается только после зелёного Stability Gate; любая
   ошибка manifest, budget, receipt, dependency, HEAD или resource state
   останавливается до повторного child/provider effect.

@@ -45,6 +45,12 @@ packages were published for them.
   proved the stable-read watcher cannot observe partial JSON.
 - Kept immutable escalation records durable while ignoring their runtime
   directory, so raised and resolved evidence survives with a clean Git status.
+- Made Codex subscription detection require a zero exit and the exact supported
+  logged-in marker across normalized stdout/stderr; warnings alone fail closed.
+- Bound dispatch context aliases to exact wiki path stems and added strict typed
+  exact-binding repair for the one case inference cannot safely represent.
+- Reconciled an already durable reap completion only against its exact pending
+  effect and receipt identities, without repeating the vault or provider effect.
 - Bound Split activation to a green pre-activation Stability Gate and stopped
   every invalid manifest, budget, receipt, dependency, HEAD or resource state
   before replaying a child or provider effect.
