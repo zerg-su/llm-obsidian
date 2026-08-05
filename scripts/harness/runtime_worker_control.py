@@ -20,6 +20,17 @@ from task_escalation_records import EscalationRecordError, append_raise
 
 class RuntimeWorkerControlMixin:
 
+    def publish_error_latch(self, status: str) -> None:
+        """Publish one owned callback/error latch, then expose its durable boundary."""
+
+        _atomic_json(
+            self.spec_path.parent / "callback-error.json",
+            {"schema_version": 1, "status": status},
+        )
+        observer = getattr(self, "fault_observer", None)
+        if observer is not None:
+            observer("error-latch-published")
+
     def inspect_control(self) -> None:
         control_path = self.spec_path.parent / "process-control.json"
         try:
@@ -165,10 +176,7 @@ class RuntimeWorkerControlMixin:
                     )
                 except Exception:
                     pass
-                _atomic_json(
-                    self.spec_path.parent / "callback-error.json",
-                    {"schema_version": 1, "status": "callback-target-invalid"},
-                )
+                self.publish_error_latch("callback-target-invalid")
             return
         self.registration_invalid = False
         if target != self.active_target:
@@ -253,10 +261,7 @@ class RuntimeWorkerControlMixin:
                 )
             except Exception:
                 pass
-            _atomic_json(
-                self.spec_path.parent / "callback-error.json",
-                {"schema_version": 1, "status": "callback-invalid"},
-            )
+            self.publish_error_latch("callback-invalid")
 
     def summary_attention(
         self,
@@ -307,10 +312,7 @@ class RuntimeWorkerControlMixin:
                     },
                 )
         if write_error:
-            _atomic_json(
-                self.spec_path.parent / "callback-error.json",
-                {"schema_version": 1, "status": status},
-            )
+            self.publish_error_latch(status)
 
     def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
         encoded = (

@@ -86,6 +86,7 @@ class RuntimeSessionManager(
         start_timeout_seconds: float = 8.0,
         worker: Path | None = None,
         status_notifier: StatusNotifier | None = None,
+        fault_observer: Callable[[str], None] | None = None,
     ):
         self.store = store
         self.cmux = cmux
@@ -99,6 +100,7 @@ class RuntimeSessionManager(
         )
         self.start_timeout_seconds = start_timeout_seconds
         self.status_notifier = status_notifier
+        self._fault_observer = fault_observer
         self.worker = (
             worker
             or Path(__file__).resolve().parents[1] / "harness-runtime-worker.py"

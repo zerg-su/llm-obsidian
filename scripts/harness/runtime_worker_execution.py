@@ -163,6 +163,7 @@ class RuntimeWorkerExecution(
         wall_clock: Callable[[], float] | None = None,
         monotonic_clock: Callable[[], float] | None = None,
         sleeper: Callable[[float], None] | None = None,
+        fault_observer: Callable[[str], None] | None = None,
     ) -> int:
         self.spec_path = spec_path
         self.poll_seconds = poll_seconds
@@ -173,6 +174,7 @@ class RuntimeWorkerExecution(
         self.wall_clock = wall_clock or clock or time.time
         self.monotonic_clock = monotonic_clock or time.monotonic
         self.sleeper = sleeper or time.sleep
+        self.fault_observer = fault_observer
         # Compatibility owner for existing callback-timeout code.  New test
         # seams name wall and monotonic clocks independently.
         self.clock = self.wall_clock

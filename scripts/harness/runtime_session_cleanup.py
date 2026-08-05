@@ -344,6 +344,8 @@ class RuntimeSessionCleanupMixin:
         result = ResourceClosureLedger(
             self._state_root(record) / "provider-events"
         ).close(identity, observation)
+        if self._fault_observer is not None:
+            self._fault_observer("cleanup-receipt-published")
         delivery_state = (
             self._state_root(record)
             / "provider-events"

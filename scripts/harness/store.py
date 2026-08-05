@@ -10,7 +10,7 @@ import tempfile
 import math
 from dataclasses import replace
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from .contracts import (
     AttentionReason,
@@ -31,8 +31,18 @@ class StoreError(RuntimeError):
 
 
 class OperationStore:
-    def __init__(self, root: Path | str):
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        fault_observer: Callable[[str], None] | None = None,
+    ):
         self.root = Path(root).expanduser().resolve()
+        self._fault_observer = fault_observer
+
+    def _observe_durable_boundary(self, boundary: str) -> None:
+        if self._fault_observer is not None:
+            self._fault_observer(boundary)
 
     def _owner_dir(self, owner_id: str) -> Path:
         from .contracts import _identifier
@@ -146,6 +156,7 @@ class OperationStore:
             self._operation_path(record.spec.owner_id, record.spec.operation_id),
             to_dict(record),
         )
+        self._observe_durable_boundary("operation-record-published")
 
     def transition(
         self,
@@ -160,6 +171,7 @@ class OperationStore:
             updated, result = transition(record, state, reason=reason)
             if result.changed:
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
+                self._observe_durable_boundary("operation-transition-published")
             return result
 
     def rearm_callback_timeout(
@@ -203,6 +215,7 @@ class OperationStore:
             updated = begin_effect(record, effect)
             if updated is not record:
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
+                self._observe_durable_boundary("effect-reserved")
             return updated
 
     def resolve_effect(
@@ -216,4 +229,5 @@ class OperationStore:
             updated = resolve_effect(record, outcome)
             if updated is not record:
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
+                self._observe_durable_boundary("effect-resolved")
             return updated

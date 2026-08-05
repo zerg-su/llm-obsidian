@@ -157,10 +157,7 @@ class RuntimeWorkerReviewBridgeMixin:
                     )
                 except Exception:
                     pass
-                _atomic_json(
-                    self.spec_path.parent / "callback-error.json",
-                    {"schema_version": 1, "status": "callback-target-invalid"},
-                )
+                self.publish_error_latch("callback-target-invalid")
             return
         self.registration_invalid = False
         if target != self.active_target:

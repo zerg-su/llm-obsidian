@@ -24,6 +24,7 @@ from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.runtime_session_contracts import RuntimeSessionRequest
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.runtime_worker import _atomic_json
+from harness.runtime_worker_control import RuntimeWorkerControlMixin
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
@@ -46,6 +47,31 @@ CALLBACK_IDENTITY_SHA256 = "e" * 64
 
 class SimulatedCrash(RuntimeError):
     """The volatile simulator process stopped after a durable prefix."""
+
+
+class CrashController:
+    """Arm one named durable boundary and fail if a schedule never consumes it."""
+
+    def __init__(self) -> None:
+        self.armed = ""
+        self.observed: list[str] = []
+
+    def arm(self, boundary: str) -> None:
+        if self.armed:
+            raise RuntimeError("a lifecycle failpoint is already armed")
+        if not boundary:
+            raise ValueError("lifecycle failpoint identity is required")
+        self.armed = boundary
+
+    def observe(self, boundary: str) -> None:
+        self.observed.append(boundary)
+        if boundary == self.armed:
+            self.armed = ""
+            raise SimulatedCrash(boundary)
+
+    def assert_consumed(self) -> None:
+        if self.armed:
+            raise AssertionError(f"unconsumed lifecycle failpoint: {self.armed}")
 
 
 class VirtualClock:
@@ -195,7 +221,7 @@ class DeterministicEventSource:
         return self.events.pop(0) if self.events else None
 
 
-class LifecycleWorker(RuntimeWorkerLoopMixin):
+class LifecycleWorker(RuntimeWorkerControlMixin, RuntimeWorkerLoopMixin):
     """Minimal volatile shell around the production poll/exit decision seam."""
 
     def __init__(self, world: "LifecycleWorld") -> None:
@@ -225,6 +251,7 @@ class LifecycleWorker(RuntimeWorkerLoopMixin):
         self.next_prompt_probe = float("inf")
         self.next_checkpoint_probe = float("inf")
         self.checkpoint = ""
+        self.fault_observer = world.crashes.observe
 
     def inspect_control(self) -> None:
         return None
@@ -256,7 +283,10 @@ class LifecycleWorld:
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
-        self.store = OperationStore(self.root / "harness")
+        self.crashes = CrashController()
+        self.store = OperationStore(
+            self.root / "harness", fault_observer=self.crashes.observe
+        )
         state = self._world_state()
         self.process = FakeProcess()
         self.cmux = FakeCmux()
@@ -268,10 +298,14 @@ class LifecycleWorld:
             self.cmux,
             self.process,
             status_notifier=None,
+            fault_observer=self.crashes.observe,
         )
         if self.record().state in {"exiting", "complete", "failed", "cancelled"}:
             self.process.disappear()
         if self.record().state in {"complete", "failed", "cancelled"}:
+            self.cmux.disappear()
+        close_receipt = self.runtime_root / "provider-events" / "resource-closed.json"
+        if close_receipt.is_file() and not close_receipt.is_symlink():
             self.cmux.disappear()
 
     @classmethod
@@ -329,7 +363,10 @@ class LifecycleWorld:
 
     @property
     def liveness(self) -> LivenessController:
-        return LivenessController(self.root / "runtime" / "liveness")
+        return LivenessController(
+            self.root / "runtime" / "liveness",
+            fault_observer=self.crashes.observe,
+        )
 
     def _world_state(self) -> dict[str, object]:
         path = self.root / "simulator" / "world.json"
@@ -552,12 +589,10 @@ class LifecycleWorld:
                 LivenessPolicy.default(),
             )
         elif name == "publish-error-latch":
-            _atomic_json(
-                self.runtime_root / "callback-error.json",
-                {
-                    "schema_version": 1,
-                    "status": str(action.get("kind") or "review-drive-failed"),
-                },
+            self.runtime_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            worker = LifecycleWorker(self)
+            worker.publish_error_latch(
+                str(action.get("kind") or "review-drive-failed")
             )
             _atomic_json(
                 self.runtime_root / "sim-error-binding.json",
@@ -587,7 +622,13 @@ class LifecycleWorld:
         elif name == "close":
             self._close()
         elif name == "crash-at":
-            raise SimulatedCrash(str(action.get("failpoint") or "unnamed"))
+            boundary = str(action.get("failpoint") or "")
+            phase = str(action.get("phase") or "after")
+            if phase == "before":
+                raise SimulatedCrash(boundary)
+            if phase != "after":
+                raise ValueError("crash phase must be before or after")
+            self.crashes.arm(boundary)
         else:
             raise ValueError("action is outside the closed simulator vocabulary")
         snapshot = self.snapshot()

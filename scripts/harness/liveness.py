@@ -10,6 +10,7 @@ import fcntl
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
 
@@ -261,8 +262,14 @@ def observe_liveness(
 class LivenessController:
     """Persist content-free state and idempotent recovery receipts."""
 
-    def __init__(self, root: Path | str):
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        fault_observer: Callable[[str], None] | None = None,
+    ):
         self.root = Path(root)
+        self._fault_observer = fault_observer
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
@@ -341,6 +348,8 @@ class LivenessController:
             else:
                 decision, current = observe_liveness(previous, evidence, policy)
             self._write(self.root / "state.json", to_dict(current))
+            if self._fault_observer is not None:
+                self._fault_observer("liveness-published")
             if decision.action != "observe":
                 receipt = {
                     "schema_version": 1,
