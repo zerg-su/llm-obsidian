@@ -37,6 +37,7 @@ from harness.pipeline_builtins import (
 )
 from harness.pipelines import compile_pipeline
 from harness.runtime_sessions import RuntimeSessionManager, RuntimeSessionRequest
+from harness.runtime_worker_execution import RuntimeWorkerExecution
 from harness.runtime_worker import (
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
@@ -72,6 +73,28 @@ PROJECT = "33333333-3333-4333-8333-333333333333"
 TASK = "44444444-4444-4444-8444-444444444444"
 INVALID_TASK = "55555555-5555-4555-8555-555555555555"
 BLOCKED_TASK = "66666666-6666-4666-8666-666666666666"
+
+ATOMIC_SUMMARY_PUBLISHER = (
+    "import os,pathlib,tempfile,time\n"
+    "def publish_summary(path,text,barrier=''):\n"
+    "  descriptor,raw=tempfile.mkstemp(prefix=f'.{path.name}.',dir=path.parent)\n"
+    "  temporary=pathlib.Path(raw)\n"
+    "  try:\n"
+    "    with os.fdopen(descriptor,'w',encoding='utf-8') as handle:\n"
+    "      if barrier:\n"
+    "        handle.write(text[:1]); handle.flush(); os.fsync(handle.fileno())\n"
+    "        marker=pathlib.Path(barrier)\n"
+    "        marker.with_suffix('.ready').write_text(temporary.name+'\\n',encoding='utf-8')\n"
+    "        for _ in range(1000):\n"
+    "          if marker.with_suffix('.release').is_file(): break\n"
+    "          time.sleep(0.005)\n"
+    "        else: raise SystemExit(6)\n"
+    "        handle.seek(0); handle.truncate()\n"
+    "      handle.write(text); handle.flush(); os.fsync(handle.fileno())\n"
+    "    os.replace(temporary,path)\n"
+    "  finally:\n"
+    "    temporary.unlink(missing_ok=True)\n"
+)
 
 
 def check(label: str, value: bool, detail: object = "") -> None:
@@ -434,6 +457,7 @@ def run_case(
     task_version: int = 3,
     bind_runtime_resources: bool = False,
     typed_review: bool = False,
+    atomic_publication_barrier: bool = False,
 ) -> tuple[
     OperationStore, FakeCmux, Path, int
 ]:
@@ -628,10 +652,11 @@ def run_case(
     provider = root / f"provider-{operation_id}.py"
     if pipeline_name == "engineering/fix" and fix_restart_after:
         provider.write_text(
-            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            ATOMIC_SUMMARY_PUBLISHER
+            + "import hashlib,json,pathlib,subprocess,sys,time\n"
             "root=pathlib.Path.cwd()\n"
             "summary=pathlib.Path(sys.argv[1])\n"
-            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "publish_summary(summary,sys.argv[2])\n"
             "state=pathlib.Path(sys.argv[4])\n"
             "restart_after=sys.argv[5]\n"
             "request=root/'.task-pipeline-step-request.json'\n"
@@ -668,7 +693,7 @@ def run_case(
             "        if (state/'pipeline-fix'/'finalization-notify.json').is_file(): break\n"
             "        time.sleep(0.01)\n"
             "      else: raise SystemExit(5)\n"
-            "      summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "      publish_summary(summary,sys.argv[2])\n"
             "      time.sleep(0.3)\n"
             "      raise SystemExit(0)\n"
             "  time.sleep(0.01)\n"
@@ -677,10 +702,11 @@ def run_case(
         )
     elif pipeline_name == "engineering/fix" and fix_retry_passes:
         provider.write_text(
-            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            ATOMIC_SUMMARY_PUBLISHER
+            + "import hashlib,json,pathlib,subprocess,sys,time\n"
             "root=pathlib.Path.cwd()\n"
             "summary=pathlib.Path(sys.argv[1])\n"
-            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "publish_summary(summary,sys.argv[2])\n"
             "state=pathlib.Path(sys.argv[4])\n"
             "passes=int(sys.argv[5])\n"
             "request=root/'.task-pipeline-step-request.json'\n"
@@ -716,17 +742,18 @@ def run_case(
             "    time.sleep(0.01)\n"
             "  else: raise SystemExit(5)\n"
             "  subprocess.run(['git','commit','--allow-empty','-m',f'provider pass {iteration + 1}'],cwd=root,text=True,capture_output=True,check=True)\n"
-            "  summary.write_text(sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2],encoding='utf-8')\n"
+            "  publish_summary(summary,sys.argv[6] if iteration and len(sys.argv)>6 else sys.argv[2])\n"
             "time.sleep(0.3)\n",
             encoding="utf-8",
         )
     elif pipeline_name == "engineering/fix":
         provider.write_text(
-            "import hashlib,json,pathlib,subprocess,sys,time\n"
+            ATOMIC_SUMMARY_PUBLISHER
+            + "import hashlib,json,pathlib,subprocess,sys,time\n"
             "root=pathlib.Path.cwd()\n"
             "summary=pathlib.Path(sys.argv[1])\n"
             "time.sleep(0.2)\n"
-            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "publish_summary(summary,sys.argv[2])\n"
             "outcome=sys.argv[3]\n"
             "state=pathlib.Path(sys.argv[4])\n"
             "request=root/'.task-pipeline-step-request.json'\n"
@@ -760,14 +787,16 @@ def run_case(
             "  if (state/'pipeline-fix'/'finalization-notify.json').is_file(): break\n"
             "  time.sleep(0.01)\n"
             "else: raise SystemExit(5)\n"
-            "summary.write_text(sys.argv[2],encoding='utf-8')\n"
+            "publish_summary(summary,sys.argv[2])\n"
             "time.sleep(0.3)\n",
             encoding="utf-8",
         )
     else:
         provider.write_text(
-            "import json,pathlib,sys,time\n"
-            "pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')\n"
+            ATOMIC_SUMMARY_PUBLISHER
+            + "import json,pathlib,sys,time\n"
+            "summary=pathlib.Path(sys.argv[1])\n"
+            "publish_summary(summary,sys.argv[2],sys.argv[3] if len(sys.argv)>3 else '')\n"
             "time.sleep(0.3)\n",
             encoding="utf-8",
         )
@@ -778,6 +807,11 @@ def run_case(
             str(provider),
             str(summary_path),
             json.dumps(summary, sort_keys=True),
+            *(
+                (str(worktree / ".atomic-summary-publication"),)
+                if atomic_publication_barrier
+                else ()
+            ),
             *(
                 (fix_outcome,)
                 if pipeline_name == "engineering/fix"
@@ -831,6 +865,27 @@ def run_case(
             profile_sha,
         )
     result: list[int] = []
+    watcher_observed = threading.Event()
+    original_inspect_task_summary = None
+    if atomic_publication_barrier:
+        if pipeline_name != "lifecycle/default":
+            raise AssertionError(
+                "atomic publication barrier is limited to the summary fixture"
+            )
+        original_inspect_task_summary = (
+            RuntimeWorkerExecution.inspect_task_summary
+        )
+
+        def observe_atomic_publication(
+            worker: RuntimeWorkerExecution,
+        ) -> None:
+            if worker.spec["operation_id"] == operation_id:
+                watcher_observed.set()
+            original_inspect_task_summary(worker)
+
+        RuntimeWorkerExecution.inspect_task_summary = (
+            observe_atomic_publication
+        )
     thread = threading.Thread(
         target=lambda: result.append(
             run_worker(
@@ -844,9 +899,48 @@ def run_case(
         )
     )
     thread.start()
+    atomic_publication_evidence: dict[str, object] = {}
+    if atomic_publication_barrier:
+        barrier = worktree / ".atomic-summary-publication"
+        ready = barrier.with_suffix(".ready")
+        release = barrier.with_suffix(".release")
+        try:
+            deadline = time.monotonic() + 2.0
+            while not ready.is_file():
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        "atomic summary provider did not reach its barrier"
+                    )
+                time.sleep(0.005)
+            watcher_observed.clear()
+            if not watcher_observed.wait(timeout=1.0):
+                raise AssertionError(
+                    "task-summary watcher did not inspect the pre-replace window"
+                )
+            temporary = worktree / ready.read_text(
+                encoding="utf-8"
+            ).strip()
+            atomic_publication_evidence = {
+                "summary_absent": not summary_path.exists(),
+                "temporary_is_local": (
+                    temporary.parent.resolve() == worktree.resolve()
+                    and temporary.name.startswith("..task-summary.json.")
+                ),
+                "temporary_is_partial": (
+                    temporary.is_file()
+                    and temporary.read_text(encoding="utf-8")
+                    == json.dumps(summary, sort_keys=True)[:1]
+                ),
+                "operation_state": store.read(
+                    "owner-1", operation_id
+                ).state,
+                "callback_error_absent": not (
+                    launch.spec_path.parent / "callback-error.json"
+                ).exists(),
+            }
+        finally:
+            release.write_text("release\n", encoding="utf-8")
     if review_state == "delayed-skip":
-        import time
-
         # The provider exits after 0.3s; approval arrives later. The runtime
         # worker must remain alive as the code-owned finalization watcher.
         time.sleep(0.45)
@@ -871,6 +965,21 @@ def run_case(
             product_root=worktree,
         )
     thread.join(timeout=8 if pipeline_name == "engineering/fix" else 3)
+    if original_inspect_task_summary is not None:
+        RuntimeWorkerExecution.inspect_task_summary = (
+            original_inspect_task_summary
+        )
+    if atomic_publication_barrier:
+        check(
+            "task-summary watcher never observes partial synthetic JSON",
+            atomic_publication_evidence.get("summary_absent") is True
+            and atomic_publication_evidence.get("temporary_is_local") is True
+            and atomic_publication_evidence.get("temporary_is_partial") is True
+            and atomic_publication_evidence.get("operation_state")
+            == "awaiting-callback"
+            and atomic_publication_evidence.get("callback_error_absent") is True,
+            atomic_publication_evidence,
+        )
     return store, cmux, launch.spec_path.parent, result[0]
 
 
@@ -1055,6 +1164,21 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
         "session": "executor-session",
         "body": "Bounded completed task.",
     }
+    atomic_task = "10101010-1010-4010-8010-101010101010"
+    atomic_store, _atomic_cmux, _atomic_state, atomic_rc = run_case(
+        root,
+        atomic_task,
+        valid_summary,
+        atomic_publication_barrier=True,
+    )
+    atomic_record = atomic_store.read("owner-1", atomic_task)
+    check(
+        "atomic synthetic summary reaches the normal callback boundary",
+        atomic_rc == 0
+        and atomic_record.state == "finalizing"
+        and atomic_record.accepted_callback_kind == "wiki-summary",
+        atomic_record,
+    )
     store, cmux, state, rc = run_case(root, TASK, valid_summary)
     record = store.read("owner-1", TASK)
     check(
