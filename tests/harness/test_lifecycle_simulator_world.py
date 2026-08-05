@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harness"))
 
-from harness.contracts import OperationSpec, RuntimeRoute  # noqa: E402
+from harness.contracts import OperationSpec, RuntimeRoute, to_dict  # noqa: E402
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 
@@ -145,6 +146,7 @@ check(
 
 
 from lifecycle_simulator import LifecycleWorld  # noqa: E402
+from lifecycle_simulator_oracle import InvariantViolation, assert_snapshot  # noqa: E402
 
 
 class NonFakeProvider:
@@ -158,6 +160,15 @@ class NonFakeProvider:
 
     def effects(self):
         return self.delegate.effects()
+
+
+def expect_invariant(label: str, invariant_id: str, action) -> None:
+    try:
+        action()
+    except InvariantViolation as exc:
+        check(label, exc.invariant_id == invariant_id, exc)
+    else:
+        raise AssertionError(f"{label}: mutation unexpectedly passed")
 
 
 with tempfile.TemporaryDirectory(prefix="lifecycle-world.") as raw:
@@ -231,5 +242,50 @@ with tempfile.TemporaryDirectory(prefix="lifecycle-real-effect-mutation.") as ra
         check("a measured real effect makes the simulator gate red", True)
     else:
         raise AssertionError("measured real provider effect unexpectedly passed")
+
+with tempfile.TemporaryDirectory(prefix="lifecycle-identity-mutation.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    world.apply({"action": "start-worker"})
+    world.apply({"action": "publish-provider-event", "kind": "result-published"})
+    expect_invariant(
+        "persisted expected identity catches a production-accepted wrong callback",
+        "SIM-INV-IDENTITY",
+        lambda: world.apply(
+            {
+                "action": "publish-callback",
+                "expected_identity_sha256": "f" * 64,
+            }
+        ),
+    )
+
+with tempfile.TemporaryDirectory(prefix="lifecycle-effect-once-mutation.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    world.apply({"action": "start-worker"})
+    effect_id = str(world.provider.effects()[0]["effect_id"])
+    world._deliver_provider(effect_id, world.stream())
+    expect_invariant(
+        "persisted provider attempts catch a second external delivery invocation",
+        "SIM-INV-EFFECT-ONCE",
+        lambda: assert_snapshot(world.snapshot()),
+    )
+
+with tempfile.TemporaryDirectory(prefix="lifecycle-terminal-mutation.") as raw:
+    world = LifecycleWorld.fresh(Path(raw))
+    world.apply({"action": "start-worker"})
+    world.apply({"action": "publish-provider-event", "kind": "result-published"})
+    world.apply({"action": "publish-callback"})
+    world.apply({"action": "close"})
+    terminal = world.record()
+    resurrected = replace(terminal, state="running", revision=terminal.revision + 1)
+    OperationStore._write(
+        world.store._operation_path("sim-owner", "sim-operation"),
+        to_dict(resurrected),
+    )
+    world._publish_liveness()
+    expect_invariant(
+        "persisted terminal history catches production-record resurrection",
+        "SIM-INV-TERMINAL-MONOTONIC",
+        lambda: assert_snapshot(world.snapshot()),
+    )
 
 print("\nAll lifecycle simulator world tests passed.")

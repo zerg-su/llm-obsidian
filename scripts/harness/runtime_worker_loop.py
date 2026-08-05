@@ -20,11 +20,13 @@ class RuntimeWorkerLoopMixin:
             self.inspect_callback()
 
     def tick_observers(self) -> None:
+        wall_clock = getattr(self, "wall_clock", time.time)
         if enforce_callback_deadline(
             self.store,
             self.spec["owner_id"],
             self.spec["operation_id"],
             callback_handled=self.callback_handled,
+            now=wall_clock(),
         ):
             _atomic_json(
                 self.spec_path.parent / "callback-timeout.json",

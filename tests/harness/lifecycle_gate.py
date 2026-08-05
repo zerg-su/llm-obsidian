@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harness"))
 
 from lifecycle_scheduler import compile_schedules, replay_trace, run_schedule  # noqa: E402
+from lifecycle_historical import run_historical_schedule  # noqa: E402
 from lifecycle_simulator import LifecycleWorld  # noqa: E402
 from lifecycle_simulator_oracle import load_scenario  # noqa: E402
 
@@ -71,9 +72,24 @@ def _historical_summary() -> dict[str, int]:
             seed=int(scenario["seed"]),
             max_schedules=int(scenario.get("max_schedules", 64)),
         )
-        selected = 1 if scenario["scenario_id"] == "v2-6-5-rearm-liveness-latch" else len(compiled)
-        schedules += selected
-        actions += sum(len(item.actions) for item in compiled[:selected])
+        for index, schedule in enumerate(compiled):
+            with tempfile.TemporaryDirectory(
+                prefix=f"lifecycle-fast-{scenario['scenario_id']}.{index}."
+            ) as raw:
+                execution = run_historical_schedule(
+                    scenario, schedule, Path(raw)
+                )
+                if execution.state not in scenario["expected_terminal_states"]:
+                    raise RuntimeError("historical lifecycle schedule did not converge")
+                if execution.real_effects != {
+                    "provider": 0,
+                    "model": 0,
+                    "cmux": 0,
+                    "network": 0,
+                }:
+                    raise RuntimeError("historical schedule crossed a real effect boundary")
+        schedules += len(compiled)
+        actions += sum(len(item.actions) for item in compiled)
         invariants.add(str(scenario["expected_initial_invariant"]))
     return {
         "scenarios": len(scenarios),

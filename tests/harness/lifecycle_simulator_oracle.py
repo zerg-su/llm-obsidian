@@ -35,6 +35,9 @@ ACTIONS = frozenset(
         "restart-worker",
         "reconcile",
         "close",
+        "reject-cross-head-continuation",
+        "rearm-review-drive",
+        "rearm-worker-tick",
     }
 )
 
@@ -101,6 +104,10 @@ def load_scenario(path: Path) -> dict[str, object]:
         "max_depth",
         "max_waves",
         "tags",
+        "replay_snapshot",
+        "route_profile",
+        "expected_callback_identity_sha256",
+        "expected_production_paths",
     }
     if not required <= set(scenario) or not set(scenario) <= allowed or scenario.get("schema_version") != 1:
         _fail("SIM-INV-SCHEMA", "scenario fields or version are invalid")
@@ -156,6 +163,22 @@ def load_scenario(path: Path) -> dict[str, object]:
         _fail("SIM-INV-SCHEMA", "terminal or forbidden-effect declarations are invalid")
     _identifier(scenario.get("expected_initial_invariant"), "expected_initial_invariant")
     _mapping(scenario.get("initial_snapshot"), "initial_snapshot")
+    replay = scenario.get("replay_snapshot")
+    if replay is not None:
+        replay = _mapping(replay, "replay_snapshot")
+        assert_snapshot(replay)
+    route_profile = scenario.get("route_profile", "")
+    if route_profile:
+        _identifier(route_profile, "route_profile")
+    callback_identity = scenario.get("expected_callback_identity_sha256", "")
+    if callback_identity:
+        _sha256(callback_identity, "expected_callback_identity_sha256")
+    production_paths = scenario.get("expected_production_paths", [])
+    if not isinstance(production_paths, list) or any(
+        not isinstance(item, str) or not IDENTIFIER.fullmatch(item)
+        for item in production_paths
+    ):
+        _fail("SIM-INV-SCHEMA", "expected production paths are invalid")
     return scenario
 
 

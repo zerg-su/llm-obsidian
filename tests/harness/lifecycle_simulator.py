@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import asdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
 
 from harness.callbacks import CallbackBroker
 from harness.contracts import (
+    AttentionReason,
     CallbackEnvelope,
     EffectOutcome,
     OperationSpec,
@@ -18,14 +19,30 @@ from harness.contracts import (
     RuntimeRoute,
     to_dict,
 )
-from harness.liveness import LivenessController, LivenessEvidence, LivenessPolicy
+from harness.liveness import (
+    LivenessController,
+    LivenessEvidence,
+    LivenessPolicy,
+    LivenessState,
+)
 from harness.reconciliation import reconcile
+from harness.review_attempt import (
+    ReviewAttempt,
+    ReviewAttemptError,
+    ReviewAttemptIdentity,
+    ReviewAttemptLaneIdentity,
+    ReviewAttemptLaneResult,
+    ReviewAttemptPolicy,
+    ReviewAttemptTerminal,
+    ReviewAttemptTerminalResult,
+)
 from harness.runtime_provider_events import RuntimeProviderEventStream
 from harness.runtime_session_contracts import RuntimeSessionRequest
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.runtime_worker import _atomic_json
 from harness.runtime_worker_control import RuntimeWorkerControlMixin
 from harness.runtime_worker_loop import RuntimeWorkerLoopMixin
+from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 
@@ -84,7 +101,7 @@ class EffectAudit:
                 raise RuntimeError("external effect observation is invalid")
         return observations
 
-    def observe(self, category: str, *, real: bool) -> None:
+    def observe(self, category: str, *, real: bool, identity: str = "") -> None:
         if category not in EFFECT_CATEGORIES:
             raise ValueError("external effect category is invalid")
         observations = self._read()
@@ -93,6 +110,7 @@ class EffectAudit:
                 "sequence": len(observations) + 1,
                 "category": category,
                 "adapter": "real" if real else "fake",
+                "identity": identity,
             }
         )
         _atomic_json(
@@ -106,6 +124,104 @@ class EffectAudit:
             if not real_only or item["adapter"] == "real":
                 result[str(item["category"])] += 1
         return result
+
+    def attempts_by_identity(self, category: str) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for item in self._read():
+            if item["category"] == category and item.get("identity"):
+                identity = str(item["identity"])
+                result[identity] = result.get(identity, 0) + 1
+        return result
+
+
+class OracleAudit:
+    """Independent expected facts and append-only lifecycle observations."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    @classmethod
+    def create(cls, path: Path) -> "OracleAudit":
+        audit = cls(path)
+        audit.configure({}, expected_callback_identity="")
+        return audit
+
+    def configure(
+        self,
+        replay_snapshot: Mapping[str, object],
+        *,
+        expected_callback_identity: str,
+    ) -> None:
+        _atomic_json(
+            self.path,
+            {
+                "schema_version": 1,
+                "expected_callback_identity": expected_callback_identity,
+                "callbacks": list(replay_snapshot.get("callbacks", [])),
+                "terminal_history": list(
+                    replay_snapshot.get("terminal_history", [])
+                ),
+                "head_boundary": dict(
+                    replay_snapshot.get("head_boundary", {})
+                ),
+                "production_paths": [],
+            },
+        )
+
+    def _read(self) -> dict[str, object]:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError("oracle audit is unavailable") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("schema_version") != 1
+            or not isinstance(value.get("callbacks"), list)
+            or not isinstance(value.get("terminal_history"), list)
+            or not isinstance(value.get("head_boundary"), dict)
+            or not isinstance(value.get("production_paths"), list)
+        ):
+            raise RuntimeError("oracle audit is invalid")
+        return value
+
+    def _write(self, value: Mapping[str, object]) -> None:
+        _atomic_json(self.path, dict(value))
+
+    def record_callback(
+        self,
+        *,
+        callback_id: str,
+        identity_sha256: str,
+        expected_identity_sha256: str,
+        accepted: bool,
+    ) -> None:
+        value = self._read()
+        callbacks = list(value["callbacks"])
+        callbacks.append(
+            {
+                "callback_id": callback_id,
+                "identity_sha256": identity_sha256,
+                "expected_identity_sha256": expected_identity_sha256,
+                "accepted": accepted,
+            }
+        )
+        self._write({**value, "callbacks": callbacks})
+
+    def observe_terminal(self, state: str) -> None:
+        if state not in {"complete", "failed", "cancelled"}:
+            return
+        value = self._read()
+        history = list(value["terminal_history"])
+        if not history:
+            history.append(state)
+            self._write({**value, "terminal_history": history})
+
+    def production_path(self, identity: str) -> None:
+        value = self._read()
+        observed = list(value["production_paths"])
+        if identity not in observed:
+            observed.append(identity)
+            self._write({**value, "production_paths": observed})
 
 
 class CrashController:
@@ -368,6 +484,7 @@ class LifecycleWorld:
         self.root = root.resolve()
         self.crashes = CrashController()
         self.effect_audit = EffectAudit(self.root / "simulator" / "effect-audit.json")
+        self.oracle_audit = OracleAudit(self.root / "simulator" / "oracle-audit.json")
         self.store = OperationStore(
             self.root / "harness", fault_observer=self.crashes.observe
         )
@@ -427,12 +544,108 @@ class LifecycleWorld:
             },
         )
         EffectAudit.create(root / "simulator" / "effect-audit.json")
+        OracleAudit.create(root / "simulator" / "oracle-audit.json")
         controller = LivenessController(root / "runtime" / "liveness")
         controller.observe(
             LivenessEvidence(0.0, "alive", record.revision, record.state),
             LivenessPolicy.default(),
         )
         return cls(root)
+
+    @classmethod
+    def from_scenario(
+        cls, root: Path, scenario: Mapping[str, object]
+    ) -> "LifecycleWorld":
+        """Hydrate one schema-validated causal prefix through production records."""
+
+        world = cls.fresh(root)
+        replay = scenario.get("replay_snapshot")
+        if not isinstance(replay, Mapping):
+            raise RuntimeError("historical scenario lacks a replay snapshot")
+        operation = replay.get("operation")
+        liveness = replay.get("liveness")
+        if not isinstance(operation, Mapping) or not isinstance(liveness, Mapping):
+            raise RuntimeError("historical replay prefix is invalid")
+
+        record = world.record()
+        resources = operation.get("resources", {})
+        if not isinstance(resources, Mapping):
+            raise RuntimeError("historical replay resources are invalid")
+        route_profile = str(scenario.get("route_profile") or record.spec.route.profile)
+        record = replace(
+            record,
+            spec=replace(record.spec, route=replace(record.spec.route, profile=route_profile)),
+            state=str(operation["state"]),
+            revision=int(operation["revision"]),
+            resources=OwnedResources(
+                surface_id=str(resources.get("surface_id") or ""),
+                process_group=int(resources.get("process_group") or 0),
+                supervisor_pid=int(resources.get("supervisor_pid") or 0),
+                process_identity=str(resources.get("process_identity") or ""),
+                supervisor_identity=str(resources.get("supervisor_identity") or ""),
+            ),
+            deadline_at=float(operation.get("deadline_at") or 0.0),
+            attention_reason=(
+                AttentionReason(str(operation["attention_reason"]))
+                if operation.get("attention_reason")
+                else None
+            ),
+            pending_effect=str(operation.get("pending_effect") or ""),
+            effect_id=str(operation.get("effect_id") or ""),
+            effect_outcome=EffectOutcome(str(operation.get("effect_outcome") or "none")),
+            accepted_callback_id=str(operation.get("accepted_callback_id") or ""),
+            accepted_callback_kind=(
+                str(operation.get("accepted_callback_kind") or "result")
+                if operation.get("accepted_callback_id")
+                else ""
+            ),
+            accepted_callback_sha256=str(
+                operation.get("accepted_callback_sha256") or ""
+            ),
+        )
+        OperationStore._write(
+            world.store._operation_path(OWNER_ID, OPERATION_ID), to_dict(record)
+        )
+        live_state = LivenessState.start(
+            LivenessEvidence(
+                observed_at=world.clock(),
+                process_status="alive",
+                operation_revision=int(liveness["operation_revision"]),
+                operation_state=str(liveness["operation_state"]),
+            )
+        )
+        live_state = replace(
+            live_state,
+            callback_submit_binding=str(
+                liveness.get("callback_submit_binding") or ""
+            ),
+            callback_submit_status=str(
+                liveness.get("callback_submit_status") or ""
+            ),
+        )
+        LivenessController._write(
+            world.liveness.root / "state.json", to_dict(live_state)
+        )
+        world.oracle_audit.configure(
+            replay,
+            expected_callback_identity=str(
+                scenario.get("expected_callback_identity_sha256") or ""
+            ),
+        )
+        if record.state != "created" or any(to_dict(record.resources).values()):
+            world._write_runtime_metadata()
+            stream = world.stream()
+            stream.start()
+            decision = stream.reserve_input()
+            if decision.action == "send":
+                stream.accept_input()
+            if record.accepted_callback_id:
+                stream.result(RESULT_SHA256)
+        if record.state in {"exiting", "complete", "failed", "cancelled"}:
+            world.process.disappear()
+        if record.state in {"complete", "failed", "cancelled"}:
+            world.cmux.disappear()
+        return world
 
     @classmethod
     def restart(cls, root: Path) -> "LifecycleWorld":
@@ -520,7 +733,13 @@ class LifecycleWorld:
 
     def _write_runtime_metadata(self) -> None:
         record = self.record()
-        cwd = self.root / "product"
+        product_root = self.root / "product"
+        product_root.mkdir(exist_ok=True)
+        cwd = (
+            self.root / "review-scratch"
+            if record.spec.route.profile == "reviewer-callback"
+            else product_root
+        )
         cwd.mkdir(exist_ok=True)
         (cwd / "prompt.md").write_text("simulator\n", encoding="utf-8")
         request = RuntimeSessionRequest(
@@ -529,6 +748,7 @@ class LifecycleWorld:
             run_id=RUN_ID,
             origin_surface="00000000-0000-4000-8000-000000000001",
             cwd=cwd,
+            product_root=product_root,
             prompt_pointer="prompt.md",
             callback_pointer="callback.json",
             placement="split",
@@ -587,7 +807,9 @@ class LifecycleWorld:
         self, effect_id: str, stream: RuntimeProviderEventStream
     ) -> dict[str, object]:
         self.effect_audit.observe(
-            "provider", real=not isinstance(self.provider, FakeProvider)
+            "provider",
+            real=not isinstance(self.provider, FakeProvider),
+            identity=effect_id,
         )
         return self.provider.deliver(effect_id, stream)
 
@@ -620,16 +842,24 @@ class LifecycleWorld:
         payload_sha256 = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
-        CallbackBroker(self.store, OWNER_ID).accept(
+        callback_id = str(action.get("callback_id") or "sim-callback")
+        acceptance = CallbackBroker(self.store, OWNER_ID).accept(
             CallbackEnvelope(
-                str(action.get("callback_id") or "sim-callback"),
-                OPERATION_ID,
-                RUN_ID,
-                kind,
-                payload,
-                payload_sha256,
+                callback_id, OPERATION_ID, RUN_ID, kind, payload, payload_sha256
             )
         )
+        expected_identity = str(
+            action.get("expected_identity_sha256")
+            or self.oracle_audit._read().get("expected_callback_identity")
+            or payload_sha256
+        )
+        self.oracle_audit.record_callback(
+            callback_id=callback_id,
+            identity_sha256=payload_sha256,
+            expected_identity_sha256=expected_identity,
+            accepted=acceptance.accepted,
+        )
+        self.oracle_audit.production_path("CallbackBroker.accept")
         self._publish_liveness()
 
     def _close(self) -> None:
@@ -640,7 +870,72 @@ class LifecycleWorld:
             cleaned = self.manager.cleanup(OWNER_ID, OPERATION_ID)
             if cleaned.action not in {"cleaned", "terminal"}:
                 raise RuntimeError(f"runtime cleanup did not converge: {cleaned.action}")
+            self.oracle_audit.production_path("RuntimeSessionManager.cleanup")
         self._publish_liveness()
+
+    def _publish_stable_artifact(
+        self, name: str, action: Mapping[str, object]
+    ) -> None:
+        value = {
+            "schema_version": 1,
+            "operation_id": OPERATION_ID,
+            "run_id": RUN_ID,
+            "identity_sha256": str(
+                action.get("identity_sha256") or CALLBACK_IDENTITY_SHA256
+            ),
+            "status": "published",
+        }
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        probe = object.__new__(RuntimeWorkerSummaryMixin)
+        probe.digest = ""
+        probe.summary_digest = ""
+        probe.summary_stable_reads = 0
+        first_stable = probe.summary_is_stable(raw)
+        second_stable = probe.summary_is_stable(raw)
+        if first_stable or not second_stable:
+            raise RuntimeError("summary stability owner did not require two exact reads")
+        _atomic_json(self.runtime_root / f"{name}.json", value)
+        self.oracle_audit.production_path(
+            "RuntimeWorkerSummaryMixin.summary_is_stable"
+        )
+
+    def _reject_cross_head_continuation(
+        self, action: Mapping[str, object]
+    ) -> None:
+        reviewed = str(action.get("reviewed_head_sha") or "a" * 40)
+        resolved = str(action.get("resolved_head_sha") or "b" * 40)
+        policy = ReviewAttemptPolicy(
+            "simple", False, "codex", "sol", "high", 1,
+            "implementation", "openai"
+        )
+        lane = ReviewAttemptLaneIdentity(
+            "openai-holistic", OWNER_ID, "review-lane", "review-lane",
+            "review-run", "codex", "sol", "high", "reviewer-callback",
+            ROUTING_SHA256,
+        )
+        identity = ReviewAttemptIdentity(
+            "historical-attempt", "historical-lineage", 1,
+            "1" * 64, "2" * 64, reviewed, policy, (lane,)
+        )
+        terminal = ReviewAttemptTerminal(
+            ReviewAttemptTerminalResult.APPROVED,
+            reviewed,
+            (ReviewAttemptLaneResult("openai-holistic", "approve", "3" * 64, ()),),
+        )
+        attempt = (
+            ReviewAttempt.pending(identity)
+            .start(identity)
+            .await_callback(identity)
+            .finish(identity, terminal)
+        )
+        try:
+            attempt.rearm(replace(identity, exact_head_sha=resolved))
+        except ReviewAttemptError as exc:
+            if "changed HEAD" not in str(exc):
+                raise
+        else:
+            raise RuntimeError("terminal review attempt accepted cross-HEAD continuation")
+        self.oracle_audit.production_path("ReviewAttempt.rearm")
 
     def apply(self, action: Mapping[str, object]) -> dict[str, object]:
         name = action.get("action")
@@ -656,22 +951,12 @@ class LifecycleWorld:
         elif name == "resolve-effect":
             outcome = EffectOutcome(str(action.get("outcome") or "succeeded"))
             self.store.resolve_effect(OWNER_ID, OPERATION_ID, outcome)
+            self.oracle_audit.production_path("OperationStore.resolve_effect")
             self._publish_liveness()
         elif name == "publish-callback":
             self._publish_callback(action)
         elif name in {"publish-summary", "publish-resolution"}:
-            _atomic_json(
-                self.runtime_root / f"{name.removeprefix('publish-')}.json",
-                {
-                    "schema_version": 1,
-                    "operation_id": OPERATION_ID,
-                    "run_id": RUN_ID,
-                    "identity_sha256": str(
-                        action.get("identity_sha256") or CALLBACK_IDENTITY_SHA256
-                    ),
-                    "status": "published",
-                },
-            )
+            self._publish_stable_artifact(name.removeprefix("publish-"), action)
         elif name == "publish-liveness":
             record = self.record()
             self.liveness.observe(
@@ -707,6 +992,8 @@ class LifecycleWorld:
             worker = LifecycleWorker(self)
             if worker.poll_once():
                 worker.settle_exit_once()
+            self.oracle_audit.production_path("RuntimeWorkerLoopMixin.poll_once")
+            self.oracle_audit.production_path("enforce_callback_deadline")
         elif name == "restart-worker":
             # Rebuild volatile adapters only; the caller can retain the returned
             # object or use LifecycleWorld.restart explicitly.
@@ -716,12 +1003,15 @@ class LifecycleWorld:
             reconcile(self.record(), self.process, self.cmux)
         elif name == "close":
             self._close()
+        elif name == "reject-cross-head-continuation":
+            self._reject_cross_head_continuation(action)
         elif name == "crash-at":
             boundary = str(action.get("failpoint") or "")
             phase = str(action.get("phase") or "after")
             self.crashes.arm(boundary, phase=phase)
         else:
             raise ValueError("action is outside the closed simulator vocabulary")
+        self.oracle_audit.observe_terminal(self.record().state)
         snapshot = self.snapshot()
         assert_snapshot(snapshot)
         return snapshot
@@ -790,16 +1080,20 @@ class LifecycleWorld:
                     "binding_sha256": binding,
                     "active": active,
                 }
-        callbacks: list[dict[str, object]] = []
-        if record.accepted_callback_id:
-            callbacks.append(
-                {
-                    "callback_id": record.accepted_callback_id,
-                    "identity_sha256": record.accepted_callback_sha256,
-                    "expected_identity_sha256": record.accepted_callback_sha256,
-                    "accepted": True,
-                }
-            )
+        audit = self.oracle_audit._read()
+        callbacks = list(audit["callbacks"])
+        artifacts: list[dict[str, object]] = []
+        for kind in ("summary", "resolution"):
+            artifact_path = self.runtime_root / f"{kind}.json"
+            if artifact_path.is_file() and not artifact_path.is_symlink():
+                stored = json.loads(artifact_path.read_text(encoding="utf-8"))
+                artifacts.append(
+                    {
+                        "kind": kind,
+                        "identity_sha256": str(stored.get("identity_sha256") or ""),
+                        "status": str(stored.get("status") or ""),
+                    }
+                )
         receipts: list[dict[str, object]] = []
         close_path = self.runtime_root / "provider-events" / "resource-closed.json"
         if close_path.is_file() and not close_path.is_symlink():
@@ -810,18 +1104,25 @@ class LifecycleWorld:
                     "status": "closed",
                 }
             )
-        return {
+        effects = self.provider.effects()
+        attempts = self.effect_audit.attempts_by_identity("provider")
+        effects = [
+            {**effect, "deliveries": attempts.get(str(effect["effect_id"]), 0)}
+            for effect in effects
+        ]
+        snapshot = {
             "operation": operation,
             "liveness": liveness,
             "recovery": recovery,
             "error_latch": latch,
-            "effects": self.provider.effects(),
+            "head_boundary": dict(audit["head_boundary"]),
+            "artifacts": artifacts,
+            "effects": effects,
             "callbacks": callbacks,
             "resource_receipts": receipts,
-            "terminal_history": [record.state]
-            if record.state in {"complete", "failed", "cancelled"}
-            else [],
+            "terminal_history": list(audit["terminal_history"]),
         }
+        return snapshot
 
     def durable_digest(self) -> str:
         digest = hashlib.sha256()
@@ -847,6 +1148,9 @@ class LifecycleWorld:
         counts = self.real_effect_counts()
         if any(counts.values()):
             raise AssertionError(f"simulator crossed a real effect boundary: {counts}")
+
+    def production_paths(self) -> tuple[str, ...]:
+        return tuple(str(item) for item in self.oracle_audit._read()["production_paths"])
 
     def resource_close_count(self) -> int:
         path = self.runtime_root / "provider-events" / "resource-closed.json"

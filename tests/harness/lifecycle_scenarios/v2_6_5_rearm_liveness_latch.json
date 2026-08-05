@@ -12,6 +12,7 @@
     "provider-restart",
     "provider-submit"
   ],
+  "expected_production_paths": ["rearm_review_drive", "RuntimeWorkerLoopMixin.tick_observers"],
   "initial_snapshot": {
     "operation": {
       "operation_id": "join-root",
@@ -60,12 +61,20 @@
     "resource_receipts": [],
     "terminal_history": []
   },
+  "replay_snapshot": {
+    "operation": {"operation_id": "sim-operation", "run_id": "sim-run", "revision": 15, "state": "awaiting-callback", "attention_reason": null, "pending_effect": "", "effect_id": "start-provider", "effect_outcome": "succeeded", "accepted_callback_id": "", "accepted_callback_sha256": "", "resources": {"surface_id": "sim-surface", "process_group": 4101, "supervisor_pid": 4102, "process_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "supervisor_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    "liveness": {"operation_revision": 15, "operation_state": "awaiting-callback", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [{"effect_id": "start-provider", "idempotency_key": "join-provider-start", "outcome": "succeeded", "deliveries": 1}], "callbacks": [], "resource_receipts": [], "terminal_history": []
+  },
   "actions": [
     {
-      "action": "restart-worker"
+      "action_id": "rearm",
+      "action": "rearm-review-drive"
     },
     {
-      "action": "worker-tick"
+      "action_id": "tick",
+      "action": "rearm-worker-tick",
+      "after": ["rearm"]
     }
   ]
 }

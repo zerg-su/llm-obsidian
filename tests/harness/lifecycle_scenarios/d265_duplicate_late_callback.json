@@ -6,6 +6,8 @@
   "expected_initial_invariant": "SIM-INV-CALLBACK-ONCE",
   "expected_terminal_states": ["complete"],
   "forbidden_effects": ["callback-redelivery"],
+  "expected_callback_identity_sha256": "a1e73038b20b14c8814f26b22e8107c1b410db346c6736eea60480137a09109b",
+  "expected_production_paths": ["CallbackBroker.accept", "RuntimeSessionManager.cleanup"],
   "initial_snapshot": {
     "operation": {"operation_id": "callback-parent", "run_id": "callback-run", "revision": 5, "state": "awaiting-callback", "attention_reason": null, "pending_effect": "", "effect_id": "provider-input", "effect_outcome": "succeeded", "accepted_callback_id": "", "accepted_callback_sha256": "", "resources": {"surface_id": "callback-surface"}},
     "liveness": {"operation_revision": 5, "operation_state": "awaiting-callback", "callback_submit_binding": "", "callback_submit_status": ""},
@@ -16,9 +18,13 @@
     ],
     "resource_receipts": [], "terminal_history": []
   },
+  "replay_snapshot": {
+    "operation": {"operation_id": "sim-operation", "run_id": "sim-run", "revision": 5, "state": "awaiting-callback", "attention_reason": null, "pending_effect": "", "effect_id": "provider-input", "effect_outcome": "succeeded", "accepted_callback_id": "", "accepted_callback_sha256": "", "resources": {"surface_id": "sim-surface", "process_group": 4101, "supervisor_pid": 4102, "process_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "supervisor_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    "liveness": {"operation_revision": 5, "operation_state": "awaiting-callback", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": []
+  },
   "actions": [
-    {"action_id": "start", "action": "start-worker"},
-    {"action_id": "callback", "action": "publish-callback", "callback_id": "sim-callback", "after": ["start"]},
+    {"action_id": "callback", "action": "publish-callback", "callback_id": "sim-callback"},
     {"action_id": "duplicate", "action": "publish-callback", "callback_id": "sim-callback", "after": ["callback"]},
     {"action_id": "result", "action": "publish-provider-event", "kind": "result-published", "after": ["duplicate"]},
     {"action_id": "close", "action": "close", "after": ["result"]}

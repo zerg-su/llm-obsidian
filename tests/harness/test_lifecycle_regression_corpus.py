@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import sys
@@ -16,8 +15,8 @@ SCENARIO_ROOT = ROOT / "tests" / "harness" / "lifecycle_scenarios"
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harness"))
 
-from lifecycle_scheduler import compile_schedules, replay_trace, run_schedule  # noqa: E402
-from lifecycle_simulator import LifecycleWorld  # noqa: E402
+from lifecycle_scheduler import compile_schedules, replay_trace  # noqa: E402
+from lifecycle_historical import run_historical_schedule  # noqa: E402
 from lifecycle_simulator_oracle import (  # noqa: E402
     InvariantViolation,
     assert_snapshot,
@@ -61,21 +60,6 @@ def expect_declared_red(scenario: dict[str, object]) -> str:
     raise AssertionError(f"{scenario['scenario_id']} historical fixture is not RED")
 
 
-def repaired_rearm_snapshot(scenario: dict[str, object]) -> dict[str, object]:
-    """Apply the accepted receipt's declared target bytes, not production policy."""
-
-    snapshot = copy.deepcopy(scenario["initial_snapshot"])
-    operation = snapshot["operation"]
-    liveness = snapshot["liveness"]
-    recovery = snapshot["recovery"]
-    latch = snapshot["error_latch"]
-    liveness["operation_revision"] = operation["revision"]
-    liveness["operation_state"] = operation["state"]
-    recovery["status"] = "applied"
-    latch["active"] = False
-    return snapshot
-
-
 def run_pass() -> dict[str, object]:
     paths = sorted(SCENARIO_ROOT.glob("*.json"))
     scenarios = [load_scenario(path) for path in paths]
@@ -92,14 +76,6 @@ def run_pass() -> dict[str, object]:
         scenario_id = str(scenario["scenario_id"])
         digests[scenario_id] = canonical_sha256(scenario)
         red_invariants.add(expect_declared_red(scenario))
-        if scenario_id == "v2-6-5-rearm-liveness-latch":
-            repaired = repaired_rearm_snapshot(scenario)
-            assert_snapshot(repaired)
-            if repaired["operation"]["state"] not in scenario["expected_terminal_states"]:
-                raise AssertionError("rearm target state is outside its declared terminal set")
-            action_count += len(scenario["actions"])
-            continue
-
         schedules = compile_schedules(
             scenario,
             seed=int(scenario["seed"]),
@@ -111,21 +87,17 @@ def run_pass() -> dict[str, object]:
             with tempfile.TemporaryDirectory(
                 prefix=f"lifecycle-corpus-{scenario_id}.{index}."
             ) as raw:
-                world = run_schedule(
-                    scenario,
-                    schedule,
-                    lambda raw=raw: LifecycleWorld.fresh(Path(raw)),
+                execution = run_historical_schedule(
+                    scenario, schedule, Path(raw)
                 )
-                record = world.record()
-                if record.state not in scenario["expected_terminal_states"]:
+                if execution.state not in scenario["expected_terminal_states"]:
                     raise AssertionError(
-                        f"{scenario_id} ended in undeclared state {record.state}"
+                        f"{scenario_id} ended in undeclared state {execution.state}"
                     )
                 forbidden = set(scenario["forbidden_effects"])
-                observed = {str(item["effect_id"]) for item in world.provider.effects()}
-                if forbidden & observed:
+                if forbidden & execution.effect_ids:
                     raise AssertionError(f"{scenario_id} emitted a forbidden effect")
-                if world.real_effect_counts() != {
+                if execution.real_effects != {
                     "provider": 0,
                     "model": 0,
                     "cmux": 0,
@@ -143,7 +115,7 @@ def run_pass() -> dict[str, object]:
 
     return {
         "scenarios": len(scenarios),
-        "schedules": schedule_count + 1,
+        "schedules": schedule_count,
         "actions": action_count,
         "invariants": len(red_invariants),
         "fixture_sha256": digests,
