@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from model_routing_config import RoutingConfig, RoutingError, validate_effort
 
@@ -14,6 +14,19 @@ from .finalization_ledger import MAX_FINALIZATION_CYCLES
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 AVAILABILITY_SOURCES = frozenset({"provider-adapter", "capability-registry"})
 AVAILABILITY_STATUSES = frozenset({"available", "unavailable", "unknown"})
+FINALIZATION_POLICY_FIELDS = frozenset(
+    {
+        "max_cycles",
+        "add_independent_model_after",
+        "execution",
+        "primary_route_alias",
+        "independent_route_alias",
+    }
+)
+REGISTERED_FINALIZATION_ROUTES = (
+    "finalization-primary",
+    "finalization-independent",
+)
 
 
 class FinalizationPolicyError(ValueError):
@@ -71,6 +84,48 @@ class FinalizationPolicy:
             raise FinalizationPolicyError(
                 "finalization route aliases must be independent"
             )
+
+
+def finalization_policy_payload(policy: FinalizationPolicy) -> dict[str, Any]:
+    if not isinstance(policy, FinalizationPolicy):
+        raise FinalizationPolicyError("finalization policy is invalid")
+    return {
+        "max_cycles": policy.max_cycles,
+        "add_independent_model_after": policy.add_independent_model_after,
+        "execution": policy.execution,
+        "primary_route_alias": policy.primary_route_alias,
+        "independent_route_alias": policy.independent_route_alias,
+    }
+
+
+def parse_finalization_policy(value: Any) -> FinalizationPolicy:
+    """Parse the exact additive nested policy without convenience coercions."""
+
+    if not isinstance(value, Mapping):
+        raise FinalizationPolicyError("finalization_policy must be an object")
+    unknown = set(value) - FINALIZATION_POLICY_FIELDS
+    missing = FINALIZATION_POLICY_FIELDS - set(value)
+    if unknown:
+        raise FinalizationPolicyError(
+            "finalization_policy has unknown fields: "
+            + ",".join(sorted(unknown))
+        )
+    if missing:
+        raise FinalizationPolicyError(
+            "finalization_policy is missing fields: "
+            + ",".join(sorted(missing))
+        )
+    return FinalizationPolicy(**dict(value))
+
+
+def require_registered_finalization_routes(policy: FinalizationPolicy) -> None:
+    if (
+        policy.primary_route_alias,
+        policy.independent_route_alias,
+    ) != REGISTERED_FINALIZATION_ROUTES:
+        raise FinalizationPolicyError(
+            "finalization_policy route aliases are not registered"
+        )
 
 
 @dataclass(frozen=True)

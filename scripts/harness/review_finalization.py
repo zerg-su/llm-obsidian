@@ -11,8 +11,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping
 
+from model_routing_config import RoutingConfig
 from review_contract import VERIFY_BUDGETS
 
+from .finalization_policy import (
+    AvailabilityEvidence,
+    FinalizationPolicy,
+    FinalizationPolicyError,
+    FinalizationRouteDecision,
+    compile_finalization_routes,
+    parse_finalization_policy,
+    require_registered_finalization_routes,
+)
+from .finalization_ledger import CycleDecision, FinalizationLedger
 from .verification import VerificationError, load_profiles
 from .workflows.review_gate import (
     ReviewGateAuthorization,
@@ -65,6 +76,115 @@ class TaskReviewStatus:
                 raise ValueError("terminal review approval requires authorization")
         elif self.authorization is not None:
             raise ValueError("non-authorized review status cannot carry evidence")
+
+
+def task_finalization_policy(
+    meta: Mapping[str, object],
+) -> FinalizationPolicy | None:
+    """Read the optional additive v4 policy; historical tasks remain valid."""
+
+    raw = meta.get("finalization_policy")
+    if raw is None:
+        return None
+    if meta.get("version") != 4 or not isinstance(raw, Mapping):
+        raise ValueError("finalization_policy requires v4 task metadata")
+    try:
+        policy = parse_finalization_policy(raw)
+        require_registered_finalization_routes(policy)
+    except FinalizationPolicyError as exc:
+        raise ValueError(str(exc)) from exc
+    return policy
+
+
+def compile_task_finalization_routes(
+    meta: Mapping[str, object],
+    *,
+    config: RoutingConfig,
+    cycle_number: int,
+    independent_permitted: bool,
+    availability: AvailabilityEvidence | None,
+    now_epoch: int,
+) -> FinalizationRouteDecision | None:
+    """Compile task policy without changing standalone review topology."""
+
+    policy = task_finalization_policy(meta)
+    if policy is None:
+        return None
+    review = meta.get("review_policy")
+    if not isinstance(review, Mapping):
+        raise ValueError("task finalization requires review_policy")
+    runtime = review.get("runtime", "")
+    model = review.get("model", "")
+    effort = review.get("effort", "")
+    if not all(isinstance(value, str) for value in (runtime, model, effort)):
+        raise ValueError("task finalization review override is invalid")
+    return compile_finalization_routes(
+        config=config,
+        policy=policy,
+        cycle_number=cycle_number,
+        independent_permitted=independent_permitted,
+        availability=availability,
+        explicit_runtime=runtime,
+        explicit_model=model,
+        explicit_effort=effort,
+        now_epoch=now_epoch,
+    )
+
+
+@dataclass(frozen=True)
+class TaskFinalizationReservation:
+    cycle: CycleDecision
+    routes: FinalizationRouteDecision | None
+
+
+def reserve_task_finalization_cycle(
+    meta: Mapping[str, object],
+    *,
+    ledger: FinalizationLedger,
+    config: RoutingConfig,
+    attempt_id: str,
+    exact_head: str,
+    task_id: str,
+    worktree: str,
+    independent_permitted: bool,
+    availability: AvailabilityEvidence | None,
+    now_epoch: int,
+) -> TaskFinalizationReservation | None:
+    """Compile all bounded choices, then atomically select the reserved cycle."""
+
+    policy = task_finalization_policy(meta)
+    if policy is None:
+        return None
+    if ledger.max_cycles != policy.max_cycles:
+        raise ValueError("finalization ledger and task policy ceilings differ")
+    decisions: dict[int, FinalizationRouteDecision] = {}
+    for cycle in range(1, policy.max_cycles + 1):
+        decision = compile_task_finalization_routes(
+            meta,
+            config=config,
+            cycle_number=cycle,
+            independent_permitted=independent_permitted,
+            availability=availability,
+            now_epoch=now_epoch,
+        )
+        assert decision is not None
+        decisions[cycle] = decision
+    reserved = ledger.reserve_from_policy_matrix(
+        attempt_id=attempt_id,
+        exact_head=exact_head,
+        task_id=task_id,
+        worktree=worktree,
+        provider_policies={
+            cycle: decision.ledger_policy()
+            for cycle, decision in decisions.items()
+        },
+    )
+    selected = (
+        decisions[reserved.cycle_number]
+        if reserved.cycle_number is not None
+        else None
+    )
+    return TaskFinalizationReservation(reserved, selected)
 
 
 def _task_identity(

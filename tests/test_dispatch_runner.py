@@ -983,9 +983,20 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check(
         "writer output has exact strict v4 schema parity",
-        set(meta) == set(v4_schema["required"])
+        set(meta) == set(v4_schema["required"]) | {"finalization_policy"}
         and set(meta) <= set(v4_schema["properties"])
         and v4_schema["additionalProperties"] is False,
+    )
+    check(
+        "writer persists the bounded additive finalization policy",
+        meta["finalization_policy"]
+        == {
+            "max_cycles": 5,
+            "add_independent_model_after": 3,
+            "execution": "ephemeral",
+            "primary_route_alias": "finalization-primary",
+            "independent_route_alias": "finalization-independent",
+        },
     )
     expert_meta = runner.write_task_files(
         expert,

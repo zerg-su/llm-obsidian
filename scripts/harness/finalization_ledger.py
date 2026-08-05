@@ -316,28 +316,20 @@ class FinalizationLedger:
             except FileNotFoundError:
                 pass
 
-    def reserve(
+    def _reserve_with_policies(
         self,
         *,
         attempt_id: str,
         exact_head: str,
         task_id: str,
         worktree: str,
-        provider_policy: Mapping[str, Any],
+        provider_policies: Mapping[int, dict[str, Any]],
     ) -> CycleDecision:
-        """Reserve the sole active cycle and authorize at most one effect."""
-
-        attempt_id = _canonical_uuid(attempt_id, "attempt_id")
-        exact_head = _head(exact_head)
-        task_id = _canonical_uuid(task_id, "task_id")
-        worktree = _worktree(worktree)
-        provider_policy = _provider_policy(provider_policy)
-        requested = {
-            "attempt_id": attempt_id,
-            "exact_head": exact_head,
-            "task_id": task_id,
-            "worktree": worktree,
-            "provider_policy": provider_policy,
+        requested_identity = {
+            "attempt_id": _canonical_uuid(attempt_id, "attempt_id"),
+            "exact_head": _head(exact_head),
+            "task_id": _canonical_uuid(task_id, "task_id"),
+            "worktree": _worktree(worktree),
         }
         with self._locked():
             value = self._read(missing_ok=True)
@@ -351,8 +343,12 @@ class FinalizationLedger:
                     disposition=disposition,
                 )
             for cycle in value["cycles"]:
-                if cycle["attempt_id"] != attempt_id:
+                if cycle["attempt_id"] != requested_identity["attempt_id"]:
                     continue
+                requested = {
+                    **requested_identity,
+                    "provider_policy": provider_policies[cycle["number"]],
+                }
                 if any(cycle[field] != requested[field] for field in requested):
                     raise FinalizationLedgerError(
                         "attempt_id reservation binding is immutable"
@@ -376,9 +372,11 @@ class FinalizationLedger:
                 raise FinalizationLedgerError(
                     "finalization cycle ceiling lacks a terminal disposition"
                 )
+            cycle_number = len(value["cycles"]) + 1
             cycle = {
-                "number": len(value["cycles"]) + 1,
-                **requested,
+                "number": cycle_number,
+                **requested_identity,
+                "provider_policy": provider_policies[cycle_number],
                 "terminal_result": "",
             }
             value["cycles"].append(cycle)
@@ -390,6 +388,57 @@ class FinalizationLedger:
                 reason="reserved",
                 disposition="",
             )
+
+    def reserve(
+        self,
+        *,
+        attempt_id: str,
+        exact_head: str,
+        task_id: str,
+        worktree: str,
+        provider_policy: Mapping[str, Any],
+    ) -> CycleDecision:
+        """Reserve the sole active cycle and authorize at most one effect."""
+
+        policy = _provider_policy(provider_policy)
+        return self._reserve_with_policies(
+            attempt_id=attempt_id,
+            exact_head=exact_head,
+            task_id=task_id,
+            worktree=worktree,
+            provider_policies={
+                cycle: policy for cycle in range(1, self.max_cycles + 1)
+            },
+        )
+
+    def reserve_from_policy_matrix(
+        self,
+        *,
+        attempt_id: str,
+        exact_head: str,
+        task_id: str,
+        worktree: str,
+        provider_policies: Mapping[int, Mapping[str, Any]],
+    ) -> CycleDecision:
+        """Atomically select the policy for the cycle actually reserved."""
+
+        if not isinstance(provider_policies, Mapping) or set(
+            provider_policies
+        ) != set(range(1, self.max_cycles + 1)):
+            raise FinalizationLedgerError(
+                "provider policy matrix must cover every configured cycle"
+            )
+        canonical = {
+            cycle: _provider_policy(provider_policies[cycle])
+            for cycle in range(1, self.max_cycles + 1)
+        }
+        return self._reserve_with_policies(
+            attempt_id=attempt_id,
+            exact_head=exact_head,
+            task_id=task_id,
+            worktree=worktree,
+            provider_policies=canonical,
+        )
 
     def record_terminal(
         self, *, attempt_id: str, terminal_result: str

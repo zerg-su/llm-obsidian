@@ -50,6 +50,7 @@ test-harness:
 	@python3 tests/harness/test_review_finalization.py
 	@python3 tests/harness/test_finalization_ledger.py
 	@python3 tests/harness/test_finalization_routing.py
+	@python3 tests/harness/test_finalization_dsl.py
 	@python3 tests/harness/test_task_review_mechanism_recovery.py
 	@python3 tests/harness/test_task_review_flow_units.py
 	@python3 tests/harness/test_task_escalation_records.py

@@ -14,6 +14,10 @@ from typing import Any
 from lifecycle_telemetry import emit_lifecycle_event
 from task_contract import ContractError, normalize as normalize_task_contract
 from harness.git_ops import GitAdapter, GitError
+from harness.finalization_policy import (
+    FinalizationPolicy,
+    finalization_policy_payload,
+)
 from dispatch_contracts import TASK_LOCAL_GIT_EXCLUDES
 from dispatch_custom_contracts import (
     approved_outcome_contract_sha256,
@@ -200,6 +204,9 @@ def write_task_files(
         "approved_plan_sha256": plan_hash,
         "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",
+        "finalization_policy": finalization_policy_payload(
+            FinalizationPolicy()
+        ),
         "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
             "mode": review.mode,

@@ -16,6 +16,11 @@ from typing import Any, Mapping
 
 from .contracts import ContractError, ID_RE, SHA256_RE, to_dict
 from .context import OUTCOME_POINTER_ID
+from .finalization_policy import (
+    FinalizationPolicy,
+    FinalizationPolicyError,
+    parse_finalization_policy,
+)
 from .pipelines import (
     PERMISSION_BINDINGS,
     SIDE_EFFECT_BINDINGS,
@@ -163,6 +168,7 @@ class PipelineSpec:
     review_mode: str
     human_gates: tuple[str, ...]
     terminal_outcomes: tuple[str, ...]
+    finalization_policy: FinalizationPolicy | None = None
     schema_version: int = CUSTOM_SPEC_VERSION
 
     def __post_init__(self) -> None:
@@ -194,6 +200,10 @@ class PipelineSpec:
             raise ContractError("PipelineSpec requires an initial-approval gate")
         if not self.terminal_outcomes:
             raise ContractError("PipelineSpec requires terminal outcomes")
+        if self.finalization_policy is not None and not isinstance(
+            self.finalization_policy, FinalizationPolicy
+        ):
+            raise ContractError("finalization_policy is invalid")
 
 
 @dataclass(frozen=True)
@@ -329,6 +339,8 @@ def pipeline_spec_payload(spec: PipelineSpec) -> dict[str, Any]:
     value["budget"].pop("schema_version", None)
     for item in value["context_pointers"]:
         item.pop("schema_version", None)
+    if value["finalization_policy"] is None:
+        value.pop("finalization_policy")
     return value
 
 
@@ -502,7 +514,7 @@ def resolve_custom_executable(
     return baseline, frozen.compiled, commands, frozen.spec
 
 
-TOP_FIELDS = frozenset(
+TOP_REQUIRED_FIELDS = frozenset(
     {
         "schema_version",
         "spec_id",
@@ -528,6 +540,7 @@ TOP_FIELDS = frozenset(
         "terminal_outcomes",
     }
 )
+TOP_FIELDS = TOP_REQUIRED_FIELDS | {"finalization_policy"}
 STEP_FIELDS = frozenset(
     {
         "step_id",
@@ -562,7 +575,18 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
     else:
         raise ContractError("PipelineSpec must be JSON or an object")
     value = _object(value, "PipelineSpec")
-    _exact_fields(value, TOP_FIELDS, "PipelineSpec")
+    unknown = set(value) - TOP_FIELDS
+    missing = TOP_REQUIRED_FIELDS - set(value)
+    if unknown:
+        raise ContractError(
+            "PipelineSpec has unknown fields: "
+            + ",".join(sorted(unknown))
+        )
+    if missing:
+        raise ContractError(
+            "PipelineSpec is missing fields: "
+            + ",".join(sorted(missing))
+        )
     if value["schema_version"] != CUSTOM_SPEC_VERSION:
         raise ContractError("unsupported PipelineSpec schema")
 
@@ -633,6 +657,15 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
             )
         )
 
+    finalization_policy = None
+    if "finalization_policy" in value:
+        try:
+            finalization_policy = parse_finalization_policy(
+                value["finalization_policy"]
+            )
+        except FinalizationPolicyError as exc:
+            raise ContractError(str(exc)) from exc
+
     return PipelineSpec(
         spec_id=value["spec_id"],
         version=value["version"],
@@ -676,4 +709,5 @@ def parse_pipeline_spec(raw: str | bytes | Mapping[str, Any]) -> PipelineSpec:
         terminal_outcomes=_string_tuple(
             value["terminal_outcomes"], "terminal outcomes"
         ),
+        finalization_policy=finalization_policy,
     )
