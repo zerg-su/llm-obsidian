@@ -40,28 +40,75 @@ def expect_crash(label: str, callback, boundary: str) -> None:
         raise AssertionError(f"{label}: failpoint did not crash")
 
 
-with tempfile.TemporaryDirectory(prefix="lifecycle-crash-before.") as raw:
-    world = LifecycleWorld.fresh(Path(raw))
-    initial = world.durable_digest()
-    for boundary in (
-        "operation-transition-published",
-        "liveness-published",
-        "error-latch-published",
-        "effect-reserved",
-        "effect-resolved",
-        "cleanup-receipt-published",
-    ):
+def prepare_before_boundary(world: LifecycleWorld, boundary: str) -> None:
+    if boundary == "effect-resolved":
+        world.apply({"action": "reserve-effect", "effect_id": "before-effect"})
+    elif boundary == "cleanup-receipt-published":
+        world.apply({"action": "start-worker"})
+        world.apply({"action": "publish-provider-event", "kind": "result-published"})
+        world.apply({"action": "publish-callback"})
+        result = world.manager.request_exit("sim-owner", "sim-operation")
+        if result.action != "exit-requested":
+            raise AssertionError("cleanup precondition did not enter exiting")
+        world.cmux.disappear()
+        world._publish_liveness()
+
+
+def invoke_boundary(world: LifecycleWorld, boundary: str) -> None:
+    if boundary == "operation-transition-published":
+        world.store.transition("sim-owner", "sim-operation", "preflight")
+    elif boundary == "liveness-published":
+        world.apply({"action": "publish-liveness"})
+    elif boundary == "error-latch-published":
+        world.apply({"action": "publish-error-latch"})
+    elif boundary == "effect-reserved":
+        world.apply({"action": "reserve-effect", "effect_id": "before-effect"})
+    elif boundary == "effect-resolved":
+        world.apply({"action": "resolve-effect", "outcome": "succeeded"})
+    elif boundary == "cleanup-receipt-published":
+        world.apply({"action": "close"})
+    else:
+        raise AssertionError(f"unknown crash boundary: {boundary}")
+
+
+for boundary in (
+    "operation-transition-published",
+    "liveness-published",
+    "error-latch-published",
+    "effect-reserved",
+    "effect-resolved",
+    "cleanup-receipt-published",
+):
+    with tempfile.TemporaryDirectory(
+        prefix=f"lifecycle-crash-before-{boundary}."
+    ) as raw:
+        root = Path(raw)
+        world = LifecycleWorld.fresh(root)
+        prepare_before_boundary(world, boundary)
+        durable_prefix = world.durable_digest()
+        world.apply(
+            {"action": "crash-at", "failpoint": boundary, "phase": "before"}
+        )
         expect_crash(
-            f"crash before {boundary} preserves its durable prefix",
-            lambda boundary=boundary: world.apply(
-                {"action": "crash-at", "failpoint": boundary, "phase": "before"}
-            ),
+            f"crash before {boundary} is reached through its production owner",
+            lambda world=world, boundary=boundary: invoke_boundary(world, boundary),
             boundary,
         )
-        world = LifecycleWorld.restart(Path(raw))
         check(
-            f"restart before {boundary} sees byte-identical durable state",
-            world.durable_digest() == initial,
+            f"crash before {boundary} preserves the prerequisite durable prefix",
+            world.durable_digest() == durable_prefix,
+        )
+        world = LifecycleWorld.restart(root)
+        invoke_boundary(world, boundary)
+        if boundary == "operation-transition-published":
+            world._publish_liveness()
+        check(
+            f"restart before {boundary} converges through the same owner",
+            world.record().state
+            in {"created", "preflight", "exiting", "complete"}
+            and world.real_effect_counts()
+            == {"provider": 0, "model": 0, "cmux": 0, "network": 0},
+            world.snapshot(),
         )
 
 

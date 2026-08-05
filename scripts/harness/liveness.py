@@ -347,6 +347,8 @@ class LivenessController:
                 decision = _decision("observe", evidence, current)
             else:
                 decision, current = observe_liveness(previous, evidence, policy)
+            if self._fault_observer is not None:
+                self._fault_observer("liveness-published:before")
             self._write(self.root / "state.json", to_dict(current))
             if self._fault_observer is not None:
                 self._fault_observer("liveness-published")

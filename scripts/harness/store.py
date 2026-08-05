@@ -40,9 +40,13 @@ class OperationStore:
         self.root = Path(root).expanduser().resolve()
         self._fault_observer = fault_observer
 
-    def _observe_durable_boundary(self, boundary: str) -> None:
+    def _observe_durable_boundary(
+        self, boundary: str, *, phase: str = "after"
+    ) -> None:
         if self._fault_observer is not None:
-            self._fault_observer(boundary)
+            self._fault_observer(
+                boundary if phase == "after" else f"{boundary}:before"
+            )
 
     def _owner_dir(self, owner_id: str) -> Path:
         from .contracts import _identifier
@@ -170,6 +174,9 @@ class OperationStore:
             record = self.read(owner_id, operation_id)
             updated, result = transition(record, state, reason=reason)
             if result.changed:
+                self._observe_durable_boundary(
+                    "operation-transition-published", phase="before"
+                )
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
                 self._observe_durable_boundary("operation-transition-published")
             return result
@@ -214,6 +221,9 @@ class OperationStore:
             record = self.read(owner_id, operation_id)
             updated = begin_effect(record, effect)
             if updated is not record:
+                self._observe_durable_boundary(
+                    "effect-reserved", phase="before"
+                )
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
                 self._observe_durable_boundary("effect-reserved")
             return updated
@@ -228,6 +238,9 @@ class OperationStore:
             record = self.read(owner_id, operation_id)
             updated = resolve_effect(record, outcome)
             if updated is not record:
+                self._observe_durable_boundary(
+                    "effect-resolved", phase="before"
+                )
                 self._write(self._operation_path(owner_id, operation_id), to_dict(updated))
                 self._observe_durable_boundary("effect-resolved")
             return updated

@@ -341,6 +341,8 @@ class RuntimeSessionCleanupMixin:
             surface_status=surface_status,
             workspace_status=workspace_status,
         )
+        if self._fault_observer is not None:
+            self._fault_observer("cleanup-receipt-published:before")
         result = ResourceClosureLedger(
             self._state_root(record) / "provider-events"
         ).close(identity, observation)

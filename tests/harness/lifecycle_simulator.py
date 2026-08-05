@@ -54,19 +54,26 @@ class CrashController:
 
     def __init__(self) -> None:
         self.armed = ""
+        self.phase = ""
         self.observed: list[str] = []
 
-    def arm(self, boundary: str) -> None:
+    def arm(self, boundary: str, *, phase: str) -> None:
         if self.armed:
             raise RuntimeError("a lifecycle failpoint is already armed")
         if not boundary:
             raise ValueError("lifecycle failpoint identity is required")
+        if phase not in {"before", "after"}:
+            raise ValueError("crash phase must be before or after")
         self.armed = boundary
+        self.phase = phase
 
-    def observe(self, boundary: str) -> None:
-        self.observed.append(boundary)
-        if boundary == self.armed:
+    def observe(self, observed: str) -> None:
+        self.observed.append(observed)
+        phase = "before" if observed.endswith(":before") else "after"
+        boundary = observed.removesuffix(":before")
+        if boundary == self.armed and phase == self.phase:
             self.armed = ""
+            self.phase = ""
             raise SimulatedCrash(boundary)
 
     def assert_consumed(self) -> None:
@@ -638,11 +645,7 @@ class LifecycleWorld:
         elif name == "crash-at":
             boundary = str(action.get("failpoint") or "")
             phase = str(action.get("phase") or "after")
-            if phase == "before":
-                raise SimulatedCrash(boundary)
-            if phase != "after":
-                raise ValueError("crash phase must be before or after")
-            self.crashes.arm(boundary)
+            self.crashes.arm(boundary, phase=phase)
         else:
             raise ValueError("action is outside the closed simulator vocabulary")
         snapshot = self.snapshot()

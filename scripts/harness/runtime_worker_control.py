@@ -23,11 +23,13 @@ class RuntimeWorkerControlMixin:
     def publish_error_latch(self, status: str) -> None:
         """Publish one owned callback/error latch, then expose its durable boundary."""
 
+        observer = getattr(self, "fault_observer", None)
+        if observer is not None:
+            observer("error-latch-published:before")
         _atomic_json(
             self.spec_path.parent / "callback-error.json",
             {"schema_version": 1, "status": status},
         )
-        observer = getattr(self, "fault_observer", None)
         if observer is not None:
             observer("error-latch-published")
 
