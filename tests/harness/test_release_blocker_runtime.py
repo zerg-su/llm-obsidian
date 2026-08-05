@@ -355,11 +355,29 @@ def successful_probe(
     if tail in cmux_help:
         return subprocess.CompletedProcess(command, 0, cmux_help[tail], "")
     if tail == ("--help",):
+        if Path(command[0]).name == "codex":
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "--model --config --sandbox --ask-for-approval",
+                "",
+            )
         return subprocess.CompletedProcess(
             command,
             0,
             "--model --effort --permission-mode",
             "",
+        )
+    if tail == ("login", "status"):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "",
+            (
+                "WARNING: proceeding, even though we could not create PATH "
+                "aliases: Operation not permitted (os error 1)\n"
+                "Logged in using ChatGPT\n"
+            ),
         )
     if tail == ("auth", "status"):
         return subprocess.CompletedProcess(
@@ -472,6 +490,23 @@ with tempfile.TemporaryDirectory(prefix="harness-release-blockers.") as raw:
     check(
         "zero-effect handshake proves the complete runtime route",
         report.compatible and expected <= set(report.capabilities),
+    )
+    codex_report = capabilities.check(
+        RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "high",
+            "executor",
+            FINGERPRINT,
+        ),
+        callback_dir=callback_dir,
+        expected_routing_sha256=FINGERPRINT,
+        which=lambda name: f"/usr/bin/{name}",
+        runner=successful_probe,
+    )
+    check(
+        "Codex capability handshake accepts the exact stderr login marker and PATH warning",
+        codex_report.compatible and expected <= set(codex_report.capabilities),
     )
     check(
         "capability probes are read-only",

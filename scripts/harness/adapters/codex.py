@@ -44,6 +44,13 @@ _EPHEMERAL_CONFIG = (
     "sandbox_workspace_write.network_access=false",
     "shell_environment_policy.ignore_default_excludes=false",
 )
+_CODEX_AUTH_MARKER = re.compile(
+    r"logged in (?:using|with|to) chatgpt[.!]?\Z"
+)
+_CODEX_PATH_ALIAS_WARNING = (
+    "warning: proceeding, even though we could not create path aliases: "
+    "operation not permitted (os error 1)"
+)
 
 
 def validate_reviewer_sandbox_command(
@@ -334,12 +341,25 @@ class CodexDriver:
             or returncode != 0
             or not isinstance(stdout, str)
             or not isinstance(stderr, str)
-            or stderr.strip()
         ):
             return False
-        status = " ".join(stdout.split()).casefold()
-        return bool(
-            re.fullmatch(r"logged in (?:using|with|to) chatgpt[.!]?", status)
+        combined = tuple(
+            normalized
+            for stream in (stdout, stderr)
+            for line in stream.splitlines()
+            if (normalized := " ".join(line.split()).casefold())
+        )
+        markers = tuple(
+            item for item in combined if _CODEX_AUTH_MARKER.fullmatch(item)
+        )
+        return (
+            len(markers) == 1
+            and all(
+                _CODEX_AUTH_MARKER.fullmatch(item)
+                or item == _CODEX_PATH_ALIAS_WARNING
+                for item in combined
+            )
+            and combined.count(_CODEX_PATH_ALIAS_WARNING) <= 1
         )
 
 

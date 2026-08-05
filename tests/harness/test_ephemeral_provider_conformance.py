@@ -208,6 +208,43 @@ with tempfile.TemporaryDirectory(prefix="ephemeral-provider.") as raw:
         and claude_ready.model_effect_allowed
         and codex_ready.model_effect_allowed,
     )
+    path_alias_warning = (
+        "WARNING: proceeding, even though we could not create PATH aliases: "
+        "Operation not permitted (os error 1)"
+    )
+    codex_stderr_ready = registry.preflight(
+        spec("openai"),
+        stdout="",
+        stderr=path_alias_warning + "\nLogged in using ChatGPT\n",
+        returncode=0,
+    )
+    check(
+        "Codex accepts its exact stderr login marker after the supported PATH warning",
+        codex_stderr_ready.status == "ready"
+        and codex_stderr_ready.model_effect_allowed,
+    )
+    for label, stdout, stderr, returncode in (
+        ("PATH warning without login marker", "", path_alias_warning, 0),
+        (
+            "login marker with arbitrary stderr",
+            "Logged in using ChatGPT",
+            "unexpected auth diagnostic",
+            0,
+        ),
+        ("missing login marker", "authentication status unknown", "", 0),
+        ("nonzero login command", "Logged in using ChatGPT", "", 1),
+    ):
+        blocked = registry.preflight(
+            spec("openai"),
+            stdout=stdout,
+            stderr=stderr,
+            returncode=returncode,
+        )
+        check(
+            f"Codex {label} remains fail-closed",
+            blocked.status == "billing-profile-unverified"
+            and not blocked.model_effect_allowed,
+        )
     for label, stdout, stderr in (
         ("negated ChatGPT login", "Not logged in to ChatGPT", ""),
         (
