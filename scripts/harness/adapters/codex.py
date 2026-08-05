@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from ..contracts import RuntimeRoute
+from ..ephemeral_provider import (
+    AuthPreflightResult,
+    AuthProbeCommand,
+    EphemeralCommand,
+    EphemeralProcessResult,
+    EphemeralProviderError,
+    EphemeralRunResult,
+    EphemeralRunSpec,
+    normalized_run_result,
+    validate_output_instance,
+)
 
 
 class CodexDriverError(ValueError):
@@ -21,6 +34,14 @@ REVIEWER_CONFIG = (
     "sandbox_workspace_write.exclude_tmpdir_env_var=true",
     "sandbox_workspace_write.network_access=false",
     "sandbox_workspace_write.writable_roots=[]",
+    "shell_environment_policy.ignore_default_excludes=false",
+)
+_EPHEMERAL_ENV_ALLOWLIST = frozenset(
+    {"HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "TZ", "USER"}
+)
+_EPHEMERAL_CONFIG = (
+    "features.web_search=false",
+    "sandbox_workspace_write.network_access=false",
     "shell_environment_policy.ignore_default_excludes=false",
 )
 
@@ -312,3 +333,164 @@ class CodexDriver:
             return False
         status = (stdout + stderr).casefold()
         return "logged in" in status and "chatgpt" in status
+
+
+def _codex_ephemeral_environment(
+    env: Mapping[str, str], runtime_home: Path
+) -> dict[str, str]:
+    """Use an isolated Codex home and a minimal credential-free child env."""
+
+    child = {
+        key: value
+        for key, value in env.items()
+        if key in _EPHEMERAL_ENV_ALLOWLIST and isinstance(value, str)
+    }
+    child["CODEX_HOME"] = str(runtime_home)
+    return child
+
+
+def _codex_failure_disposition(stderr: bytes) -> str:
+    status = stderr.decode("utf-8", errors="replace").casefold()
+    if any(marker in status for marker in ("usage limit", "rate limit", "quota")):
+        return "usage-exhausted"
+    if any(marker in status for marker in ("not logged", "authentication", "unauthorized")):
+        return "auth-expired"
+    if any(marker in status for marker in ("permission denied", "policy denied", "sandbox denied")):
+        return "policy-denied"
+    return "transport-failed"
+
+
+@dataclass(frozen=True)
+class CodexEphemeralAdapter:
+    """ChatGPT-backed Codex exec compiler and JSONL/result normalizer."""
+
+    binary: Path
+    logical_provider: str = "openai"
+    transport: str = "codex-exec"
+
+    def __post_init__(self) -> None:
+        if not self.binary.is_absolute():
+            raise EphemeralProviderError("Codex ephemeral binary must be absolute")
+
+    def compile(
+        self, spec: EphemeralRunSpec, *, env: Mapping[str, str]
+    ) -> EphemeralCommand:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Codex adapter received another provider")
+        args = [
+            str(self.binary),
+            "--model",
+            spec.model,
+            "--config",
+            f"model_reasoning_effort={spec.effort}",
+            "--sandbox",
+            "read-only",
+            "--ask-for-approval",
+            "never",
+            "--strict-config",
+        ]
+        for value in _EPHEMERAL_CONFIG:
+            args.extend(("--config", value))
+        args.extend(
+            (
+                "--cd",
+                str(spec.cwd),
+                "exec",
+                "--ephemeral",
+                "--json",
+                "--output-schema",
+                str(spec.output_schema),
+                "--output-last-message",
+                str(spec.result_path),
+                "-",
+            )
+        )
+        return EphemeralCommand(
+            tuple(args),
+            spec.context_packet.read_bytes(),
+            _codex_ephemeral_environment(env, spec.runtime_home),
+            self.transport,
+        )
+
+    def auth_command(
+        self, spec: EphemeralRunSpec, *, env: Mapping[str, str]
+    ) -> AuthProbeCommand:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Codex auth probe provider changed")
+        return AuthProbeCommand(
+            CodexDriver.auth_command(self.binary),
+            _codex_ephemeral_environment(env, spec.runtime_home),
+        )
+
+    def preflight(
+        self,
+        spec: EphemeralRunSpec,
+        *,
+        stdout: str,
+        stderr: str,
+        returncode: int,
+    ) -> AuthPreflightResult:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Codex auth probe provider changed")
+        ready = CodexDriver.authenticated_subscription(stdout, stderr, returncode)
+        return AuthPreflightResult(
+            spec.logical_provider,
+            spec.auth_profile,
+            "ready" if ready else "billing-profile-unverified",
+            "chatgpt-login-ready" if ready else "billing-profile-unverified",
+            ready,
+        )
+
+    def normalize(
+        self, spec: EphemeralRunSpec, process: EphemeralProcessResult
+    ) -> EphemeralRunResult:
+        if spec.logical_provider != self.logical_provider:
+            raise EphemeralProviderError("Codex result provider changed")
+        if process.timed_out:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition="timeout",
+                gap_reason="timeout",
+            )
+        if process.returncode:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition=_codex_failure_disposition(process.stderr),
+            )
+        try:
+            lines = process.stdout.decode("utf-8").splitlines()
+            stream = [json.loads(line) for line in lines if line.strip()]
+            result = json.loads(process.result_bytes)
+            valid = (
+                bool(stream)
+                and all(
+                    isinstance(item, dict)
+                    and isinstance(item.get("type"), str)
+                    and bool(item["type"])
+                    for item in stream
+                )
+                and isinstance(result, dict)
+                and validate_output_instance(result, spec.schema)
+            )
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            valid = False
+            result = None
+        if not valid:
+            return normalized_run_result(
+                spec,
+                process,
+                transport=self.transport,
+                disposition="schema-invalid",
+                gap_reason="schema-invalid",
+            )
+        return normalized_run_result(
+            spec,
+            process,
+            transport=self.transport,
+            disposition="succeeded",
+            result=result,
+        )
