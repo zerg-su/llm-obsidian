@@ -197,7 +197,6 @@ class RuntimeWorkerControlMixin:
         self.stable_reads += 1
         if self.stable_reads < 2:
             return
-        self.callback_handled = True
         try:
             envelope = _envelope(json.loads(raw))
             if envelope.operation_id != operation_id or envelope.run_id != run_id:
@@ -205,6 +204,8 @@ class RuntimeWorkerControlMixin:
             acceptance = CallbackBroker(self.store, self.spec["owner_id"]).accept(
                 envelope, deadline_operation_id=self.spec["operation_id"]
             )
+            self.record_provider_result(generation, digest)
+            self.callback_handled = True
             _atomic_json(
                 self.spec_path.parent / "callback-receipt.json",
                 {
@@ -226,6 +227,7 @@ class RuntimeWorkerControlMixin:
                 self.summary_attention("callback-wake-effect-uncertain")
                 return
         except CallbackTimeoutError:
+            self.callback_handled = True
             _atomic_json(
                 self.spec_path.parent / "callback-timeout.json",
                 {

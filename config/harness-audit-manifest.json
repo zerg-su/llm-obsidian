@@ -30,6 +30,7 @@
     "scripts/task_review_delta_packet.py",
     "scripts/task_review_boundary_authorization.py",
     "scripts/task_review_finalizing.py",
+    "scripts/task_review_finalization_attempt.py",
     "scripts/task_review_flow.py",
     "scripts/task_review_identity.py",
     "scripts/task_review_legacy_rounds.py",
@@ -51,6 +52,7 @@
     "scripts/task_session_store.py",
     "scripts/task_session_store_io.py",
     "scripts/task_sessions.py",
+    "scripts/verification_receipt.py",
     "scripts/wiki_summary_contract.py"
   ],
   "coverage_test_roots": [

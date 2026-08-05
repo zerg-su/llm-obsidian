@@ -632,7 +632,13 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
 
 
 class FastPathWorker(RuntimeWorkerReviewBridgeMixin):
-    pass
+    @staticmethod
+    def reserve_callback_submit(_generation: int) -> str:
+        return ""
+
+    @staticmethod
+    def record_provider_result(_generation: int, _sha256: str) -> None:
+        pass
 
 
 class RecoveryWorker(RuntimeWorkerLivenessMixin):
@@ -641,6 +647,14 @@ class RecoveryWorker(RuntimeWorkerLivenessMixin):
 
 
 class SymlinkWorker(RuntimeWorkerReviewBridgeMixin):
+    @staticmethod
+    def reserve_callback_submit(_generation: int) -> str:
+        return ""
+
+    @staticmethod
+    def record_provider_result(_generation: int, _sha256: str) -> None:
+        pass
+
     def summary_attention(
         self,
         status: str,

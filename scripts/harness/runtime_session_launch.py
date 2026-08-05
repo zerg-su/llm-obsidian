@@ -30,10 +30,14 @@ from .runtime_session_contracts import (
     SurfacePrepared,
     _relative,
     checkpointless_reviewer_route,
-    continuation_effect_id,
 )
 from .runtime_session_continuation import deliver_continuation
 from .runtime_callback_io import _bounded_file_sha256
+from .runtime_provider_input import (
+    bound_continuation_effect_id,
+    initial_provider_argv,
+    reserve_continuation_input,
+)
 from .store import StoreError
 from .supervisor import OperationSupervisor
 
@@ -240,14 +244,11 @@ class RuntimeSessionLaunchMixin:
                 )
         prompt = self._read_prompt(prompt_path)
         driver = self._driver(request.spec.route)
-        argv = (
-            *driver.command(
-                request.spec.route,
-                resume=request.checkpoint,
-                callback_pointer=callback_path, product_root=request.product_root,
-                session_root=request.cwd,
-            ),
-            prompt,
+        argv, deferred_initial_input = initial_provider_argv(
+            driver,
+            request,
+            callback_path=callback_path,
+            prompt=prompt,
         )
         report = self.check_route(
             request.spec.route,
@@ -405,6 +406,9 @@ class RuntimeSessionLaunchMixin:
                 runtime_home=request.runtime_home,
                 research_request_sha256=request.research_request_sha256,
                 callback_wake=request.callback_wake,
+                initial_input_pointer=(
+                    prompt_path if deferred_initial_input else None
+                ),
             )
         except Exception as exc:
             self._abort_prepared_surface(
@@ -521,23 +525,7 @@ class RuntimeSessionLaunchMixin:
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
         prompt = self._read_prompt(prompt_path)
         target = self._callback_target(record)
-        legacy_effect_id = continuation_effect_id(prompt)
-        bound_prompt = "\n".join(
-            (
-                prompt,
-                str(target["generation"]),
-                str(target["operation_id"]),
-                str(target["run_id"]),
-            )
-        )
-        bound_effect_id = continuation_effect_id(bound_prompt)
-        effect_id = (
-            legacy_effect_id
-            if record.effect_id == legacy_effect_id
-            and record.effect_outcome
-            in {EffectOutcome.PENDING, EffectOutcome.SUCCEEDED}
-            else bound_effect_id
-        )
+        effect_id = bound_continuation_effect_id(record, prompt, target)
         receipt_path, receipt, receipt_identity = self._continuation_receipt(
             record, effect_id, prompt, target
         )
@@ -582,6 +570,17 @@ class RuntimeSessionLaunchMixin:
             )
 
         if not already_acknowledged:
+            delivery = reserve_continuation_input(
+                self._state_root(record) / "provider-events",
+                record=record,
+                target=target,
+                workspace_id=str(metadata.get("workspace_id") or ""),
+                prompt=prompt,
+                attention_state=lambda: self._mark_attention(
+                    supervisor.read(),
+                    AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED,
+                ).state,
+            )
             if receipt is None:
                 self._write_json(
                     receipt_path,
@@ -736,7 +735,9 @@ class RuntimeSessionLaunchMixin:
                     },
                 )
                 if not result.acknowledged:
+                    delivery.ambiguous()
                     raise ContinuationUnconfirmed(result.evidence)
+                delivery.accepted()
 
             try:
                 if effect_succeeded:
@@ -762,6 +763,12 @@ class RuntimeSessionLaunchMixin:
                 raise RuntimeSessionError(
                     f"continuation submit requires attention: {exc}"
                 ) from exc
+            except Exception:
+                try:
+                    delivery.ambiguous()
+                except Exception:
+                    pass
+                raise
         current = supervisor.read()
         if current.state != "running":
             current = supervisor.transition("running")

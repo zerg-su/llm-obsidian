@@ -78,6 +78,7 @@ class RuntimeWorkerLoopMixin:
         except ChildProcessError:
             self.provider_exited = True
             self.exit_code = 0
+            self.record_provider_exit(self.exit_code)
             self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
             return True
         except OSError:
@@ -100,6 +101,7 @@ class RuntimeWorkerLoopMixin:
             return False
         self.exit_code = os.waitstatus_to_exitcode(status)
         self.provider_exited = True
+        self.record_provider_exit(self.exit_code)
         return True
 
     def mark_attention(self, reason: AttentionReason) -> None:

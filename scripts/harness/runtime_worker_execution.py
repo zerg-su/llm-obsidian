@@ -8,6 +8,11 @@ from .runtime_worker import (
     _contain_provider_start_failure,
     _research_input_provenance,
 )
+from .runtime_provider_events import (
+    RuntimeProviderEventError,
+    RuntimeProviderEventStream,
+)
+from .runtime_session_contracts import MAX_PROMPT_BYTES
 from .runtime_worker_control import RuntimeWorkerControlMixin
 from .runtime_worker_fix import RuntimeWorkerFixMixin
 from .runtime_worker_custom import RuntimeWorkerCustomMixin
@@ -28,6 +33,119 @@ class RuntimeWorkerExecution(
     RuntimeWorkerLivenessMixin,
     RuntimeWorkerLoopMixin,
 ):
+    def _workspace_id(self) -> str:
+        path = self.spec_path.parent / "session.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError(
+                "runtime provider event session identity is unavailable"
+            ) from exc
+        workspace_id = value.get("workspace_id") if isinstance(value, dict) else ""
+        if (
+            not isinstance(value, dict)
+            or value.get("operation_id") != self.spec["operation_id"]
+            or value.get("run_id") != self.spec["run_id"]
+            or not isinstance(workspace_id, str)
+            or not workspace_id
+        ):
+            raise RuntimeWorkerError(
+                "runtime provider event workspace identity is unavailable"
+            )
+        return workspace_id
+
+    @property
+    def _provider_event_root(self) -> Path:
+        return self.spec_path.parent / "provider-events"
+
+    def _create_provider_stream(
+        self, *, generation: int, input_sha256: str
+    ) -> RuntimeProviderEventStream:
+        return RuntimeProviderEventStream.create(
+            self._provider_event_root,
+            owner_id=self.spec["owner_id"],
+            operation_id=self.spec["operation_id"],
+            run_id=self.spec["run_id"],
+            generation=generation,
+            process_identity=self.handle.process_identity,
+            workspace_id=self._workspace_id(),
+            surface_id=self.spec["surface_id"],
+            input_sha256=input_sha256,
+        )
+
+    def _initial_generation(self) -> int:
+        try:
+            value = json.loads(
+                self.spec["callback_registration"].read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeWorkerError(
+                "initial provider callback generation is unavailable"
+            ) from exc
+        generation = value.get("generation") if isinstance(value, dict) else None
+        if type(generation) is not int or generation < 1:
+            raise RuntimeWorkerError(
+                "initial provider callback generation is invalid"
+            )
+        return generation
+
+    def _provider_stream(
+        self, generation: int
+    ) -> RuntimeProviderEventStream | None:
+        state = (
+            self._provider_event_root
+            / f"generation-{generation}"
+            / "delivery"
+            / "delivery-state.json"
+        )
+        if not state.is_file() or state.is_symlink():
+            return None
+        try:
+            return RuntimeProviderEventStream.rehydrate(
+                self._provider_event_root, generation
+            )
+        except RuntimeProviderEventError as exc:
+            raise RuntimeWorkerError(
+                "runtime provider delivery authority is unavailable"
+            ) from exc
+
+    def record_provider_result(self, generation: int, sha256: str) -> None:
+        try:
+            stream = self._provider_stream(generation)
+            if stream is None:
+                return
+            decision = stream.result(sha256)
+        except RuntimeProviderEventError as exc:
+            raise RuntimeWorkerError("provider result event is invalid") from exc
+        if decision.action not in {"close", "wait"}:
+            raise RuntimeWorkerError("provider result did not reach a close boundary")
+
+    def reserve_callback_submit(self, generation: int) -> str:
+        try:
+            stream = self._provider_stream(generation)
+            if stream is None:
+                return ""
+            decision = stream.turn_stopped()
+        except RuntimeProviderEventError as exc:
+            raise RuntimeWorkerError("provider Stop event is invalid") from exc
+        if decision.action != "submit-callback":
+            raise RuntimeWorkerError("callback submit is not authorized by provider Stop")
+        return decision.effect_id
+
+    def record_provider_exit(self, exit_code: int) -> None:
+        for directory in sorted(self._provider_event_root.glob("generation-*")):
+            try:
+                generation = int(directory.name.removeprefix("generation-"))
+                stream = self._provider_stream(generation)
+                if stream is None:
+                    continue
+                decision = stream.process_exited(exit_code)
+            except (RuntimeProviderEventError, RuntimeWorkerError, ValueError):
+                self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
+                continue
+            if decision.action == "attention":
+                self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
+
     def execute(
         self,
         spec_path: Path,
@@ -109,6 +227,7 @@ class RuntimeWorkerExecution(
                     },
                 )
                 return 2
+        self.cmux_adapter = self.cmux_adapter or CmuxAdapter()
         try:
             self.provider_command = provider_argv(self.spec)
             self.provider_env = provider_environment(self.spec)
@@ -127,6 +246,50 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
+        initial_input = self.spec.get("initial_input_pointer")
+        if isinstance(initial_input, Path):
+            stream: RuntimeProviderEventStream | None = None
+            try:
+                raw_input = initial_input.read_bytes()
+                if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
+                    raise RuntimeWorkerError("initial provider input is invalid")
+                input_text = raw_input.decode("utf-8")
+                stream = self._create_provider_stream(
+                    generation=self._initial_generation(),
+                    input_sha256=hashlib.sha256(raw_input).hexdigest(),
+                )
+                stream.start()
+                decision = stream.reserve_input()
+                if decision.action != "send":
+                    raise RuntimeWorkerError(
+                        "initial provider input was not durably reserved"
+                    )
+                self.cmux_adapter.send(self.spec["surface_id"], input_text)
+                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+                stream.accept_input()
+            except (
+                OSError,
+                UnicodeDecodeError,
+                RuntimeProviderEventError,
+                RuntimeWorkerError,
+            ):
+                try:
+                    if stream is not None:
+                        stream.ambiguous_input()
+                except Exception:
+                    pass
+                self.contain_provider_start_failure(self.process, self.handle)
+                self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
+                _atomic_json(self.ready, {"schema_version": 1, "status": "failed"})
+                _atomic_json(
+                    self.exit_path,
+                    {
+                        "schema_version": 1,
+                        "status": "input-unconfirmed",
+                        "exit_code": 2,
+                    },
+                )
+                return 2
         _atomic_json(
             self.ready,
             {
@@ -152,7 +315,6 @@ class RuntimeWorkerExecution(
         self.summary_digest = ""
         self.summary_stable_reads = 0
         self.summary_attention_revision = -1
-        self.cmux_adapter = self.cmux_adapter or CmuxAdapter()
         self.operation_contract = operation.spec.contract_sha256
         try:
             self._pipeline_name, self.pipeline = compiled_executable_for_contract(

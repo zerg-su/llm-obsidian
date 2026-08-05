@@ -24,6 +24,7 @@ from harness.runtime_session_delivery import (  # noqa: E402
     DeliveryController,
     DeliveryError,
 )
+from harness.runtime_provider_events import RuntimeProviderEventStream  # noqa: E402
 from harness.runtime_session_liveness import (  # noqa: E402
     ResourceCloseError,
     ResourceClosureLedger,
@@ -389,6 +390,47 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         close_event.kind == "resource-closed"
         and close_event.sequence == 4
         and closed_cursor.resource_closed,
+    )
+    runtime_stream = RuntimeProviderEventStream.create(
+        root / "runtime-close-stream",
+        owner_id=INTERACTIVE.owner_id,
+        operation_id=INTERACTIVE.operation_id,
+        run_id=INTERACTIVE.run_id,
+        generation=INTERACTIVE.generation,
+        process_identity=INTERACTIVE.process_identity,
+        workspace_id=INTERACTIVE.workspace_id,
+        surface_id=INTERACTIVE.surface_id,
+        input_sha256="2" * 64,
+    )
+    runtime_resource_identity = dataclasses.replace(
+        resource_identity,
+        provider_session_id=INTERACTIVE.run_id,
+        source_id=f"process:{INTERACTIVE.process_identity}",
+    )
+    runtime_resource_close = ResourceClosureLedger(
+        root / "runtime-close-receipt"
+    ).close(runtime_resource_identity, gone)
+    assert runtime_stream.start().action == "wait"
+    assert runtime_stream.reserve_input().action == "send"
+    assert runtime_stream.accept_input().action == "wait"
+    assert runtime_stream.process_exited(0).action == "attention"
+    runtime_close = runtime_stream.resource_closed_receipt(
+        runtime_resource_close.receipt
+    )
+    runtime_close_event = json.loads(
+        (
+            root
+            / "runtime-close-stream"
+            / "generation-1"
+            / "events"
+            / "0004.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "production stream consumes the exact close receipt as its next event",
+        runtime_close.action == "attention"
+        and runtime_close_event["kind"] == "resource-closed"
+        and runtime_close_event["reason"] == "owned-resources-gone",
     )
 
     class GoneProcess:

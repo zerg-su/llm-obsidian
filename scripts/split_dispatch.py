@@ -147,6 +147,9 @@ def drive_split_dispatch(
     terminal_receipts: tuple[SplitTerminalReceipt, ...],
     launch_receipts: tuple[SplitLaunchReceipt, ...],
     start_dispatch: Callable[[Mapping[str, Any], str], Mapping[str, object]],
+    persist_launch: Callable[
+        [SplitLaunchReceipt, str], SplitLaunchReceipt
+    ] | None = None,
 ) -> SplitDriveResult:
     """Drive one wave through the existing dispatch execution facade."""
 
@@ -155,7 +158,12 @@ def drive_split_dispatch(
     def launch(binding: SplitDispatchBinding) -> SplitLaunchReceipt:
         child = by_id[binding.subplan_id]
         result = start_dispatch(child.request, child.request_sha256)
-        return _launch_receipt(binding, result)
+        receipt = _launch_receipt(binding, result)
+        return (
+            persist_launch(receipt, child.request_sha256)
+            if persist_launch is not None
+            else receipt
+        )
 
     return drive_split(
         prepared.activation,

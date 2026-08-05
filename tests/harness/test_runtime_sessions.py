@@ -583,12 +583,13 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         "parent pins env shebang interpreter for ordinary providers",
         ordinary_launch["runtime_interpreter"] == str(node.resolve())
         and ordinary_spec["product_root"] == cwd.resolve()
+        and ordinary_spec["initial_input_pointer"]
+        == (cwd / "prompt.md").resolve()
         and ordinary_argv
         == (
             str(node.resolve()),
             str(codex),
             "--strict-config",
-            "bounded research",
         ),
         (ordinary_launch, ordinary_argv),
     )
@@ -2504,6 +2505,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         run_id="run-worker",
         surface_id=SURFACE,
         runtime="claude",
+        initial_input_pointer=cwd / "prompt.md",
+    )
+    ProcessAdapter._write_json(
+        worker_launch.spec_path.parent / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": "worker-1",
+            "run_id": "run-worker",
+            "workspace_id": WORKSPACE,
+        },
     )
     check(
         "ordinary launch materializer persists the exact cwd binding",
@@ -2602,12 +2613,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             False,
         )
     worker_result: list[int] = []
+    worker_cmux = FakeCmux([])
     worker_thread = threading.Thread(
         target=lambda: worker_result.append(
             run_runtime_worker(
                 worker_launch.spec_path,
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-worker",
+                cmux_adapter=worker_cmux,
             )
         )
     )
@@ -2691,6 +2704,29 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == "callback-worker-round-2"
         and json.loads(receipt.read_text(encoding="utf-8"))["generation"] == 2,
         (worker_ready, worker_exit, worker_record),
+    )
+    provider_events = [
+        json.loads(path.read_text(encoding="utf-8"))["kind"]
+        for path in sorted(
+            (
+                worker_launch.spec_path.parent
+                / "provider-events"
+                / "generation-1"
+                / "events"
+            ).glob("*.json")
+        )
+    ]
+    check(
+        "public launch and live worker durably order input before result and exit",
+        provider_events
+        == [
+            "provider-started",
+            "input-accepted",
+            "result-published",
+            "process-exited",
+        ]
+        and worker_cmux.sent[-1] == (SURFACE, "perform the bounded task"),
+        (provider_events, worker_cmux.sent),
     )
 
     guard_store = OperationStore(root / "guard-store")

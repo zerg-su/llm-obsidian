@@ -141,6 +141,10 @@ from .runtime_provider import (
     provider_environment,
     provider_resume_argv,
 )
+from .runtime_provider_events import (
+    RuntimeProviderEventError,
+    RuntimeProviderEventStream,
+)
 
 
 MAX_SCREEN_BYTES = 70_000

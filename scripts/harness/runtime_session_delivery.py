@@ -154,6 +154,27 @@ class DeliveryController:
             ProviderEventCursor.start(profile, identity),
         )
 
+    @classmethod
+    def rehydrate(cls, root: Path | str) -> "DeliveryController":
+        """Open only an existing owner-only state without caller identity input."""
+
+        path = Path(root) / "delivery-state.json"
+        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+            raise DeliveryError("durable delivery state is not owner-only")
+        try:
+            raw = path.read_bytes()
+            if not raw or len(raw) > 65_536:
+                raise ValueError
+            state = _state_from_dict(json.loads(raw))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise DeliveryError("durable delivery state is invalid") from exc
+        return cls(
+            root,
+            profile=state.profile,
+            identity=state.identity,
+            idempotency_key=state.idempotency_key,
+        )
+
     @staticmethod
     def _fsync_directory(path: Path) -> None:
         descriptor = os.open(path, os.O_RDONLY)

@@ -12,6 +12,7 @@ from typing import Any, Mapping, NoReturn
 
 from dispatch_contracts import DispatchError, validate_request
 from dispatch_execution import start as start_dispatch_request
+from dispatch_lifecycle import completed_replay
 from dispatch_setup import materialize_current_context
 from harness.contracts import ContractError
 from harness.split_activation import (
@@ -21,6 +22,7 @@ from harness.split_activation import (
 )
 from harness.split_contracts import manifest_from_dict, manifest_to_dict
 from harness.split_join import ChildReceipt
+from harness.split_evidence import SplitEvidenceStore, SplitTerminalProjector
 from split_dispatch import (
     DispatchChildRequest,
     PreparedSplitDispatch,
@@ -154,6 +156,8 @@ def _prepared(
                 "completion_policy": raw.get("completion_policy") or "attention",
                 "placement": raw.get("placement") or "split",
                 "worktree": Path(str(raw.get("worktree") or "")).expanduser().resolve(),
+                "branch": raw.get("branch"),
+                "vault_root": raw.get("vault_root"),
                 "split": raw.get("split"),
             }
         else:
@@ -202,6 +206,115 @@ def _activation_payload(prepared: PreparedSplitDispatch) -> dict[str, Any]:
     }
 
 
+def _split_evidence_store(
+    value: Mapping[str, Any], manifest_sha256: str
+) -> SplitEvidenceStore:
+    _manifest, _current, children = _exact_spec(value)
+    roots = {
+        str(item["dispatch"].get("vault_root") or "") for item in children
+    }
+    if len(roots) != 1:
+        raise ContractError("Split children must share one exact vault root")
+    root = Path(next(iter(roots))).expanduser()
+    if not root.is_absolute() or not root.resolve().is_dir():
+        raise ContractError("Split child vault root is unavailable")
+    return SplitEvidenceStore(
+        root.resolve(),
+        manifest_sha256=manifest_sha256,
+        activation_sha256=_canonical_sha256(value),
+    )
+
+
+def _request_sha256_by_id(
+    value: Mapping[str, Any]
+) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
+    _manifest, _current, children = _exact_spec(value)
+    digests: dict[str, str] = {}
+    requests: dict[str, dict[str, Any]] = {}
+    for item in children:
+        subplan_id = str(item["subplan_id"])
+        request = dict(item["dispatch"])
+        if subplan_id in digests:
+            raise ContractError("Split child subplan ids must be unique")
+        digests[subplan_id] = _canonical_sha256(request)
+        requests[subplan_id] = request
+    return digests, requests
+
+
+def _manifest_order(
+    prepared: PreparedSplitDispatch,
+    receipts: tuple[SplitLaunchReceipt, ...],
+) -> tuple[SplitLaunchReceipt, ...]:
+    by_id = {item.subplan_id: item for item in receipts}
+    if len(by_id) != len(receipts):
+        raise ContractError("Split launch evidence has duplicate children")
+    expected = tuple(item.subplan_id for item in prepared.activation.bindings)
+    if not set(by_id).issubset(set(expected)):
+        raise ContractError("Split launch evidence left the sealed manifest")
+    return tuple(by_id[item] for item in expected if item in by_id)
+
+
+def _authoritative_state(
+    value: Mapping[str, Any],
+    *,
+    claimed_launches: tuple[SplitLaunchReceipt, ...],
+    claimed_terminals: tuple[SplitTerminalReceipt, ...],
+) -> tuple[
+    PreparedSplitDispatch,
+    SplitEvidenceStore,
+    tuple[SplitLaunchReceipt, ...],
+    tuple[SplitTerminalReceipt, ...],
+]:
+    manifest, _current, _children = _exact_spec(value)
+    digests, requests = _request_sha256_by_id(value)
+    evidence = _split_evidence_store(value, manifest.manifest_sha256)
+    stored = evidence.launches(digests)
+    recovered: list[tuple[SplitLaunchReceipt, str]] = []
+    known = {item.subplan_id for item in stored}
+    for subplan_id, raw in requests.items():
+        if subplan_id in known:
+            continue
+        prior = completed_replay(raw, digests[subplan_id])
+        if prior is None:
+            continue
+        if not any(
+            item.subplan_id == subplan_id for item in manifest.subplans
+        ):
+            raise ContractError(
+                "recovered Split launch left the manifest: "
+                f"{subplan_id!r} not in "
+                f"{tuple(item.subplan_id for item in manifest.subplans)!r}"
+            )
+        recovered.append(
+            (
+                SplitLaunchReceipt(
+                    manifest_sha256=manifest.manifest_sha256,
+                    subplan_id=subplan_id,
+                    request_id=str(prior.get("request_id") or ""),
+                    workspace_id=str(prior.get("task_workspace") or ""),
+                    worktree_path=str(prior.get("worktree") or ""),
+                    surface_id=str(prior.get("task_surface") or ""),
+                    placement=str(prior.get("placement") or ""),
+                ),
+                digests[subplan_id],
+            )
+        )
+    provisional = (*stored, *(item[0] for item in recovered))
+    prepared = _prepared(value, existing_launches=tuple(provisional))
+    if not prepared.activation.accepted:
+        return prepared, evidence, (), ()
+    evidence.initialize()
+    for receipt, request_sha256 in recovered:
+        evidence.seal_launch(receipt, request_sha256=request_sha256)
+    launches = _manifest_order(prepared, evidence.launches(digests))
+    if claimed_launches and claimed_launches != launches:
+        raise ContractError("caller Split launch receipts are not authoritative")
+    terminals = SplitTerminalProjector(prepared, evidence).project_all(launches)
+    if claimed_terminals and claimed_terminals != terminals:
+        raise ContractError("caller Split terminal receipts are not authoritative")
+    return prepared, evidence, launches, terminals
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -219,20 +332,25 @@ def main() -> int:
     args = parser.parse_args()
     try:
         value = _read_object(args.spec.expanduser().resolve())
-        launches = _launch_receipts(
+        claimed_launches = _launch_receipts(
             args.launch_receipts.expanduser().resolve()
             if getattr(args, "launch_receipts", None)
             else None
         )
-        prepared = _prepared(value, existing_launches=launches)
         if args.command == "validate":
+            prepared = _prepared(value, existing_launches=())
             payload = _activation_payload(prepared)
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
             return 0 if prepared.activation.accepted else 2
-        terminals = _terminal_receipts(
+        claimed_terminals = _terminal_receipts(
             args.terminal_receipts.expanduser().resolve()
             if getattr(args, "terminal_receipts", None)
             else None
+        )
+        prepared, evidence, launches, terminals = _authoritative_state(
+            value,
+            claimed_launches=claimed_launches,
+            claimed_terminals=claimed_terminals,
         )
         if args.command == "start":
             before = len(launches)
@@ -242,6 +360,9 @@ def main() -> int:
                 launch_receipts=launches,
                 start_dispatch=lambda request, digest: start_dispatch_request(
                     dict(request), digest
+                ),
+                persist_launch=lambda receipt, digest: evidence.seal_launch(
+                    receipt, request_sha256=digest
                 ),
             )
             after = len(result.launch_receipts)
@@ -276,9 +397,14 @@ def main() -> int:
         heads = _read_object(args.current_heads.expanduser().resolve())
         if set(heads) != {"schema_version", "heads"} or heads.get("schema_version") != 1:
             raise ContractError("Split current-head envelope changed")
-        current_heads = heads.get("heads")
-        if not isinstance(current_heads, dict):
+        claimed_heads = heads.get("heads")
+        if not isinstance(claimed_heads, dict):
             raise ContractError("Split current heads must be an object")
+        current_heads = {
+            item.child.subplan_id: item.child.head_sha for item in terminals
+        }
+        if claimed_heads != current_heads:
+            raise ContractError("caller Split HEAD map is not authoritative")
         decision = join_split(
             prepared.activation,
             launch_receipts=launches,
@@ -308,7 +434,7 @@ def main() -> int:
             )
         )
         return 0 if decision.disposition == "ready" else 2
-    except (ContractError, DispatchError, OSError, ValueError) as exc:
+    except (ContractError, DispatchError, OSError, TypeError, ValueError) as exc:
         die(str(exc))
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping
@@ -183,6 +185,53 @@ class ReviewGateAttemptMixin:
                         "legacy-cross-head-resume-disabled"
                     )
                 existing = ReviewAttempt.from_mapping(raw_attempt)
+                if existing.status == "terminal" and identity.cycle == (
+                    existing.identity.cycle + 1
+                ):
+                    if (
+                        existing.terminal is None
+                        or existing.terminal.result
+                        != ReviewAttemptTerminalResult.CHANGES_REQUESTED
+                        or existing.identity.finalization_lineage_id
+                        != identity.finalization_lineage_id
+                        or existing.identity.plan_sha256 != identity.plan_sha256
+                        or existing.identity.outcome_sha256 != identity.outcome_sha256
+                        or existing.identity.exact_head_sha == identity.exact_head_sha
+                    ):
+                        raise ReviewAttemptError(
+                            "next review attempt lacks a changed-HEAD resolution boundary"
+                        )
+                    archive = self.root / "attempts" / (
+                        f"cycle-{existing.identity.cycle}.json"
+                    )
+                    archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    archive.parent.chmod(0o700)
+                    encoded = (
+                        json.dumps(
+                            current,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    ).encode()
+                    try:
+                        descriptor = os.open(
+                            archive,
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                            0o600,
+                        )
+                    except FileExistsError:
+                        if archive.read_bytes() != encoded:
+                            raise ReviewAttemptError(
+                                "archived review attempt changed"
+                            ) from None
+                    else:
+                        with os.fdopen(descriptor, "wb") as handle:
+                            handle.write(encoded)
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                    _atomic_json(self.state_path, initial)
+                    return attempt
                 existing.assert_identity(identity)
                 if existing.status != "pending":
                     raise ReviewAttemptError(

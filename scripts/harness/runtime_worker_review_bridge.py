@@ -188,6 +188,7 @@ class RuntimeWorkerReviewBridgeMixin:
             return
         if input_evidence.state == "stable" and not callback_path.exists():
             try:
+                self.reserve_callback_submit(generation)
                 submitted = submit_stable_review_input(
                     vault_root=self.trusted_vault,
                     worktree=self.spec["product_root"],
@@ -214,7 +215,6 @@ class RuntimeWorkerReviewBridgeMixin:
             raw = callback_path.read_bytes()
         except OSError:
             return
-        self.callback_handled = True
         try:
             envelope = _envelope(json.loads(raw))
             if envelope.operation_id != operation_id or envelope.run_id != run_id:
@@ -231,6 +231,10 @@ class RuntimeWorkerReviewBridgeMixin:
                     generation=generation,
                     envelope=envelope,
                 )
+            self.record_provider_result(
+                generation, hashlib.sha256(raw).hexdigest()
+            )
+            self.callback_handled = True
             self.finalize_callback_timeout_rearm(
                 generation=generation,
                 envelope=envelope,

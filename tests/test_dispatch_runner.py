@@ -21,6 +21,12 @@ spec = importlib.util.spec_from_file_location("dispatch_runner", SCRIPT)
 assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+review_spec = importlib.util.spec_from_file_location(
+    "task_review_runner_public", ROOT / "scripts" / "task-review-runner.py"
+)
+assert review_spec and review_spec.loader
+review_runner = importlib.util.module_from_spec(review_spec)
+review_spec.loader.exec_module(review_runner)
 from harness.contracts import OwnedResources
 from harness.finalization_ledger import FinalizationLedger
 from harness.split_activation import split_child_policy, split_child_policy_payload
@@ -37,6 +43,8 @@ from harness.runtime_sessions import RuntimeSessionResult
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import operation_spec
+from task_contract import normalize as normalize_task_meta
+from task_review_flow import _exact_head_attempt_enabled
 
 failures: list[str] = []
 
@@ -80,12 +88,17 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (vault / "wiki" / "plans").mkdir(parents=True)
     (vault / "wiki" / "context").mkdir(parents=True)
     (vault / "skills" / "dispatch" / "references").mkdir(parents=True)
+    (vault / "skills" / "review").mkdir(parents=True)
     (vault / "config").mkdir(parents=True)
     (vault / "scripts").mkdir(parents=True)
     shutil.copytree(ROOT / "scripts" / "harness", vault / "scripts" / "harness")
     shutil.copyfile(
         ROOT / "skills" / "dispatch" / "references" / "task-prompt-template.md",
         vault / "skills" / "dispatch" / "references" / "task-prompt-template.md",
+    )
+    shutil.copyfile(
+        ROOT / "skills" / "review" / "SKILL.md",
+        vault / "skills" / "review" / "SKILL.md",
     )
     shutil.copyfile(ROOT / "config" / "model-routing.toml", vault / "config" / "model-routing.toml")
     shutil.copyfile(
@@ -1110,6 +1123,25 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
             "independent_route_alias": "finalization-independent",
         },
     )
+    normalized_meta = normalize_task_meta(meta)
+    check(
+        "schema-valid generated v4 tasks select the exact-attempt protocol",
+        normalized_meta["version"] == 4
+        and normalized_meta["finalization_policy"]
+        == meta["finalization_policy"]
+        and _exact_head_attempt_enabled(meta)
+        and set(meta["review_policy"])
+        == {
+            "mode",
+            "cross_model",
+            "runtime",
+            "model",
+            "effort",
+            "max_verify_iterations",
+            "verification_profile",
+            "verification_profile_sha256",
+        },
+    )
     custom_meta = runner.write_task_files(
         approved_custom_request,
         config,
@@ -1326,6 +1358,81 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and detected.stdout.strip() == "unit-session"
         and handoff.returncode == 0,
         detected.stderr + handoff.stderr,
+    )
+
+    class PublicReviewRuntime:
+        def __init__(self, root: Path) -> None:
+            self.store = OperationStore(root)
+            self.started = 0
+
+        def start(self, runtime_request, *, on_surface_opened=None):
+            self.started += 1
+            record = self.store.create(
+                runtime_request.spec,
+                lane_id=runtime_request.lane_id,
+                run_id=runtime_request.run_id,
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "preflight"
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "starting"
+            )
+            supervisor = OperationSupervisor(
+                self.store, record.spec.owner_id, record.spec.operation_id
+            )
+            supervisor.bind_resources(
+                OwnedResources("33333333-3333-4333-8333-333333333333")
+            )
+            opened = RuntimeSessionResult(
+                supervisor.read(), "surface-opened", checkpoint="checkpoint-1"
+            )
+            if on_surface_opened is not None:
+                on_surface_opened(opened)
+            supervisor.transition("running")
+            final = supervisor.transition("awaiting-callback")
+            return RuntimeSessionResult(
+                final, "started", checkpoint="checkpoint-1"
+            )
+
+        def register_callback_target(self, *_args: object) -> None:
+            return None
+
+    public_runtime = PublicReviewRuntime(vault / ".vault-meta" / "harness")
+    public_review = review_runner.run_task_review(
+        worktree, runtime_manager=public_runtime
+    )
+    public_gate = json.loads(
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / request_id
+            / request_id
+            / "review-gate.json"
+        ).read_text(encoding="utf-8")
+    )
+    public_ledger = json.loads(
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "finalization-ledger"
+            / f"{request_id}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "generated normalized task reaches the public exact-attempt runner",
+        public_review["status"] == "reviewing"
+        and public_runtime.started == len(public_review["lanes"])
+        and public_runtime.started > 0
+        and public_gate["attempt"]["identity"]["cycle"] == 1
+        and public_gate["attempt"]["identity"]["exact_head_sha"]
+        == git("rev-parse", "HEAD", cwd=worktree)
+        and public_ledger["max_cycles"] == 5
+        and len(public_ledger["cycles"]) == 1,
+        (public_review, public_gate, public_ledger),
     )
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")

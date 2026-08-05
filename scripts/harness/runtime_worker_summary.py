@@ -395,9 +395,13 @@ class RuntimeWorkerSummaryMixin:
         )
 
     def publish_summary_callback(self, summary: dict[str, object]) -> None:
-        self.callback_handled = True
         encoded = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()
         payload_sha256 = hashlib.sha256(encoded).hexdigest()
+        generation = (
+            self.active_target[0]
+            if self.active_target is not None
+            else self._initial_generation()
+        )
         envelope = CallbackEnvelope(
             callback_id=f"wiki-summary-{payload_sha256[:24]}",
             operation_id=self.spec["operation_id"],
@@ -407,6 +411,8 @@ class RuntimeWorkerSummaryMixin:
             payload_sha256=payload_sha256,
         )
         acceptance = CallbackBroker(self.store, self.spec["owner_id"]).accept(envelope)
+        self.record_provider_result(generation, payload_sha256)
+        self.callback_handled = True
         emit_compiled_pipeline_event(
             self.spec["cwd"],
             event="terminal",

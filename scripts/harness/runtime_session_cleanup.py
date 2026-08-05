@@ -25,6 +25,10 @@ from .runtime_session_liveness import (
     ResourceIdentity,
     ResourceObservation,
 )
+from .runtime_provider_events import (
+    RuntimeProviderEventError,
+    RuntimeProviderEventStream,
+)
 from .state_machine import TERMINAL
 from .supervisor import OperationSupervisor
 
@@ -296,14 +300,14 @@ class RuntimeSessionCleanupMixin:
         supervisor_status: str,
         surface_status: str,
         workspace_status: str,
-    ) -> None:
+    ) -> str:
         """Publish the exact close receipt before clearing durable ownership."""
 
         target_path = self._callback_target_path(record)
         if not target_path.is_file():
             # Historical records created before provider-event generations remain
             # cleanup-compatible but cannot manufacture a typed event identity.
-            return
+            return "legacy"
         target = self._callback_target(record)
         resources = record.resources
         workspace_id = str(metadata.get("workspace_id") or "")
@@ -318,7 +322,7 @@ class RuntimeSessionCleanupMixin:
             # Compatibility records may prove disappearance without carrying
             # the complete new provider/resource identity. Cleanup remains
             # possible, but no typed close receipt is fabricated for them.
-            return
+            return "legacy"
         identity = ResourceIdentity(
             owner_id=record.spec.owner_id,
             operation_id=record.spec.operation_id,
@@ -337,9 +341,36 @@ class RuntimeSessionCleanupMixin:
             surface_status=surface_status,
             workspace_status=workspace_status,
         )
-        ResourceClosureLedger(
+        result = ResourceClosureLedger(
             self._state_root(record) / "provider-events"
         ).close(identity, observation)
+        delivery_state = (
+            self._state_root(record)
+            / "provider-events"
+            / f"generation-{int(target['generation'])}"
+            / "delivery"
+            / "delivery-state.json"
+        )
+        if not delivery_state.is_file() or delivery_state.is_symlink():
+            return "legacy"
+        try:
+            stream = RuntimeProviderEventStream.rehydrate(
+                self._state_root(record) / "provider-events",
+                int(target["generation"]),
+            )
+            cursor = stream.controller.current_state().cursor
+            if (
+                not cursor.process_exited
+                and not cursor.event_gap
+                and not cursor.result_published
+            ):
+                stream.event_gap("worker-exit-unobserved")
+            decision = stream.resource_closed_receipt(result.receipt)
+        except RuntimeProviderEventError as exc:
+            raise RuntimeSessionError(
+                "typed resource close delivery is invalid"
+            ) from exc
+        return decision.action
 
     def status(self, owner_id: str, operation_id: str) -> RuntimeSessionResult:
         """Read exact resource liveness without mutating durable state."""
@@ -601,7 +632,7 @@ class RuntimeSessionCleanupMixin:
                 ),
             )
             surface_status = "missing"
-        self._record_resource_closed(
+        close_action = self._record_resource_closed(
             supervisor.read(),
             metadata,
             process_status="dead",
@@ -610,6 +641,17 @@ class RuntimeSessionCleanupMixin:
             workspace_status=workspace_status,
         )
         supervisor.bind_resources(OwnedResources())
+        if close_action == "attention":
+            current = self._mark_attention(
+                supervisor.read(), AttentionReason.ATTENTION_REQUIRED
+            )
+            self._notify(current.spec.owner_id, current.spec.operation_id)
+            return self._result(
+                current,
+                "attention-required",
+                process_status="dead",
+                surface_status="missing",
+            )
         current = supervisor.transition("complete")
         self._notify(current.spec.owner_id, current.spec.operation_id)
         return self._result(

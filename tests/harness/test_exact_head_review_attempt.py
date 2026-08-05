@@ -58,6 +58,7 @@ from task_review_flow import (  # noqa: E402
 from task_review_resolution_flow import (  # noqa: E402
     legacy_cross_head_resume_disabled,
 )
+from outcome_contract import extract_from_bytes  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -554,7 +555,17 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         encoding="utf-8",
     )
     plan = vault / "approved-plan.md"
-    plan.write_text("# Approved exact-HEAD task\n", encoding="utf-8")
+    plan.write_text(
+        """# Approved exact-HEAD task
+
+## Outcome Contract
+
+```json
+{"schema_version":1,"purpose":"Exercise the exact review path.","desired_outcome":"A schema-valid v4 policy reserves one exact attempt.","success_evidence":[{"evidence_id":"exact-review","observable":"The public flow uses the ledger."}],"non_goals":["No external effect."]}
+```
+""",
+        encoding="utf-8",
+    )
     (product / "product.py").write_text("VALUE = 1\n", encoding="utf-8")
     subprocess.run(
         ["git", "init", "-b", "main"],
@@ -589,15 +600,39 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     profile_sha = load_profiles(
         vault / "config/verification-profiles.toml"
     )["scoped"].sha256
-    task_id = "exact-selector-task"
+    task_id = "11111111-1111-4111-8111-111111111111"
+    outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
+    (product / ".task-summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "type": "repo-touch",
+                "title": "Exact selector",
+                "session": "selector-session",
+                "body": "The exact selector fixture is ready.",
+                "outcome_disposition": "achieved",
+                "outcome_evidence_ids": ["exact-review"],
+                "residual_gap_pointers": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     meta = {
-        "version": 3,
+        "version": 4,
         "task_id": task_id,
         "task_name": "exact selector",
         "task_surface": "22222222-2222-4222-8222-222222222222",
         "plan_file": str(plan),
         "approved_plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
-        "outcome_contract_sha256": "2" * 64,
+        "outcome_contract_sha256": outcome_sha,
+        "finalization_policy": {
+            "max_cycles": 5,
+            "add_independent_model_after": 3,
+            "execution": "ephemeral",
+            "primary_route_alias": "finalization-primary",
+            "independent_route_alias": "finalization-independent",
+        },
         "routing": {
             "session": {
                 "runtime": "codex",
@@ -615,9 +650,6 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
             "max_verify_iterations": 1,
             "verification_profile": "scoped",
             "verification_profile_sha256": profile_sha,
-            "execution_protocol": EXACT_HEAD_REVIEW_PROTOCOL,
-            "finalization_lineage_id": "selector-lineage",
-            "finalization_cycle": 1,
         },
     }
     store = OperationStore(vault / ".vault-meta/harness")
@@ -689,8 +721,45 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and "awaiting_resolution" not in exact_state
         and "continuation_effects" not in exact_state,
     )
+    (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "resolve exact finding"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+    )
+    second = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    second_state = gate.read()
+    ledger = json.loads(
+        (
+            vault
+            / ".vault-meta/harness/finalization-ledger"
+            / f"{task_id}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "changed-HEAD resolution reserves the next bounded ledger cycle",
+        second["status"] == "reviewing"
+        and second_state["attempt"]["identity"]["cycle"] == 2
+        and len(ledger["cycles"]) == 2
+        and ledger["cycles"][0]["terminal_result"] == "changes-requested"
+        and ledger["cycles"][1]["terminal_result"] == ""
+        and (
+            gate.root / "attempts/cycle-1.json"
+        ).is_file()
+        and runtime.started == 2,
+    )
 
-    legacy_task_id = "legacy-selector-task"
+    legacy_task_id = "22222222-2222-4222-8222-222222222222"
     legacy_runtime = FakeRuntime(store, owner_id=legacy_task_id)
     legacy_gate_root = (
         vault
@@ -703,10 +772,17 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
     )
     legacy_runtime_root = base / "legacy-runtime"
     legacy_runtime_root.mkdir()
+    legacy_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=product,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     legacy_gate.begin(
         dispatch_operation_id=legacy_task_id,
         request=request(
-            head,
+            legacy_head,
             operation_id=legacy_task_id,
             owner_id=legacy_task_id,
         ),
@@ -736,10 +812,8 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         apply_finalizing_recovery=forbidden_finalizing_recovery,
     )
     check(
-        "production selector keeps historical gates inspect/archive/cleanup-only",
-        historical["status"] == "legacy-cross-head-resume-disabled"
-        and historical["allowed_actions"] == ["inspect", "archive", "cleanup"]
-        and historical["provider_effect_allowed"] is False
+        "production selector completes a pre-activation gate without conversion",
+        historical["status"] == "reviewing"
         and legacy_runtime.started == legacy_starts,
     )
 

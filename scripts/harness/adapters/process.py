@@ -163,6 +163,7 @@ class ProcessAdapter:
         runtime_home: Path | None = None,
         research_request_sha256: str = "",
         callback_wake: str = "",
+        initial_input_pointer: Path | None = None,
     ) -> SurfaceLaunch:
         return _prepare_surface_launch(
             argv=argv,
@@ -185,6 +186,7 @@ class ProcessAdapter:
             runtime_home=runtime_home,
             research_request_sha256=research_request_sha256,
             callback_wake=callback_wake,
+            initial_input_pointer=initial_input_pointer,
             json_writer=self._write_json,
             shebang_resolver=self.env_shebang_interpreter,
             error_type=ProcessError,
