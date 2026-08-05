@@ -1,0 +1,3 @@
+write: /private/tmp/llm-obsidian-265-release-subject-a85043c1/scripts/mcp-gateway/config.json
+write: /private/tmp/llm-obsidian-265-release-subject-a85043c1/.mcp.json
+config-sync: synchronized
