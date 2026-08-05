@@ -46,6 +46,7 @@ test-harness:
 	@python3 tests/harness/test_review_attempt.py
 	@python3 tests/harness/test_exact_head_review_attempt.py
 	@python3 tests/harness/test_verification_attempt.py
+	@python3 tests/test_split_components.py
 	@python3 tests/harness/test_review_program.py
 	@python3 tests/harness/test_review_topology.py
 	@python3 tests/harness/test_review_vertical.py
