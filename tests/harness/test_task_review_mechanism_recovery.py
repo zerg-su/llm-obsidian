@@ -39,6 +39,7 @@ from task_review_context import (  # noqa: E402
     _runtime_root,
 )
 from task_review_mechanism_recovery import (  # noqa: E402
+    _authorized_accepted_callback_head,
     recover_task_review_for_mechanism,
 )
 from task_review_legacy_rounds import RecoveryRoundStore  # noqa: E402
@@ -49,6 +50,7 @@ from task_review_shared import TaskReviewError  # noqa: E402
 from task_escalation_records import (  # noqa: E402
     append_raise,
     append_resolution,
+    load_chain,
 )
 
 
@@ -443,6 +445,94 @@ def replace_record(
     )
 
 
+def append_mechanism_decision(
+    fixture: RecoveryFixture,
+    escalation_id: str,
+    decision: str,
+    *,
+    task_surface: str | None = None,
+) -> None:
+    meta = json.loads(
+        (fixture.product / ".task-meta.json").read_text(encoding="utf-8")
+    )
+    append_raise(
+        fixture.product,
+        {
+            "version": 1,
+            "id": escalation_id,
+            "status": "pending",
+            "task_name": "mechanism recovery",
+            "category": "mechanism-failure",
+            "reason": "The same exact callback ingestion boundary is paused",
+            "question": "Authorize the bounded repository-owned repair?",
+            "worktree": str(fixture.product.resolve()),
+            "task_surface": task_surface or str(meta["task_surface"]),
+            "raised_at": "2026-08-05T12:00:00Z",
+        },
+    )
+    append_resolution(
+        fixture.product,
+        decision,
+        resolved_at="2026-08-05T12:01:00Z",
+    )
+
+
+def accepted_callback_chain(
+    fixture: RecoveryFixture,
+    *,
+    duplicate_anchor: bool = False,
+    latest_surface: str | None = None,
+) -> str:
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fixture.product,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    original = (
+        "Classified as an eligible repository-owned callback-ingestion "
+        "mechanism failure. Authorize one narrow reversible repair in the "
+        "task worktree with a regression reproducing two exact accepted "
+        "review callbacks stuck in verifying without .task-review.json. "
+        "Preserve and ingest the existing callback identities and findings; "
+        "do not relaunch reviewers, repeat provider/model/review effects, or "
+        "hand-edit the canonical store. If the live root worker generation "
+        "is stale, the harness may close and restart only that exact owned "
+        "generation within its existing model-restart budget, then retry "
+        f"callback ingestion once from clean HEAD {head}."
+    )
+    append_mechanism_decision(fixture, "accepted-callback-anchor", original)
+    if duplicate_anchor:
+        append_mechanism_decision(
+            fixture, "accepted-callback-anchor-duplicate", original
+        )
+    ordering = (
+        "Classified as the same eligible repository-owned callback-ingestion "
+        "mechanism failure. Authorize a narrow regression-backed ordering "
+        "repair and exactly one additional ingestion retry using the same "
+        "two accepted callback identities."
+    )
+    append_mechanism_decision(fixture, "accepted-callback-ordering", ordering)
+    chained = (
+        "Classified as the same eligible repository-owned callback-ingestion "
+        "authorization-chain mechanism failure. Authorize a narrow "
+        "regression-backed repair that accepts the latest resolved "
+        "same-failure escalation only when its exact previous chain reaches "
+        f"the resolved authorization containing reviewed HEAD {head}, the "
+        "review gate/attempt and two accepted callback identities are "
+        "unchanged, every intervening record digest and previous pointer "
+        "validates, and the current product HEAD is a clean descendant."
+    )
+    append_mechanism_decision(
+        fixture,
+        "accepted-callback-chain",
+        chained,
+        task_surface=latest_surface,
+    )
+    return head
+
+
 def check_legacy_round_rejection(
     label: str,
     *,
@@ -464,6 +554,114 @@ def check_legacy_round_rejection(
         )
     else:
         raise AssertionError(f"legacy round adapter accepted {label}")
+
+
+with tempfile.TemporaryDirectory(prefix="accepted-callback-chain.") as raw:
+    fixture = build_fixture(Path(raw))
+    reviewed_head = accepted_callback_chain(fixture)
+    latest = load_chain(fixture.product)[-1]
+    check(
+        "same-failure authorization follows one exact validated chain",
+        _authorized_accepted_callback_head(
+            latest.payload, fixture.product.resolve()
+        )
+        == reviewed_head,
+    )
+
+    chain = load_chain(fixture.product)
+    anchor = next(
+        record
+        for record in chain
+        if str(record.payload.get("decision") or "").startswith(
+            "Classified as an eligible repository-owned callback-ingestion"
+        )
+    )
+    check(
+        "literal-SHA accepted-callback authorization remains valid",
+        _authorized_accepted_callback_head(
+            anchor.payload, fixture.product.resolve()
+        )
+        == reviewed_head,
+    )
+    branch = json.loads(chain[-2].path.read_text(encoding="utf-8"))
+    branch["record_id"] = "accepted-callback-branch"
+    branch["payload"]["id"] = "accepted-callback-branch"
+    branch["previous"] = {
+        "record_id": anchor.record_id,
+        "record_sha256": anchor.sha256,
+    }
+    write_json(
+        fixture.product
+        / ".task-escalation-records/accepted-callback-branch.json",
+        branch,
+    )
+    check(
+        "same-failure authorization rejects a branched predecessor",
+        not _authorized_accepted_callback_head(
+            latest.payload, fixture.product.resolve()
+        ),
+    )
+
+
+with tempfile.TemporaryDirectory(
+    prefix="accepted-callback-chain-missing."
+) as raw:
+    fixture = build_fixture(Path(raw))
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fixture.product,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    append_mechanism_decision(
+        fixture,
+        "accepted-callback-chain-only",
+        (
+            "Classified as the same eligible repository-owned "
+            "callback-ingestion authorization-chain mechanism failure. "
+            "Authorize the exact previous authorization containing reviewed "
+            f"HEAD {head}."
+        ),
+    )
+    latest = load_chain(fixture.product)[-1]
+    check(
+        "same-failure authorization rejects a missing original grant",
+        not _authorized_accepted_callback_head(
+            latest.payload, fixture.product.resolve()
+        ),
+    )
+
+
+with tempfile.TemporaryDirectory(
+    prefix="accepted-callback-chain-ambiguous."
+) as raw:
+    fixture = build_fixture(Path(raw))
+    accepted_callback_chain(fixture, duplicate_anchor=True)
+    latest = load_chain(fixture.product)[-1]
+    check(
+        "same-failure authorization rejects ambiguous original grants",
+        not _authorized_accepted_callback_head(
+            latest.payload, fixture.product.resolve()
+        ),
+    )
+
+
+with tempfile.TemporaryDirectory(
+    prefix="accepted-callback-chain-scope."
+) as raw:
+    fixture = build_fixture(Path(raw))
+    accepted_callback_chain(
+        fixture,
+        latest_surface="99999999-9999-4999-8999-999999999999",
+    )
+    latest = load_chain(fixture.product)[-1]
+    check(
+        "same-failure authorization rejects scope drift",
+        not _authorized_accepted_callback_head(
+            latest.payload, fixture.product.resolve()
+        ),
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="legacy-round-guards.") as raw:

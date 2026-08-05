@@ -47,16 +47,28 @@ from task_review_legacy_rounds import RecoveryRoundStore
 from task_review_resolution_evidence import approved_summary_resolution
 from task_review_transport import _receipt
 from review_contract import review_axis_responsibility
-from task_escalation_records import EscalationRecordError, load_latest
+from task_escalation_records import (
+    EscalationRecordError,
+    load_chain,
+    load_latest,
+)
 
 
 _ACCEPTED_CALLBACK_RECOVERY_PREFIX = (
     "Classified as an eligible repository-owned callback-ingestion "
     "mechanism failure."
 )
+_ACCEPTED_CALLBACK_ORDERING_PREFIX = (
+    "Classified as the same eligible repository-owned callback-ingestion "
+    "mechanism failure."
+)
+_ACCEPTED_CALLBACK_CHAIN_PREFIX = (
+    "Classified as the same eligible repository-owned callback-ingestion "
+    "authorization-chain mechanism failure."
+)
 
 
-def _authorized_accepted_callback_head(
+def _literal_accepted_callback_head(
     attention: dict[str, Any], worktree: Path
 ) -> str:
     decision = str(attention.get("decision") or "")
@@ -73,6 +85,75 @@ def _authorized_accepted_callback_head(
     ):
         return ""
     return match.group(1)
+
+
+def _authorized_accepted_callback_head(
+    attention: dict[str, Any], worktree: Path
+) -> str:
+    literal_head = _literal_accepted_callback_head(attention, worktree)
+    if literal_head:
+        return literal_head
+    decision = str(attention.get("decision") or "")
+    match = re.search(r"reviewed HEAD ([0-9a-f]{40,64})", decision)
+    if (
+        attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_ACCEPTED_CALLBACK_CHAIN_PREFIX)
+        or "latest resolved same-failure escalation" not in decision
+        or "exact previous chain reaches" not in decision
+        or "two accepted callback identities are unchanged" not in decision
+        or "every intervening record digest and previous pointer validates"
+        not in decision
+        or "clean descendant" not in decision
+        or match is None
+    ):
+        return ""
+    reviewed_head = match.group(1)
+    try:
+        chain = load_chain(worktree)
+    except EscalationRecordError:
+        return ""
+    if not chain or chain[-1].payload != attention:
+        return ""
+    chain_paths = {record.path.resolve() for record in chain}
+    records_root = worktree / ".task-escalation-records"
+    try:
+        stored_paths = {
+            path.resolve()
+            for path in records_root.iterdir()
+            if path.name.endswith(".json")
+        }
+    except OSError:
+        return ""
+    if stored_paths != chain_paths:
+        return ""
+    anchors = [
+        (index, record, _literal_accepted_callback_head(record.payload, worktree))
+        for index, record in enumerate(chain[:-1])
+        if _literal_accepted_callback_head(record.payload, worktree)
+    ]
+    if len(anchors) != 1:
+        return ""
+    anchor_index, _anchor, anchor_head = anchors[0]
+    if anchor_head != reviewed_head:
+        return ""
+    scope = {
+        key: attention.get(key)
+        for key in ("category", "worktree", "task_name", "task_surface")
+    }
+    for record in chain[anchor_index:]:
+        if any(record.payload.get(key) != value for key, value in scope.items()):
+            return ""
+        if record.record_type not in {"raise", "resolution"}:
+            return ""
+        if record.record_type == "resolution" and record is not chain[-1]:
+            record_decision = str(record.payload.get("decision") or "")
+            if record is not chain[anchor_index] and not record_decision.startswith(
+                _ACCEPTED_CALLBACK_ORDERING_PREFIX
+            ):
+                return ""
+    return reviewed_head
 
 
 def _clean_descendant_head(worktree: Path, reviewed_head: str) -> str:
@@ -165,6 +246,7 @@ def _recover_accepted_exact_callbacks(
             )
         run = gate.rehydrate_attempt()
         ready = []
+        callback_identities: set[tuple[str, str]] = set()
         for lane in run.execution.lanes:
             round_ = run.rounds[lane.axis]
             callback = _callback_path(runtime_root, lane.axis)
@@ -189,9 +271,19 @@ def _recover_accepted_exact_callbacks(
                     "accepted callback recovery identity changed"
                 )
             ready.append((lane, round_, result))
-        if len(ready) != len(run.execution.lanes):
+            callback_identities.add(
+                (
+                    child.accepted_callback_id,
+                    child.accepted_callback_sha256,
+                )
+            )
+        if (
+            len(run.execution.lanes) != 2
+            or len(ready) != 2
+            or len(callback_identities) != 2
+        ):
             raise TaskReviewError(
-                "accepted callback recovery set is incomplete"
+                "accepted callback recovery identity set is not the exact pair"
             )
         for lane, round_, result in ready:
             gate.complete_attempt_round(run, lane, round_, result)
