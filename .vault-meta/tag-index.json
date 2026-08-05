@@ -152,6 +152,7 @@
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
     "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
     "wiki/meta/reviews/Cross-model review — 55ae92aa-33f1-411d-b2c4-a3f88441bb18 — 3b5a88d6a4a6.md",
+    "wiki/meta/reviews/Cross-model review — 5b3b36e7-206d-4fb0-940b-65832d14032f — 40c1f82a1995.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 6c5f69c7-7ef4-4926-bc88-80b50d4abd34 — fa1d3401c7a0.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",
@@ -401,7 +402,8 @@
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
     "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md",
-    "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md"
+    "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md",
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md"
   ],
   "release": [
     "wiki/meta/sessions/LLM Obsidian 2.4 typed pipeline composition result.md",
@@ -437,7 +439,8 @@
     "wiki/repos/LLM Obsidian 2.6 upstream live drift verification.md",
     "wiki/repos/LLM Obsidian 2.6.0 technical foundation.md",
     "wiki/repos/LLM Obsidian 2.6.3 Russian technical documentation.md",
-    "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md"
+    "wiki/repos/LLM Obsidian 2.6.4 Subplan D result.md",
+    "wiki/repos/LLM Obsidian 2.6.5 Subplan B provider events and delivery.md"
   ],
   "retrieval": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -454,6 +457,7 @@
     "wiki/meta/reviews/Cross-model review — 4c5c8763-3615-491e-bf07-bf69c70f48bb — 57d47df23fa6.md",
     "wiki/meta/reviews/Cross-model review — 4df2c9f2-43a9-415e-bf26-b063e87c593d — 4b203a34a059.md",
     "wiki/meta/reviews/Cross-model review — 55ae92aa-33f1-411d-b2c4-a3f88441bb18 — 3b5a88d6a4a6.md",
+    "wiki/meta/reviews/Cross-model review — 5b3b36e7-206d-4fb0-940b-65832d14032f — 40c1f82a1995.md",
     "wiki/meta/reviews/Cross-model review — 5c15b0f5-381b-481f-b218-6b1ea1869208 — 0891d297f25e.md",
     "wiki/meta/reviews/Cross-model review — 6c5f69c7-7ef4-4926-bc88-80b50d4abd34 — fa1d3401c7a0.md",
     "wiki/meta/reviews/Cross-model review — 789b3188-0916-4d59-9bcd-6cddcdcc64ac — 1ab0c0f125cc.md",

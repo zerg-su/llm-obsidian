@@ -20,7 +20,7 @@ _31 pages, updated 2026-08-05_
 - [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]] — pending, 2026-08-05 `c-000117`
 - [[2026-08-05-145351-llm-obsidian-2-6-5-join-stability-activation-release]] — pending, 2026-08-05 `c-000122`
 - [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-a-exact-head-review-attempt]] — pending, 2026-08-05 `c-000118`
-- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery]] — pending, 2026-08-05 `c-000119`
+- [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery]] — executed, 2026-08-05 `c-000119`
 - [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl]] — pending, 2026-08-05 `c-000120`
 - [[2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components]] — pending, 2026-08-05 `c-000121`
 - [[2026-08-03-192346-llm-obsidian-2-6-2-truthful-cmux-workspace-progress]] — pending, 2026-08-04 `c-000097`

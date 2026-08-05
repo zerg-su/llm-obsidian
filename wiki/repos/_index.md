@@ -14,8 +14,9 @@ sessions: []
 Автогенерируемый листинг (reindex.py --folder-indexes). Ручной текст вне маркеров сохраняется.
 
 <!-- AUTO-INDEX START -->
-_24 pages, updated 2026-08-04_
+_25 pages, updated 2026-08-05_
 
+- [[LLM Obsidian 2.6.5 Subplan B provider events and delivery]] — active, 2026-08-05 `c-000124`
 - [[LLM Obsidian 2.6.3 Russian technical documentation]] — active, 2026-08-04 `c-000105`
 - [[LLM Obsidian 2.6.4 Subplan D result]] — active, 2026-08-04 `c-000116`
 - [[LLM Obsidian 2.6 common dogfood fixes]] — active, 2026-08-02 `c-000092`

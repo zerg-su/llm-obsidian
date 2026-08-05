@@ -27,6 +27,13 @@ Append-only. Новые записи добавляются СВЕРХУ. Про
 
 ---
 
+## [2026-08-05] reap | llm-obsidian-2-6-5-provider-events
+
+`c-000124` [[LLM Obsidian 2.6.5 Subplan B provider events and delivery]]. Exact HEAD `84ecb3bad198053468f1ceb15f69bbea06510e3a`.
+
+- B1: `ProviderEvent` exposes exactly seven values. Interactive accepts all seven; ephemeral accepts `{provider-started,input-accepted,result-published,process-exited,resource-closed,event-gap}`. Exact owner/operation/run/generation/provider-session/process/workspace/surface/source identity and contiguous cursors reject duplicate, stale, gap, ownership drift, wrong scalar types, and unreachable durable projections.
+- B2: Claude print and Co
+
 ## [2026-08-05 15:02] dispatch | llm-obsidian-2-6-5-split-components
 
 Spawned an approved unattended task session (cmux `EA694194-167B-454F-852D-94C70B281004`, runtime codex, model gpt-5.6-sol) in workspace placement in worktree `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-split-components`. Target repo `/Users/zak/Projects/llm-obsidian`, branch `task/llm-obsidian-2-6-5-split-components` from `release/2.6.5`. Plan: `/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator/wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md`. Pre-loaded context: [[2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati]]. Awaiting typed review and final reap.

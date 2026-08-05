@@ -2,7 +2,7 @@
 type: meta
 title: "Hot Cache"
 created: 2026-07-05
-updated: 2026-08-04
+updated: 2026-08-05
 tags:
   - meta
   - hot-cache
@@ -34,6 +34,7 @@ Navigation: [[index]] | [[log]] | [[overview]]
 
 ## Recent Changes
 
+- 2026-08-05: [[LLM Obsidian 2.6.5 Subplan B provider events and delivery]] — finalized task result (`c-000124`)
 - 2026-08-04: [[LLM Obsidian 2.6.4 Subplan D result]] — finalized task result (`c-000116`)
 - 2026-08-04: [[LLM Obsidian 2.6.3 Russian technical documentation]] — finalized task result (`c-000105`)
 - 2026-08-04: [[LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization]] — bounded default runtime.env bootstrap (`c-000103`)
@@ -48,7 +49,6 @@ Navigation: [[index]] | [[log]] | [[overview]]
 - 2026-08-01: [[LLM Obsidian 2.6 skill workstream A]] — finalized task result (`c-000078`)
 - 2026-08-01: [[LLM Obsidian 2.6 skill workstream C]] — finalized task result (`c-000076`)
 - 2026-08-01: [[LLM Obsidian 2.6 paired design baseline]] — finalized task result (`c-000074`)
-- 2026-08-01: [[LLM Obsidian 2.6 paired fix baseline]] — finalized task result (`c-000072`)
 
 ## Active Threads
 

@@ -6,8 +6,10 @@ session_id: 019fab00-3160-7380-8920-4b20183afb76
 sessions:
   - id: 019fab00-3160-7380-8920-4b20183afb76
     date: 2026-08-05
+  - id: 019fab00-3160-7380-8920-4b20183afb76
+    date: 2026-08-05
 source_cwd: "/Users/zak/Projects/worktrees/llm-obsidian-2-6-5-coordinator"
-status: pending
+status: executed
 created: 2026-08-05
 updated: 2026-08-05
 tags:
@@ -77,3 +79,5 @@ Consumes existing SessionIdentity, OwnedResources, OperationStore effect receipt
 ## Verification and handoff
 
 Run new suites plus runtime session/adapters/liveness/cleanup tests and `git diff --check`. Handoff includes exact HEAD, event subsets per profile, irreversible boundary table, auth dispositions and zero-leak proof. Review: explicit single-model Deep, runtime `codex`, model `sol`, effort `xhigh`.
+
+Результат: [[LLM Obsidian 2.6.5 Subplan B provider events and delivery]] (reaped 2026-08-05)
