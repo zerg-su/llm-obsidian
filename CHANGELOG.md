@@ -30,6 +30,14 @@ packages were published for them.
 
 ### Changed
 
+- Interactive Codex tasks and continuations now receive one content-addressed
+  pointer to the complete prompt artifact instead of a multiline editor paste;
+  Claude delivery remains unchanged. The native update dialog selects `Skip`
+  for the current launch and leaves installation and future reminders to the
+  user.
+- The `tdd` skill now requires an unknown adapter/runtime mechanism to be
+  proven first by one disposable live `prototype`, then promoted into a
+  real-seam RED regression and focused GREEN before the broad gate.
 - Cross-HEAD same-session review continuation is removed from the active path.
   Changed product HEADs start a distinct attempt; legacy records remain
   inspectable but cannot trigger a provider effect.

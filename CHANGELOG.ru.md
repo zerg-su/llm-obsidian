@@ -36,6 +36,13 @@
 
 ### Изменено
 
+- Интерактивные Codex-задачи и continuation получают один content-addressed
+  указатель на полный prompt artifact вместо многострочной вставки в editor;
+  доставка Claude не меняется. Native update dialog выбирает `Skip` только для
+  текущего запуска, а установку и будущие напоминания оставляет пользователю.
+- Skill `tdd` требует сначала доказать неизвестный adapter/runtime-механизм
+  одним disposable live-`prototype`, затем перенести наблюдаемое поведение в
+  real-seam RED regression и focused GREEN до широкого gate.
 - Cross-HEAD same-session review continuation удалён из active path. Новый
   product HEAD создаёт отдельный attempt; legacy records доступны для inspect,
   но не могут вызвать provider effect.
