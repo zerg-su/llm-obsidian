@@ -17,17 +17,23 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import (  # noqa: E402
+    AttentionReason,
     EffectOutcome,
     OperationRecord,
     OwnedResources,
     RuntimeRoute,
+    to_dict,
 )
+from harness.callbacks import CallbackBroker  # noqa: E402
 from harness.pipeline_builtins import compiled_builtin  # noqa: E402
 from harness.state_machine import TERMINAL  # noqa: E402
 from harness.store import OperationStore, StoreError  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
+    ReviewFinding,
     ReviewOperationRequest,
+    ReviewResult,
+    review_round_envelope,
 )
 from harness.workflows.review_gate import (  # noqa: E402
     ReviewGateController,
@@ -38,6 +44,7 @@ from task_review_context import (  # noqa: E402
     _gate_root,
     _runtime_root,
 )
+from task_review_drift_contract import authorized_drift_quarantine  # noqa: E402
 from task_review_mechanism_recovery import (  # noqa: E402
     _authorized_accepted_callback_head,
     recover_task_review_for_mechanism,
@@ -85,6 +92,9 @@ class FakeRuntime:
         self.store = store
         self.started: list[object] = []
         self.registered: list[tuple[str, str, str, str, str]] = []
+        self.exit_requests: list[str] = []
+        self.cleanup_calls: list[str] = []
+        self.fail_cleanup_for: set[str] = set()
 
     def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
         self.started.append(request)
@@ -146,6 +156,49 @@ class FakeRuntime:
                 "mechanism fixture expected a quiescent superseded review"
             )
         return SessionResult(record, "", action="terminal")
+
+    def request_exit(self, owner_id: str, operation_id: str) -> SessionResult:
+        record = self.store.read(owner_id, operation_id)
+        if record.state in TERMINAL:
+            return SessionResult(record, "", action="terminal")
+        self.exit_requests.append(operation_id)
+        if record.state == "attention-required":
+            self.store.transition(owner_id, operation_id, "cancelling")
+        elif record.state != "finalizing":
+            self.store.transition(owner_id, operation_id, "finalizing")
+        self.store.transition(owner_id, operation_id, "exiting")
+        record = self.store.read(owner_id, operation_id)
+        return SessionResult(record, "", action="exit-requested")
+
+    def cleanup(self, owner_id: str, operation_id: str) -> SessionResult:
+        record = self.store.read(owner_id, operation_id)
+        if record.state in TERMINAL:
+            return SessionResult(record, "", action="terminal")
+        self.cleanup_calls.append(operation_id)
+        if operation_id in self.fail_cleanup_for:
+            self.store.transition(
+                owner_id,
+                operation_id,
+                "attention-required",
+                reason=AttentionReason.CALLBACK_TIMEOUT,
+            )
+            return SessionResult(
+                self.store.read(owner_id, operation_id),
+                "",
+                action="attention-required",
+            )
+        if record.state != "exiting":
+            raise AssertionError("quarantine cleanup requires exiting ownership")
+        if record.resources != OwnedResources():
+            record = replace(
+                record,
+                resources=OwnedResources(),
+                revision=record.revision + 1,
+            )
+            self.store.save(record, expected_revision=record.revision - 1)
+        self.store.transition(owner_id, operation_id, "complete")
+        record = self.store.read(owner_id, operation_id)
+        return SessionResult(record, "", action="cleaned")
 
 
 class LegacyRoundStore:
@@ -211,6 +264,7 @@ class RecoveryFixture:
     attention_path: Path
     exact_attention: dict[str, object]
     attention_pointer: bytes
+    lane_round_ids: tuple[tuple[str, str, str], ...]
 
 
 def write_json(path: Path, value: dict[str, object]) -> None:
@@ -224,6 +278,8 @@ def build_fixture(
     *,
     gate_status: str = "attention-required",
     legacy_round_specs: bool = False,
+    exact_attempt: bool = False,
+    deep: bool = False,
 ) -> RecoveryFixture:
     vault = base / "vault"
     product = base / "product"
@@ -305,12 +361,12 @@ def build_fixture(
             }
         },
         "review_policy": {
-            "mode": "simple",
+            "mode": "deep" if deep else "simple",
             "cross_model": False,
             "runtime": "",
             "model": "",
             "effort": "",
-            "max_verify_iterations": 1,
+            "max_verify_iterations": 2 if deep else 1,
             "verification_profile": "scoped",
             "verification_profile_sha256": profile_sha,
             "auto_resolve_severities": ["warning", "nit"],
@@ -343,7 +399,12 @@ def build_fixture(
     gate = ReviewGateController(
         _gate_root(vault, task_id), runtime, gate_store
     )
-    preset = ReviewPreset.from_flags()
+    preset = ReviewPreset.from_flags(
+        deep=deep,
+        runtime="codex" if deep else "",
+        model="sol" if deep else "",
+        effort="xhigh" if deep else "",
+    )
     request = ReviewOperationRequest(
         preset.request(task_id, selected_provider="openai"),
         task_id,
@@ -356,14 +417,25 @@ def build_fixture(
         ),
         context,
     )
-    run = gate.begin(
-        dispatch_operation_id=task_id,
-        request=request,
-        origin_surface=str(meta["task_surface"]),
-        cwd=runtime_root,
-        product_root=product,
-        prompt_pointer="prompts/review.md",
-        callback_root="callbacks",
+    start = {
+        "dispatch_operation_id": task_id,
+        "request": request,
+        "origin_surface": str(meta["task_surface"]),
+        "cwd": runtime_root,
+        "product_root": product,
+        "prompt_pointer": "prompts/review.md",
+        "callback_root": "callbacks",
+    }
+    run = (
+        gate.begin_attempt(
+            finalization_lineage_id=task_id,
+            cycle=1,
+            plan_sha256=str(meta["approved_plan_sha256"]),
+            outcome_sha256="3" * 64,
+            **start,
+        )
+        if exact_attempt
+        else gate.begin(**start)
     )
     lane = run.execution.lanes[0]
     round_ = run.rounds[lane.axis]
@@ -412,6 +484,10 @@ def build_fixture(
         attention_path,
         resolved_attention.payload,
         attention_path.read_bytes(),
+        tuple(
+            (lane.axis, lane.operation_id, run.rounds[lane.axis].operation_id)
+            for lane in run.execution.lanes
+        ),
     )
 
 
@@ -531,6 +607,167 @@ def accepted_callback_chain(
         task_surface=latest_surface,
     )
     return head
+
+
+@dataclass(frozen=True)
+class DriftFixture:
+    recovery: RecoveryFixture
+    reviewed_head: str
+    authorized_base_head: str
+    accepted: dict[str, tuple[str, str]]
+    artifacts: dict[str, tuple[str, str]]
+    accepted_payloads: dict[str, dict[str, object]]
+
+
+def prepare_drift_fixture(base: Path) -> DriftFixture:
+    fixture = build_fixture(
+        base,
+        gate_status="reviewing",
+        exact_attempt=True,
+        deep=True,
+    )
+    run = fixture.gate.rehydrate_attempt()
+    reviewed_head = run.execution.request.context.head_sha
+    accepted: dict[str, tuple[str, str]] = {}
+    artifacts: dict[str, tuple[str, str]] = {}
+    accepted_payloads: dict[str, dict[str, object]] = {}
+    runtime_root = _runtime_root(fixture.vault, fixture.task_id)
+    for lane in run.execution.lanes:
+        parent = fixture.store.read(fixture.task_id, lane.operation_id)
+        for state in ("preflight", "starting", "running", "awaiting-callback"):
+            if parent.state == state:
+                continue
+            fixture.store.transition(fixture.task_id, lane.operation_id, state)
+            parent = fixture.store.read(fixture.task_id, lane.operation_id)
+        round_ = run.rounds[lane.axis]
+        accepted_result = ReviewResult(
+            lane.axis,
+            "changes-requested",
+            (
+                ReviewFinding(
+                    f"{lane.axis}-accepted",
+                    lane.axis,
+                    "important",
+                    "accepted retained finding",
+                    "verify the clean descendant",
+                ),
+            ),
+            0,
+        )
+        accepted_envelope = review_round_envelope(round_, accepted_result)
+        CallbackBroker(fixture.store, fixture.task_id).accept(accepted_envelope)
+        accepted[lane.axis] = (
+            accepted_envelope.callback_id,
+            accepted_envelope.payload_sha256,
+        )
+        accepted_payloads[lane.axis] = to_dict(accepted_envelope)
+        receipt_path = (
+            fixture.store.root
+            / "owners"
+            / fixture.task_id
+            / "runtime"
+            / lane.operation_id
+            / "callback-receipt.json"
+        )
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(
+            receipt_path,
+            {
+                "schema_version": 1,
+                "status": "accepted",
+                "operation_id": round_.operation_id,
+                "run_id": round_.run_id,
+                "callback_id": accepted_envelope.callback_id,
+                "payload_sha256": accepted_envelope.payload_sha256,
+                "generation": 2,
+            },
+        )
+        artifact_envelope = accepted_envelope
+        if lane.axis.endswith("engineering"):
+            artifact_envelope = review_round_envelope(
+                round_,
+                ReviewResult(
+                    lane.axis,
+                    "changes-requested",
+                    (
+                        ReviewFinding(
+                            f"{lane.axis}-artifact",
+                            lane.axis,
+                            "important",
+                            "later retained finding",
+                            "do not reinterpret this artifact",
+                        ),
+                    ),
+                    0,
+                ),
+            )
+        callback_path = runtime_root / "callbacks" / lane.axis / ".review-callback.json"
+        callback_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(callback_path, to_dict(artifact_envelope))
+        artifacts[lane.axis] = (
+            artifact_envelope.callback_id,
+            artifact_envelope.payload_sha256,
+        )
+
+    (fixture.product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.py"], cwd=fixture.product, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "clean descendant"],
+        cwd=fixture.product,
+        check=True,
+    )
+    authorized_base_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fixture.product,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    engineering = next(
+        axis for axis in accepted if axis.endswith("engineering")
+    )
+    accepted_id, accepted_sha = accepted[engineering]
+    artifact_id, artifact_sha = artifacts[engineering]
+    append_mechanism_decision(
+        fixture,
+        "drift-quarantine-anchor",
+        (
+            "Classified as an eligible repository-owned stale-review-attempt "
+            "mechanism failure. Authorize one code-owned fail-closed retirement "
+            f"and quarantine of the complete retained {reviewed_head[:7]} review "
+            "attempt without ingesting, reconstructing, rebinding, replaying, or "
+            "reinterpreting either engineering callback. Preserve as immutable "
+            f"evidence both the accepted receipt identity {accepted_id} with "
+            f"payload digest {accepted_sha} and the mismatching callback-file "
+            f"identity {artifact_id} with payload digest {artifact_sha}, together "
+            "with the matching intent identity and all original receipts."
+        ),
+    )
+    append_mechanism_decision(
+        fixture,
+        "drift-quarantine-patch",
+        (
+            "Choose boundary A. Classified as an eligible repository-owned "
+            "stale-review quarantine mechanism gap. Authorize one narrow "
+            "code-owned mechanism patch with regression tests that adds a typed, "
+            "fail-closed drift-evidence quarantine transition, and no callback may "
+            "be ingested, reconstructed, rebound, replayed, or reinterpreted. It "
+            "must reject matching callbacks, ambiguous identity, live unrelated "
+            "ownership, missing receipts, partial cleanup, or any attempt to reuse "
+            "old effects. Commit the patch and tests to a new clean product HEAD "
+            "descended from "
+            f"{authorized_base_head}, then launch exactly one fresh single-model "
+            "Codex/Sol deep review."
+        ),
+    )
+    return DriftFixture(
+        fixture,
+        reviewed_head,
+        authorized_base_head,
+        accepted,
+        artifacts,
+        accepted_payloads,
+    )
 
 
 def check_legacy_round_rejection(
@@ -661,6 +898,304 @@ with tempfile.TemporaryDirectory(
         not _authorized_accepted_callback_head(
             latest.payload, fixture.product.resolve()
         ),
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-lifecycle.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    started_before = len(fixture.runtime.started)
+    recovered = recover_task_review_for_mechanism(
+        fixture.product,
+        runtime_manager=fixture.runtime,
+    )
+    state = fixture.gate.read()
+    quarantine = state["drift_quarantine"]
+    evidence_path = fixture.gate.root / quarantine["evidence_pointer"]
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    old_records = [
+        fixture.store.read(fixture.task_id, operation_id)
+        for _axis, parent_id, child_id in fixture.lane_round_ids
+        for operation_id in (parent_id, child_id)
+    ]
+    check(
+        "drift quarantine lifecycle closes exact old ownership before one fresh review",
+        recovered["status"] == "reviewing"
+        and state["fresh_reevaluation_used"] is True
+        and state["policy"]["max_verify_iterations"] == 0
+        and state["attempt"]["status"] == "terminal"
+        and state["attempt"]["terminal"]["result"] == "attention-required"
+        and all(record.state == "complete" for record in old_records)
+        and all(record.resources == OwnedResources() for record in old_records)
+        and set(fixture.runtime.exit_requests)
+        == {parent for _axis, parent, _child in fixture.lane_round_ids}
+        and len(fixture.runtime.started) == started_before + 2,
+    )
+    relations = {
+        row["axis"]: row["identity_relation"] for row in evidence["lanes"]
+    }
+    check(
+        "drift quarantine preserves one mismatch and matching intent as immutable bytes",
+        sorted(relations.values()) == ["drift", "match"]
+        and relations["openai-engineering"] == "drift"
+        and all(
+            (fixture.gate.root / row["accepted_receipt_pointer"]).is_file()
+            and (fixture.gate.root / row["callback_artifact_pointer"]).is_file()
+            for row in evidence["lanes"]
+        ),
+    )
+    started_after = len(fixture.runtime.started)
+    exits_after = tuple(fixture.runtime.exit_requests)
+    evidence_before = evidence_path.read_bytes()
+    replay = recover_task_review_for_mechanism(
+        fixture.product,
+        runtime_manager=fixture.runtime,
+    )
+    check(
+        "drift quarantine replay is idempotent with zero provider or callback replay",
+        replay["status"] == "reviewing"
+        and len(fixture.runtime.started) == started_after
+        and tuple(fixture.runtime.exit_requests) == exits_after
+        and evidence_path.read_bytes() == evidence_before,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-crash.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    crash_events: list[str] = []
+
+    def crash_after_first_cleanup(event: str) -> None:
+        crash_events.append(event)
+        if event.startswith("drift-quarantine-parent-cleaned:"):
+            raise RuntimeError("simulated quarantine crash")
+
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=crash_after_first_cleanup,
+        )
+    except RuntimeError as exc:
+        check(
+            "drift quarantine crash occurs only after one durable exact cleanup",
+            str(exc) == "simulated quarantine crash"
+            and len(fixture.runtime.exit_requests) == 1
+            and len(fixture.runtime.started) == 2,
+        )
+    else:
+        raise AssertionError("drift quarantine crash failpoint did not fire")
+    recovered = recover_task_review_for_mechanism(
+        fixture.product,
+        runtime_manager=fixture.runtime,
+    )
+    check(
+        "drift quarantine restart converges without repeating cleaned ownership",
+        recovered["status"] == "reviewing"
+        and len(fixture.runtime.exit_requests) == 2
+        and len(set(fixture.runtime.exit_requests)) == 2
+        and len(fixture.runtime.started) == 4,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-head-drift.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+
+    def crash_after_archive(event: str) -> None:
+        if event == "drift-quarantine-prepared":
+            raise RuntimeError("simulated quarantine archive crash")
+
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=crash_after_archive,
+        )
+    except RuntimeError as exc:
+        check(
+            "drift quarantine archives evidence before its first cleanup effect",
+            str(exc) == "simulated quarantine archive crash"
+            and not fixture.runtime.exit_requests,
+        )
+    else:
+        raise AssertionError("drift quarantine archive failpoint did not fire")
+    (fixture.product / "product.py").write_text("VALUE = 3\n", encoding="utf-8")
+    subprocess.run(["git", "add", "product.py"], cwd=fixture.product, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "unexpected later descendant"],
+        cwd=fixture.product,
+        check=True,
+    )
+    expect_error(
+        "drift quarantine restart rejects replacement HEAD drift",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "replacement HEAD changed",
+    )
+    check(
+        "replacement HEAD drift rejection has zero cleanup or provider effect",
+        not fixture.runtime.exit_requests and len(fixture.runtime.started) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-tamper.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=crash_after_archive,
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("drift quarantine archive failpoint did not fire")
+    authorization = authorized_drift_quarantine(
+        load_chain(fixture.product)[-1], fixture.product.resolve()
+    )
+    assert authorization is not None
+    evidence_path = (
+        fixture.gate.root
+        / "drift-quarantine"
+        / authorization.authorization_record_id
+        / "evidence.json"
+    )
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    drift_row = next(
+        row for row in evidence["lanes"] if row["identity_relation"] == "drift"
+    )
+    drift_row["accepted_callback_id"] = "review-tampered-identity"
+    write_json(evidence_path, evidence)
+    expect_error(
+        "drift quarantine restart rejects tampered archived identities",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "evidence identity changed",
+    )
+    check(
+        "archive tamper rejection precedes cleanup and provider effects",
+        not fixture.runtime.exit_requests and len(fixture.runtime.started) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-matching.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    engineering = "openai-engineering"
+    write_json(
+        _runtime_root(fixture.vault, fixture.task_id)
+        / "callbacks"
+        / engineering
+        / ".review-callback.json",
+        drift.accepted_payloads[engineering],
+    )
+    expect_error(
+        "drift quarantine rejects matching retained callbacks",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "requires one exact callback identity drift",
+    )
+    check(
+        "matching callback rejection has zero evidence cleanup or provider effect",
+        not (fixture.gate.root / "drift-quarantine").exists()
+        and not fixture.runtime.exit_requests
+        and len(fixture.runtime.started) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-receipt.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    engineering_parent = next(
+        parent
+        for axis, parent, _child in fixture.lane_round_ids
+        if axis == "openai-engineering"
+    )
+    receipt = (
+        fixture.store.root
+        / "owners"
+        / fixture.task_id
+        / "runtime"
+        / engineering_parent
+        / "callback-receipt.json"
+    )
+    receipt.unlink()
+    expect_error(
+        "drift quarantine rejects a missing accepted receipt",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "accepted callback receipt is unavailable",
+    )
+    check(
+        "missing receipt rejection has zero evidence cleanup or provider effect",
+        not (fixture.gate.root / "drift-quarantine").exists()
+        and not fixture.runtime.exit_requests
+        and len(fixture.runtime.started) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-unrelated.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    parent = fixture.store.read(
+        fixture.task_id, fixture.lane_round_ids[0][1]
+    )
+    fixture.store.create(
+        replace(
+            parent.spec,
+            operation_id="unrelated-review-owner",
+            idempotency_key="unrelated-review-owner-key",
+        ),
+        lane_id="unrelated-lane",
+        run_id="unrelated-run",
+    )
+    expect_error(
+        "drift quarantine rejects live unrelated ownership",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "unrelated live ownership",
+    )
+    check(
+        "unrelated ownership rejection has zero evidence cleanup or provider effect",
+        not (fixture.gate.root / "drift-quarantine").exists()
+        and not fixture.runtime.exit_requests
+        and len(fixture.runtime.started) == 2,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="drift-quarantine-partial.") as raw:
+    drift = prepare_drift_fixture(Path(raw))
+    fixture = drift.recovery
+    blocked_parent = next(
+        parent
+        for axis, parent, _child in fixture.lane_round_ids
+        if axis == "openai-engineering"
+    )
+    fixture.runtime.fail_cleanup_for.add(blocked_parent)
+    expect_error(
+        "drift quarantine fails closed on partial resource cleanup",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+        ),
+        "resource cleanup is incomplete",
+    )
+    check(
+        "partial cleanup never starts the fresh provider review",
+        len(fixture.runtime.started) == 2
+        and fixture.gate.read().get("fresh_reevaluation_used") is not True,
     )
 
 

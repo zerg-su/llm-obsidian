@@ -7,7 +7,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from harness.contracts import OwnedResources
 from harness.runtime_sessions import RuntimeSessionManager
@@ -51,6 +51,14 @@ from task_escalation_records import (
     EscalationRecordError,
     load_chain,
     load_latest,
+)
+from task_review_drift_contract import (
+    DriftQuarantineAuthorization,
+    authorized_drift_quarantine,
+)
+from task_review_drift_quarantine import (
+    mark_drift_quarantine_fresh,
+    quarantine_drifted_attempt,
 )
 
 
@@ -358,6 +366,72 @@ def _recover_accepted_exact_callbacks(
     )
 
 
+def _recover_drift_quarantine(
+    *,
+    authorization: DriftQuarantineAuthorization,
+    attention: dict[str, Any],
+    attention_record_sha256: str,
+    meta: dict[str, Any],
+    vault: Path,
+    worktree: Path,
+    task_id: str,
+    runtime_manager: object | None,
+    fault_observer: Callable[[str], None] | None,
+) -> dict[str, Any]:
+    runtime_root = _runtime_root(vault, task_id)
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate = ReviewGateController(_gate_root(vault, task_id), runtime, store)
+    current_context, context_manifest = _context(
+        meta, vault, worktree, runtime_root, task_id
+    )
+    run = quarantine_drifted_attempt(
+        authorization=authorization,
+        gate=gate,
+        store=store,
+        runtime=runtime,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        worktree=worktree,
+        fault_observer=fault_observer,
+    )
+    if run is None:
+        mark_drift_quarantine_fresh(gate, authorization)
+        state = gate.read()
+        return _receipt(
+            status=(
+                "verifying" if state.get("status") == "verifying" else "reviewing"
+            ),
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=gate.rehydrate(),
+        )
+    recovery = _RecoveryContext(
+        state=gate.read(),
+        attention=attention,
+        attention_record_sha256=attention_record_sha256,
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        task_id=task_id,
+        gate=gate,
+        run=run,
+        store=store,
+        current_context=current_context,
+        context_manifest=context_manifest,
+    )
+    result = _recover_stale_boundary(recovery)
+    mark_drift_quarantine_fresh(gate, authorization)
+    return result
+
+
 @dataclass(frozen=True)
 class _RecoveryContext:
     state: dict[str, Any]
@@ -594,6 +668,7 @@ def recover_task_review_for_mechanism(
     worktree: Path,
     *,
     runtime_manager: object | None = None,
+    quarantine_fault_observer: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Use one resolved mechanism escalation to replace a dead review lane."""
 
@@ -606,6 +681,21 @@ def recover_task_review_for_mechanism(
     if attention_record is None:
         raise TaskReviewError("task escalation record is unavailable")
     attention = attention_record.payload
+    drift_authorization = authorized_drift_quarantine(
+        attention_record, worktree
+    )
+    if drift_authorization is not None:
+        return _recover_drift_quarantine(
+            authorization=drift_authorization,
+            attention=attention,
+            attention_record_sha256=attention_record.sha256,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+            fault_observer=quarantine_fault_observer,
+        )
     if _authorized_accepted_callback_head(attention, worktree):
         return _recover_accepted_exact_callbacks(
             attention=attention,
