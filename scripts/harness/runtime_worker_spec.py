@@ -241,6 +241,7 @@ def _validate_markers(
 
 
 def load_spec(path: Path) -> dict[str, Any]:
+    path = path.expanduser().resolve()
     value = _read_spec(path)
     callback_mode = _validate_identity(value)
     _validate_argv(value)

@@ -814,6 +814,15 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         process.launch.spec_path.read_text(encoding="utf-8")
     )
     loaded_launch = load_runtime_spec(process.launch.spec_path)
+    relative_launch = load_runtime_spec(
+        Path(os.path.relpath(process.launch.spec_path, Path.cwd()))
+    )
+    check(
+        "worker accepts a canonical launch spec passed by relative path",
+        relative_launch["ready_path"] == loaded_launch["ready_path"]
+        and relative_launch["exit_path"] == loaded_launch["exit_path"],
+        relative_launch,
+    )
     protected_argv = runtime_provider_argv(
         loaded_launch,
         env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
