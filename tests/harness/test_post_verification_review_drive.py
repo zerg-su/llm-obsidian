@@ -36,6 +36,17 @@ from harness.post_verification_review_drive import (  # noqa: E402
     post_verification_review_marker,
     synchronize_post_verification_review_drive,
 )
+from task_review_post_fresh_publication import (  # noqa: E402
+    synchronize_post_fresh_publication,
+)
+from task_review_drift_contract import (  # noqa: E402
+    DriftQuarantineAuthorization,
+    PostFreshPublicationSyncAuthorization,
+    PostVerificationReviewDriveAuthorization,
+    SignalFreeRetirementAuthorization,
+    SupportedCloseRetirementAuthorization,
+)
+from review_contract import review_parent_kind  # noqa: E402
 from harness.runtime_worker import (  # noqa: E402
     _pipeline_verify_effect_id,
     _pipeline_verify_identity,
@@ -387,6 +398,10 @@ def fixture(root: Path) -> dict[str, object]:
             "status": "quarantined-evidence",
             "operation_id": task_id,
             "review_operation_id": review_id,
+            "authorization_record_id": "resolution-quarantine",
+            "authorization_record_sha256": "b" * 64,
+            "anchor_record_id": "resolution-anchor",
+            "anchor_record_sha256": "3" * 64,
             "callback_effects_replayed": 0,
             "provider_effects_replayed": 0,
         },
@@ -755,6 +770,299 @@ def synchronize(
     return receipt, process, cmux, recovery
 
 
+def post_fresh_authorization(
+    data: dict[str, object],
+) -> PostFreshPublicationSyncAuthorization:
+    drift = DriftQuarantineAuthorization(
+        "review-accepted",
+        "4" * 64,
+        "review-artifact",
+        "5" * 64,
+        str(data["source_head"]),
+        "resolution-anchor",
+        "3" * 64,
+        "resolution-quarantine",
+        "b" * 64,
+    )
+    signal = SignalFreeRetirementAuthorization(
+        drift, "resolution-signal", "6" * 64
+    )
+    parents = tuple(parent for parent, _child in data["retained"])
+    assert len(parents) == 2
+    supported = SupportedCloseRetirementAuthorization(
+        signal,
+        (str(parents[0]), str(parents[1])),
+        "resolution-supported-close",
+        "7" * 64,
+    )
+    continuation = PostVerificationReviewDriveAuthorization(
+        supported,
+        str(data["review_id"]),
+        str(data["task_id"]),
+        "resolution-fresh-binding",
+        "8" * 64,
+        "resolution-post-verification",
+        "a" * 64,
+    )
+    return PostFreshPublicationSyncAuthorization(
+        continuation,
+        "resolution-post-fresh-publication",
+        "c" * 64,
+    )
+
+
+def prepare_partial_fresh_publication(
+    data: dict[str, object],
+) -> PostFreshPublicationSyncAuthorization:
+    def stop_prepared(stage: str) -> None:
+        if stage == "prepared":
+            raise RuntimeError("retain prepared continuation")
+
+    try:
+        synchronize(data, now=40_000.0, fault=stop_prepared)
+    except RuntimeError as exc:
+        assert str(exc) == "retain prepared continuation"
+    else:
+        raise AssertionError("prepared continuation failpoint did not fire")
+
+    store = data["store"]
+    assert isinstance(store, OperationStore)
+    task_id = str(data["task_id"])
+    review_id = str(data["review_id"])
+    product = data["product"]
+    gate_path = data["gate_path"]
+    assert isinstance(product, Path) and isinstance(gate_path, Path)
+    previous_context = "f" * 64
+    next_context = "e" * 64
+    role = f"fresh:context:{next_context}"
+    suffix = f"-fresh-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
+    fresh_id = f"{review_id[:128-len(suffix)]}{suffix}"
+    authorization_path = gate_path.parent / "fresh-boundary.json"
+    write_json(
+        authorization_path,
+        {
+            "schema_version": 2,
+            "operation_id": review_id,
+            "dispatch_operation_id": task_id,
+            "kind": "context",
+            "previous_context_sha256": previous_context,
+            "next_context_sha256": next_context,
+            "reason": "authorized post-verification continuation",
+            "authorization_provenance": "pipeline-verification",
+            "verification_operation_id": data["verification"]["operation_id"],
+            "verification_receipt_sha256": sha256(data["verification_path"]),
+            "status": "authorized",
+        },
+    )
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "xhigh", "reviewer-callback", "a" * 64
+    )
+    lanes: list[dict[str, object]] = []
+    for index, axis in enumerate(("openai-intent", "openai-engineering"), 1):
+        parent_id = f"{fresh_id}-{axis}"
+        child_id = f"{parent_id}-round"
+        parent_spec = OperationSpec(
+            parent_id,
+            hashlib.sha256(f"{parent_id}:parent".encode()).hexdigest(),
+            review_parent_kind(axis),
+            task_id,
+            route,
+            f"packets/fresh/{axis}.json",
+            "scoped",
+        )
+        lane_id = hashlib.sha256(f"{parent_id}:lane".encode()).hexdigest()[:32]
+        parent_run = hashlib.sha256(f"{parent_id}:run".encode()).hexdigest()[:32]
+        store.create(parent_spec, lane_id=lane_id, run_id=parent_run)
+        advance(store, task_id, parent_id, ("preflight", "starting"))
+        resources = OwnedResources(
+            surface_id=f"{index + 1}" * 8
+            + "-2222-4222-8222-"
+            + f"{index + 1}" * 12,
+            process_group=5100 + index,
+            supervisor_pid=5200 + index,
+            process_identity=str(index + 5) * 64,
+            supervisor_identity=str(index + 7) * 64,
+        )
+        parent = store.read(task_id, parent_id)
+        store.save(
+            replace(parent, resources=resources, revision=parent.revision + 1),
+            expected_revision=parent.revision,
+        )
+        store.begin_effect(task_id, parent_id, "start-provider")
+        store.resolve_effect(task_id, parent_id, EffectOutcome.SUCCEEDED)
+        advance(store, task_id, parent_id, ("running", "awaiting-callback"))
+        child_spec = OperationSpec(
+            child_id,
+            hashlib.sha256(f"{child_id}:round".encode()).hexdigest(),
+            "review-round",
+            task_id,
+            route,
+            f"packets/fresh/{axis}.json",
+            "scoped",
+            parent_operation_id=parent_id,
+        )
+        child_run = hashlib.sha256(f"{child_id}:run".encode()).hexdigest()[:32]
+        store.create(child_spec, lane_id=lane_id, run_id=child_run)
+        advance(
+            store,
+            task_id,
+            child_id,
+            ("preflight", "starting", "running", "awaiting-callback"),
+        )
+        runtime_root = store.root / "owners" / task_id / "runtime" / parent_id
+        write_json(
+            runtime_root / "session.json",
+            {
+                "schema_version": 1,
+                "operation_id": parent_id,
+                "run_id": parent_run,
+                "cwd": str(product.resolve()),
+                "product_root": str(product.resolve()),
+                "callback_mode": "envelope",
+                "placement": "workspace",
+            },
+        )
+        write_json(
+            runtime_root / "launch.json",
+            {
+                "schema_version": 1,
+                "owner_id": task_id,
+                "operation_id": parent_id,
+                "run_id": parent_run,
+                "cwd": str(product.resolve()),
+                "product_root": str(product.resolve()),
+                "surface_id": resources.surface_id,
+                "runtime": "codex",
+                "callback_mode": "envelope",
+                "reviewer_sandbox": True,
+            },
+        )
+        write_json(
+            runtime_root / "ready.json",
+            {
+                "schema_version": 1,
+                "status": "ready",
+                "pid": resources.process_group,
+                "process_group": resources.process_group,
+                "process_identity": resources.process_identity,
+                "supervisor_pid": resources.supervisor_pid,
+                "supervisor_identity": resources.supervisor_identity,
+            },
+        )
+        write_json(
+            runtime_root / "callback-target.json",
+            {
+                "schema_version": 1,
+                "generation": 2,
+                "operation_id": child_id,
+                "run_id": child_run,
+                "callback_pointer": f"callbacks/{axis}/.review-callback.json",
+            },
+        )
+        identity = {
+            "schema_version": 1,
+            "owner_id": task_id,
+            "operation_id": parent_id,
+            "run_id": parent_run,
+            "generation": 2,
+            "provider_session_id": parent_run,
+            "process_identity": resources.process_identity,
+            "surface_id": resources.surface_id,
+            "workspace_id": f"workspace-{index}",
+            "source_id": f"process:{resources.process_identity}",
+        }
+        generation = runtime_root / "provider-events" / "generation-2"
+        for sequence, kind in ((1, "provider-started"), (2, "input-accepted")):
+            write_json(
+                generation / "events" / f"{sequence:04d}.json",
+                {
+                    "schema_version": 1,
+                    "sequence": sequence,
+                    "kind": kind,
+                    "effect_id": "" if sequence == 1 else "d" * 64,
+                    "reason": "",
+                    "result_sha256": "",
+                    "exit_code": None,
+                    "identity": identity,
+                },
+            )
+        write_json(
+            generation / "delivery" / "delivery-state.json",
+            {
+                "schema_version": 1,
+                "identity": identity,
+                "send_status": "accepted",
+                "send_attempts": 1,
+                "callback_submits": 0,
+                "attention_reason": "",
+                "cursor": {
+                    "schema_version": 1,
+                    "identity": identity,
+                    "last_sequence": 2,
+                    "provider_started": True,
+                    "input_accepted": True,
+                    "result_published": False,
+                    "process_exited": False,
+                    "resource_closed": False,
+                    "event_gap": False,
+                    "turn_stops": 0,
+                    "profile": "interactive",
+                },
+                "profile": "interactive",
+                "idempotency_key": "d" * 64,
+            },
+        )
+        lanes.append(
+            {
+                "axis": axis,
+                "operation_id": parent_id,
+                "lane_id": lane_id,
+                "run_id": parent_run,
+                "surface_id": resources.surface_id,
+                "checkpoint": "",
+                "verification_iteration": 0,
+                "state": "awaiting-callback",
+            }
+        )
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    gate.update(
+        {
+            "status": "attention-required",
+            "fresh_reevaluation_used": True,
+            "resolution_operation_id": review_id,
+            "active_review_operation_id": fresh_id,
+            "policy": {
+                **gate["policy"],
+                "depth": "deep",
+                "runtime": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cross_model": False,
+                "max_verify_iterations": 0,
+            },
+            "context": {
+                **gate["context"],
+                "head_sha": data["target_head"],
+                "sha256": next_context,
+            },
+            "fresh_boundary": {
+                "kind": "context",
+                "previous_context_sha256": previous_context,
+                "next_context_sha256": next_context,
+                "reason": "authorized post-verification continuation",
+            },
+            "fresh_boundary_authorization": {
+                "pointer": authorization_path.name,
+                "sha256": sha256(authorization_path),
+                "status": "authorized",
+            },
+            "lanes": lanes,
+        }
+    )
+    write_json(gate_path, gate)
+    return post_fresh_authorization(data)
+
+
 def reject(label: str, data: dict[str, object], mutate) -> None:
     mutate(data)
     resources = data["resources"]
@@ -1064,6 +1372,253 @@ def main() -> int:
             "prepared restart launches the one authorized fresh review once",
             recovered["status"] == "applied" and recovery.provider_starts == 2,
             (recovered, recovery.provider_starts),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-publication-") as raw:
+        data = fixture(Path(raw) / "happy")
+        authorization = prepare_partial_fresh_publication(data)
+        store = data["store"]
+        runtime_root = data["runtime_root"]
+        archive_root = data["archive_root"]
+        assert isinstance(store, OperationStore)
+        assert isinstance(runtime_root, Path) and isinstance(archive_root, Path)
+        provider_roots = [
+            store.root
+            / "owners"
+            / str(data["task_id"])
+            / "runtime"
+            / str(lane["operation_id"])
+            / "provider-events"
+            for lane in json.loads(
+                Path(data["gate_path"]).read_text(encoding="utf-8")
+            )["lanes"]
+        ]
+        provider_before = [tree_hash(root) for root in provider_roots]
+        archive_before = tree_hash(archive_root, exclude=("progress.json",))
+        receipt = synchronize_post_fresh_publication(
+            data["product"],
+            store=store,
+            operation_id=str(data["task_id"]),
+            authorization=authorization,
+            now=41_000.0,
+        )
+        gate = json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))
+        progress = json.loads(
+            Path(data["progress_path"]).read_text(encoding="utf-8")
+        )
+        root_record = store.read(str(data["task_id"]), str(data["task_id"]))
+        check(
+            "post-fresh synchronization resumes callback waiting for existing lanes",
+            receipt["status"] == "applied"
+            and receipt["reviews_started"] == 0
+            and gate["status"] == "reviewing"
+            and gate["fresh_reevaluation_used"] is True
+            and progress["status"] == "fresh-review-started"
+            and root_record.state == "awaiting-callback"
+            and (runtime_root / "pipeline-review-post-verification-start.json").is_file(),
+            (receipt, gate, progress, root_record),
+        )
+        check(
+            "post-fresh synchronization preserves archive and provider effects",
+            archive_before
+            == tree_hash(archive_root, exclude=("progress.json",))
+            and provider_before == [tree_hash(root) for root in provider_roots],
+        )
+        revision = root_record.revision
+        replay = synchronize_post_fresh_publication(
+            data["product"],
+            store=store,
+            operation_id=str(data["task_id"]),
+            authorization=authorization,
+            now=42_000.0,
+        )
+        check(
+            "post-fresh synchronization replay is idempotent and starts no review",
+            replay == receipt
+            and store.read(str(data["task_id"]), str(data["task_id"])).revision
+            == revision
+            and replay["provider_effects_replayed"] == 0
+            and replay["callback_effects_replayed"] == 0
+            and replay["reviews_started"] == 0,
+            replay,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-gate-crash-") as raw:
+        data = fixture(Path(raw) / "gate")
+        authorization = prepare_partial_fresh_publication(data)
+
+        def crash_after_gate(stage: str) -> None:
+            if stage == "gate-written":
+                raise RuntimeError("simulated fresh gate publication crash")
+
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=43_000.0,
+                fault_observer=crash_after_gate,
+            )
+        except RuntimeError as exc:
+            check(
+                "post-fresh crash retains one published gate and prepared progress",
+                str(exc) == "simulated fresh gate publication crash"
+                and json.loads(
+                    Path(data["gate_path"]).read_text(encoding="utf-8")
+                )["status"]
+                == "reviewing"
+                and json.loads(
+                    Path(data["progress_path"]).read_text(encoding="utf-8")
+                )["status"]
+                == "quarantined",
+            )
+        else:
+            raise AssertionError("fresh gate crash did not fire")
+        recovered = synchronize_post_fresh_publication(
+            data["product"],
+            store=data["store"],
+            operation_id=str(data["task_id"]),
+            authorization=authorization,
+            now=44_000.0,
+        )
+        check(
+            "post-fresh gate crash restart converges without provider replay",
+            recovered["status"] == "applied"
+            and recovered["reviews_started"] == 0
+            and recovered["provider_effects_replayed"] == 0,
+            recovered,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-transition-crash-") as raw:
+        data = fixture(Path(raw) / "transition")
+        authorization = prepare_partial_fresh_publication(data)
+
+        def crash_after_continuation(stage: str) -> None:
+            if stage == "continuation-applied":
+                raise RuntimeError("simulated continuation publication crash")
+
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=45_000.0,
+                fault_observer=crash_after_continuation,
+            )
+        except RuntimeError as exc:
+            check(
+                "post-fresh continuation crash retains the applied root transition",
+                str(exc) == "simulated continuation publication crash"
+                and data["store"].read(
+                    str(data["task_id"]), str(data["task_id"])
+                ).state
+                == "awaiting-callback",
+            )
+        else:
+            raise AssertionError("fresh continuation crash did not fire")
+        recovered = synchronize_post_fresh_publication(
+            data["product"],
+            store=data["store"],
+            operation_id=str(data["task_id"]),
+            authorization=authorization,
+            now=46_000.0,
+        )
+        check(
+            "post-fresh continuation crash restart completes only its final receipt",
+            recovered["status"] == "applied"
+            and recovered["reviews_started"] == 0
+            and recovered["provider_effects_replayed"] == 0,
+            recovered,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-drift-") as raw:
+        data = fixture(Path(raw) / "provider")
+        authorization = prepare_partial_fresh_publication(data)
+        gate = json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))
+        parent_id = gate["lanes"][0]["operation_id"]
+        event = (
+            data["store"].root
+            / "owners"
+            / str(data["task_id"])
+            / "runtime"
+            / parent_id
+            / "provider-events"
+            / "generation-2"
+            / "events"
+            / "0002.json"
+        )
+        changed = json.loads(event.read_text(encoding="utf-8"))
+        changed["identity"]["process_identity"] = "0" * 64
+        write_json(event, changed)
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=47_000.0,
+            )
+        except PostVerificationReviewDriveError:
+            check(
+                "post-fresh provider drift rejects before gate, store, or marker effect",
+                json.loads(
+                    Path(data["gate_path"]).read_text(encoding="utf-8")
+                )["status"]
+                == "attention-required"
+                and data["store"].read(
+                    str(data["task_id"]), str(data["task_id"])
+                ).state
+                == "attention-required"
+                and not (
+                    data["runtime_root"]
+                    / "pipeline-review-post-verification-start.json"
+                ).exists(),
+            )
+        else:
+            raise AssertionError("fresh provider identity drift was accepted")
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-reconcile-") as raw:
+        data = fixture(Path(raw) / "facade")
+        resources = data["resources"]
+        assert isinstance(resources, OwnedResources)
+        process = ExactProcess(resources)
+        cmux = ExactCmux(resources.surface_id)
+        original_recover = harness_cli._recover_post_fresh_publication_if_present
+        original_publish = harness_cli.publish_status
+        harness_cli._recover_post_fresh_publication_if_present = (
+            lambda _store, _owner: True
+        )
+
+        def forbid_publish(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("post-fresh reconcile cannot touch cmux status")
+
+        harness_cli.publish_status = forbid_publish
+        try:
+            code = harness_cli.main(
+                [
+                    "--store",
+                    str(data["store"].root),
+                    "--owner",
+                    str(data["task_id"]),
+                    "--json",
+                    "reconcile",
+                ],
+                process_adapter=process,
+                cmux_adapter=cmux,
+            )
+        finally:
+            harness_cli._recover_post_fresh_publication_if_present = original_recover
+            harness_cli.publish_status = original_publish
+        check(
+            "supported reconcile synchronization performs zero process/cmux probe or status effect",
+            code == 0
+            and process.probes == []
+            and process.signals == []
+            and cmux.probes == []
+            and cmux.closes == [],
+            (process.probes, process.signals, cmux.probes, cmux.closes),
         )
 
     with tempfile.TemporaryDirectory(prefix="post-verification-facade-") as raw:

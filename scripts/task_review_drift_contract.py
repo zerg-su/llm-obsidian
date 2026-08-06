@@ -38,6 +38,10 @@ _EXACT_LIVE_STATUS_PREFIX = (
     "Classified as an eligible repository-owned exact-live ownership "
     "status-adapter mechanism failure."
 )
+_POST_FRESH_PUBLICATION_PREFIX = (
+    "Classified as an eligible repository-owned post-fresh-publication "
+    "synchronization mechanism failure."
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,13 @@ class PostVerificationReviewDriveAuthorization:
     dispatch_operation_id: str
     fresh_binding_record_id: str
     fresh_binding_record_sha256: str
+    authorization_record_id: str
+    authorization_record_sha256: str
+
+
+@dataclass(frozen=True)
+class PostFreshPublicationSyncAuthorization:
+    continuation: PostVerificationReviewDriveAuthorization
     authorization_record_id: str
     authorization_record_sha256: str
 
@@ -468,18 +479,10 @@ def _exact_live_status_decision_is_valid(
     )
 
 
-def authorized_post_verification_review_drive(
-    latest: DecisionRecord, worktree: Path
+def _compile_authorized_post_verification_review_drive(
+    chain: list[DecisionRecord], index: int, worktree: Path
 ) -> PostVerificationReviewDriveAuthorization | None:
-    """Compile the exact live-provider continuation grant and its provenance."""
-
-    try:
-        chain = list(load_chain(worktree))
-    except EscalationRecordError:
-        return None
-    if not chain or chain[-1].sha256 != latest.sha256:
-        return None
-    index = len(chain) - 1
+    latest = chain[index]
     decision = str(latest.payload.get("decision") or "")
     if decision.startswith(_POST_VERIFICATION_PREFIX):
         return _compile_post_verification_review_drive(chain, index, worktree)
@@ -512,6 +515,81 @@ def authorized_post_verification_review_drive(
         prior.dispatch_operation_id,
         prior.fresh_binding_record_id,
         prior.fresh_binding_record_sha256,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
+def authorized_post_verification_review_drive(
+    latest: DecisionRecord, worktree: Path
+) -> PostVerificationReviewDriveAuthorization | None:
+    """Compile the exact live-provider continuation grant and its provenance."""
+
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    return _compile_authorized_post_verification_review_drive(
+        chain, len(chain) - 1, worktree
+    )
+
+
+def authorized_post_fresh_publication_sync(
+    latest: DecisionRecord, worktree: Path
+) -> PostFreshPublicationSyncAuthorization | None:
+    """Compile the one grant to finish a partially published fresh review."""
+
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    index = len(chain) - 1
+    decision = str(latest.payload.get("decision") or "")
+    required = (
+        "validates the prepared continuation receipt, exact fresh gate identity, fresh_reevaluation_used=true",
+        "already-created Codex/Sol parent/round identities with succeeded start-provider effects",
+        "complete only the missing gate/progress/final-marker synchronization and resume callback waiting for those existing fresh lanes",
+        "Preserve quarantine/archive/retained receipts and all existing provider effects",
+        "Do not retry the consumed resume, relaunch or replace any reviewer/provider, repeat verification, replay callbacks/provider effects, signal processes, touch cmux surfaces, manually edit gate/store",
+        "Fail closed on any identity, receipt, resource, or effect drift",
+    )
+    attention = latest.payload
+    if (
+        latest.record_type != "resolution"
+        or attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_POST_FRESH_PUBLICATION_PREFIX)
+        or any(fragment not in decision for fragment in required)
+    ):
+        return None
+    exact_live_indices = [
+        row_index
+        for row_index, record in enumerate(chain[:index])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _EXACT_LIVE_STATUS_PREFIX
+        )
+    ]
+    if len(exact_live_indices) != 1:
+        return None
+    exact_live_index = exact_live_indices[0]
+    continuation = _compile_authorized_post_verification_review_drive(
+        chain, exact_live_index, worktree
+    )
+    scope = _decision_scope(attention)
+    if continuation is None or any(
+        record.record_type not in {"raise", "resolution"}
+        or _decision_scope(record.payload) != scope
+        for record in chain[exact_live_index : index + 1]
+    ):
+        return None
+    return PostFreshPublicationSyncAuthorization(
+        continuation,
         latest.record_id,
         latest.sha256,
     )

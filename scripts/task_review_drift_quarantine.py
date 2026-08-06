@@ -27,6 +27,8 @@ from task_review_drift_contract import (
     SupportedCloseRetirementAuthorization,
 )
 from task_review_drift_evidence import (
+    PROGRESS_FIELDS_V1,
+    PROGRESS_FIELDS_V2,
     build_evidence,
     evidence_root,
     persist_evidence,
@@ -813,3 +815,80 @@ def mark_drift_quarantine_fresh(
         terminal_rounds=[str(row["round_operation_id"]) for row in rows],
         retirement_receipts=retirement_receipts,
     )
+
+
+def synchronize_drift_quarantine_fresh(
+    gate: ReviewGateController,
+    authorization: DriftQuarantineAuthorization,
+    *,
+    source_sha256: str,
+    target_sha256: str,
+) -> dict[str, object]:
+    """CAS only the missing fresh-review progress publication."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", source_sha256) or not re.fullmatch(
+        r"[0-9a-f]{64}", target_sha256
+    ):
+        raise TaskReviewError("drift quarantine progress binding is invalid")
+    root = evidence_root(gate, authorization)
+    evidence_path = root / "evidence.json"
+    if evidence_path.is_symlink() or not evidence_path.is_file():
+        raise TaskReviewError("drift quarantine evidence is unavailable")
+    evidence = _read_json(evidence_path, "drift quarantine evidence")
+    if (
+        evidence.get("schema_version") != 1
+        or evidence.get("status") != "quarantined-evidence"
+        or evidence.get("authorization_record_id")
+        != authorization.authorization_record_id
+        or evidence.get("authorization_record_sha256")
+        != authorization.authorization_record_sha256
+        or evidence.get("anchor_record_id") != authorization.anchor_record_id
+        or evidence.get("anchor_record_sha256") != authorization.anchor_record_sha256
+        or evidence.get("callback_effects_replayed") != 0
+        or evidence.get("provider_effects_replayed") != 0
+    ):
+        raise TaskReviewError("drift quarantine evidence identity changed")
+    progress_path = root / "progress.json"
+    raw = progress_path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    progress = _read_json(progress_path, "drift quarantine progress")
+    expected_fields = (
+        PROGRESS_FIELDS_V2
+        if progress.get("schema_version") == 2
+        else PROGRESS_FIELDS_V1
+    )
+    if (
+        set(progress) != expected_fields
+        or progress.get("schema_version") not in {1, 2}
+        or progress.get("evidence_sha256")
+        != hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        or not isinstance(progress.get("cleaned_parents"), list)
+        or len(progress["cleaned_parents"]) != 2
+        or not isinstance(progress.get("terminal_rounds"), list)
+        or len(progress["terminal_rounds"]) != 2
+        or (
+            progress.get("schema_version") == 2
+            and (
+                not isinstance(progress.get("retirement_receipts"), dict)
+                or set(progress["retirement_receipts"])
+                != set(progress["cleaned_parents"])
+                or any(
+                    re.fullmatch(r"[0-9a-f]{64}", str(value)) is None
+                    for value in progress["retirement_receipts"].values()
+                )
+            )
+        )
+    ):
+        raise TaskReviewError("drift quarantine progress identity changed")
+    if digest == target_sha256:
+        if progress.get("status") != "fresh-review-started":
+            raise TaskReviewError("drift quarantine target progress drifted")
+        return progress
+    if digest != source_sha256 or progress.get("status") != "quarantined":
+        raise TaskReviewError("drift quarantine source progress drifted")
+    target = {**progress, "status": "fresh-review-started"}
+    _atomic_json(progress_path, target)
+    written = progress_path.read_bytes()
+    if hashlib.sha256(written).hexdigest() != target_sha256:
+        raise TaskReviewError("drift quarantine target progress drifted")
+    return _read_json(progress_path, "drift quarantine progress")

@@ -48,6 +48,7 @@ from task_review_context import (  # noqa: E402
 )
 from task_review_drift_contract import (  # noqa: E402
     authorized_post_verification_review_drive,
+    authorized_post_fresh_publication_sync,
     authorized_drift_quarantine,
     authorized_signal_free_retirement,
     authorized_supported_close_retirement,
@@ -744,6 +745,23 @@ EXACT_LIVE_STATUS_DECISION = (
     "generation, restart or relaunch any provider/reviewer, repeat verification/"
     "cleanup, ingest old callbacks, manually edit state, or touch the surface. "
     "Fail closed and re-escalate before any effect on identity/status drift."
+)
+
+
+POST_FRESH_PUBLICATION_DECISION = (
+    "Classified as an eligible repository-owned post-fresh-publication "
+    "synchronization mechanism failure. Authorize one narrow regression-backed, "
+    "crash-idempotent repair that validates the prepared continuation receipt, "
+    "exact fresh gate identity, fresh_reevaluation_used=true, and the "
+    "already-created Codex/Sol parent/round identities with succeeded "
+    "start-provider effects; then atomically complete only the missing gate/"
+    "progress/final-marker synchronization and resume callback waiting for "
+    "those existing fresh lanes. Preserve quarantine/archive/retained receipts "
+    "and all existing provider effects. Do not retry the consumed resume, "
+    "relaunch or replace any reviewer/provider, repeat verification, replay "
+    "callbacks/provider effects, signal processes, touch cmux surfaces, manually "
+    "edit gate/store, or start more than the already-launched fresh review. Fail "
+    "closed on any identity, receipt, resource, or effect drift."
 )
 
 
@@ -1702,9 +1720,9 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         "exact-live-status-adapter",
         EXACT_LIVE_STATUS_DECISION,
     )
-    latest = load_chain(fixture.product)[-1]
+    exact_live = load_chain(fixture.product)[-1]
     authorization = authorized_post_verification_review_drive(
-        latest, fixture.product.resolve()
+        exact_live, fixture.product.resolve()
     )
     check(
         "post-verification authorization preserves the exact historical chain",
@@ -1712,7 +1730,7 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         and authorization.active_review_operation_id
         == retained_review_operation_id
         and authorization.dispatch_operation_id == fixture.task_id
-        and authorization.authorization_record_id == latest.record_id
+        and authorization.authorization_record_id == exact_live.record_id
         and authorization.authorization_record_id
         != post_verification.record_id,
     )
@@ -1729,6 +1747,22 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         and replay["status"] == "reviewing"
         and started_after == started_before + 2
         and len(fixture.runtime.started) == started_after,
+    )
+    append_mechanism_decision(
+        fixture,
+        "post-fresh-publication-sync",
+        POST_FRESH_PUBLICATION_DECISION,
+    )
+    latest = load_chain(fixture.product)[-1]
+    sync_authorization = authorized_post_fresh_publication_sync(
+        latest, fixture.product.resolve()
+    )
+    check(
+        "post-fresh synchronization authorization preserves the consumed continuation grant",
+        sync_authorization is not None
+        and sync_authorization.continuation.authorization_record_id
+        == exact_live.record_id
+        and sync_authorization.authorization_record_id == latest.record_id,
     )
 
 
