@@ -118,7 +118,9 @@ def await_initial_input_ready(
         prompt = classify(runtime, screen)
         if prompt.interactive:
             if not prompt.recognized:
-                return False
+                if observation + 1 < observation_limit:
+                    wait(observation_interval_seconds)
+                continue
             digest = _screen_digest(screen)
             if digest != handled_prompt_digest:
                 try:

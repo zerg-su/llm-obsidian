@@ -253,6 +253,41 @@ check(
 )
 
 
+class PartialInitialPromptPort(InitialPromptPort):
+    def __init__(self) -> None:
+        super().__init__()
+        complete = self.screens.pop()
+        self.screens.extend(
+            (
+                "\n".join(
+                    (
+                        "Approaching rate limits",
+                        "› 1. Switch to gpt-5.6-luna",
+                        "2. Keep current model",
+                        "Press enter to confirm or esc to go back",
+                    )
+                ),
+                complete,
+            )
+        )
+
+
+partial_initial_prompt_port = PartialInitialPromptPort()
+check(
+    "partial native prompt repaint waits without guessing a response",
+    await_initial_input_ready(
+        partial_initial_prompt_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=5,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    and partial_initial_prompt_port.keys == ["down", "Enter"],
+    partial_initial_prompt_port.keys,
+)
+
+
 class FakeProcess:
     def __init__(self, events: list[str]) -> None:
         self.events = events
