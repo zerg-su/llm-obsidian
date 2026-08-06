@@ -55,8 +55,10 @@ from task_escalation_records import (
 from task_review_drift_contract import (
     DriftQuarantineAuthorization,
     SignalFreeRetirementAuthorization,
+    SupportedCloseRetirementAuthorization,
     authorized_drift_quarantine,
     authorized_signal_free_retirement,
+    authorized_supported_close_retirement,
 )
 from task_review_drift_quarantine import (
     mark_drift_quarantine_fresh,
@@ -380,6 +382,7 @@ def _recover_drift_quarantine(
     runtime_manager: object | None,
     fault_observer: Callable[[str], None] | None,
     signal_authorization: SignalFreeRetirementAuthorization | None = None,
+    supported_close: SupportedCloseRetirementAuthorization | None = None,
 ) -> dict[str, Any]:
     runtime_root = _runtime_root(vault, task_id)
     store_root = vault / ".vault-meta" / "harness"
@@ -394,6 +397,7 @@ def _recover_drift_quarantine(
     run = quarantine_drifted_attempt(
         authorization=authorization,
         signal_authorization=signal_authorization,
+        supported_close=supported_close,
         gate=gate,
         store=store,
         runtime=runtime,
@@ -685,6 +689,23 @@ def recover_task_review_for_mechanism(
     if attention_record is None:
         raise TaskReviewError("task escalation record is unavailable")
     attention = attention_record.payload
+    supported_close = authorized_supported_close_retirement(
+        attention_record, worktree
+    )
+    if supported_close is not None:
+        return _recover_drift_quarantine(
+            authorization=supported_close.signal_free.drift,
+            signal_authorization=supported_close.signal_free,
+            supported_close=supported_close,
+            attention=attention,
+            attention_record_sha256=attention_record.sha256,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+            fault_observer=quarantine_fault_observer,
+        )
     signal_authorization = authorized_signal_free_retirement(
         attention_record, worktree
     )

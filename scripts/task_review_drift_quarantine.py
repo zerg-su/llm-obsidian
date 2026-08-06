@@ -9,7 +9,12 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from harness.contracts import AttentionReason, OperationRecord, OwnedResources, to_dict
+from harness.contracts import (
+    AttentionReason,
+    OperationRecord,
+    OwnedResources,
+    to_dict,
+)
 from harness.runtime_session_contracts import RuntimeSessionError
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
@@ -19,6 +24,7 @@ from harness.workflows.review_gate import ReviewGateController, ReviewGateRun
 from task_review_drift_contract import (
     DriftQuarantineAuthorization,
     SignalFreeRetirementAuthorization,
+    SupportedCloseRetirementAuthorization,
 )
 from task_review_drift_evidence import (
     build_evidence,
@@ -30,6 +36,14 @@ from task_review_drift_evidence import (
     write_progress,
 )
 from task_review_shared import TaskReviewError, _atomic_json, _read_json
+from task_review_supported_close import (
+    bind_evidence as _bind_supported_close_evidence,
+    consume_parent as _consume_supported_close_parent,
+    receipt_path as _supported_close_receipt_path,
+    validate_pair as _validate_supported_close_pair,
+    validate_pairs as _validate_supported_close_pairs,
+    validate_receipt as _validate_supported_close_receipt,
+)
 
 
 def _clean_descendant_head(worktree: Path, base_head: str) -> str:
@@ -376,6 +390,7 @@ def _clean_parents(
     fault_observer: Callable[[str], None] | None,
     progress: dict[str, object],
     signal_authorization: SignalFreeRetirementAuthorization | None,
+    supported_close: SupportedCloseRetirementAuthorization | None,
     current_head: str,
 ) -> tuple[list[str], dict[str, str]]:
     cleaned_parents = list(progress.get("cleaned_parents") or [])
@@ -392,10 +407,52 @@ def _clean_parents(
             raise TaskReviewError("drift quarantine lane changed")
         parent = store.read(task_id, lane.operation_id)
         if lane.operation_id in cleaned_parents:
-            if parent.state != "complete" or parent.resources != OwnedResources():
+            if supported_close is not None:
+                child = store.read(task_id, str(row["round_operation_id"]))
+                _validate_supported_close_pair(parent, child, row)
+                if child.state != "complete":
+                    raise TaskReviewError(
+                        "drift quarantine progress identity changed"
+                    )
+                _validate_supported_close_receipt(
+                    path=_supported_close_receipt_path(
+                        gate,
+                        authorization,
+                        supported_close,
+                        lane.operation_id,
+                    ),
+                    digest=retirement_receipts.get(lane.operation_id, ""),
+                    parent=parent,
+                    child=child,
+                    row=row,
+                    evidence_path=evidence_path,
+                    current_head=current_head,
+                    authorization=authorization,
+                    supported_close=supported_close,
+                )
+            elif (
+                parent.state != "complete"
+                or parent.resources != OwnedResources()
+            ):
                 raise TaskReviewError("drift quarantine progress identity changed")
             continue
-        if (
+        if supported_close is not None:
+            parent = _consume_supported_close_parent(
+                row=row,
+                parent=parent,
+                gate=gate,
+                store=store,
+                task_id=task_id,
+                authorization=authorization,
+                supported_close=supported_close,
+                evidence_path=evidence_path,
+                current_head=current_head,
+                cleaned_parents=cleaned_parents,
+                terminal_rounds=terminal_rounds,
+                retirement_receipts=retirement_receipts,
+                fault_observer=fault_observer,
+            )
+        elif (
             signal_authorization is not None
             and parent.state == "complete"
             and parent.resources == OwnedResources()
@@ -457,7 +514,13 @@ def _clean_parents(
                         "drift quarantine resource cleanup is incomplete"
                     )
         parent = store.read(task_id, lane.operation_id)
-        if parent.state != "complete" or parent.resources != OwnedResources():
+        expected_parent_state = (
+            "cancelled" if supported_close is not None else "complete"
+        )
+        if (
+            parent.state != expected_parent_state
+            or parent.resources != OwnedResources()
+        ):
             raise TaskReviewError("drift quarantine resource cleanup is incomplete")
         cleaned_parents.append(lane.operation_id)
         write_progress(
@@ -486,6 +549,7 @@ def _terminalize_rounds(
     cleaned_parents: list[str],
     progress: dict[str, object],
     signal_authorization: SignalFreeRetirementAuthorization | None,
+    supported_close: SupportedCloseRetirementAuthorization | None,
     retirement_receipts: dict[str, str],
 ) -> list[str]:
     terminal_rounds = list(progress.get("terminal_rounds") or [])
@@ -508,14 +572,15 @@ def _terminalize_rounds(
             or child.accepted_callback_kind != "review"
         ):
             raise TaskReviewError("drift quarantine round identity changed")
-        for current, following in (
-            ("verifying", "finalizing"),
-            ("finalizing", "exiting"),
-            ("exiting", "complete"),
-        ):
-            if child.state == current:
-                store.transition(task_id, round_id, following)
-                child = store.read(task_id, round_id)
+        if supported_close is None:
+            for current, following in (
+                ("verifying", "finalizing"),
+                ("finalizing", "exiting"),
+                ("exiting", "complete"),
+            ):
+                if child.state == current:
+                    store.transition(task_id, round_id, following)
+                    child = store.read(task_id, round_id)
         if child.state != "complete":
             raise TaskReviewError("drift quarantine round cleanup is incomplete")
         terminal_rounds.append(round_id)
@@ -537,6 +602,7 @@ def quarantine_drifted_attempt(
     *,
     authorization: DriftQuarantineAuthorization,
     signal_authorization: SignalFreeRetirementAuthorization | None = None,
+    supported_close: SupportedCloseRetirementAuthorization | None = None,
     gate: ReviewGateController,
     store: OperationStore,
     runtime: object,
@@ -546,6 +612,14 @@ def quarantine_drifted_attempt(
     fault_observer: Callable[[str], None] | None = None,
 ) -> ReviewGateRun | None:
     """Quarantine exact stale ownership without consuming either callback."""
+
+    if supported_close is not None and (
+        signal_authorization is None
+        or supported_close.signal_free != signal_authorization
+    ):
+        raise TaskReviewError(
+            "supported-close retirement authorization chain changed"
+        )
 
     current_head = _clean_descendant_head(
         worktree, authorization.descendant_base_head
@@ -604,6 +678,13 @@ def quarantine_drifted_attempt(
         ):
             raise TaskReviewError("signal-free retirement gate drifted")
         validate_unrelated_ownership_from_evidence(store, task_id, evidence)
+        if supported_close is not None:
+            _validate_supported_close_pairs(
+                evidence=evidence,
+                store=store,
+                task_id=task_id,
+                supported_close=supported_close,
+            )
         _bind_signal_free_evidence(
             gate=gate,
             authorization=authorization,
@@ -612,6 +693,14 @@ def quarantine_drifted_attempt(
             evidence=evidence,
             current_head=current_head,
         )
+        if supported_close is not None:
+            _bind_supported_close_evidence(
+                gate=gate,
+                authorization=authorization,
+                supported_close=supported_close,
+                evidence_path=evidence_path,
+                current_head=current_head,
+            )
     cleaned_parents, retirement_receipts = _clean_parents(
         evidence=evidence,
         gate=gate,
@@ -624,6 +713,7 @@ def quarantine_drifted_attempt(
         fault_observer=fault_observer,
         progress=progress,
         signal_authorization=signal_authorization,
+        supported_close=supported_close,
         current_head=current_head,
     )
     terminal_rounds = _terminalize_rounds(
@@ -636,6 +726,7 @@ def quarantine_drifted_attempt(
         cleaned_parents=cleaned_parents,
         progress=progress,
         signal_authorization=signal_authorization,
+        supported_close=supported_close,
         retirement_receipts=retirement_receipts,
     )
     attempt = gate._attempt()

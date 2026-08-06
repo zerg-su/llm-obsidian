@@ -49,6 +49,7 @@ from task_review_context import (  # noqa: E402
 from task_review_drift_contract import (  # noqa: E402
     authorized_drift_quarantine,
     authorized_signal_free_retirement,
+    authorized_supported_close_retirement,
 )
 from task_review_mechanism_recovery import (  # noqa: E402
     _authorized_accepted_callback_head,
@@ -653,6 +654,27 @@ SIGNAL_FREE_DECISION = (
 )
 
 
+def supported_close_decision(parents: tuple[str, str]) -> str:
+    return (
+        "Classified as an eligible repository-owned supported-close "
+        "terminal-state compatibility mechanism failure. Authorize one narrow "
+        "code-owned lifecycle repair with focused restart, crash-idempotency, "
+        "zero-signal, and zero-callback/provider-replay regressions. The repair "
+        "may consume only the exact retained parent identities "
+        f"{parents[0]} and {parents[1]} when each is terminal cancelled, has "
+        "empty OwnedResources, no pending effect, and a matching succeeded "
+        "request-exit receipt produced by the supported harness close path. It "
+        "must preserve the immutable archive and both callback identities, "
+        "atomically project the corresponding retained round children "
+        "terminal/resource-free, keep all signal and replay counters zero, and "
+        "reject any live, ambiguous, partial, non-terminal, receipt-mismatched, "
+        "archive-drifted, or unrelated state. After focused and configured gates "
+        "pass on a new clean descendant HEAD, resume the existing "
+        "drift-quarantine progress and the previously authorized exactly one "
+        "fresh single-model Codex/Sol deep review."
+    )
+
+
 def absent_ownership(index: int) -> DurableCleanupOwnership:
     return DurableCleanupOwnership(
         "dead",
@@ -699,6 +721,76 @@ def prepare_signal_free_fixture(base: Path) -> DriftFixture:
         fixture,
         "signal-free-stale-ownership",
         SIGNAL_FREE_DECISION,
+    )
+    return drift
+
+
+def apply_supported_close_receipt(
+    fixture: RecoveryFixture, operation_id: str
+) -> None:
+    record = fixture.store.read(fixture.task_id, operation_id)
+    if record.state not in {"finalizing", "cancelling"}:
+        fixture.store.transition(fixture.task_id, operation_id, "cancelling")
+    fixture.store.begin_effect(
+        fixture.task_id, operation_id, "request-exit"
+    )
+    fixture.store.resolve_effect(
+        fixture.task_id, operation_id, EffectOutcome.SUCCEEDED
+    )
+    fixture.store.transition(fixture.task_id, operation_id, "exiting")
+    record = fixture.store.read(fixture.task_id, operation_id)
+    fixture.store.save(
+        replace(
+            record,
+            resources=OwnedResources(),
+            revision=record.revision + 1,
+        ),
+        expected_revision=record.revision,
+    )
+    fixture.store.transition(fixture.task_id, operation_id, "cancelled")
+
+
+def prepare_supported_close_fixture(base: Path) -> DriftFixture:
+    drift = prepare_signal_free_fixture(base)
+    fixture = drift.recovery
+    meta = json.loads(
+        (fixture.product / ".task-meta.json").read_text(encoding="utf-8")
+    )
+    append_raise(
+        fixture.product,
+        {
+            "version": 1,
+            "id": "diagnostic-external-scope",
+            "status": "pending",
+            "task_name": "mechanism recovery",
+            "category": "external-effect",
+            "reason": "A diagnostic-only ownership boundary was classified",
+            "question": "Confirm that no provider effect was authorized",
+            "worktree": str(fixture.product.resolve()),
+            "task_surface": str(meta["task_surface"]),
+            "raised_at": "2026-08-05T12:02:00Z",
+        },
+    )
+    append_resolution(
+        fixture.product,
+        "The diagnostic boundary authorized no retained-review mutation.",
+        resolved_at="2026-08-05T12:03:00Z",
+    )
+    append_mechanism_decision(
+        fixture,
+        "signal-free-after-scope-boundary",
+        SIGNAL_FREE_DECISION,
+    )
+    parents = tuple(
+        parent for _axis, parent, _child in fixture.lane_round_ids
+    )
+    assert len(parents) == 2
+    for operation_id in parents:
+        apply_supported_close_receipt(fixture, operation_id)
+    append_mechanism_decision(
+        fixture,
+        "supported-close-terminal-state",
+        supported_close_decision(parents),
     )
     return drift
 
@@ -1364,6 +1456,254 @@ with tempfile.TemporaryDirectory(prefix="signal-free-lifecycle.") as raw:
         and tuple(fixture.runtime.ownership_probes) == probes_after
         and tuple(fixture.runtime.exit_requests) == exits_before,
     )
+
+
+with tempfile.TemporaryDirectory(prefix="supported-close-lifecycle.") as raw:
+    drift = prepare_supported_close_fixture(Path(raw))
+    fixture = drift.recovery
+    latest = load_chain(fixture.product)[-1]
+    authorization = authorized_supported_close_retirement(
+        latest, fixture.product.resolve()
+    )
+    assert authorization is not None
+    archive = (
+        fixture.gate.root
+        / "drift-quarantine"
+        / authorization.signal_free.drift.authorization_record_id
+        / "evidence.json"
+    )
+    archive_before = archive.read_bytes()
+    effects_before = (
+        tuple(fixture.runtime.exit_requests),
+        tuple(fixture.runtime.cleanup_calls),
+        tuple(fixture.runtime.ownership_probes),
+    )
+    started_before = len(fixture.runtime.started)
+    accepted_before = {
+        child: (
+            fixture.store.read(fixture.task_id, child).accepted_callback_id,
+            fixture.store.read(fixture.task_id, child).accepted_callback_sha256,
+        )
+        for _axis, _parent, child in fixture.lane_round_ids
+    }
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    progress = json.loads(
+        (archive.parent / "progress.json").read_text(encoding="utf-8")
+    )
+    parents = [
+        fixture.store.read(fixture.task_id, parent)
+        for _axis, parent, _child in fixture.lane_round_ids
+    ]
+    children = [
+        fixture.store.read(fixture.task_id, child)
+        for _axis, _parent, child in fixture.lane_round_ids
+    ]
+    check(
+        "supported-close recovery consumes only exact cancelled resource-free parents",
+        recovered["status"] == "reviewing"
+        and all(parent.state == "cancelled" for parent in parents)
+        and all(parent.resources == OwnedResources() for parent in parents)
+        and all(parent.pending_effect == "" for parent in parents)
+        and all(parent.effect_id == "request-exit" for parent in parents)
+        and all(
+            parent.effect_outcome == EffectOutcome.SUCCEEDED
+            for parent in parents
+        )
+        and all(child.state == "complete" for child in children)
+        and all(child.resources == OwnedResources() for child in children)
+        and progress["schema_version"] == 2
+        and progress["status"] == "fresh-review-started"
+        and set(progress["retirement_receipts"])
+        == set(authorization.parent_operation_ids)
+        and len(fixture.runtime.started) == started_before + 2,
+    )
+    accepted_after = {
+        child: (
+            fixture.store.read(fixture.task_id, child).accepted_callback_id,
+            fixture.store.read(fixture.task_id, child).accepted_callback_sha256,
+        )
+        for _axis, _parent, child in fixture.lane_round_ids
+    }
+    check(
+        "supported-close recovery preserves archive and has zero signal or replay",
+        archive.read_bytes() == archive_before
+        and effects_before
+        == (
+            tuple(fixture.runtime.exit_requests),
+            tuple(fixture.runtime.cleanup_calls),
+            tuple(fixture.runtime.ownership_probes),
+        )
+        and accepted_after == accepted_before,
+    )
+    started_after = len(fixture.runtime.started)
+    child_revisions = tuple(child.revision for child in children)
+    replay = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "supported-close recovery is idempotent with zero provider replay",
+        replay["status"] == "reviewing"
+        and len(fixture.runtime.started) == started_after
+        and tuple(
+            fixture.store.read(fixture.task_id, child).revision
+            for _axis, _parent, child in fixture.lane_round_ids
+        )
+        == child_revisions
+        and effects_before
+        == (
+            tuple(fixture.runtime.exit_requests),
+            tuple(fixture.runtime.cleanup_calls),
+            tuple(fixture.runtime.ownership_probes),
+        ),
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="supported-close-crash.") as raw:
+    drift = prepare_supported_close_fixture(Path(raw))
+    fixture = drift.recovery
+    started_before = len(fixture.runtime.started)
+
+    def crash_after_supported_close_projection(event: str) -> None:
+        if event.startswith("supported-close-round-completed:"):
+            raise RuntimeError("simulated supported-close projection crash")
+
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=crash_after_supported_close_projection,
+        )
+    except RuntimeError as exc:
+        completed = [
+            child
+            for _axis, _parent, child in fixture.lane_round_ids
+            if fixture.store.read(fixture.task_id, child).state == "complete"
+        ]
+        check(
+            "supported-close crash follows one atomic child projection",
+            str(exc) == "simulated supported-close projection crash"
+            and len(completed) == 1
+            and len(fixture.runtime.started) == started_before,
+        )
+    else:
+        raise AssertionError("supported-close projection failpoint did not fire")
+    completed_child = completed[0]
+    completed_revision = fixture.store.read(
+        fixture.task_id, completed_child
+    ).revision
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "supported-close crash restart converges without repeating projection",
+        recovered["status"] == "reviewing"
+        and fixture.store.read(fixture.task_id, completed_child).revision
+        == completed_revision
+        and all(
+            fixture.store.read(fixture.task_id, child).state == "complete"
+            for _axis, _parent, child in fixture.lane_round_ids
+        )
+        and fixture.runtime.ownership_probes == []
+        and len(fixture.runtime.started) == started_before + 2,
+    )
+
+
+for rejected_label, mutate, expected in (
+    (
+        "non-terminal parent",
+        lambda fixture, parent, child, root: replace_record(
+            fixture,
+            parent,
+            state="exiting",
+            resources=OwnedResources(
+                surface_id="22222222-2222-4222-8222-222222222222"
+            ),
+        ),
+        "supported-close parent receipt changed",
+    ),
+    (
+        "pending exit effect",
+        lambda fixture, parent, child, root: replace_record(
+            fixture,
+            parent,
+            pending_effect="request-exit",
+            effect_outcome=EffectOutcome.PENDING,
+        ),
+        "supported-close parent receipt changed",
+    ),
+    (
+        "partial live resources",
+        lambda fixture, parent, child, root: replace_record(
+            fixture,
+            parent,
+            resources=OwnedResources(
+                surface_id="11111111-1111-4111-8111-111111111111"
+            ),
+        ),
+        "supported-close parent receipt changed",
+    ),
+    (
+        "round callback mismatch",
+        lambda fixture, parent, child, root: replace_record(
+            fixture,
+            child,
+            accepted_callback_id="review-mismatched",
+            accepted_callback_sha256="a" * 64,
+        ),
+        "supported-close round identity changed",
+    ),
+    (
+        "archive drift",
+        lambda fixture, parent, child, root: write_json(
+            root / "evidence.json",
+            {
+                **json.loads(
+                    (root / "evidence.json").read_text(encoding="utf-8")
+                ),
+                "status": "tampered",
+            },
+        ),
+        "evidence identity changed",
+    ),
+):
+    with tempfile.TemporaryDirectory(prefix="supported-close-reject.") as raw:
+        drift = prepare_supported_close_fixture(Path(raw))
+        fixture = drift.recovery
+        parent = fixture.lane_round_ids[0][1]
+        child = fixture.lane_round_ids[0][2]
+        authorization = authorized_supported_close_retirement(
+            load_chain(fixture.product)[-1], fixture.product.resolve()
+        )
+        assert authorization is not None
+        root = (
+            fixture.gate.root
+            / "drift-quarantine"
+            / authorization.signal_free.drift.authorization_record_id
+        )
+        mutate(fixture, parent, child, root)
+        effects_before = (
+            tuple(fixture.runtime.exit_requests),
+            tuple(fixture.runtime.cleanup_calls),
+            len(fixture.runtime.started),
+        )
+        expect_error(
+            f"supported-close recovery rejects {rejected_label}",
+            lambda: recover_task_review_for_mechanism(
+                fixture.product, runtime_manager=fixture.runtime
+            ),
+            expected,
+        )
+        check(
+            f"{rejected_label} rejection has zero signal and zero replay",
+            effects_before
+            == (
+                tuple(fixture.runtime.exit_requests),
+                tuple(fixture.runtime.cleanup_calls),
+                len(fixture.runtime.started),
+            ),
+        )
 
 
 with tempfile.TemporaryDirectory(prefix="signal-free-live.") as raw:

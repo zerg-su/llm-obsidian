@@ -94,6 +94,60 @@ class OperationSupervisor:
         self.store.save(updated, expected_revision=current.revision)
         return updated
 
+    def complete_round_after_supported_close(
+        self,
+        parent: OperationRecord,
+        *,
+        parent_run_id: str,
+        round_run_id: str,
+        accepted_callback_id: str,
+        accepted_callback_sha256: str,
+    ) -> OperationRecord:
+        """Atomically terminalize one retained round after an exact close receipt."""
+
+        current = self.read()
+        parent_callback = (
+            parent.accepted_callback_id,
+            parent.accepted_callback_kind,
+            parent.accepted_callback_sha256,
+        )
+        if (
+            parent.spec.owner_id != self.owner_id
+            or parent.spec.operation_id != current.spec.parent_operation_id
+            or parent.spec.route.profile != "reviewer-callback"
+            or parent.run_id != parent_run_id
+            or parent.lane_id != current.lane_id
+            or parent.state != "cancelled"
+            or parent.resources != OwnedResources()
+            or parent.pending_effect
+            or parent.effect_id != "request-exit"
+            or parent.effect_outcome != EffectOutcome.SUCCEEDED
+            or any(parent_callback)
+            or current.spec.owner_id != self.owner_id
+            or current.spec.operation_id != self.operation_id
+            or current.spec.kind != "review-round"
+            or current.spec.route.profile != "reviewer-callback"
+            or current.run_id != round_run_id
+            or current.resources != OwnedResources()
+            or current.pending_effect
+            or current.effect_outcome != EffectOutcome.NONE
+            or current.effect_id
+            or current.accepted_callback_kind != "review"
+            or current.accepted_callback_id != accepted_callback_id
+            or current.accepted_callback_sha256 != accepted_callback_sha256
+            or current.state not in {"verifying", "complete"}
+        ):
+            raise SupervisorError(
+                "supported-close retained round identity changed"
+            )
+        if current.state == "complete":
+            return current
+        updated = current
+        for state in ("finalizing", "exiting", "complete"):
+            updated, _ = apply_transition(updated, state)
+        self.store.save(updated, expected_revision=current.revision)
+        return updated
+
     def configure_budget(
         self,
         *,

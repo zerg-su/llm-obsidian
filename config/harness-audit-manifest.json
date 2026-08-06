@@ -32,6 +32,7 @@
     "scripts/task_review_drift_contract.py",
     "scripts/task_review_drift_evidence.py",
     "scripts/task_review_drift_quarantine.py",
+    "scripts/task_review_supported_close.py",
     "scripts/task_review_boundary_authorization.py",
     "scripts/task_review_finalizing.py",
     "scripts/task_review_finalization_attempt.py",

@@ -60,6 +60,7 @@ for module in (
     "resolution_evidence",
     "resolution_flow",
     "shared",
+    "supported_close",
     "transport",
     "verification",
     "verification_recovery",
