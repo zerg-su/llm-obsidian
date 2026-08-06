@@ -41,6 +41,7 @@ assert "scripts.task_session_cmux_layout" in audit.source_modules()
 assert "scripts.task_session_store" in audit.source_modules()
 assert "scripts.task_session_store_io" in audit.source_modules()
 for module in (
+    "authorization_boundary",
     "boundary_authorization",
     "context",
     "current",

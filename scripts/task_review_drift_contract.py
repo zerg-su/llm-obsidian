@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from task_review_authorization_boundary import (
+    authorization_chain_boundary_is_valid as _authorization_chain_boundary_is_valid,
+)
 from task_escalation_records import DecisionRecord, EscalationRecordError, load_chain
 
 
@@ -50,6 +53,14 @@ _AUTHORIZATION_COMPATIBILITY_PREFIX = (
     "Classified as an eligible repository-owned typed authorization-compiler "
     "compatibility failure."
 )
+_AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX = (
+    "Classified as an eligible repository-owned authorization-chain compiler "
+    "compatibility failure."
+)
+_STOP_HOOK_TIMING_PREFIX = (
+    "Classified as an eligible repository-owned Stop-hook timing-gate "
+    "measurement failure."
+)
 _FRESH_CHILD_PROGRESS_DECISION = (
     f"{_FRESH_CHILD_PROGRESS_PREFIX} Authorize one narrow regression-backed "
     "repair: accept only the same exact fresh child-round identities after "
@@ -74,6 +85,75 @@ _AUTHORIZATION_COMPATIBILITY_DECISION = (
     "reviewer/provider relaunch or replacement, callback/effect replay, "
     "signals, cmux/manual gate-store mutation, additional fresh lane, push, "
     "publish, tag, release, or reap."
+)
+_STOP_HOOK_TIMING_DECISION = (
+    "Classified as an eligible repository-owned Stop-hook timing-gate "
+    "measurement failure. Authorize one narrow regression-backed local repair "
+    "of the benchmark/test mechanism that keeps the 1.000s product SLO, uses "
+    "deterministic warm-up and monotonic/jitter-resistant sampling to "
+    "distinguish scheduler noise from sustained hook regression, and proves an "
+    "injected real delay still fails. Do not merely raise the threshold or "
+    "weaken the production contract. After clean focused/full/coverage/quality "
+    "and fresh exact-HEAD release-final gates, permit the still-unused single "
+    "supported reconcile. Preserve all prior evidence and prohibitions; no "
+    "reviewer/provider relaunch, callback/effect replay, signals, cmux/manual "
+    "store edits, push, publish, tag, release, or reap."
+)
+_AUTHORIZATION_CHAIN_COMPATIBILITY_DECISION = (
+    f"{_AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX} Authorize one narrow "
+    "regression-backed exact-chain extension that accepts only the immediate "
+    "immutable sequence resolution-4331f351b941ba742fa44496cd53f8d8 -> "
+    "resolution-439263b4acf7db64fbba42861eaa7b08 -> raise "
+    "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6 -> this resolution, proving "
+    "every record digest, predecessor link, unchanged gate identity, clean "
+    "descendant ancestry, the already-passed release-final receipt "
+    "26500000-0000-4000-8000-000005afd184, and the literal still-unused "
+    "single-reconcile grant. Reject missing, reordered, duplicated, ambiguous, "
+    "broadened, or unrelated records. Add focused negative/positive "
+    "regressions, then run clean full/coverage/quality and a fresh exact-HEAD "
+    "release-final profile before consuming exactly one supported reconcile. "
+    "Preserve all historical evidence and prior prohibitions: no reviewer/"
+    "provider relaunch, callback/effect replay, signals, cmux or manual store "
+    "edits, push, publish, tag, release, or reap. Escalate on any further "
+    "identity, ownership, or lifecycle drift."
+)
+
+_EXACT_AUTHORIZATION_CHAIN = (
+    (
+        "resolution-4331f351b941ba742fa44496cd53f8d8",
+        "resolution",
+        "44676c9221624c9f0027d954886a9926313de37bf5bbdeb1d11f914fbc4b29bc",
+        "ab22dd67-791d-4ef1-8f9e-9eab13c87252",
+        "e892ccfccf8b348f6e22008475b883f3fe243d48deb7ab2d13ad2acca682b785",
+    ),
+    (
+        "bd012db9-c598-406e-98e0-d5d502e24106",
+        "raise",
+        "4086ecaaf68c1ecc068c86d6964756f69b492fa11152d988476b76a954b40d99",
+        "resolution-4331f351b941ba742fa44496cd53f8d8",
+        "44676c9221624c9f0027d954886a9926313de37bf5bbdeb1d11f914fbc4b29bc",
+    ),
+    (
+        "resolution-439263b4acf7db64fbba42861eaa7b08",
+        "resolution",
+        "d5e08d66d75cd274f8a2dc240a0e687ffab60e0be9dab4157d88d6abc1a1d480",
+        "bd012db9-c598-406e-98e0-d5d502e24106",
+        "4086ecaaf68c1ecc068c86d6964756f69b492fa11152d988476b76a954b40d99",
+    ),
+    (
+        "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6",
+        "raise",
+        "98d4e69168e0a7b4cc3c68b815c74425eb5ce8f544432894e29b5a375383e079",
+        "resolution-439263b4acf7db64fbba42861eaa7b08",
+        "d5e08d66d75cd274f8a2dc240a0e687ffab60e0be9dab4157d88d6abc1a1d480",
+    ),
+    (
+        "resolution-b28b1e20822edf26a9c4ffa399abf305",
+        "resolution",
+        "0f4c34f780989a8921741390b872aa0d5b0b0ecfb2fbcc7ba4f33a8520074ce9",
+        "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6",
+        "98d4e69168e0a7b4cc3c68b815c74425eb5ce8f544432894e29b5a375383e079",
+    ),
 )
 
 
@@ -699,6 +779,101 @@ def _compile_fresh_progress_compatibility(
     )
 
 
+def _compile_authorization_chain_compatibility(
+    chain: list[DecisionRecord],
+    index: int,
+    worktree: Path,
+    prior: PostFreshPublicationSyncAuthorization | Any | None = None,
+) -> PostFreshPublicationSyncAuthorization | None:
+    """Extend only the five-record immutable timing-repair decision tail."""
+
+    width = len(_EXACT_AUTHORIZATION_CHAIN)
+    if index < width - 1:
+        return None
+    tail = chain[index - width + 1 : index + 1]
+    expected_ids = tuple(row[0] for row in _EXACT_AUTHORIZATION_CHAIN)
+    if (
+        tuple(record.record_id for record in tail) != expected_ids
+        or any(
+            sum(record.record_id == record_id for record in chain) != 1
+            for record_id in expected_ids
+        )
+    ):
+        return None
+    for record, expected in zip(
+        tail, _EXACT_AUTHORIZATION_CHAIN, strict=True
+    ):
+        (
+            record_id,
+            record_type,
+            digest,
+            previous_id,
+            previous_digest,
+        ) = expected
+        if (
+            record.record_id != record_id
+            or record.record_type != record_type
+            or record.sha256 != digest
+            or record.previous_record_id != previous_id
+            or record.previous_record_sha256 != previous_digest
+        ):
+            return None
+
+    latest = tail[-1]
+    if (
+        str(tail[0].payload.get("decision") or "")
+        != _AUTHORIZATION_COMPATIBILITY_DECISION
+        or str(tail[2].payload.get("decision") or "")
+        != _STOP_HOOK_TIMING_DECISION
+        or str(latest.payload.get("decision") or "")
+        != _AUTHORIZATION_CHAIN_COMPATIBILITY_DECISION
+        or latest.payload.get("status") != "resolved"
+        or latest.payload.get("category") != "mechanism-failure"
+        or str(latest.payload.get("worktree") or "") != str(worktree)
+    ):
+        return None
+    scope = _decision_scope(latest.payload)
+    if any(
+        record.record_type not in {"raise", "resolution"}
+        or _decision_scope(record.payload) != scope
+        for record in tail
+    ):
+        return None
+    resolution_positions = {
+        prefix: [
+            row_index
+            for row_index, record in enumerate(chain)
+            if record.record_type == "resolution"
+            and str(record.payload.get("decision") or "").startswith(prefix)
+        ]
+        for prefix in (
+            _AUTHORIZATION_COMPATIBILITY_PREFIX,
+            _STOP_HOOK_TIMING_PREFIX,
+            _AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX,
+        )
+    }
+    if (
+        resolution_positions[_AUTHORIZATION_COMPATIBILITY_PREFIX]
+        != [index - 4]
+        or resolution_positions[_STOP_HOOK_TIMING_PREFIX] != [index - 2]
+        or resolution_positions[_AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX]
+        != [index]
+    ):
+        return None
+
+    if prior is None:
+        prior = _compile_fresh_progress_compatibility(
+            chain, index - width + 1, worktree
+        )
+    if prior is None:
+        return None
+    return PostFreshPublicationSyncAuthorization(
+        prior.continuation,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
 def authorized_post_fresh_publication_sync(
     latest: DecisionRecord, worktree: Path
 ) -> PostFreshPublicationSyncAuthorization | None:
@@ -720,4 +895,12 @@ def authorized_post_fresh_publication_sync(
         return _compile_fresh_progress_compatibility(
             chain, index, worktree
         )
+    if decision.startswith(_AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX):
+        authorization = _compile_authorization_chain_compatibility(
+            chain, index, worktree
+        )
+        if authorization is not None and _authorization_chain_boundary_is_valid(
+            worktree, authorization
+        ):
+            return authorization
     return None

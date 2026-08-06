@@ -11,6 +11,8 @@ import tempfile
 import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +49,8 @@ from task_review_context import (  # noqa: E402
     _runtime_root,
 )
 from task_review_drift_contract import (  # noqa: E402
+    _authorization_chain_boundary_is_valid,
+    _compile_authorization_chain_compatibility,
     authorized_post_verification_review_drive,
     authorized_post_fresh_publication_sync,
     authorized_drift_quarantine,
@@ -63,6 +67,7 @@ from task_review_resolution_evidence import (  # noqa: E402
 )
 from task_review_shared import TaskReviewError  # noqa: E402
 from task_escalation_records import (  # noqa: E402
+    DecisionRecord,
     append_raise,
     append_resolution,
     load_chain,
@@ -793,6 +798,42 @@ AUTHORIZATION_COMPATIBILITY_DECISION = (
     "still-unused single supported reconcile. No reviewer/provider relaunch or "
     "replacement, callback/effect replay, signals, cmux/manual gate-store "
     "mutation, additional fresh lane, push, publish, tag, release, or reap."
+)
+
+
+TIMING_GATE_DECISION = (
+    "Classified as an eligible repository-owned Stop-hook timing-gate "
+    "measurement failure. Authorize one narrow regression-backed local repair "
+    "of the benchmark/test mechanism that keeps the 1.000s product SLO, uses "
+    "deterministic warm-up and monotonic/jitter-resistant sampling to "
+    "distinguish scheduler noise from sustained hook regression, and proves an "
+    "injected real delay still fails. Do not merely raise the threshold or "
+    "weaken the production contract. After clean focused/full/coverage/quality "
+    "and fresh exact-HEAD release-final gates, permit the still-unused single "
+    "supported reconcile. Preserve all prior evidence and prohibitions; no "
+    "reviewer/provider relaunch, callback/effect replay, signals, cmux/manual "
+    "store edits, push, publish, tag, release, or reap."
+)
+
+
+AUTHORIZATION_CHAIN_DECISION = (
+    "Classified as an eligible repository-owned authorization-chain compiler "
+    "compatibility failure. Authorize one narrow regression-backed exact-chain "
+    "extension that accepts only the immediate immutable sequence resolution-"
+    "4331f351b941ba742fa44496cd53f8d8 -> resolution-"
+    "439263b4acf7db64fbba42861eaa7b08 -> raise "
+    "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6 -> this resolution, proving "
+    "every record digest, predecessor link, unchanged gate identity, clean "
+    "descendant ancestry, the already-passed release-final receipt "
+    "26500000-0000-4000-8000-000005afd184, and the literal still-unused "
+    "single-reconcile grant. Reject missing, reordered, duplicated, ambiguous, "
+    "broadened, or unrelated records. Add focused negative/positive "
+    "regressions, then run clean full/coverage/quality and a fresh exact-HEAD "
+    "release-final profile before consuming exactly one supported reconcile. "
+    "Preserve all historical evidence and prior prohibitions: no reviewer/"
+    "provider relaunch, callback/effect replay, signals, cmux or manual store "
+    "edits, push, publish, tag, release, or reap. Escalate on any further "
+    "identity, ownership, or lifecycle drift."
 )
 
 
@@ -1930,6 +1971,272 @@ for rejected_label, append_invalid_chain in (
                 latest, fixture.product.resolve()
             )
             is None,
+        )
+
+
+def exact_authorization_chain(
+    worktree: Path,
+) -> list[DecisionRecord]:
+    scope = {
+        "category": "mechanism-failure",
+        "worktree": str(worktree),
+        "task_name": "mechanism recovery",
+        "task_surface": "surface-exact",
+    }
+    rows = (
+        (
+            "resolution-4331f351b941ba742fa44496cd53f8d8",
+            "resolution",
+            "44676c9221624c9f0027d954886a9926313de37bf5bbdeb1d11f914fbc4b29bc",
+            "ab22dd67-791d-4ef1-8f9e-9eab13c87252",
+            "e892ccfccf8b348f6e22008475b883f3fe243d48deb7ab2d13ad2acca682b785",
+            AUTHORIZATION_COMPATIBILITY_DECISION,
+        ),
+        (
+            "bd012db9-c598-406e-98e0-d5d502e24106",
+            "raise",
+            "4086ecaaf68c1ecc068c86d6964756f69b492fa11152d988476b76a954b40d99",
+            "resolution-4331f351b941ba742fa44496cd53f8d8",
+            "44676c9221624c9f0027d954886a9926313de37bf5bbdeb1d11f914fbc4b29bc",
+            "",
+        ),
+        (
+            "resolution-439263b4acf7db64fbba42861eaa7b08",
+            "resolution",
+            "d5e08d66d75cd274f8a2dc240a0e687ffab60e0be9dab4157d88d6abc1a1d480",
+            "bd012db9-c598-406e-98e0-d5d502e24106",
+            "4086ecaaf68c1ecc068c86d6964756f69b492fa11152d988476b76a954b40d99",
+            TIMING_GATE_DECISION,
+        ),
+        (
+            "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6",
+            "raise",
+            "98d4e69168e0a7b4cc3c68b815c74425eb5ce8f544432894e29b5a375383e079",
+            "resolution-439263b4acf7db64fbba42861eaa7b08",
+            "d5e08d66d75cd274f8a2dc240a0e687ffab60e0be9dab4157d88d6abc1a1d480",
+            "",
+        ),
+        (
+            "resolution-b28b1e20822edf26a9c4ffa399abf305",
+            "resolution",
+            "0f4c34f780989a8921741390b872aa0d5b0b0ecfb2fbcc7ba4f33a8520074ce9",
+            "2f0718a4-fe30-4f97-97a6-1c5faa3fccd6",
+            "98d4e69168e0a7b4cc3c68b815c74425eb5ce8f544432894e29b5a375383e079",
+            AUTHORIZATION_CHAIN_DECISION,
+        ),
+    )
+    return [
+        DecisionRecord(
+            record_id,
+            record_type,
+            {
+                **scope,
+                "status": "resolved" if record_type == "resolution" else "pending",
+                "decision": decision,
+            },
+            digest,
+            worktree / f"{record_id}.json",
+            False,
+            previous_id,
+            previous_sha,
+        )
+        for (
+            record_id,
+            record_type,
+            digest,
+            previous_id,
+            previous_sha,
+            decision,
+        ) in rows
+    ]
+
+
+with tempfile.TemporaryDirectory(prefix="authorization-chain-exact.") as raw:
+    product = Path(raw).resolve()
+    chain = exact_authorization_chain(product)
+    continuation = SimpleNamespace(dispatch_operation_id="dispatch-exact")
+    prior = SimpleNamespace(continuation=continuation)
+    compiled = _compile_authorization_chain_compatibility(
+        chain, len(chain) - 1, product, prior
+    )
+    check(
+        "authorization chain compiler accepts only the exact immutable tail",
+        compiled is not None
+        and compiled.continuation is continuation
+        and compiled.authorization_record_id == chain[-1].record_id
+        and compiled.authorization_record_sha256 == chain[-1].sha256,
+    )
+    mutations = {
+        "missing record": chain[:-1],
+        "reordered record": [chain[0], chain[2], chain[1], *chain[3:]],
+        "duplicated record": [chain[0], chain[0], *chain[1:]],
+        "ambiguous resolution": [
+            replace(
+                chain[-1],
+                record_id="resolution-ambiguous-chain",
+                sha256="2" * 64,
+                previous_record_id="resolution-before-chain",
+                previous_record_sha256="3" * 64,
+            ),
+            *chain,
+        ],
+        "wrong digest": [*chain[:-1], replace(chain[-1], sha256="0" * 64)],
+        "broken predecessor": [
+            *chain[:-1],
+            replace(chain[-1], previous_record_sha256="1" * 64),
+        ],
+        "broadened decision": [
+            *chain[:-1],
+            replace(
+                chain[-1],
+                payload={
+                    **chain[-1].payload,
+                    "decision": AUTHORIZATION_CHAIN_DECISION
+                    + " Permit one provider retry.",
+                },
+            ),
+        ],
+        "unrelated scope": [
+            chain[0],
+            replace(
+                chain[1],
+                payload={**chain[1].payload, "task_surface": "surface-other"},
+            ),
+            *chain[2:],
+        ],
+    }
+    for label, candidate in mutations.items():
+        check(
+            f"authorization chain compiler rejects {label}",
+            _compile_authorization_chain_compatibility(
+                candidate, len(candidate) - 1, product, prior
+            )
+            is None,
+        )
+
+
+with tempfile.TemporaryDirectory(prefix="authorization-chain-boundary.") as raw:
+    base = Path(raw)
+    product = base / "product"
+    vault = base / "vault"
+    product.mkdir()
+    (vault / "wiki").mkdir(parents=True)
+    (vault / "scripts").mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=product, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "review@example.invalid"],
+        cwd=product,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Authorization Test"],
+        cwd=product,
+        check=True,
+    )
+    task_id = "ad97826c-0651-4014-a113-72518e6fceea"
+    write_json(
+        product / ".task-meta.json",
+        {
+            "task_id": task_id,
+            "worktree": str(product.resolve()),
+            "vault_root": str(vault.resolve()),
+        },
+    )
+    receipt_path = product / "evidence/receipt.json"
+    receipt_path.parent.mkdir()
+    receipt_path.write_text("{}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=product, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "release receipt"], cwd=product, check=True)
+    release_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=product, text=True, capture_output=True, check=True
+    ).stdout.strip()
+    release_tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=product, text=True, capture_output=True, check=True
+    ).stdout.strip()
+    (product / "repair.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=product, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "clean descendant"], cwd=product, check=True)
+    gate_root = (
+        vault
+        / ".vault-meta/harness/review-data"
+        / task_id
+        / task_id
+    )
+    gate_root.mkdir(parents=True)
+    gate = {
+        "schema_version": 1,
+        "owner_id": task_id,
+        "dispatch_operation_id": task_id,
+        "active_review_operation_id": (
+            "b63552c9-60c2-54b3-99c9-093525a65c44-fresh-8016a8aa"
+        ),
+        "status": "attention-required",
+        "fresh_reevaluation_used": True,
+    }
+    write_json(gate_root / "review-gate.json", gate)
+    gate_sha = hashlib.sha256((gate_root / "review-gate.json").read_bytes()).hexdigest()
+    runtime_root = vault / ".vault-meta/harness/owners" / task_id / "runtime" / task_id
+    runtime_root.mkdir(parents=True)
+    authorization = SimpleNamespace(
+        continuation=SimpleNamespace(dispatch_operation_id=task_id)
+    )
+    receipt = {
+        "attempt_id": "attempt-exact",
+        "profile": "release-final",
+        "profile_sha256": (
+            "804158ff362f6683f29d6a76f858fa8f02912051f6fe31ad2fb39270c2e56067"
+        ),
+        "subject_head_sha": release_head,
+        "subject_tree_sha": release_tree,
+        "execution_relation": "release-candidate",
+        "status": "passed",
+    }
+    overrides = {
+        "_RECONCILE_GATE_SHA256": gate_sha,
+        "_RELEASE_FINAL_ATTEMPT_ID": "attempt-exact",
+        "_RELEASE_FINAL_HEAD": release_head,
+        "_RELEASE_FINAL_TREE": release_tree,
+        "_RELEASE_FINAL_RECEIPT": Path("evidence/receipt.json"),
+    }
+    with patch.multiple("task_review_authorization_boundary", **overrides):
+        verifier = lambda _path: receipt
+        check(
+            "authorization boundary proves clean ancestry, gate, receipt, and unused reconcile",
+            _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
+        )
+        (product / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        check(
+            "authorization boundary rejects a dirty descendant",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
+        )
+        (product / "dirty.txt").unlink()
+        sync = runtime_root / "post-fresh-publication-sync.json"
+        sync.write_text("{}\n", encoding="utf-8")
+        check(
+            "authorization boundary rejects a consumed reconcile",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
+        )
+        sync.unlink()
+        check(
+            "authorization boundary rejects receipt identity drift",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(),
+                authorization,
+                receipt_verifier=lambda _path: {**receipt, "attempt_id": "other"},
+            ),
+        )
+        write_json(gate_root / "review-gate.json", {**gate, "status": "reviewing"})
+        check(
+            "authorization boundary rejects gate identity drift",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
         )
 
 

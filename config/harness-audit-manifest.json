@@ -25,6 +25,7 @@
     "scripts/review_telemetry.py",
     "scripts/split_dispatch.py",
     "scripts/task_contract.py",
+    "scripts/task_review_authorization_boundary.py",
     "scripts/task_review_context.py",
     "scripts/task_review_current.py",
     "scripts/task_review_delta_chunks.py",
