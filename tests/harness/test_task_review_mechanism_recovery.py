@@ -866,6 +866,50 @@ FRESH_BOUNDARY_PROVENANCE_DECISION = (
 )
 
 
+CORRECTED_PROVENANCE_IDENTITY_DECISION = (
+    "Classified as coordinator-authored exact-identity contract drift. The "
+    "intended coordinator provenance verification_receipt_sha256 is the actual "
+    "immutable 64-character record/artifact-bound value "
+    "19b7353968b7b7ee91043a604f10a4f7471b99a6b268a643a2f24cf41285aa4b; "
+    "the prior 63-character value ending aa4 is superseded only at that literal "
+    "and must never be accepted. Explicitly adopt clean repair commit "
+    "8addce2c2e06ed54d4353d8908938e32df460933 and its focused fail-closed "
+    "regressions. Preserve the still-unused authorization for exactly one "
+    "replacement supported reconcile after one clean focused/full/coverage/"
+    "quality and exact-HEAD release-final gate. Apply the user's minimum-release "
+    "boundary: make no further architectural refactor, completeness-certificate "
+    "work, optional enhancement, reviewer/provider relaunch, callback/effect "
+    "replay, signal, cmux or manual store/gate edit, push, publish, tag, release, "
+    "or reap. If the corrected exact immutable identity chain does not compile "
+    "or any new lifecycle/identity drift appears, fail closed and escalate once."
+)
+
+
+FINAL_EXACT_TAIL_DECISION = (
+    "Classified as coordinator-authored exact commit-identity drift. The "
+    "intended and adopted clean existing Git commit is exactly "
+    "8addce2df1bd3d7cae3b6f586b7fb43d9bb13733; the nonexistent "
+    "8addce2c2e06ed54d4353d8908938e32df460933 value is superseded and must "
+    "be rejected. Preserve the already-authorized final minimal literal "
+    "exact-tail extension, now through raise "
+    "4ad73b06-7526-439d-82f3-a014ce1e178b with sha256 "
+    "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1 and "
+    "this exact resolution record, all predecessor identities, the corrected "
+    "64-character coordinator provenance digest "
+    "19b7353968b7b7ee91043a604f10a4f7471b99a6b268a643a2f24cf41285aa4b, "
+    "and the still-unused authorization for exactly one replacement supported "
+    "reconcile. Permit only the focused exact-tail regression and minimal "
+    "existing-validator change required to compile this immutable correction; "
+    "then one clean focused/full/coverage/quality and exact-HEAD release-final "
+    "gate followed by that single reconcile. Preserve the user's minimum-release "
+    "boundary and every prior prohibition: no completeness certificate, optional "
+    "refactor, generic decision language, new abstraction/public interface/"
+    "dependency/migration, reviewer/provider relaunch, replay, signal, cmux or "
+    "manual store/gate edit, push, publish, tag, release, or reap. Escalate once "
+    "and stop on any further identity or lifecycle drift."
+)
+
+
 def absent_ownership(index: int) -> DurableCleanupOwnership:
     return DurableCleanupOwnership(
         "dead",
@@ -2233,6 +2277,213 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-exact.") as raw:
     for label, candidate in provenance_mutations.items():
         check(
             f"fresh-boundary provenance compiler rejects {label}",
+            _compile_fresh_boundary_provenance_compatibility(
+                candidate, len(candidate) - 1, product, compiled
+            )
+            is None,
+        )
+
+    correction_rows = (
+        (
+            "06a3444c-c03f-4eb7-bee5-381ed69032fb",
+            "raise",
+            "778c27d45d5a0337aa91c89706fff45797e395da2e0e88319151224a43c17ce7",
+            "resolution-133515ccf480a8d5266eb125582f7f5b",
+            "85416c36635bb3d4cfac65de0463d83b96c61744b32a825a97c6306dc0744479",
+            "contract-drift",
+            "",
+        ),
+        (
+            "resolution-10939a9719a80eb4eb5dd91059b097cc",
+            "resolution",
+            "3055116cbd7f829529e4f3f105edd70f3baed9c290eb67c919580431b3ce5b37",
+            "06a3444c-c03f-4eb7-bee5-381ed69032fb",
+            "778c27d45d5a0337aa91c89706fff45797e395da2e0e88319151224a43c17ce7",
+            "contract-drift",
+            CORRECTED_PROVENANCE_IDENTITY_DECISION,
+        ),
+        (
+            "3d775da5-2d50-4754-aba9-2cddb2d1715f",
+            "raise",
+            "807c81a499239bd27d6330de05fd7a34df685b2b2781a488fc96d9a363447baf",
+            "resolution-10939a9719a80eb4eb5dd91059b097cc",
+            "3055116cbd7f829529e4f3f105edd70f3baed9c290eb67c919580431b3ce5b37",
+            "mechanism-failure",
+            "",
+        ),
+        (
+            "resolution-1671bc7ae72328b503d14860fd98415d",
+            "resolution",
+            "5786f93a726c5df73c95273dc14cd2fc7e40b7f28f66e01a9dce00c8c6d6b019",
+            "3d775da5-2d50-4754-aba9-2cddb2d1715f",
+            "807c81a499239bd27d6330de05fd7a34df685b2b2781a488fc96d9a363447baf",
+            "mechanism-failure",
+            "",
+        ),
+        (
+            "4ad73b06-7526-439d-82f3-a014ce1e178b",
+            "raise",
+            "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1",
+            "resolution-1671bc7ae72328b503d14860fd98415d",
+            "5786f93a726c5df73c95273dc14cd2fc7e40b7f28f66e01a9dce00c8c6d6b019",
+            "contract-drift",
+            "",
+        ),
+        (
+            "resolution-5834db241204d59c5e2c5c5610a1ea65",
+            "resolution",
+            "16aa04f969d4d0e0ce5a335b26d4b953ea0d235d542d14ce25c9b5a93dbebfdc",
+            "4ad73b06-7526-439d-82f3-a014ce1e178b",
+            "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1",
+            "contract-drift",
+            FINAL_EXACT_TAIL_DECISION,
+        ),
+    )
+    historical_legacy_decision = FRESH_BOUNDARY_PROVENANCE_DECISION.replace(
+        "41285aa4b;", "41285aa4;"
+    )
+    correction_chain = [*chain, *provenance_tail[1:]]
+    correction_chain[-1] = replace(
+        correction_chain[-1],
+        payload={
+            **correction_chain[-1].payload,
+            "decision": historical_legacy_decision,
+        },
+    )
+    correction_chain.extend(
+        DecisionRecord(
+            record_id,
+            record_type,
+            {
+                **scope,
+                "category": category,
+                "status": "resolved" if record_type == "resolution" else "pending",
+                "decision": decision,
+            },
+            digest,
+            product / f"{record_id}.json",
+            False,
+            previous_id,
+            previous_sha,
+        )
+        for (
+            record_id,
+            record_type,
+            digest,
+            previous_id,
+            previous_sha,
+            category,
+            decision,
+        ) in correction_rows
+    )
+    correction_compiled = _compile_fresh_boundary_provenance_compatibility(
+        correction_chain,
+        len(correction_chain) - 1,
+        product,
+        compiled,
+    )
+    check(
+        "fresh-boundary provenance compiler accepts the final exact correction tail",
+        correction_compiled is not None
+        and correction_compiled.continuation is continuation
+        and correction_compiled.authorization_record_id
+        == correction_chain[-1].record_id
+        and correction_compiled.authorization_record_sha256
+        == correction_chain[-1].sha256,
+    )
+    with patch(
+        "task_review_drift_contract.load_chain", return_value=correction_chain
+    ), patch(
+        "task_review_drift_contract._authorization_chain_boundary_is_valid",
+        return_value=True,
+    ), patch(
+        "task_review_drift_contract._compile_authorization_chain_compatibility",
+        return_value=compiled,
+    ) as prior_compiler:
+        dispatched = authorized_post_fresh_publication_sync(
+            correction_chain[-1], product
+        )
+    check(
+        "fresh-boundary dispatcher compiles the final exact correction tail",
+        dispatched is not None
+        and dispatched.authorization_record_id == correction_chain[-1].record_id
+        and prior_compiler.call_args.args
+        == (correction_chain, len(correction_chain) - 9, product),
+    )
+    legacy_digest_decision = CORRECTED_PROVENANCE_IDENTITY_DECISION.replace(
+        "41285aa4b;", "41285aa4;"
+    )
+    correction_mutations = {
+        "missing record": [
+            *correction_chain[:-4],
+            *correction_chain[-3:],
+        ],
+        "reordered record": [
+            *correction_chain[:-4],
+            correction_chain[-3],
+            correction_chain[-4],
+            *correction_chain[-2:],
+        ],
+        "duplicated identity": [correction_chain[-1], *correction_chain],
+        "wrong digest": [
+            *correction_chain[:-1],
+            replace(correction_chain[-1], sha256="0" * 64),
+        ],
+        "broken predecessor": [
+            *correction_chain[:-1],
+            replace(correction_chain[-1], previous_record_sha256="1" * 64),
+        ],
+        "broadened decision": [
+            *correction_chain[:-1],
+            replace(
+                correction_chain[-1],
+                payload={
+                    **correction_chain[-1].payload,
+                    "decision": FINAL_EXACT_TAIL_DECISION
+                    + " Permit another reconcile.",
+                },
+            ),
+        ],
+        "unrelated scope": [
+            *correction_chain[:-2],
+            replace(
+                correction_chain[-2],
+                payload={
+                    **correction_chain[-2].payload,
+                    "task_surface": "surface-unrelated",
+                },
+            ),
+            correction_chain[-1],
+        ],
+        "legacy 63-character provenance": [
+            *correction_chain[:-5],
+            replace(
+                correction_chain[-5],
+                payload={
+                    **correction_chain[-5].payload,
+                    "decision": legacy_digest_decision,
+                },
+            ),
+            *correction_chain[-4:],
+        ],
+        "superseded commit identity": [
+            *correction_chain[:-1],
+            replace(
+                correction_chain[-1],
+                payload={
+                    **correction_chain[-1].payload,
+                    "decision": FINAL_EXACT_TAIL_DECISION.replace(
+                        "8addce2df1bd3d7cae3b6f586b7fb43d9bb13733",
+                        "8addce2c2e06ed54d4353d8908938e32df460933",
+                        1,
+                    ),
+                },
+            ),
+        ],
+    }
+    for label, candidate in correction_mutations.items():
+        check(
+            f"fresh-boundary provenance compiler rejects {label} in final tail",
             _compile_fresh_boundary_provenance_compatibility(
                 candidate, len(candidate) - 1, product, compiled
             )

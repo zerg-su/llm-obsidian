@@ -40,12 +40,20 @@ ZERO_EFFECT_FIELDS = (
     "callback_effects_replayed",
     "provider_effects_replayed",
 )
-FRESH_BOUNDARY_PROVENANCE_PREFIX = (
+_INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX = (
     "Classified as an eligible repository-owned fresh-boundary authorization "
     "provenance compatibility failure."
 )
+_FINAL_EXACT_TAIL_PREFIX = (
+    "Classified as coordinator-authored exact commit-identity drift."
+)
+FRESH_BOUNDARY_PROVENANCE_PREFIX = (
+    _INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX,
+    _FINAL_EXACT_TAIL_PREFIX,
+)
 _FRESH_BOUNDARY_PROVENANCE_DECISION = (
-    f"{FRESH_BOUNDARY_PROVENANCE_PREFIX} Authorize one narrow regression-backed "
+    f"{_INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX} Authorize one narrow "
+    "regression-backed "
     "fail-closed repair: preserve the immutable fresh-boundary artifact byte-"
     "for-byte; validate its exact coordinator escalation provenance "
     "verification_operation_id 75ff063d-d388-46a7-915d-0eed20392da4 and "
@@ -69,6 +77,45 @@ _FRESH_BOUNDARY_PROVENANCE_DECISION = (
     "release, or reap. Escalate on any further identity, ownership, or lifecycle "
     "drift."
 )
+_CORRECTED_PROVENANCE_IDENTITY_DECISION = (
+    "Classified as coordinator-authored exact-identity contract drift. The "
+    "intended coordinator provenance verification_receipt_sha256 is the actual "
+    "immutable 64-character record/artifact-bound value "
+    "19b7353968b7b7ee91043a604f10a4f7471b99a6b268a643a2f24cf41285aa4b; "
+    "the prior 63-character value ending aa4 is superseded only at that literal "
+    "and must never be accepted. Explicitly adopt clean repair commit "
+    "8addce2c2e06ed54d4353d8908938e32df460933 and its focused fail-closed "
+    "regressions. Preserve the still-unused authorization for exactly one "
+    "replacement supported reconcile after one clean focused/full/coverage/"
+    "quality and exact-HEAD release-final gate. Apply the user's minimum-release "
+    "boundary: make no further architectural refactor, completeness-certificate "
+    "work, optional enhancement, reviewer/provider relaunch, callback/effect "
+    "replay, signal, cmux or manual store/gate edit, push, publish, tag, release, "
+    "or reap. If the corrected exact immutable identity chain does not compile "
+    "or any new lifecycle/identity drift appears, fail closed and escalate once."
+)
+_FINAL_EXACT_TAIL_DECISION = (
+    f"{_FINAL_EXACT_TAIL_PREFIX} The intended and adopted clean existing Git "
+    "commit is exactly 8addce2df1bd3d7cae3b6f586b7fb43d9bb13733; the "
+    "nonexistent 8addce2c2e06ed54d4353d8908938e32df460933 value is superseded "
+    "and must be rejected. Preserve the already-authorized final minimal literal "
+    "exact-tail extension, now through raise "
+    "4ad73b06-7526-439d-82f3-a014ce1e178b with sha256 "
+    "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1 and "
+    "this exact resolution record, all predecessor identities, the corrected "
+    "64-character coordinator provenance digest "
+    "19b7353968b7b7ee91043a604f10a4f7471b99a6b268a643a2f24cf41285aa4b, "
+    "and the still-unused authorization for exactly one replacement supported "
+    "reconcile. Permit only the focused exact-tail regression and minimal "
+    "existing-validator change required to compile this immutable correction; "
+    "then one clean focused/full/coverage/quality and exact-HEAD release-final "
+    "gate followed by that single reconcile. Preserve the user's minimum-release "
+    "boundary and every prior prohibition: no completeness certificate, optional "
+    "refactor, generic decision language, new abstraction/public interface/"
+    "dependency/migration, reviewer/provider relaunch, replay, signal, cmux or "
+    "manual store/gate edit, push, publish, tag, release, or reap. Escalate once "
+    "and stop on any further identity or lifecycle drift."
+)
 _EXACT_PROVENANCE_TAIL = (
     (
         "resolution-b28b1e20822edf26a9c4ffa399abf305",
@@ -90,6 +137,56 @@ _EXACT_PROVENANCE_TAIL = (
         "85416c36635bb3d4cfac65de0463d83b96c61744b32a825a97c6306dc0744479",
         "50949589-9803-4b88-9e2c-e86e89da73a9",
         "a3aeac897b3db2c29f5a8d82bf9a140a689ad7924dffcfc113977388c5e95e26",
+    ),
+)
+_EXACT_CORRECTION_TAIL = (
+    (
+        "06a3444c-c03f-4eb7-bee5-381ed69032fb",
+        "raise",
+        "778c27d45d5a0337aa91c89706fff45797e395da2e0e88319151224a43c17ce7",
+        "resolution-133515ccf480a8d5266eb125582f7f5b",
+        "85416c36635bb3d4cfac65de0463d83b96c61744b32a825a97c6306dc0744479",
+        "contract-drift",
+    ),
+    (
+        "resolution-10939a9719a80eb4eb5dd91059b097cc",
+        "resolution",
+        "3055116cbd7f829529e4f3f105edd70f3baed9c290eb67c919580431b3ce5b37",
+        "06a3444c-c03f-4eb7-bee5-381ed69032fb",
+        "778c27d45d5a0337aa91c89706fff45797e395da2e0e88319151224a43c17ce7",
+        "contract-drift",
+    ),
+    (
+        "3d775da5-2d50-4754-aba9-2cddb2d1715f",
+        "raise",
+        "807c81a499239bd27d6330de05fd7a34df685b2b2781a488fc96d9a363447baf",
+        "resolution-10939a9719a80eb4eb5dd91059b097cc",
+        "3055116cbd7f829529e4f3f105edd70f3baed9c290eb67c919580431b3ce5b37",
+        "mechanism-failure",
+    ),
+    (
+        "resolution-1671bc7ae72328b503d14860fd98415d",
+        "resolution",
+        "5786f93a726c5df73c95273dc14cd2fc7e40b7f28f66e01a9dce00c8c6d6b019",
+        "3d775da5-2d50-4754-aba9-2cddb2d1715f",
+        "807c81a499239bd27d6330de05fd7a34df685b2b2781a488fc96d9a363447baf",
+        "mechanism-failure",
+    ),
+    (
+        "4ad73b06-7526-439d-82f3-a014ce1e178b",
+        "raise",
+        "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1",
+        "resolution-1671bc7ae72328b503d14860fd98415d",
+        "5786f93a726c5df73c95273dc14cd2fc7e40b7f28f66e01a9dce00c8c6d6b019",
+        "contract-drift",
+    ),
+    (
+        "resolution-5834db241204d59c5e2c5c5610a1ea65",
+        "resolution",
+        "16aa04f969d4d0e0ce5a335b26d4b953ea0d235d542d14ce25c9b5a93dbebfdc",
+        "4ad73b06-7526-439d-82f3-a014ce1e178b",
+        "1cd799cdb36c15eafd187de79f933392c8094a60869643000d54e1f8749718a1",
+        "contract-drift",
     ),
 )
 
@@ -122,10 +219,97 @@ def coordinator_provenance_is_exact(
 def provenance_tail_is_exact(
     chain: list[DecisionRecord], index: int, worktree: Path
 ) -> bool:
-    """Accept only the immediate three-record replacement-reconcile grant."""
+    """Accept only the literal replacement-reconcile correction tails."""
 
     if index < 2:
         return False
+    if chain[index].record_id == _EXACT_CORRECTION_TAIL[-1][0]:
+        initial_index = index - len(_EXACT_CORRECTION_TAIL)
+        if initial_index < 2:
+            return False
+        initial_tail = chain[initial_index - 2 : initial_index + 1]
+        initial_ids = tuple(row[0] for row in _EXACT_PROVENANCE_TAIL)
+        if tuple(record.record_id for record in initial_tail) != initial_ids or any(
+            sum(record.record_id == record_id for record in chain) != 1
+            for record_id in initial_ids
+        ):
+            return False
+        for record, expected in zip(
+            initial_tail, _EXACT_PROVENANCE_TAIL, strict=True
+        ):
+            if (
+                (
+                    record.record_id,
+                    record.record_type,
+                    record.sha256,
+                    record.previous_record_id,
+                    record.previous_record_sha256,
+                )
+                != expected
+            ):
+                return False
+        correction = chain[initial_index + 1 : index + 1]
+        expected_ids = tuple(row[0] for row in _EXACT_CORRECTION_TAIL)
+        if tuple(record.record_id for record in correction) != expected_ids or any(
+            sum(record.record_id == record_id for record in chain) != 1
+            for record_id in expected_ids
+        ):
+            return False
+        for record, expected in zip(
+            correction, _EXACT_CORRECTION_TAIL, strict=True
+        ):
+            if (
+                (
+                    record.record_id,
+                    record.record_type,
+                    record.sha256,
+                    record.previous_record_id,
+                    record.previous_record_sha256,
+                    record.payload.get("category"),
+                )
+                != expected
+            ):
+                return False
+        scope = {
+            key: initial_tail[-1].payload.get(key)
+            for key in ("worktree", "task_name", "task_surface")
+        }
+        return bool(
+            initial_tail[-1].payload.get("status") == "resolved"
+            and initial_tail[-1].payload.get("category") == "mechanism-failure"
+            and all(
+                {
+                    key: record.payload.get(key)
+                    for key in ("worktree", "task_name", "task_surface")
+                }
+                == scope
+                for record in initial_tail
+            )
+            and correction[1].payload.get("decision")
+            == _CORRECTED_PROVENANCE_IDENTITY_DECISION
+            and correction[-1].payload.get("status") == "resolved"
+            and correction[-1].payload.get("decision")
+            == _FINAL_EXACT_TAIL_DECISION
+            and str(correction[-1].payload.get("worktree") or "")
+            == str(worktree)
+            and all(
+                {
+                    key: record.payload.get(key)
+                    for key in ("worktree", "task_name", "task_surface")
+                }
+                == scope
+                for record in correction
+            )
+            and [
+                row_index
+                for row_index, record in enumerate(chain)
+                if record.record_type == "resolution"
+                and str(record.payload.get("decision") or "").startswith(
+                    _FINAL_EXACT_TAIL_PREFIX
+                )
+            ]
+            == [index]
+        )
     tail = chain[index - 2 : index + 1]
     expected_ids = tuple(row[0] for row in _EXACT_PROVENANCE_TAIL)
     if tuple(record.record_id for record in tail) != expected_ids or any(
@@ -169,7 +353,7 @@ def provenance_tail_is_exact(
             for row_index, record in enumerate(chain)
             if record.record_type == "resolution"
             and str(record.payload.get("decision") or "").startswith(
-                FRESH_BOUNDARY_PROVENANCE_PREFIX
+                _INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX
             )
         ]
         == [index]

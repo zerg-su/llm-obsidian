@@ -889,8 +889,14 @@ def _compile_fresh_boundary_provenance_compatibility(
     if not provenance_tail_is_exact(chain, index, worktree):
         return None
     if prior is None:
+        prior_index = index - 2
+        if (
+            chain[index].record_id
+            == "resolution-5834db241204d59c5e2c5c5610a1ea65"
+        ):
+            prior_index = index - 8
         prior = _compile_authorization_chain_compatibility(
-            chain, index - 2, worktree
+            chain, prior_index, worktree
         )
     if prior is None:
         return None
