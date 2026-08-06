@@ -17,6 +17,11 @@ vertical slice:
 5. Bind green to declared success evidence, not task completion; explicit gaps.
 6. Commit a runnable slice.
 
+Unknown adapter/runtime mechanism: first use the `prototype` skill to prove one
+falsifiable live path in disposable isolation while production stays unchanged.
+Promote only the observed mechanism into the RED regression at the real seam;
+make the focused integration GREEN before one broad gate.
+
 Stateful/workflow-heavy: inventory states/transitions; exhaust a fast deterministic matrix as a release invariant.
 Coverage denominator includes never-executed lines; observed-only is not coverage evidence. Mock provider/transport; keep state transitions real.
 

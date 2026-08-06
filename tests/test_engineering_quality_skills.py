@@ -101,6 +101,20 @@ require(
     and "whenever writing or changing tests, fakes, or mocks" in tdd,
 )
 require(
+    "TDD proves unknown integrations in isolation before production promotion",
+    all(
+        phrase in tdd
+        for phrase in (
+            "unknown adapter/runtime mechanism",
+            "prototype",
+            "production stays unchanged",
+            "observed mechanism",
+            "red regression at the real seam",
+            "focused integration green before one broad gate",
+        )
+    ),
+)
+require(
     "test quality rejects tautological expectations and mock-only evidence",
     all(
         phrase in test_quality

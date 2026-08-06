@@ -199,11 +199,11 @@
       "token_estimate": 1003
     },
     "tdd": {
-      "body_bytes": 1009,
-      "body_lines": 18,
-      "closure_bytes": 2850,
-      "closure_token_estimate": 713,
-      "token_estimate": 253
+      "body_bytes": 1306,
+      "body_lines": 23,
+      "closure_bytes": 3147,
+      "closure_token_estimate": 787,
+      "token_estimate": 327
     },
     "unsafe-research": {
       "body_bytes": 1497,
