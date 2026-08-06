@@ -53,6 +53,7 @@ class SplitDispatchBinding:
     """Exact child policy handed to the existing workspace dispatch facade."""
 
     manifest_sha256: str
+    base_sha: str
     subplan_id: str
     request_id: str
     pipeline: str
@@ -68,6 +69,12 @@ class SplitDispatchBinding:
             or any(char not in "0123456789abcdef" for char in self.manifest_sha256)
         ):
             raise ContractError("binding manifest_sha256 must be a lowercase sha256")
+        if (
+            not isinstance(self.base_sha, str)
+            or len(self.base_sha) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in self.base_sha)
+        ):
+            raise ContractError("binding base_sha must be a lowercase Git object id")
         for value, label in (
             (self.subplan_id, "binding subplan_id"),
             (self.request_id, "binding request_id"),
@@ -90,6 +97,7 @@ class SplitChildPolicy:
     manifest_sha256: str
     parent_plan_sha256: str
     parent_outcome_contract_sha256: str
+    base_sha: str
     subplan_id: str
     route_alias: str
     owned_paths: tuple[str, ...]
@@ -112,6 +120,12 @@ class SplitChildPolicy:
                 or any(char not in "0123456789abcdef" for char in value)
             ):
                 raise ContractError(f"{label} must be a lowercase sha256")
+        if (
+            not isinstance(self.base_sha, str)
+            or len(self.base_sha) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in self.base_sha)
+        ):
+            raise ContractError("split policy base_sha must be a lowercase Git object id")
         _identifier(self.subplan_id, "split policy subplan_id")
         _identifier(self.route_alias, "split policy route_alias")
         if (
@@ -156,6 +170,7 @@ def split_child_policy(
         manifest_sha256=manifest.manifest_sha256,
         parent_plan_sha256=manifest.parent.plan_sha256,
         parent_outcome_contract_sha256=manifest.parent.outcome_contract_sha256,
+        base_sha=manifest.parent.base_sha,
         subplan_id=candidate.subplan_id,
         route_alias=candidate.route_alias,
         owned_paths=candidate.owned_paths,
@@ -172,6 +187,7 @@ def split_child_policy_payload(value: SplitChildPolicy) -> dict[str, object]:
         "manifest_sha256": value.manifest_sha256,
         "parent_plan_sha256": value.parent_plan_sha256,
         "parent_outcome_contract_sha256": value.parent_outcome_contract_sha256,
+        "base_sha": value.base_sha,
         "subplan_id": value.subplan_id,
         "route_alias": value.route_alias,
         "owned_paths": list(value.owned_paths),
@@ -189,6 +205,7 @@ def parse_split_child_policy(value: object) -> SplitChildPolicy:
         "manifest_sha256",
         "parent_plan_sha256",
         "parent_outcome_contract_sha256",
+        "base_sha",
         "subplan_id",
         "route_alias",
         "owned_paths",
@@ -210,6 +227,7 @@ def parse_split_child_policy(value: object) -> SplitChildPolicy:
         parent_outcome_contract_sha256=value.get(  # type: ignore[arg-type]
             "parent_outcome_contract_sha256"
         ),
+        base_sha=value.get("base_sha"),  # type: ignore[arg-type]
         subplan_id=value.get("subplan_id"),  # type: ignore[arg-type]
         route_alias=value.get("route_alias"),  # type: ignore[arg-type]
         owned_paths=tuple(value.get("owned_paths", ())),
@@ -227,6 +245,7 @@ class SplitLaunchReceipt:
     """Immutable identity returned by the existing dispatch/cmux adapter."""
 
     manifest_sha256: str
+    base_sha: str
     subplan_id: str
     request_id: str
     workspace_id: str
@@ -241,6 +260,12 @@ class SplitLaunchReceipt:
             or any(char not in "0123456789abcdef" for char in self.manifest_sha256)
         ):
             raise ContractError("launch manifest_sha256 must be a lowercase sha256")
+        if (
+            not isinstance(self.base_sha, str)
+            or len(self.base_sha) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in self.base_sha)
+        ):
+            raise ContractError("launch base_sha must be a lowercase Git object id")
         for value, label in (
             (self.subplan_id, "launch subplan_id"),
             (self.request_id, "launch request_id"),
@@ -365,6 +390,7 @@ def compile_activation(
     for child, binding in zip(manifest.subplans, bindings, strict=True):
         if (
             binding.manifest_sha256 != manifest.manifest_sha256
+            or binding.base_sha != manifest.parent.base_sha
             or binding.pipeline != child.pipeline
             or binding.route_alias != child.route_alias
             or binding.budget != child.budget

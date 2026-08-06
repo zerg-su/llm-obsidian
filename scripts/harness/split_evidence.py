@@ -98,6 +98,25 @@ def _git(worktree: Path, *argv: str) -> str:
     return result.stdout.strip()
 
 
+def child_head_descends_from_base(
+    worktree: Path, base_sha: str, head_sha: str
+) -> bool:
+    """Return exact Git ancestry without consulting a mutable branch name."""
+
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base_sha, head_sha],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise ContractError("Split child ancestry evidence is unavailable")
+
+
 class SplitEvidenceStore:
     """Seal one activation's dispatch and projected child receipts once."""
 
@@ -298,6 +317,8 @@ class SplitTerminalProjector:
             or meta.get("task_id") != launch.request_id
             or meta.get("worktree") != str(worktree)
             or meta.get("branch") != expected_branch
+            or meta.get("base_sha") != manifest.parent.base_sha
+            or launch.base_sha != manifest.parent.base_sha
             or meta.get("vault_root") != str(self.store.vault_root)
             or meta.get("split_policy") != expected_policy
         ):
@@ -322,7 +343,9 @@ class SplitTerminalProjector:
         )
         if tracked_status:
             return None
-        base = str(meta.get("base_branch") or "")
+        base = str(meta.get("base_sha") or "")
+        if not child_head_descends_from_base(worktree, base, head):
+            raise ContractError("Split child HEAD is unrelated to its sealed base")
         changed = tuple(
             item
             for item in _git(
@@ -406,6 +429,8 @@ class SplitTerminalProjector:
             SplitTerminalReceipt(
                 child=ChildReceipt(
                     manifest_sha256=manifest.manifest_sha256,
+                    base_sha=base,
+                    base_ancestor=True,
                     subplan_id=launch.subplan_id,
                     branch=branch,
                     head_sha=head,

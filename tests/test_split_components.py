@@ -84,6 +84,7 @@ def fanout_preview():
     parent = ParentContract(
         plan_sha256=SHA_A,
         outcome_contract_sha256=SHA_B,
+        base_sha="0" * 40,
         evidence_ids=EVIDENCE,
         non_goals=NON_GOALS,
     )
@@ -360,6 +361,8 @@ def receipts(status_by_id: dict[str, str] | None = None):
     return tuple(
         ChildReceipt(
             manifest_sha256=manifest.manifest_sha256,
+            base_sha=manifest.parent.base_sha,
+            base_ancestor=True,
             subplan_id=item.subplan_id,
             branch=f"task/{item.subplan_id}",
             head_sha=heads[item.subplan_id],
@@ -415,6 +418,20 @@ wrong_manifest[0] = dataclasses.replace(wrong_manifest[0], manifest_sha256=SHA_C
 assert evaluate_join(
     accepted.validated,
     tuple(wrong_manifest),
+    current_heads=heads,
+).disposition == "receipt-invalid"
+wrong_base = list(receipts())
+wrong_base[0] = dataclasses.replace(wrong_base[0], base_sha="9" * 40)
+assert evaluate_join(
+    accepted.validated,
+    tuple(wrong_base),
+    current_heads=heads,
+).disposition == "receipt-invalid"
+unrelated = list(receipts())
+unrelated[0] = dataclasses.replace(unrelated[0], base_ancestor=False)
+assert evaluate_join(
+    accepted.validated,
+    tuple(unrelated),
     current_heads=heads,
 ).disposition == "receipt-invalid"
 assert set(join_fixture["stop_dispositions"]) == {

@@ -9,7 +9,7 @@
     "executor_runtime", "runtime", "origin_session", "spawned_at",
     "wiki_surface", "wiki_surface_ref", "task_surface", "task_surface_ref",
     "task_workspace", "task_workspace_ref", "task_window", "task_window_ref",
-    "worktree", "target_repo", "vault_root", "branch", "base_branch",
+    "worktree", "target_repo", "vault_root", "branch", "base_branch", "base_sha",
     "codex_home", "codex_profile", "wiki_reap_command", "review_skill",
     "routing", "plan_file", "approved_plan_sha256", "outcome_contract_sha256", "interaction_policy",
     "pipeline_policy", "review_policy", "reap_policy", "surface_policy",
@@ -38,6 +38,7 @@
     "vault_root": {"type": "string", "minLength": 1},
     "branch": {"type": "string", "minLength": 1},
     "base_branch": {"type": "string", "minLength": 1},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
     "codex_home": {"type": ["string", "null"]},
     "codex_profile": {"type": ["string", "null"]},
     "wiki_reap_command": {"type": "string", "minLength": 1},
@@ -94,6 +95,34 @@
         "execution": {"const": "ephemeral"},
         "primary_route_alias": {"const": "finalization-primary"},
         "independent_route_alias": {"const": "finalization-independent"}
+      }
+    },
+    "split_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256", "parent_plan_sha256",
+        "parent_outcome_contract_sha256", "base_sha", "subplan_id",
+        "route_alias", "owned_paths", "evidence_ids", "dependencies", "budget"
+      ],
+      "properties": {
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "parent_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "parent_outcome_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "subplan_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "route_alias": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "owned_paths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "evidence_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "dependencies": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "budget": {
+          "type": "object", "additionalProperties": false,
+          "required": ["token_limit", "time_budget_seconds"],
+          "properties": {
+            "token_limit": {"type": "integer", "minimum": 1},
+            "time_budget_seconds": {"type": "integer", "minimum": 1}
+          }
+        }
       }
     },
     "pipeline_policy": {

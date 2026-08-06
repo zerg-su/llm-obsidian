@@ -95,7 +95,7 @@ def create_worktree(request: dict[str, Any]) -> None:
         GitAdapter(request["target_repo"]).create_worktree(
             request["worktree"],
             request["branch"],
-            request["base_branch"],
+            request["base_sha"],
         )
     except GitError as exc:
         raise DispatchError(f"worktree creation failed: {exc}") from exc
@@ -199,6 +199,7 @@ def write_task_files(
         "vault_root": str(request["vault_root"]),
         "branch": request["branch"],
         "base_branch": request["base_branch"],
+        "base_sha": request["base_sha"],
         "codex_home": config.get("codex_home") or None,
         "codex_profile": config.get("profile") or None,
         "wiki_reap_command": config["reap_skill"],

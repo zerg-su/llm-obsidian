@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
-  "manifest_sha256": "1c9eec607d58d77255321c318a4366cd97b3928a9461042fc817a04481b5c78a",
+  "manifest_sha256": "569dcbbbad618092f8744bd0ea561925d8f59814de27e85f6f3898ead3a2ead8",
   "parent": {
     "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "outcome_contract_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "base_sha": "0000000000000000000000000000000000000000",
     "evidence_ids": [
       "D1-governed-split-preview",
       "D2-eight-rejections",

@@ -120,6 +120,8 @@ def _terminal_receipts(path: Path | None) -> tuple[SplitTerminalReceipt, ...]:
             SplitTerminalReceipt(
                 child=ChildReceipt(
                     manifest_sha256=child.get("manifest_sha256"),
+                    base_sha=child.get("base_sha"),
+                    base_ancestor=child.get("base_ancestor"),
                     subplan_id=child.get("subplan_id"),
                     branch=child.get("branch"),
                     head_sha=child.get("head_sha"),
@@ -157,6 +159,7 @@ def _prepared(
                 "placement": raw.get("placement") or "split",
                 "worktree": Path(str(raw.get("worktree") or "")).expanduser().resolve(),
                 "branch": raw.get("branch"),
+                "base_sha": raw.get("base_sha"),
                 "vault_root": raw.get("vault_root"),
                 "split": raw.get("split"),
             }
@@ -289,6 +292,7 @@ def _authoritative_state(
             (
                 SplitLaunchReceipt(
                     manifest_sha256=manifest.manifest_sha256,
+                    base_sha=manifest.parent.base_sha,
                     subplan_id=subplan_id,
                     request_id=str(prior.get("request_id") or ""),
                     workspace_id=str(prior.get("task_workspace") or ""),

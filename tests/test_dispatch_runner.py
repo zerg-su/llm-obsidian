@@ -317,6 +317,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     split_parent = ParentContract(
         plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
         outcome_contract_sha256=workspace_request["outcome_contract_sha256"],
+        base_sha=workspace_request["base_sha"],
         evidence_ids=("fixture-green",),
         non_goals=("No external effects.",),
     )

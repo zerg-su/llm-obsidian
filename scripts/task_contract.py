@@ -80,6 +80,7 @@ V4_META_FIELDS = V3_META_FIELDS | {
     "outcome_contract_sha256",
     "finalization_policy",
     "split_policy",
+    "base_sha",
 }
 FORBIDDEN_ACTIONS = [
     "push",
@@ -369,6 +370,8 @@ def _validate_split_policy(
     surface = meta.get("surface_policy")
     if not isinstance(surface, dict) or surface.get("placement") != "workspace":
         raise ContractError("split_policy requires child workspace placement")
+    if policy.get("base_sha") != meta.get("base_sha"):
+        raise ContractError("split_policy base_sha differs from task base_sha")
     return policy
 
 
@@ -483,6 +486,16 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     finalization = _validate_finalization_policy(meta, version)
     split_policy = _validate_split_policy(meta, version)
 
+    base_sha = meta.get("base_sha")
+    if (
+        base_sha is not None
+        and (
+            not isinstance(base_sha, str)
+            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base_sha)
+        )
+    ):
+        raise ContractError("v4 metadata base_sha must be an exact lowercase commit")
+
     reap = meta.get("reap_policy")
     if not isinstance(reap, dict):
         raise ContractError("reap_policy must be an object")
@@ -539,6 +552,8 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     }
     if version == 4:
         result["outcome_contract_sha256"] = outcome_digest
+        if base_sha is not None:
+            result["base_sha"] = base_sha
         result.update(_finalization_projection(finalization))
         result.update(_split_projection(split_policy))
     return result

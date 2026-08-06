@@ -116,9 +116,18 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     )
     plan_sha = hashlib.sha256(plan.read_bytes()).hexdigest()
     outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
+    worktree.mkdir()
+    git(worktree, "init", "-b", BRANCH)
+    git(worktree, "config", "user.name", "Split Test")
+    git(worktree, "config", "user.email", "split@example.invalid")
+    (worktree / "README.md").write_text("base\n", encoding="utf-8")
+    git(worktree, "add", "README.md")
+    git(worktree, "commit", "-m", "base")
+    base = git(worktree, "rev-parse", "HEAD")
     parent = ParentContract(
         plan_sha256=plan_sha,
         outcome_contract_sha256=outcome_sha,
+        base_sha=base,
         evidence_ids=("split-child-proof",),
         non_goals=("No provider replay.",),
     )
@@ -148,14 +157,6 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     candidate = manifest.subplans[0]
     policy = split_child_policy_payload(split_child_policy(manifest, candidate))
 
-    worktree.mkdir()
-    git(worktree, "init", "-b", BRANCH)
-    git(worktree, "config", "user.name", "Split Test")
-    git(worktree, "config", "user.email", "split@example.invalid")
-    (worktree / "README.md").write_text("base\n", encoding="utf-8")
-    git(worktree, "add", "README.md")
-    git(worktree, "commit", "-m", "base")
-    base = git(worktree, "rev-parse", "HEAD")
     product = worktree / OWNED_PATH
     product.parent.mkdir(parents=True)
     product.write_text("bounded result\n", encoding="utf-8")
@@ -187,7 +188,8 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         "worktree": str(worktree.resolve()),
         "branch": BRANCH,
         "vault_root": str(vault.resolve()),
-        "base_branch": base,
+        "base_branch": "deleted-parent-branch",
+        "base_sha": base,
         "plan_file": str(plan.resolve()),
         "outcome_contract_sha256": outcome_sha,
         "split_policy": policy,
@@ -281,6 +283,7 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         "vault_root": str(vault.resolve()),
         "worktree": str(worktree.resolve()),
         "branch": BRANCH,
+        "base_sha": base,
         "placement": "workspace",
         "pipeline": "lifecycle/default",
         "completion_policy": "attention",
@@ -353,6 +356,10 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     terminal_stored = json.loads(
         (split_root / "terminals" / f"{SUBPLAN}.json").read_text(encoding="utf-8")
     )["receipt"]
+    assert launch_stored["base_sha"] == base
+    assert terminal_stored["child"]["base_sha"] == base
+    assert terminal_stored["child"]["base_ancestor"] is True
+    print("OK   launch and terminal evidence retain the sealed ancestor commit")
     launches_path = root / "launches.json"
     terminals_path = root / "terminals.json"
     heads_path = root / "heads.json"

@@ -72,6 +72,7 @@ test-harness:
 	@python3 tests/test_split_components.py
 	@python3 tests/harness/test_split_activation.py
 	@python3 tests/harness/test_split_evidence.py
+	@python3 tests/harness/test_split_base_identity.py
 	@python3 tests/harness/test_verification_receipt.py
 	@python3 tests/harness/test_review_program.py
 	@python3 tests/harness/test_review_topology.py

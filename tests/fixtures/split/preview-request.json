@@ -3,6 +3,7 @@
   "parent": {
     "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "outcome_contract_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "base_sha": "0000000000000000000000000000000000000000",
     "evidence_ids": [
       "D1-governed-split-preview",
       "D2-eight-rejections",

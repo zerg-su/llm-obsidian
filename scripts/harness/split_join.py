@@ -34,6 +34,8 @@ def _sha256(value: str, label: str) -> None:
 @dataclass(frozen=True)
 class ChildReceipt:
     manifest_sha256: str
+    base_sha: str
+    base_ancestor: bool
     subplan_id: str
     branch: str
     head_sha: str
@@ -44,6 +46,13 @@ class ChildReceipt:
 
     def __post_init__(self) -> None:
         _sha256(self.manifest_sha256, "receipt manifest_sha256")
+        if (
+            not isinstance(self.base_sha, str)
+            or len(self.base_sha) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in self.base_sha)
+            or type(self.base_ancestor) is not bool
+        ):
+            raise ContractError("receipt base ancestry must be exact and typed")
         if not isinstance(self.subplan_id, str) or not ID_RE.fullmatch(self.subplan_id):
             raise ContractError("receipt subplan_id must be a bounded identifier")
         if (
@@ -75,6 +84,7 @@ class ChildReceipt:
 @dataclass(frozen=True)
 class JoinItem:
     subplan_id: str
+    base_sha: str
     branch: str
     head_sha: str
     summary_sha256: str
@@ -125,6 +135,8 @@ def evaluate_join(
     for subplan, receipt in zip(ordered_subplans, receipts, strict=True):
         if (
             receipt.manifest_sha256 != manifest.manifest_sha256
+            or receipt.base_sha != manifest.parent.base_sha
+            or not receipt.base_ancestor
             or receipt.evidence_ids != subplan.evidence_ids
         ):
             return _stop("receipt-invalid", f"{subplan.subplan_id} receipt identity drifted")
@@ -145,6 +157,7 @@ def evaluate_join(
     integration_order = tuple(
         JoinItem(
             subplan_id=receipt.subplan_id,
+            base_sha=receipt.base_sha,
             branch=receipt.branch,
             head_sha=receipt.head_sha,
             summary_sha256=receipt.summary_sha256,

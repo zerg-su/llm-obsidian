@@ -79,6 +79,7 @@ def candidate(
 parent = ParentContract(
     plan_sha256=SHA_A,
     outcome_contract_sha256=SHA_B,
+    base_sha="0" * 40,
     evidence_ids=EVIDENCE,
     non_goals=NON_GOALS,
 )
@@ -109,6 +110,7 @@ def bindings() -> tuple[SplitDispatchBinding, ...]:
     return tuple(
         SplitDispatchBinding(
             manifest_sha256=manifest.manifest_sha256,
+            base_sha=manifest.parent.base_sha,
             subplan_id=item.subplan_id,
             request_id=f"request-{item.subplan_id}",
             pipeline=item.pipeline,
@@ -151,6 +153,7 @@ def launch(binding: SplitDispatchBinding) -> SplitLaunchReceipt:
     launch_calls.append(binding.subplan_id)
     return SplitLaunchReceipt(
         manifest_sha256=binding.manifest_sha256,
+        base_sha=binding.base_sha,
         subplan_id=binding.subplan_id,
         request_id=binding.request_id,
         workspace_id=f"workspace-{binding.subplan_id}",
@@ -184,6 +187,8 @@ def child_receipt(subplan_id: str, status: str = "approved") -> ChildReceipt:
     item = next(item for item in manifest.subplans if item.subplan_id == subplan_id)
     return ChildReceipt(
         manifest_sha256=manifest.manifest_sha256,
+        base_sha=manifest.parent.base_sha,
+        base_ancestor=True,
         subplan_id=subplan_id,
         branch=f"task/{subplan_id}",
         head_sha=HEADS[subplan_id],
@@ -474,6 +479,9 @@ with tempfile.TemporaryDirectory(prefix="split-runner.") as raw_tmp:
     cli_parent = ParentContract(
         plan_sha256=hashlib.sha256(plan_path.read_bytes()).hexdigest(),
         outcome_contract_sha256=extract_from_bytes(plan_path.read_bytes()).sha256,
+        base_sha=subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip(),
         evidence_ids=("split-dogfood-proof",),
         non_goals=("No publish.",),
     )

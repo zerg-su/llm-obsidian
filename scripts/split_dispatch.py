@@ -96,6 +96,7 @@ def prepare_split_dispatch(
         worktree_path = str(worktree) if isinstance(worktree, Path) else ""
         binding = SplitDispatchBinding(
             manifest_sha256=manifest.manifest_sha256,
+            base_sha=manifest.parent.base_sha,
             subplan_id=candidate.subplan_id,
             request_id=str(request.get("request_id") or ""),
             pipeline=str(request.get("pipeline") or ""),
@@ -132,6 +133,7 @@ def _launch_receipt(
         raise ContractError("existing dispatch adapter returned no result mapping")
     return SplitLaunchReceipt(
         manifest_sha256=binding.manifest_sha256,
+        base_sha=binding.base_sha,
         subplan_id=binding.subplan_id,
         request_id=str(result.get("request_id") or ""),
         workspace_id=str(result.get("task_workspace") or ""),

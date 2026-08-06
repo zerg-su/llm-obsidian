@@ -135,12 +135,19 @@ class FrozenSplitBudget:
 class ParentContract:
     plan_sha256: str
     outcome_contract_sha256: str
+    base_sha: str
     evidence_ids: tuple[str, ...]
     non_goals: tuple[str, ...]
 
     def __post_init__(self) -> None:
         _sha256(self.plan_sha256, "parent plan_sha256")
         _sha256(self.outcome_contract_sha256, "parent outcome_contract_sha256")
+        if (
+            not isinstance(self.base_sha, str)
+            or len(self.base_sha) not in {40, 64}
+            or any(char not in "0123456789abcdef" for char in self.base_sha)
+        ):
+            raise ContractError("parent base_sha must be a lowercase Git object id")
         _string_tuple(self.evidence_ids, "parent evidence id", identifiers=True)
         _string_tuple(self.non_goals, "parent non-goal")
 
@@ -296,6 +303,7 @@ def manifest_to_dict(value: SplitManifest) -> dict[str, Any]:
         "parent": {
             "plan_sha256": value.parent.plan_sha256,
             "outcome_contract_sha256": value.parent.outcome_contract_sha256,
+            "base_sha": value.parent.base_sha,
             "evidence_ids": list(value.parent.evidence_ids),
             "non_goals": list(value.parent.non_goals),
         },
@@ -396,7 +404,7 @@ def manifest_from_dict(value: Mapping[str, Any]) -> SplitManifest:
     parent = value.get("parent", {})
     _exact_keys(
         parent,
-        {"plan_sha256", "outcome_contract_sha256", "evidence_ids", "non_goals"},
+        {"plan_sha256", "outcome_contract_sha256", "base_sha", "evidence_ids", "non_goals"},
         "manifest parent",
     )
     selection = value.get("selection", {})
@@ -424,6 +432,7 @@ def manifest_from_dict(value: Mapping[str, Any]) -> SplitManifest:
         parent=ParentContract(
             plan_sha256=parent.get("plan_sha256"),
             outcome_contract_sha256=parent.get("outcome_contract_sha256"),
+            base_sha=parent.get("base_sha"),
             evidence_ids=tuple(parent.get("evidence_ids", ())),
             non_goals=tuple(parent.get("non_goals", ())),
         ),
@@ -598,7 +607,7 @@ def preview_from_dict(value: Mapping[str, Any]) -> SplitPreview:
     parent = value.get("parent", {})
     _exact_keys(
         parent,
-        {"plan_sha256", "outcome_contract_sha256", "evidence_ids", "non_goals"},
+        {"plan_sha256", "outcome_contract_sha256", "base_sha", "evidence_ids", "non_goals"},
         "preview parent",
     )
     frozen = value.get("frozen_budget", {})
@@ -624,6 +633,7 @@ def preview_from_dict(value: Mapping[str, Any]) -> SplitPreview:
         parent=ParentContract(
             plan_sha256=parent.get("plan_sha256"),
             outcome_contract_sha256=parent.get("outcome_contract_sha256"),
+            base_sha=parent.get("base_sha"),
             evidence_ids=tuple(parent.get("evidence_ids", ())),
             non_goals=tuple(parent.get("non_goals", ())),
         ),

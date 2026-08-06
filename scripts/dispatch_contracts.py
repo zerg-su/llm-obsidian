@@ -58,6 +58,27 @@ SUMMARY_TYPES = {"session", "decision", "runbook", "incident", "service-update",
 RUN_STATES = {"preparing", "launched", "failed"}
 COORDINATOR_ACTION = "return-to-idle-without-polling"
 TASK_LOCAL_GIT_EXCLUDES = (".task-origin-session",)
+
+
+def resolve_base_commit(target_repo: Path, base_ref: str) -> str:
+    """Resolve one diagnostic base ref to the immutable commit used by Split."""
+
+    if not isinstance(target_repo, Path) or not isinstance(base_ref, str) or not base_ref:
+        raise DispatchError("dispatch base ref is invalid")
+    result = subprocess.run(
+        ["git", "-C", str(target_repo), "rev-parse", "--verify", f"{base_ref}^{{commit}}"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    value = result.stdout.strip()
+    if (
+        result.returncode != 0
+        or len(value) not in {40, 64}
+        or any(char not in "0123456789abcdef" for char in value)
+    ):
+        raise DispatchError("dispatch base ref does not resolve to one commit")
+    return value
 DEFAULT_DISPATCH = {
     "codex_home": "",
     "profile": "",
@@ -325,6 +346,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
     if branch != f"task/{task_name}":
         raise DispatchError("new dispatch branch must equal task/<task_name>")
     base_branch = require_string(raw.get("base_branch"), "base_branch", maximum=300)
+    base_sha = resolve_base_commit(target_repo, base_branch)
     origin_surface = require_string(raw.get("origin_surface"), "origin_surface", maximum=100)
     placement = str(raw.get("placement") or "split").strip()
     if placement not in {"split", "workspace"}:
@@ -448,6 +470,7 @@ def validate_request(raw: dict[str, Any]) -> dict[str, Any]:
         "worktree": worktree,
         "branch": branch,
         "base_branch": base_branch,
+        "base_sha": base_sha,
         "plan_file": plan_file,
         "outcome_contract_sha256": outcome_contract_sha256,
         "origin_surface": origin_surface,
