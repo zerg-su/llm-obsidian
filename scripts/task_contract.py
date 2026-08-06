@@ -381,6 +381,34 @@ def _split_projection(
     return {} if split_policy is None else {"split_policy": split_policy}
 
 
+def _validate_base_sha(meta: dict[str, Any]) -> str | None:
+    base_sha = meta.get("base_sha")
+    if base_sha is None:
+        return None
+    if not isinstance(base_sha, str) or not re.fullmatch(
+        r"[0-9a-f]{40}|[0-9a-f]{64}", base_sha
+    ):
+        raise ContractError("v4 metadata base_sha must be an exact lowercase commit")
+    return base_sha
+
+
+def _v4_projection(
+    version: int,
+    outcome_digest: str,
+    base_sha: str | None,
+    finalization: dict[str, Any] | None,
+    split_policy: dict[str, object] | None,
+) -> dict[str, Any]:
+    if version != 4:
+        return {}
+    result: dict[str, Any] = {"outcome_contract_sha256": outcome_digest}
+    if base_sha is not None:
+        result["base_sha"] = base_sha
+    result.update(_finalization_projection(finalization))
+    result.update(_split_projection(split_policy))
+    return result
+
+
 def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
     version = meta.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int):
@@ -485,16 +513,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     review = _validate_review_policy(meta, version)
     finalization = _validate_finalization_policy(meta, version)
     split_policy = _validate_split_policy(meta, version)
-
-    base_sha = meta.get("base_sha")
-    if (
-        base_sha is not None
-        and (
-            not isinstance(base_sha, str)
-            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base_sha)
-        )
-    ):
-        raise ContractError("v4 metadata base_sha must be an exact lowercase commit")
+    base_sha = _validate_base_sha(meta)
 
     reap = meta.get("reap_policy")
     if not isinstance(reap, dict):
@@ -550,12 +569,11 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
         "surface_policy": surface,
         "watchdog_policy": watchdog,
     }
-    if version == 4:
-        result["outcome_contract_sha256"] = outcome_digest
-        if base_sha is not None:
-            result["base_sha"] = base_sha
-        result.update(_finalization_projection(finalization))
-        result.update(_split_projection(split_policy))
+    result.update(
+        _v4_projection(
+            version, outcome_digest, base_sha, finalization, split_policy
+        )
+    )
     return result
 
 
