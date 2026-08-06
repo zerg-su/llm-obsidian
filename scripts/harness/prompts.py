@@ -150,6 +150,22 @@ def classify(runtime: str, screen: str, *, closure_armed: bool = False) -> Promp
         )
         if region and _has(region, first_run):
             return PromptDecision(True, "first-run-style", ("Enter",), True)
+        update_available = (
+            "Update available!",
+            "1. Update now",
+            "2. Skip",
+            "3. Skip until next version",
+            "Press enter to continue",
+        )
+        if region and _has(region, update_available):
+            # Installation remains user-owned. Skip this invocation without
+            # suppressing future update reminders.
+            return PromptDecision(
+                True,
+                "update-skip-current",
+                ("down", "Enter"),
+                True,
+            )
         rate_limit_switch = (
             "Approaching rate limits",
             "Switch to",

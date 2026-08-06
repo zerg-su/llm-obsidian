@@ -40,6 +40,7 @@ from .runtime_callback_io import _bounded_file_sha256
 from .runtime_provider_input import (
     bound_continuation_effect_id,
     initial_provider_argv,
+    interactive_provider_input,
     reserve_continuation_input,
 )
 from .store import StoreError
@@ -540,6 +541,8 @@ class RuntimeSessionLaunchMixin:
         cwd = Path(str(metadata.get("cwd") or "")).resolve()
         prompt_path = self._resolve_pointer(cwd, prompt_pointer, must_exist=True)
         prompt = self._read_prompt(prompt_path)
+        runtime = record.spec.route.runtime
+        delivery_prompt = interactive_provider_input(runtime, prompt_path, prompt)
         target = self._callback_target(record)
         effect_id = bound_continuation_effect_id(record, prompt, target)
         receipt_path, receipt, receipt_identity = self._continuation_receipt(
@@ -591,7 +594,7 @@ class RuntimeSessionLaunchMixin:
                 record=record,
                 target=target,
                 workspace_id=str(metadata.get("workspace_id") or ""),
-                prompt=prompt,
+                prompt=delivery_prompt,
                 attention_state=lambda: self._mark_attention(
                     supervisor.read(),
                     AttentionReason.CONTINUATION_SUBMIT_UNCONFIRMED,
@@ -712,7 +715,7 @@ class RuntimeSessionLaunchMixin:
                 result = deliver_continuation(
                     self.cmux,
                     surface_id=record.resources.surface_id,
-                    prompt=prompt,
+                    prompt=delivery_prompt,
                     runtime=record.spec.route.runtime,
                     artifact_ready=lambda: self._continuation_artifact_ready(
                         record, target

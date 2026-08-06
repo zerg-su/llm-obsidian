@@ -64,6 +64,7 @@ from harness.runtime_session_continuation import (
     await_initial_input_visible,
     await_surface_transport_ready,
 )
+from harness.runtime_provider_input import interactive_provider_input
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -329,6 +330,60 @@ check(
     )
     and partial_initial_prompt_port.keys == ["down", "Enter"],
     partial_initial_prompt_port.keys,
+)
+
+
+class CodexUpdatePromptPort(InitialPromptPort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.screens = [
+            "\n".join(
+                (
+                    "Update available! 0.146.0 -> 0.146.1",
+                    "Release notes: https://github.com/openai/codex/releases/latest",
+                    "› 1. Update now (runs npm install -g @openai/codex)",
+                    "2. Skip",
+                    "3. Skip until next version",
+                    "Press enter to continue",
+                )
+            )
+        ]
+
+
+codex_update_prompt_port = CodexUpdatePromptPort()
+check(
+    "Codex update prompt is skipped without changing reminder policy",
+    await_initial_input_ready(
+        codex_update_prompt_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=4,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    and codex_update_prompt_port.keys == ["down", "Enter"],
+    codex_update_prompt_port.keys,
+)
+
+
+review_prompt = "# Harness-owned review\nAxis: openai-engineering\nInspect exact HEAD."
+review_pointer = Path("/private/tmp/reviewer-lane/inputs/review.md")
+review_digest = hashlib.sha256(review_prompt.encode()).hexdigest()
+codex_delivery = interactive_provider_input(
+    "codex", review_pointer, review_prompt
+)
+check(
+    "Codex receives one compact pointer bound to the complete prompt digest",
+    "\n" not in codex_delivery
+    and str(review_pointer) in codex_delivery
+    and review_digest in codex_delivery
+    and review_prompt not in codex_delivery,
+    codex_delivery,
+)
+check(
+    "Claude retains the complete interactive prompt",
+    interactive_provider_input("claude", review_pointer, review_prompt)
+    == review_prompt,
 )
 
 collapsed_claude_paste = InitialReadyPort(
@@ -1686,6 +1741,92 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         and checkpointless.checkpoint == ""
         and checkpointless_cmux.sent[-1]
         == (SURFACE, "verify through the retained Claude process"),
+    )
+
+    class CodexContinuationCmux(FakeCmux):
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            if not self.sent:
+                return "›"
+            self.transport_visible = True
+            prompt = self.sent[-1][1]
+            anchor = next(
+                (line.strip() for line in prompt.splitlines() if line.strip()),
+                "",
+            )
+            if self.submit_count == self.submits_at_last_send:
+                return f"› {anchor}"
+            return "• Working (1s • esc to interrupt)"
+
+    codex_continue_root = root / "codex-continuation"
+    codex_continue_root.mkdir()
+    codex_continue_product = root / "codex-continuation-product"
+    codex_continue_product.mkdir()
+    (codex_continue_root / "callbacks").mkdir()
+    (codex_continue_root / "prompt.md").write_text(
+        "start Codex", encoding="utf-8"
+    )
+    codex_continue_prompt = (
+        "# Harness-owned review verification\n"
+        "Axis: openai-engineering\n"
+        "Inspect the exact fixed HEAD."
+    )
+    codex_continue_path = codex_continue_root / "continue.md"
+    codex_continue_path.write_text(
+        codex_continue_prompt, encoding="utf-8"
+    )
+    codex_continue_route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "high", "reviewer-callback", "c" * 64
+    )
+    codex_continue_spec = OperationSpec(
+        "runtime-1",
+        "runtime-key-1",
+        "review-session",
+        "owner-1",
+        codex_continue_route,
+        "packets/review.json",
+        "scoped",
+    )
+    codex_continue_cmux = CodexContinuationCmux([])
+    codex_continue_manager = RuntimeSessionManager(
+        OperationStore(root / "codex-continuation-store"),
+        codex_continue_cmux,
+        FakeProcess([]),
+        {"codex": CodexDriver(Path("/usr/bin/codex"))},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            codex_continue_route, True, ("provider:profile-valid",)
+        ),
+    )
+    codex_continue_manager.start(
+        RuntimeSessionRequest(
+            codex_continue_spec,
+            "lane-shared",
+            "run-1",
+            ORIGIN,
+            codex_continue_root,
+            "prompt.md",
+            "callbacks/result.json",
+            product_root=codex_continue_product,
+        )
+    )
+    codex_continued = codex_continue_manager.continue_session(
+        "owner-1", "runtime-1", "checkpoint-1", "continue.md"
+    )
+    expected_codex_continuation = interactive_provider_input(
+        "codex", codex_continue_path.resolve(), codex_continue_prompt
+    )
+    check(
+        "Codex continuation stays one compact contract pointer",
+        codex_continued.record.state == "running"
+        and codex_continue_cmux.sent[-1]
+        == (SURFACE, expected_codex_continuation)
+        and sum(
+            text == expected_codex_continuation
+            for _surface, text in codex_continue_cmux.sent
+        )
+        == 1
+        and "\n" not in expected_codex_continuation,
+        codex_continue_cmux.sent,
     )
 
     class RetainedPromptCmux(FakeCmux):
@@ -3054,6 +3195,118 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         ]
         and worker_cmux.sent[-1] == (SURFACE, "perform the bounded task"),
         (provider_events, worker_cmux.sent),
+    )
+
+    compact_prompt_path = cwd / "codex-prompt.md"
+    compact_prompt = (
+        "# Harness-owned review\n"
+        "Axis: openai-engineering\n"
+        "Inspect the exact product HEAD and return one typed verdict."
+    )
+    compact_prompt_path.write_text(compact_prompt, encoding="utf-8")
+    compact_callback = cwd / "callbacks" / "compact-worker.json"
+    compact_payload = {"status": "compact-ok"}
+    compact_encoded = json.dumps(
+        compact_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    compact_envelope = {
+        "schema_version": 1,
+        "callback_id": "callback-compact-worker",
+        "operation_id": "compact-worker",
+        "run_id": "run-compact-worker",
+        "kind": "result",
+        "payload": compact_payload,
+        "payload_sha256": hashlib.sha256(compact_encoded).hexdigest(),
+    }
+    compact_store = OperationStore(root / "compact-worker-store")
+    compact_spec = OperationSpec(
+        "compact-worker",
+        "compact-worker-key",
+        "runtime-lifecycle",
+        "owner-compact-worker",
+        RuntimeRoute(
+            "codex", "gpt-5.6-sol", "high", "executor", "c" * 64
+        ),
+        "packets/runtime.json",
+        "scoped",
+    )
+    compact_store.create(
+        compact_spec,
+        lane_id="lane-compact-worker",
+        run_id="run-compact-worker",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        compact_store.transition(
+            "owner-compact-worker", "compact-worker", state
+        )
+    compact_launch = ProcessAdapter().prepare_surface_launch(
+        argv=(
+            str(Path(sys.executable).resolve()),
+            str(provider),
+            str(compact_callback),
+            json.dumps(compact_envelope, sort_keys=True),
+        ),
+        cwd=cwd,
+        state_root=root / "compact-worker-state",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=compact_callback,
+        product_root=cwd,
+        store_root=compact_store.root,
+        owner_id="owner-compact-worker",
+        operation_id="compact-worker",
+        run_id="run-compact-worker",
+        surface_id=SURFACE,
+        runtime="codex",
+        initial_input_pointer=compact_prompt_path,
+    )
+    ProcessAdapter._write_json(
+        compact_launch.spec_path.parent / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": "compact-worker",
+            "run_id": "run-compact-worker",
+            "workspace_id": WORKSPACE,
+        },
+    )
+    class CompactCodexCmux(FakeCmux):
+        def read(self, surface_id: str) -> str:
+            assert surface_id == SURFACE
+            if not self.sent:
+                return "›"
+            self.transport_visible = True
+            prompt = self.sent[-1][1]
+            anchor = next(
+                (line.strip() for line in prompt.splitlines() if line.strip()),
+                "",
+            )
+            if self.submit_count == self.submits_at_last_send:
+                return f"› {anchor}"
+            return "• Working (1s • esc to interrupt)"
+
+    compact_cmux = CompactCodexCmux([])
+    compact_rc = run_runtime_worker(
+        compact_launch.spec_path,
+        poll_seconds=0.02,
+        checkpoint_probe=lambda _surface, _runtime: "checkpoint-compact",
+        cmux_adapter=compact_cmux,
+    )
+    expected_compact_input = interactive_provider_input(
+        "codex", compact_prompt_path.resolve(), compact_prompt
+    )
+    compact_exit = (
+        json.loads(compact_launch.exit_path.read_text(encoding="utf-8"))
+        if compact_launch.exit_path.is_file()
+        else {}
+    )
+    compact_record = compact_store.read(
+        "owner-compact-worker", "compact-worker"
+    )
+    check(
+        "Codex worker sends one compact contract pointer through cmux",
+        compact_rc == 0
+        and compact_cmux.sent == [(SURFACE, expected_compact_input)]
+        and "\n" not in expected_compact_input,
+        (compact_rc, compact_exit, compact_record, compact_cmux.sent),
     )
 
     guard_store = OperationStore(root / "guard-store")

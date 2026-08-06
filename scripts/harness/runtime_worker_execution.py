@@ -12,6 +12,7 @@ from .runtime_provider_events import (
     RuntimeProviderEventError,
     RuntimeProviderEventStream,
 )
+from .runtime_provider_input import interactive_provider_input
 from .runtime_session_contracts import MAX_PROMPT_BYTES
 from .runtime_session_continuation import (
     _editor_digest,
@@ -269,6 +270,10 @@ class RuntimeWorkerExecution(
                 if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
                     raise RuntimeWorkerError("initial provider input is invalid")
                 input_text = raw_input.decode("utf-8")
+                delivery_text = interactive_provider_input(
+                    self.spec["runtime"], initial_input, input_text
+                )
+                delivery_bytes = delivery_text.encode("utf-8")
                 if not await_initial_input_ready(
                     self.cmux_adapter,
                     surface_id=self.spec["surface_id"],
@@ -279,7 +284,7 @@ class RuntimeWorkerExecution(
                     )
                 stream = self._create_provider_stream(
                     generation=self._initial_generation(),
-                    input_sha256=hashlib.sha256(raw_input).hexdigest(),
+                    input_sha256=hashlib.sha256(delivery_bytes).hexdigest(),
                 )
                 stream.start()
                 decision = stream.reserve_input()
@@ -291,12 +296,14 @@ class RuntimeWorkerExecution(
                     self.spec["runtime"],
                     self.cmux_adapter.read(self.spec["surface_id"]),
                 )
-                self.cmux_adapter.send(self.spec["surface_id"], input_text)
+                self.cmux_adapter.send(
+                    self.spec["surface_id"], delivery_text
+                )
                 if not await_initial_input_visible(
                     self.cmux_adapter,
                     surface_id=self.spec["surface_id"],
                     runtime=self.spec["runtime"],
-                    text=input_text,
+                    text=delivery_text,
                     before_editor_sha256=before_editor_sha256,
                 ):
                     raise RuntimeWorkerError(

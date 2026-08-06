@@ -41,6 +41,24 @@ def initial_provider_argv(
     )
 
 
+def interactive_provider_input(
+    runtime: str,
+    prompt_path: Path,
+    prompt: str,
+) -> str:
+    """Keep Codex's interactive editor compact without weakening prompt identity."""
+
+    if runtime != "codex":
+        return prompt
+    if not prompt_path.is_absolute():
+        raise RuntimeSessionError("interactive prompt pointer must be absolute")
+    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    return (
+        "Read and follow the complete task contract at "
+        f"`{prompt_path}` (SHA-256 `{digest}`)."
+    )
+
+
 @dataclass(frozen=True)
 class RuntimeContinuationInput:
     """Optional typed stream; legacy sessions remain byte-for-byte compatible."""
