@@ -200,6 +200,7 @@ def await_initial_input_visible(
     surface_id: str,
     runtime: str,
     text: str,
+    before_editor_sha256: str = "",
     observation_limit: int = 40,
     observation_interval_seconds: float = 0.05,
     wait: Waiter = sleep,
@@ -213,14 +214,25 @@ def await_initial_input_visible(
         raise ValueError("initial input visibility limit must be positive")
     if observation_interval_seconds < 0:
         raise ValueError("initial input visibility interval cannot be negative")
+    if before_editor_sha256 and not re.fullmatch(
+        r"[0-9a-f]{64}", before_editor_sha256
+    ):
+        raise ValueError("initial editor digest is invalid")
     for observation in range(observation_limit):
+        screen = port.read(surface_id)
         state = classify_continuation_screen(
-            runtime, port.read(surface_id), anchor
+            runtime, screen, anchor
         )
         if state == "input-ready":
             return True
         if state == "permission":
             return False
+        if (
+            before_editor_sha256
+            and _editor_state(runtime, screen)
+            and _editor_digest(runtime, screen) != before_editor_sha256
+        ):
+            return True
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False

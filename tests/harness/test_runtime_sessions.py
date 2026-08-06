@@ -59,7 +59,9 @@ from harness.runtime_sessions import (
 )
 from harness.runtime_session_contracts import continuation_effect_id
 from harness.runtime_session_continuation import (
+    _editor_digest,
     await_initial_input_ready,
+    await_initial_input_visible,
     await_surface_transport_ready,
 )
 from harness.runtime_worker import (
@@ -327,6 +329,24 @@ check(
     )
     and partial_initial_prompt_port.keys == ["down", "Enter"],
     partial_initial_prompt_port.keys,
+)
+
+collapsed_claude_paste = InitialReadyPort(
+    ["❯ [Pasted text #1 +120 lines]"]
+)
+check(
+    "initial Claude input accepts a changed collapsed editor state",
+    await_initial_input_visible(
+        collapsed_claude_paste,
+        surface_id=SURFACE,
+        runtime="claude",
+        text="# Harness-owned review verification\nlong payload",
+        before_editor_sha256=_editor_digest("claude", "❯"),
+        observation_limit=1,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    ),
+    collapsed_claude_paste.reads,
 )
 
 

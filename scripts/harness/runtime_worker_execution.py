@@ -14,6 +14,7 @@ from .runtime_provider_events import (
 )
 from .runtime_session_contracts import MAX_PROMPT_BYTES
 from .runtime_session_continuation import (
+    _editor_digest,
     await_initial_input_ready,
     await_initial_input_visible,
 )
@@ -286,12 +287,17 @@ class RuntimeWorkerExecution(
                     raise RuntimeWorkerError(
                         "initial provider input was not durably reserved"
                     )
+                before_editor_sha256 = _editor_digest(
+                    self.spec["runtime"],
+                    self.cmux_adapter.read(self.spec["surface_id"]),
+                )
                 self.cmux_adapter.send(self.spec["surface_id"], input_text)
                 if not await_initial_input_visible(
                     self.cmux_adapter,
                     surface_id=self.spec["surface_id"],
                     runtime=self.spec["runtime"],
                     text=input_text,
+                    before_editor_sha256=before_editor_sha256,
                 ):
                     raise RuntimeWorkerError(
                         "initial provider input was not visible"
