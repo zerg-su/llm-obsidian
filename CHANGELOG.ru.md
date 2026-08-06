@@ -54,6 +54,9 @@
 
 ### Исправлено
 
+- Current-checkout callback notification больше не добавляет synthetic
+  review-scope как legacy `current --plan`; точная команда повторяет исходную
+  purpose/boundary identity и может принять готовый callback.
 - Synthetic task-summary publisher в runtime-тестах переведён на atomic
   publication; regression доказывает, что stable-read watcher не видит partial
   JSON.

@@ -49,6 +49,9 @@ packages were published for them.
 
 ### Fixed
 
+- Current-checkout callback notifications no longer append the synthetic
+  review-scope file as legacy `current --plan`; their exact command now reuses
+  the original purpose/boundary identity and can ingest the ready callback.
 - Made the synthetic task-summary publisher used by runtime tests atomic, and
   proved the stable-read watcher cannot observe partial JSON.
 - Kept immutable escalation records durable while ignoring their runtime
