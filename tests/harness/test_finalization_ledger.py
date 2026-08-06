@@ -175,13 +175,33 @@ with tempfile.TemporaryDirectory(prefix="finalization-ledger-approved.") as raw:
         attempt_id=attempt(20), terminal_result="approved"
     )
     before_retry = ledger.path.read_bytes()
-    denied = reserve(ledger, 21)
+    denied = ledger.reserve(
+        attempt_id=attempt(21),
+        exact_head=f"{20:040x}",
+        task_id=attempt(21),
+        worktree="/tmp/finalization-task-21",
+        provider_policy={
+            "routes": ["finalization-primary"],
+            "reason": "primary-only",
+        },
+    )
     check(
-        "approval closes the lineage without another cycle",
+        "approval closes only its exact HEAD",
         approved.terminal_disposition == "approved"
         and denied.reason == "approved"
         and not denied.allowed
         and ledger.path.read_bytes() == before_retry,
+    )
+    changed_head = reserve(ledger, 22)
+    snapshot = ledger.snapshot()
+    check(
+        "a changed HEAD reopens the bounded lineage after approval",
+        changed_head.allowed
+        and changed_head.created
+        and changed_head.cycle_number == 2
+        and snapshot["terminal_disposition"] == ""
+        and snapshot["cycles"][0]["terminal_result"] == "approved"
+        and snapshot["cycles"][1]["terminal_result"] == "",
     )
 
 print("\nAll finalization ledger tests passed.")

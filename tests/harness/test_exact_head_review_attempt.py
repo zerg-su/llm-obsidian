@@ -967,6 +967,124 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and runtime.started == 2,
     )
 
+    def finish_current_attempt(
+        started_receipt: dict[str, object], verdict: str
+    ) -> dict[str, object]:
+        active_run = gate.rehydrate_attempt()
+        active_lane = active_run.execution.lanes[0]
+        active_round = active_run.rounds[active_lane.axis]
+        callback = Path(
+            str(
+                list(started_receipt["lanes"])[0]["callback_path"]
+            )
+        )
+        callback.parent.mkdir(parents=True, exist_ok=True)
+        callback.write_text(
+            json.dumps(
+                to_dict(
+                    review_round_envelope(
+                        active_round,
+                        ReviewResult(active_lane.axis, verdict, (), 0),
+                    )
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return _run_review(
+            meta,
+            vault,
+            product,
+            task_id,
+            runtime_root,
+            runtime_manager=runtime,
+            apply_finalizing_recovery=forbidden_finalizing_recovery,
+        )
+
+    def commit_changed_head(value: int, message: str) -> None:
+        (product / "product.py").write_text(
+            f"VALUE = {value}\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "product.py"], cwd=product, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=product,
+            check=True,
+            capture_output=True,
+        )
+
+    approved_terminal = finish_current_attempt(second, "approve")
+    commit_changed_head(3, "change after approval")
+    after_approved = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "changed HEAD never reuses an approved terminal attempt",
+        approved_terminal["status"] == "approved"
+        and after_approved["status"] == "reviewing"
+        and gate.read()["attempt"]["identity"]["cycle"] == 3
+        and runtime.started == 3,
+    )
+
+    blocked_terminal = finish_current_attempt(after_approved, "blocked")
+    commit_changed_head(4, "change after blocked review")
+    after_blocked = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "changed HEAD never reuses a blocked terminal attempt",
+        blocked_terminal["status"] == "blocked"
+        and after_blocked["status"] == "reviewing"
+        and gate.read()["attempt"]["identity"]["cycle"] == 4
+        and runtime.started == 4,
+    )
+
+    original_request_exit = runtime.request_exit
+
+    def attention_request_exit(owner_id: str, operation_id: str) -> object:
+        record = store.read(owner_id, operation_id)
+        if record.state != "attention-required":
+            store.transition(
+                owner_id,
+                operation_id,
+                "attention-required",
+                reason=AttentionReason.ATTENTION_REQUIRED,
+            )
+        return store.read(owner_id, operation_id)
+
+    runtime.request_exit = attention_request_exit
+    attention_terminal = finish_current_attempt(after_blocked, "approve")
+    runtime.request_exit = original_request_exit
+    commit_changed_head(5, "change after attention review")
+    after_attention = _run_review(
+        meta,
+        vault,
+        product,
+        task_id,
+        runtime_root,
+        runtime_manager=runtime,
+        apply_finalizing_recovery=forbidden_finalizing_recovery,
+    )
+    check(
+        "changed HEAD never reuses an attention terminal attempt",
+        attention_terminal["status"] == "attention-required"
+        and after_attention["status"] == "reviewing"
+        and gate.read()["attempt"]["identity"]["cycle"] == 5
+        and runtime.started == 5,
+    )
+
     legacy_task_id = "22222222-2222-4222-8222-222222222222"
     legacy_runtime = FakeRuntime(store, owner_id=legacy_task_id)
     legacy_gate_root = (

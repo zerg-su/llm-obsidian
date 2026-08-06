@@ -335,13 +335,20 @@ class FinalizationLedger:
             value = self._read(missing_ok=True)
             disposition = value["terminal_disposition"]
             if disposition:
-                return _decision(
-                    None,
-                    allowed=False,
-                    created=False,
-                    reason=disposition,
-                    disposition=disposition,
-                )
+                latest = value["cycles"][-1] if value["cycles"] else None
+                if not (
+                    disposition == "approved"
+                    and latest is not None
+                    and latest["exact_head"] != requested_identity["exact_head"]
+                ):
+                    return _decision(
+                        None,
+                        allowed=False,
+                        created=False,
+                        reason=disposition,
+                        disposition=disposition,
+                    )
+                value["terminal_disposition"] = ""
             for cycle in value["cycles"]:
                 if cycle["attempt_id"] != requested_identity["attempt_id"]:
                     continue

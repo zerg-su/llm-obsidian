@@ -192,8 +192,6 @@ class ReviewGateAttemptMixin:
                 ):
                     if (
                         existing.terminal is None
-                        or existing.terminal.result
-                        != ReviewAttemptTerminalResult.CHANGES_REQUESTED
                         or existing.identity.finalization_lineage_id
                         != identity.finalization_lineage_id
                         or existing.identity.plan_sha256 != identity.plan_sha256
@@ -201,7 +199,7 @@ class ReviewGateAttemptMixin:
                         or existing.identity.exact_head_sha == identity.exact_head_sha
                     ):
                         raise ReviewAttemptError(
-                            "next review attempt lacks a changed-HEAD resolution boundary"
+                            "next review attempt lacks a changed-HEAD terminal boundary"
                         )
                     archive = self.root / "attempts" / (
                         f"cycle-{existing.identity.cycle}.json"

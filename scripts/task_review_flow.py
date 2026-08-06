@@ -575,16 +575,6 @@ def _run_exact_head_review(
                 attempt_id=prior_attempt.identity.attempt_id,
                 terminal_result=prior_attempt.terminal.result.value,
             )
-            if prior_attempt.terminal.result.value == "approved":
-                return _receipt(
-                    status="approved",
-                    meta=meta,
-                    vault=vault,
-                    worktree=worktree,
-                    runtime_root=runtime_root,
-                    context_manifest=context_manifest,
-                    run=None,
-                )
             if context.head_sha == prior_attempt.identity.exact_head_sha:
                 return _receipt(
                     status=prior_attempt.terminal.result.value,
@@ -594,10 +584,6 @@ def _run_exact_head_review(
                     runtime_root=runtime_root,
                     context_manifest=context_manifest,
                     run=None,
-                )
-            if prior_attempt.terminal.result.value != "changes-requested":
-                raise TaskReviewError(
-                    "only a changed-HEAD resolution may select another finalization cycle"
                 )
             cycle += 1
 
