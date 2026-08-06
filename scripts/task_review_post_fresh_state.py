@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Mapping
 
@@ -38,7 +39,7 @@ def preserved_continuation(
     operation_id: str,
     authorization: PostFreshPublicationSyncAuthorization,
     receipt: Mapping[str, object],
-) -> tuple[dict[str, object], Path]:
+) -> tuple[dict[str, object], Path, str, str]:
     """Validate immutable continuation inputs without probing live resources."""
 
     continuation = authorization.continuation
@@ -67,8 +68,19 @@ def preserved_continuation(
     ):
         raise PostVerificationReviewDriveError("task identity drifted")
     head, tree = _current_git(worktree, str(meta.get("branch") or ""))
-    if head != receipt.get("target_head_sha") or tree != receipt.get("target_tree_sha"):
-        raise PostVerificationReviewDriveError("repair HEAD drifted")
+    target_head = str(receipt.get("target_head_sha") or "")
+    exact_target = head == target_head and tree == receipt.get("target_tree_sha")
+    descendant = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", target_head, head],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if not exact_target and descendant.returncode != 0:
+        raise PostVerificationReviewDriveError(
+            "repair HEAD is not an authorized clean descendant"
+        )
     try:
         root_record = store.read(operation_id, operation_id)
     except StoreError as exc:
@@ -158,7 +170,7 @@ def preserved_continuation(
             != binding.get("record_sha256")
         ):
             raise PostVerificationReviewDriveError("retained operation drifted")
-    return gate, runtime_root
+    return gate, runtime_root, head, tree
 
 
 def applied_publication(

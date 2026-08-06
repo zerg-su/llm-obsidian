@@ -1382,6 +1382,15 @@ def main() -> int:
         archive_root = data["archive_root"]
         assert isinstance(store, OperationStore)
         assert isinstance(runtime_root, Path) and isinstance(archive_root, Path)
+        product = data["product"]
+        assert isinstance(product, Path)
+        (product / "publication-repair.txt").write_text(
+            "typed post-fresh repair\n", encoding="utf-8"
+        )
+        git(product, "add", "publication-repair.txt")
+        git(product, "commit", "-q", "-m", "post-fresh mechanism repair")
+        repair_head = git(product, "rev-parse", "HEAD")
+        repair_tree = git(product, "rev-parse", "HEAD^{tree}")
         provider_roots = [
             store.root
             / "owners"
@@ -1411,6 +1420,9 @@ def main() -> int:
             "post-fresh synchronization resumes callback waiting for existing lanes",
             receipt["status"] == "applied"
             and receipt["reviews_started"] == 0
+            and receipt["repair_head_sha"] == repair_head
+            and receipt["repair_tree_sha"] == repair_tree
+            and receipt["repair_head_sha"] != data["target_head"]
             and gate["status"] == "reviewing"
             and gate["fresh_reevaluation_used"] is True
             and progress["status"] == "fresh-review-started"

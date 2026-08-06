@@ -15,6 +15,7 @@ from harness.post_verification_review_drive import (
     _validated_receipt,
 )
 from harness.post_verification_review_drive_boundary import (
+    HEAD,
     IDENTIFIER,
     MARKER_NAME,
     RECEIPT_NAME,
@@ -48,6 +49,8 @@ SYNC_FIELDS = {
     "continuation_authorization_record_id",
     "continuation_authorization_record_sha256",
     "continuation_receipt_sha256",
+    "repair_head_sha",
+    "repair_tree_sha",
     "source_gate_sha256",
     "target_gate_sha256",
     "source_progress_sha256",
@@ -121,6 +124,11 @@ def _sync_receipt(path: Path) -> dict[str, object] | None:
         if not SHA256.fullmatch(str(value.get(field) or "")):
             raise PostVerificationReviewDriveError(
                 "post-fresh publication digest is invalid"
+            )
+    for field in ("repair_head_sha", "repair_tree_sha"):
+        if not HEAD.fullmatch(str(value.get(field) or "")):
+            raise PostVerificationReviewDriveError(
+                "post-fresh publication repair identity is invalid"
             )
     if (
         not IDENTIFIER.fullmatch(str(value.get("operation_id") or ""))
@@ -564,7 +572,7 @@ def synchronize_post_fresh_publication(
         raise PostVerificationReviewDriveError(
             "prepared continuation receipt is unavailable"
         )
-    gate, runtime_root = preserved_continuation(
+    gate, runtime_root, repair_head, repair_tree = preserved_continuation(
         worktree=root,
         store=store,
         operation_id=operation_id,
@@ -625,6 +633,8 @@ def synchronize_post_fresh_publication(
                 authorization.continuation.authorization_record_sha256
             ),
             "continuation_receipt_sha256": sha256(continuation_path.read_bytes()),
+            "repair_head_sha": repair_head,
+            "repair_tree_sha": repair_tree,
             "source_gate_sha256": sha256(source_gate_raw),
             "target_gate_sha256": sha256(target_gate_raw),
             "source_progress_sha256": sha256(source_progress_raw),
@@ -653,6 +663,8 @@ def synchronize_post_fresh_publication(
         != authorization.continuation.authorization_record_id
         or sync.get("continuation_authorization_record_sha256")
         != authorization.continuation.authorization_record_sha256
+        or sync.get("repair_head_sha") != repair_head
+        or sync.get("repair_tree_sha") != repair_tree
         or (
             continuation.get("status") == "prepared"
             and sync.get("continuation_receipt_sha256")
