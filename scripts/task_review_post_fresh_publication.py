@@ -43,6 +43,10 @@ from task_review_post_fresh_state import (
     applied_publication,
     preserved_continuation,
 )
+from task_review_provenance_contract import (
+    FRESH_BOUNDARY_AUTHORIZATION_FIELDS,
+    coordinator_provenance_is_exact,
+)
 
 
 SYNC_RECEIPT_NAME = "post-fresh-publication-sync.json"
@@ -475,8 +479,21 @@ def _fresh_gate_identity(
     authorization, authorization_raw = regular_json(
         authorization_path, "fresh boundary authorization"
     )
+    pipeline_provenance = bool(
+        set(authorization) == FRESH_BOUNDARY_AUTHORIZATION_FIELDS
+        and authorization.get("authorization_provenance")
+        == "pipeline-verification"
+        and authorization.get("verification_operation_id")
+        == continuation.get("source_verification_operation_id")
+        and authorization.get("verification_receipt_sha256")
+        == continuation.get("source_verification_receipt_sha256")
+    )
+    provenance_is_exact = pipeline_provenance or coordinator_provenance_is_exact(
+        authorization, continuation
+    )
     if (
         sha256(authorization_raw) != authorization_identity.get("sha256")
+        or authorization.get("schema_version") != 2
         or authorization.get("status") != "authorized"
         or authorization.get("operation_id") != old_review_id
         or authorization.get("dispatch_operation_id") != operation_id
@@ -485,10 +502,7 @@ def _fresh_gate_identity(
         != boundary.get("previous_context_sha256")
         or authorization.get("next_context_sha256") != next_context
         or authorization.get("reason") != boundary.get("reason")
-        or authorization.get("verification_operation_id")
-        != continuation.get("source_verification_operation_id")
-        or authorization.get("verification_receipt_sha256")
-        != continuation.get("source_verification_receipt_sha256")
+        or not provenance_is_exact
     ):
         raise PostVerificationReviewDriveError(
             "fresh boundary authorization drifted"

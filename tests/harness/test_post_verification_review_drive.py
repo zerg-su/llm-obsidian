@@ -12,6 +12,7 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -750,6 +751,8 @@ def synchronize(
     now: float,
     fault=None,
     process: ExactProcess | None = None,
+    authorization_record_id: str = "resolution-post-verification",
+    authorization_record_sha256: str = "a" * 64,
 ) -> tuple[dict[str, object], ExactProcess, ExactCmux, RecoveryEffect]:
     resources = data["resources"]
     assert isinstance(resources, OwnedResources)
@@ -761,8 +764,8 @@ def synchronize(
         store=data["store"],
         operation_id=str(data["task_id"]),
         active_review_operation_id=str(data["review_id"]),
-        authorization_record_id="resolution-post-verification",
-        authorization_record_sha256="a" * 64,
+        authorization_record_id=authorization_record_id,
+        authorization_record_sha256=authorization_record_sha256,
         process_adapter=process,
         cmux_adapter=cmux,
         recover_review=recovery,
@@ -774,6 +777,9 @@ def synchronize(
 
 def post_fresh_authorization(
     data: dict[str, object],
+    *,
+    authorization_record_id: str = "resolution-post-verification",
+    authorization_record_sha256: str = "a" * 64,
 ) -> PostFreshPublicationSyncAuthorization:
     drift = DriftQuarantineAuthorization(
         "review-accepted",
@@ -803,8 +809,8 @@ def post_fresh_authorization(
         str(data["task_id"]),
         "resolution-fresh-binding",
         "8" * 64,
-        "resolution-post-verification",
-        "a" * 64,
+        authorization_record_id,
+        authorization_record_sha256,
     )
     return PostFreshPublicationSyncAuthorization(
         continuation,
@@ -815,13 +821,29 @@ def post_fresh_authorization(
 
 def prepare_partial_fresh_publication(
     data: dict[str, object],
+    *,
+    coordinator_provenance: dict[str, str] | None = None,
 ) -> PostFreshPublicationSyncAuthorization:
     def stop_prepared(stage: str) -> None:
         if stage == "prepared":
             raise RuntimeError("retain prepared continuation")
 
     try:
-        synchronize(data, now=40_000.0, fault=stop_prepared)
+        synchronize(
+            data,
+            now=40_000.0,
+            fault=stop_prepared,
+            authorization_record_id=(
+                coordinator_provenance["record_id"]
+                if coordinator_provenance
+                else "resolution-post-verification"
+            ),
+            authorization_record_sha256=(
+                coordinator_provenance["record_sha256"]
+                if coordinator_provenance
+                else "a" * 64
+            ),
+        )
     except RuntimeError as exc:
         assert str(exc) == "retain prepared continuation"
     else:
@@ -840,9 +862,7 @@ def prepare_partial_fresh_publication(
     suffix = f"-fresh-{hashlib.sha256(role.encode()).hexdigest()[:8]}"
     fresh_id = f"{review_id[:128-len(suffix)]}{suffix}"
     authorization_path = gate_path.parent / "fresh-boundary.json"
-    write_json(
-        authorization_path,
-        {
+    authorization_payload = {
             "schema_version": 2,
             "operation_id": review_id,
             "dispatch_operation_id": task_id,
@@ -850,12 +870,24 @@ def prepare_partial_fresh_publication(
             "previous_context_sha256": previous_context,
             "next_context_sha256": next_context,
             "reason": "authorized post-verification continuation",
-            "authorization_provenance": "pipeline-verification",
-            "verification_operation_id": data["verification"]["operation_id"],
-            "verification_receipt_sha256": sha256(data["verification_path"]),
+            "authorization_provenance": (
+                "coordinator-approved"
+                if coordinator_provenance
+                else "pipeline-verification"
+            ),
+            "verification_operation_id": (
+                coordinator_provenance["operation_id"]
+                if coordinator_provenance
+                else data["verification"]["operation_id"]
+            ),
+            "verification_receipt_sha256": (
+                coordinator_provenance["record_sha256"]
+                if coordinator_provenance
+                else sha256(data["verification_path"])
+            ),
             "status": "authorized",
-        },
-    )
+        }
+    write_json(authorization_path, authorization_payload)
     route = RuntimeRoute(
         "codex", "gpt-5.6-sol", "xhigh", "reviewer-callback", "a" * 64
     )
@@ -1062,7 +1094,19 @@ def prepare_partial_fresh_publication(
         }
     )
     write_json(gate_path, gate)
-    return post_fresh_authorization(data)
+    return post_fresh_authorization(
+        data,
+        authorization_record_id=(
+            coordinator_provenance["record_id"]
+            if coordinator_provenance
+            else "resolution-post-verification"
+        ),
+        authorization_record_sha256=(
+            coordinator_provenance["record_sha256"]
+            if coordinator_provenance
+            else "a" * 64
+        ),
+    )
 
 
 def advance_fresh_round(
@@ -1557,6 +1601,143 @@ def main() -> int:
             and replay["reviews_started"] == 0,
             replay,
         )
+
+    coordinator = {
+        "operation_id": "coordinator-provenance-exact",
+        "record_id": "resolution-coordinator-provenance",
+        "record_sha256": "9" * 64,
+    }
+
+    def provenance_overrides(data: dict[str, object]) -> dict[str, object]:
+        verification = data["verification"]
+        assert isinstance(verification, dict)
+        return {
+            "COORDINATOR_PROVENANCE_OPERATION_ID": coordinator["operation_id"],
+            "COORDINATOR_PROVENANCE_RECORD_ID": coordinator["record_id"],
+            "COORDINATOR_PROVENANCE_SHA256": coordinator["record_sha256"],
+            "SCOPED_VERIFICATION_OPERATION_ID": verification["operation_id"],
+            "SCOPED_VERIFICATION_RECEIPT_SHA256": sha256(
+                Path(data["verification_path"])
+            ),
+        }
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-dual-provenance-") as raw:
+        data = fixture(Path(raw) / "happy")
+        authorization = prepare_partial_fresh_publication(
+            data, coordinator_provenance=coordinator
+        )
+        gate = json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))
+        artifact_path = Path(data["gate_path"]).parent / gate[
+            "fresh_boundary_authorization"
+        ]["pointer"]
+        artifact_before = artifact_path.read_bytes()
+        with patch.multiple(
+            "task_review_provenance_contract",
+            **provenance_overrides(data),
+        ):
+            receipt = synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_010.0,
+            )
+            replay = synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_020.0,
+            )
+        check(
+            "post-fresh synchronization preserves exact dual provenance byte-for-byte",
+            receipt == replay
+            and receipt["status"] == "applied"
+            and artifact_path.read_bytes() == artifact_before
+            and receipt["os_signals_sent"] == 0
+            and receipt["cmux_signals_sent"] == 0
+            and receipt["callback_effects_replayed"] == 0
+            and receipt["provider_effects_replayed"] == 0
+            and receipt["reviews_started"] == 0,
+            receipt,
+        )
+
+    for rejected_label, mutate_artifact, override_drift in (
+        (
+            "missing coordinator provenance",
+            lambda value: value.pop("authorization_provenance"),
+            {},
+        ),
+        (
+            "mismatched coordinator provenance",
+            lambda value: value.update(
+                {"verification_operation_id": "coordinator-unrelated"}
+            ),
+            {},
+        ),
+        (
+            "broadened coordinator provenance",
+            lambda value: value.update({"provider_relaunch": True}),
+            {},
+        ),
+        (
+            "mismatched scoped verification binding",
+            lambda _value: None,
+            {"SCOPED_VERIFICATION_RECEIPT_SHA256": "8" * 64},
+        ),
+    ):
+        with tempfile.TemporaryDirectory(
+            prefix=f"post-fresh-provenance-{rejected_label.split()[0]}."
+        ) as raw:
+            data = fixture(Path(raw) / "rejected")
+            authorization = prepare_partial_fresh_publication(
+                data, coordinator_provenance=coordinator
+            )
+            gate_path = Path(data["gate_path"])
+            progress_path = Path(data["progress_path"])
+            gate = json.loads(gate_path.read_text(encoding="utf-8"))
+            artifact_path = gate_path.parent / gate[
+                "fresh_boundary_authorization"
+            ]["pointer"]
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            mutate_artifact(artifact)
+            write_json(artifact_path, artifact)
+            gate["fresh_boundary_authorization"]["sha256"] = sha256(artifact_path)
+            write_json(gate_path, gate)
+            gate_before = gate_path.read_bytes()
+            progress_before = progress_path.read_bytes()
+            root_before = data["store"].read(
+                str(data["task_id"]), str(data["task_id"])
+            )
+            overrides = {**provenance_overrides(data), **override_drift}
+            try:
+                with patch.multiple(
+                    "task_review_provenance_contract",
+                    **overrides,
+                ):
+                    synchronize_post_fresh_publication(
+                        data["product"],
+                        store=data["store"],
+                        operation_id=str(data["task_id"]),
+                        authorization=authorization,
+                        now=42_030.0,
+                    )
+            except PostVerificationReviewDriveError:
+                check(
+                    f"post-fresh synchronization rejects {rejected_label} before effect",
+                    gate_path.read_bytes() == gate_before
+                    and progress_path.read_bytes() == progress_before
+                    and data["store"].read(
+                        str(data["task_id"]), str(data["task_id"])
+                    )
+                    == root_before
+                    and not (
+                        Path(data["runtime_root"])
+                        / "post-fresh-publication-sync.json"
+                    ).exists(),
+                )
+            else:
+                raise AssertionError(f"accepted {rejected_label}")
 
     for progressed_state in ("verifying", "finalizing", "complete"):
         with tempfile.TemporaryDirectory(

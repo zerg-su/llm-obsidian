@@ -10,6 +10,10 @@ from typing import Any
 from task_review_authorization_boundary import (
     authorization_chain_boundary_is_valid as _authorization_chain_boundary_is_valid,
 )
+from task_review_provenance_contract import (
+    FRESH_BOUNDARY_PROVENANCE_PREFIX,
+    provenance_tail_is_exact,
+)
 from task_escalation_records import DecisionRecord, EscalationRecordError, load_chain
 
 
@@ -874,6 +878,30 @@ def _compile_authorization_chain_compatibility(
     )
 
 
+def _compile_fresh_boundary_provenance_compatibility(
+    chain: list[DecisionRecord],
+    index: int,
+    worktree: Path,
+    prior: PostFreshPublicationSyncAuthorization | Any | None = None,
+) -> PostFreshPublicationSyncAuthorization | None:
+    """Compile only the exact failed-before-effect replacement grant."""
+
+    if not provenance_tail_is_exact(chain, index, worktree):
+        return None
+    if prior is None:
+        prior = _compile_authorization_chain_compatibility(
+            chain, index - 2, worktree
+        )
+    if prior is None:
+        return None
+    latest = chain[index]
+    return PostFreshPublicationSyncAuthorization(
+        prior.continuation,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
 def authorized_post_fresh_publication_sync(
     latest: DecisionRecord, worktree: Path
 ) -> PostFreshPublicationSyncAuthorization | None:
@@ -897,6 +925,14 @@ def authorized_post_fresh_publication_sync(
         )
     if decision.startswith(_AUTHORIZATION_CHAIN_COMPATIBILITY_PREFIX):
         authorization = _compile_authorization_chain_compatibility(
+            chain, index, worktree
+        )
+        if authorization is not None and _authorization_chain_boundary_is_valid(
+            worktree, authorization
+        ):
+            return authorization
+    if decision.startswith(FRESH_BOUNDARY_PROVENANCE_PREFIX):
+        authorization = _compile_fresh_boundary_provenance_compatibility(
             chain, index, worktree
         )
         if authorization is not None and _authorization_chain_boundary_is_valid(

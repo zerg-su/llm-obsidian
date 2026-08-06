@@ -46,6 +46,7 @@
     "scripts/task_review_post_fresh_state.py",
     "scripts/task_review_plan.py",
     "scripts/task_review_plan_rebind.py",
+    "scripts/task_review_provenance_contract.py",
     "scripts/task_review_replay.py",
     "scripts/task_review_request.py",
     "scripts/task_review_resolution_bundle.py",

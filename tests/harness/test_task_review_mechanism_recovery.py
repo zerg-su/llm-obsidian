@@ -51,6 +51,7 @@ from task_review_context import (  # noqa: E402
 from task_review_drift_contract import (  # noqa: E402
     _authorization_chain_boundary_is_valid,
     _compile_authorization_chain_compatibility,
+    _compile_fresh_boundary_provenance_compatibility,
     authorized_post_verification_review_drive,
     authorized_post_fresh_publication_sync,
     authorized_drift_quarantine,
@@ -834,6 +835,34 @@ AUTHORIZATION_CHAIN_DECISION = (
     "provider relaunch, callback/effect replay, signals, cmux or manual store "
     "edits, push, publish, tag, release, or reap. Escalate on any further "
     "identity, ownership, or lifecycle drift."
+)
+
+
+FRESH_BOUNDARY_PROVENANCE_DECISION = (
+    "Classified as an eligible repository-owned fresh-boundary authorization "
+    "provenance compatibility failure. Authorize one narrow regression-backed "
+    "fail-closed repair: preserve the immutable fresh-boundary artifact byte-"
+    "for-byte; validate its exact coordinator escalation provenance "
+    "verification_operation_id 75ff063d-d388-46a7-915d-0eed20392da4 and "
+    "verification_receipt_sha256 "
+    "19b7353968b7b7ee91043a604f10a4f7471b99a6b268a643a2f24cf41285aa4b; "
+    "separately validate the exact bound scoped-verification operation "
+    "ad97826c-0651-4014-a113-72518e6fceea-verify-23e835bbe5984523 and receipt "
+    "digest c2037564a8a77f384fe012df4aa009882a124ad1297ab9f218cd90106278638b "
+    "through the existing continuation/dispatch/gate identity chain; and accept "
+    "only when both provenance layers, record/file digests, operation, dispatch, "
+    "context, kind, reason, unchanged gate/progress state, clean descendant "
+    "ancestry, and zero replay/signal counters are exact and unambiguous. Reject "
+    "any missing, rewritten, mismatched, duplicated, unrelated, or broadened "
+    "provenance. Add focused positive/negative and idempotency regressions, run "
+    "clean focused/full/coverage/quality plus a fresh exact-HEAD release-final "
+    "gate, then authorize exactly one replacement supported reconcile because "
+    "the consumed attempt failed before post-fresh-publication-sync receipt or "
+    "any lifecycle/provider/callback/reviewer effect. Preserve all historical "
+    "evidence and prior prohibitions: no reviewer/provider relaunch, callback/"
+    "effect replay, signals, cmux or manual store/gate edits, push, publish, tag, "
+    "release, or reap. Escalate on any further identity, ownership, or lifecycle "
+    "drift."
 )
 
 
@@ -2114,6 +2143,102 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-exact.") as raw:
             is None,
         )
 
+    scope = {
+        key: chain[-1].payload[key]
+        for key in ("category", "worktree", "task_name", "task_surface")
+    }
+    provenance_tail = [
+        chain[-1],
+        DecisionRecord(
+            "50949589-9803-4b88-9e2c-e86e89da73a9",
+            "raise",
+            {**scope, "status": "pending", "decision": ""},
+            "a3aeac897b3db2c29f5a8d82bf9a140a689ad7924dffcfc113977388c5e95e26",
+            product / "50949589-9803-4b88-9e2c-e86e89da73a9.json",
+            False,
+            chain[-1].record_id,
+            chain[-1].sha256,
+        ),
+        DecisionRecord(
+            "resolution-133515ccf480a8d5266eb125582f7f5b",
+            "resolution",
+            {
+                **scope,
+                "status": "resolved",
+                "decision": FRESH_BOUNDARY_PROVENANCE_DECISION,
+            },
+            "85416c36635bb3d4cfac65de0463d83b96c61744b32a825a97c6306dc0744479",
+            product / "resolution-133515ccf480a8d5266eb125582f7f5b.json",
+            False,
+            "50949589-9803-4b88-9e2c-e86e89da73a9",
+            "a3aeac897b3db2c29f5a8d82bf9a140a689ad7924dffcfc113977388c5e95e26",
+        ),
+    ]
+    provenance_compiled = _compile_fresh_boundary_provenance_compatibility(
+        provenance_tail,
+        len(provenance_tail) - 1,
+        product,
+        compiled,
+    )
+    check(
+        "fresh-boundary provenance compiler accepts the exact replacement tail",
+        provenance_compiled is not None
+        and provenance_compiled.continuation is continuation
+        and provenance_compiled.authorization_record_id
+        == provenance_tail[-1].record_id
+        and provenance_compiled.authorization_record_sha256
+        == provenance_tail[-1].sha256,
+    )
+    provenance_mutations = {
+        "missing resolution": provenance_tail[:-1],
+        "reordered tail": [
+            provenance_tail[1],
+            provenance_tail[0],
+            provenance_tail[2],
+        ],
+        "duplicated resolution": [provenance_tail[-1], *provenance_tail],
+        "wrong record digest": [
+            *provenance_tail[:-1],
+            replace(provenance_tail[-1], sha256="0" * 64),
+        ],
+        "broken predecessor": [
+            *provenance_tail[:-1],
+            replace(
+                provenance_tail[-1], previous_record_sha256="1" * 64
+            ),
+        ],
+        "broadened decision": [
+            *provenance_tail[:-1],
+            replace(
+                provenance_tail[-1],
+                payload={
+                    **provenance_tail[-1].payload,
+                    "decision": FRESH_BOUNDARY_PROVENANCE_DECISION
+                    + " Permit another reconcile.",
+                },
+            ),
+        ],
+        "unrelated scope": [
+            provenance_tail[0],
+            replace(
+                provenance_tail[1],
+                payload={
+                    **provenance_tail[1].payload,
+                    "task_surface": "surface-unrelated",
+                },
+            ),
+            provenance_tail[2],
+        ],
+    }
+    for label, candidate in provenance_mutations.items():
+        check(
+            f"fresh-boundary provenance compiler rejects {label}",
+            _compile_fresh_boundary_provenance_compatibility(
+                candidate, len(candidate) - 1, product, compiled
+            )
+            is None,
+        )
+
 
 with tempfile.TemporaryDirectory(prefix="authorization-chain-boundary.") as raw:
     base = Path(raw)
@@ -2177,6 +2302,34 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-boundary.") as raw:
     gate_sha = hashlib.sha256((gate_root / "review-gate.json").read_bytes()).hexdigest()
     runtime_root = vault / ".vault-meta/harness/owners" / task_id / "runtime" / task_id
     runtime_root.mkdir(parents=True)
+    progress_path = (
+        gate_root
+        / "drift-quarantine/resolution-82635951f4b6de424f108e32e3313d29/progress.json"
+    )
+    progress_path.parent.mkdir(parents=True)
+    write_json(progress_path, {"schema_version": 2, "status": "quarantined"})
+    progress_raw = progress_path.read_bytes()
+    coordinator_record_id = "resolution-coordinator-exact"
+    coordinator_sha = "6" * 64
+    verification_id = f"{task_id}-verify-exact"
+    verification_sha = "7" * 64
+    continuation_path = runtime_root / "post-verification-review-drive.json"
+    write_json(
+        continuation_path,
+        {
+            "status": "prepared",
+            "operation_id": task_id,
+            "authorization_record_id": coordinator_record_id,
+            "authorization_record_sha256": coordinator_sha,
+            "source_verification_operation_id": verification_id,
+            "source_verification_receipt_sha256": verification_sha,
+            "os_signals_sent": 0,
+            "cmux_signals_sent": 0,
+            "callback_effects_replayed": 0,
+            "provider_effects_replayed": 0,
+        },
+    )
+    continuation_raw = continuation_path.read_bytes()
     authorization = SimpleNamespace(
         continuation=SimpleNamespace(dispatch_operation_id=task_id)
     )
@@ -2197,8 +2350,19 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-boundary.") as raw:
         "_RELEASE_FINAL_HEAD": release_head,
         "_RELEASE_FINAL_TREE": release_tree,
         "_RELEASE_FINAL_RECEIPT": Path("evidence/receipt.json"),
+        "_QUARANTINE_PROGRESS_SHA256": hashlib.sha256(progress_raw).hexdigest(),
     }
-    with patch.multiple("task_review_authorization_boundary", **overrides):
+    provenance_overrides = {
+        "COORDINATOR_PROVENANCE_RECORD_ID": coordinator_record_id,
+        "COORDINATOR_PROVENANCE_SHA256": coordinator_sha,
+        "SCOPED_VERIFICATION_OPERATION_ID": verification_id,
+        "SCOPED_VERIFICATION_RECEIPT_SHA256": verification_sha,
+    }
+    with patch.multiple(
+        "task_review_authorization_boundary", **overrides
+    ), patch.multiple(
+        "task_review_provenance_contract", **provenance_overrides
+    ):
         verifier = lambda _path: receipt
         check(
             "authorization boundary proves clean ancestry, gate, receipt, and unused reconcile",
@@ -2231,6 +2395,24 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-boundary.") as raw:
                 receipt_verifier=lambda _path: {**receipt, "attempt_id": "other"},
             ),
         )
+        write_json(progress_path, {"schema_version": 2, "status": "reviewing"})
+        check(
+            "authorization boundary rejects quarantine progress drift",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
+        )
+        progress_path.write_bytes(progress_raw)
+        continuation = json.loads(continuation_raw)
+        continuation["provider_effects_replayed"] = 1
+        write_json(continuation_path, continuation)
+        check(
+            "authorization boundary rejects nonzero replay counters",
+            not _authorization_chain_boundary_is_valid(
+                product.resolve(), authorization, receipt_verifier=verifier
+            ),
+        )
+        continuation_path.write_bytes(continuation_raw)
         write_json(gate_root / "review-gate.json", {**gate, "status": "reviewing"})
         check(
             "authorization boundary rejects gate identity drift",

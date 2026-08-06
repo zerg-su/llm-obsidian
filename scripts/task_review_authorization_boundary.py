@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+import task_review_provenance_contract as provenance
 from verification_receipt import ReceiptError, verify_receipt
 
 
@@ -25,6 +26,12 @@ _RELEASE_FINAL_PROFILE_SHA256 = (
 )
 _RELEASE_FINAL_RECEIPT = Path(
     "docs/acceptance/evidence/v2.6.5/lifecycle-simulator-5afd184/receipt.json"
+)
+_QUARANTINE_PROGRESS_SHA256 = (
+    "87b9a79c7b191ee4f963a8345a2abe5b0b62cd6982a7f0370abba5c89d14db7f"
+)
+_QUARANTINE_PROGRESS_RELATIVE = Path(
+    "drift-quarantine/resolution-82635951f4b6de424f108e32e3313d29/progress.json"
 )
 
 
@@ -74,15 +81,15 @@ def authorization_chain_boundary_is_valid(
         ):
             return False
         vault = vault.resolve()
-        gate_path = (
+        gate_root = (
             vault
             / ".vault-meta"
             / "harness"
             / "review-data"
             / task_id
             / task_id
-            / "review-gate.json"
         )
+        gate_path = gate_root / "review-gate.json"
         if gate_path.is_symlink() or not gate_path.is_file():
             return False
         gate_raw = gate_path.read_bytes()
@@ -111,6 +118,36 @@ def authorization_chain_boundary_is_valid(
             / "post-fresh-publication-sync.json"
         )
         if sync_path.exists() or sync_path.is_symlink():
+            return False
+        progress_path = gate_root / _QUARANTINE_PROGRESS_RELATIVE
+        if (
+            progress_path.is_symlink()
+            or not progress_path.is_file()
+            or hashlib.sha256(progress_path.read_bytes()).hexdigest()
+            != _QUARANTINE_PROGRESS_SHA256
+        ):
+            return False
+        continuation_path = sync_path.parent / "post-verification-review-drive.json"
+        if continuation_path.is_symlink() or not continuation_path.is_file():
+            return False
+        continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(continuation, dict)
+            or continuation.get("status") != "prepared"
+            or continuation.get("operation_id") != task_id
+            or continuation.get("authorization_record_id")
+            != provenance.COORDINATOR_PROVENANCE_RECORD_ID
+            or continuation.get("authorization_record_sha256")
+            != provenance.COORDINATOR_PROVENANCE_SHA256
+            or continuation.get("source_verification_operation_id")
+            != provenance.SCOPED_VERIFICATION_OPERATION_ID
+            or continuation.get("source_verification_receipt_sha256")
+            != provenance.SCOPED_VERIFICATION_RECEIPT_SHA256
+            or any(
+                continuation.get(field) != 0
+                for field in provenance.ZERO_EFFECT_FIELDS
+            )
+        ):
             return False
         receipt = receipt_verifier(receipt_path)
         if (

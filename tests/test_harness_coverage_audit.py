@@ -58,6 +58,7 @@ for module in (
     "post_fresh_publication",
     "post_fresh_recovery",
     "post_fresh_state",
+    "provenance_contract",
     "replay",
     "request",
     "resolution_bundle",
