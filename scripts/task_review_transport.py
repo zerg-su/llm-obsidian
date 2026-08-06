@@ -238,7 +238,6 @@ def _callback_wake(
         wake_argv.extend(("--purpose", purpose))
     if boundary_file:
         wake_argv.extend(("--boundary-input", boundary_file))
-    wake_argv.extend(("--plan", str(meta["plan_file"])))
     return (
         "Typed current-review callback is ready. Run this exact command: "
         + shlex.join(wake_argv)

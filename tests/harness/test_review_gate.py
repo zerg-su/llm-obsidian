@@ -4283,6 +4283,8 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
             in current_runtime.started[0].callback_wake
             and f"--worktree {product.resolve()}"
             in current_runtime.started[0].callback_wake
+            and " --plan "
+            not in current_runtime.started[0].callback_wake
             and manifest.is_file()
             and product.resolve() not in manifest.parents,
         )
