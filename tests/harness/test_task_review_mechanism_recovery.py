@@ -301,6 +301,7 @@ def build_fixture(
     legacy_round_specs: bool = False,
     exact_attempt: bool = False,
     deep: bool = False,
+    review_operation_id: str | None = None,
 ) -> RecoveryFixture:
     vault = base / "vault"
     product = base / "product"
@@ -427,7 +428,10 @@ def build_fixture(
         effort="xhigh" if deep else "",
     )
     request = ReviewOperationRequest(
-        preset.request(task_id, selected_provider="openai"),
+        preset.request(
+            review_operation_id or task_id,
+            selected_provider="openai",
+        ),
         task_id,
         RuntimeRoute(
             "codex",
@@ -686,8 +690,12 @@ def absent_ownership(index: int) -> DurableCleanupOwnership:
     )
 
 
-def prepare_signal_free_fixture(base: Path) -> DriftFixture:
-    drift = prepare_drift_fixture(base)
+def prepare_signal_free_fixture(
+    base: Path, *, review_operation_id: str | None = None
+) -> DriftFixture:
+    drift = prepare_drift_fixture(
+        base, review_operation_id=review_operation_id
+    )
     fixture = drift.recovery
     parents = [parent for _axis, parent, _child in fixture.lane_round_ids]
     for index, operation_id in enumerate(parents, start=1):
@@ -751,7 +759,9 @@ def apply_supported_close_receipt(
 
 
 def prepare_supported_close_fixture(base: Path) -> DriftFixture:
-    drift = prepare_signal_free_fixture(base)
+    drift = prepare_signal_free_fixture(
+        base, review_operation_id=str(uuid.uuid4())
+    )
     fixture = drift.recovery
     meta = json.loads(
         (fixture.product / ".task-meta.json").read_text(encoding="utf-8")
@@ -795,12 +805,15 @@ def prepare_supported_close_fixture(base: Path) -> DriftFixture:
     return drift
 
 
-def prepare_drift_fixture(base: Path) -> DriftFixture:
+def prepare_drift_fixture(
+    base: Path, *, review_operation_id: str | None = None
+) -> DriftFixture:
     fixture = build_fixture(
         base,
         gate_status="reviewing",
         exact_attempt=True,
         deep=True,
+        review_operation_id=review_operation_id,
     )
     run = fixture.gate.rehydrate_attempt()
     reviewed_head = run.execution.request.context.head_sha
@@ -1478,6 +1491,9 @@ with tempfile.TemporaryDirectory(prefix="supported-close-lifecycle.") as raw:
         tuple(fixture.runtime.cleanup_calls),
         tuple(fixture.runtime.ownership_probes),
     )
+    retained_review_operation_id = fixture.gate.read()[
+        "active_review_operation_id"
+    ]
     started_before = len(fixture.runtime.started)
     accepted_before = {
         child: (
@@ -1488,6 +1504,14 @@ with tempfile.TemporaryDirectory(prefix="supported-close-lifecycle.") as raw:
     }
     recovered = recover_task_review_for_mechanism(
         fixture.product, runtime_manager=fixture.runtime
+    )
+    gate_state = fixture.gate.read()
+    authorization_identity = gate_state["fresh_boundary_authorization"]
+    assert isinstance(authorization_identity, dict)
+    boundary_authorization = json.loads(
+        (fixture.gate.root / str(authorization_identity["pointer"])).read_text(
+            encoding="utf-8"
+        )
     )
     progress = json.loads(
         (archive.parent / "progress.json").read_text(encoding="utf-8")
@@ -1517,7 +1541,12 @@ with tempfile.TemporaryDirectory(prefix="supported-close-lifecycle.") as raw:
         and progress["status"] == "fresh-review-started"
         and set(progress["retirement_receipts"])
         == set(authorization.parent_operation_ids)
-        and len(fixture.runtime.started) == started_before + 2,
+        and len(fixture.runtime.started) == started_before + 2
+        and retained_review_operation_id != fixture.task_id
+        and boundary_authorization["schema_version"] == 2
+        and boundary_authorization["operation_id"]
+        == retained_review_operation_id
+        and boundary_authorization["dispatch_operation_id"] == fixture.task_id,
     )
     accepted_after = {
         child: (

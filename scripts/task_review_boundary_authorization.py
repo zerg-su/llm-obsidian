@@ -13,7 +13,8 @@ from task_review_shared import TaskReviewError, _atomic_json, _read_json
 
 def authorization_payload(
     *,
-    task_id: str,
+    review_operation_id: str,
+    dispatch_operation_id: str,
     boundary: ReviewScopeBoundary,
     attention: dict[str, Any],
     attention_record_sha256: str,
@@ -21,8 +22,9 @@ def authorization_payload(
     if not re.fullmatch(r"[0-9a-f]{64}", attention_record_sha256):
         raise TaskReviewError("coordinator authorization record digest is invalid")
     return {
-        "schema_version": 1,
-        "operation_id": task_id,
+        "schema_version": 2,
+        "operation_id": review_operation_id,
+        "dispatch_operation_id": dispatch_operation_id,
         "kind": boundary.kind,
         "previous_context_sha256": boundary.previous_context_sha256,
         "next_context_sha256": boundary.next_context_sha256,

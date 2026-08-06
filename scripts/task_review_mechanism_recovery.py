@@ -546,7 +546,10 @@ def _approved_summary_recovery(
         ),
     )
     authorization = authorization_payload(
-        task_id=recovery.task_id,
+        review_operation_id=(
+            recovery.run.execution.request.policy.operation_id
+        ),
+        dispatch_operation_id=recovery.task_id,
         boundary=boundary,
         attention=recovery.attention,
         attention_record_sha256=recovery.attention_record_sha256,
@@ -638,7 +641,10 @@ def _recover_stale_boundary(
         ),
     )
     authorization = authorization_payload(
-        task_id=recovery.task_id,
+        review_operation_id=(
+            recovery.run.execution.request.policy.operation_id
+        ),
+        dispatch_operation_id=recovery.task_id,
         boundary=boundary,
         attention=recovery.attention,
         attention_record_sha256=recovery.attention_record_sha256,
