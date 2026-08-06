@@ -137,4 +137,46 @@ for row in ledger_rows:
     )
     assert isinstance(row["external_effects_observed"], bool)
 
+failed = load("evidence/v2.6.6-rc1/failed-fbf87a4/diagnostic-receipt.json")
+assert failed.get("type") == "diagnostic-only"
+assert failed.get("evidence_disposition") == "not-verification-evidence"
+assert failed.get("status") == "failed"
+assert failed.get("subject_head_sha") == "fbf87a4e8ef532b43e4d55225c87ad0f39f55bd9"
+assert failed.get("command_id") == "harness-coverage"
+assert failed.get("command_index") == 2
+
+passed = load("evidence/v2.6.6-rc1/replacement-126b5fe/receipt.json")
+assert passed.get("status") == "passed"
+assert passed.get("profile") == "release-final"
+assert passed.get("execution_relation") == "release-candidate"
+assert passed.get("subject_head_sha") == "126b5fecb087a231bd6fbec8ce3f5dfe9235a206"
+commands = passed.get("commands")
+assert isinstance(commands, list) and len(commands) == 15
+assert [row.get("command_id") for row in commands if isinstance(row, dict)] == [
+    "full-tests",
+    "harness-coverage",
+    "release-acceptance",
+    "vault-validation",
+    "code-quality",
+    "skill-audit",
+    "instruction-budget-adapter",
+    "codex-adapter",
+    "split-skill-audit",
+    "mcp-sync-config",
+    "codex-mcp-sync",
+    "harness-status",
+    "harness-doctor",
+    "diff-check",
+    "clean-status",
+]
+coverage_row = commands[1]
+assert isinstance(coverage_row, dict)
+assert coverage_row.get("observations") == {
+    "coverage_kind": "stdlib-trace-ast-statement-lines",
+    "covered_lines": 16755,
+    "executable_lines": 22599,
+    "transition_matrix_cases": 4370,
+    "weighted_percent": 74.14,
+}
+
 print("2.6.6 RC1 evidence schemas passed")
