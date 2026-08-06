@@ -88,8 +88,10 @@ def run_cli(*argv: str) -> subprocess.CompletedProcess[str]:
 with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     root = Path(raw)
     vault = root / "vault"
+    target_repo = root / "target"
     worktree = root / "child"
     (vault / "wiki" / "plans").mkdir(parents=True)
+    (vault / "skills" / "dispatch").mkdir(parents=True)
     (vault / "config").mkdir()
     shutil.copy2(
         ROOT / "config" / "verification-profiles.toml",
@@ -109,21 +111,23 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     }
     plan = vault / "wiki" / "plans" / "split-proof.md"
     plan.write_text(
-        "# Split proof\n\n## Outcome Contract\n\n```json\n"
+        "---\nstatus: pending\n---\n\n# Split proof\n\n"
+        "## Outcome Contract\n\n```json\n"
         + json.dumps(contract_value, sort_keys=True)
         + "\n```\n",
         encoding="utf-8",
     )
     plan_sha = hashlib.sha256(plan.read_bytes()).hexdigest()
     outcome_sha = extract_from_bytes(plan.read_bytes()).sha256
-    worktree.mkdir()
-    git(worktree, "init", "-b", BRANCH)
-    git(worktree, "config", "user.name", "Split Test")
-    git(worktree, "config", "user.email", "split@example.invalid")
-    (worktree / "README.md").write_text("base\n", encoding="utf-8")
-    git(worktree, "add", "README.md")
-    git(worktree, "commit", "-m", "base")
-    base = git(worktree, "rev-parse", "HEAD")
+    target_repo.mkdir()
+    git(target_repo, "init", "-b", "main")
+    git(target_repo, "config", "user.name", "Split Test")
+    git(target_repo, "config", "user.email", "split@example.invalid")
+    (target_repo / "README.md").write_text("base\n", encoding="utf-8")
+    git(target_repo, "add", "README.md")
+    git(target_repo, "commit", "-m", "base")
+    base = git(target_repo, "rev-parse", "HEAD")
+    git(target_repo, "branch", "source-base", base)
     parent = ParentContract(
         plan_sha256=plan_sha,
         outcome_contract_sha256=outcome_sha,
@@ -156,6 +160,60 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     ).manifest
     candidate = manifest.subplans[0]
     policy = split_child_policy_payload(split_child_policy(manifest, candidate))
+
+    raw_dispatch = {
+        "schema_version": 1,
+        "request_id": TASK_ID,
+        "task_name": "split-proof",
+        "description": "Prove exact durable Split replay evidence.",
+        "vault_root": str(vault.resolve()),
+        "target_repo": str(target_repo.resolve()),
+        "worktree": str(worktree.resolve()),
+        "branch": BRANCH,
+        "base_branch": "source-base",
+        "plan_file": str(plan.resolve()),
+        "origin_surface": "22222222-2222-4222-8222-222222222222",
+        "origin_session": "split-runner-test",
+        "session_route": {
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+            "source": "unit-test",
+        },
+        "executor": {},
+        "placement": "workspace",
+        "pipeline": "lifecycle/default",
+        "completion_policy": "attention",
+        "wiki_context": [],
+        "suggested_agents": [],
+        "reap": {
+            "type": "repo-touch",
+            "title": "Split proof",
+            "plan_mode": "shared",
+        },
+        "split": policy,
+    }
+    assert "base_sha" not in raw_dispatch
+    spec = {
+        "schema_version": 1,
+        "manifest": manifest_to_dict(manifest),
+        "current_parent": {
+            "plan_sha256": plan_sha,
+            "outcome_contract_sha256": outcome_sha,
+        },
+        "registered_pipelines": ["lifecycle/default"],
+        "children": [{"subplan_id": SUBPLAN, "dispatch": raw_dispatch}],
+    }
+    spec_path = root / "activation.json"
+    write_json(spec_path, spec)
+    validated = run_cli("validate", "--spec", str(spec_path))
+    assert validated.returncode == 0, validated.stderr
+    assert json.loads(validated.stdout)["status"] == "valid"
+    print("OK   replay fixture starts from one schema-valid public request")
+
+    git(target_repo, "worktree", "add", "-b", BRANCH, str(worktree), "source-base")
+    git(worktree, "config", "user.name", "Split Test")
+    git(worktree, "config", "user.email", "split@example.invalid")
 
     product = worktree / OWNED_PATH
     product.parent.mkdir(parents=True)
@@ -277,31 +335,6 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         },
     )
 
-    raw_dispatch = {
-        "request_id": TASK_ID,
-        "task_name": "split-proof",
-        "vault_root": str(vault.resolve()),
-        "worktree": str(worktree.resolve()),
-        "branch": BRANCH,
-        "placement": "workspace",
-        "pipeline": "lifecycle/default",
-        "completion_policy": "attention",
-        "split": policy,
-    }
-    assert "base_sha" not in raw_dispatch
-    spec = {
-        "schema_version": 1,
-        "manifest": manifest_to_dict(manifest),
-        "current_parent": {
-            "plan_sha256": plan_sha,
-            "outcome_contract_sha256": outcome_sha,
-        },
-        "registered_pipelines": ["lifecycle/default"],
-        "children": [{"subplan_id": SUBPLAN, "dispatch": raw_dispatch}],
-    }
-    spec_path = root / "activation.json"
-    write_json(spec_path, spec)
-
     request_sha = canonical_sha256(raw_dispatch)
     state_path = run_state_path(vault, TASK_ID)
     write_json(
@@ -335,6 +368,27 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     split_root = (
         harness_root / "split-operations" / manifest.manifest_sha256
     )
+    git(target_repo, "branch", "-D", "source-base")
+    meta_path = worktree / ".task-meta.json"
+    meta_bytes = meta_path.read_bytes()
+    meta_path.unlink()
+    missing_meta_recovery = run_cli("start", "--spec", str(spec_path))
+    assert missing_meta_recovery.returncode == 3
+    assert "cannot read exact JSON object" in missing_meta_recovery.stderr
+    assert not split_root.exists()
+    meta_path.write_bytes(meta_bytes)
+    print("OK   recovery rejects missing child metadata before launch evidence")
+
+    wrong_meta = json.loads(meta_bytes)
+    wrong_meta["base_sha"] = "9" * 40
+    write_json(meta_path, wrong_meta)
+    rejected_recovery = run_cli("start", "--spec", str(spec_path))
+    assert rejected_recovery.returncode == 3
+    assert "recovered Split child base SHA drifted" in rejected_recovery.stderr
+    assert not split_root.exists()
+    meta_path.write_bytes(meta_bytes)
+    print("OK   recovery rejects durable child base drift before launch evidence")
+
     assert not split_root.exists()
     recovered = run_cli("start", "--spec", str(spec_path))
     assert recovered.returncode == 0, recovered.stderr
@@ -346,6 +400,7 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         "surfaces_created": 0,
         "worktrees_created": 0,
     }
+    assert recovered_payload["launch_receipts"][0]["base_sha"] == base
     assert (split_root / "launches" / f"{SUBPLAN}.json").is_file()
     assert (split_root / "terminals" / f"{SUBPLAN}.json").is_file()
     print("OK   completed dispatch crash window recovers without a second launch")
@@ -375,7 +430,10 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     launches_path = root / "launches.json"
     terminals_path = root / "terminals.json"
     heads_path = root / "heads.json"
-    write_json(launches_path, {"schema_version": 1, "receipts": [launch_stored]})
+    write_json(
+        launches_path,
+        {"schema_version": 1, "receipts": recovered_payload["launch_receipts"]},
+    )
     write_json(terminals_path, {"schema_version": 1, "receipts": [terminal_stored]})
     write_json(heads_path, {"schema_version": 1, "heads": {SUBPLAN: head}})
     joined = run_cli(
@@ -391,7 +449,7 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     )
     assert joined.returncode == 0, joined.stderr
     assert json.loads(joined.stdout)["disposition"] == "ready"
-    print("OK   join accepts the exact code-owned terminal projection")
+    print("OK   public start receipt round-trips into exact Join")
 
     forged_launch = {**launch_stored, "workspace_id": "workspace-forged"}
     write_json(launches_path, {"schema_version": 1, "receipts": [forged_launch]})

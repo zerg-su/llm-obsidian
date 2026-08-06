@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc1",
+  "deviations": [
+    {
+      "id": "D-266-RC1-E6-01",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "historical-incremental-execution-proof",
+      "finding_ids": [
+        "OI.E6.UNBOUND-SLICE-RECEIPTS",
+        "OI.E6.RECEIPTS_NOT_ESTABLISHED"
+      ],
+      "affected_slices": ["A", "B", "C", "D", "E", "F", "G"],
+      "affected_repair_heads": [
+        "83d06f44f01def888a020e3bf7d7e50939ea4b24",
+        "bd537cd0c3603c2466f86ff38e7aa56e2c6e4f69"
+      ],
+      "authority": "approved-rc1-closure-plan-section-13",
+      "constraint": "The slice ledger and interactive repair commands are retrospective metadata, not independently generated immutable RED/GREEN receipts. RC1 claims only focused regressions that remain executable and one immutable exact-HEAD release-final receipt for the final candidate.",
+      "remediation": "RC2.SLICE_RECEIPT_PROVENANCE owns a code-generated per-slice receipt runner. RC1 must not fabricate or backfill historical command proof."
+    }
+  ]
+}

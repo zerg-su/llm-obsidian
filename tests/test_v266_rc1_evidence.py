@@ -262,6 +262,13 @@ assert set(finding_ids) == {
     "OI.E8.CANDIDATE-BUDGET-EXCEEDED",
     "ENG.SPLIT.BASE_REQUEST_DRIFT",
     "ENG.SPLIT.REPLAY.BASE_SHA_MISSING",
+    "ENG.SPLIT.LAUNCH_RECEIPT_BASE_OMITTED",
+    "ENG.SPLIT.RECOVERED_BASE_ASSUMED",
+    "TEST.SPLIT.REPLAY_FIXTURE_INVALID_REQUEST",
+    "ENG.SPLIT.DUPLICATE_LAUNCH_GUARD",
+    "OI.E6.RECEIPTS_NOT_ESTABLISHED",
+    "OI.E8.CANDIDATE_LEDGER_STALE",
+    "OI.E8.RECEIPT_NOT_BOUND_IN_BOUNDARY",
 }
 for row in finding_rows:
     assert isinstance(row, dict)
@@ -271,8 +278,37 @@ for row in finding_rows:
         "out-of-scope-2.7",
         "not-a-defect",
         "blocks-rc1",
+        "accepted-deviation",
     }
     assert isinstance(row.get("rationale"), str) and row["rationale"].strip()
+
+deviations = load("v2.6.6-rc1-accepted-deviations.json")
+assert deviations.get("release") == "2.6.6-rc1"
+deviation_rows = deviations.get("deviations")
+assert isinstance(deviation_rows, list) and len(deviation_rows) == 1
+deviation = deviation_rows[0]
+assert isinstance(deviation, dict)
+assert deviation.get("id") == "D-266-RC1-E6-01"
+assert deviation.get("status") == "accepted"
+assert deviation.get("authority") == "approved-rc1-closure-plan-section-13"
+assert deviation.get("affected_slices") == list("ABCDEFG")
+assert deviation.get("finding_ids") == [
+    "OI.E6.UNBOUND-SLICE-RECEIPTS",
+    "OI.E6.RECEIPTS_NOT_ESTABLISHED",
+]
+repair_heads = deviation.get("affected_repair_heads")
+assert isinstance(repair_heads, list) and repair_heads
+for repair_head in repair_heads:
+    assert isinstance(repair_head, str) and SHA.fullmatch(repair_head)
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", repair_head, "HEAD"],
+        cwd=ROOT,
+        check=False,
+    ).returncode == 0
+assert "not independently generated immutable RED/GREEN receipts" in str(
+    deviation.get("constraint")
+)
+assert "RC2.SLICE_RECEIPT_PROVENANCE" in str(deviation.get("remediation"))
 
 ledger = load("v2.6.6-rc2-defect-ledger.json")
 assert ledger.get("release") == "2.6.6-rc2"

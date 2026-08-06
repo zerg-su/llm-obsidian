@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Mapping, NoReturn
@@ -143,8 +144,6 @@ def _prepared(
 ) -> PreparedSplitDispatch:
     manifest, current, raw_children = _exact_spec(value)
     launched = {item.subplan_id: item for item in existing_launches}
-    if len(launched) != len(existing_launches):
-        raise ContractError("Split launch evidence has duplicate children")
     children: list[DispatchChildRequest] = []
     for item in raw_children:
         raw = dict(item["dispatch"])
@@ -260,6 +259,48 @@ def _manifest_order(
     return tuple(by_id[item] for item in expected if item in by_id)
 
 
+def _recovered_launch_base(
+    raw: Mapping[str, Any],
+    prior: Mapping[str, Any],
+    *,
+    manifest_base_sha: str,
+) -> str:
+    """Read an accepted child's actual sealed base before writing evidence."""
+
+    request_id = str(raw.get("request_id") or "")
+    requested_worktree = Path(str(raw.get("worktree") or "")).expanduser()
+    recovered_worktree = Path(str(prior.get("worktree") or "")).expanduser()
+    requested_vault = Path(str(raw.get("vault_root") or "")).expanduser()
+    if (
+        prior.get("request_id") != request_id
+        or not requested_worktree.is_absolute()
+        or not recovered_worktree.is_absolute()
+        or requested_worktree.resolve() != recovered_worktree.resolve()
+        or prior.get("branch") != raw.get("branch")
+    ):
+        raise ContractError("recovered Split child dispatch identity drifted")
+    meta = _read_object(recovered_worktree.resolve() / ".task-meta.json")
+    recorded_vault = Path(str(meta.get("vault_root") or "")).expanduser()
+    if (
+        meta.get("version") != 4
+        or meta.get("task_id") != request_id
+        or meta.get("worktree") != str(recovered_worktree.resolve())
+        or meta.get("branch") != raw.get("branch")
+        or not requested_vault.is_absolute()
+        or not recorded_vault.is_absolute()
+        or requested_vault.resolve() != recorded_vault.resolve()
+        or meta.get("split_policy") != raw.get("split")
+    ):
+        raise ContractError("recovered Split child task contract drifted")
+    base_sha = str(meta.get("base_sha") or "")
+    if (
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base_sha) is None
+        or base_sha != manifest_base_sha
+    ):
+        raise ContractError("recovered Split child base SHA drifted")
+    return base_sha
+
+
 def _authoritative_state(
     value: Mapping[str, Any],
     *,
@@ -291,11 +332,16 @@ def _authoritative_state(
                 f"{subplan_id!r} not in "
                 f"{tuple(item.subplan_id for item in manifest.subplans)!r}"
             )
+        recovered_base_sha = _recovered_launch_base(
+            raw,
+            prior,
+            manifest_base_sha=manifest.parent.base_sha,
+        )
         recovered.append(
             (
                 SplitLaunchReceipt(
                     manifest_sha256=manifest.manifest_sha256,
-                    base_sha=manifest.parent.base_sha,
+                    base_sha=recovered_base_sha,
                     subplan_id=subplan_id,
                     request_id=str(prior.get("request_id") or ""),
                     workspace_id=str(prior.get("task_workspace") or ""),
@@ -388,6 +434,7 @@ def main() -> int:
                         key: getattr(item, key)
                         for key in (
                             "manifest_sha256",
+                            "base_sha",
                             "subplan_id",
                             "request_id",
                             "workspace_id",
