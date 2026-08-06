@@ -7,6 +7,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -34,11 +35,19 @@ RC1_ACTIVE_AUTHORITY_FILES = (
     "scripts/harness/callback_submit_recovery.py",
     "scripts/harness/liveness.py",
     "scripts/harness/provider_events.py",
+    "scripts/harness/review_drive_rearm.py",
     "scripts/harness/runtime_provider_events.py",
     "scripts/harness/runtime_worker_liveness.py",
     "scripts/harness/workflows/review_gate_attempt.py",
     "scripts/harness/workflows/review_gate_recovery.py",
+    "scripts/task_review_authorization_boundary.py",
+    "scripts/task_review_drift_contract.py",
     "scripts/task_review_flow.py",
+    "scripts/task_review_mechanism_recovery.py",
+    "scripts/task_review_post_fresh_publication.py",
+    "scripts/task_review_post_fresh_recovery.py",
+    "scripts/task_review_provenance_contract.py",
+    "scripts/task_review_resolution_flow.py",
 )
 RC1_WRITABLE_AUTHORITY_SYMBOLS = frozenset(
     {
@@ -172,21 +181,17 @@ def _incident_literal_kinds(value: str) -> tuple[str, ...]:
     return tuple(kinds)
 
 
-def audit_rc1_active_authority(repo_root: Path = ROOT) -> dict[str, object]:
-    """Inventory the bounded RC1 review/recovery contour without content."""
-
+def _audit_rc1_sources(
+    sources: tuple[tuple[str, str], ...],
+) -> dict[str, object]:
     production_files = []
     writable_authorities = []
     incident_literals = []
-    for relative in RC1_ACTIVE_AUTHORITY_FILES:
-        path = repo_root / relative
-        if not path.is_file() or path.is_symlink():
-            continue
-        source = path.read_text(encoding="utf-8")
+    for relative, source in sources:
         production_files.append(
             {"path": relative, "loc": len(source.splitlines())}
         )
-        tree = ast.parse(source, filename=str(path))
+        tree = ast.parse(source, filename=relative)
         for node in ast.walk(tree):
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -214,6 +219,55 @@ def audit_rc1_active_authority(repo_root: Path = ROOT) -> dict[str, object]:
         "writable_authorities": writable_authorities,
         "incident_literals": incident_literals,
     }
+
+
+def audit_rc1_active_authority(repo_root: Path = ROOT) -> dict[str, object]:
+    """Inventory the bounded RC1 review/recovery contour without content."""
+
+    sources = []
+    for relative in RC1_ACTIVE_AUTHORITY_FILES:
+        path = repo_root / relative
+        if path.is_file() and not path.is_symlink():
+            sources.append((relative, path.read_text(encoding="utf-8")))
+    return _audit_rc1_sources(tuple(sources))
+
+
+def audit_rc1_active_authority_at_commit(
+    subject_sha: str, repo_root: Path = ROOT
+) -> dict[str, object]:
+    """Recompute the same contour from one exact local Git commit."""
+
+    if not re.fullmatch(r"[0-9a-f]{40}", subject_sha):
+        raise ValueError("RC1 authority subject must be an exact Git object ID")
+    commit = subprocess.run(
+        ["git", "cat-file", "-e", f"{subject_sha}^{{commit}}"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if commit.returncode:
+        raise ValueError("RC1 authority subject commit is unavailable")
+    sources = []
+    for relative in RC1_ACTIVE_AUTHORITY_FILES:
+        exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{subject_sha}:{relative}"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if exists.returncode:
+            continue
+        shown = subprocess.run(
+            ["git", "show", f"{subject_sha}:{relative}"],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        sources.append((relative, shown.stdout))
+    return _audit_rc1_sources(tuple(sources))
 
 
 def classify(rows: tuple[FileSignal, ...]) -> tuple[list[str], list[str]]:
@@ -316,11 +370,18 @@ def main() -> int:
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--rc1-authority-json", action="store_true")
+    parser.add_argument("--rc1-authority-subject")
     args = parser.parse_args()
     if args.rc1_authority_json:
         try:
-            authority = audit_rc1_active_authority(ROOT)
-        except (OSError, SyntaxError) as exc:
+            authority = (
+                audit_rc1_active_authority_at_commit(
+                    args.rc1_authority_subject, ROOT
+                )
+                if args.rc1_authority_subject
+                else audit_rc1_active_authority(ROOT)
+            )
+        except (OSError, SyntaxError, ValueError, subprocess.SubprocessError) as exc:
             print(f"RC1 authority audit: {exc}")
             return 1
         print(json.dumps(authority, indent=2, sort_keys=True))

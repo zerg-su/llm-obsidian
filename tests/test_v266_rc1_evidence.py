@@ -65,6 +65,62 @@ for entry in slices:
         ).returncode == 0
 
 assert seen_slices == set("ABCDEFG")
+
+quality_baseline = json.loads(
+    (ROOT / "config" / "code-quality-baseline.json").read_text(
+        encoding="utf-8"
+    )
+)["rc1_active_authority"]
+baseline_subject = quality_baseline.get("baseline_subject_sha")
+assert isinstance(baseline_subject, str) and SHA.fullmatch(baseline_subject)
+assert subprocess.run(
+    ["git", "cat-file", "-e", f"{baseline_subject}^{{commit}}"],
+    cwd=ROOT,
+    check=False,
+).returncode == 0
+for entry in slices:
+    assert subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            baseline_subject,
+            str(entry["commit_sha"]),
+        ],
+        cwd=ROOT,
+        check=False,
+    ).returncode == 0
+baseline_run = subprocess.run(
+    [
+        "python3",
+        "scripts/code-quality-audit.py",
+        "--rc1-authority-json",
+        "--rc1-authority-subject",
+        baseline_subject,
+    ],
+    cwd=ROOT,
+    check=True,
+    capture_output=True,
+    text=True,
+)
+baseline_audit = json.loads(baseline_run.stdout)
+assert baseline_audit["production_loc"] == quality_baseline[
+    "baseline_production_loc"
+]
+assert len(baseline_audit["production_files"]) == quality_baseline[
+    "baseline_production_file_count"
+]
+assert len(baseline_audit["writable_authorities"]) == quality_baseline[
+    "baseline_writable_authorities"
+]
+assert len(baseline_audit["incident_literals"]) == quality_baseline[
+    "baseline_incident_literals"
+]
+literal_classes: dict[str, int] = {}
+for item in baseline_audit["incident_literals"]:
+    literal_classes[item["kind"]] = literal_classes.get(item["kind"], 0) + 1
+assert literal_classes == quality_baseline["baseline_incident_literal_classes"]
+
 forbidden = receipts.get("forbidden_before_integration_green")
 assert isinstance(forbidden, list) and all(
     isinstance(command, str) and command for command in forbidden
