@@ -180,7 +180,8 @@
     "wiki/plans/2026-08-04-112015-llm-obsidian-2-6-4-unattended-callback-submit-watchdog.md",
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-a-callback-control-plane.md",
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
-    "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md"
+    "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md",
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "historical-migration": [
     "wiki/plans/2026-07-19-v2-1-1-code-owned-optimization-plan.md"
@@ -212,7 +213,8 @@
     "wiki/concepts/Persistent Wiki Artifact.md"
   ],
   "lifecycle": [
-    "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md"
+    "wiki/decisions/LLM Obsidian 2.6.4 — amendment superseded review cleanup.md",
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "lint": [
     "wiki/meta/reports/lint-report-2026-08-01.md"
@@ -239,7 +241,8 @@
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-a-exact-head-review-attempt.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md",
-    "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md"
+    "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md",
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "llm-wiki": [
     "wiki/comparisons/Wiki vs RAG.md",
@@ -273,7 +276,8 @@
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-b-durable-decisions.md",
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-c-plan-review-safety.md",
     "wiki/plans/2026-08-04-175932-llm-obsidian-2-6-4-subplan-d-wiki-self-heal.md",
-    "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md"
+    "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md",
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "mcp": [
     "wiki/decisions/LLM Obsidian 2.6.3 — MCP runtime bootstrap authorization.md"
@@ -366,7 +370,8 @@
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-a-exact-head-review-attempt.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md",
-    "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md"
+    "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md",
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "product-roadmap": [
     "wiki/concepts/cherry-picks.md"
@@ -542,6 +547,9 @@
   "synthesis": [
     "wiki/concepts/Source-First Synthesis.md"
   ],
+  "technical-debt": [
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
+  ],
   "todo": [
     "wiki/backlog.md"
   ],
@@ -593,6 +601,9 @@
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-b-provider-events-and-delivery.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-c-bounded-finalization-and-dsl.md",
     "wiki/plans/2026-08-05-145351-llm-obsidian-2-6-5-subplan-d-split-components.md"
+  ],
+  "v2-6-6": [
+    "wiki/plans/2026-08-06-154927-llm-obsidian-2-6-6-zakrytie-lifecycle-debt-posle-2-6-5.md"
   ],
   "v2.6": [
     "wiki/plans/2026-08-02-010436-llm-obsidian-2-6-dogfood-rt1-callback-watchdog.md",
