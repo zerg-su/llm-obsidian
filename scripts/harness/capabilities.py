@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -15,6 +16,42 @@ from .contracts import AttentionReason, CapabilityReport, RuntimeRoute
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 Which = Callable[[str], str | None]
+
+
+def _provider_help(
+    binary: str,
+    runtime: str,
+    required: tuple[str, ...],
+    runner: Runner,
+) -> tuple[int, str]:
+    """Read provider help without accepting a pipe-truncated Claude response."""
+    try:
+        result = runner(
+            [binary, "--help"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return 1, ""
+    output = (result.stdout + result.stderr)[:20_000]
+    if result.returncode or all(token in output for token in required):
+        return result.returncode, output
+    if runtime != "claude":
+        return result.returncode, output
+    try:
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stream:
+            file_result = runner(
+                [binary, "--help"],
+                text=True,
+                stdout=stream,
+                stderr=stream,
+                check=False,
+            )
+            stream.seek(0)
+            return file_result.returncode, stream.read(20_000)
+    except (OSError, TypeError, ValueError):
+        return result.returncode, output
 
 
 def check(
@@ -114,17 +151,10 @@ def check(
         "claude": ("--model", "--effort", "--permission-mode"),
         "codex": ("--model", "--config", "--sandbox", "--ask-for-approval"),
     }[route.runtime]
-    try:
-        result = runner(
-            [binaries[route.runtime], "--help"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        result = subprocess.CompletedProcess((), 1, "", "")
-    output = (result.stdout + result.stderr)[:20_000]
-    if result.returncode or not all(token in output for token in provider_help):
+    returncode, output = _provider_help(
+        binaries[route.runtime], route.runtime, provider_help, runner
+    )
+    if returncode or not all(token in output for token in provider_help):
         return CapabilityReport(
             route,
             False,

@@ -370,6 +370,78 @@ with tempfile.TemporaryDirectory(prefix="harness-context.") as raw:
         <= set(complete.capabilities),
     )
 
+    claude_route = replace(route, runtime="claude", model="claude-opus-5")
+    claude_help_calls: list[str] = []
+
+    def truncated_claude_help_probe(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        args = command[1:]
+        if Path(command[0]).name == "cmux":
+            return complete_cmux_probe(command, **kwargs)
+        if args == ["--help"]:
+            if kwargs.get("capture_output"):
+                claude_help_calls.append("pipe")
+                return subprocess.CompletedProcess(
+                    command, 0, "Claude Code\n" + ("x" * 500), ""
+                )
+            claude_help_calls.append("regular-file")
+            output = kwargs["stdout"]
+            assert hasattr(output, "write")
+            output.write("--model --effort --permission-mode\n")
+            output.flush()
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if args == ["auth", "status"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "loggedIn": True,
+                        "authMethod": "claude.ai",
+                        "apiProvider": "firstParty",
+                        "subscriptionType": "team",
+                    }
+                ),
+                "",
+            )
+        return subprocess.CompletedProcess(command, 1, "", "unsupported")
+
+    truncated_claude = capabilities.check(
+        claude_route,
+        callback_dir=callback_dir,
+        which=lambda name: f"/usr/bin/{name}",
+        runner=truncated_claude_help_probe,
+    )
+    check(
+        "Claude capability handshake recovers pipe-truncated help from a regular file",
+        truncated_claude.compatible
+        and claude_help_calls == ["pipe", "regular-file"],
+    )
+
+    def incomplete_claude_help_probe(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        result = truncated_claude_help_probe(command, **kwargs)
+        if command[1:] == ["--help"] and not kwargs.get("capture_output"):
+            output = kwargs["stdout"]
+            output.seek(0)
+            output.truncate(0)
+            output.write("--model --effort\n")
+            output.flush()
+        return result
+
+    incomplete_claude = capabilities.check(
+        claude_route,
+        callback_dir=callback_dir,
+        which=lambda name: f"/usr/bin/{name}",
+        runner=incomplete_claude_help_probe,
+    )
+    check(
+        "Claude capability handshake rejects incomplete regular-file help",
+        not incomplete_claude.compatible,
+    )
+
 profiles = load_profiles(ROOT / "config/verification-profiles.toml")
 check(
     "six verification profiles load",
