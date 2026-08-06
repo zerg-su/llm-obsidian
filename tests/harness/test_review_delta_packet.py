@@ -17,6 +17,7 @@ from task_review_delta_packet import (  # noqa: E402
     DeltaPacketError,
     build_delta_packet,
     validate_delta_packet,
+    validate_materialized_delta_packet,
 )
 from harness.context import ContextBuilder, ContextInput  # noqa: E402
 from harness.contracts import OperationRecord, RuntimeRoute  # noqa: E402
@@ -30,7 +31,6 @@ from harness.workflows.review_gate import (  # noqa: E402
     ReviewPreset,
 )
 from review_resolution import FindingResolution, ReviewResolution  # noqa: E402
-from task_review_resolution_flow import _resolution_packet_ready  # noqa: E402
 from task_review_shared import ResolutionBundle  # noqa: E402
 
 
@@ -51,6 +51,27 @@ def rejected(label: str, action: object) -> None:
         check(label, True)
     else:
         check(label, False)
+
+
+def resolution_packet_ready(
+    gate: ReviewGateController,
+    run: object,
+    context_manifest: Path,
+    bundle: ResolutionBundle,
+) -> bool:
+    try:
+        delta = validate_materialized_delta_packet(
+            context_manifest,
+            expected_reviewed_head=bundle.resolution.reviewed_head_sha,
+            expected_resolved_head=bundle.resolution.resolved_head_sha,
+            expected_review_identity_sha256=bundle.review_identity_sha256,
+        )
+        if delta != bundle.fix_delta:
+            raise DeltaPacketError("materialized delta differs from Git evidence")
+    except (DeltaPacketError, OSError):
+        gate._mark_attention(run.execution.lanes)
+        return False
+    return True
 
 
 def section(name: str, payload_bytes: int) -> bytes:
@@ -304,7 +325,7 @@ with tempfile.TemporaryDirectory(prefix="review-delta-attention.") as raw:
     )
     check(
         "complete materialized packet is valid before prompt delivery",
-        _resolution_packet_ready(gate, run, context_manifest, bundle)
+        resolution_packet_ready(gate, run, context_manifest, bundle)
         and gate.read()["status"] == "reviewing",
     )
     materialized = json.loads(context_manifest.read_text(encoding="utf-8"))
@@ -319,7 +340,7 @@ with tempfile.TemporaryDirectory(prefix="review-delta-attention.") as raw:
     part_path.write_bytes(part_path.read_bytes() + b"tamper")
     check(
         "tampered packet becomes durable attention before continuation effect",
-        not _resolution_packet_ready(gate, run, context_manifest, bundle)
+        not resolution_packet_ready(gate, run, context_manifest, bundle)
         and gate.read()["status"] == "attention-required"
         and store.read(
             run.execution.lanes[0].owner_id,

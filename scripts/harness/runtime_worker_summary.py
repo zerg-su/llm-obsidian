@@ -11,15 +11,6 @@ from .runtime_worker import (
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
 )
-from .review_drive_rearm import (
-    ReviewDriveRearmError,
-    review_marker_path_after_rearm,
-)
-from .post_verification_review_drive import (
-    PostVerificationReviewDriveError,
-    continued_verification_receipt,
-    post_verification_review_marker,
-)
 
 
 @dataclass
@@ -74,28 +65,7 @@ class RuntimeWorkerSummaryMixin:
         return summary
 
     def load_review_marker(self) -> dict[str, object] | None:
-        try:
-            continued = post_verification_review_marker(
-                self.spec_path.parent,
-                operation_id=self.spec["operation_id"],
-                definition_sha256=self.pipeline.definition_sha256,
-            )
-            if continued is None:
-                self.marker_path = review_marker_path_after_rearm(
-                    self.spec_path.parent, self.spec["operation_id"]
-                )
-            else:
-                self.marker_path = continued["path"]
-                if not self.marker_path.exists():
-                    return {
-                        key: value
-                        for key, value in continued.items()
-                        if key != "path"
-                    }
-        except (PostVerificationReviewDriveError, ReviewDriveRearmError) as exc:
-            raise RuntimeWorkerError(
-                "pipeline review rearm marker is invalid"
-            ) from exc
+        self.marker_path = self.spec_path.parent / "pipeline-review-start.json"
         if not self.marker_path.is_file() or self.marker_path.is_symlink():
             return None
         marker = json.loads(self.marker_path.read_text(encoding="utf-8"))
@@ -314,26 +284,7 @@ class RuntimeWorkerSummaryMixin:
         )
         if not self.handle_prior_failed_verification(previous):
             return None
-        try:
-            continued = (
-                continued_verification_receipt(
-                    self.spec_path.parent,
-                    operation_id=self.spec["operation_id"],
-                    current_head=self.verification_head,
-                    controller_receipt=previous,
-                )
-                if verify_step is not None
-                else None
-            )
-        except PostVerificationReviewDriveError as exc:
-            raise RuntimeWorkerError(
-                "pipeline verification continuation is invalid"
-            ) from exc
-        existing, halted = (
-            (continued, False)
-            if continued is not None
-            else self.resolve_current_verification(verify_step)
-        )
+        existing, halted = self.resolve_current_verification(verify_step)
         if halted:
             return None
         return SummaryPipelineState(summary, marker, steps, verify_step, existing)
@@ -345,6 +296,7 @@ class RuntimeWorkerSummaryMixin:
             return False
         gate_state = self.review_gate_state()
         awaiting_resolution = gate_state.get("awaiting_resolution")
+        notification_evidence = gate_state.get("review_notification_evidence")
         raw_attempt = gate_state.get("attempt")
         terminal = (
             raw_attempt.get("terminal")
@@ -357,8 +309,8 @@ class RuntimeWorkerSummaryMixin:
             and raw_attempt.get("status") == "terminal"
             and isinstance(terminal, dict)
             and terminal.get("result") == "changes-requested"
-            and isinstance(awaiting_resolution, dict)
-            and bool(awaiting_resolution)
+            and isinstance(notification_evidence, dict)
+            and bool(notification_evidence)
         )
         if (
             gate_state.get("status") == "awaiting-resolution"

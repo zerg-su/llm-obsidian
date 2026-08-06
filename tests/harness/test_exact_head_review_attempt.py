@@ -25,7 +25,10 @@ from harness.contracts import (  # noqa: E402
     RuntimeRoute,
     to_dict,
 )
-from harness.review_attempt import ReviewAttemptError  # noqa: E402
+from harness.review_attempt import (  # noqa: E402
+    LEGACY_CROSS_HEAD_RESUME_DISABLED,
+    ReviewAttemptError,
+)
 from harness.runtime_session_contracts import (  # noqa: E402
     RuntimeCheckpointEvidenceMissing,
 )
@@ -61,9 +64,6 @@ from task_review_flow import (  # noqa: E402
     EXACT_HEAD_REVIEW_PROTOCOL,
     _run_exact_head_review,
     _run_review,
-)
-from task_review_resolution_flow import (  # noqa: E402
-    legacy_cross_head_resume_disabled,
 )
 from outcome_contract import extract_from_bytes  # noqa: E402
 
@@ -437,7 +437,7 @@ check(
             "recovery",
         )
     )
-    and legacy_cross_head_resume_disabled()["provider_effect_allowed"] is False,
+    and LEGACY_CROSS_HEAD_RESUME_DISABLED.provider_effect_allowed is False,
 )
 
 with tempfile.TemporaryDirectory(prefix="exact-head-attempt.") as raw:
@@ -1020,8 +1020,10 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         apply_finalizing_recovery=forbidden_finalizing_recovery,
     )
     check(
-        "production selector completes a pre-activation gate without conversion",
-        historical["status"] == "reviewing"
+        "production selector makes a pre-activation gate inspect-only",
+        historical["status"] == "legacy-cross-head-resume-disabled"
+        and historical["allowed_actions"] == ["inspect", "archive", "cleanup"]
+        and historical["provider_effect_allowed"] is False
         and legacy_runtime.started == legacy_starts,
     )
 

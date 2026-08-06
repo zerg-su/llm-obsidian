@@ -68,8 +68,7 @@ EXPECTED_SEMANTIC_EFFECTS = {
         "resource-cleanup",
     },
     "v2-6-5-rearm-liveness-latch": {
-        "review-drive-rearmed",
-        "liveness-reconciled",
+        "cross-head-rearm-rejected",
     },
 }
 

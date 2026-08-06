@@ -12,7 +12,7 @@
     "provider-restart",
     "provider-submit"
   ],
-  "expected_production_paths": ["rearm_review_drive", "RuntimeWorkerLoopMixin.tick_observers"],
+  "expected_production_paths": ["legacy-cross-head-resume-disabled"],
   "initial_snapshot": {
     "operation": {
       "operation_id": "join-root",

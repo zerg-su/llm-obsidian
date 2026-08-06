@@ -34,19 +34,11 @@ RC1_ACTIVE_AUTHORITY_FILES = (
     "scripts/harness/callback_submit_recovery.py",
     "scripts/harness/liveness.py",
     "scripts/harness/provider_events.py",
-    "scripts/harness/review_drive_rearm.py",
     "scripts/harness/runtime_provider_events.py",
     "scripts/harness/runtime_worker_liveness.py",
     "scripts/harness/workflows/review_gate_attempt.py",
     "scripts/harness/workflows/review_gate_recovery.py",
-    "scripts/task_review_authorization_boundary.py",
-    "scripts/task_review_drift_contract.py",
     "scripts/task_review_flow.py",
-    "scripts/task_review_mechanism_recovery.py",
-    "scripts/task_review_post_fresh_publication.py",
-    "scripts/task_review_post_fresh_recovery.py",
-    "scripts/task_review_provenance_contract.py",
-    "scripts/task_review_resolution_flow.py",
 )
 RC1_WRITABLE_AUTHORITY_SYMBOLS = frozenset(
     {

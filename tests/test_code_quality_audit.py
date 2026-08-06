@@ -126,8 +126,10 @@ with tempfile.TemporaryDirectory(prefix="code-quality-audit.") as raw:
 
 with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
     root = Path(raw)
-    incident = root / "scripts" / "task_review_provenance_contract.py"
-    recovery = root / "scripts" / "harness" / "review_drive_rearm.py"
+    incident = root / "scripts" / "task_review_flow.py"
+    recovery = (
+        root / "scripts" / "harness" / "workflows" / "review_gate_recovery.py"
+    )
     quiet = root / "scripts" / "harness" / "provider_events.py"
     for path in (incident, recovery, quiet):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
         encoding="utf-8",
     )
     recovery.write_text(
-        "def rearm_review_drive():\n"
+        "def restart_for_boundary():\n"
         "    return {'awaiting_resolution': True}\n",
         encoding="utf-8",
     )
@@ -153,16 +155,16 @@ with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
             "loc": 2,
         },
         {
-            "path": "scripts/harness/review_drive_rearm.py",
+            "path": "scripts/harness/workflows/review_gate_recovery.py",
             "loc": 2,
         },
         {
-            "path": "scripts/task_review_provenance_contract.py",
+            "path": "scripts/task_review_flow.py",
             "loc": 3,
         },
     ]
     assert [item["symbol"] for item in authority["writable_authorities"]] == [
-        "rearm_review_drive"
+        "restart_for_boundary"
     ]
     assert {item["kind"] for item in authority["incident_literals"]} == {
         "decision-prose",

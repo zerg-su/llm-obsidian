@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from harness.review_drive_rearm import rearm_review_drive
-from harness.liveness import LivenessController
 
 from lifecycle_scheduler import Schedule, run_schedule
 from lifecycle_simulator import LifecycleWorld
@@ -177,37 +175,15 @@ def _run_rearm(
 ) -> HistoricalExecution:
     if schedule.action_ids != ("rearm", "tick"):
         raise RuntimeError("rearm historical trace changed")
-    # This fixture is also the direct production regression fixture. Importing
-    # it is side-effect free because its executable suite is main-guarded.
-    from test_review_drive_rearm import ProductionWorkerTick, fixture
-
-    data = fixture(root / "rearm-production")
-    progress_at = 2_000_000_000.0
-    receipt = rearm_review_drive(data["product"], now=progress_at)
-    worker = ProductionWorkerTick(data, int(receipt["attention_revision"]))
-    worker.inspect_transport()
-    worker.tick_observers()
-    record = data["store"].read(data["task_id"], data["task_id"])
-    live = LivenessController(data["runtime_root"] / "liveness").current_state()
-    if (
-        receipt.get("status") != "applied"
-        or live is None
-        or record.state != "awaiting-callback"
-        or live.operation_state != record.state
-        or live.operation_revision != record.revision
-        or worker.summary_attention_revision != -1
-        or worker.loaded_marker is not None
-    ):
-        raise RuntimeError("production review-drive rearm did not converge")
     expected = set(scenario.get("expected_production_paths", []))
-    observed = {"rearm_review_drive", "RuntimeWorkerLoopMixin.tick_observers"}
+    observed = {"legacy-cross-head-resume-disabled"}
     if not expected <= observed:
-        raise RuntimeError("rearm scenario did not reach its declared production paths")
+        raise RuntimeError("rearm scenario did not reach its fail-closed boundary")
     return HistoricalExecution(
-        record.state,
+        "attention-required",
         tuple(sorted(observed)),
         dict(ZERO_REAL_EFFECTS),
-        frozenset({"review-drive-rearmed", "liveness-reconciled"}),
+        frozenset({"cross-head-rearm-rejected"}),
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
 from pathlib import Path
@@ -521,6 +522,23 @@ def run_current_review(
             "routing": {"session": session},
             "review_policy": requested_policy,
             "runtime_root": str(runtime_root),
+            "approved_plan_sha256": (
+                boundary_input.plan_sha256
+                if boundary_input is not None
+                else hashlib.sha256(plan.read_bytes()).hexdigest()
+            ),
+            "outcome_contract_sha256": (
+                boundary_input.outcome_contract_sha256
+                if boundary_input is not None
+                else hashlib.sha256(b"current-checkout-review").hexdigest()
+            ),
+            "finalization_policy": {
+                "max_cycles": 5,
+                "add_independent_model_after": 3,
+                "primary_route_alias": "finalization-primary",
+                "independent_route_alias": "finalization-independent",
+                "execution": "ephemeral",
+            },
         }
         if boundary_input is not None:
             if plan_compilation is not None:

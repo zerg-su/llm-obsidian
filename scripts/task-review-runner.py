@@ -144,14 +144,6 @@ from task_review_finalizing import (
     _launch_authorized_task_review,
     recover_finalizing_review,
 )
-from task_review_mechanism_recovery import (
-    recover_post_verification_review_drive,
-    recover_task_review_for_mechanism,
-    restart_task_review_for_boundary,
-)
-from task_review_post_fresh_recovery import (
-    recover_post_fresh_publication_sync,
-)
 
 
 
@@ -338,12 +330,6 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--worktree", type=Path, required=True)
-    fresh = sub.add_parser("fresh")
-    fresh.add_argument("--worktree", type=Path, required=True)
-    fresh.add_argument("--kind", choices=("scope", "context"), required=True)
-    fresh.add_argument("--reason", required=True)
-    recover = sub.add_parser("recover")
-    recover.add_argument("--worktree", type=Path, required=True)
     current = sub.add_parser("current")
     current.add_argument("--worktree", type=Path, required=True)
     current.add_argument("--deep", action="store_true")
@@ -385,18 +371,6 @@ def main(
         if args.command == "run":
             result = run_task_review(
                 args.worktree, runtime_manager=runtime_manager
-            )
-        elif args.command == "fresh":
-            result = restart_task_review_for_boundary(
-                args.worktree,
-                kind=args.kind,
-                reason=args.reason,
-                runtime_manager=runtime_manager,
-            )
-        elif args.command == "recover":
-            result = recover_task_review_for_mechanism(
-                args.worktree,
-                runtime_manager=runtime_manager,
             )
         elif args.command == "current":
             if (

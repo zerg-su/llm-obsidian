@@ -367,7 +367,7 @@ def stale_resolution_boundary(
     """Allow replacement only after the reviewed HEAD moved and owners closed."""
 
     return (
-        status == "awaiting-resolution"
+        status in {"awaiting-resolution", "changes-requested"}
         and bool(bound_head)
         and bound_head != current_head
         and quiescent

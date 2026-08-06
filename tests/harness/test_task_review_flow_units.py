@@ -32,8 +32,6 @@ from task_review_flow import (  # noqa: E402
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
-from task_review_resolution_flow import _prompt_effect_id  # noqa: E402
-from harness.runtime_session_contracts import continuation_effect_id  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -324,42 +322,5 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         and unbound_running_state["status"] == "attention-required"
         and gate.read()["status"] == "attention-required",
     )
-
-    prompt = runtime_root / "prompts" / "verify.md"
-    prompt.parent.mkdir()
-    prompt.write_text("# Verify exact HEAD\n", encoding="utf-8")
-    target = base / "callback-target.json"
-    target.write_text(
-        '{"generation":2,"operation_id":"old-round","run_id":"old-run",'
-        '"schema_version":1}\n',
-        encoding="utf-8",
-    )
-    expected = continuation_effect_id(
-        "# Verify exact HEAD\n\n3\nnew-round\nnew-run"
-    )
-    pending_effect = _prompt_effect_id(
-        runtime_root,
-        "prompts/verify.md",
-        callback_target_path=target,
-        callback_operation_id="new-round",
-        callback_run_id="new-run",
-    )
-    target.write_text(
-        '{"generation":3,"operation_id":"new-round","run_id":"new-run",'
-        '"schema_version":1}\n',
-        encoding="utf-8",
-    )
-    replay_effect = _prompt_effect_id(
-        runtime_root,
-        "prompts/verify.md",
-        callback_target_path=target,
-        callback_operation_id="new-round",
-        callback_run_id="new-run",
-    )
-    check(
-        "gate continuation identity matches runtime generation binding",
-        pending_effect == expected and replay_effect == expected,
-    )
-
 
 print("\nAll task review flow unit tests passed.")
