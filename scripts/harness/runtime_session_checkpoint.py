@@ -306,10 +306,10 @@ class RuntimeSessionCheckpointMixin:
             or launch.get("runtime") != record.spec.route.runtime
             or launch.get("surface_id") != resources.surface_id
             or launch.get("cwd") != str(cwd)
+            or launch.get("product_root") != str(product_root)
             or launch.get("store_root") != str(self.store.root.resolve())
             or not isinstance(argv, list)
             or not all(isinstance(item, str) for item in argv)
-            or not any(str(product_root) in item for item in argv)
         ):
             raise RuntimeSessionError(
                 "durable cleanup launch identity changed"

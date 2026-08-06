@@ -427,6 +427,152 @@ def envelope(
     )
 
 
+with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as raw:
+    cleanup_root = Path(raw).resolve()
+    cleanup_scratch = cleanup_root / "review-scratch"
+    cleanup_scratch.mkdir()
+    (cleanup_scratch / "callbacks").mkdir()
+    cleanup_product = cleanup_root / "product"
+    cleanup_product.mkdir()
+    cleanup_events: list[str] = []
+    cleanup_store = OperationStore(cleanup_root / "store")
+    cleanup_route = RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "high",
+        "reviewer-callback",
+        "d" * 64,
+    )
+    cleanup_spec = OperationSpec(
+        "review-cleanup-parent",
+        "review-cleanup-key",
+        "deep-review-spec",
+        "review-cleanup-owner",
+        cleanup_route,
+        "packets/review.json",
+        "scoped",
+    )
+    cleanup_store.create(
+        cleanup_spec,
+        lane_id="review-cleanup-lane",
+        run_id="review-cleanup-run",
+    )
+    for cleanup_state in ("preflight", "starting", "running", "awaiting-callback"):
+        cleanup_store.transition(
+            "review-cleanup-owner",
+            "review-cleanup-parent",
+            cleanup_state,
+        )
+    OperationSupervisor(
+        cleanup_store,
+        "review-cleanup-owner",
+        "review-cleanup-parent",
+    ).bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    cleanup_cmux = FakeCmux(cleanup_events)
+    cleanup_cmux.surface_status = "missing"
+    cleanup_cmux.workspace_status_value = "missing"
+    cleanup_process = FakeProcess(cleanup_events)
+    cleanup_process.status_value = "dead"
+    cleanup_process.supervisor_status_value = "dead"
+    cleanup_manager = RuntimeSessionManager(
+        cleanup_store,
+        cleanup_cmux,
+        cleanup_process,
+        {"codex": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            cleanup_route, True, ("provider:profile-valid",)
+        ),
+    )
+    cleanup_state_root = (
+        cleanup_store.root
+        / "owners"
+        / "review-cleanup-owner"
+        / "runtime"
+        / "review-cleanup-parent"
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "callback_mode": "envelope",
+            "cwd": str(cleanup_scratch),
+            "product_root": str(cleanup_product),
+            "placement": "workspace",
+            "workspace_id": WORKSPACE,
+            "window_id": WINDOW,
+            "workspace_ref": "workspace:8",
+            "window_ref": "window:7",
+            "surface_ref": "surface:9",
+            "checkpoint": "",
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "launch.json",
+        {
+            "schema_version": 1,
+            "owner_id": "review-cleanup-owner",
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "runtime": "codex",
+            "surface_id": SURFACE,
+            "cwd": str(cleanup_scratch),
+            "product_root": str(cleanup_product),
+            "store_root": str(cleanup_store.root.resolve()),
+            "argv": [
+                "/usr/bin/codex",
+                "--model",
+                cleanup_route.model,
+                "--cd",
+                str(cleanup_scratch / "callbacks"),
+            ],
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "checkpoint.json",
+        {
+            "schema_version": 1,
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "runtime": "codex",
+            "checkpoint": "review-cleanup-checkpoint",
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "ready.json",
+        {
+            "schema_version": 1,
+            "status": "ready",
+            "pid": 123,
+            "process_group": 123,
+            "process_identity": PROCESS_IDENTITY,
+            "supervisor_pid": 124,
+            "supervisor_identity": SUPERVISOR_IDENTITY,
+        },
+    )
+    cleanup_ownership = cleanup_manager.prove_durable_cleanup_ownership(
+        "review-cleanup-owner",
+        "review-cleanup-parent",
+    )
+    check(
+        "sandboxed reviewer cleanup trusts the typed product binding instead of argv text",
+        cleanup_ownership.process_status == "dead"
+        and cleanup_ownership.supervisor_status == "dead"
+        and cleanup_ownership.surface_status == "missing"
+        and cleanup_ownership.workspace_status == "missing",
+        cleanup_ownership,
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="research-home-boundary.") as raw:
     research_root = Path(raw).resolve()
     research_cwd = research_root / "scratch"
