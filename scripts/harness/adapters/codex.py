@@ -36,6 +36,7 @@ REVIEWER_CONFIG = (
     "sandbox_workspace_write.writable_roots=[]",
     "shell_environment_policy.ignore_default_excludes=false",
 )
+RESUME_CWD_CONFIG = 'tui.resume_cwd="current"'
 _EPHEMERAL_ENV_ALLOWLIST = frozenset(
     {"HOME", "LANG", "LC_ALL", "LOGNAME", "PATH", "SHELL", "TERM", "TMPDIR", "TZ", "USER"}
 )
@@ -106,7 +107,7 @@ def validate_reviewer_sandbox_command(
     ]
     if (
         len(reasoning) != 1
-        or config_values != [reasoning[0], *REVIEWER_CONFIG]
+        or config_values != [reasoning[0], RESUME_CWD_CONFIG, *REVIEWER_CONFIG]
     ):
         raise CodexDriverError("review sandbox config expands authority")
 
@@ -223,6 +224,8 @@ class CodexDriver:
                 [
                     "--config",
                     f"model_reasoning_effort={route.effort}",
+                    "--config",
+                    RESUME_CWD_CONFIG,
                     "--sandbox",
                     sandbox,
                     "--ask-for-approval",

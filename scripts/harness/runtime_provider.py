@@ -190,7 +190,11 @@ def _pin_env_shebang(
 
 
 def provider_resume_argv(
-    argv: tuple[str, ...], runtime: str, checkpoint: str
+    argv: tuple[str, ...],
+    runtime: str,
+    checkpoint: str,
+    *,
+    deferred_initial_input: bool = False,
 ) -> tuple[str, ...]:
     """Bind one provider restart to the exact previously captured session."""
 
@@ -213,7 +217,8 @@ def provider_resume_argv(
         )
     if len(argv) < 2:
         raise RuntimeWorkerError("Codex provider command lacks its prompt")
-    return (*argv[:-1], "resume", checkpoint)
+    base = argv if deferred_initial_input else argv[:-1]
+    return (*base, "resume", checkpoint)
 
 
 def provider_environment(

@@ -46,6 +46,7 @@ from cmux_agent_support import (
     SupervisorError,
     codex_automation_service_tier_config,
     codex_effort_config,
+    codex_resume_cwd_config,
     resolved_git_common_dir,
     task_codex_config_values,
     validated_cmux_socket_path,
@@ -172,6 +173,7 @@ def prepare_task(worktree: Path, surface: str) -> Path:
             env["CMUX_SOCKET_PATH"] = str(cmux_socket)
         else:
             argv.extend(["-c", codex_automation_service_tier_config()])
+            argv.extend(["-c", codex_resume_cwd_config()])
             argv.extend(["-c", codex_effort_config(effort)])
         codex_home = str(meta.get("codex_home") or "").strip()
         if codex_home:

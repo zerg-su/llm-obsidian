@@ -603,6 +603,11 @@ with tempfile.TemporaryDirectory(prefix="task-lifecycle-test.") as raw:
         'service_tier="default"'
         in supervisor_module.option_values(agent_spec["argv"], "-c"),
     )
+    check(
+        "supervisor resumes Codex in the current task worktree",
+        'tui.resume_cwd="current"'
+        in supervisor_module.option_values(agent_spec["argv"], "-c"),
+    )
     add_dir_index = agent_spec["argv"].index("--add-dir")
     check(
         "supervisor grants only the task Git metadata root",

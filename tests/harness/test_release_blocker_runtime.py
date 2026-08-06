@@ -54,6 +54,19 @@ check(
         )
     ),
 )
+codex_research_command = codex_driver.command(
+    RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "xhigh",
+        "research-unsafe",
+        FINGERPRINT,
+    )
+)
+check(
+    "Codex pins resumed sessions to the current task worktree",
+    "tui.resume_cwd=\"current\"" in codex_research_command,
+)
 for label, call in (
     (
         "Claude rejects an unregistered model",
@@ -101,14 +114,23 @@ check(
         "--",
     )
     and runtime_worker.provider_resume_argv(
-        ("codex", "--model", "gpt-5.6-sol", "continue"),
+        (
+            "codex",
+            "--model",
+            "gpt-5.6-sol",
+            "--config",
+            'tui.resume_cwd="current"',
+        ),
         "codex",
         "thread-1",
+        deferred_initial_input=True,
     )
     == (
         "codex",
         "--model",
         "gpt-5.6-sol",
+        "--config",
+        'tui.resume_cwd="current"',
         "resume",
         "thread-1",
     ),
@@ -126,6 +148,7 @@ check(
         ("codex", "--model", "gpt-5.6-sol", "continue"),
         "codex",
         "thread-1",
+        deferred_initial_input=False,
     ),
 )
 try:

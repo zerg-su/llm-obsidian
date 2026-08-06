@@ -19,6 +19,7 @@ from cmux_agent_support import (
     SupervisorError,
     codex_automation_service_tier_config,
     codex_effort_config,
+    codex_resume_cwd_config,
     resolved_git_common_dir,
     task_codex_config_values,
     validated_cmux_socket_path,
@@ -63,6 +64,7 @@ def require_option(argv: list[str], flag: str, expected: str) -> None:
 def reviewer_codex_config_values(effort: str = "") -> list[str]:
     values = [
         codex_automation_service_tier_config(),
+        codex_resume_cwd_config(),
         'web_search="disabled"',
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
@@ -164,7 +166,9 @@ def validate_task_safety(
         elif any(option_value(argv, flag) is not None for flag in ("-a", "-s", "--add-dir")):
             raise SupervisorError("interactive Codex task command has unexpected approval overrides")
         elif option_values(argv, "-c") != [
-            codex_automation_service_tier_config(), codex_effort_config(effort)
+            codex_automation_service_tier_config(),
+            codex_resume_cwd_config(),
+            codex_effort_config(effort),
         ]:
             raise SupervisorError("interactive Codex task command has unexpected config overrides")
         return

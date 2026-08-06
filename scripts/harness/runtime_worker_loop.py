@@ -197,7 +197,12 @@ class RuntimeWorkerLoopMixin:
         restarted: ProcessHandle | None = None
         try:
             resume_command = provider_resume_argv(
-                self.provider_command, str(self.spec["runtime"]), self.checkpoint
+                self.provider_command,
+                str(self.spec["runtime"]),
+                self.checkpoint,
+                deferred_initial_input=isinstance(
+                    self.spec.get("initial_input_pointer"), Path
+                ),
             )
             restarted = self.process.start(
                 resume_command, cwd=self.spec["cwd"], env=self.provider_env

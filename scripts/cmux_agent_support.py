@@ -51,12 +51,18 @@ def codex_automation_service_tier_config() -> str:
     return 'service_tier="default"'
 
 
+def codex_resume_cwd_config() -> str:
+    """Resume Harness-owned Codex sessions in the current task worktree."""
+    return 'tui.resume_cwd="current"'
+
+
 def task_codex_config_values(
     cmux_socket: Path, effort: str = DEFAULT_CODEX_EFFORT
 ) -> list[str]:
     socket_rule = json.dumps(str(cmux_socket), ensure_ascii=False)
     return [
         codex_automation_service_tier_config(),
+        codex_resume_cwd_config(),
         "sandbox_workspace_write.network_access=true",
         "features.network_proxy.enabled=true",
         'features.network_proxy.domains={ "localhost" = "allow", "127.0.0.1" = "allow", "::1" = "allow" }',
