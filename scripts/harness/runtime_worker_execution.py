@@ -131,12 +131,10 @@ class RuntimeWorkerExecution(
             stream = self._provider_stream(generation)
             if stream is None:
                 return ""
-            decision = stream.turn_stopped()
+            effect_id = stream.callback_submit_effect()
         except RuntimeProviderEventError as exc:
             raise RuntimeWorkerError("provider Stop event is invalid") from exc
-        if decision.action != "submit-callback":
-            raise RuntimeWorkerError("callback submit is not authorized by provider Stop")
-        return decision.effect_id
+        return effect_id
 
     def record_provider_exit(self, exit_code: int) -> None:
         for directory in sorted(self._provider_event_root.glob("generation-*")):

@@ -48,6 +48,10 @@ from harness.runtime_worker_summary import (  # noqa: E402
 from harness.runtime_worker_review_bridge import (  # noqa: E402
     RuntimeWorkerReviewBridgeMixin,
 )
+from harness.runtime_worker_execution import RuntimeWorkerExecution  # noqa: E402
+from harness.runtime_provider_events import (  # noqa: E402
+    RuntimeProviderEventStream,
+)
 from harness.runtime_callback_io import (  # noqa: E402
     _callback_target,
     _current_callback_receipt_sha256,
@@ -641,6 +645,12 @@ class FastPathWorker(RuntimeWorkerReviewBridgeMixin):
         pass
 
 
+class EventBoundWorker(RuntimeWorkerExecution):
+    @staticmethod
+    def record_provider_result(_generation: int, _sha256: str) -> None:
+        pass
+
+
 class RecoveryWorker(RuntimeWorkerLivenessMixin):
     def inspect_callback(self) -> None:
         raise AssertionError("missing-artifact recovery must not ingest a callback")
@@ -998,7 +1008,7 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
         ),
         encoding="utf-8",
     )
-    worker = FastPathWorker()
+    worker = EventBoundWorker()
     worker.spec_path = state_root / "launch.json"
     worker.spec = {
         "owner_id": "review-owner-1",
@@ -1018,6 +1028,34 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
     worker.callback_handled = False
     worker.registration_invalid = False
     worker.cmux_adapter = object()
+    stream = RuntimeProviderEventStream.create(
+        state_root / "provider-events",
+        owner_id="review-owner-1",
+        operation_id="review-parent-1",
+        run_id="review-parent-run-1",
+        generation=3,
+        process_identity="f" * 64,
+        workspace_id="review-workspace-1",
+        surface_id="review-surface-1",
+        input_sha256="a" * 64,
+    )
+    stream.start()
+    assert stream.reserve_input().action == "send"
+    stream.accept_input()
+    worker.inspect_callback()
+    worker.inspect_callback()
+    worker.inspect_callback()
+    before_stop = store.read("review-owner-1", "review-round-1")
+    check(
+        "stable review input before Provider Stop has zero submit effect",
+        before_stop.state == "awaiting-callback"
+        and not before_stop.accepted_callback_id
+        and input_path.is_file()
+        and not callback_path.exists()
+        and not (state_root / "callback-receipt.json").exists(),
+        before_stop,
+    )
+    assert stream.turn_stopped().action == "submit-callback"
     worker.inspect_callback()
     worker.inspect_callback()
     worker.inspect_callback()
@@ -1027,7 +1065,7 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
         (state_root / "callback-timeout-rearm.json").read_text(encoding="utf-8")
     )
     check(
-        "runtime rearms only to ingest a stable typed callback without model input",
+        "one durable Provider Stop authorizes one stable-input submit",
         accepted.state == "finalizing"
         and bool(accepted.accepted_callback_id)
         and rearmed.state == "awaiting-callback"

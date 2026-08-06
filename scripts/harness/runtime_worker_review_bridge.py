@@ -214,7 +214,9 @@ class RuntimeWorkerReviewBridgeMixin:
             return
         if input_evidence.state == "stable" and not callback_path.exists():
             try:
-                self.reserve_callback_submit(generation)
+                submit_effect = self.reserve_callback_submit(generation)
+                if not submit_effect:
+                    return
                 submitted = submit_stable_review_input(
                     vault_root=self.trusted_vault,
                     worktree=self.spec["product_root"],
