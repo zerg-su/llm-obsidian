@@ -51,6 +51,21 @@ LANE_FIELDS = {
     "callback_artifact_pointer",
     "callback_artifact_file_sha256",
 }
+PROGRESS_FIELDS_V1 = {
+    "schema_version",
+    "status",
+    "evidence_sha256",
+    "cleaned_parents",
+    "terminal_rounds",
+}
+PROGRESS_FIELDS_V2 = PROGRESS_FIELDS_V1 | {"retirement_receipts"}
+PROGRESS_STATUSES = {
+    "prepared",
+    "cleaning",
+    "terminalizing-rounds",
+    "quarantined",
+    "fresh-review-started",
+}
 
 
 def _bounded_json_bytes(path: Path, label: str) -> tuple[dict[str, Any], bytes]:
@@ -425,6 +440,23 @@ def _validate_unrelated_ownership(
             raise TaskReviewError("drift quarantine found unrelated live ownership")
 
 
+def validate_unrelated_ownership_from_evidence(
+    store: OperationStore, task_id: str, evidence: dict[str, Any]
+) -> None:
+    rows = evidence.get("lanes")
+    if not isinstance(rows, list):
+        raise TaskReviewError("drift quarantine evidence is invalid")
+    expected = {
+        str(row.get(key) or "")
+        for row in rows
+        if isinstance(row, dict)
+        for key in ("parent_operation_id", "round_operation_id")
+    }
+    if len(expected) != 4 or "" in expected:
+        raise TaskReviewError("drift quarantine evidence identity changed")
+    _validate_unrelated_ownership(store, task_id, expected)
+
+
 def build_evidence(
     *,
     authorization: DriftQuarantineAuthorization,
@@ -502,14 +534,89 @@ def write_progress(
     status: str,
     cleaned_parents: list[str],
     terminal_rounds: list[str],
+    retirement_receipts: dict[str, str] | None = None,
 ) -> None:
+    payload: dict[str, object] = {
+        "schema_version": 2 if retirement_receipts is not None else 1,
+        "status": status,
+        "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+        "cleaned_parents": sorted(cleaned_parents),
+        "terminal_rounds": sorted(terminal_rounds),
+    }
+    if retirement_receipts is not None:
+        payload["retirement_receipts"] = dict(sorted(retirement_receipts.items()))
     _atomic_json(
         evidence_root(gate, authorization) / "progress.json",
-        {
-            "schema_version": 1,
-            "status": status,
-            "evidence_sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
-            "cleaned_parents": sorted(cleaned_parents),
-            "terminal_rounds": sorted(terminal_rounds),
-        },
+        payload,
     )
+
+
+def validate_progress(
+    gate: ReviewGateController,
+    authorization: DriftQuarantineAuthorization,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate exact restart progress without silently resetting it."""
+
+    path = evidence_root(gate, authorization) / "progress.json"
+    if path.is_symlink() or not path.is_file():
+        raise TaskReviewError("drift quarantine progress is unavailable")
+    progress = _read_json(path, "drift quarantine progress")
+    schema_version = progress.get("schema_version")
+    expected_fields = PROGRESS_FIELDS_V1 if schema_version == 1 else PROGRESS_FIELDS_V2
+    rows = evidence.get("lanes")
+    if not isinstance(rows, list):
+        raise TaskReviewError("drift quarantine progress identity changed")
+    expected_parents = {
+        str(row.get("parent_operation_id") or "")
+        for row in rows
+        if isinstance(row, dict)
+    }
+    expected_rounds = {
+        str(row.get("round_operation_id") or "")
+        for row in rows
+        if isinstance(row, dict)
+    }
+    cleaned = progress.get("cleaned_parents")
+    terminal = progress.get("terminal_rounds")
+    receipts = progress.get("retirement_receipts", {})
+    evidence_path = evidence_root(gate, authorization) / "evidence.json"
+    if (
+        schema_version not in {1, 2}
+        or set(progress) != expected_fields
+        or progress.get("status") not in PROGRESS_STATUSES
+        or progress.get("evidence_sha256")
+        != hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        or not isinstance(cleaned, list)
+        or not all(isinstance(item, str) for item in cleaned)
+        or cleaned != sorted(set(cleaned))
+        or not set(cleaned).issubset(expected_parents)
+        or not isinstance(terminal, list)
+        or not all(isinstance(item, str) for item in terminal)
+        or terminal != sorted(set(terminal))
+        or not set(terminal).issubset(expected_rounds)
+        or not isinstance(receipts, dict)
+        or any(
+            not isinstance(parent, str)
+            or not isinstance(digest, str)
+            or parent not in expected_parents
+            or SHA256.fullmatch(str(digest)) is None
+            for parent, digest in receipts.items()
+        )
+    ):
+        raise TaskReviewError("drift quarantine progress identity changed")
+    status = str(progress["status"])
+    if (
+        (status == "prepared" and (cleaned or terminal))
+        or (status == "cleaning" and terminal)
+        or (
+            status in {"terminalizing-rounds", "quarantined", "fresh-review-started"}
+            and set(cleaned) != expected_parents
+        )
+        or (
+            status in {"quarantined", "fresh-review-started"}
+            and set(terminal) != expected_rounds
+        )
+    ):
+        raise TaskReviewError("drift quarantine progress identity changed")
+    return progress

@@ -13,6 +13,7 @@ from .contracts import (
     OwnedResources,
 )
 from .store import OperationStore
+from .state_machine import transition as apply_transition
 
 
 T = TypeVar("T")
@@ -52,6 +53,43 @@ class OperationSupervisor:
             current,
             resources=resources,
             revision=current.revision + 1,
+        )
+        self.store.save(updated, expected_revision=current.revision)
+        return updated
+
+    def retire_proven_absent_resources(
+        self, expected_resources: OwnedResources
+    ) -> OperationRecord:
+        """Atomically terminalize one exact reviewer after absence proof."""
+
+        current = self.read()
+        if (
+            current.spec.route.profile != "reviewer-callback"
+            or expected_resources == OwnedResources()
+            or current.resources != expected_resources
+            or current.pending_effect
+            or current.state
+            not in {
+                "awaiting-callback",
+                "attention-required",
+                "finalizing",
+                "cancelling",
+                "exiting",
+            }
+        ):
+            raise SupervisorError(
+                "signal-free retirement parent identity changed"
+            )
+        updated = current
+        if updated.state not in {"finalizing", "cancelling", "exiting"}:
+            updated, _ = apply_transition(updated, "cancelling")
+        if updated.state in {"finalizing", "cancelling"}:
+            updated, _ = apply_transition(updated, "exiting")
+        updated, _ = apply_transition(updated, "complete")
+        updated = replace(
+            updated,
+            resources=OwnedResources(),
+            revision=updated.revision + 1,
         )
         self.store.save(updated, expected_revision=current.revision)
         return updated

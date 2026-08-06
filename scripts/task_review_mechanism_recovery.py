@@ -54,7 +54,9 @@ from task_escalation_records import (
 )
 from task_review_drift_contract import (
     DriftQuarantineAuthorization,
+    SignalFreeRetirementAuthorization,
     authorized_drift_quarantine,
+    authorized_signal_free_retirement,
 )
 from task_review_drift_quarantine import (
     mark_drift_quarantine_fresh,
@@ -377,6 +379,7 @@ def _recover_drift_quarantine(
     task_id: str,
     runtime_manager: object | None,
     fault_observer: Callable[[str], None] | None,
+    signal_authorization: SignalFreeRetirementAuthorization | None = None,
 ) -> dict[str, Any]:
     runtime_root = _runtime_root(vault, task_id)
     store_root = vault / ".vault-meta" / "harness"
@@ -390,6 +393,7 @@ def _recover_drift_quarantine(
     )
     run = quarantine_drifted_attempt(
         authorization=authorization,
+        signal_authorization=signal_authorization,
         gate=gate,
         store=store,
         runtime=runtime,
@@ -681,6 +685,22 @@ def recover_task_review_for_mechanism(
     if attention_record is None:
         raise TaskReviewError("task escalation record is unavailable")
     attention = attention_record.payload
+    signal_authorization = authorized_signal_free_retirement(
+        attention_record, worktree
+    )
+    if signal_authorization is not None:
+        return _recover_drift_quarantine(
+            authorization=signal_authorization.drift,
+            signal_authorization=signal_authorization,
+            attention=attention,
+            attention_record_sha256=attention_record.sha256,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+            fault_observer=quarantine_fault_observer,
+        )
     drift_authorization = authorized_drift_quarantine(
         attention_record, worktree
     )

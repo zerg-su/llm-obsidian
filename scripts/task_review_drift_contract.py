@@ -18,6 +18,10 @@ _PATCH_PREFIX = (
     "Choose boundary A. Classified as an eligible repository-owned "
     "stale-review quarantine mechanism gap."
 )
+_SIGNAL_FREE_PREFIX = (
+    "Classified as an eligible repository-owned stale OS-ownership drift "
+    "mechanism failure."
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,13 @@ class DriftQuarantineAuthorization:
     descendant_base_head: str
     anchor_record_id: str
     anchor_record_sha256: str
+    authorization_record_id: str
+    authorization_record_sha256: str
+
+
+@dataclass(frozen=True)
+class SignalFreeRetirementAuthorization:
+    drift: DriftQuarantineAuthorization
     authorization_record_id: str
     authorization_record_sha256: str
 
@@ -57,11 +68,10 @@ def _anchor_identities(decision: str) -> tuple[str, str, str, str] | None:
     return identities
 
 
-def authorized_drift_quarantine(
-    latest: DecisionRecord, worktree: Path
+def _compile_drift_authorization(
+    chain: list[DecisionRecord], index: int, worktree: Path
 ) -> DriftQuarantineAuthorization | None:
-    """Compile one exact coordinator chain into drift-quarantine authority."""
-
+    latest = chain[index]
     attention = latest.payload
     decision = str(attention.get("decision") or "")
     base_match = re.search(
@@ -85,15 +95,9 @@ def authorized_drift_quarantine(
         or base_match is None
     ):
         return None
-    try:
-        chain = load_chain(worktree)
-    except EscalationRecordError:
-        return None
-    if not chain or chain[-1].sha256 != latest.sha256:
-        return None
     anchors = [
         (index, record, _anchor_identities(str(record.payload.get("decision") or "")))
-        for index, record in enumerate(chain[:-1])
+        for index, record in enumerate(chain[:index])
         if record.record_type == "resolution"
         and str(record.payload.get("decision") or "").startswith(_ANCHOR_PREFIX)
     ]
@@ -105,7 +109,7 @@ def authorized_drift_quarantine(
     if any(
         record.record_type not in {"raise", "resolution"}
         or _decision_scope(record.payload) != scope
-        for record in chain[anchor_index:]
+        for record in chain[anchor_index : index + 1]
     ):
         return None
     return DriftQuarantineAuthorization(
@@ -113,6 +117,74 @@ def authorized_drift_quarantine(
         base_match.group(1),
         anchor.record_id,
         anchor.sha256,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
+def authorized_drift_quarantine(
+    latest: DecisionRecord, worktree: Path
+) -> DriftQuarantineAuthorization | None:
+    """Compile one exact coordinator chain into drift-quarantine authority."""
+
+    try:
+        chain = load_chain(worktree)
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    return _compile_drift_authorization(chain, len(chain) - 1, worktree)
+
+
+def authorized_signal_free_retirement(
+    latest: DecisionRecord, worktree: Path
+) -> SignalFreeRetirementAuthorization | None:
+    """Compile the exact follow-up grant for signal-free stale retirement."""
+
+    attention = latest.payload
+    decision = str(attention.get("decision") or "")
+    required = (
+        "one narrow code-owned, signal-free recovery path",
+        "must send no OS/cmux/provider signal",
+        "Only after read-only inventory proves no exact owned live resource",
+        "reject any actually live exact match, any PID/PGID or supervisor reuse, ambiguous ownership, unrelated ownership, partial identity evidence, missing archive, archive tampering, or gate/progress drift",
+        "exactly one fresh single-model Codex/Sol deep review",
+    )
+    if (
+        latest.record_type != "resolution"
+        or attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_SIGNAL_FREE_PREFIX)
+        or any(fragment not in decision for fragment in required)
+    ):
+        return None
+    try:
+        chain = load_chain(worktree)
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    patch_indices = [
+        index
+        for index, record in enumerate(chain[:-1])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(_PATCH_PREFIX)
+    ]
+    if len(patch_indices) != 1:
+        return None
+    drift = _compile_drift_authorization(chain, patch_indices[0], worktree)
+    if drift is None:
+        return None
+    scope = _decision_scope(attention)
+    if any(
+        record.record_type not in {"raise", "resolution"}
+        or _decision_scope(record.payload) != scope
+        for record in chain[patch_indices[0] :]
+    ):
+        return None
+    return SignalFreeRetirementAuthorization(
+        drift,
         latest.record_id,
         latest.sha256,
     )

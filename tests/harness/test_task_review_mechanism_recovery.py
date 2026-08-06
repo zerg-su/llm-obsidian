@@ -28,6 +28,8 @@ from harness.callbacks import CallbackBroker  # noqa: E402
 from harness.pipeline_builtins import compiled_builtin  # noqa: E402
 from harness.state_machine import TERMINAL  # noqa: E402
 from harness.store import OperationStore, StoreError  # noqa: E402
+from harness.runtime_session_checkpoint import DurableCleanupOwnership  # noqa: E402
+from harness.runtime_session_contracts import RuntimeSessionError  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewFinding,
@@ -44,7 +46,10 @@ from task_review_context import (  # noqa: E402
     _gate_root,
     _runtime_root,
 )
-from task_review_drift_contract import authorized_drift_quarantine  # noqa: E402
+from task_review_drift_contract import (  # noqa: E402
+    authorized_drift_quarantine,
+    authorized_signal_free_retirement,
+)
 from task_review_mechanism_recovery import (  # noqa: E402
     _authorized_accepted_callback_head,
     recover_task_review_for_mechanism,
@@ -95,6 +100,9 @@ class FakeRuntime:
         self.exit_requests: list[str] = []
         self.cleanup_calls: list[str] = []
         self.fail_cleanup_for: set[str] = set()
+        self.cleanup_ownership: dict[str, DurableCleanupOwnership] = {}
+        self.cleanup_ownership_errors: dict[str, RuntimeSessionError] = {}
+        self.ownership_probes: list[str] = []
 
     def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
         self.started.append(request)
@@ -199,6 +207,18 @@ class FakeRuntime:
         self.store.transition(owner_id, operation_id, "complete")
         record = self.store.read(owner_id, operation_id)
         return SessionResult(record, "", action="cleaned")
+
+    def prove_durable_cleanup_ownership(
+        self, owner_id: str, operation_id: str
+    ) -> DurableCleanupOwnership:
+        self.ownership_probes.append(operation_id)
+        error = self.cleanup_ownership_errors.get(operation_id)
+        if error is not None:
+            raise error
+        try:
+            return self.cleanup_ownership[operation_id]
+        except KeyError as exc:
+            raise RuntimeSessionError("ownership evidence is unavailable") from exc
 
 
 class LegacyRoundStore:
@@ -617,6 +637,70 @@ class DriftFixture:
     accepted: dict[str, tuple[str, str]]
     artifacts: dict[str, tuple[str, str]]
     accepted_payloads: dict[str, dict[str, object]]
+
+
+SIGNAL_FREE_DECISION = (
+    "Classified as an eligible repository-owned stale OS-ownership drift "
+    "mechanism failure. Authorize one narrow code-owned, signal-free recovery "
+    "path with regression tests for an exact retained review parent. The path "
+    "must send no OS/cmux/provider signal and preserve all archived evidence. "
+    "It must reject any actually live exact match, any PID/PGID or supervisor "
+    "reuse, ambiguous ownership, unrelated ownership, partial identity evidence, "
+    "missing archive, archive tampering, or gate/progress drift. Only after "
+    "read-only inventory proves no exact owned live resource may lifecycle APIs "
+    "clear the stale projection. Preserve authorization for exactly one fresh "
+    "single-model Codex/Sol deep review on the resulting exact clean HEAD."
+)
+
+
+def absent_ownership(index: int) -> DurableCleanupOwnership:
+    return DurableCleanupOwnership(
+        "dead",
+        "dead",
+        "missing",
+        "missing",
+        f"workspace-{index}",
+        f"window-{index}",
+    )
+
+
+def prepare_signal_free_fixture(base: Path) -> DriftFixture:
+    drift = prepare_drift_fixture(base)
+    fixture = drift.recovery
+    parents = [parent for _axis, parent, _child in fixture.lane_round_ids]
+    for index, operation_id in enumerate(parents, start=1):
+        record = fixture.store.read(fixture.task_id, operation_id)
+        replace_record(
+            fixture,
+            operation_id,
+            resources=OwnedResources(
+                surface_id=record.resources.surface_id,
+                process_group=4100 + index,
+                supervisor_pid=5100 + index,
+                process_identity=hashlib.sha256(
+                    f"process-{index}".encode()
+                ).hexdigest(),
+                supervisor_identity=hashlib.sha256(
+                    f"supervisor-{index}".encode()
+                ).hexdigest(),
+            ),
+        )
+        fixture.runtime.cleanup_ownership[operation_id] = absent_ownership(index)
+    fixture.runtime.fail_cleanup_for.add(parents[0])
+    expect_error(
+        "signal-free fixture preserves prepared archive after old cleanup failure",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product, runtime_manager=fixture.runtime
+        ),
+        "resource cleanup is incomplete",
+    )
+    fixture.runtime.fail_cleanup_for.clear()
+    append_mechanism_decision(
+        fixture,
+        "signal-free-stale-ownership",
+        SIGNAL_FREE_DECISION,
+    )
+    return drift
 
 
 def prepare_drift_fixture(base: Path) -> DriftFixture:
@@ -1196,6 +1280,302 @@ with tempfile.TemporaryDirectory(prefix="drift-quarantine-partial.") as raw:
         "partial cleanup never starts the fresh provider review",
         len(fixture.runtime.started) == 2
         and fixture.gate.read().get("fresh_reevaluation_used") is not True,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="signal-free-lifecycle.") as raw:
+    drift = prepare_signal_free_fixture(Path(raw))
+    fixture = drift.recovery
+    latest = load_chain(fixture.product)[-1]
+    authorization = authorized_signal_free_retirement(
+        latest, fixture.product.resolve()
+    )
+    assert authorization is not None
+    archive = (
+        fixture.gate.root
+        / "drift-quarantine"
+        / authorization.drift.authorization_record_id
+        / "evidence.json"
+    )
+    archive_before = archive.read_bytes()
+    exits_before = tuple(fixture.runtime.exit_requests)
+    cleanup_before = tuple(fixture.runtime.cleanup_calls)
+    started_before = len(fixture.runtime.started)
+    accepted_before = {
+        child: (
+            fixture.store.read(fixture.task_id, child).accepted_callback_id,
+            fixture.store.read(fixture.task_id, child).accepted_callback_sha256,
+        )
+        for _axis, _parent, child in fixture.lane_round_ids
+    }
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    state = fixture.gate.read()
+    progress = json.loads(
+        (
+            archive.parent / "progress.json"
+        ).read_text(encoding="utf-8")
+    )
+    old_records = [
+        fixture.store.read(fixture.task_id, operation_id)
+        for _axis, parent, child in fixture.lane_round_ids
+        for operation_id in (parent, child)
+    ]
+    check(
+        "signal-free lifecycle atomically retires proven-absent parents and starts one fresh boundary",
+        recovered["status"] == "reviewing"
+        and state["fresh_reevaluation_used"] is True
+        and state["policy"]["max_verify_iterations"] == 0
+        and all(record.state == "complete" for record in old_records)
+        and all(record.resources == OwnedResources() for record in old_records)
+        and len(fixture.runtime.started) == started_before + 2
+        and progress["schema_version"] == 2
+        and progress["status"] == "fresh-review-started"
+        and len(progress["retirement_receipts"]) == 2,
+    )
+    accepted_after = {
+        child: (
+            fixture.store.read(fixture.task_id, child).accepted_callback_id,
+            fixture.store.read(fixture.task_id, child).accepted_callback_sha256,
+        )
+        for _axis, _parent, child in fixture.lane_round_ids
+    }
+    check(
+        "signal-free lifecycle preserves archive and has zero signal or callback replay",
+        archive.read_bytes() == archive_before
+        and tuple(fixture.runtime.exit_requests) == exits_before
+        and tuple(fixture.runtime.cleanup_calls) == cleanup_before
+        and accepted_after == accepted_before
+        and all(
+            fixture.runtime.ownership_probes.count(parent) == 2
+            for _axis, parent, _child in fixture.lane_round_ids
+        ),
+    )
+    probes_after = tuple(fixture.runtime.ownership_probes)
+    started_after = len(fixture.runtime.started)
+    replay = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "signal-free recovery replay is idempotent with zero provider replay",
+        replay["status"] == "reviewing"
+        and len(fixture.runtime.started) == started_after
+        and tuple(fixture.runtime.ownership_probes) == probes_after
+        and tuple(fixture.runtime.exit_requests) == exits_before,
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="signal-free-live.") as raw:
+    drift = prepare_signal_free_fixture(Path(raw))
+    fixture = drift.recovery
+    parent = fixture.lane_round_ids[0][1]
+    fixture.runtime.cleanup_ownership[parent] = DurableCleanupOwnership(
+        "alive", "alive", "missing", "missing", "workspace-live", "window-live"
+    )
+    exits_before = tuple(fixture.runtime.exit_requests)
+    cleanup_before = tuple(fixture.runtime.cleanup_calls)
+    started_before = len(fixture.runtime.started)
+    expect_error(
+        "signal-free recovery rejects an actually live exact match",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product, runtime_manager=fixture.runtime
+        ),
+        "exact live resource",
+    )
+    check(
+        "exact-live rejection sends zero signal and starts zero provider",
+        tuple(fixture.runtime.exit_requests) == exits_before
+        and tuple(fixture.runtime.cleanup_calls) == cleanup_before
+        and len(fixture.runtime.started) == started_before,
+    )
+
+
+for reuse_label, reuse_message in (
+    ("PID/PGID reuse", "durable cleanup process identity was reused"),
+    ("supervisor reuse", "durable cleanup supervisor identity changed"),
+):
+    with tempfile.TemporaryDirectory(prefix="signal-free-reuse.") as raw:
+        drift = prepare_signal_free_fixture(Path(raw))
+        fixture = drift.recovery
+        parent = fixture.lane_round_ids[0][1]
+        fixture.runtime.cleanup_ownership_errors[parent] = RuntimeSessionError(
+            reuse_message
+        )
+        effects_before = (
+            tuple(fixture.runtime.exit_requests),
+            tuple(fixture.runtime.cleanup_calls),
+            len(fixture.runtime.started),
+        )
+        expect_error(
+            f"signal-free recovery rejects {reuse_label}",
+            lambda: recover_task_review_for_mechanism(
+                fixture.product, runtime_manager=fixture.runtime
+            ),
+            "ownership inventory is ambiguous",
+        )
+        check(
+            f"{reuse_label} rejection has zero signal and zero provider replay",
+            effects_before
+            == (
+                tuple(fixture.runtime.exit_requests),
+                tuple(fixture.runtime.cleanup_calls),
+                len(fixture.runtime.started),
+            ),
+        )
+
+
+with tempfile.TemporaryDirectory(prefix="signal-free-partial.") as raw:
+    drift = prepare_signal_free_fixture(Path(raw))
+    fixture = drift.recovery
+    parent = fixture.lane_round_ids[0][1]
+    fixture.runtime.cleanup_ownership[parent] = DurableCleanupOwnership(
+        "dead", "unknown", "missing", "missing", "workspace-partial", "window-partial"
+    )
+    expect_error(
+        "signal-free recovery rejects partial identity evidence",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product, runtime_manager=fixture.runtime
+        ),
+        "ownership inventory is ambiguous",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="signal-free-crash.") as raw:
+    drift = prepare_signal_free_fixture(Path(raw))
+    fixture = drift.recovery
+    exits_before = tuple(fixture.runtime.exit_requests)
+    started_before = len(fixture.runtime.started)
+
+    def crash_after_signal_free_retirement(event: str) -> None:
+        if event.startswith("signal-free-parent-retired:"):
+            raise RuntimeError("simulated atomic retirement crash")
+
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=crash_after_signal_free_retirement,
+        )
+    except RuntimeError as exc:
+        check(
+            "signal-free crash occurs after one atomic terminal resource projection",
+            str(exc) == "simulated atomic retirement crash"
+            and sum(
+                fixture.store.read(fixture.task_id, parent).state == "complete"
+                for _axis, parent, _child in fixture.lane_round_ids
+            )
+            == 1
+            and len(fixture.runtime.started) == started_before,
+        )
+    else:
+        raise AssertionError("signal-free retirement failpoint did not fire")
+    first_parent = fixture.lane_round_ids[0][1]
+    first_probe_count = fixture.runtime.ownership_probes.count(first_parent)
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "signal-free crash restart resumes prepared progress without repeating retirement proof",
+        recovered["status"] == "reviewing"
+        and fixture.runtime.ownership_probes.count(first_parent) == first_probe_count
+        and tuple(fixture.runtime.exit_requests) == exits_before
+        and len(fixture.runtime.started) == started_before + 2,
+    )
+
+
+for drift_label, mutate, expected in (
+    (
+        "missing archive",
+        lambda fixture, root: (root / "evidence.json").unlink(),
+        "archive is unavailable",
+    ),
+    (
+        "archive tampering",
+        lambda fixture, root: write_json(
+            root / "evidence.json",
+            {
+                **json.loads((root / "evidence.json").read_text(encoding="utf-8")),
+                "status": "tampered",
+            },
+        ),
+        "evidence identity changed",
+    ),
+    (
+        "progress drift",
+        lambda fixture, root: write_json(
+            root / "progress.json",
+            {
+                **json.loads((root / "progress.json").read_text(encoding="utf-8")),
+                "cleaned_parents": ["unrelated-parent"],
+            },
+        ),
+        "progress identity changed",
+    ),
+    (
+        "gate drift",
+        lambda fixture, root: write_json(
+            fixture.gate.state_path,
+            {**fixture.gate.read(), "status": "attention-required"},
+        ),
+        "gate drifted",
+    ),
+):
+    with tempfile.TemporaryDirectory(prefix="signal-free-drift.") as raw:
+        drift = prepare_signal_free_fixture(Path(raw))
+        fixture = drift.recovery
+        authorization = authorized_signal_free_retirement(
+            load_chain(fixture.product)[-1], fixture.product.resolve()
+        )
+        assert authorization is not None
+        root = (
+            fixture.gate.root
+            / "drift-quarantine"
+            / authorization.drift.authorization_record_id
+        )
+        mutate(fixture, root)
+        effects_before = (
+            tuple(fixture.runtime.exit_requests),
+            tuple(fixture.runtime.cleanup_calls),
+            len(fixture.runtime.started),
+        )
+        expect_error(
+            f"signal-free recovery rejects {drift_label}",
+            lambda: recover_task_review_for_mechanism(
+                fixture.product, runtime_manager=fixture.runtime
+            ),
+            expected,
+        )
+        check(
+            f"{drift_label} rejection precedes signals and provider replay",
+            effects_before
+            == (
+                tuple(fixture.runtime.exit_requests),
+                tuple(fixture.runtime.cleanup_calls),
+                len(fixture.runtime.started),
+            ),
+        )
+
+
+with tempfile.TemporaryDirectory(prefix="signal-free-unrelated.") as raw:
+    drift = prepare_signal_free_fixture(Path(raw))
+    fixture = drift.recovery
+    parent = fixture.store.read(fixture.task_id, fixture.lane_round_ids[0][1])
+    fixture.store.create(
+        replace(
+            parent.spec,
+            operation_id="late-unrelated-review-owner",
+            idempotency_key="late-unrelated-review-owner-key",
+        ),
+        lane_id="late-unrelated-lane",
+        run_id="late-unrelated-run",
+    )
+    expect_error(
+        "signal-free recovery rechecks and rejects unrelated ownership",
+        lambda: recover_task_review_for_mechanism(
+            fixture.product, runtime_manager=fixture.runtime
+        ),
+        "unrelated live ownership",
     )
 
 
