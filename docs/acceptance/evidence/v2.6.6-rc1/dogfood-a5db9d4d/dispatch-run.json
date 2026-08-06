@@ -1,0 +1,40 @@
+{
+  "request_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+  "request_sha256": "2337342819617d2ebfba9e84116c60ceee66d084f35af97219d170e476ef9b67",
+  "result": {
+    "branch": "task/llm-obsidian-2-6-6-rc1",
+    "coordinator_action": "return-to-idle-without-polling",
+    "effort": "high",
+    "harness": {
+      "lane_id": "07b35300-4c20-5df1-8461-a994178c7d80",
+      "operation_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+      "owner_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+      "run_id": "0bd0922a-acfe-5c2f-9668-aec5d5bb9303"
+    },
+    "idempotent": false,
+    "log_status": "ok",
+    "model": "gpt-5.6-sol",
+    "origin_surface": "F4E45A1C-F461-480A-B285-F598F0303DCC",
+    "placement": "workspace",
+    "project_id": "abde4336-6172-447c-af90-cec792b0229f",
+    "request_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+    "runtime": "codex",
+    "schema_version": 1,
+    "setup_duration_ms": 4370,
+    "status": "launched",
+    "task_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+    "task_name": "llm-obsidian-2-6-6-rc1",
+    "task_surface": "AD3A84E5-0DD2-48BF-A7D2-49A0D0DDEF24",
+    "task_surface_ref": "surface:2670",
+    "task_window": "7341B4E6-E199-41D4-AEAA-AB0F386EFBE9",
+    "task_window_ref": "window:1",
+    "task_workspace": "1463232A-B376-475A-A64D-8BAD0A5662EF",
+    "task_workspace_ref": "workspace:518",
+    "worktree": "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc1"
+  },
+  "schema_version": 1,
+  "status": "launched",
+  "task_name": "llm-obsidian-2-6-6-rc1",
+  "updated_at": "2026-08-06T16:18:57Z",
+  "worktree": "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc1"
+}

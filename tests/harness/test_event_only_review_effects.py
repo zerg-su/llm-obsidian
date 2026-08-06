@@ -121,15 +121,12 @@ with tempfile.TemporaryDirectory(prefix="event-only-review.") as raw:
     stopped = controller.decide(
         event=ProviderEvent("turn-stopped", identity, 3)
     )
-    repeated = controller.decide(
-        event=ProviderEvent("turn-stopped", identity, 4)
-    )
     check(
-        "exact first turn-stopped event authorizes one submit-only effect",
-        stopped.action == "submit-callback"
-        and bool(stopped.effect_id)
-        and repeated.action == "attention"
-        and controller.current_state().callback_submits == 1,
+        "turn-stopped is telemetry-only until a production adapter exists",
+        stopped.action == "attention"
+        and stopped.reason == "callback-submit-unsupported"
+        and not stopped.effect_id
+        and controller.current_state().callback_submits == 0,
     )
 
 check(

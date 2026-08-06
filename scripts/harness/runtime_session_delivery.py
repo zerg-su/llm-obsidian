@@ -315,21 +315,13 @@ class DeliveryController:
                 if event.kind == "event-gap":
                     state = replace(state, attention_reason="event-gap")
                 elif event.kind == "turn-stopped" and not cursor.result_published:
-                    if cursor.turn_stops == 1 and state.callback_submits == 0:
-                        state = replace(state, callback_submits=1)
-                        self._write(state)
-                        callback_effect = hashlib.sha256(
-                            f"{state.idempotency_key}:callback-submit".encode()
-                        ).hexdigest()
-                        return self._decision(
-                            state,
-                            "submit-callback",
-                            effect_id=callback_effect,
-                            reason="turn-stopped",
-                        )
+                    # Neither supported interactive provider currently exposes an
+                    # authenticated production source for this event.  Retain the
+                    # typed observation for compatibility, but never turn a
+                    # test-only event into an input effect.
                     state = replace(
                         state,
-                        attention_reason="callback-submit-exhausted",
+                        attention_reason="callback-submit-unsupported",
                     )
                 elif event.kind == "process-exited" and not cursor.result_published:
                     state = replace(state, attention_reason="result-missing")

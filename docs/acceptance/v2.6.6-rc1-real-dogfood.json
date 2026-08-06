@@ -6,6 +6,7 @@
   "stage": "bounded-deep-implementation-review",
   "owner_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
   "review_attempt_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4",
+  "evidence_manifest": "docs/acceptance/evidence/v2.6.6-rc1/dogfood-a5db9d4d/manifest.json",
   "review_topology": {
     "runtime": "codex",
     "model": "gpt-5.6-sol",

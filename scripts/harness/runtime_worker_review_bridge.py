@@ -14,7 +14,6 @@ from .runtime_worker import (
     _pipeline_verify_identity,
     _research_input_provenance,
     _review_resolution_handoff_ready,
-    _submit_failure_requires_attention,
 )
 from review_contract import ReviewContractError, axis_finding_id
 
@@ -213,20 +212,10 @@ class RuntimeWorkerReviewBridgeMixin:
             self.summary_attention("review-input-invalid")
             return
         if input_evidence.state == "stable" and not callback_path.exists():
-            try:
-                submit_effect = self.reserve_callback_submit(generation)
-                if not submit_effect:
-                    return
-                submitted = submit_stable_review_input(
-                    vault_root=self.trusted_vault,
-                    worktree=self.spec["product_root"],
-                    callback_path=callback_path,
-                )
-            except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired):
-                submitted = subprocess.CompletedProcess((), 3, "", "")
-            if _submit_failure_requires_attention(submitted, callback_path):
-                self.summary_attention("review-input-invalid")
-                return
+            # A provider-authenticated turn-complete signal does not exist in
+            # either supported runtime.  Stable input is therefore evidence for
+            # attention/recovery diagnosis only and cannot authorize Enter.
+            return
         callback_evidence, self.last_digest, self.stable_reads = (
             observe_review_artifact(
                 callback_path,

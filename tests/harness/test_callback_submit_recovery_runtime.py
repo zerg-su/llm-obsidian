@@ -1055,42 +1055,22 @@ with tempfile.TemporaryDirectory(prefix="review-input-runtime.") as raw:
         and not (state_root / "callback-receipt.json").exists(),
         before_stop,
     )
-    assert stream.turn_stopped().action == "submit-callback"
+    stop_decision = stream.turn_stopped()
     worker.inspect_callback()
     worker.inspect_callback()
     worker.inspect_callback()
-    accepted = store.read("review-owner-1", "review-round-1")
-    rearmed = store.read("review-owner-1", "review-parent-1")
-    rearm_receipt = json.loads(
-        (state_root / "callback-timeout-rearm.json").read_text(encoding="utf-8")
-    )
+    after_stop = store.read("review-owner-1", "review-round-1")
     check(
-        "one durable Provider Stop authorizes one stable-input submit",
-        accepted.state == "finalizing"
-        and bool(accepted.accepted_callback_id)
-        and rearmed.state == "awaiting-callback"
-        and rearm_receipt["status"] == "accepted"
-        and (state_root / "callback-receipt.json").is_file()
-        and not input_path.exists(),
-        accepted,
-    )
-    rearm_receipt["status"] = "prepared"
-    (state_root / "callback-timeout-rearm.json").write_text(
-        json.dumps(rearm_receipt, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    worker.callback_handled = False
-    worker.inspect_callback()
-    repaired_rearm = json.loads(
-        (state_root / "callback-timeout-rearm.json").read_text(encoding="utf-8")
-    )
-    check(
-        "accepted callback replay repairs a prepared rearm receipt without effect",
-        repaired_rearm["status"] == "accepted"
-        and json.loads(
-            (state_root / "callback-receipt.json").read_text(encoding="utf-8")
-        )["status"]
-        == "duplicate",
-        repaired_rearm,
+        "turn-stopped cannot submit stable input without a production adapter",
+        stop_decision.action == "attention"
+        and stop_decision.reason == "callback-submit-unsupported"
+        and after_stop.state == "awaiting-callback"
+        and not after_stop.accepted_callback_id
+        and input_path.is_file()
+        and not callback_path.exists()
+        and not (state_root / "callback-receipt.json").exists()
+        and not (state_root / "callback-timeout-rearm.json").exists(),
+        after_stop,
     )
 
 

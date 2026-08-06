@@ -13,6 +13,28 @@
       "disposition": "defer-rc2",
       "suggested_owner": "review callback ingestion and dispatch finalization",
       "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.SLICE_RECEIPT_PROVENANCE",
+      "observed_at_stage": "RC1 final exact-HEAD implementation review",
+      "subject_head_sha": "51a02167255412b818e85388055442aec2a9a20d",
+      "reproducer_or_evidence": "OI.E6.UNBOUND-SLICE-RECEIPTS; v2.6.6-rc1-slice-receipts.json records commands and commits but has no independently generated exit/output receipt",
+      "severity": "important",
+      "rc1_relation": "Historical RED/GREEN cannot be reconstructed honestly; the RC1 amendment narrows the claim and requires exact evidence for the final correction only.",
+      "disposition": "defer-rc2",
+      "suggested_owner": "verification receipt runner and TDD skill evidence contract",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.AUTHENTICATED_TURN_COMPLETE_ADAPTER",
+      "observed_at_stage": "RC1 final exact-HEAD implementation review",
+      "subject_head_sha": "51a02167255412b818e85388055442aec2a9a20d",
+      "reproducer_or_evidence": "ENG.E3.TURN_STOP_UNREACHABLE; no production caller of RuntimeProviderEventStream.turn_stopped exists in either supported runtime",
+      "severity": "minor",
+      "rc1_relation": "RC1 removes the unreachable positive effect and remains attention-only; any future recovery requires a real authenticated provider/host signal.",
+      "disposition": "defer-rc2",
+      "suggested_owner": "runtime provider adapters",
+      "external_effects_observed": false
     }
   ]
 }

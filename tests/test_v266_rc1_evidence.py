@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -105,6 +106,58 @@ assert all(
     for row in terminal_inventory
 )
 
+dogfood_manifest_path = ROOT / str(dogfood.get("evidence_manifest") or "")
+assert dogfood_manifest_path.is_file()
+dogfood_manifest = json.loads(dogfood_manifest_path.read_text(encoding="utf-8"))
+assert dogfood_manifest.get("schema_version") == 1
+assert dogfood_manifest.get("subject_head_sha") == dogfood_head
+assert dogfood_manifest.get("owner_id") == dogfood.get("owner_id")
+assert dogfood_manifest.get("review_attempt_id") == dogfood.get("review_attempt_id")
+dogfood_evidence_root = dogfood_manifest_path.parent
+manifest_rows = dogfood_manifest.get("artifacts")
+assert isinstance(manifest_rows, list) and len(manifest_rows) == 14
+manifest_payloads: dict[str, dict[str, object]] = {}
+for row in manifest_rows:
+    assert isinstance(row, dict)
+    relative = row.get("path")
+    digest = row.get("sha256")
+    assert isinstance(relative, str) and relative == Path(relative).name
+    assert isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+    artifact_path = dogfood_evidence_root / relative
+    raw = artifact_path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == digest
+    payload = json.loads(raw)
+    assert isinstance(payload, dict)
+    manifest_payloads[relative] = payload
+
+for axis in ("openai-intent", "openai-engineering"):
+    callback = manifest_payloads[f"callback-{axis}.json"]
+    receipt = manifest_payloads[f"callback-receipt-{axis}.json"]
+    summary = next(row for row in callback_receipts if row["axis"] == axis)
+    assert callback.get("callback_id") == receipt.get("callback_id") == summary["callback_id"]
+    assert callback.get("payload_sha256") == receipt.get("payload_sha256") == summary["payload_sha256"]
+    assert receipt.get("status") == "accepted"
+
+archived_operations = {
+    payload["spec"]["operation_id"]: payload
+    for name, payload in manifest_payloads.items()
+    if name.startswith("operation-")
+}
+assert set(archived_operations) == {
+    row["operation_id"] for row in terminal_inventory
+}
+for row in terminal_inventory:
+    operation = archived_operations[row["operation_id"]]
+    assert operation["state"] == row["state"]
+    assert operation["revision"] == row["revision"]
+    assert operation["resources"] == {
+        "process_group": 0,
+        "process_identity": "",
+        "supervisor_identity": "",
+        "supervisor_pid": 0,
+        "surface_id": "",
+    }
+
 quality_baseline = json.loads(
     (ROOT / "config" / "code-quality-baseline.json").read_text(
         encoding="utf-8"
@@ -203,6 +256,10 @@ assert set(finding_ids) == {
     "OI-E1-BASELINE-SUBJECT",
     "OI-E7-FRESH-DOGFOOD-MISSING",
     "OI-E8-EXACT-HEAD-DRIFT",
+    "ENG.E3.TURN_STOP_UNREACHABLE",
+    "OI.E6.UNBOUND-SLICE-RECEIPTS",
+    "OI.E7.UNBOUND-DOGFOOD-REPORT",
+    "OI.E8.CANDIDATE-BUDGET-EXCEEDED",
 }
 for row in finding_rows:
     assert isinstance(row, dict)
@@ -238,7 +295,9 @@ for row in ledger_rows:
     )
     assert isinstance(row["external_effects_observed"], bool)
 assert {row["finding_id"] for row in ledger_rows} >= {
-    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING"
+    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING",
+    "RC2.SLICE_RECEIPT_PROVENANCE",
+    "RC2.AUTHENTICATED_TURN_COMPLETE_ADAPTER",
 }
 
 failed = load("evidence/v2.6.6-rc1/failed-fbf87a4/diagnostic-receipt.json")

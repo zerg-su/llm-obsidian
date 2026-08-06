@@ -225,18 +225,19 @@ with tempfile.TemporaryDirectory(prefix="delivery-boundary.") as raw:
         event=provider_event(INTERACTIVE, "turn-stopped", 3)
     )
     check(
-        "one typed interactive Stop permits one submit-only recovery",
-        one_stop.action == "submit-callback"
-        and one_stop.effect_id != "delivery-key"
-        and interactive.current_state().callback_submits == 1,
+        "typed interactive Stop fails closed without a production adapter",
+        one_stop.action == "attention"
+        and one_stop.reason == "callback-submit-unsupported"
+        and not one_stop.effect_id
+        and interactive.current_state().callback_submits == 0,
     )
     second_stop = interactive.decide(
         event=provider_event(INTERACTIVE, "turn-stopped", 4)
     )
     check(
-        "second interactive Stop becomes attention with zero second submit",
+        "repeated interactive Stop remains attention with zero submit",
         second_stop.action == "attention"
-        and interactive.current_state().callback_submits == 1,
+        and interactive.current_state().callback_submits == 0,
     )
 
     result_flow = DeliveryController(

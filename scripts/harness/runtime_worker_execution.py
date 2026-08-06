@@ -126,16 +126,6 @@ class RuntimeWorkerExecution(
         if decision.action not in {"close", "wait"}:
             raise RuntimeWorkerError("provider result did not reach a close boundary")
 
-    def reserve_callback_submit(self, generation: int) -> str:
-        try:
-            stream = self._provider_stream(generation)
-            if stream is None:
-                return ""
-            effect_id = stream.callback_submit_effect()
-        except RuntimeProviderEventError as exc:
-            raise RuntimeWorkerError("provider Stop event is invalid") from exc
-        return effect_id
-
     def record_provider_exit(self, exit_code: int) -> None:
         for directory in sorted(self._provider_event_root.glob("generation-*")):
             try:

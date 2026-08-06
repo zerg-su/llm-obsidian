@@ -229,23 +229,6 @@ class RuntimeProviderEventStream:
     def turn_stopped(self) -> DeliveryDecision:
         return self.emit("turn-stopped")
 
-    def callback_submit_effect(self) -> str:
-        """Return the already-reserved callback effect without minting an event."""
-
-        state = self.controller.current_state()
-        if (
-            state.attention_reason
-            or state.callback_submits != 1
-            or state.cursor.turn_stops != 1
-            or state.cursor.result_published
-            or state.cursor.process_exited
-            or state.cursor.resource_closed
-        ):
-            return ""
-        return hashlib.sha256(
-            f"{state.idempotency_key}:callback-submit".encode()
-        ).hexdigest()
-
     def process_exited(self, exit_code: int) -> DeliveryDecision:
         return self.emit("process-exited", exit_code=exit_code)
 

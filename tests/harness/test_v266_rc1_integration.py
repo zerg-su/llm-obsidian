@@ -56,8 +56,8 @@ check(
     and "pre-activation gate inspect-only" in exact_trace,
 )
 check(
-    "provider-event trace permits one submit and no reviewer restart",
-    "one submit-only effect" in event_trace
+    "provider-event trace is attention-only and has no reviewer restart",
+    "turn-stopped is telemetry-only" in event_trace
     and "reviewer runtime contains no restart authority" in event_trace,
 )
 check(
