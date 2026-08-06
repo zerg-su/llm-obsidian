@@ -19,11 +19,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.contracts import (  # noqa: E402
     AttentionReason,
+    CallbackEnvelope,
     EffectOutcome,
     OperationSpec,
     OwnedResources,
     RuntimeRoute,
 )
+from harness.callbacks import CallbackBroker  # noqa: E402
 from harness import cli as harness_cli  # noqa: E402
 from harness.liveness import (  # noqa: E402
     LivenessController,
@@ -1063,6 +1065,107 @@ def prepare_partial_fresh_publication(
     return post_fresh_authorization(data)
 
 
+def advance_fresh_round(
+    data: dict[str, object], lane_index: int, target_state: str
+) -> tuple[str, str]:
+    """Persist the real callback/provider chain for one monotonic fresh round."""
+
+    if target_state not in {"verifying", "finalizing", "complete"}:
+        raise AssertionError(f"unsupported fresh round test state: {target_state}")
+    store = data["store"]
+    gate_path = data["gate_path"]
+    assert isinstance(store, OperationStore) and isinstance(gate_path, Path)
+    task_id = str(data["task_id"])
+    lane = json.loads(gate_path.read_text(encoding="utf-8"))["lanes"][lane_index]
+    parent_id = str(lane["operation_id"])
+    child = next(
+        record
+        for record in store.list(task_id)
+        if record.spec.parent_operation_id == parent_id
+        and record.spec.kind == "review-round"
+    )
+    verdict = "changes-requested" if target_state == "verifying" else "approve"
+    payload = {
+        "parent_session_operation_id": parent_id,
+        "verdict": verdict,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload_sha = hashlib.sha256(encoded).hexdigest()
+    callback_id = f"review-{payload_sha[:24]}"
+    CallbackBroker(store, task_id).accept(
+        CallbackEnvelope(
+            callback_id,
+            child.spec.operation_id,
+            child.run_id,
+            "review",
+            payload,
+            payload_sha,
+        ),
+        deadline_operation_id=parent_id,
+    )
+    if target_state == "complete":
+        for state in ("exiting", "complete"):
+            store.transition(task_id, child.spec.operation_id, state)
+
+    runtime_root = store.root / "owners" / task_id / "runtime" / parent_id
+    write_json(
+        runtime_root / "callback-receipt.json",
+        {
+            "schema_version": 1,
+            "status": "accepted",
+            "operation_id": child.spec.operation_id,
+            "run_id": child.run_id,
+            "callback_id": callback_id,
+            "payload_sha256": payload_sha,
+            "generation": 2,
+        },
+    )
+    generation = runtime_root / "provider-events" / "generation-2"
+    identity = json.loads(
+        (generation / "events" / "0001.json").read_text(encoding="utf-8")
+    )["identity"]
+    write_json(
+        generation / "events" / "0003.json",
+        {
+            "schema_version": 1,
+            "sequence": 3,
+            "kind": "turn-stopped",
+            "effect_id": "",
+            "reason": "",
+            "result_sha256": "",
+            "exit_code": None,
+            "identity": identity,
+        },
+    )
+    write_json(
+        generation / "events" / "0004.json",
+        {
+            "schema_version": 1,
+            "sequence": 4,
+            "kind": "result-published",
+            "effect_id": "",
+            "reason": "",
+            "result_sha256": hashlib.sha256(
+                f"{child.spec.operation_id}:result".encode()
+            ).hexdigest(),
+            "exit_code": None,
+            "identity": identity,
+        },
+    )
+    delivery_path = generation / "delivery" / "delivery-state.json"
+    delivery = json.loads(delivery_path.read_text(encoding="utf-8"))
+    delivery["callback_submits"] = 1
+    delivery["cursor"].update(
+        {
+            "last_sequence": 4,
+            "result_published": True,
+            "turn_stops": 1,
+        }
+    )
+    write_json(delivery_path, delivery)
+    return parent_id, child.spec.operation_id
+
+
 def reject(label: str, data: dict[str, object], mutate) -> None:
     mutate(data)
     resources = data["resources"]
@@ -1454,6 +1557,251 @@ def main() -> int:
             and replay["reviews_started"] == 0,
             replay,
         )
+
+    for progressed_state in ("verifying", "finalizing", "complete"):
+        with tempfile.TemporaryDirectory(
+            prefix=f"post-fresh-{progressed_state}-"
+        ) as raw:
+            data = fixture(Path(raw) / progressed_state)
+            authorization = prepare_partial_fresh_publication(data)
+            store = data["store"]
+            assert isinstance(store, OperationStore)
+            pairs = [
+                advance_fresh_round(data, index, progressed_state)
+                for index in range(2)
+            ]
+            parent_before = {
+                parent: sha256(
+                    store.root
+                    / "owners"
+                    / str(data["task_id"])
+                    / "operations"
+                    / f"{parent}.json"
+                )
+                for parent, _child in pairs
+            }
+            round_before = {
+                child: sha256(
+                    store.root
+                    / "owners"
+                    / str(data["task_id"])
+                    / "operations"
+                    / f"{child}.json"
+                )
+                for _parent, child in pairs
+            }
+            provider_before = {
+                parent: tree_hash(
+                    store.root
+                    / "owners"
+                    / str(data["task_id"])
+                    / "runtime"
+                    / parent
+                    / "provider-events"
+                )
+                for parent, _child in pairs
+            }
+            receipt = synchronize_post_fresh_publication(
+                data["product"],
+                store=store,
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_100.0,
+            )
+            check(
+                f"post-fresh synchronization accepts exact monotonic {progressed_state} rounds",
+                receipt["status"] == "applied"
+                and {
+                    str(binding["round_state"])
+                    for binding in receipt["fresh_lane_bindings"]
+                }
+                == {progressed_state}
+                and all(
+                    binding["provider_phase"] == "result-published"
+                    and binding["accepted_callback_id"]
+                    and binding["accepted_callback_sha256"]
+                    and binding["callback_receipt_sha256"]
+                    for binding in receipt["fresh_lane_bindings"]
+                )
+                and all(receipt[key] == 0 for key in (
+                    "os_signals_sent",
+                    "cmux_signals_sent",
+                    "callback_effects_replayed",
+                    "provider_effects_replayed",
+                    "reviews_started",
+                )),
+                receipt,
+            )
+            check(
+                f"post-fresh {progressed_state} synchronization preserves exact parents and callback/provider effects",
+                parent_before
+                == {
+                    parent: sha256(
+                        store.root
+                        / "owners"
+                        / str(data["task_id"])
+                        / "operations"
+                        / f"{parent}.json"
+                    )
+                    for parent, _child in pairs
+                }
+                and round_before
+                == {
+                    child: sha256(
+                        store.root
+                        / "owners"
+                        / str(data["task_id"])
+                        / "operations"
+                        / f"{child}.json"
+                    )
+                    for _parent, child in pairs
+                }
+                and provider_before
+                == {
+                    parent: tree_hash(
+                        store.root
+                        / "owners"
+                        / str(data["task_id"])
+                        / "runtime"
+                        / parent
+                        / "provider-events"
+                    )
+                    for parent, _child in pairs
+                },
+            )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-progress-crash-") as raw:
+        data = fixture(Path(raw) / "progress")
+        authorization = prepare_partial_fresh_publication(data)
+
+        def crash_after_sync_prepared(stage: str) -> None:
+            if stage == "prepared":
+                raise RuntimeError("simulated pre-progress sync crash")
+
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_200.0,
+                fault_observer=crash_after_sync_prepared,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "simulated pre-progress sync crash"
+        else:
+            raise AssertionError("pre-progress sync crash did not fire")
+        advance_fresh_round(data, 0, "verifying")
+        advance_fresh_round(data, 1, "complete")
+        recovered = synchronize_post_fresh_publication(
+            data["product"],
+            store=data["store"],
+            operation_id=str(data["task_id"]),
+            authorization=authorization,
+            now=42_300.0,
+        )
+        check(
+            "post-fresh prepared crash accepts only monotonic child advancement",
+            recovered["status"] == "applied"
+            and {binding["round_state"] for binding in recovered["fresh_lane_bindings"]}
+            == {"verifying", "complete"}
+            and recovered["reviews_started"] == 0
+            and recovered["provider_effects_replayed"] == 0
+            and recovered["callback_effects_replayed"] == 0,
+            recovered,
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-progress-regression-") as raw:
+        data = fixture(Path(raw) / "regression")
+        authorization = prepare_partial_fresh_publication(data)
+        _parent, child_id = advance_fresh_round(data, 0, "finalizing")
+        advance_fresh_round(data, 1, "finalizing")
+
+        def crash_after_advanced_prepared(stage: str) -> None:
+            if stage == "prepared":
+                raise RuntimeError("simulated advanced prepared crash")
+
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_400.0,
+                fault_observer=crash_after_advanced_prepared,
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("advanced prepared crash did not fire")
+        store = data["store"]
+        assert isinstance(store, OperationStore)
+        regressed = store.read(str(data["task_id"]), child_id)
+        store.save(
+            replace(regressed, state="verifying", revision=regressed.revision + 1),
+            expected_revision=regressed.revision,
+        )
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=store,
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_500.0,
+            )
+        except PostVerificationReviewDriveError:
+            check(
+                "post-fresh prepared recovery rejects child state regression without publication",
+                json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))[
+                    "status"
+                ]
+                == "attention-required"
+                and not (
+                    data["runtime_root"]
+                    / "pipeline-review-post-verification-start.json"
+                ).exists(),
+            )
+        else:
+            raise AssertionError("fresh child state regression was accepted")
+
+    with tempfile.TemporaryDirectory(prefix="post-fresh-callback-drift-") as raw:
+        data = fixture(Path(raw) / "callback")
+        authorization = prepare_partial_fresh_publication(data)
+        parent_id, _child_id = advance_fresh_round(data, 0, "verifying")
+        advance_fresh_round(data, 1, "finalizing")
+        receipt_path = (
+            data["store"].root
+            / "owners"
+            / str(data["task_id"])
+            / "runtime"
+            / parent_id
+            / "callback-receipt.json"
+        )
+        callback_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        callback_receipt["payload_sha256"] = "0" * 64
+        write_json(receipt_path, callback_receipt)
+        try:
+            synchronize_post_fresh_publication(
+                data["product"],
+                store=data["store"],
+                operation_id=str(data["task_id"]),
+                authorization=authorization,
+                now=42_600.0,
+            )
+        except PostVerificationReviewDriveError:
+            check(
+                "post-fresh progressed callback receipt drift rejects with zero publication",
+                json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))[
+                    "status"
+                ]
+                == "attention-required"
+                and not (
+                    data["runtime_root"]
+                    / "post-fresh-publication-sync.json"
+                ).exists(),
+            )
+        else:
+            raise AssertionError("fresh progressed callback receipt drift was accepted")
 
     with tempfile.TemporaryDirectory(prefix="post-fresh-gate-crash-") as raw:
         data = fixture(Path(raw) / "gate")

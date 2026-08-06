@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import math
+from dataclasses import asdict
 from pathlib import Path
 from time import time
 from typing import Callable, Mapping
 
 from harness.contracts import EffectOutcome, OwnedResources
+from harness.provider_events import (
+    ProviderEvent,
+    ProviderEventError,
+    ProviderEventIdentity,
+    validate_event_stream,
+)
 from harness.post_verification_review_drive import (
     _apply_transition,
     _publish_fresh_marker,
@@ -165,6 +172,18 @@ def _tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _typed_provider_event(value: object) -> ProviderEvent:
+    if not isinstance(value, dict) or not isinstance(value.get("identity"), dict):
+        raise PostVerificationReviewDriveError("fresh provider event is invalid")
+    try:
+        identity = ProviderEventIdentity(**value["identity"])
+        return ProviderEvent(**{**value, "identity": identity})
+    except (ProviderEventError, TypeError) as exc:
+        raise PostVerificationReviewDriveError(
+            "fresh provider event is invalid"
+        ) from exc
+
+
 def _provider_events(
     runtime_root: Path,
     *,
@@ -172,7 +191,8 @@ def _provider_events(
     operation_id: str,
     run_id: str,
     resources: OwnedResources,
-) -> str:
+    round_state: str,
+) -> tuple[str, str]:
     provider_root = runtime_root / "provider-events"
     generations = sorted(
         path for path in provider_root.glob("generation-*") if path.is_dir()
@@ -182,50 +202,118 @@ def _provider_events(
             "fresh provider generation is not exact"
         )
     event_paths = sorted((generations[0] / "events").glob("*.json"))
-    events = [regular_json(path, "fresh provider event")[0] for path in event_paths]
-    if len(events) != 2 or [event.get("kind") for event in events] != [
-        "provider-started",
-        "input-accepted",
-    ]:
+    raw_events = [
+        regular_json(path, "fresh provider event")[0] for path in event_paths
+    ]
+    events = [_typed_provider_event(event) for event in raw_events]
+    progressed = round_state in {"verifying", "finalizing", "complete"}
+    expected_kinds = (
+        ["provider-started", "input-accepted", "turn-stopped", "result-published"]
+        if progressed
+        else ["provider-started", "input-accepted"]
+    )
+    if [event.kind for event in events] != expected_kinds:
         raise PostVerificationReviewDriveError(
             "fresh provider event boundary is not exact"
         )
-    for event in events:
-        identity = event.get("identity")
-        if (
-            not isinstance(identity, dict)
-            or identity.get("owner_id") != owner_id
-            or identity.get("operation_id") != operation_id
-            or identity.get("run_id") != run_id
-            or identity.get("generation") != 2
-            or identity.get("process_identity") != resources.process_identity
-            or identity.get("surface_id") != resources.surface_id
-        ):
-            raise PostVerificationReviewDriveError(
-                "fresh provider event identity drifted"
-            )
+    identity = events[0].identity
+    if (
+        identity.owner_id != owner_id
+        or identity.operation_id != operation_id
+        or identity.run_id != run_id
+        or identity.generation != 2
+        or identity.process_identity != resources.process_identity
+        or identity.surface_id != resources.surface_id
+    ):
+        raise PostVerificationReviewDriveError(
+            "fresh provider event identity drifted"
+        )
+    try:
+        cursor = validate_event_stream(
+            "interactive", events, expected_identity=identity
+        )
+    except ProviderEventError as exc:
+        raise PostVerificationReviewDriveError(
+            "fresh provider event boundary is not exact"
+        ) from exc
     delivery, _raw = regular_json(
         generations[0] / "delivery" / "delivery-state.json",
         "fresh provider delivery state",
     )
-    cursor = delivery.get("cursor")
     if (
-        delivery.get("send_status") != "accepted"
+        set(delivery)
+        != {
+            "schema_version",
+            "profile",
+            "identity",
+            "idempotency_key",
+            "cursor",
+            "send_attempts",
+            "send_status",
+            "callback_submits",
+            "attention_reason",
+        }
+        or delivery.get("schema_version") != 1
+        or delivery.get("profile") != "interactive"
+        or delivery.get("identity") != asdict(identity)
+        or delivery.get("idempotency_key") != events[1].effect_id
+        or delivery.get("cursor") != asdict(cursor)
+        or delivery.get("send_status") != "accepted"
         or delivery.get("send_attempts") != 1
-        or delivery.get("callback_submits") != 0
-        or not isinstance(cursor, dict)
-        or cursor.get("last_sequence") != 2
-        or cursor.get("provider_started") is not True
-        or cursor.get("input_accepted") is not True
-        or cursor.get("result_published") is not False
-        or cursor.get("process_exited") is not False
-        or cursor.get("resource_closed") is not False
-        or cursor.get("event_gap") is not False
+        or delivery.get("callback_submits") != int(progressed)
+        or delivery.get("attention_reason") != ""
     ):
         raise PostVerificationReviewDriveError(
             "fresh provider delivery state drifted"
         )
-    return _tree_sha256(provider_root)
+    return (
+        _tree_sha256(provider_root),
+        "result-published" if progressed else "awaiting-result",
+    )
+
+
+def _callback_receipt(runtime_root: Path, child: object) -> str:
+    path = runtime_root / "callback-receipt.json"
+    if child.state == "awaiting-callback":
+        if path.exists() or any(
+            (
+                child.accepted_callback_id,
+                child.accepted_callback_kind,
+                child.accepted_callback_sha256,
+            )
+        ):
+            raise PostVerificationReviewDriveError(
+                "fresh callback receipt predates round progress"
+            )
+        return ""
+    receipt, raw = regular_json(path, "fresh callback receipt")
+    callback_id = str(receipt.get("callback_id") or "")
+    payload_sha = str(receipt.get("payload_sha256") or "")
+    if (
+        set(receipt)
+        != {
+            "schema_version",
+            "status",
+            "operation_id",
+            "run_id",
+            "callback_id",
+            "payload_sha256",
+            "generation",
+        }
+        or receipt.get("schema_version") != 1
+        or receipt.get("status") != "accepted"
+        or receipt.get("operation_id") != child.spec.operation_id
+        or receipt.get("run_id") != child.run_id
+        or receipt.get("generation") != 2
+        or callback_id != child.accepted_callback_id
+        or payload_sha != child.accepted_callback_sha256
+        or callback_id != f"review-{payload_sha[:24]}"
+        or SHA256.fullmatch(payload_sha) is None
+    ):
+        raise PostVerificationReviewDriveError(
+            "fresh callback receipt identity drifted"
+        )
+    return sha256(raw)
 
 
 def _runtime_binding(
@@ -284,6 +372,15 @@ def _runtime_binding(
         raise PostVerificationReviewDriveError(
             "fresh provider runtime identity drifted"
         )
+    callback_receipt_sha = _callback_receipt(runtime_root, child)
+    provider_events_sha, provider_phase = _provider_events(
+        runtime_root,
+        owner_id=owner_id,
+        operation_id=operation_id,
+        run_id=parent.run_id,
+        resources=resources,
+        round_state=child.state,
+    )
     return {
         "axis": axis,
         "parent_operation_id": operation_id,
@@ -293,20 +390,20 @@ def _runtime_binding(
         ),
         "round_operation_id": child.spec.operation_id,
         "round_run_id": child.run_id,
+        "round_state": child.state,
+        "round_revision": child.revision,
         "round_record_sha256": sha256(
             store._operation_path(owner_id, child.spec.operation_id).read_bytes()
         ),
+        "accepted_callback_id": child.accepted_callback_id,
+        "accepted_callback_sha256": child.accepted_callback_sha256,
+        "callback_receipt_sha256": callback_receipt_sha,
         "session_sha256": sha256(session_raw),
         "launch_sha256": sha256(launch_raw),
         "ready_sha256": sha256(ready_raw),
         "callback_target_sha256": sha256(target_raw),
-        "provider_events_sha256": _provider_events(
-            runtime_root,
-            owner_id=owner_id,
-            operation_id=operation_id,
-            run_id=parent.run_id,
-            resources=resources,
-        ),
+        "provider_events_sha256": provider_events_sha,
+        "provider_phase": provider_phase,
     }
 
 
@@ -465,17 +562,31 @@ def _fresh_operation_binding(
             "fresh review parent identity drifted"
         )
     child = children[0]
+    awaiting = child.state == "awaiting-callback"
+    progressed = child.state in {"verifying", "finalizing", "complete"}
+    callback_identity = (
+        child.accepted_callback_id,
+        child.accepted_callback_kind,
+        child.accepted_callback_sha256,
+    )
     if (
         child.spec.owner_id != operation_id
         or child.spec.route != parent.spec.route
         or child.lane_id != parent.lane_id
-        or child.state != "awaiting-callback"
+        or not (awaiting or progressed)
         or child.resources != OwnedResources()
         or child.pending_effect
+        or child.effect_outcome != EffectOutcome.NONE
         or child.effect_id
-        or child.accepted_callback_id
-        or child.accepted_callback_kind
-        or child.accepted_callback_sha256
+        or (awaiting and any(callback_identity))
+        or (
+            progressed
+            and (
+                child.accepted_callback_kind != "review"
+                or not IDENTIFIER.fullmatch(child.accepted_callback_id)
+                or not SHA256.fullmatch(child.accepted_callback_sha256)
+            )
+        )
     ):
         raise PostVerificationReviewDriveError(
             "fresh review round identity drifted"
@@ -536,6 +647,93 @@ def _fresh_lanes(
             "fresh review operation set is ambiguous"
         )
     return expected_fresh_id, bindings
+
+
+_ROUND_SUCCESSORS = {
+    "awaiting-callback": {"verifying", "finalizing", "complete"},
+    "verifying": {"finalizing", "complete"},
+    "finalizing": {"complete"},
+    "complete": set(),
+}
+_ROUND_PROGRESS_FIELDS = frozenset(
+    {
+        "round_state",
+        "round_revision",
+        "round_record_sha256",
+        "accepted_callback_id",
+        "accepted_callback_sha256",
+        "callback_receipt_sha256",
+        "provider_events_sha256",
+        "provider_phase",
+    }
+)
+
+
+def _monotonic_fresh_lane(
+    previous: Mapping[str, object], current: Mapping[str, object]
+) -> bool:
+    """Prove that one prepared lane only advanced through callback completion."""
+
+    if set(previous) != set(current) or any(
+        previous.get(key) != value
+        for key, value in current.items()
+        if key not in _ROUND_PROGRESS_FIELDS
+    ):
+        return False
+    old_state = str(previous.get("round_state") or "")
+    new_state = str(current.get("round_state") or "")
+    if old_state not in _ROUND_SUCCESSORS or new_state not in _ROUND_SUCCESSORS:
+        return False
+    if old_state == new_state:
+        return previous == current
+    if new_state not in _ROUND_SUCCESSORS[old_state]:
+        return False
+    old_revision = previous.get("round_revision")
+    new_revision = current.get("round_revision")
+    if (
+        type(old_revision) is not int
+        or type(new_revision) is not int
+        or new_revision <= old_revision
+        or previous.get("round_record_sha256")
+        == current.get("round_record_sha256")
+    ):
+        return False
+    old_phase = previous.get("provider_phase")
+    new_phase = current.get("provider_phase")
+    callback_fields = (
+        "accepted_callback_id",
+        "accepted_callback_sha256",
+        "callback_receipt_sha256",
+    )
+    if old_state == "awaiting-callback":
+        return (
+            old_phase == "awaiting-result"
+            and not any(previous.get(field) for field in callback_fields)
+            and new_phase == "result-published"
+            and all(current.get(field) for field in callback_fields)
+        )
+    return (
+        old_phase == new_phase == "result-published"
+        and previous.get("provider_events_sha256")
+        == current.get("provider_events_sha256")
+        and all(
+            previous.get(field) == current.get(field)
+            for field in callback_fields
+        )
+    )
+
+
+def _monotonic_fresh_lanes(
+    previous: object, current: list[dict[str, object]]
+) -> bool:
+    return (
+        isinstance(previous, list)
+        and len(previous) == len(current)
+        and all(
+            isinstance(before, dict) and _monotonic_fresh_lane(before, after)
+            for before, after in zip(previous, current)
+        )
+    )
 
 
 def synchronize_post_fresh_publication(
@@ -670,7 +868,9 @@ def synchronize_post_fresh_publication(
             and sync.get("continuation_receipt_sha256")
             != sha256(continuation_path.read_bytes())
         )
-        or sync.get("fresh_lane_bindings") != fresh_bindings
+        or not _monotonic_fresh_lanes(
+            sync.get("fresh_lane_bindings"), fresh_bindings
+        )
         or sync.get("fresh_marker_sha256") != marker_sha
         or sync.get("source_gate_sha256") != sha256(source_gate_raw)
         or sync.get("target_gate_sha256") != sha256(target_gate_raw)
@@ -680,6 +880,9 @@ def synchronize_post_fresh_publication(
         raise PostVerificationReviewDriveError(
             "post-fresh publication binding drifted"
         )
+    if sync.get("fresh_lane_bindings") != fresh_bindings:
+        sync = {**sync, "fresh_lane_bindings": fresh_bindings}
+        sync["binding_sha256"] = _binding(sync)
     gate_controller = ReviewGateController(gate_path.parent, object(), store)
     gate_controller.synchronize_fresh_publication(
         source_sha256=str(sync["source_gate_sha256"]),
