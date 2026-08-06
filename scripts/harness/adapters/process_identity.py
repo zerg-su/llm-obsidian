@@ -9,10 +9,22 @@ import os
 import re
 import stat
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 
 IdentityProbe = Callable[[int], tuple[int, str]]
+
+
+@dataclass(frozen=True)
+class DarwinProcessSnapshot:
+    """Read-only libproc facts needed to reject stale ownership."""
+
+    pid: int
+    parent_pid: int
+    process_group: int
+    status: int
+    started_at: str
 
 
 def linux_process_record(pid: int) -> tuple[int, str, str]:
@@ -122,7 +134,7 @@ def darwin_boot_id(
         return "unavailable"
 
 
-def darwin_process_fields(pid: int) -> tuple[int, str]:
+def darwin_process_snapshot(pid: int) -> DarwinProcessSnapshot:
     class ProcBsdInfo(ctypes.Structure):
         _fields_ = [
             ("pbi_flags", ctypes.c_uint32),
@@ -171,8 +183,18 @@ def darwin_process_fields(pid: int) -> tuple[int, str]:
         raise OSError(code or errno.EIO, os.strerror(code or errno.EIO))
     if read < size or info.pbi_pid != pid:
         raise OSError(errno.EIO, "invalid Darwin process identity")
-    started = f"{info.pbi_start_tvsec}:{info.pbi_start_tvusec}"
-    return int(info.pbi_pgid), started
+    return DarwinProcessSnapshot(
+        pid=int(info.pbi_pid),
+        parent_pid=int(info.pbi_ppid),
+        process_group=int(info.pbi_pgid),
+        status=int(info.pbi_status),
+        started_at=f"{info.pbi_start_tvsec}:{info.pbi_start_tvusec}",
+    )
+
+
+def darwin_process_fields(pid: int) -> tuple[int, str]:
+    snapshot = darwin_process_snapshot(pid)
+    return snapshot.process_group, snapshot.started_at
 
 
 def darwin_process_record(

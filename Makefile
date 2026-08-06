@@ -3,10 +3,29 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+.PHONY: test-lifecycle-simulator test-lifecycle-simulator-body test-lifecycle-simulator-extended test-harness test-harness-coverage test-code-quality code-quality-audit test-model-routing test-session-preflight test-model-literal-lint test-upgrade-preflight test-task-sessions test-docs
+
+test-lifecycle-simulator:
+	@./scripts/with-timeout 60 $(MAKE) --no-print-directory test-lifecycle-simulator-body
+
+test-lifecycle-simulator-body:
+	@echo "=== deterministic lifecycle simulator (fast) ==="
+	@python3 tests/harness/test_lifecycle_simulator_oracle.py
+	@python3 tests/harness/test_lifecycle_simulator_world.py
+	@python3 tests/harness/test_lifecycle_scheduler.py
+	@python3 tests/harness/test_lifecycle_crash_matrix.py
+	@python3 tests/harness/test_lifecycle_gate_budget.py
+	@python3 tests/harness/test_lifecycle_regression_corpus.py
+	@python3 tests/harness/test_lifecycle_provider_conformance.py
+	@python3 tests/harness/lifecycle_gate.py --mode fast
+
+test-lifecycle-simulator-extended: test-lifecycle-simulator
+	@echo "=== deterministic lifecycle simulator (extended) ==="
+	@./scripts/with-timeout 300 python3 tests/harness/lifecycle_gate.py --mode extended
 
 test-harness:
 	@echo "=== harness contracts and replay regressions ==="
+	@$(MAKE) --no-print-directory test-lifecycle-simulator
 	@python3 tests/harness/test_contracts.py
 	@python3 tests/harness/test_contract_boundaries.py
 	@python3 tests/harness/test_contract_state_edge_matrix.py
@@ -22,6 +41,10 @@ test-harness:
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
+	@python3 tests/harness/test_darwin_exact_process_status.py
+	@python3 tests/harness/test_provider_events.py
+	@python3 tests/harness/test_ephemeral_provider_conformance.py
+	@python3 tests/harness/test_delivery_boundary.py
 	@python3 tests/harness/test_callbacks.py
 	@python3 tests/harness/test_callback_submit_recovery.py
 	@python3 tests/harness/test_callback_submit_recovery_runtime.py
@@ -38,16 +61,29 @@ test-harness:
 	@python3 tests/harness/test_review_resolution.py
 	@python3 tests/harness/test_review_resolution_bundle.py
 	@python3 tests/harness/test_review_delta_packet.py
+	@python3 tests/harness/test_review_chunked_delta.py
 	@python3 tests/harness/test_review_telemetry.py
 	@python3 tests/harness/test_review_transport.py
+	@python3 tests/harness/test_review_attempt.py
+	@python3 tests/harness/test_exact_head_review_attempt.py
+	@python3 tests/harness/test_verification_attempt.py
+	@python3 tests/test_split_components.py
+	@python3 tests/harness/test_split_activation.py
+	@python3 tests/harness/test_split_evidence.py
+	@python3 tests/harness/test_verification_receipt.py
 	@python3 tests/harness/test_review_program.py
 	@python3 tests/harness/test_review_topology.py
 	@python3 tests/harness/test_review_vertical.py
 	@python3 tests/harness/test_review_gate.py
 	@python3 tests/harness/test_runtime_sessions.py
 	@python3 tests/harness/test_runtime_task_summary.py
+	@python3 tests/harness/test_review_drive_rearm.py
+	@python3 tests/harness/test_post_verification_review_drive.py
 	@python3 tests/harness/test_runtime_research.py
 	@python3 tests/harness/test_review_finalization.py
+	@python3 tests/harness/test_finalization_ledger.py
+	@python3 tests/harness/test_finalization_routing.py
+	@python3 tests/harness/test_finalization_dsl.py
 	@python3 tests/harness/test_task_review_mechanism_recovery.py
 	@python3 tests/harness/test_task_review_flow_units.py
 	@python3 tests/harness/test_task_escalation_records.py
@@ -97,6 +133,8 @@ test-upgrade-preflight:
 help:
 	@echo "llm-obsidian developer targets:"
 	@echo "  make test              Run all vault + retrieval + hook tests"
+	@echo "  make test-lifecycle-simulator  Run the fast deterministic lifecycle gate"
+	@echo "  make test-lifecycle-simulator-extended  Run the bounded extended sweep"
 	@echo "  make test-harness-coverage  Audit statement-line coverage and ratchet critical floors"
 	@echo "  make test-docs          Validate the Russian handbook, examples, inventory, and PipelineSpec"
 	@echo "  make eval-smoke        Validate and grade checked-in agent eval fixtures"
@@ -195,6 +233,7 @@ test-pipeline-runners:
 	@python3 tests/test_dispatch_runner.py
 	@python3 tests/test_pipeline_step_submit.py
 	@python3 tests/test_reap_runner.py
+	@python3 tests/test_reap_effect_reconciliation.py
 	@python3 tests/test_queue_session_exit.py
 
 retrieval-experiment:
@@ -328,6 +367,8 @@ test-plan-capture:
 	@bash tests/test_plan_capture.sh
 
 test-stop-hook:
+	@echo "=== test_stop_hook_latency_gate.py ==="
+	@python3 tests/test_stop_hook_latency_gate.py
 	@echo "=== test_stop_hook.sh ==="
 	@bash tests/test_stop_hook.sh
 

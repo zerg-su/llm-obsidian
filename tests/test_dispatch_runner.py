@@ -21,11 +21,30 @@ spec = importlib.util.spec_from_file_location("dispatch_runner", SCRIPT)
 assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+review_spec = importlib.util.spec_from_file_location(
+    "task_review_runner_public", ROOT / "scripts" / "task-review-runner.py"
+)
+assert review_spec and review_spec.loader
+review_runner = importlib.util.module_from_spec(review_spec)
+review_spec.loader.exec_module(review_runner)
 from harness.contracts import OwnedResources
+from harness.finalization_ledger import FinalizationLedger
+from harness.split_activation import split_child_policy, split_child_policy_payload
+from harness.split_contracts import (
+    ChildBudget,
+    FrozenSplitBudget,
+    JoinSpec,
+    ParentContract,
+    SplitCandidate,
+    build_split_preview,
+)
+from harness.review_finalization import task_finalization_policy
 from harness.runtime_sessions import RuntimeSessionResult
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.workflows.dispatch import operation_spec
+from task_contract import normalize as normalize_task_meta
+from task_review_flow import _exact_head_attempt_enabled
 
 failures: list[str] = []
 
@@ -69,12 +88,17 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     (vault / "wiki" / "plans").mkdir(parents=True)
     (vault / "wiki" / "context").mkdir(parents=True)
     (vault / "skills" / "dispatch" / "references").mkdir(parents=True)
+    (vault / "skills" / "review").mkdir(parents=True)
     (vault / "config").mkdir(parents=True)
     (vault / "scripts").mkdir(parents=True)
     shutil.copytree(ROOT / "scripts" / "harness", vault / "scripts" / "harness")
     shutil.copyfile(
         ROOT / "skills" / "dispatch" / "references" / "task-prompt-template.md",
         vault / "skills" / "dispatch" / "references" / "task-prompt-template.md",
+    )
+    shutil.copyfile(
+        ROOT / "skills" / "review" / "SKILL.md",
+        vault / "skills" / "review" / "SKILL.md",
     )
     shutil.copyfile(ROOT / "config" / "model-routing.toml", vault / "config" / "model-routing.toml")
     shutil.copyfile(
@@ -181,6 +205,48 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     config = runner.load_dispatch_config(vault, target)
     session, effective = runner.resolved_routes(request, persist=False)
+    alias_raw = json.loads(json.dumps(raw_request))
+    alias_raw["wiki_context"][0]["title"] = "Human display title"
+    alias_raw["wiki_context"][0]["context_path"] = (
+        "wiki/context/Dispatch Context.md"
+    )
+    alias_request = runner.validate_request(alias_raw)
+    child_fixture = {
+        "surface": "22222222-2222-4222-8222-222222222222",
+    }
+    with mock.patch(
+        "dispatch_workspace.run_command",
+        return_value=subprocess.CompletedProcess([], 0, "", ""),
+    ) as log_write:
+        runner.dispatch_log(alias_request, effective, child_fixture)
+    logged = json.loads(log_write.call_args.kwargs["input_text"])["log_entry"]
+    check(
+        "dispatch log links the exact context stem with the display title as alias",
+        "[[Dispatch Context|Human display title]]" in logged
+        and "[[Human display title]]" not in logged,
+        logged,
+    )
+    context_file = vault / "wiki" / "context" / "Dispatch Context.md"
+    context_bytes = context_file.read_bytes()
+    context_file.unlink()
+    try:
+        with mock.patch("dispatch_workspace.run_command") as missing_write:
+            expect_error(
+                "dispatch log fails closed if the exact context target disappears",
+                lambda: runner.dispatch_log(
+                    alias_request,
+                    effective,
+                    child_fixture,
+                ),
+                "must exist exactly",
+            )
+            check(
+                "missing exact context target reaches no vault write",
+                missing_write.call_count == 0,
+                str(missing_write.call_args_list),
+            )
+    finally:
+        context_file.write_bytes(context_bytes)
     prompt = runner.render_task_prompt(request, config)
     check("route inherits captured runtime", effective["runtime"] == "codex")
     check("route inherits captured model", effective["model"] == "gpt-5.6-sol")
@@ -247,6 +313,56 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         "workspace dispatch remains an explicit placement",
         workspace_request["placement"] == "workspace"
         and "scripts/harness-cli.py" in workspace_prompt,
+    )
+    split_parent = ParentContract(
+        plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
+        outcome_contract_sha256=workspace_request["outcome_contract_sha256"],
+        evidence_ids=("fixture-green",),
+        non_goals=("No external effects.",),
+    )
+    split_candidate = SplitCandidate(
+        subplan_id="whole-plan",
+        title="Whole plan",
+        pipeline="lifecycle/default",
+        route_alias="task-default",
+        owned_paths=("README.md",),
+        evidence_ids=("fixture-green",),
+        dependencies=(),
+        inherited_non_goals=split_parent.non_goals,
+        budget=ChildBudget(200_000, 1_800),
+        independence_proven=True,
+    )
+    split_manifest = build_split_preview(
+        parent=split_parent,
+        candidates=(split_candidate,),
+        frozen_budget=FrozenSplitBudget(1, 1, 200_000, 1_800),
+        requested_max_parallel=1,
+        coordination_cost=0,
+        parallel_benefit=1,
+        fallback_pipeline="lifecycle/default",
+        fallback_route_alias="task-default",
+        join=JoinSpec(),
+    ).manifest
+    split_raw = json.loads(json.dumps(workspace_raw))
+    split_raw["split"] = split_child_policy_payload(
+        split_child_policy(split_manifest, split_manifest.subplans[0])
+    )
+    split_request = runner.validate_request(split_raw)
+    split_prompt = runner.render_task_prompt(split_request, config)
+    check(
+        "Split child dispatch persists a frozen child-local policy",
+        split_request["placement"] == "workspace"
+        and split_request["split"]["manifest_sha256"]
+        == split_manifest.manifest_sha256
+        and "## Frozen Split child contract" in split_prompt
+        and "`README.md`" in split_prompt,
+    )
+    wrong_split_placement = json.loads(json.dumps(split_raw))
+    wrong_split_placement["placement"] = "split"
+    expect_error(
+        "Split child cannot fall back into the coordinator split",
+        lambda: runner.validate_request(wrong_split_placement),
+        "requires workspace placement",
     )
     unknown_reap = json.loads(json.dumps(raw_request))
     unknown_reap["reap"]["mode"] = "shared"
@@ -382,6 +498,13 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
                 "review_mode": "simple",
                 "human_gates": ["initial-approval"],
                 "terminal_outcomes": ["completed", "attention-required"],
+                "finalization_policy": {
+                    "max_cycles": 1,
+                    "add_independent_model_after": 4,
+                    "execution": "ephemeral",
+                    "primary_route_alias": "finalization-primary",
+                    "independent_route_alias": "finalization-independent",
+                },
             },
             sort_keys=True,
         ),
@@ -522,6 +645,8 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and "Inherited harness permissions: cmux-target:policy-only"
         in custom_contract["summary"]
         and "Inherited harness side effects: cmux-surface:policy-only"
+        in custom_contract["summary"]
+        and "Finalization: cycles<=1; independent-after=4"
         in custom_contract["summary"]
         and request["origin_surface"] in custom_contract["summary"]
         and request["origin_session"] in custom_contract["summary"]
@@ -983,9 +1108,106 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check(
         "writer output has exact strict v4 schema parity",
-        set(meta) == set(v4_schema["required"])
+        set(meta) == set(v4_schema["required"]) | {"finalization_policy"}
         and set(meta) <= set(v4_schema["properties"])
         and v4_schema["additionalProperties"] is False,
+    )
+    check(
+        "writer persists the bounded additive finalization policy",
+        meta["finalization_policy"]
+        == {
+            "max_cycles": 5,
+            "add_independent_model_after": 3,
+            "execution": "ephemeral",
+            "primary_route_alias": "finalization-primary",
+            "independent_route_alias": "finalization-independent",
+        },
+    )
+    normalized_meta = normalize_task_meta(meta)
+    check(
+        "schema-valid generated v4 tasks select the exact-attempt protocol",
+        normalized_meta["version"] == 4
+        and normalized_meta["finalization_policy"]
+        == meta["finalization_policy"]
+        and _exact_head_attempt_enabled(meta)
+        and set(meta["review_policy"])
+        == {
+            "mode",
+            "cross_model",
+            "runtime",
+            "model",
+            "effort",
+            "max_verify_iterations",
+            "verification_profile",
+            "verification_profile_sha256",
+        },
+    )
+    custom_meta = runner.write_task_files(
+        approved_custom_request,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
+    )
+    normalized_custom = runner.normalize_task_contract(custom_meta)
+    custom_finalization = task_finalization_policy(custom_meta)
+    custom_spec_value, custom_compiled, custom_ceiling, _custom_card = (
+        runner.custom_contract_for_request(approved_custom_request)
+    )
+    custom_ledger = FinalizationLedger(
+        tmp / "custom-finalization-ledger",
+        lineage_id=str(uuid.UUID(int=900)),
+        origin_task_id=str(uuid.UUID(int=901)),
+        plan_sha256=custom_meta["approved_plan_sha256"],
+        outcome_contract_sha256=custom_meta["outcome_contract_sha256"],
+        max_cycles=custom_meta["finalization_policy"]["max_cycles"],
+    )
+    check(
+        "dispatch preserves an approved lower custom finalization ceiling",
+        custom_spec_value.finalization_policy is not None
+        and custom_meta["finalization_policy"]
+        == runner.pipeline_spec_payload(custom_spec_value)["finalization_policy"]
+        == normalized_custom["finalization_policy"]
+        and custom_finalization == custom_spec_value.finalization_policy
+        and custom_ledger.max_cycles == custom_spec_value.finalization_policy.max_cycles
+        and custom_meta["pipeline_policy"]["definition_sha256"]
+        == custom_compiled.definition_sha256,
+        custom_meta,
+    )
+    legacy_payload = json.loads(json.dumps(custom_payload))
+    legacy_payload.pop("finalization_policy")
+    legacy_spec = runner.parse_pipeline_spec(legacy_payload)
+    legacy_compiled = runner.compile_custom_spec(
+        legacy_spec,
+        runner.builtin_registry(),
+        policy=custom_ceiling,
+        capabilities=("route:resolved",),
+    )
+    legacy_request = dict(approved_custom_request)
+    legacy_request["_approved_custom_contract"] = (
+        legacy_spec,
+        legacy_compiled,
+        custom_ceiling,
+        runner.render_custom_approval(
+            legacy_spec, legacy_compiled, policy=custom_ceiling
+        ),
+    )
+    legacy_meta = runner.write_task_files(
+        legacy_request,
+        config,
+        session,
+        effective,
+        identity,
+        {"surface_id": raw_request["origin_surface"], "surface_ref": "surface:1"},
+        {"surface": "22222222-2222-4222-8222-222222222222", "surface_ref": "surface:2"},
+    )
+    check(
+        "custom specs without the additive policy retain the code-owned default",
+        legacy_spec.finalization_policy is None
+        and legacy_meta["finalization_policy"] == meta["finalization_policy"],
+        legacy_meta,
     )
     expert_meta = runner.write_task_files(
         expert,
@@ -1137,6 +1359,81 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and handoff.returncode == 0,
         detected.stderr + handoff.stderr,
     )
+
+    class PublicReviewRuntime:
+        def __init__(self, root: Path) -> None:
+            self.store = OperationStore(root)
+            self.started = 0
+
+        def start(self, runtime_request, *, on_surface_opened=None):
+            self.started += 1
+            record = self.store.create(
+                runtime_request.spec,
+                lane_id=runtime_request.lane_id,
+                run_id=runtime_request.run_id,
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "preflight"
+            )
+            self.store.transition(
+                record.spec.owner_id, record.spec.operation_id, "starting"
+            )
+            supervisor = OperationSupervisor(
+                self.store, record.spec.owner_id, record.spec.operation_id
+            )
+            supervisor.bind_resources(
+                OwnedResources("33333333-3333-4333-8333-333333333333")
+            )
+            opened = RuntimeSessionResult(
+                supervisor.read(), "surface-opened", checkpoint="checkpoint-1"
+            )
+            if on_surface_opened is not None:
+                on_surface_opened(opened)
+            supervisor.transition("running")
+            final = supervisor.transition("awaiting-callback")
+            return RuntimeSessionResult(
+                final, "started", checkpoint="checkpoint-1"
+            )
+
+        def register_callback_target(self, *_args: object) -> None:
+            return None
+
+    public_runtime = PublicReviewRuntime(vault / ".vault-meta" / "harness")
+    public_review = review_runner.run_task_review(
+        worktree, runtime_manager=public_runtime
+    )
+    public_gate = json.loads(
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "review-data"
+            / request_id
+            / request_id
+            / "review-gate.json"
+        ).read_text(encoding="utf-8")
+    )
+    public_ledger = json.loads(
+        (
+            vault
+            / ".vault-meta"
+            / "harness"
+            / "finalization-ledger"
+            / f"{request_id}.json"
+        ).read_text(encoding="utf-8")
+    )
+    check(
+        "generated normalized task reaches the public exact-attempt runner",
+        public_review["status"] == "reviewing"
+        and public_runtime.started == len(public_review["lanes"])
+        and public_runtime.started > 0
+        and public_gate["attempt"]["identity"]["cycle"] == 1
+        and public_gate["attempt"]["identity"]["exact_head_sha"]
+        == git("rev-parse", "HEAD", cwd=worktree)
+        and public_ledger["max_cycles"] == 5
+        and len(public_ledger["cycles"]) == 1,
+        (public_review, public_gate, public_ledger),
+    )
     check("runner writes one plan branch", (worktree / ".task-prompt.md").read_text().count("## Approved plan") == 1)
     check("runner metadata validates", runner.normalize_task_contract(meta)["interaction_policy"] == "unattended")
     check("runner metadata records split placement", meta["surface_policy"]["placement"] == "split")
@@ -1162,6 +1459,12 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and workspace_meta["task_workspace"] == "44444444-4444-4444-8444-444444444444"
         and workspace_meta["task_window"] == "55555555-5555-4555-8555-555555555555"
         and workspace_meta["reap_policy"]["mode"] == "shared",
+    )
+    split_meta = {**workspace_meta, "split_policy": split_request["split"]}
+    check(
+        "task-session metadata preserves the exact Split manifest slice",
+        runner.normalize_task_contract(split_meta)["split_policy"]
+        == split_request["split"],
     )
 
     duplicate = json.loads(json.dumps(raw_request))

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "effect_counts": {
+    "dispatches": 0,
+    "provider_calls": 0,
+    "surfaces_created": 0,
+    "worktrees_created": 0
+  },
+  "receipts": [
+    {"invalid_class": "stale-digest", "accepted": false},
+    {"invalid_class": "uncovered-evidence", "accepted": false},
+    {"invalid_class": "overlapping-ownership", "accepted": false},
+    {"invalid_class": "dependency-cycle", "accepted": false},
+    {"invalid_class": "missing-join", "accepted": false},
+    {"invalid_class": "weakened-non-goal", "accepted": false},
+    {"invalid_class": "unregistered-pipeline", "accepted": false},
+    {"invalid_class": "budget-exceeded", "accepted": false}
+  ]
+}

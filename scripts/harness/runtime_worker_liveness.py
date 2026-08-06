@@ -393,20 +393,22 @@ class RuntimeWorkerLivenessMixin:
             if receipt_sha256
             else ArtifactEvidence()
         )
+        # The OperationStore is the lifecycle authority. Refresh the durable
+        # liveness projection on every callback observation so a worker resumed
+        # after a succeeded continuation cannot retain an older `starting`
+        # revision and misclassify the current awaiting-callback generation.
+        self.liveness_controller.observe(
+            LivenessEvidence(
+                observed_at=observed_at,
+                process_status=process_status,
+                operation_revision=record.revision,
+                operation_state=record.state,
+                callback_sha256=callback_artifact.sha256,
+                receipt_sha256=receipt_artifact.sha256,
+            ),
+            self.liveness_policy,
+        )
         current = self.liveness_controller.current_state()
-        if current is None:
-            self.liveness_controller.observe(
-                LivenessEvidence(
-                    observed_at=observed_at,
-                    process_status=process_status,
-                    operation_revision=record.revision,
-                    operation_state=record.state,
-                    callback_sha256=callback_artifact.sha256,
-                    receipt_sha256=receipt_artifact.sha256,
-                ),
-                self.liveness_policy,
-            )
-            current = self.liveness_controller.current_state()
         if current is None:
             self.callback_submit_attention("callback-submit-evidence-malformed")
             return
@@ -550,12 +552,16 @@ class RuntimeWorkerLivenessMixin:
                     old_handle.process_identity,
                     signal.SIGTERM,
                 )
-                deadline = time.monotonic() + 2.0
-                while time.monotonic() < deadline:
+                monotonic_clock = getattr(
+                    self, "monotonic_clock", time.monotonic
+                )
+                sleeper = getattr(self, "sleeper", time.sleep)
+                deadline = monotonic_clock() + 2.0
+                while monotonic_clock() < deadline:
                     waited, _status = os.waitpid(old_handle.pid, os.WNOHANG)
                     if waited == old_handle.pid:
                         break
-                    time.sleep(0.05)
+                    sleeper(0.05)
                 else:
                     self.process.signal_owned_child_group(
                         old_handle.process_group,
@@ -683,7 +689,7 @@ class RuntimeWorkerLivenessMixin:
                     callback_sha256 = ""
             decision = self.liveness_controller.observe(
                 LivenessEvidence(
-                    observed_at=time.time(),
+                    observed_at=getattr(self, "wall_clock", time.time)(),
                     process_status=process_status,
                     operation_revision=record.revision,
                     operation_state=record.state,

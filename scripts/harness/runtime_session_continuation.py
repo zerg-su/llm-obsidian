@@ -97,6 +97,34 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     return "unknown"
 
 
+def await_initial_input_ready(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+    observation_limit: int = 300,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> bool:
+    """Wait until the native provider editor can safely receive first input."""
+
+    if observation_limit < 1:
+        raise ValueError("initial input observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("initial input observation interval cannot be negative")
+    for observation in range(observation_limit):
+        state = classify_continuation_screen(
+            runtime, port.read(surface_id), ""
+        )
+        if state == "idle":
+            return True
+        if state == "permission":
+            return False
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    return False
+
+
 def deliver_continuation(
     port: ContinuationPort,
     *,

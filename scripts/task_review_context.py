@@ -34,7 +34,7 @@ from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, resolve, session_from_meta
 from outcome_contract import OutcomeContractError, extract_from_bytes
 from task_contract import normalize
-from task_review_delta_packet import build_delta_packet
+from task_review_delta_packet import DeltaPacket, build_delta_packet
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
@@ -296,6 +296,76 @@ def _head_diff_input(worktree: Path) -> ContextInput:
         diff = diff[:65_000] + b"\n[diff truncated; inspect product HEAD]\n"
     return ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
 
+
+def _delta_inputs(
+    packet: DeltaPacket,
+    *,
+    delta_source: str,
+    runtime_root: Path,
+) -> tuple[ContextInput, ...]:
+    """Materialize one legacy-inline or v2 pointer-backed delta packet."""
+
+    inputs = [
+        ContextInput(
+            "fix-delta.manifest.json",
+            delta_source + "#manifest",
+            packet.manifest,
+            role="fix",
+        )
+    ]
+    delta_schema = json.loads(packet.manifest)["schema_version"]
+    if delta_schema == 1:
+        inputs.extend(
+            ContextInput(
+                part.name,
+                delta_source + f"#part={index}/{len(packet.parts)}",
+                part.content,
+                role="fix",
+            )
+            for index, part in enumerate(packet.parts, start=1)
+        )
+        return tuple(inputs)
+    try:
+        resolved_runtime = runtime_root.expanduser().resolve(strict=True)
+        pointer_root = resolved_runtime
+        for component in (
+            "pointers",
+            "fix-delta-v2",
+            hashlib.sha256(packet.manifest).hexdigest(),
+        ):
+            pointer_root = pointer_root / component
+            if pointer_root.is_symlink():
+                raise TaskReviewError(
+                    "review delta pointer root cannot be a symlink"
+                )
+            pointer_root.mkdir(mode=0o700, exist_ok=True)
+            if (
+                pointer_root.is_symlink()
+                or not pointer_root.is_dir()
+                or resolved_runtime not in pointer_root.resolve().parents
+            ):
+                raise TaskReviewError(
+                    "review delta pointer root escaped its owner"
+                )
+            pointer_root.chmod(0o700)
+    except OSError as exc:
+        raise TaskReviewError(
+            "review delta pointer root is unavailable"
+        ) from exc
+    for part in packet.parts:
+        pointer = pointer_root / part.name
+        _atomic_bytes(pointer, part.content)
+        inputs.append(
+            ContextInput.pointer(
+                part.name,
+                str(pointer.resolve(strict=True)),
+                byte_count=len(part.content),
+                content_sha256=hashlib.sha256(part.content).hexdigest(),
+                role="fix",
+            )
+        )
+    return tuple(inputs)
+
 def _context(
     meta: Mapping[str, Any],
     vault: Path,
@@ -509,6 +579,9 @@ def _context(
             resolution_bundle.fix_delta,
             resolution_bundle.resolution.reviewed_head_sha,
             resolution_bundle.resolution.resolved_head_sha,
+            review_identity_sha256=(
+                resolution_bundle.review_identity_sha256
+            ),
         )
         resolution_payload = {
             "schema_version": 1,
@@ -536,23 +609,12 @@ def _context(
             f"{resolution_bundle.resolution.reviewed_head_sha}.."
             f"{resolution_bundle.resolution.resolved_head_sha}"
         )
-        inputs.append(
-            ContextInput(
-                "fix-delta.manifest.json",
-                delta_source + "#manifest",
-                delta_packet.manifest,
-                role="fix",
-            )
-        )
         inputs.extend(
-            ContextInput(
-                part.name,
-                delta_source
-                + f"#part={index}/{len(delta_packet.parts)}",
-                part.content,
-                role="fix",
+            _delta_inputs(
+                delta_packet,
+                delta_source=delta_source,
+                runtime_root=runtime_root,
             )
-            for index, part in enumerate(delta_packet.parts, start=1)
         )
         inputs.append(
             ContextInput(

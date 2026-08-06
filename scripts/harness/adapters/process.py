@@ -13,10 +13,12 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from .process_identity import (
+    DarwinProcessSnapshot,
     capture_identity as _capture_identity,
     current_identity as _current_identity,
     darwin_boot_id as _darwin_boot_id,
     darwin_process_fields as _darwin_process_fields,
+    darwin_process_snapshot as _darwin_process_snapshot,
     darwin_process_record as _darwin_process_record,
     darwin_session_file_id as _darwin_session_file_id,
     darwin_sysctl_boot_id as _darwin_sysctl_boot_id,
@@ -34,6 +36,7 @@ from .process_launch import (
     write_json as _write_json,
 )
 from .process_signals import (
+    exact_statuses as _exact_statuses,
     group_has_other_members as _group_has_other_members,
     pid_status as _pid_status,
     process_status as _process_status,
@@ -87,6 +90,10 @@ class ProcessAdapter:
     @staticmethod
     def _darwin_process_fields(pid: int) -> tuple[int, str]:
         return _darwin_process_fields(pid)
+
+    @staticmethod
+    def _darwin_process_snapshot(pid: int) -> DarwinProcessSnapshot:
+        return _darwin_process_snapshot(pid)
 
     @staticmethod
     def _darwin_process_record(pid: int) -> tuple[int, str, str]:
@@ -163,6 +170,7 @@ class ProcessAdapter:
         runtime_home: Path | None = None,
         research_request_sha256: str = "",
         callback_wake: str = "",
+        initial_input_pointer: Path | None = None,
     ) -> SurfaceLaunch:
         return _prepare_surface_launch(
             argv=argv,
@@ -185,6 +193,7 @@ class ProcessAdapter:
             runtime_home=runtime_home,
             research_request_sha256=research_request_sha256,
             callback_wake=callback_wake,
+            initial_input_pointer=initial_input_pointer,
             json_writer=self._write_json,
             shebang_resolver=self.env_shebang_interpreter,
             error_type=ProcessError,
@@ -210,6 +219,23 @@ class ProcessAdapter:
     def pid_status(pid: int, identity: str = "") -> str:
         return _pid_status(
             pid, identity, identity_probe=ProcessAdapter._current_identity
+        )
+
+    @staticmethod
+    def exact_statuses(
+        process_group: int,
+        process_identity: str,
+        supervisor_pid: int,
+        supervisor_identity: str,
+    ) -> tuple[str, str]:
+        return _exact_statuses(
+            process_group,
+            process_identity,
+            supervisor_pid,
+            supervisor_identity,
+            platform=sys.platform,
+            identity_probe=ProcessAdapter._current_identity,
+            darwin_snapshot_probe=ProcessAdapter._darwin_process_snapshot,
         )
 
     @staticmethod

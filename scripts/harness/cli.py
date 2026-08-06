@@ -337,6 +337,32 @@ def _cancel_or_close(
     return store.transition(owner, operation_id, terminal_state)
 
 
+def _review_recovery_kind(
+    gate: object, response_path: Path
+) -> str:
+    """Select exact callback recovery before the legacy response boundary."""
+
+    if not isinstance(gate, dict):
+        return ""
+    attempt = gate.get("attempt")
+    if (
+        gate.get("status") == "reviewing"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and isinstance(attempt, dict)
+        and attempt.get("status") == "awaiting-callback"
+    ):
+        return "accepted-exact-callbacks"
+    if not response_path.is_file():
+        return ""
+    if gate.get("status") in {
+        "verifying",
+        "recovery-verification-required",
+        "fresh-boundary-authorized",
+    }:
+        return "legacy-finalizing"
+    return ""
+
+
 def _recover_finalizing_review_if_present(
     store: OperationStore,
     owner: str,
@@ -373,7 +399,6 @@ def _recover_finalizing_review_if_present(
     if (
         session.get("operation_id") != operation_id
         or not worktree.is_absolute()
-        or not response_path.is_file()
     ):
         return False
     gate_path = (
@@ -393,11 +418,8 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch recovery review gate is invalid"
         ) from exc
-    if not isinstance(gate, dict) or gate.get("status") not in {
-        "verifying",
-        "recovery-verification-required",
-        "fresh-boundary-authorized",
-    }:
+    recovery_kind = _review_recovery_kind(gate, response_path)
+    if not recovery_kind:
         return False
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
@@ -411,7 +433,14 @@ def _recover_finalizing_review_if_present(
     module = importlib.util.module_from_spec(module_spec)
     try:
         module_spec.loader.exec_module(module)
-        recover = getattr(module, "recover_finalizing_review")
+        recover = getattr(
+            module,
+            (
+                "recover_task_review_for_mechanism"
+                if recovery_kind == "accepted-exact-callbacks"
+                else "recover_finalizing_review"
+            ),
+        )
         runtime = runtime_manager or RuntimeSessionManager.for_root(
             vault,
             store_root=store_root,
@@ -423,11 +452,128 @@ def _recover_finalizing_review_if_present(
         ) from exc
     if not isinstance(receipt, dict) or receipt.get("status") not in {
         "approved",
+        "changes-requested",
         "verifying",
         "reviewing",
     }:
         raise RuntimeSessionError(
             "dispatch finalizing review recovery did not make bounded progress"
+        )
+    return True
+
+
+def _recover_post_verification_review_drive_if_present(
+    store: OperationStore,
+    owner: str,
+    operation_id: str,
+    *,
+    process_adapter: object,
+    cmux_adapter: object,
+    runtime_manager: object | None = None,
+) -> bool:
+    """Continue one exact live dispatch through its authorized failed drive."""
+
+    session_path = (
+        store.root
+        / "owners"
+        / owner
+        / "runtime"
+        / operation_id
+        / "session.json"
+    )
+    if not session_path.is_file() or session_path.is_symlink():
+        return False
+    try:
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSessionError(
+            "post-verification dispatch session metadata is invalid"
+        ) from exc
+    if (
+        not isinstance(session, dict)
+        or session.get("operation_id") != operation_id
+    ):
+        return False
+    worktree = Path(str(session.get("cwd") or "")).expanduser()
+    if not worktree.is_absolute():
+        return False
+    runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
+    module_spec = importlib.util.spec_from_file_location(
+        "_harness_post_verification_review_drive",
+        runner_path,
+    )
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeSessionError(
+            "post-verification review recovery is unavailable"
+        )
+    module = importlib.util.module_from_spec(module_spec)
+    try:
+        module_spec.loader.exec_module(module)
+        recover = getattr(module, "recover_post_verification_review_drive")
+        receipt = recover(
+            worktree,
+            process_adapter=process_adapter,
+            cmux_adapter=cmux_adapter,
+            runtime_manager=runtime_manager,
+        )
+    except Exception as exc:
+        raise RuntimeSessionError(
+            "post-verification review-drive recovery failed"
+        ) from exc
+    if receipt is None:
+        return False
+    if not isinstance(receipt, dict) or receipt.get("status") != "applied":
+        raise RuntimeSessionError(
+            "post-verification review-drive recovery did not synchronize"
+        )
+    return True
+
+
+def _recover_post_fresh_publication_if_present(
+    store: OperationStore,
+    owner: str,
+) -> bool:
+    """Finish an authorized partial fresh publication without live probes."""
+
+    session_path = (
+        store.root / "owners" / owner / "runtime" / owner / "session.json"
+    )
+    if not session_path.is_file() or session_path.is_symlink():
+        return False
+    try:
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeSessionError(
+            "post-fresh dispatch session metadata is invalid"
+        ) from exc
+    if not isinstance(session, dict) or session.get("operation_id") != owner:
+        return False
+    worktree = Path(str(session.get("cwd") or "")).expanduser()
+    if not worktree.is_absolute():
+        return False
+    runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
+    module_spec = importlib.util.spec_from_file_location(
+        "_harness_post_fresh_publication_sync",
+        runner_path,
+    )
+    if module_spec is None or module_spec.loader is None:
+        raise RuntimeSessionError(
+            "post-fresh publication recovery is unavailable"
+        )
+    module = importlib.util.module_from_spec(module_spec)
+    try:
+        module_spec.loader.exec_module(module)
+        recover = getattr(module, "recover_post_fresh_publication_sync")
+        receipt = recover(worktree)
+    except Exception as exc:
+        raise RuntimeSessionError(
+            "post-fresh publication recovery failed"
+        ) from exc
+    if receipt is None:
+        return False
+    if not isinstance(receipt, dict) or receipt.get("status") != "applied":
+        raise RuntimeSessionError(
+            "post-fresh publication recovery did not synchronize"
         )
     return True
 
@@ -450,6 +596,25 @@ def _resume(
             owner,
             operation_id,
             reason=AttentionReason.ATTENTION_REQUIRED,
+        )
+    if initial.spec.kind == "dispatch" and (
+        _recover_post_verification_review_drive_if_present(
+            store,
+            owner,
+            operation_id,
+            process_adapter=process_adapter,
+            cmux_adapter=cmux_adapter,
+            runtime_manager=review_runtime_manager,
+        )
+    ):
+        current = store.read(owner, operation_id)
+        return TransitionResult(
+            operation_id,
+            initial.state,
+            current.state,
+            current.revision,
+            current.revision != initial.revision,
+            current.attention_reason,
         )
     if initial.state == "attention-required":
         if initial.spec.kind == "dispatch":
@@ -526,6 +691,7 @@ def main(
     store = OperationStore(args.store)
     process_adapter = process_adapter or ProcessAdapter()
     cmux_adapter = cmux_adapter or CmuxAdapter()
+    suppress_status_publish = False
     try:
         if args.command == "status":
             value = [
@@ -551,82 +717,93 @@ def main(
         elif args.command == "diagnose":
             value = observe_diagnostics(args.store, args.owner)
         elif args.command == "reconcile":
-            value = []
-            for row in store.list(args.owner):
-                if row.state in TERMINAL:
-                    continue
-                operation_id = row.spec.operation_id
-                if row.pending_effect:
-                    _attention(
-                        store,
-                        args.owner,
-                        operation_id,
-                        reason=AttentionReason.ATTENTION_REQUIRED,
-                    )
-                    action = "inspect-pending-effect"
-                elif _has_owned_resources(row):
-                    decision = _reconcile_owned_resources(
-                        store, row, process_adapter, cmux_adapter
-                    )
-                    if decision.action == "continue":
-                        action = "resources-live"
-                    elif decision.action == "complete":
-                        _clear_owned_resources(store, args.owner, operation_id)
-                        if row.state in {"cancelling", "exiting"}:
-                            _cancel_or_close(
-                                store,
-                                args.owner,
-                                operation_id,
-                                process_adapter=process_adapter,
-                                cmux_adapter=cmux_adapter,
-                            )
-                            action = (
-                                "callback-complete"
-                                if row.accepted_callback_id
-                                else "cancel-complete"
-                            )
+            if _recover_post_fresh_publication_if_present(store, args.owner):
+                current = store.read(args.owner, args.owner)
+                value = [
+                    {
+                        "operation_id": args.owner,
+                        "state": current.state,
+                        "action": "post-fresh-publication-synchronized",
+                    }
+                ]
+                suppress_status_publish = True
+            else:
+                value = []
+                for row in store.list(args.owner):
+                    if row.state in TERMINAL:
+                        continue
+                    operation_id = row.spec.operation_id
+                    if row.pending_effect:
+                        _attention(
+                            store,
+                            args.owner,
+                            operation_id,
+                            reason=AttentionReason.ATTENTION_REQUIRED,
+                        )
+                        action = "inspect-pending-effect"
+                    elif _has_owned_resources(row):
+                        decision = _reconcile_owned_resources(
+                            store, row, process_adapter, cmux_adapter
+                        )
+                        if decision.action == "continue":
+                            action = "resources-live"
+                        elif decision.action == "complete":
+                            _clear_owned_resources(store, args.owner, operation_id)
+                            if row.state in {"cancelling", "exiting"}:
+                                _cancel_or_close(
+                                    store,
+                                    args.owner,
+                                    operation_id,
+                                    process_adapter=process_adapter,
+                                    cmux_adapter=cmux_adapter,
+                                )
+                                action = (
+                                    "callback-complete"
+                                    if row.accepted_callback_id
+                                    else "cancel-complete"
+                                )
+                            else:
+                                _attention(
+                                    store,
+                                    args.owner,
+                                    operation_id,
+                                    reason=(
+                                        decision.reason
+                                        or AttentionReason.CLEANUP_INCOMPLETE
+                                    ),
+                                )
+                                action = "resources-released"
                         else:
                             _attention(
                                 store,
                                 args.owner,
                                 operation_id,
-                                reason=(
-                                    decision.reason
-                                    or AttentionReason.CLEANUP_INCOMPLETE
-                                ),
+                                reason=AttentionReason.CLEANUP_INCOMPLETE,
                             )
-                            action = "resources-released"
-                    else:
-                        _attention(
+                            action = "inspect-owned-resources"
+                    elif row.state in {"cancelling", "exiting"}:
+                        _cancel_or_close(
                             store,
                             args.owner,
                             operation_id,
-                            reason=AttentionReason.CLEANUP_INCOMPLETE,
+                            process_adapter=process_adapter,
+                            cmux_adapter=cmux_adapter,
                         )
-                        action = "inspect-owned-resources"
-                elif row.state in {"cancelling", "exiting"}:
-                    _cancel_or_close(
-                        store,
-                        args.owner,
-                        operation_id,
-                        process_adapter=process_adapter,
-                        cmux_adapter=cmux_adapter,
+                        action = (
+                            "callback-complete"
+                            if row.accepted_callback_id
+                            else "cancel-complete"
+                        )
+                    else:
+                        action = "none"
+                    current = store.read(args.owner, operation_id)
+                    value.append(
+                        {
+                            "operation_id": operation_id,
+                            "state": current.state,
+                            "action": action,
+                        }
                     )
-                    action = (
-                        "callback-complete"
-                        if row.accepted_callback_id
-                        else "cancel-complete"
-                    )
-                else:
-                    action = "none"
-                current = store.read(args.owner, operation_id)
-                value.append(
-                    {
-                        "operation_id": operation_id,
-                        "state": current.state,
-                        "action": action,
-                    }
-                )
         else:
             operation_id = args.operation_id
             record = store.read(args.owner, operation_id)
@@ -649,7 +826,10 @@ def main(
                 )
             value = to_dict(result)
         _emit(value, json_mode=args.json)
-        if args.command in {"resume", "cancel", "close", "reconcile"}:
+        if (
+            args.command in {"resume", "cancel", "close", "reconcile"}
+            and not suppress_status_publish
+        ):
             publish_status(
                 args.store,
                 trigger_owner=args.owner,

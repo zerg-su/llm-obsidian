@@ -20,6 +20,19 @@ from task_escalation_records import EscalationRecordError, append_raise
 
 class RuntimeWorkerControlMixin:
 
+    def publish_error_latch(self, status: str) -> None:
+        """Publish one owned callback/error latch, then expose its durable boundary."""
+
+        observer = getattr(self, "fault_observer", None)
+        if observer is not None:
+            observer("error-latch-published:before")
+        _atomic_json(
+            self.spec_path.parent / "callback-error.json",
+            {"schema_version": 1, "status": status},
+        )
+        if observer is not None:
+            observer("error-latch-published")
+
     def inspect_control(self) -> None:
         control_path = self.spec_path.parent / "process-control.json"
         try:
@@ -165,10 +178,7 @@ class RuntimeWorkerControlMixin:
                     )
                 except Exception:
                     pass
-                _atomic_json(
-                    self.spec_path.parent / "callback-error.json",
-                    {"schema_version": 1, "status": "callback-target-invalid"},
-                )
+                self.publish_error_latch("callback-target-invalid")
             return
         self.registration_invalid = False
         if target != self.active_target:
@@ -197,7 +207,6 @@ class RuntimeWorkerControlMixin:
         self.stable_reads += 1
         if self.stable_reads < 2:
             return
-        self.callback_handled = True
         try:
             envelope = _envelope(json.loads(raw))
             if envelope.operation_id != operation_id or envelope.run_id != run_id:
@@ -205,6 +214,8 @@ class RuntimeWorkerControlMixin:
             acceptance = CallbackBroker(self.store, self.spec["owner_id"]).accept(
                 envelope, deadline_operation_id=self.spec["operation_id"]
             )
+            self.record_provider_result(generation, digest)
+            self.callback_handled = True
             _atomic_json(
                 self.spec_path.parent / "callback-receipt.json",
                 {
@@ -226,6 +237,7 @@ class RuntimeWorkerControlMixin:
                 self.summary_attention("callback-wake-effect-uncertain")
                 return
         except CallbackTimeoutError:
+            self.callback_handled = True
             _atomic_json(
                 self.spec_path.parent / "callback-timeout.json",
                 {
@@ -251,10 +263,7 @@ class RuntimeWorkerControlMixin:
                 )
             except Exception:
                 pass
-            _atomic_json(
-                self.spec_path.parent / "callback-error.json",
-                {"schema_version": 1, "status": "callback-invalid"},
-            )
+            self.publish_error_latch("callback-invalid")
 
     def summary_attention(
         self,
@@ -305,10 +314,7 @@ class RuntimeWorkerControlMixin:
                     },
                 )
         if write_error:
-            _atomic_json(
-                self.spec_path.parent / "callback-error.json",
-                {"schema_version": 1, "status": status},
-            )
+            self.publish_error_latch(status)
 
     def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
         encoded = (

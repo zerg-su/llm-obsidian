@@ -117,8 +117,9 @@ def _apply_finalizing_recovery(
         reason,
     )
     authorization = {
-        "schema_version": 1,
-        "operation_id": task_id,
+        "schema_version": 2,
+        "operation_id": run.execution.request.policy.operation_id,
+        "dispatch_operation_id": task_id,
         "kind": boundary.kind,
         "previous_context_sha256": boundary.previous_context_sha256,
         "next_context_sha256": boundary.next_context_sha256,

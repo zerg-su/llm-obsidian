@@ -131,7 +131,13 @@ MUTATION_KEYS = HOT_MUTATION_KEYS | {
     "moves",
     "manifest_update",
 }
-KNOWN_KEYS = MUTATION_KEYS | {"actor", "session", "schema_version", "request_id"}
+KNOWN_KEYS = MUTATION_KEYS | {
+    "actor",
+    "session",
+    "schema_version",
+    "request_id",
+    "exact_binding",
+}
 
 OUTPUT_JSON = False
 TRANSACTION_ID = ""
@@ -283,6 +289,14 @@ def _read_payload(argv: list[str]) -> tuple[dict, int | None]:
         unknown = unknown - {"index_line"}
     if unknown:
         return {}, fail(3, f"unknown payload keys: {sorted(unknown)}")
+    if (
+        "exact_binding" in parsed
+        and parsed.get("actor") != "stop-hook-link-repair"
+    ):
+        return {}, fail(
+            3,
+            "exact_binding is reserved for stop-hook-link-repair",
+        )
     if not parsed.keys() & MUTATION_KEYS:
         return {}, fail(3, "payload has no actionable keys")
     if "actor" in parsed and not isinstance(parsed["actor"], str):

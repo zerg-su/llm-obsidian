@@ -16,6 +16,12 @@ from review_resolution import (
 )
 
 from .review_program_contracts import ReviewBoundaryInput, ReviewProgramError
+from .review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
+    ReviewAttempt,
+    ReviewAttemptError,
+    ReviewAttemptTerminalResult,
+)
 from .store import OperationStore, StoreError
 from .workflows.review import review_round_payload
 from .workflows.review_gate_contracts import _result_from_payload
@@ -288,6 +294,120 @@ def _require_final_iterations(
         )
 
 
+def _require_exact_attempt_results(
+    gate_root: Path,
+    store: OperationStore,
+    operation_id: str,
+    gate: Mapping[str, object],
+    lanes: Mapping[str, Mapping[str, object]],
+    attempt: ReviewAttempt,
+) -> None:
+    terminal = attempt.terminal
+    pointers = gate.get("final_results")
+    if terminal is None or not isinstance(pointers, dict):
+        raise ReviewProgramError("trusted review attempt results are unavailable")
+    terminal_results = {item.axis: item for item in terminal.lane_results}
+    frozen_lanes = {item.axis: item for item in attempt.identity.lanes}
+    if set(pointers) != set(lanes) or set(terminal_results) != set(lanes):
+        raise ReviewProgramError("trusted review attempt results are incomplete")
+    for axis, lane_result in terminal_results.items():
+        pointer = pointers.get(axis)
+        if not isinstance(pointer, str):
+            raise ReviewProgramError("trusted review attempt result is unavailable")
+        relative = Path(pointer)
+        path = (gate_root / relative).resolve()
+        if (
+            relative.is_absolute()
+            or path == gate_root
+            or gate_root not in path.parents
+            or not path.is_file()
+            or path.is_symlink()
+        ):
+            raise ReviewProgramError("trusted review attempt result is unavailable")
+        raw = path.read_bytes()
+        result = _object(path, "trusted review attempt result")
+        findings = result.get("findings")
+        if (
+            result.get("axis") != axis
+            or result.get("verdict") != lane_result.verdict
+            or result.get("verification_iteration") != 0
+            or hashlib.sha256(raw).hexdigest() != lane_result.result_sha256
+            or not isinstance(findings, list)
+            or tuple(
+                str(item.get("finding_id") or "")
+                for item in findings
+                if isinstance(item, dict)
+            )
+            != lane_result.finding_ids
+            or len(findings) != len(lane_result.finding_ids)
+        ):
+            raise ReviewProgramError("trusted review attempt result is stale")
+        _accepted_round_result(
+            store, frozen_lanes[axis].owner_id, lanes[axis], result, axis, 0
+        )
+
+
+def _exact_attempt_terminal_head(
+    root: Path,
+    gate_root: Path,
+    gate: Mapping[str, object],
+    boundary: ReviewBoundaryInput,
+    operation_id: str,
+) -> str:
+    """Trust only iteration zero at the attempt's originally frozen HEAD."""
+
+    raw_attempt = gate.get("attempt")
+    context = gate.get("context")
+    if not isinstance(raw_attempt, Mapping) or not isinstance(context, dict):
+        raise ReviewProgramError("trusted review attempt identity is unavailable")
+    try:
+        attempt = ReviewAttempt.from_mapping(raw_attempt)
+    except ReviewAttemptError as exc:
+        raise ReviewProgramError("trusted review attempt identity is invalid") from exc
+    identity = attempt.identity
+    terminal = attempt.terminal
+    reviewed_head = boundary.product_head_sha or boundary.integration_head_sha
+    if (
+        identity.attempt_id != operation_id
+        or identity.plan_sha256 != boundary.plan_sha256
+        or identity.outcome_sha256 != boundary.outcome_contract_sha256
+        or identity.exact_head_sha != reviewed_head
+        or context.get("head_sha") != reviewed_head
+        or identity.policy.purpose != boundary.purpose
+        or context.get("boundary_input_sha256") != boundary.input_sha256
+    ):
+        raise ReviewProgramError("trusted review attempt HEAD or identity is stale")
+    if (
+        attempt.status != "terminal"
+        or terminal is None
+        or terminal.result == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+        or gate.get("status") != terminal.result.value
+    ):
+        raise ReviewProgramError("trusted review attempt is not terminal")
+    lanes = _lane_identities(gate, operation_id)
+    frozen_lanes = {lane.axis: lane for lane in identity.lanes}
+    if set(lanes) != set(frozen_lanes):
+        raise ReviewProgramError("trusted review attempt lanes are stale")
+    for axis, raw_lane in lanes.items():
+        frozen = frozen_lanes[axis]
+        if (
+            raw_lane.get("operation_id") != frozen.operation_id
+            or raw_lane.get("lane_id") != frozen.lane_id
+            or raw_lane.get("run_id") != frozen.run_id
+            or raw_lane.get("verification_iteration") != 0
+        ):
+            raise ReviewProgramError("trusted review attempt lane identity is stale")
+    _require_exact_attempt_results(
+        gate_root,
+        OperationStore(root / ".vault-meta/harness"),
+        operation_id,
+        gate,
+        lanes,
+        attempt,
+    )
+    return reviewed_head
+
+
 def resolved_terminal_head(
     root: Path,
     gate_root: Path,
@@ -297,6 +417,17 @@ def resolved_terminal_head(
 ) -> str:
     """Bind a moved implementation HEAD to material rounds and exact Git deltas."""
 
+    protocol = gate.get("execution_protocol", "")
+    if protocol not in {"", EXACT_HEAD_REVIEW_PROTOCOL}:
+        raise ReviewProgramError("trusted review execution protocol is invalid")
+    if protocol == EXACT_HEAD_REVIEW_PROTOCOL and not isinstance(
+        gate.get("attempt"), Mapping
+    ):
+        raise ReviewProgramError("trusted review attempt identity is unavailable")
+    if isinstance(gate.get("attempt"), Mapping):
+        return _exact_attempt_terminal_head(
+            root, gate_root, gate, boundary, operation_id
+        )
     context = gate.get("context")
     if not isinstance(context, dict):
         raise ReviewProgramError("trusted review gate identity is stale")

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -209,6 +211,48 @@ class ReviewGateStateMixin:
             state.update(updates)
             _atomic_json(self.state_path, state)
             return state
+
+    def synchronize_fresh_publication(
+        self,
+        *,
+        source_sha256: str,
+        target_sha256: str,
+    ) -> dict[str, object]:
+        """CAS one already-started fresh gate back to callback waiting."""
+
+        if not re.fullmatch(r"[0-9a-f]{64}", source_sha256) or not re.fullmatch(
+            r"[0-9a-f]{64}", target_sha256
+        ):
+            raise ValueError("fresh publication gate binding is invalid")
+        with self._locked():
+            raw = self.state_path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            state = _read_json(self.state_path)
+            if digest == target_sha256:
+                return state
+            lanes = state.get("lanes")
+            if (
+                digest != source_sha256
+                or state.get("status") != "attention-required"
+                or state.get("fresh_reevaluation_used") is not True
+                or not isinstance(lanes, list)
+                or not lanes
+            ):
+                raise ValueError("fresh publication gate identity drifted")
+            target = {**state, "status": "reviewing"}
+            encoded = (
+                json.dumps(
+                    target,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode()
+            if hashlib.sha256(encoded).hexdigest() != target_sha256:
+                raise ValueError("fresh publication gate target drifted")
+            _atomic_json(self.state_path, target)
+            return target
 
     def mark_pending_attention(self) -> None:
         state = self.read()

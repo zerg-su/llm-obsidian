@@ -20,11 +20,13 @@ class RuntimeWorkerLoopMixin:
             self.inspect_callback()
 
     def tick_observers(self) -> None:
+        wall_clock = getattr(self, "wall_clock", time.time)
         if enforce_callback_deadline(
             self.store,
             self.spec["owner_id"],
             self.spec["operation_id"],
             callback_handled=self.callback_handled,
+            now=wall_clock(),
         ):
             _atomic_json(
                 self.spec_path.parent / "callback-timeout.json",
@@ -35,7 +37,8 @@ class RuntimeWorkerLoopMixin:
                     "status": "attention-required",
                 },
             )
-        now = time.monotonic()
+        monotonic_clock = getattr(self, "monotonic_clock", time.monotonic)
+        now = monotonic_clock()
         if now >= self.next_liveness_probe:
             self.next_liveness_probe = now + self.liveness_policy.probe_seconds
             self.inspect_liveness()
@@ -78,6 +81,7 @@ class RuntimeWorkerLoopMixin:
         except ChildProcessError:
             self.provider_exited = True
             self.exit_code = 0
+            self.record_provider_exit(self.exit_code)
             self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
             return True
         except OSError:
@@ -100,6 +104,7 @@ class RuntimeWorkerLoopMixin:
             return False
         self.exit_code = os.waitstatus_to_exitcode(status)
         self.provider_exited = True
+        self.record_provider_exit(self.exit_code)
         return True
 
     def mark_attention(self, reason: AttentionReason) -> None:
@@ -294,21 +299,31 @@ class RuntimeWorkerLoopMixin:
             self.inspect_transport()
             if self.callback_handled:
                 break
-            time.sleep(max(0.02, self.poll_seconds))
+            getattr(self, "sleeper", time.sleep)(max(0.02, self.poll_seconds))
+
+    def poll_once(self) -> bool:
+        """Run one production transport/observer/exit-observation iteration."""
+
+        self.inspect_transport()
+        self.tick_observers()
+        return self.observe_provider_exit()
+
+    def settle_exit_once(self) -> bool:
+        """Classify one observed exit and decide restart versus finality."""
+
+        self.mark_failed_research_runtime()
+        if self.needs_provider_restart():
+            self.restart_provider()
+        return self.provider_exit_is_final()
 
     def run_provider_loop(self) -> int:
         while True:
-            self.inspect_transport()
-            self.tick_observers()
-            if not self.observe_provider_exit():
-                time.sleep(max(0.02, self.poll_seconds))
+            if not self.poll_once():
+                self.sleeper(max(0.02, self.poll_seconds))
                 continue
-            self.mark_failed_research_runtime()
-            if self.needs_provider_restart():
-                self.restart_provider()
-            if self.provider_exit_is_final():
+            if self.settle_exit_once():
                 break
-            time.sleep(max(0.02, self.poll_seconds))
+            self.sleeper(max(0.02, self.poll_seconds))
         self.drain_callbacks()
         _atomic_json(
             self.exit_path,

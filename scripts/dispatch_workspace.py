@@ -8,13 +8,17 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from lifecycle_telemetry import emit_lifecycle_event
 from task_contract import ContractError, normalize as normalize_task_contract
 from harness.git_ops import GitAdapter, GitError
-from dispatch_contracts import TASK_LOCAL_GIT_EXCLUDES
+from harness.finalization_policy import (
+    FinalizationPolicy,
+    finalization_policy_payload,
+)
+from dispatch_contracts import TASK_LOCAL_GIT_EXCLUDES, _validated_context
 from dispatch_custom_contracts import (
     approved_outcome_contract_sha256,
     approved_plan_file,
@@ -138,6 +142,19 @@ def sync_codex_profile(request: dict[str, Any], config: dict[str, Any], effectiv
     )
 
 
+def finalization_policy_for_request(
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Project the exact approved custom policy or the compatibility default."""
+
+    policy = FinalizationPolicy()
+    if request.get("pipeline") == "custom":
+        declared = custom_contract_for_request(request)[0].finalization_policy
+        if declared is not None:
+            policy = declared
+    return finalization_policy_payload(policy)
+
+
 def write_task_files(
     request: dict[str, Any], config: dict[str, Any], session: dict[str, Any],
     effective: dict[str, Any], identity: dict[str, str], origin: dict[str, str],
@@ -200,6 +217,7 @@ def write_task_files(
         "approved_plan_sha256": plan_hash,
         "outcome_contract_sha256": outcome_hash,
         "interaction_policy": "unattended",
+        "finalization_policy": finalization_policy_for_request(request),
         "pipeline_policy": task_pipeline_policy(request),
         "review_policy": {
             "mode": review.mode,
@@ -234,6 +252,8 @@ def write_task_files(
         ],
         "suggested_agents": request["suggested_agents"],
     }
+    if request.get("split") is not None:
+        meta["split_policy"] = request["split"]
     if request["executor"]["model"]:
         meta["model"] = request["executor"]["model"]
     if request["executor"]["effort"]:
@@ -247,7 +267,16 @@ def write_task_files(
 
 
 def dispatch_log(request: dict[str, Any], effective: dict[str, Any], child: dict[str, str]) -> None:
-    links = ", ".join(f"[[{item['title']}]]" for item in request["wiki_context"]) or "none"
+    context = _validated_context(
+        {"wiki_context": request["wiki_context"]},
+        request["vault_root"],
+        request["plan_file"],
+        None,
+    )
+    links = ", ".join(
+        f"[[{PurePosixPath(item['context_path']).stem}|{item['title']}]]"
+        for item in context
+    ) or "none"
     entry = (
         f"## [{datetime.now().astimezone().strftime('%Y-%m-%d %H:%M')}] dispatch | {request['task_name']}\n\n"
         f"Spawned an approved unattended task session (cmux `{child['surface']}`, runtime "

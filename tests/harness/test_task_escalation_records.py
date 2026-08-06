@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -126,6 +127,73 @@ class ControlWriterFixture(RuntimeWorkerControlMixin):
     def write_immutable_json(self, path: Path, value: dict[str, object]) -> None:
         if not path.exists():
             write_json(path, value)
+
+
+with tempfile.TemporaryDirectory(prefix="task-escalation-ignore.") as raw:
+    worktree = Path(raw) / "task"
+    worktree.mkdir()
+    shutil.copy2(ROOT / ".gitignore", worktree / ".gitignore")
+    meta(worktree, task_id="gitignore-task")
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+    )
+    exclude = worktree / ".git" / "info" / "exclude"
+    exclude.write_text(
+        exclude.read_text(encoding="utf-8")
+        + ".task-needs-attention.json\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", ".gitignore", ".task-meta.json"],
+        cwd=worktree,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Escalation Test",
+            "-c",
+            "user.email=escalation@example.invalid",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+        cwd=worktree,
+        check=True,
+        capture_output=True,
+    )
+    raised = append_raise(
+        worktree,
+        raised_payload(worktree, "gitignore-escalation", "durable raise"),
+    )
+    raised_bytes = record_path(worktree, raised.record_id).read_bytes()
+    resolved = append_resolution(
+        worktree,
+        "preserve the durable escalation evidence",
+        resolved_at="2026-08-04T12:00:30Z",
+    )
+    chain = load_chain(worktree)
+    status = subprocess.run(
+        ["git", "status", "--short", "--untracked-files=all"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    check(
+        "raised and resolved records stay durable while Git remains clean",
+        [item.record_type for item in chain] == ["raise", "resolution"]
+        and chain[0].sha256 == raised.sha256
+        and chain[1].sha256 == resolved.sha256
+        and record_path(worktree, raised.record_id).read_bytes()
+        == raised_bytes
+        and record_path(worktree, resolved.record_id).is_file()
+        and status.stdout == "",
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="task-escalation-records.") as raw:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from .runtime_worker import *
+from types import SimpleNamespace
 from .runtime_worker import (
     _atomic_json,
     _bounded_file_sha256,
@@ -16,6 +17,34 @@ from .runtime_worker import (
     _submit_failure_requires_attention,
 )
 from review_contract import ReviewContractError, axis_finding_id
+
+
+def publish_review_resolution_transport(
+    *,
+    gate_state: dict[str, object],
+    gate_root: Path,
+    worktree: Path,
+    operation_id: str,
+    surface_id: str,
+    summary_sha256: str,
+    runtime_spec_path: Path,
+    cmux_adapter: object,
+) -> None:
+    """Publish one existing review decision through the worker-owned transport."""
+
+    publisher = RuntimeWorkerReviewBridgeMixin()
+    publisher.spec = {
+        "cwd": worktree.expanduser().resolve(),
+        "operation_id": operation_id,
+        "surface_id": surface_id,
+    }
+    publisher.spec_path = runtime_spec_path.expanduser().resolve()
+    publisher.review = SimpleNamespace(
+        gate_root=gate_root.expanduser().resolve()
+    )
+    publisher.digest = summary_sha256
+    publisher.cmux_adapter = cmux_adapter
+    publisher.notify_review_resolution(gate_state)
 
 
 class RuntimeWorkerReviewBridgeMixin:
@@ -157,10 +186,7 @@ class RuntimeWorkerReviewBridgeMixin:
                     )
                 except Exception:
                     pass
-                _atomic_json(
-                    self.spec_path.parent / "callback-error.json",
-                    {"schema_version": 1, "status": "callback-target-invalid"},
-                )
+                self.publish_error_latch("callback-target-invalid")
             return
         self.registration_invalid = False
         if target != self.active_target:
@@ -188,6 +214,7 @@ class RuntimeWorkerReviewBridgeMixin:
             return
         if input_evidence.state == "stable" and not callback_path.exists():
             try:
+                self.reserve_callback_submit(generation)
                 submitted = submit_stable_review_input(
                     vault_root=self.trusted_vault,
                     worktree=self.spec["product_root"],
@@ -214,7 +241,6 @@ class RuntimeWorkerReviewBridgeMixin:
             raw = callback_path.read_bytes()
         except OSError:
             return
-        self.callback_handled = True
         try:
             envelope = _envelope(json.loads(raw))
             if envelope.operation_id != operation_id or envelope.run_id != run_id:
@@ -231,6 +257,10 @@ class RuntimeWorkerReviewBridgeMixin:
                     generation=generation,
                     envelope=envelope,
                 )
+            self.record_provider_result(
+                generation, hashlib.sha256(raw).hexdigest()
+            )
+            self.callback_handled = True
             self.finalize_callback_timeout_rearm(
                 generation=generation,
                 envelope=envelope,

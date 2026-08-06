@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d265-stale-exiting-resource-gone",
+  "seed": 26501,
+  "max_steps": 8,
+  "source_fixture": "tests/fixtures/v2.6.5/stale-exiting-resource-gone.json",
+  "source_sha256": "4366081fc997f5f266c8896f7399753707e7a5a901d6e8a554ce62142e09df0e",
+  "expected_initial_invariant": "SIM-INV-CLEANUP-RECEIPT",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["physical-disappearance-completion"],
+  "expected_production_paths": ["RuntimeSessionManager.cleanup"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "stale-exiting-child", "run_id": "stale-exiting-run", "revision": 7, "state": "exiting", "attention_reason": null, "pending_effect": "", "effect_id": "request-exit", "effect_outcome": "succeeded", "accepted_callback_id": "result-callback", "accepted_callback_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "resources": {}},
+    "liveness": {"operation_revision": 7, "operation_state": "exiting", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": []
+  },
+  "replay_snapshot": {
+    "operation": {"operation_id": "sim-operation", "run_id": "sim-run", "revision": 7, "state": "exiting", "attention_reason": null, "pending_effect": "", "effect_id": "request-exit", "effect_outcome": "succeeded", "accepted_callback_id": "result-callback", "accepted_callback_kind": "result", "accepted_callback_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "resources": {"surface_id": "sim-surface", "process_group": 4101, "supervisor_pid": 4102, "process_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "supervisor_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    "liveness": {"operation_revision": 7, "operation_state": "exiting", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": []
+  },
+  "actions": [
+    {"action_id": "gone", "action": "resource-disappears", "kind": "all", "identity": "sim-resource"},
+    {"action_id": "close", "action": "close", "after": ["gone"]}
+  ]
+}

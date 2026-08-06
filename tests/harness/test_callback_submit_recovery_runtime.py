@@ -37,6 +37,7 @@ from harness.contracts import (  # noqa: E402
 )
 from harness.liveness import (  # noqa: E402
     LivenessController,
+    LivenessEvidence,
     LivenessPolicy,
 )
 from harness.pipeline_builtins import compiled_builtin  # noqa: E402
@@ -631,7 +632,13 @@ with tempfile.TemporaryDirectory(prefix="superseded-review-cleanup.") as raw:
 
 
 class FastPathWorker(RuntimeWorkerReviewBridgeMixin):
-    pass
+    @staticmethod
+    def reserve_callback_submit(_generation: int) -> str:
+        return ""
+
+    @staticmethod
+    def record_provider_result(_generation: int, _sha256: str) -> None:
+        pass
 
 
 class RecoveryWorker(RuntimeWorkerLivenessMixin):
@@ -640,6 +647,14 @@ class RecoveryWorker(RuntimeWorkerLivenessMixin):
 
 
 class SymlinkWorker(RuntimeWorkerReviewBridgeMixin):
+    @staticmethod
+    def reserve_callback_submit(_generation: int) -> str:
+        return ""
+
+    @staticmethod
+    def record_provider_result(_generation: int, _sha256: str) -> None:
+        pass
+
     def summary_attention(
         self,
         status: str,
@@ -1666,6 +1681,15 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
     stale_worker.liveness_controller = LivenessController(
         stale_state_root / "liveness"
     )
+    stale_worker.liveness_controller.observe(
+        LivenessEvidence(
+            observed_at=now - 120,
+            process_status="alive",
+            operation_revision=8,
+            operation_state="starting",
+        ),
+        stale_worker.liveness_policy,
+    )
     stale_worker.cmux_adapter = stale_cmux
     stale_worker.callback_idle_observations = 0
     stale_worker.callback_prompt_observations = 0
@@ -1685,6 +1709,9 @@ with tempfile.TemporaryDirectory(prefix="review-submit-nudge-runtime.") as raw:
         len(stale_cmux.sent) == 1
         and stale_cmux.keys == [(SURFACE, "Enter")]
         and stale_recovery_state is not None
+        and stale_recovery_state.operation_revision
+        == store.read("review-owner-3", "review-parent-3").revision
+        and stale_recovery_state.operation_state == "awaiting-callback"
         and stale_recovery_state.nudge_count == 1
         and stale_recovery_state.callback_submit_status == "sent"
         and not (stale_state_root / "callback-submit-attention.json").exists(),

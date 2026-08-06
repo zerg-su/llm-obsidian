@@ -76,7 +76,11 @@ V3_META_FIELDS = {
     "model",
     "effort",
 }
-V4_META_FIELDS = V3_META_FIELDS | {"outcome_contract_sha256"}
+V4_META_FIELDS = V3_META_FIELDS | {
+    "outcome_contract_sha256",
+    "finalization_policy",
+    "split_policy",
+}
 FORBIDDEN_ACTIONS = [
     "push",
     "deploy",
@@ -311,6 +315,69 @@ def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any
     return review
 
 
+def _validate_finalization_policy(
+    meta: dict[str, Any], version: int
+) -> dict[str, Any] | None:
+    raw = meta.get("finalization_policy")
+    if raw is None:
+        return None
+    if version != 4:
+        raise ContractError("finalization_policy requires v4 task metadata")
+    from harness.finalization_policy import (
+        FinalizationPolicyError,
+        finalization_policy_payload,
+        parse_finalization_policy,
+        require_registered_finalization_routes,
+    )
+
+    try:
+        policy = parse_finalization_policy(raw)
+        require_registered_finalization_routes(policy)
+        return finalization_policy_payload(policy)
+    except FinalizationPolicyError as exc:
+        raise ContractError(str(exc)) from exc
+
+
+def _finalization_projection(
+    finalization: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return (
+        {}
+        if finalization is None
+        else {"finalization_policy": finalization}
+    )
+
+
+def _validate_split_policy(
+    meta: dict[str, Any], version: int
+) -> dict[str, object] | None:
+    raw = meta.get("split_policy")
+    if raw is None:
+        return None
+    if version != 4:
+        raise ContractError("split_policy requires v4 task metadata")
+    from harness.contracts import ContractError as HarnessContractError
+    from harness.split_activation import (
+        parse_split_child_policy,
+        split_child_policy_payload,
+    )
+
+    try:
+        policy = split_child_policy_payload(parse_split_child_policy(raw))
+    except HarnessContractError as exc:
+        raise ContractError(str(exc)) from exc
+    surface = meta.get("surface_policy")
+    if not isinstance(surface, dict) or surface.get("placement") != "workspace":
+        raise ContractError("split_policy requires child workspace placement")
+    return policy
+
+
+def _split_projection(
+    split_policy: dict[str, object] | None,
+) -> dict[str, object]:
+    return {} if split_policy is None else {"split_policy": split_policy}
+
+
 def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[str, Any]:
     version = meta.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, int):
@@ -413,6 +480,8 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError("plan_file must belong to vault_root/wiki/plans")
 
     review = _validate_review_policy(meta, version)
+    finalization = _validate_finalization_policy(meta, version)
+    split_policy = _validate_split_policy(meta, version)
 
     reap = meta.get("reap_policy")
     if not isinstance(reap, dict):
@@ -470,6 +539,8 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
     }
     if version == 4:
         result["outcome_contract_sha256"] = outcome_digest
+        result.update(_finalization_projection(finalization))
+        result.update(_split_projection(split_policy))
     return result
 
 

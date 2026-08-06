@@ -145,8 +145,12 @@ from task_review_finalizing import (
     recover_finalizing_review,
 )
 from task_review_mechanism_recovery import (
+    recover_post_verification_review_drive,
     recover_task_review_for_mechanism,
     restart_task_review_for_boundary,
+)
+from task_review_post_fresh_recovery import (
+    recover_post_fresh_publication_sync,
 )
 
 

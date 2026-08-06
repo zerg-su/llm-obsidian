@@ -80,15 +80,31 @@ class MutationPlanner:
     def _exact_writer_owned_link_repair(self, payload: dict) -> bool:
         """Authorize only the planner's current deterministic repair bytes."""
 
+        allowed = {"schema_version", "request_id", "actor", "pages"}
+        raw_binding = payload.get("exact_binding")
+        binding = None
+        if raw_binding is not None:
+            allowed.add("exact_binding")
         if (
             payload.get("actor") != "stop-hook-link-repair"
-            or set(payload)
-            != {"schema_version", "request_id", "actor", "pages"}
+            or set(payload) != allowed
         ):
             return False
-        from vault_link_repair import build_repair_plan
+        from vault_link_repair import (
+            ExactBindingError,
+            build_repair_plan,
+            parse_exact_binding,
+        )
 
-        repair = build_repair_plan(self.repo_root)
+        try:
+            if raw_binding is not None:
+                binding = parse_exact_binding(raw_binding)
+            repair = build_repair_plan(
+                self.repo_root,
+                exact_binding=binding,
+            )
+        except ExactBindingError:
+            return False
         return repair is not None and payload == repair.payload
 
     def manifest_write(self, spec: object) -> tuple[Path, str] | None:

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "parent": {
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "outcome_contract_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "evidence_ids": [
+      "D1-governed-split-preview",
+      "D2-eight-rejections",
+      "D3-bounded-waves-locality",
+      "D4-deterministic-join"
+    ],
+    "non_goals": [
+      "Do not activate dispatch.",
+      "Do not open child provider effects."
+    ]
+  },
+  "candidates": [
+    {
+      "subplan_id": "contracts",
+      "title": "Contracts",
+      "pipeline": "engineering/change",
+      "route_alias": "task-default",
+      "owned_paths": ["scripts/harness/split_contracts.py"],
+      "evidence_ids": ["D1-governed-split-preview"],
+      "dependencies": [],
+      "inherited_non_goals": [
+        "Do not activate dispatch.",
+        "Do not open child provider effects."
+      ],
+      "budget": {"token_limit": 1000, "time_budget_seconds": 100},
+      "independence_proven": true
+    },
+    {
+      "subplan_id": "validation",
+      "title": "Validation",
+      "pipeline": "engineering/change",
+      "route_alias": "task-default",
+      "owned_paths": ["scripts/harness/split_validation.py"],
+      "evidence_ids": ["D2-eight-rejections"],
+      "dependencies": [],
+      "inherited_non_goals": [
+        "Do not activate dispatch.",
+        "Do not open child provider effects."
+      ],
+      "budget": {"token_limit": 1000, "time_budget_seconds": 100},
+      "independence_proven": true
+    },
+    {
+      "subplan_id": "execution",
+      "title": "Execution",
+      "pipeline": "engineering/change",
+      "route_alias": "task-default",
+      "owned_paths": ["scripts/harness/split_execution.py"],
+      "evidence_ids": ["D3-bounded-waves-locality"],
+      "dependencies": ["contracts", "validation"],
+      "inherited_non_goals": [
+        "Do not activate dispatch.",
+        "Do not open child provider effects."
+      ],
+      "budget": {"token_limit": 1000, "time_budget_seconds": 100},
+      "independence_proven": true
+    },
+    {
+      "subplan_id": "join",
+      "title": "Join",
+      "pipeline": "engineering/change",
+      "route_alias": "task-default",
+      "owned_paths": ["scripts/harness/split_join.py"],
+      "evidence_ids": ["D4-deterministic-join"],
+      "dependencies": ["execution"],
+      "inherited_non_goals": [
+        "Do not activate dispatch.",
+        "Do not open child provider effects."
+      ],
+      "budget": {"token_limit": 1000, "time_budget_seconds": 100},
+      "independence_proven": true
+    }
+  ],
+  "frozen_budget": {
+    "subplan_limit": 6,
+    "max_parallel": 2,
+    "total_token_limit": 5000,
+    "total_time_budget_seconds": 500
+  },
+  "requested_max_parallel": 2,
+  "coordination_cost": 2,
+  "parallel_benefit": 8,
+  "fallback_pipeline": "engineering/change",
+  "fallback_route_alias": "task-default",
+  "join": {"strategy": "manifest-order", "required_status": "approved"},
+  "current_parent": {
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "outcome_contract_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "registered_pipelines": ["engineering/change"]
+}

@@ -7,8 +7,18 @@ from dataclasses import dataclass
 from .runtime_worker import *  # noqa: F401,F403
 from .runtime_worker import (
     _atomic_json,
+    _pipeline_verify_effect_id,
     _pipeline_verify_identity,
     _review_resolution_handoff_ready,
+)
+from .review_drive_rearm import (
+    ReviewDriveRearmError,
+    review_marker_path_after_rearm,
+)
+from .post_verification_review_drive import (
+    PostVerificationReviewDriveError,
+    continued_verification_receipt,
+    post_verification_review_marker,
 )
 
 
@@ -64,7 +74,28 @@ class RuntimeWorkerSummaryMixin:
         return summary
 
     def load_review_marker(self) -> dict[str, object] | None:
-        self.marker_path = self.spec_path.parent / "pipeline-review-start.json"
+        try:
+            continued = post_verification_review_marker(
+                self.spec_path.parent,
+                operation_id=self.spec["operation_id"],
+                definition_sha256=self.pipeline.definition_sha256,
+            )
+            if continued is None:
+                self.marker_path = review_marker_path_after_rearm(
+                    self.spec_path.parent, self.spec["operation_id"]
+                )
+            else:
+                self.marker_path = continued["path"]
+                if not self.marker_path.exists():
+                    return {
+                        key: value
+                        for key, value in continued.items()
+                        if key != "path"
+                    }
+        except (PostVerificationReviewDriveError, ReviewDriveRearmError) as exc:
+            raise RuntimeWorkerError(
+                "pipeline review rearm marker is invalid"
+            ) from exc
         if not self.marker_path.is_file() or self.marker_path.is_symlink():
             return None
         marker = json.loads(self.marker_path.read_text(encoding="utf-8"))
@@ -105,21 +136,33 @@ class RuntimeWorkerSummaryMixin:
             "[0-9a-f]{40,64}", self.verification_head
         ):
             raise RuntimeWorkerError("pipeline product HEAD is unavailable")
-        schema_version = verify_step.schema_version if verify_step is not None else 1
+        self.verification_step_schema_version = (
+            verify_step.schema_version if verify_step is not None else 1
+        )
+        self._bind_verification_attempt(0)
+
+    def _bind_verification_attempt(self, attempt_index: int) -> None:
+        self.verification_attempt = VerificationAttempt(
+            parent_operation_id=self.operation.spec.operation_id,
+            profile=self.profile.name,
+            profile_sha256=self.profile.sha256,
+            exact_head_sha=self.verification_head,
+            attempt_index=attempt_index,
+        )
         self.verification_input_sha256 = hashlib.sha256(
             json.dumps(
                 {
                     "definition_sha256": self.pipeline.definition_sha256,
                     "head_sha": self.verification_head,
                     "profile_sha256": self.profile.sha256,
-                    "schema_version": schema_version,
+                    "schema_version": self.verification_step_schema_version,
                 },
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        self.verification_effect_id = (
-            "pipeline-verify-" + self.verification_input_sha256[:32]
+        self.verification_effect_id = _pipeline_verify_effect_id(
+            self.verification_input_sha256, attempt_index
         )
         (
             self.verification_spec,
@@ -130,6 +173,7 @@ class RuntimeWorkerSummaryMixin:
             definition_sha256=self.pipeline.definition_sha256,
             input_sha256=self.verification_input_sha256,
             profile=self.profile.name,
+            attempt_index=attempt_index,
         )
         self.verification_root = (
             self.spec_path.parent
@@ -141,19 +185,48 @@ class RuntimeWorkerSummaryMixin:
     def handle_prior_failed_verification(
         self, previous: dict[str, object] | None
     ) -> bool:
-        if (
-            previous is None
-            or previous["status"] != "failed"
-            or previous["head_sha"] == self.verification_head
-        ):
+        if previous is None or previous["status"] != "failed":
             return True
         self.reconcile_failed_verification_child(previous)
         if self._pipeline_name == "engineering/fix":
-            return self.accept_fix_retry_resubmission(previous)
+            return (
+                True
+                if previous["head_sha"] == self.verification_head
+                else self.accept_fix_retry_resubmission(previous)
+            )
+        if previous["head_sha"] == self.verification_head:
+            failed_attempt = self.verification_attempt_from_receipt(previous)
+            allow_changed_head = (
+                self.changed_head_resubmit_count()
+                < MAX_PIPELINE_VERIFY_RESUBMITS
+            )
+            allow_same_head = failed_attempt.attempt_index == 0
+            self.notify_verification_attention(
+                previous,
+                allow_resubmit=allow_changed_head,
+                allow_same_head_retry=allow_same_head,
+            )
+            if not allow_same_head:
+                self.summary_attention(
+                    "pipeline-verification-same-head-retry-exhausted",
+                    AttentionReason.RETRY_EXHAUSTED,
+                )
+                return False
+            if not self.accept_same_head_verification_retry(previous):
+                return False
+            self._bind_verification_attempt(1)
+            return True
         allow_resubmit = (
-            self.failed_verification_count() <= MAX_PIPELINE_VERIFY_RESUBMITS
+            self.changed_head_resubmit_count() < MAX_PIPELINE_VERIFY_RESUBMITS
         )
-        self.notify_verification_attention(previous, allow_resubmit=allow_resubmit)
+        self.notify_verification_attention(
+            previous,
+            allow_resubmit=allow_resubmit,
+            allow_same_head_retry=(
+                self.verification_attempt_from_receipt(previous).attempt_index
+                == 0
+            ),
+        )
         if not allow_resubmit:
             self.summary_attention(
                 "pipeline-verification-retry-exhausted",
@@ -174,11 +247,15 @@ class RuntimeWorkerSummaryMixin:
                     self.schedule_fix_retry(existing)
                 else:
                     allow_resubmit = (
-                        self.failed_verification_count()
-                        <= MAX_PIPELINE_VERIFY_RESUBMITS
+                        self.changed_head_resubmit_count()
+                        < MAX_PIPELINE_VERIFY_RESUBMITS
                     )
                     self.notify_verification_attention(
-                        existing, allow_resubmit=allow_resubmit
+                        existing,
+                        allow_resubmit=allow_resubmit,
+                        allow_same_head_retry=(
+                            self.verification_attempt.attempt_index == 0
+                        ),
                     )
                     if not allow_resubmit:
                         self.summary_attention(
@@ -237,7 +314,26 @@ class RuntimeWorkerSummaryMixin:
         )
         if not self.handle_prior_failed_verification(previous):
             return None
-        existing, halted = self.resolve_current_verification(verify_step)
+        try:
+            continued = (
+                continued_verification_receipt(
+                    self.spec_path.parent,
+                    operation_id=self.spec["operation_id"],
+                    current_head=self.verification_head,
+                    controller_receipt=previous,
+                )
+                if verify_step is not None
+                else None
+            )
+        except PostVerificationReviewDriveError as exc:
+            raise RuntimeWorkerError(
+                "pipeline verification continuation is invalid"
+            ) from exc
+        existing, halted = (
+            (continued, False)
+            if continued is not None
+            else self.resolve_current_verification(verify_step)
+        )
         if halted:
             return None
         return SummaryPipelineState(summary, marker, steps, verify_step, existing)
@@ -248,7 +344,26 @@ class RuntimeWorkerSummaryMixin:
         if not verification_complete:
             return False
         gate_state = self.review_gate_state()
-        if gate_state.get("status") == "awaiting-resolution":
+        awaiting_resolution = gate_state.get("awaiting_resolution")
+        raw_attempt = gate_state.get("attempt")
+        terminal = (
+            raw_attempt.get("terminal")
+            if isinstance(raw_attempt, dict)
+            else None
+        )
+        exact_attempt_resolution = (
+            gate_state.get("status") == "changes-requested"
+            and isinstance(raw_attempt, dict)
+            and raw_attempt.get("status") == "terminal"
+            and isinstance(terminal, dict)
+            and terminal.get("result") == "changes-requested"
+            and isinstance(awaiting_resolution, dict)
+            and bool(awaiting_resolution)
+        )
+        if (
+            gate_state.get("status") == "awaiting-resolution"
+            or exact_attempt_resolution
+        ):
             self.notify_review_resolution(gate_state)
             if self.review.status == "stale":
                 if not _review_resolution_handoff_ready(
@@ -348,9 +463,13 @@ class RuntimeWorkerSummaryMixin:
         )
 
     def publish_summary_callback(self, summary: dict[str, object]) -> None:
-        self.callback_handled = True
         encoded = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()
         payload_sha256 = hashlib.sha256(encoded).hexdigest()
+        generation = (
+            self.active_target[0]
+            if self.active_target is not None
+            else self._initial_generation()
+        )
         envelope = CallbackEnvelope(
             callback_id=f"wiki-summary-{payload_sha256[:24]}",
             operation_id=self.spec["operation_id"],
@@ -360,6 +479,8 @@ class RuntimeWorkerSummaryMixin:
             payload_sha256=payload_sha256,
         )
         acceptance = CallbackBroker(self.store, self.spec["owner_id"]).accept(envelope)
+        self.record_provider_result(generation, payload_sha256)
+        self.callback_handled = True
         emit_compiled_pipeline_event(
             self.spec["cwd"],
             event="terminal",

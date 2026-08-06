@@ -51,6 +51,7 @@ class ReviewGateFreshBoundaryMixin:
             "verification_receipt_sha256",
             "status",
         }
+        expected_v2_keys = expected_keys | {"dispatch_operation_id"}
         authorization = (
             _read_json(authorization_path)
             if authorization_path.is_file()
@@ -70,10 +71,22 @@ class ReviewGateFreshBoundaryMixin:
                 "fresh-boundary-authorized",
             }
             or not isinstance(authorization, dict)
-            or set(authorization) != expected_keys
-            or authorization.get("schema_version") != 1
+            or (
+                authorization.get("schema_version") == 1
+                and set(authorization) != expected_keys
+            )
+            or (
+                authorization.get("schema_version") == 2
+                and set(authorization) != expected_v2_keys
+            )
+            or authorization.get("schema_version") not in {1, 2}
             or authorization.get("operation_id")
             != run.execution.request.policy.operation_id
+            or (
+                authorization.get("schema_version") == 2
+                and authorization.get("dispatch_operation_id")
+                != state.get("dispatch_operation_id")
+            )
             or authorization.get("kind") != boundary.kind
             or authorization.get("previous_context_sha256")
             != boundary.previous_context_sha256

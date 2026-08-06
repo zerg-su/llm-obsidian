@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from harness.contracts import AttentionReason
+from harness.review_attempt import (
+    EXACT_HEAD_REVIEW_PROTOCOL,
+    LEGACY_CROSS_HEAD_RESUME_DISABLED,
+    ReviewAttempt,
+    ReviewAttemptError,
+)
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore, StoreError
@@ -26,6 +32,9 @@ from harness.workflows.review_gate import (
     ReviewGateRun,
     ReviewPreset,
 )
+from harness.workflows.review_gate_attempt import (
+    compile_review_attempt_identity,
+)
 from review_resolution import MATERIAL_SEVERITIES
 from review_telemetry import emit_review_event
 from task_review_context import (
@@ -35,6 +44,13 @@ from task_review_context import (
     _gate_root,
     _prompt,
     _request,
+)
+from task_review_finalization_attempt import (
+    FinalizationAttemptError,
+    attempt_binding,
+    exact_head_attempt_enabled,
+    finalization_ledger,
+    reserve_exact_head_attempt,
 )
 from task_review_resolution_bundle import _resolution_bundle
 from task_review_shared import (
@@ -187,6 +203,132 @@ def _start_review(
                 context_manifest=context_manifest,
             )
         raise
+    return _receipt(
+        status="reviewing",
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=context_manifest,
+        run=run,
+    )
+
+
+def _exact_head_attempt_enabled(meta: Mapping[str, Any]) -> bool:
+    """Select the protocol only from the normalized additive v4 policy.
+
+    ``review_policy`` deliberately remains the exact public v4 shape.  The
+    already-versioned ``finalization_policy`` is the code-owned capability for
+    exact-HEAD attempts; caller-injected selector fields have no authority.
+    """
+
+    try:
+        return exact_head_attempt_enabled(meta)
+    except FinalizationAttemptError as exc:
+        raise TaskReviewError(str(exc)) from exc
+
+
+def _legacy_resume_disabled_receipt(
+    *,
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    runtime_root: Path,
+) -> dict[str, Any]:
+    disposition = LEGACY_CROSS_HEAD_RESUME_DISABLED.payload()
+    return {
+        **disposition,
+        "review_purpose": str(
+            meta.get("review_policy", {}).get("purpose")
+            if isinstance(meta.get("review_policy"), Mapping)
+            else "implementation"
+        )
+        or "implementation",
+        "task_id": meta["task_id"],
+        "worktree": str(worktree),
+        "vault_root": str(vault),
+        "context_manifest": "",
+        "lanes": [],
+    }
+
+
+def _attempt_binding(
+    meta: Mapping[str, Any], task_id: str, *, cycle: int
+) -> tuple[str, int, str, str]:
+    try:
+        return attempt_binding(meta, task_id, cycle=cycle)
+    except FinalizationAttemptError as exc:
+        raise TaskReviewError(str(exc)) from exc
+
+
+def _start_exact_head_review(
+    *,
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    task_id: str,
+    runtime_root: Path,
+    context: ReviewContext,
+    context_manifest: Path,
+    preset: ReviewPreset,
+    request: ReviewOperationRequest | None,
+    gate: ReviewGateController,
+    cycle: int,
+) -> dict[str, Any]:
+    if not preset.enabled:
+        raise TaskReviewError(
+            "exact-HEAD attempt protocol requires an enabled review"
+        )
+    if request is None:
+        raise TaskReviewError("enabled review has no request")
+    prompt_pointers = {
+        axis: _prompt(
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context=context,
+            axis=axis,
+            verification=False,
+        )
+        for axis in request.policy.axes
+    }
+
+    def prepare_lane(
+        axis: str,
+        _session_request: object,
+        _result: object,
+        round_: ReviewRound,
+    ) -> None:
+        _write_round_meta(
+            runtime_root=runtime_root,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            depth=preset.depth,
+            context=context,
+            lane_operation_id=round_.parent_operation_id,
+            round_=round_,
+        )
+
+    lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
+        meta, task_id, cycle=cycle
+    )
+    run = gate.begin_attempt(
+        dispatch_operation_id=task_id,
+        finalization_lineage_id=lineage,
+        cycle=cycle,
+        plan_sha256=plan_sha256,
+        outcome_sha256=outcome_sha256,
+        request=request,
+        origin_surface=str(meta.get("task_surface") or ""),
+        cwd=runtime_root,
+        product_root=worktree,
+        prompt_pointer=prompt_pointers[request.policy.axes[0]],
+        prompt_pointers=prompt_pointers,
+        callback_root="callbacks",
+        callback_wake=_callback_wake(meta, vault, worktree),
+        prepare_lane=prepare_lane,
+    )
     return _receipt(
         status="reviewing",
         meta=meta,
@@ -391,6 +533,175 @@ def _terminal_receipt(
     )
 
 
+def _run_exact_head_review(
+    meta: Mapping[str, Any],
+    vault: Path,
+    worktree: Path,
+    task_id: str,
+    runtime_root: Path,
+    *,
+    runtime_manager: object | None = None,
+) -> dict[str, Any]:
+    """Drive the iteration-zero attempt path through its frozen gate only."""
+
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+    runtime = runtime_manager or RuntimeSessionManager.for_root(
+        vault, store_root=store_root
+    )
+    gate_root = _gate_root(vault, task_id)
+    gate = ReviewGateController(gate_root, runtime, store)
+    gate_exists = gate.state_path.exists()
+    if gate_exists:
+        state = gate.read()
+        if not isinstance(state.get("attempt"), Mapping):
+            return _legacy_resume_disabled_receipt(
+                meta=meta,
+                vault=vault,
+                worktree=worktree,
+                runtime_root=runtime_root,
+            )
+    context, context_manifest = _context(
+        meta, vault, worktree, runtime_root, task_id
+    )
+    preset, request = _request(meta, vault, task_id, context)
+    if request is None:
+        raise TaskReviewError("enabled review has no request")
+
+    cycle = 1
+    if gate_exists:
+        prior_attempt = ReviewAttempt.from_mapping(gate.read()["attempt"])
+        cycle = prior_attempt.identity.cycle
+        if prior_attempt.status == "terminal":
+            assert prior_attempt.terminal is not None
+            ledger = finalization_ledger(meta, vault, task_id)
+            ledger.record_terminal(
+                attempt_id=prior_attempt.identity.attempt_id,
+                terminal_result=prior_attempt.terminal.result.value,
+            )
+            if prior_attempt.terminal.result.value == "approved":
+                return _receipt(
+                    status="approved",
+                    meta=meta,
+                    vault=vault,
+                    worktree=worktree,
+                    runtime_root=runtime_root,
+                    context_manifest=context_manifest,
+                    run=None,
+                )
+            if context.head_sha == prior_attempt.identity.exact_head_sha:
+                return _receipt(
+                    status=prior_attempt.terminal.result.value,
+                    meta=meta,
+                    vault=vault,
+                    worktree=worktree,
+                    runtime_root=runtime_root,
+                    context_manifest=context_manifest,
+                    run=None,
+                )
+            if prior_attempt.terminal.result.value != "changes-requested":
+                raise TaskReviewError(
+                    "only a changed-HEAD resolution may select another finalization cycle"
+                )
+            cycle += 1
+
+    request, ledger = reserve_exact_head_attempt(
+        meta,
+        vault=vault,
+        worktree=worktree,
+        task_id=task_id,
+        request=request,
+        cycle=cycle,
+    )
+    if not gate_exists or (
+        ReviewAttempt.from_mapping(gate.read()["attempt"]).status == "terminal"
+    ):
+        return _start_exact_head_review(
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_root=runtime_root,
+            context=context,
+            context_manifest=context_manifest,
+            preset=preset,
+            request=request,
+            gate=gate,
+            cycle=cycle,
+        )
+
+    state = gate.read()
+    attempt = ReviewAttempt.from_mapping(state["attempt"])
+    lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
+        meta, task_id, cycle=attempt.identity.cycle
+    )
+    candidate = compile_review_attempt_identity(
+        request=request,
+        finalization_lineage_id=lineage,
+        cycle=cycle,
+        plan_sha256=plan_sha256,
+        outcome_sha256=outcome_sha256,
+    )
+    attempt.assert_identity(candidate)
+    if context.head_sha != attempt.identity.exact_head_sha:
+        raise ReviewAttemptError("review attempt cannot bind a changed HEAD")
+    status = str(state.get("status") or "")
+    if attempt.status == "terminal":
+        if status != attempt.terminal.result.value:
+            raise ReviewAttemptError("review attempt terminal projection changed")
+        return _receipt(
+            status=status,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=None,
+        )
+    if attempt.status != "awaiting-callback" or status != "reviewing":
+        raise ReviewAttemptError("review attempt is not at a callback boundary")
+    run = gate.rehydrate_attempt()
+    ready = _collect_ready_results(run, runtime_root, worktree, vault)
+    if _requires_lane_barrier(preset) and len(ready) != len(
+        run.execution.lanes
+    ):
+        return _receipt(
+            status="reviewing",
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            runtime_root=runtime_root,
+            context_manifest=context_manifest,
+            run=run,
+        )
+    for lane, round_, result in ready:
+        decision = gate.complete_attempt_round(run, lane, round_, result)
+        if decision.action != "awaiting-axes":
+            break
+    next_state = gate.read()
+    next_status = str(next_state.get("status") or "")
+    next_attempt = ReviewAttempt.from_mapping(next_state["attempt"])
+    if next_attempt.status == "terminal":
+        assert next_attempt.terminal is not None
+        ledger.record_terminal(
+            attempt_id=next_attempt.identity.attempt_id,
+            terminal_result=next_attempt.terminal.result.value,
+        )
+    return _receipt(
+        status=next_status,
+        meta=meta,
+        vault=vault,
+        worktree=worktree,
+        runtime_root=runtime_root,
+        context_manifest=context_manifest,
+        run=(
+            gate.rehydrate_attempt()
+            if next_attempt.status != "terminal"
+            else None
+        ),
+    )
+
+
 def _run_review(
     meta: Mapping[str, Any],
     vault: Path,
@@ -401,6 +712,27 @@ def _run_review(
     runtime_manager: object | None = None,
     apply_finalizing_recovery: Callable[..., dict[str, Any]],
 ) -> dict[str, Any]:
+    gate_path = _gate_root(vault, task_id) / "review-gate.json"
+    exact_enabled = _exact_head_attempt_enabled(meta)
+    if exact_enabled and gate_path.exists():
+        try:
+            existing_gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise TaskReviewError("review gate state is unavailable") from exc
+        # A gate created before the v4 exact-attempt activation completes on
+        # its original path. It cannot be converted or replayed in place.
+        exact_enabled = isinstance(existing_gate, dict) and isinstance(
+            existing_gate.get("attempt"), Mapping
+        )
+    if exact_enabled:
+        return _run_exact_head_review(
+            meta,
+            vault,
+            worktree,
+            task_id,
+            runtime_root,
+            runtime_manager=runtime_manager,
+        )
     store_root = vault / ".vault-meta" / "harness"
     store = OperationStore(store_root)
     runtime = runtime_manager or RuntimeSessionManager.for_root(

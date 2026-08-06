@@ -9,7 +9,7 @@ from typing import Mapping, Sequence
 from harness.context import ContextInput
 from review_resolution import (
     MATERIAL_SEVERITIES,
-    MAX_FIX_DELTA_TOTAL_BYTES,
+    MAX_FIX_DELTA_CANONICAL_BYTES,
     ResolutionError,
     ReviewResolution,
     ReviewResolutionEvidence,
@@ -300,11 +300,16 @@ def _resolution_bundle(
         resolved_head,
         "--",
     )
-    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_TOTAL_BYTES:
+    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_CANONICAL_BYTES:
         raise TaskReviewError(
-            "review fix delta must be non-empty and at most 131072 bytes"
+            "review fix delta must be non-empty and at most 1048576 bytes"
         )
-    build_delta_packet(fix_delta, reviewed_head, resolved_head)
+    build_delta_packet(
+        fix_delta,
+        reviewed_head,
+        resolved_head,
+        review_identity_sha256=review_identity_sha256,
+    )
     fix_delta_sha256 = hashlib.sha256(fix_delta).hexdigest()
     if any(
         evidence.fix_delta_sha256 != fix_delta_sha256
@@ -394,12 +399,17 @@ def _recovery_resolution_bundle(
         resolved_head,
         "--",
     )
-    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_TOTAL_BYTES:
+    if not fix_delta or len(fix_delta) > MAX_FIX_DELTA_CANONICAL_BYTES:
         raise TaskReviewError(
-            "review fix delta must be non-empty and at most 131072 bytes"
+            "review fix delta must be non-empty and at most 1048576 bytes"
         )
     build_delta_packet(
-        fix_delta, persisted.reviewed_head_sha, resolved_head
+        fix_delta,
+        persisted.reviewed_head_sha,
+        resolved_head,
+        review_identity_sha256=(
+            review_identity_sha256 or resolution.review_identity_sha256
+        ),
     )
     try:
         evidence = build_resolution_evidence(

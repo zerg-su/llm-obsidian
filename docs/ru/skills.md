@@ -1,10 +1,10 @@
-# Skills: полный inventory версии 2.6.3
+# Skills: полный inventory версии 2.6.5
 
 Skill — versioned reasoning contract. Claude использует plugin skill `/name`;
 Codex — `$llm-obsidian:name`. Другой agent может прочитать
 `skills/<name>/SKILL.md` вручную. Router даёт hint, но не расширяет разрешения.
 
-## Каталог 34 skills
+## Каталог 35 skills
 
 | Skill и вызов | Когда применять | Вход | Результат и граница | Permission/effect · минимальный пример |
 |---|---|---|---|---|
@@ -35,6 +35,7 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 | `review` · `/review` · `$llm-obsidian:review` | Проверить outcome/code/spec/release | Purpose, exact HEAD и evidence boundary | Harness-owned read-only reviewer lanes | Provider lifecycle через harness · `/review --deep` |
 | `save-plan` · `/save-plan` · `$llm-obsidian:save-plan` | Сохранить утверждённый план | Plan body и provenance | Canonical wiki plan | Vault transaction · `/save-plan` |
 | `save` · `/save` · `$llm-obsidian:save` | Сохранить решение/вопрос/знание | Content, type и provenance | Deduplicated vault page | Vault transaction · `/save решение по callback` |
+| `split` · `/split` · `$llm-obsidian:split` | Preview или явная bounded activation approved plan | Frozen plan/Outcome Contract, bounded candidates; для activation — `--dispatch` | Exact SplitManifest; preview имеет zero effects, activation запускает dependency-ready workspace children через harness и принимает только exact approved resource-free receipts | Preview: read-only · `/split wiki/plans/example.md`; activation: `/split --dispatch wiki/plans/example.md` |
 | `tdd` · `/tdd` · `$llm-obsidian:tdd` | Реализовать ясное поведение | Authorized behavior и observable seam | RED→GREEN slices; не diagnosis-only | Product/test writes · `/tdd fail-closed parent gate` |
 | `unsafe-research` · `/unsafe-research` · `$llm-obsidian:unsafe-research` | Явно принять single-context web risk | Query, full context, explicit authorization | Cited answer; никогда не fallback protected research | Network с принятым context risk · `/unsafe-research current vendor status` |
 | `wiki-fold` · `/wiki-fold` · `$llm-obsidian:wiki-fold` | Свернуть старые operation-log entries | Oldest unprocessed entries | Deterministic rollup, dry-run по умолчанию | Vault transaction только explicit commit · `/wiki-fold --dry-run` |
@@ -52,6 +53,9 @@ Codex — `$llm-obsidian:name`. Другой agent может прочитать
 - Новый документ: `defuddle` для web cleanup или `wiki-ingest` для файла →
   `save`/transaction → `wiki-query` для проверки findability.
 - Долгая task: `save-plan` → `dispatch` → `review` → `reap`.
+- Approved параллельная task: `save-plan` → `split` preview → явный
+  `split --dispatch` → manifest-order join exact receipts; merge/release остаются
+  отдельными действиями.
 - Defect: `debug` до root cause, затем разрешённый `tdd`; не называйте
   отсутствие expected new behavior mechanism failure.
 

@@ -143,9 +143,9 @@ assert (
 )
 assert (
     hashlib.sha256((ROOT / "schemas" / "pipeline-spec-v1.schema.json").read_bytes()).hexdigest()
-    == "2ab84eaf5b0abb7810ca834cec1dca5966fbff13a8894426af981200fe2367d1"
+    == "00a7b15a4615863a6fff060a67d91864ba2c0d95850a3a8fd494566acb0c1e3f"
 )
-print("OK   v3 metadata and frozen custom grammar match their tracked digests")
+print("OK   v3 metadata and additive custom grammar match their tracked digests")
 
 
 def expect_contract_error(label: str, meta: dict[str, object], needle: str) -> None:

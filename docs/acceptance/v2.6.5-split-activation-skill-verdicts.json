@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "split",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "activation-path-stale",
+        "steering": "activation-path-stale",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved plan, exact parent Outcome Contract, registered child pipelines, frozen budgets, and an explicit preview-only or --dispatch invocation.",
+      "overall_outcome": "A zero-effect exact Split preview, or when separately authorized, bounded workspace-local waves and deterministic resource-free join without provider replay.",
+      "local_subgoal": "Preserve preview authority by default and route explicit activation through the validated existing dispatch/session lifecycle.",
+      "completion_proxies": [
+        "The Split skill structural audit is green.",
+        "The activation request validates with four zero effect counters.",
+        "The focused Split activation and dispatch suites pass."
+      ],
+      "required_outcome_evidence": [
+        "J2-stability-gate",
+        "J3-integrated-split",
+        "J4-release-proof"
+      ],
+      "evidence": "skills/split/SKILL.md; scripts/split-runner.py; scripts/harness/split_activation.py; tests/harness/test_split_activation.py; docs/acceptance/v2.6.5-split-activation-skill-audit.md",
+      "change": "Add the separately authorized --dispatch branch after the unchanged zero-effect preview, bind it to harness lifecycle commands, and require exact resource-free join evidence.",
+      "behavior_proof": "Explicit-only invocation and preview zero effects are unchanged; the new effectful branch is reachable only through explicit --dispatch plus the approved plan and the code-owned validation/dispatch adapters authorized by the 2.6.5 Join plan."
+    }
+  ]
+}

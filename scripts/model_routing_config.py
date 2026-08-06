@@ -86,6 +86,23 @@ class RoutingConfig:
             "effort": value["effort"],
         }
 
+    def finalization_route(self, alias: str) -> dict[str, str]:
+        """Resolve one registered finalization-only logical route."""
+
+        routes = self.data["finalization_routes"]
+        if alias not in routes:
+            raise RoutingError(
+                f"finalization route alias {alias!r} is not registered"
+            )
+        value = routes[alias]
+        target = self.resolve_alias(value["model"], value["runtime"])
+        return {
+            "alias": alias,
+            "runtime": target["runtime"],
+            "model": target["model"],
+            "effort": value["effort"],
+        }
+
     def default_models(self) -> set[str]:
         diagnostic = self.resolve_alias(
             self.data["roles"]["diagnostic-fast"]["model"]
@@ -96,6 +113,10 @@ class RoutingConfig:
                 self.reviewer_default(runtime, profile)["model"]
                 for runtime in RUNTIMES
                 for profile in ("simple", "deep")
+            ),
+            *(
+                self.finalization_route(alias)["model"]
+                for alias in sorted(self.data["finalization_routes"])
             ),
             diagnostic["model"],
         }
@@ -366,6 +387,51 @@ def _validate_review_profiles(
             validate_effort(runtime, item["effort"])
 
 
+def _validate_finalization_routes(
+    data: dict[str, Any],
+    registry: dict[str, Any],
+    aliases: dict[str, Any],
+) -> None:
+    routes = data.get("finalization_routes")
+    expected = {"finalization-primary", "finalization-independent"}
+    if not isinstance(routes, dict) or set(routes) != expected:
+        raise RoutingError(
+            "finalization_routes must define exactly finalization-primary "
+            "and finalization-independent"
+        )
+    resolved_runtimes: dict[str, str] = {}
+    for alias in sorted(expected):
+        item = routes[alias]
+        if not isinstance(item, dict) or set(item) != {
+            "runtime",
+            "model",
+            "effort",
+        }:
+            raise RoutingError(
+                f"finalization_routes.{alias} has an invalid shape"
+            )
+        runtime, model, effort = (
+            item["runtime"],
+            item["model"],
+            item["effort"],
+        )
+        registered_runtime = (
+            aliases[model]["runtime"]
+            if model in aliases
+            else registry.get(model)
+        )
+        if runtime not in RUNTIMES or registered_runtime != runtime:
+            raise RoutingError(
+                f"finalization route alias/runtime mismatch: {alias}"
+            )
+        validate_effort(runtime, effort)
+        resolved_runtimes[alias] = runtime
+    if len(set(resolved_runtimes.values())) != len(resolved_runtimes):
+        raise RoutingError(
+            "finalization routes must resolve to different providers"
+        )
+
+
 def _validate_legacy_defaults(
     data: dict[str, Any], registry: dict[str, Any]
 ) -> None:
@@ -393,6 +459,7 @@ def _validate(data: dict[str, Any]) -> None:
     aliases = _validate_aliases(data, registry)
     _validate_diagnostic_role(roles, registry, aliases)
     _validate_review_profiles(data, registry, aliases)
+    _validate_finalization_routes(data, registry, aliases)
     _validate_legacy_defaults(data, registry)
 
 

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d265-reap-complete-pending-effect",
+  "seed": 26504,
+  "max_steps": 8,
+  "expected_initial_invariant": "SIM-INV-RESOURCE-FREE",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["terminal-reap-replay"],
+  "expected_production_paths": ["OperationStore.resolve_effect", "RuntimeSessionManager.cleanup"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "reap-parent", "run_id": "reap-run", "revision": 11, "state": "complete", "attention_reason": null, "pending_effect": "reap-finalize", "effect_id": "reap-finalize", "effect_outcome": "pending", "accepted_callback_id": "summary-callback", "accepted_callback_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "resources": {}},
+    "liveness": {"operation_revision": 11, "operation_state": "complete", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": ["complete"]
+  },
+  "replay_snapshot": {
+    "operation": {"operation_id": "sim-operation", "run_id": "sim-run", "revision": 10, "state": "finalizing", "attention_reason": null, "pending_effect": "reap-finalize", "effect_id": "reap-finalize", "effect_outcome": "pending", "accepted_callback_id": "summary-callback", "accepted_callback_kind": "result", "accepted_callback_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "resources": {"surface_id": "sim-surface", "process_group": 4101, "supervisor_pid": 4102, "process_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "supervisor_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+    "liveness": {"operation_revision": 10, "operation_state": "finalizing", "callback_submit_binding": "", "callback_submit_status": ""},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": []
+  },
+  "actions": [
+    {"action_id": "resolve", "action": "resolve-effect", "outcome": "succeeded"},
+    {"action_id": "close", "action": "close", "after": ["resolve"]}
+  ]
+}

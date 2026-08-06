@@ -137,6 +137,10 @@ assert "auto_resolve_severities" not in review_v4["properties"]
 assert "escalate_severities" not in review_v4["properties"]
 assert set(review_v4["properties"]["mode"]["enum"]) == task_contract.REVIEW_MODES
 assert review_v4["allOf"] == review_v3["allOf"]
+assert "finalization_policy" not in task_meta_v4["required"]
+assert task_meta_v4["properties"]["finalization_policy"] == (
+    load("pipeline-spec-v1.schema.json")["properties"]["finalization_policy"]
+)
 outcome_v1 = load("outcome-contract-v1.schema.json")
 assert outcome_v1["additionalProperties"] is False
 assert set(outcome_v1["required"]) == outcome_contract.REQUIRED_FIELDS
@@ -159,6 +163,7 @@ assert pipeline_spec["properties"]["schema_version"] == {"const": CUSTOM_SPEC_VE
 assert set(pipeline_spec["properties"]["review_mode"]["enum"]) == REVIEW_MODES
 assert pipeline_spec["additionalProperties"] is False
 assert pipeline_spec["properties"]["steps"]["maxItems"] == 8
+assert "finalization_policy" not in pipeline_spec["required"]
 assert pipeline_spec["properties"]["context_pointers"]["items"] == {
     "$ref": "#/$defs/contextPointer"
 }

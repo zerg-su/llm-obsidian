@@ -58,6 +58,7 @@ from harness.runtime_sessions import (
     RuntimeSessionRequest,
 )
 from harness.runtime_session_contracts import continuation_effect_id
+from harness.runtime_session_continuation import await_initial_input_ready
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -132,7 +133,7 @@ class FakeCmux:
     def read(self, surface_id: str) -> str:
         assert surface_id == SURFACE
         if not self.sent:
-            return "›"
+            return "❯\n›"
         prompt = self.sent[-1][1]
         anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
         if self.submit_count == self.submits_at_last_send:
@@ -178,6 +179,37 @@ class FakeCmux:
             surface_id == SURFACE and runtime in {"claude", "codex"},
         )
         return self.checkpoint
+
+
+class InitialReadyPort:
+    def __init__(self, screens: list[str]) -> None:
+        self.screens = list(screens)
+        self.reads = 0
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        self.reads += 1
+        return self.screens.pop(0) if self.screens else ""
+
+
+initial_ready_port = InitialReadyPort(
+    ["", "Starting MCP servers", "› Implement {feature}"]
+)
+initial_ready_waits: list[float] = []
+check(
+    "initial provider input waits for the native idle editor",
+    await_initial_input_ready(
+        initial_ready_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=3,
+        observation_interval_seconds=0.01,
+        wait=initial_ready_waits.append,
+    )
+    and initial_ready_port.reads == 3
+    and initial_ready_waits == [0.01, 0.01],
+    (initial_ready_port.reads, initial_ready_waits),
+)
 
 
 class FakeProcess:
@@ -395,6 +427,152 @@ def envelope(
     )
 
 
+with tempfile.TemporaryDirectory(prefix="review-cleanup-product-binding.") as raw:
+    cleanup_root = Path(raw).resolve()
+    cleanup_scratch = cleanup_root / "review-scratch"
+    cleanup_scratch.mkdir()
+    (cleanup_scratch / "callbacks").mkdir()
+    cleanup_product = cleanup_root / "product"
+    cleanup_product.mkdir()
+    cleanup_events: list[str] = []
+    cleanup_store = OperationStore(cleanup_root / "store")
+    cleanup_route = RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "high",
+        "reviewer-callback",
+        "d" * 64,
+    )
+    cleanup_spec = OperationSpec(
+        "review-cleanup-parent",
+        "review-cleanup-key",
+        "deep-review-spec",
+        "review-cleanup-owner",
+        cleanup_route,
+        "packets/review.json",
+        "scoped",
+    )
+    cleanup_store.create(
+        cleanup_spec,
+        lane_id="review-cleanup-lane",
+        run_id="review-cleanup-run",
+    )
+    for cleanup_state in ("preflight", "starting", "running", "awaiting-callback"):
+        cleanup_store.transition(
+            "review-cleanup-owner",
+            "review-cleanup-parent",
+            cleanup_state,
+        )
+    OperationSupervisor(
+        cleanup_store,
+        "review-cleanup-owner",
+        "review-cleanup-parent",
+    ).bind_resources(
+        OwnedResources(
+            SURFACE,
+            123,
+            124,
+            PROCESS_IDENTITY,
+            SUPERVISOR_IDENTITY,
+        )
+    )
+    cleanup_cmux = FakeCmux(cleanup_events)
+    cleanup_cmux.surface_status = "missing"
+    cleanup_cmux.workspace_status_value = "missing"
+    cleanup_process = FakeProcess(cleanup_events)
+    cleanup_process.status_value = "dead"
+    cleanup_process.supervisor_status_value = "dead"
+    cleanup_manager = RuntimeSessionManager(
+        cleanup_store,
+        cleanup_cmux,
+        cleanup_process,
+        {"codex": FakeDriver()},
+        preflight=lambda _route, _callback_dir: CapabilityReport(
+            cleanup_route, True, ("provider:profile-valid",)
+        ),
+    )
+    cleanup_state_root = (
+        cleanup_store.root
+        / "owners"
+        / "review-cleanup-owner"
+        / "runtime"
+        / "review-cleanup-parent"
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "callback_mode": "envelope",
+            "cwd": str(cleanup_scratch),
+            "product_root": str(cleanup_product),
+            "placement": "workspace",
+            "workspace_id": WORKSPACE,
+            "window_id": WINDOW,
+            "workspace_ref": "workspace:8",
+            "window_ref": "window:7",
+            "surface_ref": "surface:9",
+            "checkpoint": "",
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "launch.json",
+        {
+            "schema_version": 1,
+            "owner_id": "review-cleanup-owner",
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "runtime": "codex",
+            "surface_id": SURFACE,
+            "cwd": str(cleanup_scratch),
+            "product_root": str(cleanup_product),
+            "store_root": str(cleanup_store.root.resolve()),
+            "argv": [
+                "/usr/bin/codex",
+                "--model",
+                cleanup_route.model,
+                "--cd",
+                str(cleanup_scratch / "callbacks"),
+            ],
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "checkpoint.json",
+        {
+            "schema_version": 1,
+            "operation_id": "review-cleanup-parent",
+            "run_id": "review-cleanup-run",
+            "runtime": "codex",
+            "checkpoint": "review-cleanup-checkpoint",
+        },
+    )
+    cleanup_manager._write_json(
+        cleanup_state_root / "ready.json",
+        {
+            "schema_version": 1,
+            "status": "ready",
+            "pid": 123,
+            "process_group": 123,
+            "process_identity": PROCESS_IDENTITY,
+            "supervisor_pid": 124,
+            "supervisor_identity": SUPERVISOR_IDENTITY,
+        },
+    )
+    cleanup_ownership = cleanup_manager.prove_durable_cleanup_ownership(
+        "review-cleanup-owner",
+        "review-cleanup-parent",
+    )
+    check(
+        "sandboxed reviewer cleanup trusts the typed product binding instead of argv text",
+        cleanup_ownership.process_status == "dead"
+        and cleanup_ownership.supervisor_status == "dead"
+        and cleanup_ownership.surface_status == "missing"
+        and cleanup_ownership.workspace_status == "missing",
+        cleanup_ownership,
+    )
+
+
 with tempfile.TemporaryDirectory(prefix="research-home-boundary.") as raw:
     research_root = Path(raw).resolve()
     research_cwd = research_root / "scratch"
@@ -583,12 +761,13 @@ with tempfile.TemporaryDirectory(prefix="research-parent-shebang.") as raw:
         "parent pins env shebang interpreter for ordinary providers",
         ordinary_launch["runtime_interpreter"] == str(node.resolve())
         and ordinary_spec["product_root"] == cwd.resolve()
+        and ordinary_spec["initial_input_pointer"]
+        == (cwd / "prompt.md").resolve()
         and ordinary_argv
         == (
             str(node.resolve()),
             str(codex),
             "--strict-config",
-            "bounded research",
         ),
         (ordinary_launch, ordinary_argv),
     )
@@ -2504,6 +2683,16 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         run_id="run-worker",
         surface_id=SURFACE,
         runtime="claude",
+        initial_input_pointer=cwd / "prompt.md",
+    )
+    ProcessAdapter._write_json(
+        worker_launch.spec_path.parent / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": "worker-1",
+            "run_id": "run-worker",
+            "workspace_id": WORKSPACE,
+        },
     )
     check(
         "ordinary launch materializer persists the exact cwd binding",
@@ -2602,12 +2791,14 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
             False,
         )
     worker_result: list[int] = []
+    worker_cmux = FakeCmux([])
     worker_thread = threading.Thread(
         target=lambda: worker_result.append(
             run_runtime_worker(
                 worker_launch.spec_path,
                 poll_seconds=0.02,
                 checkpoint_probe=lambda _surface, _runtime: "checkpoint-worker",
+                cmux_adapter=worker_cmux,
             )
         )
     )
@@ -2691,6 +2882,29 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
         == "callback-worker-round-2"
         and json.loads(receipt.read_text(encoding="utf-8"))["generation"] == 2,
         (worker_ready, worker_exit, worker_record),
+    )
+    provider_events = [
+        json.loads(path.read_text(encoding="utf-8"))["kind"]
+        for path in sorted(
+            (
+                worker_launch.spec_path.parent
+                / "provider-events"
+                / "generation-1"
+                / "events"
+            ).glob("*.json")
+        )
+    ]
+    check(
+        "public launch and live worker durably order input before result and exit",
+        provider_events
+        == [
+            "provider-started",
+            "input-accepted",
+            "result-published",
+            "process-exited",
+        ]
+        and worker_cmux.sent[-1] == (SURFACE, "perform the bounded task"),
+        (provider_events, worker_cmux.sent),
     )
 
     guard_store = OperationStore(root / "guard-store")

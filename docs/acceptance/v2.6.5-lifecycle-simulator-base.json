@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "receipt_kind": "lifecycle-simulator-base-admission",
+  "task_branch": "task/llm-obsidian-2-6-5-lifecycle-simulator-v2",
+  "base_branch": "task/llm-obsidian-2-6-5-simulator-bootstrap",
+  "admitted_head_sha": "cca8c98c95596229c607ccf5e565e9688696858e",
+  "admitted_tree_sha": "f0e78711fa763f960a71a02ad78df60d76dfcdae",
+  "clean_tracked_status": true,
+  "first_parent_chain": [
+    {
+      "role": "terminal-attention-join",
+      "head_sha": "09fd1c31e35c4f9b16fdbfcf17eb933360a0b374",
+      "tree_sha": "03fde11f15b7dbbe4092e73953343a78790cc3da"
+    },
+    {
+      "role": "authorized-provider-editor-bootstrap",
+      "head_sha": "cca8c98c95596229c607ccf5e565e9688696858e",
+      "tree_sha": "f0e78711fa763f960a71a02ad78df60d76dfcdae",
+      "first_parent_sha": "09fd1c31e35c4f9b16fdbfcf17eb933360a0b374"
+    }
+  ],
+  "approved_contracts": {
+    "parent_join_plan_sha256": "180783398075b45eecbf6f0e1787b77d372a85d26965b625af34832c2c0a324e",
+    "parent_join_outcome_sha256": "8aa2f480310177f4793739c6cf75a8b7062b0d303e0cd8dab5acce9a7053d199",
+    "simulator_plan_sha256": "b98b2a0a59aa32779dd85de1918937ac2d14c5ebaea3acc42494fff24e12e5c0",
+    "simulator_outcome_sha256": "3bcc41702dfc5c2bbde87774e23e741acfad84d9ca546befda1db43c1233611a"
+  },
+  "preserved_join_review_drive_evidence": {
+    "operation_id": "9f9964aa-7eb5-4b60-bdaf-53e1b6e46f52",
+    "reviewed_head_sha": "933083e0ee0c86e842482a58319e76196f51d153",
+    "resolved_head_sha": "09fd1c31e35c4f9b16fdbfcf17eb933360a0b374",
+    "review_identity_sha256": "e0bcec945a9b562a365191db227ff1673425b79fb867a38567bf515db2fa560f",
+    "review_callbacks": [
+      {
+        "axis": "openai-engineering",
+        "callback_id": "review-10bb2c9e4d4bca74de6f8a50",
+        "payload_sha256": "10bb2c9e4d4bca74de6f8a5012c5232566d9f72e04509fb418ce079667bf918a",
+        "artifact_sha256": "367d3c9278d8474965daa453dc4fbc329d01c8c1f4cf12723503eb33c685da08"
+      },
+      {
+        "axis": "openai-intent",
+        "callback_id": "review-47d4f182a05eafe20fd929ac",
+        "payload_sha256": "47d4f182a05eafe20fd929ac4fbc5ca73829ea3fb9f568456f493e75946ddb50",
+        "artifact_sha256": "17c0fa9e8d07e8d6c0950b52fab4efc8dcae195332a3bdaf644646a3955263fd"
+      }
+    ],
+    "failed_drive": {
+      "failed_drive_head_sha": "cfba5d03b25159eaa022f04b290ce8d2a3af566a",
+      "drive_sha256": "5cfd020a46871dd689a93bc0162e3bfd79d46bd035e3039903b31c89a32f3715",
+      "callback_error_sha256": "ac860f9e617898594bf39c192e1b8b79a59d59dd4c73786b6401c6ccee3269e5"
+    },
+    "rearm_receipt": {
+      "artifact_sha256": "e508c9448308519b8e06565bf9154499c6aa8b59b4e429e826f7862674d248b4",
+      "binding_sha256": "8d18d24fd70061406377021ee2e97e45dd2af528c065c0ef4b5948959da8fe9e",
+      "source_operation_sha256": "4ca322c960898b6d245d63444f5f6414490bf8307d43fa1a7496405f2e770526",
+      "source_liveness_sha256": "42c770ae54504a21c06c0cc4a553f8899e3b7ba7e28038e1625d60d528c1ab4e",
+      "target_operation_sha256": "d278cbba4dfa8257e7b0a307a882c2f107ae9d4f3bc3386add06bea2a1e44378",
+      "target_liveness_sha256": "0e9a58437e11a0a70b347ce716614b4ba311986eab33d7b43641ee37d6d2d0d1"
+    },
+    "verification_chain": {
+      "failed_head_sha": "bfc08827d0ca3b7d2d6c034cf710862a8147b024",
+      "verification_operation_id": "9f9964aa-7eb5-4b60-bdaf-53e1b6e46f52-verify-608b870883a43b37",
+      "response_packet_sha256": "1d744da6e279064d84f2c36db11a021697cbb89ceca581627c8f20e00d43def2",
+      "resubmitted_head_sha": "09fd1c31e35c4f9b16fdbfcf17eb933360a0b374"
+    }
+  },
+  "runtime_inventory": {
+    "scripts/harness/contracts.py": "ec55b1375bde68a92bf0cc5130408d5da8a5a05755885f98c869c7c7120e8ac5",
+    "scripts/harness/liveness.py": "3e1b16ca901fd2dc2fd9d2adfb2e53b46a8e820df04daa951a35ddded676a5a6",
+    "scripts/harness/provider_events.py": "5b04b37d78137745225da60631595849904471286372587f297c53f20162dfc8",
+    "scripts/harness/reconciliation.py": "877cf9ceaf3d5ebf438e1900145cf6bd2563046e321d675bfec2ad477a87dab6",
+    "scripts/harness/review_drive_rearm.py": "00f42fe2c23a2c8da468b9639b561a04d7a94c9a5074e4ba60e9c105390e138f",
+    "scripts/harness/runtime_session_cleanup.py": "7d1e834dd190ccaf2ad565936266619479c7ede6fe02867dca6e27fc4a964017",
+    "scripts/harness/runtime_session_delivery.py": "2db43616e0c0d04c33820865dc048fb488a43c6fbddf55717dec71abdde926c4",
+    "scripts/harness/runtime_worker_control.py": "dc08f602c8cbab648cea9580b20915bb83f5b578a4736cadb3e2840af3cb057d",
+    "scripts/harness/runtime_worker_execution.py": "b1a078594df1868b86a0b04acd9650d313a15f67ee407958043b591b65a84e13",
+    "scripts/harness/runtime_worker_liveness.py": "5ddcee69d89889f15efac3fb68393589d4b4b5a311a278334a19c024c793354c",
+    "scripts/harness/runtime_worker_loop.py": "383abb5be3e31f2f9ab382e312f188f5b456bdfd4bfdf5d79757271771fcf14e",
+    "scripts/harness/runtime_worker_review_bridge.py": "b95450e57c7bd38c1e679281ff8bba01ec71e5e3ba0f7a7ae4efda27d574e497",
+    "scripts/harness/state_machine.py": "5cf6943dbac637ca79ffa1e64cd4ca44b813d0a6c75d88cd1efca0062d6d5d63",
+    "scripts/harness/store.py": "12a881b41b4d6ff1d6771bdc045e6d0974fcd865717eceb2085c96948ecc66c9"
+  },
+  "historical_fixture_inventory": {
+    "docs/acceptance/v2.6.5-causal-ledger.md": "e5ae0605a7c46228e9778210bb25cc9056ef6394ff7ebf080b9de8e7a6a15cde",
+    "tests/fixtures/v2.6.5/d264-73-terminal-parent-child.json": "74936e09ae3ddc45aabbf7ccc8e1044a1322a16df08a3a04c8a5286a5bfebe2c",
+    "tests/fixtures/v2.6.5/stale-exiting-resource-gone.json": "4366081fc997f5f266c8896f7399753707e7a5a901d6e8a554ce62142e09df0e"
+  }
+}

@@ -64,6 +64,20 @@ def _validate_argv(value: dict[str, Any]) -> None:
         raise RuntimeWorkerError("runtime launch argv is invalid")
 
 
+def _initial_input(value: dict[str, Any], cwd: Path) -> Path | None:
+    raw = value.get("initial_input_pointer")
+    if raw in {None, ""}:
+        return None
+    pointer = _absolute(raw, "initial_input_pointer")
+    try:
+        pointer.relative_to(cwd)
+    except ValueError as exc:
+        raise RuntimeWorkerError("initial provider input escapes cwd") from exc
+    if pointer.is_symlink() or not pointer.is_file():
+        raise RuntimeWorkerError("initial provider input is unavailable")
+    return pointer
+
+
 def _task_summary_pointer(
     value: dict[str, Any], callback_mode: str, origin_surface: str
 ) -> Path | None:
@@ -231,6 +245,7 @@ def load_spec(path: Path) -> dict[str, Any]:
     callback_mode = _validate_identity(value)
     _validate_argv(value)
     cwd = _absolute(value.get("cwd"), "cwd")
+    initial_input = _initial_input(value, cwd)
     callback = _absolute(value.get("callback_pointer"), "callback_pointer")
     product_root = None
     reviewer_sandbox = value.get("reviewer_sandbox", False)
@@ -324,6 +339,7 @@ def load_spec(path: Path) -> dict[str, Any]:
             "store_root": store_root,
             "ready_path": ready,
             "exit_path": exit_path,
+            "initial_input_pointer": initial_input,
         }
     )
     return value

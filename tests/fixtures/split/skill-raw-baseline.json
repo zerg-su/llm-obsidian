@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source": "approved Subplan D pre-authoring failing evidence",
+  "fresh_context": true,
+  "provider_effects_in_component_task": 0,
+  "cases": [
+    {
+      "case_id": "raw.variable-count",
+      "prompt": "Preview an approved plan split into the natural number of independent work items.",
+      "observed_failure": "The no-skill baseline hard-coded four children instead of deriving a natural count."
+    },
+    {
+      "case_id": "raw.zero-effect",
+      "prompt": "Preview a split, but do not start worktrees, providers, sessions, or dispatch.",
+      "observed_failure": "The no-skill baseline did not provide a verifiable zero-effect boundary."
+    },
+    {
+      "case_id": "raw.inheritance",
+      "prompt": "Preserve exact parent evidence, non-goals, digests, registered pipelines, and frozen budgets.",
+      "observed_failure": "The no-skill baseline omitted complete evidence or non-goal inheritance."
+    },
+    {
+      "case_id": "raw.completion-authority",
+      "prompt": "Return a bounded manifest and say exactly what the preview proves.",
+      "observed_failure": "The no-skill baseline lacked deterministic completion criteria and an authority stop before child effects."
+    }
+  ]
+}

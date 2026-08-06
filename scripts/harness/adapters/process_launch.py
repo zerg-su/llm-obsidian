@@ -175,6 +175,7 @@ def prepare_surface_launch(
     runtime_home: Path | None,
     research_request_sha256: str,
     callback_wake: str,
+    initial_input_pointer: Path | None,
     json_writer: Callable[[Path, object], None],
     shebang_resolver: Callable[[Sequence[str], Mapping[str, str]], Path | None],
     error_type: type[RuntimeError],
@@ -259,6 +260,18 @@ def prepare_surface_launch(
     )
     if any(not isinstance(part, str) or "\0" in part for part in argv):
         raise error_type("surface launch argv is invalid")
+    initial_input = (
+        initial_input_pointer.expanduser().resolve()
+        if initial_input_pointer is not None
+        else None
+    )
+    if initial_input is not None:
+        try:
+            initial_input.relative_to(cwd.resolve())
+        except ValueError as exc:
+            raise error_type("initial provider input escapes runtime cwd") from exc
+        if initial_input.is_symlink() or not initial_input.is_file():
+            raise error_type("initial provider input is unavailable")
 
     resolved_state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     resolved_state_root.chmod(0o700)
@@ -302,6 +315,7 @@ def prepare_surface_launch(
             surface_id=surface_id,
             runtime=runtime,
             launch=launch,
+            initial_input=initial_input,
         ),
     )
     command = shlex.join(
@@ -395,6 +409,7 @@ def _launch_spec(
     surface_id: str,
     runtime: str,
     launch: SurfaceLaunch,
+    initial_input: Path | None,
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -421,6 +436,7 @@ def _launch_spec(
         "runtime": runtime,
         "ready_path": str(launch.ready_path),
         "exit_path": str(launch.exit_path),
+        "initial_input_pointer": str(initial_input) if initial_input else "",
     }
 
 

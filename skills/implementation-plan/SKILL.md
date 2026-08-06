@@ -29,6 +29,14 @@ Apply YAGNI: omit every unrequired feature, compatibility layer, extension
 point, and abstraction that lacks current Outcome Contract evidence. Record a
 non-goal instead of implementing speculative scope.
 
+For a stateful finalization slice, name the durable `FinalizationLedger`, the
+lineage key, and the exact HEAD owned by each terminal attempt. Plan atomic
+reservation for cycles 1–5 and prove that a sixth reservation has zero model,
+session, and ledger effect. Keep the optional PipelineSpec v1
+`finalization_policy` additive, with aliases and ceilings validated before any
+effect. Treat standalone `review --deep` as a non-goal: its default
+dual-provider topology is not the finalization route matrix.
+
 Self-review the whole plan for every uncovered requirement, contradictory
 interface, placeholder, circular dependency, missing evidence ID, and task that
 concentrates unrelated responsibilities. Obtain approval before code. Complete

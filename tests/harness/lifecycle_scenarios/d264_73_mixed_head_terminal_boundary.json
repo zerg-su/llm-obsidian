@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "scenario_id": "d264-73-mixed-head-terminal-boundary",
+  "seed": 26473,
+  "max_steps": 8,
+  "source_fixture": "tests/fixtures/v2.6.5/d264-73-terminal-parent-child.json",
+  "source_sha256": "74936e09ae3ddc45aabbf7ccc8e1044a1322a16df08a3a04c8a5286a5bfebe2c",
+  "expected_initial_invariant": "SIM-INV-TERMINAL-MONOTONIC",
+  "expected_terminal_states": ["complete"],
+  "forbidden_effects": ["rearm-parent", "continue-provider-session"],
+  "expected_production_paths": ["ReviewAttempt.rearm"],
+  "initial_snapshot": {
+    "operation": {"operation_id": "mixed-head-parent", "run_id": "mixed-head-run", "revision": 9, "state": "complete", "attention_reason": null, "pending_effect": "", "effect_id": "review", "effect_outcome": "succeeded", "accepted_callback_id": "review-callback", "accepted_callback_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resources": {}},
+    "liveness": {"operation_revision": 9, "operation_state": "complete", "callback_submit_binding": "", "callback_submit_status": ""},
+    "head_boundary": {"reviewed_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resolved_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "attempt_terminal": true, "continuation_requested": true},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": ["complete"]
+  },
+  "replay_snapshot": {
+    "operation": {"operation_id": "sim-operation", "run_id": "sim-run", "revision": 9, "state": "complete", "attention_reason": null, "pending_effect": "", "effect_id": "review", "effect_outcome": "succeeded", "accepted_callback_id": "review-callback", "accepted_callback_kind": "result", "accepted_callback_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resources": {}},
+    "liveness": {"operation_revision": 9, "operation_state": "complete", "callback_submit_binding": "", "callback_submit_status": ""},
+    "head_boundary": {"reviewed_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resolved_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "attempt_terminal": true, "continuation_requested": false},
+    "effects": [], "callbacks": [], "resource_receipts": [], "terminal_history": ["complete"]
+  },
+  "actions": [
+    {"action_id": "reject-rearm", "action": "reject-cross-head-continuation", "reviewed_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resolved_head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+  ]
+}

@@ -5602,6 +5602,49 @@ with tempfile.TemporaryDirectory(prefix="fresh-review-preflight.") as raw:
         review_context_sha256(next_context),
         "approved bounded ContextPacket expansion",
     )
+    wrong_dispatch_authorization = {
+        "schema_version": 2,
+        "operation_id": "fresh-preflight",
+        "dispatch_operation_id": "unrelated-dispatch",
+        "kind": preflight_boundary.kind,
+        "previous_context_sha256": (
+            preflight_boundary.previous_context_sha256
+        ),
+        "next_context_sha256": preflight_boundary.next_context_sha256,
+        "reason": preflight_boundary.reason,
+        "authorization_provenance": "coordinator-approved",
+        "verification_operation_id": "verification-preflight",
+        "verification_receipt_sha256": "b" * 64,
+        "status": "authorized",
+    }
+    wrong_dispatch_path = (
+        preflight_gate.root / "wrong-dispatch-authorization.json"
+    )
+    wrong_dispatch_path.write_text(
+        json.dumps(wrong_dispatch_authorization, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    preflight_gate._replace(status="attention-required")
+    try:
+        preflight_gate.authorize_fresh_boundary(
+            preflight_run,
+            boundary=preflight_boundary,
+            authorization_pointer=wrong_dispatch_path.name,
+            authorization_sha256=hashlib.sha256(
+                wrong_dispatch_path.read_bytes()
+            ).hexdigest(),
+        )
+    except ValueError as exc:
+        wrong_dispatch_rejected = (
+            str(exc) == "fresh review authorization is invalid"
+        )
+    else:
+        wrong_dispatch_rejected = False
+    check(
+        "fresh authorization rejects unrelated dispatch provenance",
+        wrong_dispatch_rejected
+        and preflight_gate.read()["status"] == "attention-required",
+    )
     preflight_authorization = {
         "schema_version": 1,
         "operation_id": "fresh-preflight",

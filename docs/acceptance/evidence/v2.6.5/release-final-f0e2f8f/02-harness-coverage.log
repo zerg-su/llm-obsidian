@@ -1,0 +1,14 @@
+=== hermetic harness statement-line coverage ===
+harness coverage audit unit contracts passed
+harness statement-line coverage: 75.95% across 150 modules (17059/22461 lines)
+  scripts.harness.callbacks: 90.4% (floor 87.0%)
+  scripts.harness.contracts: 98.6% (floor 98.0%)
+  scripts.harness.liveness: 86.5% (floor 86.0%)
+  scripts.harness.pipeline_builtins: 93.1% (floor 93.0%)
+  scripts.harness.pipelines: 84.8% (floor 84.0%)
+  scripts.harness.runtime_sessions: 78.4% (floor 74.0%)
+  scripts.harness.runtime_worker: 81.4% (floor 71.0%)
+  scripts.harness.state_machine: 97.4% (floor 97.0%)
+  scripts.harness.store: 95.5% (floor 94.0%)
+  scripts.harness.workflows.review_gate: 83.1% (floor 81.0%)
+transition completeness: 4,370 deterministic matrix cases
