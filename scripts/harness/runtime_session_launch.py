@@ -184,6 +184,47 @@ class RuntimeSessionLaunchMixin:
         )
         self._notify(supervisor.owner_id, supervisor.operation_id)
 
+    def _start_prepared_provider(self, launch: object, surface_id: str) -> object:
+        if not await_surface_transport_ready(self.cmux, surface_id=surface_id):
+            raise RuntimeSessionError("surface terminal did not become ready")
+        command = str(getattr(launch, "command"))
+        self.cmux.send(surface_id, command)
+        if not await_surface_transport_visible(
+            self.cmux, surface_id=surface_id, text=command
+        ):
+            raise RuntimeSessionError("surface worker command was not visible")
+        self.cmux.send_key(surface_id, "Enter")
+        return self.process.await_surface_handle(
+            launch, timeout_seconds=self.start_timeout_seconds
+        )
+
+    @staticmethod
+    def _bind_provider_process(
+        supervisor: OperationSupervisor, surface_id: str, handle: object
+    ) -> None:
+        pid = int(getattr(handle, "pid", 0))
+        pgid = int(getattr(handle, "process_group", 0))
+        supervisor_pid = int(getattr(handle, "supervisor_pid", 0)) or pid
+        process_identity = str(getattr(handle, "process_identity", ""))
+        supervisor_identity = str(getattr(handle, "supervisor_identity", ""))
+        if (
+            pid <= 1
+            or pgid <= 1
+            or pid != pgid
+            or not re.fullmatch(r"[0-9a-f]{64}", process_identity)
+            or not re.fullmatch(r"[0-9a-f]{64}", supervisor_identity)
+        ):
+            raise RuntimeSessionError("provider worker returned invalid ownership")
+        supervisor.bind_resources(
+            OwnedResources(
+                surface_id=surface_id,
+                process_group=pgid,
+                supervisor_pid=supervisor_pid,
+                process_identity=process_identity,
+                supervisor_identity=supervisor_identity,
+            )
+        )
+
     def start(
         self,
         request: RuntimeSessionRequest,
@@ -420,62 +461,17 @@ class RuntimeSessionLaunchMixin:
             )
             raise RuntimeSessionError("provider worker preparation failed") from exc
 
-        def start_provider(_record: OperationRecord) -> object:
-            if not await_surface_transport_ready(
-                self.cmux,
-                surface_id=surface_id,
-            ):
-                raise RuntimeSessionError(
-                    "surface terminal did not become ready"
-                )
-            command = str(getattr(launch, "command"))
-            self.cmux.send(surface_id, command)
-            if not await_surface_transport_visible(
-                self.cmux,
-                surface_id=surface_id,
-                text=command,
-            ):
-                raise RuntimeSessionError(
-                    "surface worker command was not visible"
-                )
-            self.cmux.send_key(surface_id, "Enter")
-            return self.process.await_surface_handle(
-                launch, timeout_seconds=self.start_timeout_seconds
-            )
-
-        def bind_process(_record: OperationRecord, handle: object) -> None:
-            pid = int(getattr(handle, "pid", 0))
-            pgid = int(getattr(handle, "process_group", 0))
-            supervisor_pid = int(getattr(handle, "supervisor_pid", 0)) or pid
-            process_identity = str(
-                getattr(handle, "process_identity", "")
-            )
-            supervisor_identity = str(
-                getattr(handle, "supervisor_identity", "")
-            )
-            if (
-                pid <= 1
-                or pgid <= 1
-                or pid != pgid
-                or not re.fullmatch(r"[0-9a-f]{64}", process_identity)
-                or not re.fullmatch(r"[0-9a-f]{64}", supervisor_identity)
-            ):
-                raise RuntimeSessionError("provider worker returned invalid ownership")
-            supervisor.bind_resources(
-                OwnedResources(
-                    surface_id=surface_id,
-                    process_group=pgid,
-                    supervisor_pid=supervisor_pid,
-                    process_identity=process_identity,
-                    supervisor_identity=supervisor_identity,
-                )
-            )
-
         try:
             supervisor.effect(
                 "start-provider",
-                start_provider,
-                persist_result=bind_process,
+                lambda _record: self._start_prepared_provider(
+                    launch, surface_id
+                ),
+                persist_result=lambda _record, handle: (
+                    self._bind_provider_process(
+                        supervisor, surface_id, handle
+                    )
+                ),
             )
         except Exception as exc:
             current = self._mark_attention(
