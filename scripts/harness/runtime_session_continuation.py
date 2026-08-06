@@ -112,14 +112,27 @@ def await_initial_input_ready(
         raise ValueError("initial input observation limit must be positive")
     if observation_interval_seconds < 0:
         raise ValueError("initial input observation interval cannot be negative")
+    handled_prompt_digest = ""
     for observation in range(observation_limit):
-        state = classify_continuation_screen(
-            runtime, port.read(surface_id), ""
-        )
+        screen = port.read(surface_id)
+        prompt = classify(runtime, screen)
+        if prompt.interactive:
+            if not prompt.recognized:
+                return False
+            digest = _screen_digest(screen)
+            if digest != handled_prompt_digest:
+                try:
+                    for key in prompt.keys:
+                        port.send_key(surface_id, key)
+                except Exception:
+                    return False
+                handled_prompt_digest = digest
+            if observation + 1 < observation_limit:
+                wait(observation_interval_seconds)
+            continue
+        state = classify_continuation_screen(runtime, screen, "")
         if state == "idle":
             return True
-        if state == "permission":
-            return False
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False

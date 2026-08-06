@@ -212,6 +212,47 @@ check(
 )
 
 
+class InitialPromptPort(InitialReadyPort):
+    def __init__(self) -> None:
+        super().__init__(
+            [
+                "\n".join(
+                    (
+                        "Approaching rate limits",
+                        "Switch to gpt-5.6-luna for lower credit usage?",
+                        "› 1. Switch to gpt-5.6-luna",
+                        "2. Keep current model",
+                        "3. Keep current model (never show again)",
+                        "Press enter to confirm or esc to go back",
+                    )
+                )
+            ]
+        )
+        self.keys: list[str] = []
+
+    def send_key(self, surface_id: str, key: str) -> None:
+        assert surface_id == SURFACE
+        self.keys.append(key)
+        if key == "Enter":
+            self.screens.append("› Implement {feature}")
+
+
+initial_prompt_port = InitialPromptPort()
+check(
+    "initial provider input resolves an exact safe native prompt before delivery",
+    await_initial_input_ready(
+        initial_prompt_port,
+        surface_id=SURFACE,
+        runtime="codex",
+        observation_limit=4,
+        observation_interval_seconds=0,
+        wait=lambda _seconds: None,
+    )
+    and initial_prompt_port.keys == ["down", "Enter"],
+    initial_prompt_port.keys,
+)
+
+
 class FakeProcess:
     def __init__(self, events: list[str]) -> None:
         self.events = events
