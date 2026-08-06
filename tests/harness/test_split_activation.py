@@ -400,6 +400,7 @@ dispatch_children = tuple(
             "pipeline": item.pipeline,
             "placement": "workspace",
             "worktree": Path(f"/worktrees/dispatch-{item.subplan_id}"),
+            "base_sha": dispatch_manifest.parent.base_sha,
             "split": split_child_policy_payload(
                 split_child_policy(dispatch_manifest, item)
             ),
@@ -469,9 +470,63 @@ else:
 assert dispatch_effects == ["dispatch-contracts", "dispatch-validation"]
 print("OK   activated waves use existing workspace dispatch results and frozen budgets")
 
+drifted_base = list(dispatch_children)
+drifted_base[0] = dataclasses.replace(
+    drifted_base[0],
+    request={
+        **dict(drifted_base[0].request),
+        "base_sha": "9" * 40,
+    },
+)
+try:
+    prepare_split_dispatch(
+        dispatch_manifest,
+        current_plan_sha256=SHA_A,
+        current_outcome_contract_sha256=SHA_B,
+        registered_pipelines={PIPELINE},
+        children=tuple(drifted_base),
+    )
+except Exception as exc:
+    assert "base SHA drifted" in str(exc)
+else:
+    raise AssertionError("drifted child base reached Split activation")
+assert dispatch_effects == ["dispatch-contracts", "dispatch-validation"]
+print("OK   child request base drift fails before any dispatch effect")
+
 
 with tempfile.TemporaryDirectory(prefix="split-runner.") as raw_tmp:
     temporary = Path(raw_tmp)
+    target_repo = temporary / "target"
+    target_repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=target_repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "split-test@example.invalid"],
+        cwd=target_repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Split Test"],
+        cwd=target_repo,
+        check=True,
+    )
+    (target_repo / "marker.txt").write_text("sealed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "marker.txt"], cwd=target_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "sealed base"],
+        cwd=target_repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    sealed_base = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=target_repo, text=True
+    ).strip()
     plan_path = (
         ROOT
         / "wiki/plans/2026-08-05-113349-llm-obsidian-2-6-5-event-driven-lifecycle-bounded-finalizati.md"
@@ -479,9 +534,7 @@ with tempfile.TemporaryDirectory(prefix="split-runner.") as raw_tmp:
     cli_parent = ParentContract(
         plan_sha256=hashlib.sha256(plan_path.read_bytes()).hexdigest(),
         outcome_contract_sha256=extract_from_bytes(plan_path.read_bytes()).sha256,
-        base_sha=subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-        ).strip(),
+        base_sha=sealed_base,
         evidence_ids=("split-dogfood-proof",),
         non_goals=("No publish.",),
     )
@@ -515,7 +568,7 @@ with tempfile.TemporaryDirectory(prefix="split-runner.") as raw_tmp:
         "task_name": "split-dogfood",
         "description": "Produce one bounded local Split acceptance artifact.",
         "vault_root": str(ROOT),
-        "target_repo": str(ROOT),
+        "target_repo": str(target_repo),
         "worktree": str(temporary / "split-dogfood"),
         "branch": "task/split-dogfood",
         "base_branch": "HEAD",
@@ -577,6 +630,32 @@ with tempfile.TemporaryDirectory(prefix="split-runner.") as raw_tmp:
         "surfaces_created": 0,
         "worktrees_created": 0,
     }
+    assert not (temporary / "split-dogfood").exists()
+
+    (target_repo / "marker.txt").write_text("moved\n", encoding="utf-8")
+    subprocess.run(["git", "add", "marker.txt"], cwd=target_repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "move source branch"],
+        cwd=target_repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    moved = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/split-runner.py"),
+            "validate",
+            "--spec",
+            str(spec_path),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert moved.returncode == 3, f"stdout={moved.stdout!r} stderr={moved.stderr!r}"
+    assert "base SHA drifted" in moved.stderr
     assert not (temporary / "split-dogfood").exists()
 print("OK   public Split activation validation stays zero-effect")
 

@@ -89,6 +89,8 @@ def prepare_split_dispatch(
     bindings: list[SplitDispatchBinding] = []
     for candidate, child in zip(manifest.subplans, children, strict=True):
         request = child.request
+        if request.get("base_sha") != manifest.parent.base_sha:
+            raise ContractError(f"{candidate.subplan_id} task base SHA drifted")
         policy = parse_split_child_policy(request.get("split"))
         if policy != split_child_policy(manifest, candidate):
             raise ContractError(f"{candidate.subplan_id} task Split policy drifted")
