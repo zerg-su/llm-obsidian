@@ -101,6 +101,7 @@ assert set(finding_ids) == {
     "intent-e14-gate-not-run-at-reviewed-head",
     "eng-receipt-subject-is-parent-commit",
     "OI.E14.outcome-proof-invalid",
+    "RC1.L4.dead-adapters-unobserved",
 }
 for row in finding_rows:
     assert isinstance(row, dict)

@@ -87,10 +87,12 @@ manifest_sources = set(manifest.entrypoints)
 deleted_authorities = {
     "scripts/task_review_authorization_boundary.py",
     "scripts/task_review_drift_contract.py",
+    "scripts/task_review_legacy_rounds.py",
     "scripts/task_review_mechanism_recovery.py",
     "scripts/task_review_post_fresh_publication.py",
     "scripts/task_review_post_fresh_recovery.py",
     "scripts/task_review_resolution_flow.py",
+    "scripts/task_review_resolution_evidence.py",
 }
 check(
     "audit manifest admits no deleted lifecycle authority",

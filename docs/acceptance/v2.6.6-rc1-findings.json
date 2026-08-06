@@ -18,6 +18,7 @@
     {"finding_id":"intent-e9-tdd-skill-verdict-missing","disposition":"defer-rc2","evidence_ids":[],"rationale":"Skill semantic governance changes remain in RC2."},
     {"finding_id":"intent-e14-gate-not-run-at-reviewed-head","disposition":"defer-rc2","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"Systemic receipt debt is deferred; RC1 independently blocks on exact candidate drift."},
     {"finding_id":"eng-receipt-subject-is-parent-commit","disposition":"defer-rc2","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"Systemic receipt debt is deferred; RC1 independently blocks on exact candidate drift."},
-    {"finding_id":"OI.E14.outcome-proof-invalid","disposition":"not-a-defect","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"The 2.6.5 overclaim was corrected by its waiver; RC1 uses its own bounded evidence map."}
+    {"finding_id":"OI.E14.outcome-proof-invalid","disposition":"not-a-defect","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"The 2.6.5 overclaim was corrected by its waiver; RC1 uses its own bounded evidence map."},
+    {"finding_id":"RC1.L4.dead-adapters-unobserved","disposition":"fixed-rc1","evidence_ids":["E1-negative-active-surface","E8-exact-candidate-release-proof"],"rationale":"The first exact candidate exposed two zero-caller compatibility adapters as unobserved audit modules; the replacement candidate deletes both and retains every coverage floor."}
   ]
 }
