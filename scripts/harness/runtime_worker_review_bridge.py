@@ -398,7 +398,16 @@ class RuntimeWorkerReviewBridgeMixin:
     def build_review_resolution_packet(
         self, gate_state: dict[str, object]
     ) -> tuple[dict[str, object], list[dict[str, object]]]:
-        awaiting = gate_state.get("awaiting_resolution")
+        attempt = gate_state.get("attempt")
+        exact_terminal = (
+            isinstance(attempt, dict)
+            and attempt.get("status") == "terminal"
+        )
+        awaiting = gate_state.get(
+            "review_notification_evidence"
+            if exact_terminal
+            else "awaiting_resolution"
+        )
         if not isinstance(awaiting, dict) or not awaiting:
             raise RuntimeWorkerError("review resolution evidence is unavailable")
         findings: list[dict[str, object]] = []

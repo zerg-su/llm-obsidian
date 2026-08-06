@@ -544,8 +544,7 @@ with tempfile.TemporaryDirectory(prefix="exact-head-attempt.") as raw:
             record.spec.operation_id for record in store.list("task-1")
         }
         == initial_operation_ids
-        and set(state["awaiting_resolution"])
-        == {item.axis for item in run.execution.lanes}
+        and not state.get("awaiting_resolution")
         and "continuation_effects" not in state
         and runtime.continued == 0
         and runtime.rearmed == 0,
@@ -927,8 +926,7 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         and runtime.started == 1
         and runtime.continued == 0
         and runtime.rearmed == 0
-        and set(exact_state["awaiting_resolution"])
-        == {lane.axis}
+        and not exact_state.get("awaiting_resolution")
         and "continuation_effects" not in exact_state,
     )
     (product / "product.py").write_text("VALUE = 2\n", encoding="utf-8")

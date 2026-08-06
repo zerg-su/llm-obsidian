@@ -434,25 +434,25 @@ class ReviewGateAttemptMixin:
             return ReviewAttemptTerminalResult.CHANGES_REQUESTED
         return ReviewAttemptTerminalResult.APPROVED
 
-    def _attempt_resolution_boundaries(
+    def _attempt_notification_evidence(
         self,
         run: ReviewGateRun,
         pointers: Mapping[str, object],
     ) -> dict[str, object]:
-        """Bind exact-attempt findings to their already accepted callbacks."""
+        """Freeze accepted callback evidence for executor notification only."""
 
-        boundaries: dict[str, object] = {}
+        evidence_by_axis: dict[str, object] = {}
         material_count = 0
         for lane in run.execution.lanes:
             pointer = pointers.get(lane.axis)
             if not isinstance(pointer, str) or not pointer:
                 raise ReviewAttemptError(
-                    "review attempt resolution result is unavailable"
+                    "review attempt notification result is unavailable"
                 )
             path = (self.root / pointer).resolve()
             if self.root not in path.parents or not path.is_file() or path.is_symlink():
                 raise ReviewAttemptError(
-                    "review attempt resolution result is unavailable"
+                    "review attempt notification result is unavailable"
                 )
             result = _result_from_payload(_read_json(path))
             qualified = namespace_review_result(
@@ -481,9 +481,9 @@ class ReviewGateAttemptMixin:
                 != envelope.payload_sha256
             ):
                 raise ReviewAttemptError(
-                    "review attempt resolution callback identity changed"
+                    "review attempt notification callback identity changed"
                 )
-            boundaries[lane.axis] = {
+            evidence_by_axis[lane.axis] = {
                 "pointer": pointer,
                 "reviewed_head_sha": (
                     run.execution.request.context.head_sha
@@ -499,9 +499,9 @@ class ReviewGateAttemptMixin:
             }
         if material_count == 0:
             raise ReviewAttemptError(
-                "changes-requested attempt has no material resolution boundary"
+                "changes-requested attempt has no material notification"
             )
-        return boundaries
+        return evidence_by_axis
 
     def complete_attempt_round(
         self,
@@ -625,8 +625,8 @@ class ReviewGateAttemptMixin:
                 evidence=evidence,
             )
         elif terminal_result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
-            updates["awaiting_resolution"] = (
-                self._attempt_resolution_boundaries(run, rounds)
+            updates["review_notification_evidence"] = (
+                self._attempt_notification_evidence(run, rounds)
             )
         self._replace(**updates)
         return ReviewGateDecision(
