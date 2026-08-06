@@ -303,8 +303,8 @@ accepted = classify_callback_submit(
     CallbackSubmitPolicy.default(),
 )
 check(
-    "callback lifecycle distinguishes code reservation from typed publication",
-    reserved.action == "reserve-submit-recovery"
+    "callback lifecycle distinguishes observation from typed publication",
+    reserved.action == "none"
     and not reserved.model_effect
     and accepted.action == "accept-callback"
     and not accepted.model_effect,

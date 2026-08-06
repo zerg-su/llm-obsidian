@@ -37,6 +37,7 @@ test-harness:
 	@CUSTOM_RUNTIME_PROFILE=fix python3 tests/harness/test_custom_runtime.py
 	@python3 tests/test_pipeline_verification_resubmit.py
 	@python3 tests/harness/test_liveness.py
+	@python3 tests/harness/test_event_only_review_effects.py
 	@python3 tests/harness/test_pipeline_builtins.py
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py

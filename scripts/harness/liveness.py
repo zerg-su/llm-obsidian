@@ -51,6 +51,12 @@ class LivenessPolicy:
     def default(cls) -> "LivenessPolicy":
         return cls(60, 600, 900, 1200, 1, 1, 2)
 
+    @classmethod
+    def reviewer(cls) -> "LivenessPolicy":
+        """Reviewer observations may reconcile artifacts but never prompt/restart."""
+
+        return cls(60, 600, 900, 1200, 0, 0, 2)
+
     def __post_init__(self) -> None:
         values = (
             self.probe_seconds,

@@ -342,14 +342,7 @@ def classify_callback_submit(
     if evidence.recovery_status == "uncertain":
         return _attention(evidence, "callback-submit-effect-uncertain")
 
-    if evidence.prompt_class == "active" or evidence.stable_idle_observations < 2:
-        return _decision(evidence, state="working")
-    if evidence.observed_at - evidence.generation_progress_at < policy.nudge_after_seconds:
-        return _decision(evidence, state="working")
-    if evidence.nudge_count >= policy.max_nudges:
-        return _attention(evidence, "callback-submit-budget-exhausted")
-    return _decision(
-        evidence,
-        state="idle-without-submit",
-        action="reserve-submit-recovery",
-    )
+    # Screen stability and elapsed time are telemetry only.  The sole positive
+    # callback-submit authority is the exact ProviderEvent ``turn-stopped``
+    # transition in DeliveryController.
+    return _decision(evidence, state="working")

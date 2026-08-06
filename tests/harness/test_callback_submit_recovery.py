@@ -82,9 +82,9 @@ policy = CallbackSubmitPolicy.default()
 
 decision = classify_callback_submit(idle(), policy)
 check(
-    "exact current idle generation reserves one recovery",
-    decision.state == "idle-without-submit"
-    and decision.action == "reserve-submit-recovery"
+    "exact current idle generation remains observation-only",
+    decision.state == "working"
+    and decision.action == "none"
     and not decision.model_effect
     and len(decision.action_id) == 64,
     decision,
@@ -385,11 +385,11 @@ for label, mutation, state, action, reason in (
         "callback-submit-deadline-insufficient",
     ),
     (
-        "shared generic nudge ceiling blocks submit recovery",
+        "prior generic nudge state cannot authorize submit recovery",
         {"nudge_count": 1},
-        "attention",
-        "attention-required",
-        "callback-submit-budget-exhausted",
+        "working",
+        "none",
+        "",
     ),
     (
         "symlink input fails closed",
@@ -440,11 +440,11 @@ test_policy = CallbackSubmitPolicy(
     max_nudges=1,
 )
 check(
-    "tests can inject a bounded policy without changing production defaults",
+    "bounded timing policy cannot create reviewer effect authority",
     classify_callback_submit(
         idle(observed_at=160, generation_progress_at=100, callback_deadline_at=220),
         test_policy,
     ).action
-    == "reserve-submit-recovery"
+    == "none"
     and CallbackSubmitPolicy.default().nudge_after_seconds == 900,
 )

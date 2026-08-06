@@ -181,92 +181,6 @@ class RuntimeWorkerLivenessMixin:
             return False
         return True
 
-    def _artifact_after_callback_reservation(
-        self, callback_path: Path, binding_sha256: str
-    ) -> str:
-        """Return send, wait, or handled after an exact post-reserve read."""
-
-        (
-            input_artifact,
-            self.callback_recovery_input_digest,
-            self.callback_recovery_input_reads,
-        ) = observe_review_artifact(
-            callback_path.with_name(".review-input.json"),
-            self.callback_recovery_input_digest,
-            self.callback_recovery_input_reads,
-        )
-        (
-            callback_artifact,
-            self.callback_recovery_digest,
-            self.callback_recovery_reads,
-        ) = observe_review_artifact(
-            callback_path,
-            self.callback_recovery_digest,
-            self.callback_recovery_reads,
-        )
-        current_receipt_sha256 = _current_callback_receipt_sha256(
-            self.spec_path.parent
-        )
-        if (
-            input_artifact.state in INVALID_ARTIFACT_STATES
-            or callback_artifact.state in INVALID_ARTIFACT_STATES
-        ):
-            self.callback_submit_attention("callback-submit-artifact-invalid")
-            return "handled"
-        winner = current_receipt_sha256
-        if not winner and input_artifact.state == "stable":
-            winner = input_artifact.sha256
-        if not winner and callback_artifact.state == "stable":
-            winner = callback_artifact.sha256
-        if winner:
-            if self._settle_reserved_callback_submit(binding_sha256, winner):
-                self.inspect_callback()
-            return "handled"
-        if (
-            input_artifact.state == "unstable"
-            or callback_artifact.state == "unstable"
-        ):
-            return "wait"
-        return "send"
-
-    def _send_callback_submit_recovery(
-        self, callback_path: Path, binding_sha256: str
-    ) -> None:
-        input_path = callback_path.with_name(".review-input.json")
-        submit_command = shlex.join(
-            (
-                sys.executable,
-                str(self.trusted_vault / "scripts/harness/review_submit.py"),
-                "--worktree",
-                str(self.spec["product_root"]),
-                "--state-dir",
-                str(callback_path.parent),
-                "--input-file",
-                str(input_path),
-            )
-        )
-        message = (
-            "Harness callback-submit recovery: write the already completed "
-            f"review JSON only to {input_path}, then run this exact command: "
-            f"{submit_command}. Do not write the callback manually."
-        )
-        if len(message.encode()) > 4096:
-            self.callback_submit_attention("callback-submit-evidence-malformed")
-            return
-        try:
-            self.cmux_adapter.send(self.spec["surface_id"], message)
-            self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-        except Exception:
-            try:
-                self.liveness_controller.mark_callback_submit_uncertain(
-                    binding_sha256
-                )
-            except Exception:
-                pass
-            self.callback_submit_attention("callback-submit-effect-uncertain")
-            return
-        self.liveness_controller.mark_callback_submit_sent(binding_sha256)
-
     def inspect_callback_submit_recovery(
         self, record: object, process_status: str
     ) -> None:
@@ -504,135 +418,6 @@ class RuntimeWorkerLivenessMixin:
             return
         if decision.action == "attention-required":
             self.callback_submit_attention(decision.reason)
-            return
-        if decision.action == "reserve-submit-recovery":
-            if (
-                _bounded_file_sha256(self.spec["callback_registration"])
-                != target_sha256
-                or self._expected_callback_child(record, operation_id, run_id)
-                is None
-            ):
-                self.callback_submit_attention("callback-submit-stale-generation")
-                return
-            if not self.liveness_controller.reserve_callback_submit(
-                binding_sha256,
-                callback_submit_binding_identity(evidence),
-            ):
-                return
-        else:
-            return
-
-        # Reservation is durable. Re-read every artifact and target immediately
-        # before the single provider-facing effect.
-        if _bounded_file_sha256(self.spec["callback_registration"]) != target_sha256:
-            self.callback_submit_attention("callback-submit-stale-generation")
-            return
-        if self._expected_callback_child(record, operation_id, run_id) is None:
-            self.callback_submit_attention("callback-submit-stale-generation")
-            return
-        if (
-            self._artifact_after_callback_reservation(
-                callback_path, binding_sha256
-            )
-            != "send"
-        ):
-            return
-        self._send_callback_submit_recovery(callback_path, binding_sha256)
-
-    def restart_for_liveness(self, action_id: str) -> None:
-        supervisor = OperationSupervisor(
-            self.store, self.spec["owner_id"], self.spec["operation_id"]
-        )
-        try:
-            budgeted = supervisor.consume_model_restart(explicitly_permitted=True)
-            old_handle = self.handle
-            if not self.provider_exited:
-                self.process.signal_owned_child_group(
-                    old_handle.process_group,
-                    old_handle.process_identity,
-                    signal.SIGTERM,
-                )
-                monotonic_clock = getattr(
-                    self, "monotonic_clock", time.monotonic
-                )
-                sleeper = getattr(self, "sleeper", time.sleep)
-                deadline = monotonic_clock() + 2.0
-                while monotonic_clock() < deadline:
-                    waited, _status = os.waitpid(old_handle.pid, os.WNOHANG)
-                    if waited == old_handle.pid:
-                        break
-                    sleeper(0.05)
-                else:
-                    self.process.signal_owned_child_group(
-                        old_handle.process_group,
-                        old_handle.process_identity,
-                        signal.SIGKILL,
-                    )
-                    os.waitpid(old_handle.pid, 0)
-            resume_command = provider_resume_argv(
-                self.provider_command, str(self.spec["runtime"]), self.checkpoint
-            )
-            restarted = self.process.start(
-                resume_command, cwd=self.spec["cwd"], env=self.provider_env
-            )
-            resources = budgeted.resources
-            supervisor.bind_resources(
-                OwnedResources(
-                    surface_id=resources.surface_id or self.spec["surface_id"],
-                    process_group=restarted.process_group,
-                    supervisor_pid=resources.supervisor_pid or os.getpid(),
-                    process_identity=restarted.process_identity,
-                    supervisor_identity=resources.supervisor_identity
-                    or self.supervisor_identity,
-                )
-            )
-            self.handle = restarted
-            self.provider_exited = False
-            self.exit_code = 0
-            self.exit_containment_failed = False
-            self.write_immutable_json(
-                self.spec_path.parent
-                / "liveness"
-                / f"provider-restart-{budgeted.model_restarts}.json",
-                {
-                    "schema_version": 1,
-                    "action_id": action_id,
-                    "operation_id": self.spec["operation_id"],
-                    "run_id": self.spec["run_id"],
-                    "model_restarts": budgeted.model_restarts,
-                    "checkpoint": self.checkpoint,
-                    "provider_argv_sha256": hashlib.sha256(
-                        json.dumps(resume_command, separators=(",", ":")).encode()
-                    ).hexdigest(),
-                    "old_process_identity": old_handle.process_identity,
-                    "new_process_identity": restarted.process_identity,
-                    "status": "restarted",
-                },
-            )
-        except (
-            HarnessContractError,
-            OSError,
-            ProcessError,
-            RuntimeWorkerError,
-            StoreError,
-            SupervisorError,
-        ):
-            try:
-                current = self.store.read(
-                    self.spec["owner_id"], self.spec["operation_id"]
-                )
-                if (
-                    current.state not in TERMINAL
-                    and current.state != "attention-required"
-                ):
-                    self.store.transition(
-                        self.spec["owner_id"],
-                        self.spec["operation_id"],
-                        "attention-required",
-                        reason=AttentionReason.ATTENTION_REQUIRED,
-                    )
-            except Exception:
-                pass
 
     def inspect_liveness(self) -> None:
         try:
@@ -701,7 +486,11 @@ class RuntimeWorkerLivenessMixin:
                         self.spec_path.parent
                     ),
                 ),
-                self.liveness_policy,
+                (
+                    LivenessPolicy.reviewer()
+                    if record.spec.route.profile == "reviewer-callback"
+                    else self.liveness_policy
+                ),
             )
             if decision.action != "observe":
                 telemetry_marker = (
@@ -751,9 +540,7 @@ class RuntimeWorkerLivenessMixin:
                     "Harness liveness check: continue the current task, or if it is complete, write the exact required typed callback now.",
                 )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-            elif decision.action == "restart":
-                self.restart_for_liveness(decision.action_id)
-            elif decision.action == "attention-required":
+            elif decision.action in {"restart", "attention-required"}:
                 current = self.store.read(
                     self.spec["owner_id"], self.spec["operation_id"]
                 )
