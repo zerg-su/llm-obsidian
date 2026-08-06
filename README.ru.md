@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Deletion-first упрощение lifecycle и sealed Split ancestry в 2.6.6 RC1 | [Release notes 2.6.6 RC1](docs/releases/v2.6.6-rc1.md) |
 | Model inheritance и overrides | [Model routing](docs/model-routing.md) |
 | Различия Claude/Codex | [Runtime capability matrix](docs/runtime-capabilities.md) |
 | Dispatch, review, watchdog, close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |

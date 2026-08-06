@@ -16,6 +16,31 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc1] — 2026-08-07
+
+Этот release candidate упрощает lifecycle по принципу deletion-first. Он
+удаляет legacy cross-HEAD recovery authority, оставляет reviewer liveness
+наблюдаемым сигналом и привязывает Split dispatch, replay и Join к одному
+неизменяемому base commit.
+
+### Изменено
+
+- Удалён incident-bound compatibility lifecycle и сокращён активный authority
+  contour с сохранением exact-attempt evidence.
+- Callback recovery стал attention-only, пока runtime не публикует
+  authenticated turn-complete event: время и стабильность экрана не могут
+  отправлять input или перезапускать provider.
+- Каждый Split child request, task contract, launch/terminal receipt, replay и
+  Join result привязан к sealed base SHA манифеста.
+- Добавлена exact replay-проверка durable child metadata и fail-closed обработка
+  отсутствующей, конфликтующей, дублирующейся или неродственной ancestry.
+
+### Граница релиза
+
+- Публикация требует immutable release gate из 15 команд и финального Fable
+  release-review packaged exact HEAD. Единственное minor замечание к
+  конфигурации implementation-кандидата перенесено в RC2.
+
 ## [2.6.5] — 2026-08-05
 
 Это минимальный стабилизационный релиз. Полный технический gate зелёный;

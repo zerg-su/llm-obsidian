@@ -389,4 +389,27 @@ assert "v2.6.6-rc1-real-dogfood.json" in readiness
 assert "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING" in readiness
 assert "authoritative technical candidate is exact clean HEAD\n`126b5fe" not in readiness
 
+release_version = "2.6.6-rc1"
+claude_plugin = json.loads(
+    (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8")
+)
+codex_plugin = json.loads(
+    (ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")
+)
+marketplace = json.loads(
+    (ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
+)
+assert claude_plugin["version"] == release_version
+assert codex_plugin["version"] == release_version
+assert marketplace["metadata"]["version"] == release_version
+assert marketplace["plugins"][0]["version"] == release_version
+for relative_path in (
+    "CHANGELOG.md",
+    "CHANGELOG.ru.md",
+    "README.md",
+    "README.ru.md",
+    "docs/releases/v2.6.6-rc1.md",
+):
+    assert release_version in (ROOT / relative_path).read_text(encoding="utf-8")
+
 print("2.6.6 RC1 evidence schemas passed")

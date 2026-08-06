@@ -10,6 +10,31 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc1] - 2026-08-07
+
+This release candidate is a deletion-first lifecycle simplification. It removes
+legacy cross-HEAD recovery authority, makes reviewer liveness observational,
+and seals Split dispatch, replay, and Join to one immutable base commit.
+
+### Changed
+
+- Removed the incident-bound compatibility lifecycle and reduced the active
+  authority contour while preserving exact-attempt evidence.
+- Made callback recovery attention-only until a supported runtime publishes an
+  authenticated turn-complete event; time and screen stability cannot submit
+  input or restart a provider.
+- Bound every Split child request, task contract, launch receipt, terminal
+  receipt, replay, and Join result to the manifest's sealed base SHA.
+- Added exact replay validation against durable child metadata and fail-closed
+  handling for missing, conflicting, duplicate, or unrelated ancestry.
+
+### Release boundary
+
+- Publication is gated by the immutable 15-command release profile and a final
+  Fable release review on the packaged exact HEAD. The sole minor
+  configuration-cleanup finding from the implementation candidate is deferred
+  to RC2.
+
 ## [2.6.5] - 2026-08-05
 
 This is a minimum-stabilization release. Its full technical gate is green;
