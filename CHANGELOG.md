@@ -12,6 +12,10 @@ packages were published for them.
 
 ## [2.6.5] - 2026-08-05
 
+This is a minimum-stabilization release. Its full technical gate is green;
+terminal exact-HEAD review is explicitly waived, and all accepted residual
+findings are retained in the 2.6.6 lifecycle-debt plan.
+
 ### Added
 
 - Added immutable exact-HEAD `ReviewAttempt` and bounded
@@ -41,12 +45,11 @@ packages were published for them.
 - The manual transport prototype can opt into a model-free CMUX layout smoke:
   one isolated workspace, extra tab, right/left splits, exact tree checks and
   exact cleanup with no workspace or surface tail.
-- Cross-HEAD same-session review continuation is removed from the active path.
-  Changed product HEADs start a distinct attempt; legacy records remain
-  inspectable but cannot trigger a provider effect.
-- Time, screen content and physical resource disappearance are observations,
-  never lifecycle authority. Durable typed events repair stale liveness state,
-  and Stop remains the sole callback-submit owner.
+- Added the exact-HEAD attempt path. Legacy V3/pre-activation continuation and
+  bounded review-drive rearm remain accepted compatibility debt for 2.6.6.
+- Added typed provider-event and delivery paths. Legacy screen/time recovery
+  authority remains accepted debt; Stop remains the callback-submit owner on
+  the new path.
 - Task metadata v4 optionally carries an immutable Split child policy without
   changing v1-v3 read compatibility or ordinary dispatch behavior.
 
@@ -68,6 +71,9 @@ packages were published for them.
 - Bound Split activation to a green pre-activation Stability Gate and stopped
   every invalid manifest, budget, receipt, dependency, HEAD or resource state
   before replaying a child or provider effect.
+- Recorded that ephemeral adapters are conformance-ready but not yet selected
+  by production review, late-cycle independent availability is not wired, and
+  Split ownership still needs an exact sealed base commit.
 
 ## [2.6.4] - 2026-08-04
 
