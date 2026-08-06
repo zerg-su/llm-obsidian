@@ -92,7 +92,7 @@ second_hash=$(shasum -a 256 "$VAULT/.obsidian/app.json" | awk '{print $1}')
 [[ "$first_hash" == "$second_hash" ]]
 
 out=$(run_setup --reset-obsidian "$VAULT")
-backup=$(printf '%s\n' "$out" | awk '/^backup: / {sub(/^backup: /, ""); print; exit}')
+backup=$(awk '/^backup: / {sub(/^backup: /, ""); print; exit}' <<< "$out")
 [[ -d "$backup" ]]
 grep -q '"custom":true' "$backup/app.json"
 cmp -s "$ROOT/.obsidian/app.json" "$VAULT/.obsidian/app.json"
