@@ -97,8 +97,12 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
     import task_review_context
 
     original_git = task_review_context._git
+    original_git_bytes = task_review_context._git_bytes
     task_review_context._git = lambda _root, *args: (
         HEAD if args == ("rev-parse", "HEAD") else "bounded HEAD diff"
+    )
+    task_review_context._git_bytes = (
+        lambda _root, *args: b"bounded HEAD diff"
     )
     try:
         context, manifest_path = task_review._context(
@@ -106,6 +110,7 @@ with tempfile.TemporaryDirectory(prefix="workstream-c-review.") as raw:
         )
     finally:
         task_review_context._git = original_git
+        task_review_context._git_bytes = original_git_bytes
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     packet_files = {

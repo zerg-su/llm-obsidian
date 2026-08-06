@@ -80,6 +80,16 @@ _BOUNDARY_ARTIFACTS = {
 }
 
 
+def _bounded_review_diff(raw: bytes) -> bytes:
+    """Normalize arbitrary Git output and truncate on a UTF-8 boundary."""
+
+    encoded = raw.decode("utf-8", errors="replace").encode("utf-8")
+    if len(encoded) <= 65_536:
+        return encoded
+    prefix = encoded[:65_000].decode("utf-8", errors="ignore").encode("utf-8")
+    return prefix + b"\n[diff truncated; inspect product HEAD]\n"
+
+
 class _ReviewedArtifactMissing(TaskReviewError):
     """The exact reviewed tree has no entry for a boundary artifact."""
 
@@ -283,17 +293,17 @@ def _purpose_boundary_inputs(
 
 
 def _head_diff_input(worktree: Path) -> ContextInput:
-    diff = _git(
-        worktree,
-        "show",
-        "--format=fuller",
-        "--stat",
-        "--patch",
-        "--find-renames",
-        "HEAD",
-    ).encode()
-    if len(diff) > 65_536:
-        diff = diff[:65_000] + b"\n[diff truncated; inspect product HEAD]\n"
+    diff = _bounded_review_diff(
+        _git_bytes(
+            worktree,
+            "show",
+            "--format=fuller",
+            "--stat",
+            "--patch",
+            "--find-renames",
+            "HEAD",
+        )
+    )
     return ContextInput("head-diff.patch", "git:show:HEAD", diff, role="diff")
 
 
