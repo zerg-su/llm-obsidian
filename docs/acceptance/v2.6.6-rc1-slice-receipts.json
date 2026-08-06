@@ -7,5 +7,14 @@
     "review --full",
     "release-final"
   ],
-  "slices": []
+  "slices": [
+    {
+      "slice_id": "A",
+      "commit_sha": "3892eae7cddc1bf3ce1d3029ebe16482d93248ae",
+      "red_command": "python3 tests/test_code_quality_audit.py",
+      "red_failure_reason": "AttributeError: code_quality_audit had no audit_rc1_active_authority observable.",
+      "green_command": "python3 tests/test_code_quality_audit.py",
+      "focused_command": "python3 tests/test_v266_rc1_evidence.py && python3 tests/test_code_quality_audit.py && python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json && git diff --check"
+    }
+  ]
 }
