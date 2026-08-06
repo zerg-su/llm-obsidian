@@ -283,12 +283,12 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
         "vault_root": str(vault.resolve()),
         "worktree": str(worktree.resolve()),
         "branch": BRANCH,
-        "base_sha": base,
         "placement": "workspace",
         "pipeline": "lifecycle/default",
         "completion_policy": "attention",
         "split": policy,
     }
+    assert "base_sha" not in raw_dispatch
     spec = {
         "schema_version": 1,
         "manifest": manifest_to_dict(manifest),
@@ -360,6 +360,18 @@ with tempfile.TemporaryDirectory(prefix="split-evidence.") as raw:
     assert terminal_stored["child"]["base_sha"] == base
     assert terminal_stored["child"]["base_ancestor"] is True
     print("OK   launch and terminal evidence retain the sealed ancestor commit")
+
+    launch_evidence_path = split_root / "launches" / f"{SUBPLAN}.json"
+    launch_evidence_bytes = launch_evidence_path.read_bytes()
+    drifted_launch = json.loads(launch_evidence_bytes)
+    drifted_launch["receipt"]["base_sha"] = "9" * 40
+    write_json(launch_evidence_path, drifted_launch)
+    drifted_replay = run_cli("start", "--spec", str(spec_path))
+    assert drifted_replay.returncode == 3
+    assert "base SHA drifted" in drifted_replay.stderr
+    launch_evidence_path.write_bytes(launch_evidence_bytes)
+    print("OK   replay rejects launch evidence with a drifted sealed base")
+
     launches_path = root / "launches.json"
     terminals_path = root / "terminals.json"
     heads_path = root / "heads.json"

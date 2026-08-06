@@ -261,6 +261,7 @@ assert set(finding_ids) == {
     "OI.E7.UNBOUND-DOGFOOD-REPORT",
     "OI.E8.CANDIDATE-BUDGET-EXCEEDED",
     "ENG.SPLIT.BASE_REQUEST_DRIFT",
+    "ENG.SPLIT.REPLAY.BASE_SHA_MISSING",
 }
 for row in finding_rows:
     assert isinstance(row, dict)

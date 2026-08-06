@@ -142,7 +142,9 @@ def _prepared(
     existing_launches: tuple[SplitLaunchReceipt, ...],
 ) -> PreparedSplitDispatch:
     manifest, current, raw_children = _exact_spec(value)
-    launched = {item.subplan_id for item in existing_launches}
+    launched = {item.subplan_id: item for item in existing_launches}
+    if len(launched) != len(existing_launches):
+        raise ContractError("Split launch evidence has duplicate children")
     children: list[DispatchChildRequest] = []
     for item in raw_children:
         raw = dict(item["dispatch"])
@@ -152,6 +154,7 @@ def _prepared(
             # A launched child is never revalidated through worktree creation;
             # its immutable launch receipt and frozen Split policy are the
             # replay boundary.  Only the fields needed for binding are read.
+            launch = launched[subplan_id]
             request = {
                 "request_id": raw.get("request_id"),
                 "pipeline": raw.get("pipeline") or "lifecycle/default",
@@ -159,7 +162,7 @@ def _prepared(
                 "placement": raw.get("placement") or "split",
                 "worktree": Path(str(raw.get("worktree") or "")).expanduser().resolve(),
                 "branch": raw.get("branch"),
-                "base_sha": raw.get("base_sha"),
+                "base_sha": launch.base_sha,
                 "vault_root": raw.get("vault_root"),
                 "split": raw.get("split"),
             }
