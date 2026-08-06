@@ -55,6 +55,17 @@
       "red_failure_reason": "ImportError: dispatch contracts exposed no immutable base-commit resolver and Split evidence exposed no ancestry seam.",
       "green_command": "python3 tests/harness/test_split_base_identity.py",
       "focused_command": "python3 tests/harness/test_split_base_identity.py && python3 tests/test_split_components.py && python3 tests/harness/test_split_activation.py && python3 tests/harness/test_split_evidence.py && python3 tests/test_dispatch_runner.py && python3 tests/harness/test_dispatch_runtime.py && python3 tests/test_contract_schemas.py && python3 tests/test_outcome_contract.py && python3 tests/harness/test_suite_registration.py && git diff --check"
+    },
+    {
+      "slice_id": "G",
+      "commit_sha": "983ff386482b398db0e11513e3b508524b1b947e",
+      "integration_repair_commit_shas": [
+        "475978c37004cd77df3179d1fb2c34474415c241"
+      ],
+      "red_command": "python3 tests/harness/test_v266_rc1_integration.py",
+      "red_failure_reason": "The unified RC1 integration trace did not exist, so exact-attempt, event-only, sealed-base, audit-manifest, receipt-ladder and dogfood evidence were not bound by one L3 test.",
+      "green_command": "python3 tests/harness/test_v266_rc1_integration.py",
+      "focused_command": "python3 tests/harness/test_exact_head_review_attempt.py && python3 tests/harness/test_event_only_review_effects.py && python3 tests/harness/test_split_base_identity.py && python3 tests/harness/test_task_review_context.py && python3 tests/harness/test_review_gate.py && python3 tests/harness/test_lifecycle_regression_corpus.py && python3 tests/harness/test_v266_rc1_integration.py && python3 tests/test_v266_rc1_evidence.py && python3 tests/test_harness_coverage_audit.py && python3 tests/test_code_quality_audit.py && python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json && python3 scripts/harness-cli.py --json status && python3 scripts/harness-cli.py --json doctor && git diff --check"
     }
   ]
 }

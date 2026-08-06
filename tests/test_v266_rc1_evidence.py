@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -47,6 +48,35 @@ for entry in slices:
         "focused_command",
     ):
         assert isinstance(entry[field], str) and entry[field].strip()
+    commit_sha = str(entry["commit_sha"])
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit_sha, "HEAD"],
+        cwd=ROOT,
+        check=False,
+    ).returncode == 0
+    repair_shas = entry.get("integration_repair_commit_shas", [])
+    assert isinstance(repair_shas, list)
+    for repair_sha in repair_shas:
+        assert isinstance(repair_sha, str) and SHA.fullmatch(repair_sha)
+        assert subprocess.run(
+            ["git", "merge-base", "--is-ancestor", repair_sha, "HEAD"],
+            cwd=ROOT,
+            check=False,
+        ).returncode == 0
+
+assert seen_slices == set("ABCDEFG")
+forbidden = receipts.get("forbidden_before_integration_green")
+assert isinstance(forbidden, list) and all(
+    isinstance(command, str) and command for command in forbidden
+)
+for entry in slices:
+    assert isinstance(entry, dict)
+    command_segments = {
+        segment.strip()
+        for field in ("red_command", "green_command", "focused_command")
+        for segment in str(entry[field]).split("&&")
+    }
+    assert command_segments.isdisjoint(forbidden)
 
 findings = load("v2.6.6-rc1-findings.json")
 assert findings.get("release") == "2.6.6-rc1"

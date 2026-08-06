@@ -120,8 +120,8 @@ receipts = json.loads(
 forbidden = tuple(receipts["forbidden_before_integration_green"])
 rows = receipts["slices"]
 check(
-    "pre-integration receipt ladder is complete through Slice F",
-    [row["slice_id"] for row in rows] == list("ABCDEF"),
+    "incremental receipt ladder is complete through Slice G",
+    [row["slice_id"] for row in rows] == list("ABCDEFG"),
 )
 for row in rows:
     commit_sha = row["commit_sha"]
