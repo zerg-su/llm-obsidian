@@ -23,6 +23,14 @@
       "red_failure_reason": "ImportError: task_review_context had no _bounded_review_diff byte boundary.",
       "green_command": "python3 tests/harness/test_task_review_context.py",
       "focused_command": "python3 tests/harness/test_task_review_context.py && python3 tests/test_workstream_c_review_reap.py && python3 tests/harness/test_task_review_flow_units.py && git diff --check"
+    },
+    {
+      "slice_id": "C",
+      "commit_sha": "79c5741beee38c012a6aeebc1ea0987b5e380fa2",
+      "red_command": "python3 tests/harness/test_exact_head_review_attempt.py",
+      "red_failure_reason": "A terminal changes-requested attempt still wrote an awaiting_resolution authority map.",
+      "green_command": "python3 tests/harness/test_exact_head_review_attempt.py",
+      "focused_command": "python3 tests/harness/test_review_attempt.py && python3 tests/harness/test_finalization_ledger.py && python3 tests/harness/test_task_review_flow_units.py && python3 tests/harness/test_exact_head_review_attempt.py && python3 tests/harness/test_runtime_task_summary.py && git diff --check"
     }
   ]
 }
