@@ -124,6 +124,33 @@ def await_surface_transport_ready(
     return False
 
 
+def await_surface_transport_visible(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    text: str,
+    observation_limit: int = 40,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> bool:
+    """Confirm one command is visible before submitting it to the shell."""
+
+    anchor = _prompt_anchor(text)
+    if not anchor:
+        raise ValueError("surface transport text has no visible anchor")
+    if observation_limit < 1:
+        raise ValueError("surface paste observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("surface paste interval cannot be negative")
+    for observation in range(observation_limit):
+        screen = " ".join(port.read(surface_id).split())
+        if anchor in screen:
+            return True
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    return False
+
+
 def await_initial_input_ready(
     port: ContinuationPort,
     *,
@@ -162,6 +189,38 @@ def await_initial_input_ready(
         state = classify_continuation_screen(runtime, screen, "")
         if state == "idle":
             return True
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    return False
+
+
+def await_initial_input_visible(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+    text: str,
+    observation_limit: int = 40,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> bool:
+    """Confirm the first provider input is visible before submitting it."""
+
+    anchor = _prompt_anchor(text)
+    if not anchor:
+        raise ValueError("initial provider input has no visible anchor")
+    if observation_limit < 1:
+        raise ValueError("initial input visibility limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("initial input visibility interval cannot be negative")
+    for observation in range(observation_limit):
+        state = classify_continuation_screen(
+            runtime, port.read(surface_id), anchor
+        )
+        if state == "input-ready":
+            return True
+        if state == "permission":
+            return False
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False

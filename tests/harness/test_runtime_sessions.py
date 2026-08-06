@@ -100,6 +100,7 @@ class FakeCmux:
         self.checkpoint = "checkpoint-1"
         self.submit_count = 0
         self.submits_at_last_send = 0
+        self.transport_visible = False
 
     def open_split(self, origin_surface: str) -> Surface:
         self.events.append("surface-open")
@@ -107,6 +108,7 @@ class FakeCmux:
         self.sent.clear()
         self.submit_count = 0
         self.submits_at_last_send = 0
+        self.transport_visible = False
         check("start anchors the exact origin surface", origin_surface == ORIGIN)
         return Surface(
             SURFACE,
@@ -127,11 +129,14 @@ class FakeCmux:
         self.events.append("provider-send")
         self.sent.append((surface_id, text))
         self.submits_at_last_send = self.submit_count
+        self.transport_visible = False
 
     def send_key(self, surface_id: str, key: str) -> None:
         check(
             "submission uses exact surface and allowlisted Enter",
-            surface_id == SURFACE and key == "Enter",
+            surface_id == SURFACE
+            and key == "Enter"
+            and (type(self) is not FakeCmux or self.transport_visible),
         )
         self.events.append("provider-submit")
         self.submit_count += 1
@@ -140,6 +145,7 @@ class FakeCmux:
         assert surface_id == SURFACE
         if not self.sent:
             return "❯\n›"
+        self.transport_visible = True
         prompt = self.sent[-1][1]
         anchor = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
         if self.submit_count == self.submits_at_last_send:

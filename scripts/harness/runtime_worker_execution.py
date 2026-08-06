@@ -13,7 +13,10 @@ from .runtime_provider_events import (
     RuntimeProviderEventStream,
 )
 from .runtime_session_contracts import MAX_PROMPT_BYTES
-from .runtime_session_continuation import await_initial_input_ready
+from .runtime_session_continuation import (
+    await_initial_input_ready,
+    await_initial_input_visible,
+)
 from .runtime_worker_control import RuntimeWorkerControlMixin
 from .runtime_worker_fix import RuntimeWorkerFixMixin
 from .runtime_worker_custom import RuntimeWorkerCustomMixin
@@ -284,6 +287,15 @@ class RuntimeWorkerExecution(
                         "initial provider input was not durably reserved"
                     )
                 self.cmux_adapter.send(self.spec["surface_id"], input_text)
+                if not await_initial_input_visible(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    runtime=self.spec["runtime"],
+                    text=input_text,
+                ):
+                    raise RuntimeWorkerError(
+                        "initial provider input was not visible"
+                    )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
                 stream.accept_input()
             except (

@@ -33,6 +33,7 @@ from .runtime_session_contracts import (
 )
 from .runtime_session_continuation import (
     await_surface_transport_ready,
+    await_surface_transport_visible,
     deliver_continuation,
 )
 from .runtime_callback_io import _bounded_file_sha256
@@ -427,7 +428,16 @@ class RuntimeSessionLaunchMixin:
                 raise RuntimeSessionError(
                     "surface terminal did not become ready"
                 )
-            self.cmux.send(surface_id, str(getattr(launch, "command")))
+            command = str(getattr(launch, "command"))
+            self.cmux.send(surface_id, command)
+            if not await_surface_transport_visible(
+                self.cmux,
+                surface_id=surface_id,
+                text=command,
+            ):
+                raise RuntimeSessionError(
+                    "surface worker command was not visible"
+                )
             self.cmux.send_key(surface_id, "Enter")
             return self.process.await_surface_handle(
                 launch, timeout_seconds=self.start_timeout_seconds
