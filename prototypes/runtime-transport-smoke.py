@@ -6,8 +6,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib
+import os
+import re
 import shlex
+import subprocess
 import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,8 +22,180 @@ def require(label: str, condition: bool) -> None:
     print(f"OK   {label}")
 
 
+CMUX_UUID = re.compile(
+    r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}"
+)
+
+
+def cmux_command(repo: Path, *argv: str) -> str:
+    env = {**os.environ, "CMUX_QUIET": "1"}
+    result = subprocess.run(
+        ("cmux", *argv),
+        cwd=repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=8,
+        check=False,
+    )
+    if result.returncode:
+        raise AssertionError(
+            f"cmux {' '.join(argv)} failed: "
+            f"{(result.stderr or result.stdout).strip()}"
+        )
+    return result.stdout
+
+
+def cmux_both(repo: Path, *argv: str) -> str:
+    return cmux_command(repo, "--id-format", "both", *argv)
+
+
+def first_cmux_id(label: str, output: str) -> str:
+    ids = CMUX_UUID.findall(output)
+    require(label, bool(ids))
+    return ids[0] if ids else ""
+
+
+def cmux_tree(repo: Path, workspace_id: str) -> str:
+    return cmux_both(repo, "tree", "--workspace", workspace_id)
+
+
+def close_surface(repo: Path, workspace_id: str, surface_id: str) -> None:
+    cmux_command(
+        repo,
+        "close-surface",
+        "--surface",
+        surface_id,
+        "--workspace",
+        workspace_id,
+    )
+
+
+def live_cmux_probe(repo: Path) -> None:
+    title = f"llm-obsidian-transport-smoke-{uuid.uuid4().hex[:12]}"
+    created = cmux_command(
+        repo,
+        "new-workspace",
+        "--name",
+        title,
+        "--description",
+        "bounded-create-observe-close-probe",
+        "--cwd",
+        "/private/tmp",
+        "--focus",
+        "false",
+    )
+    match = re.search(r"OK (workspace:\d+)", created)
+    require("cmux creates one bounded workspace", match is not None)
+    workspace_ref = match.group(1) if match else ""
+    workspace_id = ""
+    try:
+        listing = cmux_both(repo, "list-workspaces")
+        row = next((line for line in listing.splitlines() if title in line), "")
+        workspace_id = first_cmux_id(
+            "cmux exposes the exact created workspace", row
+        )
+        before = cmux_tree(repo, workspace_id)
+        anchors = {
+            found
+            for line in before.splitlines()
+            if "surface " in line
+            for found in CMUX_UUID.findall(line)
+        }
+        require("cmux workspace starts with an observable surface", bool(anchors))
+        anchor = sorted(anchors)[0]
+
+        tab = first_cmux_id(
+            "cmux returns the new exact surface identity",
+            cmux_both(
+                repo,
+                "new-surface",
+                "--type",
+                "terminal",
+                "--workspace",
+                workspace_id,
+                "--working-directory",
+                "/private/tmp",
+                "--focus",
+                "false",
+            ),
+        )
+        close_surface(repo, workspace_id, tab)
+        after_tab = cmux_tree(repo, workspace_id)
+        require(
+            "cmux closes only the exact added surface",
+            tab not in after_tab and all(item in after_tab for item in anchors),
+        )
+
+        right = first_cmux_id(
+            "cmux creates an exact right split",
+            cmux_both(
+                repo,
+                "new-split",
+                "right",
+                "--workspace",
+                workspace_id,
+                "--surface",
+                anchor,
+                "--focus",
+                "false",
+            ),
+        )
+        left = first_cmux_id(
+            "cmux creates an exact left split",
+            cmux_both(
+                repo,
+                "new-split",
+                "left",
+                "--workspace",
+                workspace_id,
+                "--surface",
+                right,
+                "--focus",
+                "false",
+            ),
+        )
+        layout = cmux_tree(repo, workspace_id)
+        require(
+            "cmux binds left and right splits to the requested workspace",
+            all(item in layout for item in (anchor, right, left))
+            and len(re.findall(r"\bpane pane:\d+", layout)) == 3,
+        )
+
+        close_surface(repo, workspace_id, left)
+        close_surface(repo, workspace_id, right)
+        collapsed = cmux_tree(repo, workspace_id)
+        require(
+            "cmux removes both split panes without touching the anchor",
+            left not in collapsed
+            and right not in collapsed
+            and anchor in collapsed
+            and len(re.findall(r"\bpane pane:\d+", collapsed)) == 1,
+        )
+    finally:
+        if workspace_id or workspace_ref:
+            cmux_command(
+                repo,
+                "close-workspace",
+                "--workspace",
+                workspace_id or workspace_ref,
+            )
+
+    final_listing = cmux_both(repo, "list-workspaces")
+    require(
+        "cmux leaves no workspace or surface tail",
+        title not in final_listing
+        and (not workspace_id or workspace_id not in final_listing),
+    )
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--repo", type=Path, required=True)
+parser.add_argument(
+    "--live-cmux",
+    action="store_true",
+    help="create and close one isolated cmux workspace/surface without an LLM",
+)
 args = parser.parse_args()
 repo = args.repo.resolve()
 sys.path.insert(0, str(repo / "scripts"))
@@ -137,5 +313,8 @@ require(
     and bounded_wake[bounded_wake.index("--boundary-input") + 1] == boundary
     and "--plan" not in bounded_wake,
 )
+
+if args.live_cmux:
+    live_cmux_probe(repo)
 
 print("\ntransport smoke: PASS")

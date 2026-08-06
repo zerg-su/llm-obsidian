@@ -38,6 +38,9 @@ packages were published for them.
 - The `tdd` skill now requires an unknown adapter/runtime mechanism to be
   proven first by one disposable live `prototype`, then promoted into a
   real-seam RED regression and focused GREEN before the broad gate.
+- The manual transport prototype can opt into a model-free CMUX layout smoke:
+  one isolated workspace, extra tab, right/left splits, exact tree checks and
+  exact cleanup with no workspace or surface tail.
 - Cross-HEAD same-session review continuation is removed from the active path.
   Changed product HEADs start a distinct attempt; legacy records remain
   inspectable but cannot trigger a provider effect.

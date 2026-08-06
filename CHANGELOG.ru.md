@@ -43,6 +43,9 @@
 - Skill `tdd` требует сначала доказать неизвестный adapter/runtime-механизм
   одним disposable live-`prototype`, затем перенести наблюдаемое поведение в
   real-seam RED regression и focused GREEN до широкого gate.
+- Ручной transport-прототип получил model-free CMUX layout smoke: один
+  изолированный workspace, дополнительный tab, splits справа/слева, exact tree
+  checks и точное закрытие без хвостов workspace/surface.
 - Cross-HEAD same-session review continuation удалён из active path. Новый
   product HEAD создаёт отдельный attempt; legacy records доступны для inspect,
   но не могут вызвать provider effect.
