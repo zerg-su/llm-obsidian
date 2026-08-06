@@ -103,6 +103,7 @@ test-harness-coverage:
 test-code-quality:
 	@echo "=== code quality audit unit contracts ==="
 	@python3 tests/test_code_quality_audit.py
+	@python3 tests/test_v266_rc1_evidence.py
 	@python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json
 
 code-quality-audit: test-code-quality

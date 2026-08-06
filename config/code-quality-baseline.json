@@ -1,4 +1,13 @@
 {
   "schema_version": 1,
-  "hotspots": {}
+  "hotspots": {},
+  "rc1_active_authority": {
+    "baseline_production_loc": 9326,
+    "baseline_writable_authorities": 4,
+    "baseline_incident_literals": 50,
+    "final_max_production_loc": 9325,
+    "final_max_writable_authorities": 0,
+    "final_max_incident_literals": 0,
+    "evidence": "docs/acceptance/v2.6.6-rc1-active-authority-baseline.md"
+  }
 }

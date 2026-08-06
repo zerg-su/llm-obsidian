@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc2",
+  "append_only_during_rc1": true,
+  "findings": []
+}

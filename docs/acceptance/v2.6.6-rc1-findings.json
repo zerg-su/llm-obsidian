@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc1",
+  "source": "docs/acceptance/v2.6.5-accepted-review-waiver.md",
+  "findings": [
+    {"finding_id":"OI.E3.cross-head-rearm","disposition":"fixed-rc1","evidence_ids":["E1-negative-active-surface","E2-exact-head-terminal-authority"],"rationale":"RC1 removes active cross-HEAD continuation."},
+    {"finding_id":"intent-e3-legacy-cross-head-provider-effect","disposition":"fixed-rc1","evidence_ids":["E2-exact-head-terminal-authority"],"rationale":"Historical attempts become inspect/archive/cleanup only."},
+    {"finding_id":"intent-nongoal-cross-head-rearm-added","disposition":"fixed-rc1","evidence_ids":["E1-negative-active-surface","E2-exact-head-terminal-authority"],"rationale":"The rearm authority is deleted rather than extended."},
+    {"finding_id":"OI.E4b.ephemeral-unwired","disposition":"defer-rc2","evidence_ids":[],"rationale":"Production ephemeral adapters are an explicit RC1 non-goal."},
+    {"finding_id":"ENG-EPHEMERAL-INTEGRATION","disposition":"defer-rc2","evidence_ids":[],"rationale":"Production ephemeral adapters are an explicit RC1 non-goal."},
+    {"finding_id":"eng-ephemeral-profile-unwired","disposition":"defer-rc2","evidence_ids":[],"rationale":"Production ephemeral adapters are an explicit RC1 non-goal."},
+    {"finding_id":"OI.E6.time-screen-authority","disposition":"fixed-rc1","evidence_ids":["E3-event-only-review-effects"],"rationale":"Only exact ProviderEvent input may authorize submit recovery."},
+    {"finding_id":"eng-incident-pinned-authorization","disposition":"fixed-rc1","evidence_ids":["E1-negative-active-surface","E2-exact-head-terminal-authority"],"rationale":"Incident UUID, path, digest and prose compilers are removed."},
+    {"finding_id":"ENG-INDEPENDENT-AVAILABILITY","disposition":"defer-rc2","evidence_ids":[],"rationale":"Independent late-cycle routing is an explicit RC1 non-goal."},
+    {"finding_id":"ENG-LEGACY-RESOLUTION-AUTHORITY","disposition":"fixed-rc1","evidence_ids":["E2-exact-head-terminal-authority"],"rationale":"Terminal attempts cannot create mutable resolution authority."},
+    {"finding_id":"ENG-SPLIT-BASE-BINDING","disposition":"fixed-rc1","evidence_ids":["E4-sealed-split-base"],"rationale":"Split ownership is sealed to an exact ancestor commit."},
+    {"finding_id":"eng-store-private-writers","disposition":"defer-rc2","evidence_ids":[],"rationale":"Public CAS and OperationStore refactoring is an RC1 non-goal."},
+    {"finding_id":"intent-e9-tdd-skill-verdict-missing","disposition":"defer-rc2","evidence_ids":[],"rationale":"Skill semantic governance changes remain in RC2."},
+    {"finding_id":"intent-e14-gate-not-run-at-reviewed-head","disposition":"defer-rc2","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"Systemic receipt debt is deferred; RC1 independently blocks on exact candidate drift."},
+    {"finding_id":"eng-receipt-subject-is-parent-commit","disposition":"defer-rc2","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"Systemic receipt debt is deferred; RC1 independently blocks on exact candidate drift."},
+    {"finding_id":"OI.E14.outcome-proof-invalid","disposition":"not-a-defect","evidence_ids":["E8-exact-candidate-release-proof"],"rationale":"The 2.6.5 overclaim was corrected by its waiver; RC1 uses its own bounded evidence map."}
+  ]
+}

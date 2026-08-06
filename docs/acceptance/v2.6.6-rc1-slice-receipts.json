@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc1",
+  "forbidden_before_integration_green": [
+    "make test",
+    "make test-harness-coverage",
+    "review --full",
+    "release-final"
+  ],
+  "slices": []
+}

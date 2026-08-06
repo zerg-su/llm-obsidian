@@ -123,4 +123,54 @@ with tempfile.TemporaryDirectory(prefix="code-quality-audit.") as raw:
     )[0]
     assert "stale blocker baseline" in audit.ratchet_failures({}, baseline)[0]
 
+
+with tempfile.TemporaryDirectory(prefix="rc1-authority-audit.") as raw:
+    root = Path(raw)
+    incident = root / "scripts" / "task_review_provenance_contract.py"
+    recovery = root / "scripts" / "harness" / "review_drive_rearm.py"
+    quiet = root / "scripts" / "harness" / "provider_events.py"
+    for path in (incident, recovery, quiet):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    incident.write_text(
+        "OPERATION_ID = '75ff063d-d388-46a7-915d-0eed20392da4'\n"
+        "DECISION = 'Classified as an eligible repository-owned incident'\n"
+        "STORE = '/private/tmp/llm-obsidian-265-simulator/state'\n",
+        encoding="utf-8",
+    )
+    recovery.write_text(
+        "def rearm_review_drive():\n"
+        "    return {'awaiting_resolution': True}\n",
+        encoding="utf-8",
+    )
+    quiet.write_text("def observe():\n    return 'read-only'\n", encoding="utf-8")
+
+    authority = audit.audit_rc1_active_authority(root)
+    assert authority["schema_version"] == 1
+    assert authority["production_loc"] == 7
+    assert authority["production_files"] == [
+        {
+            "path": "scripts/harness/provider_events.py",
+            "loc": 2,
+        },
+        {
+            "path": "scripts/harness/review_drive_rearm.py",
+            "loc": 2,
+        },
+        {
+            "path": "scripts/task_review_provenance_contract.py",
+            "loc": 3,
+        },
+    ]
+    assert [item["symbol"] for item in authority["writable_authorities"]] == [
+        "rearm_review_drive"
+    ]
+    assert {item["kind"] for item in authority["incident_literals"]} == {
+        "decision-prose",
+        "operation-uuid",
+        "operator-local-path",
+    }
+    assert all(
+        "value" not in item for item in authority["incident_literals"]
+    ), "audit output must remain content-free"
+
 print("code quality audit unit contracts passed")

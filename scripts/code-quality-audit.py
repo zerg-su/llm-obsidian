@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -27,6 +28,38 @@ OWNED_PYTHON_ROOTS = (
 )
 NON_PRODUCTION_DIRECTORIES = frozenset(
     {"__pycache__", "references", "tests"}
+)
+
+RC1_ACTIVE_AUTHORITY_FILES = (
+    "scripts/harness/callback_submit_recovery.py",
+    "scripts/harness/liveness.py",
+    "scripts/harness/provider_events.py",
+    "scripts/harness/review_drive_rearm.py",
+    "scripts/harness/runtime_provider_events.py",
+    "scripts/harness/runtime_worker_liveness.py",
+    "scripts/harness/workflows/review_gate_attempt.py",
+    "scripts/harness/workflows/review_gate_recovery.py",
+    "scripts/task_review_authorization_boundary.py",
+    "scripts/task_review_drift_contract.py",
+    "scripts/task_review_flow.py",
+    "scripts/task_review_mechanism_recovery.py",
+    "scripts/task_review_post_fresh_publication.py",
+    "scripts/task_review_post_fresh_recovery.py",
+    "scripts/task_review_provenance_contract.py",
+    "scripts/task_review_resolution_flow.py",
+)
+RC1_WRITABLE_AUTHORITY_SYMBOLS = frozenset(
+    {
+        "rearm_review_drive",
+        "restart_for_boundary",
+        "restart_for_liveness",
+        "restart_task_review_for_boundary",
+    }
+)
+_UUID_LITERAL = re.compile(
+    r"(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])",
+    re.IGNORECASE,
 )
 
 
@@ -136,6 +169,61 @@ def owned_source_paths(repo_root: Path = ROOT) -> tuple[Path, ...]:
     )
 
 
+def _incident_literal_kinds(value: str) -> tuple[str, ...]:
+    kinds = []
+    if _UUID_LITERAL.search(value):
+        kinds.append("operation-uuid")
+    if "/private/tmp/" in value:
+        kinds.append("operator-local-path")
+    if value.startswith(("Classified as ", "Choose boundary ")):
+        kinds.append("decision-prose")
+    return tuple(kinds)
+
+
+def audit_rc1_active_authority(repo_root: Path = ROOT) -> dict[str, object]:
+    """Inventory the bounded RC1 review/recovery contour without content."""
+
+    production_files = []
+    writable_authorities = []
+    incident_literals = []
+    for relative in RC1_ACTIVE_AUTHORITY_FILES:
+        path = repo_root / relative
+        if not path.is_file() or path.is_symlink():
+            continue
+        source = path.read_text(encoding="utf-8")
+        production_files.append(
+            {"path": relative, "loc": len(source.splitlines())}
+        )
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name in RC1_WRITABLE_AUTHORITY_SYMBOLS
+            ):
+                writable_authorities.append(
+                    {"path": relative, "line": node.lineno, "symbol": node.name}
+                )
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for kind in _incident_literal_kinds(node.value):
+                    incident_literals.append(
+                        {"path": relative, "line": node.lineno, "kind": kind}
+                    )
+    production_files.sort(key=lambda item: item["path"])
+    writable_authorities.sort(
+        key=lambda item: (item["path"], item["line"], item["symbol"])
+    )
+    incident_literals.sort(
+        key=lambda item: (item["path"], item["line"], item["kind"])
+    )
+    return {
+        "schema_version": 1,
+        "production_files": production_files,
+        "production_loc": sum(item["loc"] for item in production_files),
+        "writable_authorities": writable_authorities,
+        "incident_literals": incident_literals,
+    }
+
+
 def classify(rows: tuple[FileSignal, ...]) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -235,7 +323,16 @@ def main() -> int:
     parser.add_argument("--scan", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--rc1-authority-json", action="store_true")
     args = parser.parse_args()
+    if args.rc1_authority_json:
+        try:
+            authority = audit_rc1_active_authority(ROOT)
+        except (OSError, SyntaxError) as exc:
+            print(f"RC1 authority audit: {exc}")
+            return 1
+        print(json.dumps(authority, indent=2, sort_keys=True))
+        return 0
     try:
         if args.scan is None:
             rows = inspect_paths(owned_source_paths(ROOT), ROOT)
