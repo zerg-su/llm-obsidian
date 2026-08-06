@@ -121,6 +121,8 @@ check(
         and "--surface" not in call
         and "--focus" in call
         and "false" in call
+        and "--command" in call
+        and call[call.index("--command") + 1] == ":"
         for call in calls
     ),
 )

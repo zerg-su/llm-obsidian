@@ -296,6 +296,8 @@ class CmuxAdapter:
             window_id,
             "--focus",
             "false",
+            "--command",
+            ":",
         ]
         if cwd is not None:
             resolved_cwd = cwd.expanduser().resolve()
