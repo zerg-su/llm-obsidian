@@ -123,6 +123,36 @@ class ExactProcess:
         raise AssertionError("post-verification continuation cannot signal")
 
 
+class MixedDarwinProcess(ExactProcess):
+    def process_status(self, process_group: int, identity: str) -> str:
+        super().process_status(process_group, identity)
+        return "unknown"
+
+    def pid_status(self, pid: int, identity: str) -> str:
+        super().pid_status(pid, identity)
+        return "unknown"
+
+    def exact_statuses(
+        self,
+        process_group: int,
+        process_identity: str,
+        supervisor_pid: int,
+        supervisor_identity: str,
+    ) -> tuple[str, str]:
+        assert (
+            process_group,
+            process_identity,
+            supervisor_pid,
+            supervisor_identity,
+        ) == (
+            self.resources.process_group,
+            self.resources.process_identity,
+            self.resources.supervisor_pid,
+            self.resources.supervisor_identity,
+        )
+        return "alive", "alive"
+
+
 class ExactCmux:
     def __init__(self, surface_id: str) -> None:
         self.surface_id = surface_id
@@ -702,10 +732,11 @@ def synchronize(
     *,
     now: float,
     fault=None,
+    process: ExactProcess | None = None,
 ) -> tuple[dict[str, object], ExactProcess, ExactCmux, RecoveryEffect]:
     resources = data["resources"]
     assert isinstance(resources, OwnedResources)
-    process = ExactProcess(resources)
+    process = process or ExactProcess(resources)
     cmux = ExactCmux(resources.surface_id)
     recovery = RecoveryEffect(data)
     receipt = synchronize_post_verification_review_drive(
@@ -811,6 +842,21 @@ def main() -> int:
             }
             and not process.signals
             and not cmux.closes,
+        )
+        mixed_data = fixture(Path(raw) / "mixed-darwin")
+        mixed_resources = mixed_data["resources"]
+        assert isinstance(mixed_resources, OwnedResources)
+        mixed_receipt, mixed_process, _mixed_cmux, mixed_recovery = synchronize(
+            mixed_data,
+            now=20_050.0,
+            process=MixedDarwinProcess(mixed_resources),
+        )
+        check(
+            "post-verification recovery accepts only the paired exact-live fallback",
+            mixed_receipt["status"] == "applied"
+            and mixed_recovery.provider_starts == 2
+            and not mixed_process.signals,
+            (mixed_receipt, mixed_recovery.provider_starts),
         )
         continued = continued_verification_receipt(
             runtime_root,
@@ -1153,7 +1199,6 @@ def main() -> int:
                 },
             ),
         )
-
     return 0
 
 

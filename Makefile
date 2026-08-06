@@ -41,6 +41,7 @@ test-harness:
 	@python3 tests/harness/test_regressions.py
 	@python3 tests/harness/test_store.py
 	@python3 tests/harness/test_adapters.py
+	@python3 tests/harness/test_darwin_exact_process_status.py
 	@python3 tests/harness/test_provider_events.py
 	@python3 tests/harness/test_ephemeral_provider_conformance.py
 	@python3 tests/harness/test_delivery_boundary.py

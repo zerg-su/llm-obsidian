@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -12,46 +13,114 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from .process_identity import DarwinProcessSnapshot
+
 
 IdentityProbe = Callable[[int], tuple[int, str]]
+DarwinSnapshotProbe = Callable[[int], DarwinProcessSnapshot]
+
+
+def _group_status(
+    process_group: int, identity: str, *, identity_probe: IdentityProbe
+) -> tuple[str, bool]:
+    if process_group <= 1 or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        return "unknown", False
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return "dead", False
+    except PermissionError as exc:
+        return "unknown", exc.errno in {errno.EPERM, errno.EACCES}
+    except OSError:
+        return "unknown", False
+    try:
+        actual_group, actual_identity = identity_probe(process_group)
+    except (ProcessLookupError, OSError):
+        return "unknown", False
+    return (
+        "alive"
+        if actual_group == process_group and actual_identity == identity
+        else "unknown",
+        False,
+    )
+
+
+def _pid_status(
+    pid: int, identity: str, *, identity_probe: IdentityProbe
+) -> tuple[str, bool]:
+    if pid <= 1 or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        return "unknown", False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "dead", False
+    except PermissionError as exc:
+        return "unknown", exc.errno in {errno.EPERM, errno.EACCES}
+    except OSError:
+        return "unknown", False
+    try:
+        _process_group, actual_identity = identity_probe(pid)
+    except (ProcessLookupError, OSError):
+        return "unknown", False
+    return ("alive" if actual_identity == identity else "unknown", False)
 
 
 def process_status(
     process_group: int, identity: str, *, identity_probe: IdentityProbe
 ) -> str:
-    if process_group <= 1 or not re.fullmatch(r"[0-9a-f]{64}", identity):
-        return "unknown"
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return "dead"
-    except OSError:
-        return "unknown"
-    try:
-        actual_group, actual_identity = identity_probe(process_group)
-    except (ProcessLookupError, OSError):
-        return "unknown"
-    return (
-        "alive"
-        if actual_group == process_group and actual_identity == identity
-        else "unknown"
-    )
+    return _group_status(
+        process_group, identity, identity_probe=identity_probe
+    )[0]
 
 
 def pid_status(pid: int, identity: str, *, identity_probe: IdentityProbe) -> str:
-    if pid <= 1 or not re.fullmatch(r"[0-9a-f]{64}", identity):
-        return "unknown"
+    return _pid_status(pid, identity, identity_probe=identity_probe)[0]
+
+
+def exact_statuses(
+    process_group: int,
+    process_identity: str,
+    supervisor_pid: int,
+    supervisor_identity: str,
+    *,
+    platform: str,
+    identity_probe: IdentityProbe,
+    darwin_snapshot_probe: DarwinSnapshotProbe,
+) -> tuple[str, str]:
+    """Prove one Darwin EPERM pair alive without delivering a signal."""
+
+    process, process_denied = _group_status(
+        process_group, process_identity, identity_probe=identity_probe
+    )
+    supervisor, supervisor_denied = _pid_status(
+        supervisor_pid, supervisor_identity, identity_probe=identity_probe
+    )
+    if (
+        platform != "darwin"
+        or not process_denied
+        or not supervisor_denied
+    ):
+        return process, supervisor
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return "dead"
-    except OSError:
-        return "unknown"
-    try:
-        _process_group, actual_identity = identity_probe(pid)
+        child = darwin_snapshot_probe(process_group)
+        parent = darwin_snapshot_probe(supervisor_pid)
+        child_group, child_identity = identity_probe(process_group)
+        parent_group, parent_identity = identity_probe(supervisor_pid)
     except (ProcessLookupError, OSError):
-        return "unknown"
-    return "alive" if actual_identity == identity else "unknown"
+        return "unknown", "unknown"
+    exact_running_pair = bool(
+        child.pid == process_group
+        and child.process_group == process_group
+        and child.parent_pid == supervisor_pid
+        and child.status == 2
+        and parent.pid == supervisor_pid
+        and parent.status == 2
+        and child_group == process_group
+        and child_identity == process_identity
+        and parent_group == parent.process_group
+        and parent_identity == supervisor_identity
+    )
+    return ("alive", "alive") if exact_running_pair else ("unknown", "unknown")
 
 
 def signal_exact(

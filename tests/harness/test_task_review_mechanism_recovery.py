@@ -720,6 +720,33 @@ POST_VERIFICATION_DECISION = (
 )
 
 
+EXACT_LIVE_STATUS_DECISION = (
+    "Classified as an eligible repository-owned exact-live ownership "
+    "status-adapter mechanism failure. The absent-owner replacement path is "
+    "prohibited for this boundary. Authorize one narrow local reversible TDD "
+    "repair to the read-only Darwin process/pid status adapter: when "
+    "zero-signal liveness probing returns EPERM/unknown, report alive only if "
+    "libproc proves the exact persisted PID/PGID identity unchanged, "
+    "proc_bsdinfo reports a running non-zombie process, the provider parent PID "
+    "is the exact persisted supervisor PID, and both identities match the "
+    "existing ownership receipt. Preserve current behavior on non-Darwin "
+    "platforms and for ordinary successful zero-signal probes. Add focused "
+    "EPERM+exact-live, PID/PGID reuse, wrong parent, stopped/zombie/exited/absent, "
+    "permission-without-libproc-proof, and no-signal regressions; no signal may "
+    "be sent and no lifecycle/store/gate/provider/callback/review effect may "
+    "occur during diagnosis or tests. Run relevant configured harness, "
+    "coverage, quality, and exact-HEAD release gates and commit a clean "
+    "descendant. Then, if the same exact provider and supervisor still prove "
+    "alive and all previous continuation/quarantine/verification receipts "
+    "remain unchanged, authorize exactly one new supported post-verification "
+    "recovery attempt on that same live dispatch executor toward the one "
+    "previously authorized fresh Codex/Sol review. Do not create a replacement "
+    "generation, restart or relaunch any provider/reviewer, repeat verification/"
+    "cleanup, ingest old callbacks, manually edit state, or touch the surface. "
+    "Fail closed and re-escalate before any effect on identity/status drift."
+)
+
+
 def absent_ownership(index: int) -> DurableCleanupOwnership:
     return DurableCleanupOwnership(
         "dead",
@@ -1669,6 +1696,12 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         "post-verification-review-drive",
         POST_VERIFICATION_DECISION,
     )
+    post_verification = load_chain(fixture.product)[-1]
+    append_mechanism_decision(
+        fixture,
+        "exact-live-status-adapter",
+        EXACT_LIVE_STATUS_DECISION,
+    )
     latest = load_chain(fixture.product)[-1]
     authorization = authorized_post_verification_review_drive(
         latest, fixture.product.resolve()
@@ -1679,7 +1712,9 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         and authorization.active_review_operation_id
         == retained_review_operation_id
         and authorization.dispatch_operation_id == fixture.task_id
-        and authorization.authorization_record_id == latest.record_id,
+        and authorization.authorization_record_id == latest.record_id
+        and authorization.authorization_record_id
+        != post_verification.record_id,
     )
     recovered = recover_task_review_for_mechanism(
         fixture.product, runtime_manager=fixture.runtime

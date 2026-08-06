@@ -467,13 +467,24 @@ def _owned_dispatch(
             "dispatch provider ownership is not exact"
         )
     try:
-        statuses = {
-            process_adapter.process_status(
+        exact_statuses = getattr(process_adapter, "exact_statuses", None)
+        if callable(exact_statuses):
+            process_status, supervisor_status = exact_statuses(
+                resources.process_group,
+                resources.process_identity,
+                resources.supervisor_pid,
+                resources.supervisor_identity,
+            )
+        else:
+            process_status = process_adapter.process_status(
                 resources.process_group, resources.process_identity
-            ),
-            process_adapter.pid_status(
+            )
+            supervisor_status = process_adapter.pid_status(
                 resources.supervisor_pid, resources.supervisor_identity
-            ),
+            )
+        statuses = {
+            process_status,
+            supervisor_status,
             cmux_adapter.status(resources.surface_id),
         }
     except Exception as exc:

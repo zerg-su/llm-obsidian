@@ -34,6 +34,10 @@ _POST_VERIFICATION_PREFIX = (
     "Classified as an eligible repository-owned post-verification review-drive "
     "mechanism failure."
 )
+_EXACT_LIVE_STATUS_PREFIX = (
+    "Classified as an eligible repository-owned exact-live ownership "
+    "status-adapter mechanism failure."
+)
 
 
 @dataclass(frozen=True)
@@ -348,11 +352,10 @@ def authorized_supported_close_retirement(
     )
 
 
-def authorized_post_verification_review_drive(
-    latest: DecisionRecord, worktree: Path
+def _compile_post_verification_review_drive(
+    chain: list[DecisionRecord], index: int, worktree: Path
 ) -> PostVerificationReviewDriveAuthorization | None:
-    """Compile the exact live-provider continuation grant and its provenance."""
-
+    latest = chain[index]
     attention = latest.payload
     decision = str(attention.get("decision") or "")
     required = (
@@ -372,15 +375,9 @@ def authorized_post_verification_review_drive(
         or any(fragment not in decision for fragment in required)
     ):
         return None
-    try:
-        chain = list(load_chain(worktree))
-    except EscalationRecordError:
-        return None
-    if not chain or chain[-1].sha256 != latest.sha256:
-        return None
     supported_indices = [
-        index
-        for index, record in enumerate(chain[:-1])
+        row_index
+        for row_index, record in enumerate(chain[:index])
         if record.record_type == "resolution"
         and str(record.payload.get("decision") or "").startswith(
             _SUPPORTED_CLOSE_PREFIX
@@ -393,7 +390,9 @@ def authorized_post_verification_review_drive(
         chain, supported_index, worktree
     )
     fresh_rows: list[tuple[int, DecisionRecord, re.Match[str]]] = []
-    for index, record in enumerate(chain[supported_index + 1 : -1], supported_index + 1):
+    for row_index, record in enumerate(
+        chain[supported_index + 1 : index], supported_index + 1
+    ):
         record_decision = str(record.payload.get("decision") or "")
         if record.record_type != "resolution" or not record_decision.startswith(
             _FRESH_OPERATION_BINDING_PREFIX
@@ -406,7 +405,7 @@ def authorized_post_verification_review_drive(
             record_decision,
         )
         if match is not None:
-            fresh_rows.append((index, record, match))
+            fresh_rows.append((row_index, record, match))
     if supported is None or len(fresh_rows) != 1:
         return None
     fresh_index, fresh, match = fresh_rows[0]
@@ -425,9 +424,9 @@ def authorized_post_verification_review_drive(
         or any(
             record.record_type not in {"raise", "resolution"}
             or _decision_scope(record.payload) != scope
-            for record in chain[supported_index :]
+            for record in chain[supported_index : index + 1]
         )
-        or fresh_index >= len(chain) - 1
+        or fresh_index >= index
     ):
         return None
     return PostVerificationReviewDriveAuthorization(
@@ -436,6 +435,83 @@ def authorized_post_verification_review_drive(
         dispatch_id,
         fresh.record_id,
         fresh.sha256,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
+def _exact_live_status_decision_is_valid(
+    latest: DecisionRecord, worktree: Path
+) -> bool:
+    attention = latest.payload
+    decision = str(attention.get("decision") or "")
+    required = (
+        "The absent-owner replacement path is prohibited for this boundary",
+        "one narrow local reversible TDD repair to the read-only Darwin process/pid status adapter",
+        "when zero-signal liveness probing returns EPERM/unknown, report alive only if libproc proves the exact persisted PID/PGID identity unchanged",
+        "proc_bsdinfo reports a running non-zombie process",
+        "provider parent PID is the exact persisted supervisor PID",
+        "both identities match the existing ownership receipt",
+        "Preserve current behavior on non-Darwin platforms and for ordinary successful zero-signal probes",
+        "no signal may be sent and no lifecycle/store/gate/provider/callback/review effect may occur during diagnosis or tests",
+        "exactly one new supported post-verification recovery attempt on that same live dispatch executor",
+        "Do not create a replacement generation, restart or relaunch any provider/reviewer",
+        "Fail closed and re-escalate before any effect on identity/status drift",
+    )
+    return not (
+        latest.record_type != "resolution"
+        or attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_EXACT_LIVE_STATUS_PREFIX)
+        or any(fragment not in decision for fragment in required)
+    )
+
+
+def authorized_post_verification_review_drive(
+    latest: DecisionRecord, worktree: Path
+) -> PostVerificationReviewDriveAuthorization | None:
+    """Compile the exact live-provider continuation grant and its provenance."""
+
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    index = len(chain) - 1
+    decision = str(latest.payload.get("decision") or "")
+    if decision.startswith(_POST_VERIFICATION_PREFIX):
+        return _compile_post_verification_review_drive(chain, index, worktree)
+    if not _exact_live_status_decision_is_valid(latest, worktree):
+        return None
+    post_indices = [
+        row_index
+        for row_index, record in enumerate(chain[:index])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _POST_VERIFICATION_PREFIX
+        )
+    ]
+    if len(post_indices) != 1:
+        return None
+    post_index = post_indices[0]
+    prior = _compile_post_verification_review_drive(
+        chain, post_index, worktree
+    )
+    scope = _decision_scope(latest.payload)
+    if prior is None or any(
+        record.record_type not in {"raise", "resolution"}
+        or _decision_scope(record.payload) != scope
+        for record in chain[post_index : index + 1]
+    ):
+        return None
+    return PostVerificationReviewDriveAuthorization(
+        prior.supported_close,
+        prior.active_review_operation_id,
+        prior.dispatch_operation_id,
+        prior.fresh_binding_record_id,
+        prior.fresh_binding_record_sha256,
         latest.record_id,
         latest.sha256,
     )
