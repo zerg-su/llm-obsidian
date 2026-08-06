@@ -643,6 +643,7 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
                 "run_id": run_id,
                 "runtime": runtime,
                 "cwd": str(scratch.resolve()),
+                "product_root": str(product.resolve()),
                 "surface_id": launch_surface,
                 "store_root": str(store.root.resolve()),
                 "argv": [
