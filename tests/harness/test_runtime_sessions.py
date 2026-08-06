@@ -58,7 +58,10 @@ from harness.runtime_sessions import (
     RuntimeSessionRequest,
 )
 from harness.runtime_session_contracts import continuation_effect_id
-from harness.runtime_session_continuation import await_initial_input_ready
+from harness.runtime_session_continuation import (
+    await_initial_input_ready,
+    await_surface_transport_ready,
+)
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
     provider_argv as runtime_provider_argv,
@@ -209,6 +212,20 @@ check(
     and initial_ready_port.reads == 3
     and initial_ready_waits == [0.01, 0.01],
     (initial_ready_port.reads, initial_ready_waits),
+)
+
+surface_transport_port = InitialReadyPort(["", "", "zak@host project %"])
+check(
+    "surface command waits for a visible shell before first transport",
+    await_surface_transport_ready(
+        surface_transport_port,
+        surface_id=SURFACE,
+        observation_limit=3,
+        observation_interval_seconds=0.01,
+        wait=lambda _seconds: None,
+    )
+    and surface_transport_port.reads == 3,
+    surface_transport_port.reads,
 )
 
 
@@ -1624,6 +1641,8 @@ with tempfile.TemporaryDirectory(prefix="runtime-sessions.") as raw:
 
         def read(self, surface_id: str) -> str:
             assert surface_id == SURFACE
+            if not self.sent:
+                return "❯\n›"
             prompt = self.sent[-1][1]
             anchor = next(
                 (line.strip() for line in prompt.splitlines() if line.strip()),

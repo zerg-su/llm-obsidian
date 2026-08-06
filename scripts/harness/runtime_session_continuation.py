@@ -97,6 +97,28 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
     return "unknown"
 
 
+def await_surface_transport_ready(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    observation_limit: int = 100,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> bool:
+    """Wait for the fresh terminal to paint before sending its first command."""
+
+    if observation_limit < 1:
+        raise ValueError("surface transport observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("surface transport interval cannot be negative")
+    for observation in range(observation_limit):
+        if port.read(surface_id).strip():
+            return True
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    return False
+
+
 def await_initial_input_ready(
     port: ContinuationPort,
     *,
