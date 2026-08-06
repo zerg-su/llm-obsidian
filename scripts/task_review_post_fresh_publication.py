@@ -304,13 +304,16 @@ def _runtime_binding(
 
 def _fresh_gate_identity(
     *,
+    worktree: Path,
     store: OperationStore,
     operation_id: str,
     continuation: Mapping[str, object],
     gate: Mapping[str, object],
     allow_published: bool,
-) -> tuple[str, list[Mapping[str, object]], tuple[str, ...]]:
+) -> tuple[str, str, list[Mapping[str, object]], tuple[str, ...]]:
     policy = gate.get("policy")
+    meta, _meta_raw = regular_json(worktree / ".task-meta.json", "task metadata")
+    review_policy = meta.get("review_policy")
     context = gate.get("context")
     boundary = gate.get("fresh_boundary")
     authorization_identity = gate.get("fresh_boundary_authorization")
@@ -329,7 +332,7 @@ def _fresh_gate_identity(
         or not isinstance(policy, dict)
         or policy.get("depth") != "deep"
         or policy.get("runtime") != "codex"
-        or policy.get("model") != "gpt-5.6-sol"
+        or not IDENTIFIER.fullmatch(str(policy.get("model") or ""))
         or policy.get("effort") != "xhigh"
         or policy.get("cross_model") is not False
         or policy.get("max_verify_iterations") != 0
@@ -341,6 +344,10 @@ def _fresh_gate_identity(
         or authorization_identity.get("status") != "authorized"
         or not isinstance(lanes, list)
         or len(lanes) != 2
+        or not isinstance(review_policy, dict)
+        or review_policy.get("runtime") != "codex"
+        or review_policy.get("model") != "sol"
+        or review_policy.get("effort") != "xhigh"
     ):
         raise PostVerificationReviewDriveError("fresh review gate is not exact")
     kind = str(boundary.get("kind") or "")
@@ -392,7 +399,7 @@ def _fresh_gate_identity(
         raise PostVerificationReviewDriveError("fresh review axes drifted") from exc
     if any(not axis.startswith("openai-") for axis in axes):
         raise PostVerificationReviewDriveError("fresh review provider drifted")
-    return expected_fresh_id, lanes, axes
+    return expected_fresh_id, str(policy["model"]), lanes, axes
 
 
 def _fresh_operation_binding(
@@ -402,6 +409,7 @@ def _fresh_operation_binding(
     operation_id: str,
     raw_lane: Mapping[str, object],
     axis: str,
+    expected_model: str,
     operations: list[object],
 ) -> tuple[dict[str, object], set[str]]:
     parent_id = str(raw_lane.get("operation_id") or "")
@@ -424,7 +432,7 @@ def _fresh_operation_binding(
         or parent.spec.operation_id != parent_id
         or parent.spec.kind != review_parent_kind(axis)
         or parent.spec.route.runtime != "codex"
-        or parent.spec.route.model != "gpt-5.6-sol"
+        or parent.spec.route.model != expected_model
         or parent.spec.route.effort != "xhigh"
         or parent.spec.route.profile != "reviewer-callback"
         or parent.state != "awaiting-callback"
@@ -487,7 +495,8 @@ def _fresh_lanes(
     gate: Mapping[str, object],
     allow_published: bool,
 ) -> tuple[str, list[dict[str, object]]]:
-    expected_fresh_id, lanes, axes = _fresh_gate_identity(
+    expected_fresh_id, expected_model, lanes, axes = _fresh_gate_identity(
+        worktree=worktree,
         store=store,
         operation_id=operation_id,
         continuation=continuation,
@@ -504,6 +513,7 @@ def _fresh_lanes(
             operation_id=operation_id,
             raw_lane=raw_lane,
             axis=axis,
+            expected_model=expected_model,
             operations=operations,
         )
         expected_ids.update(identifiers)
