@@ -15,6 +15,14 @@
       "red_failure_reason": "AttributeError: code_quality_audit had no audit_rc1_active_authority observable.",
       "green_command": "python3 tests/test_code_quality_audit.py",
       "focused_command": "python3 tests/test_v266_rc1_evidence.py && python3 tests/test_code_quality_audit.py && python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json && git diff --check"
+    },
+    {
+      "slice_id": "B",
+      "commit_sha": "46e9f014198238dd4214748a9bb36f280d5877e8",
+      "red_command": "python3 tests/harness/test_task_review_context.py",
+      "red_failure_reason": "ImportError: task_review_context had no _bounded_review_diff byte boundary.",
+      "green_command": "python3 tests/harness/test_task_review_context.py",
+      "focused_command": "python3 tests/harness/test_task_review_context.py && python3 tests/test_workstream_c_review_reap.py && python3 tests/harness/test_task_review_flow_units.py && git diff --check"
     }
   ]
 }
