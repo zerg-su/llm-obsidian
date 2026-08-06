@@ -910,6 +910,47 @@ FINAL_EXACT_TAIL_DECISION = (
 )
 
 
+DEFAULT_BINDING_DECISION = (
+    "Classified as an eligible repository-owned supported-facade default "
+    "store/owner binding mechanism failure. The zero-effect invocation against "
+    "store=.vault-meta/harness and owner=local did not address or mutate the "
+    "canonical task boundary, created no sync receipt or lifecycle effect, and "
+    "therefore did not consume the one replacement supported reconcile grant. "
+    "Authorize exactly one correctly bound supported reconcile using store "
+    "/private/tmp/llm-obsidian-265-simulator-coordinator.cVqYPn/.vault-meta/"
+    "harness and owner ad97826c-0651-4014-a113-72518e6fceea. Preserve the exact "
+    "compiled authorization resolution-5834db241204d59c5e2c5c5610a1ea65, all "
+    "immutable evidence, zero callback/provider replay, zero manual gate/store "
+    "edits, zero unrelated OS/cmux signals, and all minimum-release "
+    "prohibitions. Do not repeat the correctly bound command regardless of "
+    "result; inspect the resulting lifecycle boundary read-only and escalate "
+    "once on any further identity or routing drift."
+)
+
+
+FINAL_SELECTOR_DECISION = (
+    "Classified as an eligible repository-owned exact authorization-selector/"
+    "latest-resolution routing mechanism failure. Authorize only the minimal "
+    "regression-backed fail-closed compatibility needed for the supported facade "
+    "to validate one immutable exact chain rooted in compiled resolution-"
+    "5834db241204d59c5e2c5c5610a1ea65, continuing through zero-effect default-"
+    "binding resolution-12fdf06b8e93bb56b2dc4749a589597a, and ending at this "
+    "exact coordinator decision record. The compatibility must reject missing, "
+    "reordered, mutated, ambiguous, or unrelated records; it must not broaden "
+    "the public DSL, lifecycle state machine, permissions, or generic decision "
+    "grammar. Preserve the still-unused single correctly bound reconcile using "
+    "store /private/tmp/llm-obsidian-265-simulator-coordinator.cVqYPn/.vault-"
+    "meta/harness and owner ad97826c-0651-4014-a113-72518e6fceea, all immutable "
+    "evidence, zero callback/provider replay, zero manual gate/store edits, zero "
+    "unrelated OS/cmux signals, and all minimum-release prohibitions. After "
+    "focused regressions, clean full, coverage, quality, and one fresh exact-HEAD "
+    "release-final receipt, invoke that correctly bound reconcile exactly once "
+    "and inspect the boundary read-only. On any further identity, selector, "
+    "routing, or lifecycle drift, stop this task without another compatibility "
+    "patch."
+)
+
+
 def absent_ownership(index: int) -> DurableCleanupOwnership:
     return DurableCleanupOwnership(
         "dead",
@@ -2484,6 +2525,180 @@ with tempfile.TemporaryDirectory(prefix="authorization-chain-exact.") as raw:
     for label, candidate in correction_mutations.items():
         check(
             f"fresh-boundary provenance compiler rejects {label} in final tail",
+            _compile_fresh_boundary_provenance_compatibility(
+                candidate, len(candidate) - 1, product, compiled
+            )
+            is None,
+        )
+
+    selector_rows = (
+        (
+            "0819b5ff-abf4-4fba-aa0a-393cafd3cc93",
+            "raise",
+            "6ec6c5a6d39df65118773ced05ec2f2fcbea9d6aae17b53e76b1bbf82762d69a",
+            "resolution-5834db241204d59c5e2c5c5610a1ea65",
+            "16aa04f969d4d0e0ce5a335b26d4b953ea0d235d542d14ce25c9b5a93dbebfdc",
+            "",
+        ),
+        (
+            "resolution-12fdf06b8e93bb56b2dc4749a589597a",
+            "resolution",
+            "ae35956ec23ac4ff43752d6e01be78a104559a70c945e99c0ae167313d0fd09e",
+            "0819b5ff-abf4-4fba-aa0a-393cafd3cc93",
+            "6ec6c5a6d39df65118773ced05ec2f2fcbea9d6aae17b53e76b1bbf82762d69a",
+            DEFAULT_BINDING_DECISION,
+        ),
+        (
+            "ce042952-220d-4a50-a35e-c38fb2038546",
+            "raise",
+            "fda8e41e5e4d9bc38c90e4f65d1354b246f5c45388cd7eb690b7650d650162d8",
+            "resolution-12fdf06b8e93bb56b2dc4749a589597a",
+            "ae35956ec23ac4ff43752d6e01be78a104559a70c945e99c0ae167313d0fd09e",
+            "",
+        ),
+        (
+            "resolution-77faf7709dfaa1bd2d11ac3d60d324ee",
+            "resolution",
+            "8796db7b834844e5d19452e018472b2ff20ff7f7cd79c6aa3f43489e8be7c72e",
+            "ce042952-220d-4a50-a35e-c38fb2038546",
+            "fda8e41e5e4d9bc38c90e4f65d1354b246f5c45388cd7eb690b7650d650162d8",
+            FINAL_SELECTOR_DECISION,
+        ),
+    )
+    selector_chain = [*correction_chain]
+    selector_chain.extend(
+        DecisionRecord(
+            record_id,
+            record_type,
+            {
+                **scope,
+                "category": "mechanism-failure",
+                "status": "resolved" if record_type == "resolution" else "pending",
+                "decision": decision,
+            },
+            digest,
+            product / f"{record_id}.json",
+            False,
+            previous_id,
+            previous_sha,
+        )
+        for (
+            record_id,
+            record_type,
+            digest,
+            previous_id,
+            previous_sha,
+            decision,
+        ) in selector_rows
+    )
+    selector_compiled = _compile_fresh_boundary_provenance_compatibility(
+        selector_chain,
+        len(selector_chain) - 1,
+        product,
+        compiled,
+    )
+    check(
+        "fresh-boundary compiler accepts the exact latest-resolution selector tail",
+        selector_compiled is not None
+        and selector_compiled.continuation is continuation
+        and selector_compiled.authorization_record_id
+        == selector_chain[-1].record_id
+        and selector_compiled.authorization_record_sha256
+        == selector_chain[-1].sha256,
+    )
+    with patch(
+        "task_review_drift_contract.load_chain", return_value=selector_chain
+    ), patch(
+        "task_review_drift_contract._authorization_chain_boundary_is_valid",
+        return_value=True,
+    ), patch(
+        "task_review_drift_contract._compile_authorization_chain_compatibility",
+        return_value=compiled,
+    ) as selector_prior_compiler:
+        selector_dispatched = authorized_post_fresh_publication_sync(
+            selector_chain[-1], product
+        )
+    check(
+        "fresh-boundary dispatcher compiles the exact latest-resolution selector tail",
+        selector_dispatched is not None
+        and selector_dispatched.authorization_record_id
+        == selector_chain[-1].record_id
+        and selector_prior_compiler.call_args.args
+        == (selector_chain, len(selector_chain) - 13, product),
+    )
+    selector_mutations = {
+        "missing record": [
+            *selector_chain[:-3],
+            *selector_chain[-2:],
+        ],
+        "reordered records": [
+            *selector_chain[:-3],
+            selector_chain[-2],
+            selector_chain[-3],
+            selector_chain[-1],
+        ],
+        "duplicated identity": [selector_chain[-1], *selector_chain],
+        "ambiguous resolution": [
+            replace(
+                selector_chain[-1],
+                record_id="resolution-ambiguous-selector",
+                sha256="2" * 64,
+                previous_record_id="resolution-unrelated",
+                previous_record_sha256="3" * 64,
+            ),
+            *selector_chain,
+        ],
+        "mutated root digest": [
+            *selector_chain[:-5],
+            replace(selector_chain[-5], sha256="4" * 64),
+            *selector_chain[-4:],
+        ],
+        "mutated final digest": [
+            *selector_chain[:-1],
+            replace(selector_chain[-1], sha256="5" * 64),
+        ],
+        "broken predecessor": [
+            *selector_chain[:-1],
+            replace(selector_chain[-1], previous_record_sha256="6" * 64),
+        ],
+        "mutated default-binding decision": [
+            *selector_chain[:-3],
+            replace(
+                selector_chain[-3],
+                payload={
+                    **selector_chain[-3].payload,
+                    "decision": DEFAULT_BINDING_DECISION
+                    + " Permit another attempt.",
+                },
+            ),
+            *selector_chain[-2:],
+        ],
+        "broadened final decision": [
+            *selector_chain[:-1],
+            replace(
+                selector_chain[-1],
+                payload={
+                    **selector_chain[-1].payload,
+                    "decision": FINAL_SELECTOR_DECISION
+                    + " Permit a generic selector.",
+                },
+            ),
+        ],
+        "unrelated scope": [
+            *selector_chain[:-2],
+            replace(
+                selector_chain[-2],
+                payload={
+                    **selector_chain[-2].payload,
+                    "task_surface": "surface-unrelated",
+                },
+            ),
+            selector_chain[-1],
+        ],
+    }
+    for label, candidate in selector_mutations.items():
+        check(
+            f"fresh-boundary compiler rejects {label} in selector tail",
             _compile_fresh_boundary_provenance_compatibility(
                 candidate, len(candidate) - 1, product, compiled
             )

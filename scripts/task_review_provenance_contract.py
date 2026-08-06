@@ -47,9 +47,14 @@ _INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX = (
 _FINAL_EXACT_TAIL_PREFIX = (
     "Classified as coordinator-authored exact commit-identity drift."
 )
+_FINAL_SELECTOR_PREFIX = (
+    "Classified as an eligible repository-owned exact authorization-selector/"
+    "latest-resolution routing mechanism failure."
+)
 FRESH_BOUNDARY_PROVENANCE_PREFIX = (
     _INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX,
     _FINAL_EXACT_TAIL_PREFIX,
+    _FINAL_SELECTOR_PREFIX,
 )
 _FRESH_BOUNDARY_PROVENANCE_DECISION = (
     f"{_INITIAL_FRESH_BOUNDARY_PROVENANCE_PREFIX} Authorize one narrow "
@@ -115,6 +120,42 @@ _FINAL_EXACT_TAIL_DECISION = (
     "dependency/migration, reviewer/provider relaunch, replay, signal, cmux or "
     "manual store/gate edit, push, publish, tag, release, or reap. Escalate once "
     "and stop on any further identity or lifecycle drift."
+)
+_DEFAULT_BINDING_DECISION = (
+    "Classified as an eligible repository-owned supported-facade default "
+    "store/owner binding mechanism failure. The zero-effect invocation against "
+    "store=.vault-meta/harness and owner=local did not address or mutate the "
+    "canonical task boundary, created no sync receipt or lifecycle effect, and "
+    "therefore did not consume the one replacement supported reconcile grant. "
+    "Authorize exactly one correctly bound supported reconcile using store "
+    "/private/tmp/llm-obsidian-265-simulator-coordinator.cVqYPn/.vault-meta/"
+    "harness and owner ad97826c-0651-4014-a113-72518e6fceea. Preserve the exact "
+    "compiled authorization resolution-5834db241204d59c5e2c5c5610a1ea65, all "
+    "immutable evidence, zero callback/provider replay, zero manual gate/store "
+    "edits, zero unrelated OS/cmux signals, and all minimum-release "
+    "prohibitions. Do not repeat the correctly bound command regardless of "
+    "result; inspect the resulting lifecycle boundary read-only and escalate "
+    "once on any further identity or routing drift."
+)
+_FINAL_SELECTOR_DECISION = (
+    f"{_FINAL_SELECTOR_PREFIX} Authorize only the minimal regression-backed "
+    "fail-closed compatibility needed for the supported facade to validate one "
+    "immutable exact chain rooted in compiled resolution-"
+    "5834db241204d59c5e2c5c5610a1ea65, continuing through zero-effect default-"
+    "binding resolution-12fdf06b8e93bb56b2dc4749a589597a, and ending at this "
+    "exact coordinator decision record. The compatibility must reject missing, "
+    "reordered, mutated, ambiguous, or unrelated records; it must not broaden "
+    "the public DSL, lifecycle state machine, permissions, or generic decision "
+    "grammar. Preserve the still-unused single correctly bound reconcile using "
+    "store /private/tmp/llm-obsidian-265-simulator-coordinator.cVqYPn/.vault-"
+    "meta/harness and owner ad97826c-0651-4014-a113-72518e6fceea, all immutable "
+    "evidence, zero callback/provider replay, zero manual gate/store edits, zero "
+    "unrelated OS/cmux signals, and all minimum-release prohibitions. After "
+    "focused regressions, clean full, coverage, quality, and one fresh exact-HEAD "
+    "release-final receipt, invoke that correctly bound reconcile exactly once "
+    "and inspect the boundary read-only. On any further identity, selector, "
+    "routing, or lifecycle drift, stop this task without another compatibility "
+    "patch."
 )
 _EXACT_PROVENANCE_TAIL = (
     (
@@ -189,6 +230,40 @@ _EXACT_CORRECTION_TAIL = (
         "contract-drift",
     ),
 )
+_EXACT_SELECTOR_TAIL = (
+    (
+        "0819b5ff-abf4-4fba-aa0a-393cafd3cc93",
+        "raise",
+        "6ec6c5a6d39df65118773ced05ec2f2fcbea9d6aae17b53e76b1bbf82762d69a",
+        "resolution-5834db241204d59c5e2c5c5610a1ea65",
+        "16aa04f969d4d0e0ce5a335b26d4b953ea0d235d542d14ce25c9b5a93dbebfdc",
+        "mechanism-failure",
+    ),
+    (
+        "resolution-12fdf06b8e93bb56b2dc4749a589597a",
+        "resolution",
+        "ae35956ec23ac4ff43752d6e01be78a104559a70c945e99c0ae167313d0fd09e",
+        "0819b5ff-abf4-4fba-aa0a-393cafd3cc93",
+        "6ec6c5a6d39df65118773ced05ec2f2fcbea9d6aae17b53e76b1bbf82762d69a",
+        "mechanism-failure",
+    ),
+    (
+        "ce042952-220d-4a50-a35e-c38fb2038546",
+        "raise",
+        "fda8e41e5e4d9bc38c90e4f65d1354b246f5c45388cd7eb690b7650d650162d8",
+        "resolution-12fdf06b8e93bb56b2dc4749a589597a",
+        "ae35956ec23ac4ff43752d6e01be78a104559a70c945e99c0ae167313d0fd09e",
+        "mechanism-failure",
+    ),
+    (
+        "resolution-77faf7709dfaa1bd2d11ac3d60d324ee",
+        "resolution",
+        "8796db7b834844e5d19452e018472b2ff20ff7f7cd79c6aa3f43489e8be7c72e",
+        "ce042952-220d-4a50-a35e-c38fb2038546",
+        "fda8e41e5e4d9bc38c90e4f65d1354b246f5c45388cd7eb690b7650d650162d8",
+        "mechanism-failure",
+    ),
+)
 
 
 def coordinator_provenance_is_exact(
@@ -223,6 +298,60 @@ def provenance_tail_is_exact(
 
     if index < 2:
         return False
+    if chain[index].record_id == _EXACT_SELECTOR_TAIL[-1][0]:
+        root_index = index - len(_EXACT_SELECTOR_TAIL)
+        if root_index < 0 or not provenance_tail_is_exact(
+            chain, root_index, worktree
+        ):
+            return False
+        selector = chain[root_index + 1 : index + 1]
+        expected_ids = tuple(row[0] for row in _EXACT_SELECTOR_TAIL)
+        if tuple(record.record_id for record in selector) != expected_ids or any(
+            sum(record.record_id == record_id for record in chain) != 1
+            for record_id in expected_ids
+        ):
+            return False
+        for record, expected in zip(selector, _EXACT_SELECTOR_TAIL, strict=True):
+            if (
+                (
+                    record.record_id,
+                    record.record_type,
+                    record.sha256,
+                    record.previous_record_id,
+                    record.previous_record_sha256,
+                    record.payload.get("category"),
+                )
+                != expected
+            ):
+                return False
+        scope = {
+            key: chain[root_index].payload.get(key)
+            for key in ("worktree", "task_name", "task_surface")
+        }
+        return bool(
+            selector[1].payload.get("decision") == _DEFAULT_BINDING_DECISION
+            and selector[-1].payload.get("status") == "resolved"
+            and selector[-1].payload.get("decision") == _FINAL_SELECTOR_DECISION
+            and str(selector[-1].payload.get("worktree") or "")
+            == str(worktree)
+            and all(
+                {
+                    key: record.payload.get(key)
+                    for key in ("worktree", "task_name", "task_surface")
+                }
+                == scope
+                for record in selector
+            )
+            and [
+                row_index
+                for row_index, record in enumerate(chain)
+                if record.record_type == "resolution"
+                and str(record.payload.get("decision") or "").startswith(
+                    _FINAL_SELECTOR_PREFIX
+                )
+            ]
+            == [index]
+        )
     if chain[index].record_id == _EXACT_CORRECTION_TAIL[-1][0]:
         initial_index = index - len(_EXACT_CORRECTION_TAIL)
         if initial_index < 2:

@@ -895,6 +895,11 @@ def _compile_fresh_boundary_provenance_compatibility(
             == "resolution-5834db241204d59c5e2c5c5610a1ea65"
         ):
             prior_index = index - 8
+        if (
+            chain[index].record_id
+            == "resolution-77faf7709dfaa1bd2d11ac3d60d324ee"
+        ):
+            prior_index = index - 12
         prior = _compile_authorization_chain_compatibility(
             chain, prior_index, worktree
         )
