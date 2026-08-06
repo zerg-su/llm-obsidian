@@ -39,6 +39,14 @@
       "red_failure_reason": "The pre-activation review fixture still exposed cross-HEAD continuation instead of inspect/archive/cleanup-only authority.",
       "green_command": "python3 tests/harness/test_exact_head_review_attempt.py",
       "focused_command": "python3 tests/harness/test_exact_head_review_attempt.py && python3 tests/harness/test_review_gate.py && python3 tests/harness/test_review_resolution_bundle.py && python3 tests/harness/test_review_delta_packet.py && python3 tests/harness/test_task_review_flow_units.py && python3 tests/harness/test_lifecycle_regression_corpus.py && python3 tests/harness/test_runtime_task_summary.py && python3 tests/harness/test_suite_registration.py && python3 tests/test_harness_coverage_audit.py && python3 tests/test_code_quality_audit.py && python3 tests/test_v266_rc1_evidence.py && python3 scripts/code-quality-audit.py --rc1-authority-json && git diff --check"
+    },
+    {
+      "slice_id": "E",
+      "commit_sha": "06714ec289ebe8feb6e549d7feea6f870c2f3a96",
+      "red_command": "python3 tests/harness/test_event_only_review_effects.py",
+      "red_failure_reason": "AttributeError: LivenessPolicy had no reviewer zero-effect policy and time/screen state still authorized submit recovery.",
+      "green_command": "python3 tests/harness/test_event_only_review_effects.py",
+      "focused_command": "python3 tests/harness/test_event_only_review_effects.py && python3 tests/harness/test_callback_submit_recovery.py && python3 tests/harness/test_callback_submit_recovery_runtime.py && python3 tests/harness/test_liveness.py && python3 tests/harness/test_provider_events.py && python3 tests/harness/test_delivery_boundary.py && python3 tests/harness/test_harness_control_plane.py && python3 tests/harness/test_review_gate.py && python3 tests/harness/test_runtime_sessions.py && python3 tests/harness/test_exact_head_review_attempt.py && python3 tests/harness/test_suite_registration.py && python3 tests/test_code_quality_audit.py && python3 scripts/code-quality-audit.py --rc1-authority-json && git diff --check"
     }
   ]
 }
