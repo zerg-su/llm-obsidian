@@ -367,6 +367,8 @@ test-plan-capture:
 	@bash tests/test_plan_capture.sh
 
 test-stop-hook:
+	@echo "=== test_stop_hook_latency_gate.py ==="
+	@python3 tests/test_stop_hook_latency_gate.py
 	@echo "=== test_stop_hook.sh ==="
 	@bash tests/test_stop_hook.sh
 
