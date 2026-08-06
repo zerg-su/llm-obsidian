@@ -77,6 +77,7 @@ test-harness:
 	@python3 tests/harness/test_runtime_sessions.py
 	@python3 tests/harness/test_runtime_task_summary.py
 	@python3 tests/harness/test_review_drive_rearm.py
+	@python3 tests/harness/test_post_verification_review_drive.py
 	@python3 tests/harness/test_runtime_research.py
 	@python3 tests/harness/test_review_finalization.py
 	@python3 tests/harness/test_finalization_ledger.py

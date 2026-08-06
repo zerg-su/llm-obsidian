@@ -1,0 +1,1161 @@
+#!/usr/bin/env python3
+"""Post-verification review-drive continuation is exact and replay-free."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import sys
+import tempfile
+import uuid
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from harness.contracts import (  # noqa: E402
+    AttentionReason,
+    EffectOutcome,
+    OperationSpec,
+    OwnedResources,
+    RuntimeRoute,
+)
+from harness import cli as harness_cli  # noqa: E402
+from harness.liveness import (  # noqa: E402
+    LivenessController,
+    LivenessEvidence,
+    LivenessPolicy,
+)
+from harness.post_verification_review_drive import (  # noqa: E402
+    PostVerificationReviewDriveError,
+    continued_verification_receipt,
+    post_verification_review_marker,
+    synchronize_post_verification_review_drive,
+)
+from harness.runtime_worker import (  # noqa: E402
+    _pipeline_verify_effect_id,
+    _pipeline_verify_identity,
+)
+from harness.runtime_worker_summary import RuntimeWorkerSummaryMixin  # noqa: E402
+from harness.store import OperationStore  # noqa: E402
+from harness.verification import load_profiles  # noqa: E402
+from harness.verification_attempt import VerificationAttempt  # noqa: E402
+
+
+def check(label: str, value: bool, detail: object = "") -> None:
+    if not value:
+        raise AssertionError(f"{label}: {detail}")
+    print(f"OK   {label}")
+
+
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def tree_hash(root: Path, *, exclude: tuple[str, ...] = ()) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = path.relative_to(root).as_posix()
+        if relative in exclude:
+            continue
+        digest.update(relative.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, text=True, capture_output=True
+    ).stdout.strip()
+
+
+def advance(
+    store: OperationStore, owner: str, operation: str, states: tuple[str, ...]
+) -> None:
+    for state in states:
+        store.transition(owner, operation, state)
+
+
+class ExactProcess:
+    def __init__(self, resources: OwnedResources) -> None:
+        self.resources = resources
+        self.process_state = "alive"
+        self.supervisor_state = "alive"
+        self.probes: list[tuple[str, int, str]] = []
+        self.signals: list[str] = []
+
+    def process_status(self, process_group: int, identity: str) -> str:
+        self.probes.append(("process", process_group, identity))
+        if (
+            process_group != self.resources.process_group
+            or identity != self.resources.process_identity
+        ):
+            return "unknown"
+        return self.process_state
+
+    def pid_status(self, pid: int, identity: str) -> str:
+        self.probes.append(("supervisor", pid, identity))
+        if (
+            pid != self.resources.supervisor_pid
+            or identity != self.resources.supervisor_identity
+        ):
+            return "unknown"
+        return self.supervisor_state
+
+    def request_guardian_signal(self, *_args: object, **_kwargs: object) -> None:
+        self.signals.append("guardian")
+        raise AssertionError("post-verification continuation cannot signal")
+
+    def request_exit(self, *_args: object, **_kwargs: object) -> None:
+        self.signals.append("exit")
+        raise AssertionError("post-verification continuation cannot signal")
+
+
+class ExactCmux:
+    def __init__(self, surface_id: str) -> None:
+        self.surface_id = surface_id
+        self.state = "alive"
+        self.probes: list[str] = []
+        self.closes: list[str] = []
+
+    def status(self, surface_id: str) -> str:
+        self.probes.append(surface_id)
+        if surface_id != self.surface_id:
+            return "unknown"
+        return self.state
+
+    def close_exact(self, surface_id: str) -> None:
+        self.closes.append(surface_id)
+        raise AssertionError("post-verification continuation cannot close")
+
+
+class RecoveryEffect:
+    def __init__(self, data: dict[str, object]) -> None:
+        self.data = data
+        self.calls = 0
+        self.provider_starts = 0
+
+    def __call__(self) -> dict[str, object]:
+        self.calls += 1
+        gate_path = self.data["gate_path"]
+        assert isinstance(gate_path, Path)
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        if gate.get("fresh_reevaluation_used") is not True:
+            self.provider_starts += 2
+            gate.update(
+                {
+                    "status": "reviewing",
+                    "fresh_reevaluation_used": True,
+                    "fresh_boundary": {
+                        "kind": "context",
+                        "reason": "authorized post-verification continuation",
+                        "next_context_sha256": "e" * 64,
+                    },
+                    "fresh_boundary_authorization": {
+                        "pointer": "fresh-boundary.json",
+                        "sha256": "f" * 64,
+                        "status": "authorized",
+                    },
+                    "context": {
+                        **gate["context"],
+                        "head_sha": self.data["target_head"],
+                    },
+                }
+            )
+            write_json(gate_path, gate)
+            progress_path = self.data["progress_path"]
+            assert isinstance(progress_path, Path)
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            progress["status"] = "fresh-review-started"
+            write_json(progress_path, progress)
+        return {"status": "reviewing"}
+
+
+def fixture(root: Path) -> dict[str, object]:
+    vault = root / "vault"
+    product = root / "product"
+    (vault / "wiki").mkdir(parents=True)
+    (vault / "config").mkdir()
+    (vault / "config" / "verification-profiles.toml").write_bytes(
+        (ROOT / "config" / "verification-profiles.toml").read_bytes()
+    )
+    product.mkdir()
+    git(product, "init", "-q", "-b", "task/post-verification")
+    git(product, "config", "user.email", "continuation@example.invalid")
+    git(product, "config", "user.name", "Continuation Test")
+    (product / ".gitignore").write_text(".task-*.json\n", encoding="utf-8")
+    (product / "product.txt").write_text("verified\n", encoding="utf-8")
+    git(product, "add", ".gitignore", "product.txt")
+    git(product, "commit", "-q", "-m", "verified source")
+    source_head = git(product, "rev-parse", "HEAD")
+
+    task_id = str(uuid.uuid4())
+    review_id = str(uuid.uuid4())
+    definition = "d" * 64
+    profile_sha = load_profiles(
+        vault / "config" / "verification-profiles.toml"
+    )["scoped"].sha256
+    write_json(
+        product / ".task-meta.json",
+        {
+            "version": 4,
+            "task_id": task_id,
+            "task_name": "post verification continuation",
+            "origin_session": "session-continuation",
+            "executor_runtime": "codex",
+            "interaction_policy": "unattended",
+            "pipeline_policy": {
+                "name": "lifecycle/default",
+                "definition_sha256": definition,
+                "completion_policy": "attention",
+                "total_pass_limit": 2,
+            },
+            "review_policy": {
+                "mode": "deep",
+                "cross_model": False,
+                "runtime": "codex",
+                "model": "sol",
+                "effort": "xhigh",
+                "max_verify_iterations": 2,
+                "verification_profile": "scoped",
+                "verification_profile_sha256": profile_sha,
+            },
+            "vault_root": str(vault.resolve()),
+            "worktree": str(product.resolve()),
+            "branch": "task/post-verification",
+            "task_surface": "11111111-1111-4111-8111-111111111111",
+        },
+    )
+    write_json(
+        product / ".task-summary.json",
+        {
+            "schema_version": 2,
+            "type": "repo-touch",
+            "title": "post verification continuation",
+            "session": "session-continuation",
+            "body": "The verified source is ready for its fresh review.",
+            "outcome_disposition": "achieved",
+            "outcome_evidence_ids": ["verified"],
+            "residual_gap_pointers": [],
+        },
+    )
+
+    store = OperationStore(vault / ".vault-meta" / "harness")
+    route = RuntimeRoute(
+        "codex", "gpt-5.6-sol", "xhigh", "executor", "a" * 64
+    )
+    root_spec = OperationSpec(
+        task_id,
+        "dispatch-idempotency",
+        "dispatch",
+        task_id,
+        route,
+        "packets/root/manifest.json",
+        "scoped",
+        contract_sha256=definition,
+    )
+    store.create(root_spec, lane_id="root-lane", run_id="root-run")
+    advance(
+        store,
+        task_id,
+        task_id,
+        ("preflight", "starting", "running", "awaiting-callback"),
+    )
+    resources = OwnedResources(
+        surface_id="11111111-1111-4111-8111-111111111111",
+        process_group=4101,
+        supervisor_pid=4102,
+        process_identity="1" * 64,
+        supervisor_identity="2" * 64,
+    )
+    record = store.read(task_id, task_id)
+    store.save(
+        replace(record, resources=resources, revision=record.revision + 1),
+        expected_revision=record.revision,
+    )
+    store.begin_effect(task_id, task_id, "start-provider")
+    store.resolve_effect(task_id, task_id, EffectOutcome.SUCCEEDED)
+    store.transition(
+        task_id,
+        task_id,
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+
+    retained: list[tuple[str, str]] = []
+    for index, axis in enumerate(("openai-engineering", "openai-intent"), 1):
+        parent_id = f"{review_id}-{axis}"
+        child_id = f"{parent_id}-round"
+        parent_spec = OperationSpec(
+            parent_id,
+            f"parent-{index}",
+            "deep-review-correctness" if index == 1 else "deep-review-spec",
+            task_id,
+            replace(route, profile="reviewer-callback"),
+            "packets/review/manifest.json",
+            "scoped",
+        )
+        store.create(parent_spec, lane_id=f"lane-{index}", run_id=f"parent-run-{index}")
+        advance(
+            store,
+            task_id,
+            parent_id,
+            ("preflight", "starting", "running", "awaiting-callback"),
+        )
+        store.begin_effect(task_id, parent_id, "request-exit")
+        store.resolve_effect(task_id, parent_id, EffectOutcome.SUCCEEDED)
+        advance(store, task_id, parent_id, ("cancelling", "exiting", "cancelled"))
+        child_spec = OperationSpec(
+            child_id,
+            f"child-{index}",
+            "review-round",
+            task_id,
+            replace(route, profile="reviewer-ephemeral"),
+            "packets/review/manifest.json",
+            "scoped",
+            parent_operation_id=parent_id,
+        )
+        store.create(child_spec, lane_id=f"lane-{index}", run_id=f"child-run-{index}")
+        advance(
+            store,
+            task_id,
+            child_id,
+            ("preflight", "starting", "running", "awaiting-callback"),
+        )
+        child = store.read(task_id, child_id)
+        store.save(
+            replace(
+                child,
+                accepted_callback_id=f"review-{index}",
+                accepted_callback_kind="review",
+                accepted_callback_sha256=str(index) * 64,
+                revision=child.revision + 1,
+            ),
+            expected_revision=child.revision,
+        )
+        advance(store, task_id, child_id, ("finalizing", "exiting", "complete"))
+        retained.append((parent_id, child_id))
+
+    gate_root = store.root / "review-data" / task_id / task_id
+    archive_root = gate_root / "drift-quarantine" / "resolution-quarantine"
+    write_json(
+        archive_root / "evidence.json",
+        {
+            "schema_version": 1,
+            "status": "quarantined-evidence",
+            "operation_id": task_id,
+            "review_operation_id": review_id,
+            "callback_effects_replayed": 0,
+            "provider_effects_replayed": 0,
+        },
+    )
+    for index, (_parent, _child) in enumerate(retained, 1):
+        write_json(
+            archive_root / "artifacts" / f"callback-{index}.json",
+            {
+                "schema_version": 1,
+                "callback_id": f"review-{index}",
+                "payload_sha256": str(index) * 64,
+            },
+        )
+        write_json(
+            archive_root / "supported-close" / f"parent-{index}.json",
+            {"schema_version": 1, "status": "supported-close-consumed"},
+        )
+    evidence_sha = sha256(archive_root / "evidence.json")
+    progress_path = archive_root / "progress.json"
+    write_json(
+        progress_path,
+        {
+            "schema_version": 2,
+            "status": "quarantined",
+            "evidence_sha256": evidence_sha,
+            "cleaned_parents": [parent for parent, _child in retained],
+            "terminal_rounds": [child for _parent, child in retained],
+            "retirement_receipts": {
+                parent: hashlib.sha256(parent.encode()).hexdigest()
+                for parent, _child in retained
+            },
+        },
+    )
+    gate_path = gate_root / "review-gate.json"
+    write_json(
+        gate_path,
+        {
+            "schema_version": 1,
+            "dispatch_operation_id": task_id,
+            "owner_id": task_id,
+            "active_review_operation_id": review_id,
+            "status": "attention-required",
+            "fresh_reevaluation_used": False,
+            "context": {
+                "head_sha": source_head,
+                "manifest": "packets/old/manifest.json",
+                "verification_profile": "scoped",
+                "verification_profile_sha256": profile_sha,
+            },
+            "policy": {
+                "enabled": True,
+                "depth": "deep",
+                "runtime": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cross_model": False,
+                "max_verify_iterations": 2,
+                "purpose": "implementation",
+            },
+            "attempt": {
+                "schema_version": 1,
+                "status": "terminal",
+                "identity": {
+                    "schema_version": 1,
+                    "attempt_id": review_id,
+                    "exact_head_sha": source_head,
+                },
+                "terminal": {
+                    "schema_version": 1,
+                    "result": "attention-required",
+                    "exact_head_sha": source_head,
+                    "lane_results": [],
+                },
+            },
+            "drift_quarantine": {
+                "status": "quarantined",
+                "evidence_pointer": (
+                    archive_root / "evidence.json"
+                ).relative_to(gate_root).as_posix(),
+                "evidence_sha256": evidence_sha,
+                "authorization_record_id": "resolution-quarantine",
+                "authorization_record_sha256": "b" * 64,
+            },
+            "lanes": [],
+            "round_results": {},
+            "final_results": {},
+            "evidence": {},
+        },
+    )
+
+    runtime_root = store.root / "owners" / task_id / "runtime" / task_id
+    write_json(
+        runtime_root / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "run_id": "root-run",
+            "cwd": str(product.resolve()),
+            "product_root": str(product.resolve()),
+            "callback_mode": "task-summary",
+            "time_budget_seconds": 1800,
+            "placement": "workspace",
+        },
+    )
+    write_json(
+        runtime_root / "launch.json",
+        {
+            "schema_version": 1,
+            "owner_id": task_id,
+            "operation_id": task_id,
+            "run_id": "root-run",
+            "cwd": str(product.resolve()),
+            "product_root": str(product.resolve()),
+            "surface_id": resources.surface_id,
+            "callback_mode": "task-summary",
+        },
+    )
+    write_json(
+        runtime_root / "ready.json",
+        {
+            "schema_version": 1,
+            "status": "ready",
+            "pid": resources.process_group,
+            "process_group": resources.process_group,
+            "process_identity": resources.process_identity,
+            "supervisor_pid": resources.supervisor_pid,
+            "supervisor_identity": resources.supervisor_identity,
+        },
+    )
+    provider_identity = {
+        "schema_version": 1,
+        "owner_id": task_id,
+        "operation_id": task_id,
+        "run_id": "root-run",
+        "generation": 1,
+        "provider_session_id": "root-run",
+        "process_identity": resources.process_identity,
+        "surface_id": resources.surface_id,
+        "workspace_id": "workspace-test",
+        "source_id": f"process:{resources.process_identity}",
+    }
+    events = runtime_root / "provider-events" / "generation-1"
+    write_json(
+        events / "events" / "0001.json",
+        {
+            "schema_version": 1,
+            "sequence": 1,
+            "kind": "provider-started",
+            "effect_id": "",
+            "reason": "",
+            "result_sha256": "",
+            "exit_code": None,
+            "identity": provider_identity,
+        },
+    )
+    write_json(
+        events / "events" / "0002.json",
+        {
+            "schema_version": 1,
+            "sequence": 2,
+            "kind": "input-accepted",
+            "effect_id": "c" * 64,
+            "reason": "",
+            "result_sha256": "",
+            "exit_code": None,
+            "identity": provider_identity,
+        },
+    )
+    write_json(
+        events / "delivery" / "delivery-state.json",
+        {
+            "schema_version": 1,
+            "identity": provider_identity,
+            "send_status": "accepted",
+            "send_attempts": 1,
+            "callback_submits": 0,
+            "attention_reason": "",
+            "cursor": {
+                "schema_version": 1,
+                "identity": provider_identity,
+                "last_sequence": 2,
+                "provider_started": True,
+                "input_accepted": True,
+                "result_published": False,
+                "process_exited": False,
+                "resource_closed": False,
+                "event_gap": False,
+                "turn_stops": 0,
+                "profile": "interactive",
+            },
+            "profile": "interactive",
+            "idempotency_key": "c" * 64,
+        },
+    )
+    write_json(
+        runtime_root / "callback-error.json",
+        {"schema_version": 1, "status": "review-drive-failed"},
+    )
+
+    input_sha = hashlib.sha256(
+        json.dumps(
+            {
+                "definition_sha256": definition,
+                "head_sha": source_head,
+                "profile_sha256": profile_sha,
+                "schema_version": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    child_spec, verify_lane, verify_run = _pipeline_verify_identity(
+        root_spec,
+        definition_sha256=definition,
+        input_sha256=input_sha,
+        profile="scoped",
+    )
+    store.create(child_spec, lane_id=verify_lane, run_id=verify_run)
+    advance(
+        store,
+        task_id,
+        child_spec.operation_id,
+        ("preflight", "starting", "running", "verifying"),
+    )
+    effect_id = _pipeline_verify_effect_id(input_sha)
+    store.begin_effect(task_id, child_spec.operation_id, effect_id)
+    store.resolve_effect(task_id, child_spec.operation_id, EffectOutcome.SUCCEEDED)
+    advance(
+        store,
+        task_id,
+        child_spec.operation_id,
+        ("finalizing", "exiting", "complete"),
+    )
+    attempt = VerificationAttempt(task_id, "scoped", profile_sha, source_head, 0)
+    evidence: list[dict[str, object]] = []
+    for index in range(1, 4):
+        output = (
+            runtime_root
+            / "pipeline-verification"
+            / child_spec.operation_id
+            / "evidence"
+            / f"scoped-{index}.log"
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("ok\n", encoding="utf-8")
+        evidence.append(
+            {
+                "profile": "scoped",
+                "profile_sha256": profile_sha,
+                "head_sha": source_head,
+                "command_id": f"scoped-{index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "started_at": str(index),
+                "finished_at": str(index + 1),
+                "output_pointer": output.relative_to(runtime_root).as_posix(),
+            }
+        )
+    verification = {
+        "schema_version": 2,
+        "operation_id": child_spec.operation_id,
+        "parent_operation_id": task_id,
+        "lane_id": verify_lane,
+        "run_id": verify_run,
+        "definition_sha256": definition,
+        "step_id": "verify",
+        "head_sha": source_head,
+        "input_sha256": input_sha,
+        "profile": "scoped",
+        "profile_sha256": profile_sha,
+        "effect_id": effect_id,
+        "status": "complete",
+        "evidence": evidence,
+        "verification_attempt": attempt.as_dict(),
+        "verification_attempt_sha256": attempt.sha256,
+    }
+    verification_path = (
+        runtime_root
+        / "pipeline-verification"
+        / child_spec.operation_id
+        / "receipt.json"
+    )
+    write_json(verification_path, verification)
+    write_json(runtime_root / "pipeline-step-verify.json", verification)
+
+    drive = hashlib.sha256()
+    drive.update(gate_path.read_bytes())
+    drive.update(source_head.encode())
+    write_json(
+        runtime_root / "pipeline-review-start.json",
+        {
+            "schema_version": 1,
+            "operation_id": task_id,
+            "definition_sha256": definition,
+            "drive_sha256": drive.hexdigest(),
+            "status": "pending",
+        },
+    )
+
+    summary_sha = sha256(product / ".task-summary.json")
+    current = store.read(task_id, task_id)
+    LivenessController(runtime_root / "liveness").observe(
+        LivenessEvidence(
+            observed_at=10_000.0,
+            process_status="alive",
+            prompt_state="non-interactive",
+            operation_revision=current.revision,
+            operation_state=current.state,
+            screen_sha256="9" * 64,
+            typed_result_sha256=summary_sha,
+        ),
+        LivenessPolicy.default(),
+    )
+
+    (product / "mechanism.txt").write_text(
+        "post-verification continuation repair\n", encoding="utf-8"
+    )
+    git(product, "add", "mechanism.txt")
+    git(product, "commit", "-q", "-m", "mechanism continuation")
+    target_head = git(product, "rev-parse", "HEAD")
+    return {
+        "vault": vault,
+        "product": product,
+        "store": store,
+        "task_id": task_id,
+        "review_id": review_id,
+        "definition": definition,
+        "source_head": source_head,
+        "target_head": target_head,
+        "runtime_root": runtime_root,
+        "gate_path": gate_path,
+        "archive_root": archive_root,
+        "progress_path": progress_path,
+        "resources": resources,
+        "verification": verification,
+        "verification_path": verification_path,
+        "retained": retained,
+    }
+
+
+def synchronize(
+    data: dict[str, object],
+    *,
+    now: float,
+    fault=None,
+) -> tuple[dict[str, object], ExactProcess, ExactCmux, RecoveryEffect]:
+    resources = data["resources"]
+    assert isinstance(resources, OwnedResources)
+    process = ExactProcess(resources)
+    cmux = ExactCmux(resources.surface_id)
+    recovery = RecoveryEffect(data)
+    receipt = synchronize_post_verification_review_drive(
+        data["product"],
+        store=data["store"],
+        operation_id=str(data["task_id"]),
+        active_review_operation_id=str(data["review_id"]),
+        authorization_record_id="resolution-post-verification",
+        authorization_record_sha256="a" * 64,
+        process_adapter=process,
+        cmux_adapter=cmux,
+        recover_review=recovery,
+        now=now,
+        _fault_hook=fault,
+    )
+    return receipt, process, cmux, recovery
+
+
+def reject(label: str, data: dict[str, object], mutate) -> None:
+    mutate(data)
+    resources = data["resources"]
+    assert isinstance(resources, OwnedResources)
+    process = ExactProcess(resources)
+    cmux = ExactCmux(resources.surface_id)
+    recovery = RecoveryEffect(data)
+    try:
+        synchronize_post_verification_review_drive(
+            data["product"],
+            store=data["store"],
+            operation_id=str(data["task_id"]),
+            active_review_operation_id=str(data["review_id"]),
+            authorization_record_id="resolution-post-verification",
+            authorization_record_sha256="a" * 64,
+            process_adapter=process,
+            cmux_adapter=cmux,
+            recover_review=recovery,
+            now=30_000.0,
+        )
+    except PostVerificationReviewDriveError:
+        check(
+            label,
+            recovery.provider_starts == 0
+            and not process.signals
+            and not cmux.closes,
+        )
+    else:
+        raise AssertionError(f"{label}: invalid boundary was accepted")
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="post-verification-drive-") as raw:
+        data = fixture(Path(raw) / "happy")
+        store = data["store"]
+        assert isinstance(store, OperationStore)
+        runtime_root = data["runtime_root"]
+        archive_root = data["archive_root"]
+        assert isinstance(runtime_root, Path)
+        assert isinstance(archive_root, Path)
+        archive_before = tree_hash(archive_root, exclude=("progress.json",))
+        provider_before = tree_hash(runtime_root / "provider-events")
+        retained_before = {
+            operation: sha256(
+                store.root
+                / "owners"
+                / str(data["task_id"])
+                / "operations"
+                / f"{operation}.json"
+            )
+            for pair in data["retained"]
+            for operation in pair
+        }
+        receipt, process, cmux, recovery = synchronize(data, now=20_000.0)
+        record = store.read(str(data["task_id"]), str(data["task_id"]))
+        live = LivenessController(runtime_root / "liveness").current_state()
+        check(
+            "exact live continuation applies one fresh review after completed verification",
+            receipt["status"] == "applied"
+            and receipt["source_verification_head_sha"] == data["source_head"]
+            and receipt["target_head_sha"] == data["target_head"]
+            and record.state == "awaiting-callback"
+            and live is not None
+            and live.operation_state == "awaiting-callback"
+            and live.operation_revision == record.revision
+            and record.deadline_at == 21_800.0
+            and recovery.provider_starts == 2,
+            (receipt, record, live, recovery.provider_starts),
+        )
+        check(
+            "continuation preserves archive, retained receipts, and dispatch provider",
+            tree_hash(archive_root, exclude=("progress.json",)) == archive_before
+            and tree_hash(runtime_root / "provider-events") == provider_before
+            and retained_before
+            == {
+                operation: sha256(
+                    store.root
+                    / "owners"
+                    / str(data["task_id"])
+                    / "operations"
+                    / f"{operation}.json"
+                )
+                for pair in data["retained"]
+                for operation in pair
+            }
+            and not process.signals
+            and not cmux.closes,
+        )
+        continued = continued_verification_receipt(
+            runtime_root,
+            operation_id=str(data["task_id"]),
+            current_head=str(data["target_head"]),
+            controller_receipt=data["verification"],
+        )
+        marker = post_verification_review_marker(
+            runtime_root,
+            operation_id=str(data["task_id"]),
+            definition_sha256=str(data["definition"]),
+        )
+        check(
+            "applied receipt reuses only the bound completion and selects a fresh marker",
+            continued == data["verification"]
+            and marker is not None
+            and marker["status"] == "started"
+            and marker["path"].name
+            == "pipeline-review-post-verification-start.json",
+            (continued, marker),
+        )
+        marker_worker = RuntimeWorkerSummaryMixin()
+        marker_worker.spec_path = runtime_root / "runtime.json"
+        marker_worker.spec = {"operation_id": str(data["task_id"])}
+        marker_worker.pipeline = SimpleNamespace(
+            definition_sha256=str(data["definition"])
+        )
+        loaded_marker = marker_worker.load_review_marker()
+        check(
+            "production worker selects the started fresh marker without changing the failed marker",
+            loaded_marker is not None
+            and loaded_marker["status"] == "started"
+            and marker_worker.marker_path.name
+            == "pipeline-review-post-verification-start.json",
+            (loaded_marker, marker_worker.marker_path),
+        )
+
+        class ReviewAdvanceProbe(RuntimeWorkerSummaryMixin):
+            def __init__(self) -> None:
+                self.review = SimpleNamespace(
+                    status="reviewing",
+                    gate_root=Path(data["gate_path"]).parent,
+                )
+                self.spec = {
+                    "operation_id": str(data["task_id"]),
+                    "cwd": data["product"],
+                }
+                self.trusted_vault = data["vault"]
+                self.drive_calls = 0
+
+            def drive_review(self) -> bool:
+                self.drive_calls += 1
+                return True
+
+            def review_gate_state(self) -> dict[str, object]:
+                return json.loads(Path(data["gate_path"]).read_text(encoding="utf-8"))
+
+            def review_drive_sha256(self) -> str:
+                assert loaded_marker is not None
+                return str(loaded_marker["drive_sha256"])
+
+        advance_probe = ReviewAdvanceProbe()
+        advanced = advance_probe.advance_review_boundary(
+            SimpleNamespace(marker=loaded_marker), True
+        )
+        check(
+            "started fresh marker prevents a second review drive",
+            advanced and advance_probe.drive_calls == 0,
+            advance_probe.drive_calls,
+        )
+
+        class VerificationCarryProbe(RuntimeWorkerSummaryMixin):
+            def __init__(self) -> None:
+                self.spec_path = runtime_root / "runtime.json"
+                self.spec = {"operation_id": str(data["task_id"])}
+                steps = (
+                    SimpleNamespace(primitive_id="model_step"),
+                    SimpleNamespace(primitive_id="verify"),
+                    SimpleNamespace(primitive_id="review"),
+                )
+                self.pipeline = SimpleNamespace(
+                    definition_sha256=str(data["definition"]),
+                    definition=SimpleNamespace(steps=steps),
+                )
+                self.operation = SimpleNamespace(
+                    spec=SimpleNamespace(contract_sha256=str(data["definition"]))
+                )
+                self.is_custom_pipeline = False
+                self.verification_head = str(data["target_head"])
+                self.resolve_calls = 0
+
+            def load_summary_contract(self, _raw: bytes) -> dict[str, object]:
+                return {"schema_version": 2}
+
+            def load_review_marker(self) -> dict[str, object]:
+                return {"status": "pending"}
+
+            def bind_verification_contract(self, _step: object) -> None:
+                self.verification_head = str(data["target_head"])
+
+            def controller_verification_receipt(self) -> dict[str, object]:
+                return data["verification"]
+
+            def handle_prior_failed_verification(self, _previous: object) -> bool:
+                return True
+
+            def resolve_current_verification(self, _step: object):
+                self.resolve_calls += 1
+                return None, False
+
+        carry_probe = VerificationCarryProbe()
+        pipeline_state = carry_probe.build_summary_pipeline_state(b"{}")
+        check(
+            "production summary path does not repeat completed scoped verification",
+            pipeline_state is not None
+            and pipeline_state.existing_verification == data["verification"]
+            and carry_probe.resolve_calls == 0,
+            (pipeline_state, carry_probe.resolve_calls),
+        )
+        revision = record.revision
+        replay, _process2, _cmux2, replay_recovery = synchronize(
+            data, now=20_100.0
+        )
+        check(
+            "continuation replay is idempotent and starts at most one fresh review",
+            replay == receipt
+            and store.read(str(data["task_id"]), str(data["task_id"])).revision
+            == revision
+            and replay_recovery.provider_starts == 0,
+            (replay, replay_recovery.provider_starts),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-verification-crash-") as raw:
+        data = fixture(Path(raw) / "operation")
+        stages: list[str] = []
+
+        def crash(stage: str) -> None:
+            stages.append(stage)
+            if stage == "operation-written":
+                raise RuntimeError("simulated operation publication crash")
+
+        try:
+            synchronize(data, now=22_000.0, fault=crash)
+        except RuntimeError as exc:
+            check(
+                "crash is injected after exact operation publication",
+                str(exc) == "simulated operation publication crash",
+            )
+        else:
+            raise AssertionError("operation crash did not fire")
+        store = data["store"]
+        runtime_root = data["runtime_root"]
+        assert isinstance(store, OperationStore)
+        assert isinstance(runtime_root, Path)
+        partial = store.read(str(data["task_id"]), str(data["task_id"]))
+        partial_live = LivenessController(runtime_root / "liveness").current_state()
+        check(
+            "write-ahead transition retains the recoverable split publication",
+            partial.state == "awaiting-callback"
+            and partial_live is not None
+            and partial_live.operation_state == "attention-required",
+            (partial, partial_live, stages),
+        )
+        recovered, _process, _cmux, replay_recovery = synchronize(
+            data, now=23_000.0
+        )
+        recovered_record = store.read(
+            str(data["task_id"]), str(data["task_id"])
+        )
+        recovered_live = LivenessController(runtime_root / "liveness").current_state()
+        check(
+            "crash restart converges without a second transition or provider replay",
+            recovered["status"] == "applied"
+            and recovered_record.revision == partial.revision
+            and recovered_live is not None
+            and recovered_live.operation_revision == partial.revision
+            and replay_recovery.provider_starts == 0,
+            (recovered, recovered_record, recovered_live),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-verification-prepare-") as raw:
+        data = fixture(Path(raw) / "prepared")
+
+        def crash_prepared(stage: str) -> None:
+            if stage == "prepared":
+                raise RuntimeError("simulated prepared crash")
+
+        try:
+            synchronize(data, now=24_000.0, fault=crash_prepared)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("prepared crash did not fire")
+        store = data["store"]
+        assert isinstance(store, OperationStore)
+        check(
+            "prepared crash occurs before any fresh review effect",
+            store.read(str(data["task_id"]), str(data["task_id"])).state
+            == "attention-required",
+        )
+        recovered, _process, _cmux, recovery = synchronize(
+            data, now=24_000.0
+        )
+        check(
+            "prepared restart launches the one authorized fresh review once",
+            recovered["status"] == "applied" and recovery.provider_starts == 2,
+            (recovered, recovery.provider_starts),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-verification-facade-") as raw:
+        data = fixture(Path(raw) / "facade")
+        resources = data["resources"]
+        assert isinstance(resources, OwnedResources)
+        process = ExactProcess(resources)
+        cmux = ExactCmux(resources.surface_id)
+        recovery = RecoveryEffect(data)
+        facade_calls = 0
+
+        def supported_facade_recovery(
+            store: OperationStore,
+            owner: str,
+            operation_id: str,
+            **_kwargs: object,
+        ) -> bool:
+            nonlocal facade_calls
+            facade_calls += 1
+            synchronize_post_verification_review_drive(
+                data["product"],
+                store=store,
+                operation_id=operation_id,
+                active_review_operation_id=str(data["review_id"]),
+                authorization_record_id="resolution-post-verification",
+                authorization_record_sha256="a" * 64,
+                process_adapter=process,
+                cmux_adapter=cmux,
+                recover_review=recovery,
+                now=25_000.0,
+            )
+            return owner == operation_id == str(data["task_id"])
+
+        original = harness_cli._recover_post_verification_review_drive_if_present
+        harness_cli._recover_post_verification_review_drive_if_present = (
+            supported_facade_recovery
+        )
+        try:
+            result = harness_cli._resume(
+                data["store"],
+                str(data["task_id"]),
+                str(data["task_id"]),
+                process_adapter=process,
+                cmux_adapter=cmux,
+            )
+        finally:
+            harness_cli._recover_post_verification_review_drive_if_present = original
+        check(
+            "supported resume facade consumes the synchronization exactly once",
+            facade_calls == 1
+            and result.previous_state == "attention-required"
+            and result.state == "awaiting-callback"
+            and recovery.provider_starts == 2,
+            (facade_calls, result, recovery.provider_starts),
+        )
+
+    with tempfile.TemporaryDirectory(prefix="post-verification-reject-") as raw:
+        base = Path(raw)
+        dead = fixture(base / "dead")
+        resources = dead["resources"]
+        assert isinstance(resources, OwnedResources)
+        process = ExactProcess(resources)
+        process.process_state = "dead"
+        cmux = ExactCmux(resources.surface_id)
+        recovery = RecoveryEffect(dead)
+        try:
+            synchronize_post_verification_review_drive(
+                dead["product"],
+                store=dead["store"],
+                operation_id=str(dead["task_id"]),
+                active_review_operation_id=str(dead["review_id"]),
+                authorization_record_id="resolution-post-verification",
+                authorization_record_sha256="a" * 64,
+                process_adapter=process,
+                cmux_adapter=cmux,
+                recover_review=recovery,
+                now=30_000.0,
+            )
+        except PostVerificationReviewDriveError:
+            check(
+                "dead exact process rejects before the fresh review effect",
+                recovery.provider_starts == 0,
+            )
+        else:
+            raise AssertionError("dead process boundary was accepted")
+
+        reject(
+            "ready identity drift rejects before any effect",
+            fixture(base / "ready"),
+            lambda data: write_json(
+                data["runtime_root"] / "ready.json",
+                {
+                    **json.loads(
+                        (data["runtime_root"] / "ready.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                    "process_identity": "0" * 64,
+                },
+            ),
+        )
+        reject(
+            "verification receipt drift rejects before any effect",
+            fixture(base / "verification"),
+            lambda data: write_json(
+                data["runtime_root"] / "pipeline-step-verify.json",
+                {**data["verification"], "status": "failed"},
+            ),
+        )
+        reject(
+            "pending review marker drift rejects before any effect",
+            fixture(base / "marker"),
+            lambda data: write_json(
+                data["runtime_root"] / "pipeline-review-start.json",
+                {
+                    **json.loads(
+                        (
+                            data["runtime_root"] / "pipeline-review-start.json"
+                        ).read_text(encoding="utf-8")
+                    ),
+                    "status": "started",
+                },
+            ),
+        )
+        reject(
+            "gate identity drift rejects before any effect",
+            fixture(base / "gate"),
+            lambda data: write_json(
+                data["gate_path"],
+                {
+                    **json.loads(data["gate_path"].read_text(encoding="utf-8")),
+                    "active_review_operation_id": str(uuid.uuid4()),
+                },
+            ),
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

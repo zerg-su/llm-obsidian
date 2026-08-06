@@ -14,6 +14,9 @@ from harness.runtime_sessions import RuntimeSessionManager
 from harness.runtime_worker_review_bridge import (
     publish_review_resolution_transport,
 )
+from harness.post_verification_review_drive import (
+    synchronize_post_verification_review_drive,
+)
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
 from harness.workflows.review_gate import (
@@ -57,6 +60,7 @@ from task_review_drift_contract import (
     SignalFreeRetirementAuthorization,
     SupportedCloseRetirementAuthorization,
     authorized_drift_quarantine,
+    authorized_post_verification_review_drive,
     authorized_signal_free_retirement,
     authorized_supported_close_retirement,
 )
@@ -383,6 +387,7 @@ def _recover_drift_quarantine(
     fault_observer: Callable[[str], None] | None,
     signal_authorization: SignalFreeRetirementAuthorization | None = None,
     supported_close: SupportedCloseRetirementAuthorization | None = None,
+    resume_completed_quarantine: bool = False,
 ) -> dict[str, Any]:
     runtime_root = _runtime_root(vault, task_id)
     store_root = vault / ".vault-meta" / "harness"
@@ -405,6 +410,7 @@ def _recover_drift_quarantine(
         task_id=task_id,
         worktree=worktree,
         fault_observer=fault_observer,
+        resume_completed_quarantine=resume_completed_quarantine,
     )
     if run is None:
         mark_drift_quarantine_fresh(gate, authorization)
@@ -695,6 +701,25 @@ def recover_task_review_for_mechanism(
     if attention_record is None:
         raise TaskReviewError("task escalation record is unavailable")
     attention = attention_record.payload
+    post_verification = authorized_post_verification_review_drive(
+        attention_record, worktree
+    )
+    if post_verification is not None:
+        supported = post_verification.supported_close
+        return _recover_drift_quarantine(
+            authorization=supported.signal_free.drift,
+            signal_authorization=supported.signal_free,
+            supported_close=supported,
+            attention=attention,
+            attention_record_sha256=attention_record.sha256,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+            fault_observer=quarantine_fault_observer,
+            resume_completed_quarantine=True,
+        )
     supported_close = authorized_supported_close_retirement(
         attention_record, worktree
     )
@@ -807,6 +832,67 @@ def recover_task_review_for_mechanism(
     if summary_recovery is not None:
         return summary_recovery
     return _recover_stale_boundary(recovery)
+
+
+def recover_post_verification_review_drive(
+    worktree: Path,
+    *,
+    process_adapter: object,
+    cmux_adapter: object,
+    runtime_manager: object | None = None,
+    fault_observer: Callable[[str], None] | None = None,
+) -> dict[str, Any] | None:
+    """Synchronize one live dispatch before its authorized fresh review."""
+
+    worktree = worktree.expanduser().resolve()
+    meta, vault, task_id = _validate_task(worktree)
+    try:
+        attention_record = load_latest(worktree)
+    except EscalationRecordError as exc:
+        raise TaskReviewError(f"task escalation record is invalid: {exc}") from exc
+    if attention_record is None:
+        return None
+    authorization = authorized_post_verification_review_drive(
+        attention_record, worktree
+    )
+    if authorization is None:
+        return None
+    if authorization.dispatch_operation_id != task_id:
+        raise TaskReviewError(
+            "post-verification dispatch authorization identity drifted"
+        )
+    store_root = vault / ".vault-meta" / "harness"
+    store = OperationStore(store_root)
+
+    def recover_review() -> dict[str, Any]:
+        supported = authorization.supported_close
+        return _recover_drift_quarantine(
+            authorization=supported.signal_free.drift,
+            signal_authorization=supported.signal_free,
+            supported_close=supported,
+            attention=attention_record.payload,
+            attention_record_sha256=attention_record.sha256,
+            meta=meta,
+            vault=vault,
+            worktree=worktree,
+            task_id=task_id,
+            runtime_manager=runtime_manager,
+            fault_observer=None,
+            resume_completed_quarantine=True,
+        )
+
+    return synchronize_post_verification_review_drive(
+        worktree,
+        store=store,
+        operation_id=task_id,
+        active_review_operation_id=authorization.active_review_operation_id,
+        authorization_record_id=authorization.authorization_record_id,
+        authorization_record_sha256=authorization.authorization_record_sha256,
+        process_adapter=process_adapter,
+        cmux_adapter=cmux_adapter,
+        recover_review=recover_review,
+        _fault_hook=fault_observer,
+    )
 
 
 def restart_task_review_for_boundary(

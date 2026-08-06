@@ -47,6 +47,7 @@ from task_review_context import (  # noqa: E402
     _runtime_root,
 )
 from task_review_drift_contract import (  # noqa: E402
+    authorized_post_verification_review_drive,
     authorized_drift_quarantine,
     authorized_signal_free_retirement,
     authorized_supported_close_retirement,
@@ -677,6 +678,46 @@ def supported_close_decision(parents: tuple[str, str]) -> str:
         "drift-quarantine progress and the previously authorized exactly one "
         "fresh single-model Codex/Sol deep review."
     )
+
+
+def fresh_operation_binding_decision(
+    review_operation_id: str, dispatch_operation_id: str
+) -> str:
+    return (
+        "Classified as an eligible repository-owned fresh-boundary operation-ID "
+        "binding mechanism failure. Authorize one narrow local reversible TDD "
+        "repair that binds fresh-boundary authorization to the active review "
+        f"operation_id {review_operation_id} while preserving the dispatch "
+        f"operation_id {dispatch_operation_id} only as provenance. Add focused "
+        "crash, restart, idempotency, exact-identity, zero-signal, and "
+        "zero-callback/provider-replay regressions. Preserve the completed "
+        "quarantine archive, parent cleanup receipts, and terminal child-round "
+        "receipts exactly; do not repeat cleanup, ingest or reinterpret old "
+        "callbacks, manually edit gate/store state, or launch more than the one "
+        "previously authorized fresh Codex/Sol review."
+    )
+
+
+POST_VERIFICATION_DECISION = (
+    "Classified as an eligible repository-owned post-verification review-drive "
+    "mechanism failure. Authorize read-only diagnosis of the exact "
+    "review-drive-failed boundary and one narrow local reversible TDD repair "
+    "limited to crash/restart synchronization between the completed "
+    "scoped-verification receipt, the pending fresh-review marker, and the exact "
+    "tracked live dispatch provider. Preserve the completed quarantine archive, "
+    "terminal retained-parent and retained-round receipts, scoped-verification "
+    "receipt, and existing provider ownership exactly. Add focused "
+    "exact-identity, live-ownership, crash, restart, idempotency, "
+    "zero-callback-replay, zero-provider-replay, and at-most-one-fresh-review "
+    "regressions. Do not manually edit gate/store state, signal or close the "
+    "exact live provider, repeat cleanup or verification, ingest old callbacks, "
+    "relaunch the dispatch provider, or launch more than the one previously "
+    "authorized fresh Codex/Sol review. After the repair and relevant configured "
+    "gates are green on a clean descendant, resume once through the supported "
+    "facade so the existing tracked provider continues from the completed "
+    "verification boundary; fail closed and re-escalate before any effect if "
+    "exact identity or ownership cannot be proven."
+)
 
 
 def absent_ownership(index: int) -> DurableCleanupOwnership:
@@ -1586,6 +1627,73 @@ with tempfile.TemporaryDirectory(prefix="supported-close-lifecycle.") as raw:
             tuple(fixture.runtime.cleanup_calls),
             tuple(fixture.runtime.ownership_probes),
         ),
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as raw:
+    drift = prepare_supported_close_fixture(Path(raw))
+    fixture = drift.recovery
+    started_before = len(fixture.runtime.started)
+
+    def stop_at_quarantined_boundary(event: str) -> None:
+        if event == "drift-quarantine-complete":
+            raise RuntimeError("retain the completed quarantine boundary")
+
+    try:
+        recover_task_review_for_mechanism(
+            fixture.product,
+            runtime_manager=fixture.runtime,
+            quarantine_fault_observer=stop_at_quarantined_boundary,
+        )
+    except RuntimeError as exc:
+        check(
+            "post-verification fixture stops after quarantine and before review",
+            str(exc) == "retain the completed quarantine boundary"
+            and fixture.gate.read()["status"] == "attention-required"
+            and len(fixture.runtime.started) == started_before,
+        )
+    else:
+        raise AssertionError("post-verification quarantine failpoint did not fire")
+    retained_review_operation_id = fixture.gate.read()[
+        "active_review_operation_id"
+    ]
+    append_mechanism_decision(
+        fixture,
+        "fresh-operation-binding",
+        fresh_operation_binding_decision(
+            retained_review_operation_id, fixture.task_id
+        ),
+    )
+    append_mechanism_decision(
+        fixture,
+        "post-verification-review-drive",
+        POST_VERIFICATION_DECISION,
+    )
+    latest = load_chain(fixture.product)[-1]
+    authorization = authorized_post_verification_review_drive(
+        latest, fixture.product.resolve()
+    )
+    check(
+        "post-verification authorization preserves the exact historical chain",
+        authorization is not None
+        and authorization.active_review_operation_id
+        == retained_review_operation_id
+        and authorization.dispatch_operation_id == fixture.task_id
+        and authorization.authorization_record_id == latest.record_id,
+    )
+    recovered = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    started_after = len(fixture.runtime.started)
+    replay = recover_task_review_for_mechanism(
+        fixture.product, runtime_manager=fixture.runtime
+    )
+    check(
+        "post-verification recovery launches the authorized fresh review at most once",
+        recovered["status"] == "reviewing"
+        and replay["status"] == "reviewing"
+        and started_after == started_before + 2
+        and len(fixture.runtime.started) == started_after,
     )
 
 

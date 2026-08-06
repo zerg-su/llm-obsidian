@@ -26,6 +26,14 @@ _SUPPORTED_CLOSE_PREFIX = (
     "Classified as an eligible repository-owned supported-close "
     "terminal-state compatibility mechanism failure."
 )
+_FRESH_OPERATION_BINDING_PREFIX = (
+    "Classified as an eligible repository-owned fresh-boundary operation-ID "
+    "binding mechanism failure."
+)
+_POST_VERIFICATION_PREFIX = (
+    "Classified as an eligible repository-owned post-verification review-drive "
+    "mechanism failure."
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,17 @@ class SignalFreeRetirementAuthorization:
 class SupportedCloseRetirementAuthorization:
     signal_free: SignalFreeRetirementAuthorization
     parent_operation_ids: tuple[str, str]
+    authorization_record_id: str
+    authorization_record_sha256: str
+
+
+@dataclass(frozen=True)
+class PostVerificationReviewDriveAuthorization:
+    supported_close: SupportedCloseRetirementAuthorization
+    active_review_operation_id: str
+    dispatch_operation_id: str
+    fresh_binding_record_id: str
+    fresh_binding_record_sha256: str
     authorization_record_id: str
     authorization_record_sha256: str
 
@@ -218,11 +237,10 @@ def authorized_signal_free_retirement(
     )
 
 
-def authorized_supported_close_retirement(
-    latest: DecisionRecord, worktree: Path
+def _compile_supported_close_authorization(
+    chain: list[DecisionRecord], index: int, worktree: Path
 ) -> SupportedCloseRetirementAuthorization | None:
-    """Compile one exact terminal supported-close compatibility grant."""
-
+    latest = chain[index]
     attention = latest.payload
     decision = str(attention.get("decision") or "")
     required = (
@@ -250,15 +268,9 @@ def authorized_supported_close_retirement(
         or parent_match.group(1) == parent_match.group(2)
     ):
         return None
-    try:
-        chain = list(load_chain(worktree))
-    except EscalationRecordError:
-        return None
-    if not chain or chain[-1].sha256 != latest.sha256:
-        return None
     signal_indices = [
-        index
-        for index, record in enumerate(chain[:-1])
+        signal_index
+        for signal_index, record in enumerate(chain[:index])
         if record.record_type == "resolution"
         and str(record.payload.get("decision") or "").startswith(
             _SIGNAL_FREE_PREFIX
@@ -309,12 +321,121 @@ def authorized_supported_close_retirement(
     if any(
         record.record_type not in {"raise", "resolution"}
         or _decision_scope(record.payload) != scope
-        for record in chain[signal_index :]
+        for record in chain[signal_index : index + 1]
     ):
         return None
     return SupportedCloseRetirementAuthorization(
         signal_free,
         (parent_match.group(1), parent_match.group(2)),
+        latest.record_id,
+        latest.sha256,
+    )
+
+
+def authorized_supported_close_retirement(
+    latest: DecisionRecord, worktree: Path
+) -> SupportedCloseRetirementAuthorization | None:
+    """Compile one exact terminal supported-close compatibility grant."""
+
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    return _compile_supported_close_authorization(
+        chain, len(chain) - 1, worktree
+    )
+
+
+def authorized_post_verification_review_drive(
+    latest: DecisionRecord, worktree: Path
+) -> PostVerificationReviewDriveAuthorization | None:
+    """Compile the exact live-provider continuation grant and its provenance."""
+
+    attention = latest.payload
+    decision = str(attention.get("decision") or "")
+    required = (
+        "crash/restart synchronization between the completed scoped-verification receipt, the pending fresh-review marker, and the exact tracked live dispatch provider",
+        "Preserve the completed quarantine archive, terminal retained-parent and retained-round receipts, scoped-verification receipt, and existing provider ownership exactly",
+        "zero-callback-replay, zero-provider-replay, and at-most-one-fresh-review regressions",
+        "Do not manually edit gate/store state, signal or close the exact live provider, repeat cleanup or verification, ingest old callbacks, relaunch the dispatch provider",
+        "resume once through the supported facade so the existing tracked provider continues from the completed verification boundary",
+        "fail closed and re-escalate before any effect if exact identity or ownership cannot be proven",
+    )
+    if (
+        latest.record_type != "resolution"
+        or attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or not decision.startswith(_POST_VERIFICATION_PREFIX)
+        or any(fragment not in decision for fragment in required)
+    ):
+        return None
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    supported_indices = [
+        index
+        for index, record in enumerate(chain[:-1])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _SUPPORTED_CLOSE_PREFIX
+        )
+    ]
+    if not supported_indices:
+        return None
+    supported_index = supported_indices[-1]
+    supported = _compile_supported_close_authorization(
+        chain, supported_index, worktree
+    )
+    fresh_rows: list[tuple[int, DecisionRecord, re.Match[str]]] = []
+    for index, record in enumerate(chain[supported_index + 1 : -1], supported_index + 1):
+        record_decision = str(record.payload.get("decision") or "")
+        if record.record_type != "resolution" or not record_decision.startswith(
+            _FRESH_OPERATION_BINDING_PREFIX
+        ):
+            continue
+        match = re.search(
+            r"active review operation_id "
+            r"([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) while preserving the dispatch "
+            r"operation_id ([A-Za-z0-9][A-Za-z0-9._:-]{0,127}) only as provenance",
+            record_decision,
+        )
+        if match is not None:
+            fresh_rows.append((index, record, match))
+    if supported is None or len(fresh_rows) != 1:
+        return None
+    fresh_index, fresh, match = fresh_rows[0]
+    active_review_id, dispatch_id = match.groups()
+    if active_review_id == dispatch_id:
+        return None
+    fresh_decision = str(fresh.payload.get("decision") or "")
+    fresh_required = (
+        "zero-callback/provider-replay regressions",
+        "Preserve the completed quarantine archive, parent cleanup receipts, and terminal child-round receipts exactly",
+        "one previously authorized fresh Codex/Sol review",
+    )
+    scope = _decision_scope(attention)
+    if (
+        any(fragment not in fresh_decision for fragment in fresh_required)
+        or any(
+            record.record_type not in {"raise", "resolution"}
+            or _decision_scope(record.payload) != scope
+            for record in chain[supported_index :]
+        )
+        or fresh_index >= len(chain) - 1
+    ):
+        return None
+    return PostVerificationReviewDriveAuthorization(
+        supported,
+        active_review_id,
+        dispatch_id,
+        fresh.record_id,
+        fresh.sha256,
         latest.record_id,
         latest.sha256,
     )

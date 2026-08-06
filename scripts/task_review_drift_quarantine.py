@@ -610,6 +610,7 @@ def quarantine_drifted_attempt(
     task_id: str,
     worktree: Path,
     fault_observer: Callable[[str], None] | None = None,
+    resume_completed_quarantine: bool = False,
 ) -> ReviewGateRun | None:
     """Quarantine exact stale ownership without consuming either callback."""
 
@@ -625,9 +626,12 @@ def quarantine_drifted_attempt(
         worktree, authorization.descendant_base_head
     )
     archived = validate_archived_evidence(gate, authorization)
-    if archived is not None and signal_authorization is None and archived.get(
-        "replacement_head_sha"
-    ) != current_head:
+    if (
+        archived is not None
+        and signal_authorization is None
+        and not resume_completed_quarantine
+        and archived.get("replacement_head_sha") != current_head
+    ):
         raise TaskReviewError("drift quarantine replacement HEAD changed")
     state = gate.read()
     if archived is not None and state.get("fresh_reevaluation_used") is True:
@@ -639,6 +643,23 @@ def quarantine_drifted_attempt(
         ):
             raise TaskReviewError("drift quarantine fresh boundary changed")
         return None
+    if archived is not None and resume_completed_quarantine:
+        progress = validate_progress(gate, authorization, archived)
+        attempt = state.get("attempt")
+        terminal = attempt.get("terminal") if isinstance(attempt, dict) else None
+        quarantine = state.get("drift_quarantine")
+        if (
+            progress.get("status") != "quarantined"
+            or state.get("status") != "attention-required"
+            or not isinstance(attempt, dict)
+            or attempt.get("status") != "terminal"
+            or not isinstance(terminal, dict)
+            or terminal.get("result") != "attention-required"
+            or not isinstance(quarantine, dict)
+            or quarantine.get("status") != "quarantined"
+        ):
+            raise TaskReviewError("completed drift quarantine boundary changed")
+        return gate.rehydrate_attempt()
     if signal_authorization is not None and archived is None:
         raise TaskReviewError("signal-free retirement archive is unavailable")
     run = gate.rehydrate_attempt()
