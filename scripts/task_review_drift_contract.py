@@ -42,6 +42,39 @@ _POST_FRESH_PUBLICATION_PREFIX = (
     "Classified as an eligible repository-owned post-fresh-publication "
     "synchronization mechanism failure."
 )
+_FRESH_CHILD_PROGRESS_PREFIX = (
+    "Classified as an eligible repository-owned fresh child-round "
+    "lifecycle-progress synchronization failure."
+)
+_AUTHORIZATION_COMPATIBILITY_PREFIX = (
+    "Classified as an eligible repository-owned typed authorization-compiler "
+    "compatibility failure."
+)
+_FRESH_CHILD_PROGRESS_DECISION = (
+    f"{_FRESH_CHILD_PROGRESS_PREFIX} Authorize one narrow regression-backed "
+    "repair: accept only the same exact fresh child-round identities after "
+    "monotonic advancement from awaiting-callback into verifying, finalizing, "
+    "or terminal resource-free completion, while validating their persisted "
+    "callback/provider/effect chain, unchanged parent identities and succeeded "
+    "start-provider effects, zero replay counters, and no state regression. "
+    "Preserve the prepared continuation, quarantine archive, and all receipts. "
+    "After a clean exact-HEAD gate, authorize exactly one additional supported "
+    "reconcile attempt. Do not relaunch or replace reviewers/providers, replay "
+    "callbacks or effects, signal processes, touch cmux manually, edit gate/"
+    "store by hand, or create any additional fresh lane."
+)
+_AUTHORIZATION_COMPATIBILITY_DECISION = (
+    f"{_AUTHORIZATION_COMPATIBILITY_PREFIX} Authorize one narrow regression-"
+    "backed compiler repair that accepts only the exact latest fresh child-"
+    "round lifecycle-progress resolution, proves and preserves its complete "
+    "chain to the prior post-fresh-publication authorization and the still-"
+    "unused one-additional-reconcile grant, and rejects missing, reordered, "
+    "ambiguous, or broadened decisions. After clean relevant and exact-HEAD "
+    "gates, permit exactly the still-unused single supported reconcile. No "
+    "reviewer/provider relaunch or replacement, callback/effect replay, "
+    "signals, cmux/manual gate-store mutation, additional fresh lane, push, "
+    "publish, tag, release, or reap."
+)
 
 
 @dataclass(frozen=True)
@@ -536,18 +569,10 @@ def authorized_post_verification_review_drive(
     )
 
 
-def authorized_post_fresh_publication_sync(
-    latest: DecisionRecord, worktree: Path
+def _compile_post_fresh_publication_sync(
+    chain: list[DecisionRecord], index: int, worktree: Path
 ) -> PostFreshPublicationSyncAuthorization | None:
-    """Compile the one grant to finish a partially published fresh review."""
-
-    try:
-        chain = list(load_chain(worktree))
-    except EscalationRecordError:
-        return None
-    if not chain or chain[-1].sha256 != latest.sha256:
-        return None
-    index = len(chain) - 1
+    latest = chain[index]
     decision = str(latest.payload.get("decision") or "")
     required = (
         "validates the prepared continuation receipt, exact fresh gate identity, fresh_reevaluation_used=true",
@@ -593,3 +618,106 @@ def authorized_post_fresh_publication_sync(
         latest.record_id,
         latest.sha256,
     )
+
+
+def _compile_fresh_progress_compatibility(
+    chain: list[DecisionRecord], index: int, worktree: Path
+) -> PostFreshPublicationSyncAuthorization | None:
+    """Compile only the exact two-step extension of the publication grant."""
+
+    latest = chain[index]
+    attention = latest.payload
+    decision = str(attention.get("decision") or "")
+    if (
+        index < 4
+        or latest.record_type != "resolution"
+        or attention.get("status") != "resolved"
+        or attention.get("category") != "mechanism-failure"
+        or str(attention.get("worktree") or "") != str(worktree)
+        or decision != _AUTHORIZATION_COMPATIBILITY_DECISION
+    ):
+        return None
+
+    post_index = index - 4
+    progress_raise = chain[index - 3]
+    progress = chain[index - 2]
+    compatibility_raise = chain[index - 1]
+    if (
+        chain[post_index].record_type != "resolution"
+        or progress_raise.record_type != "raise"
+        or progress.record_type != "resolution"
+        or str(progress.payload.get("decision") or "")
+        != _FRESH_CHILD_PROGRESS_DECISION
+        or compatibility_raise.record_type != "raise"
+    ):
+        return None
+
+    post_indices = [
+        row_index
+        for row_index, record in enumerate(chain[:index])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _POST_FRESH_PUBLICATION_PREFIX
+        )
+    ]
+    progress_indices = [
+        row_index
+        for row_index, record in enumerate(chain[:index])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _FRESH_CHILD_PROGRESS_PREFIX
+        )
+    ]
+    compatibility_indices = [
+        row_index
+        for row_index, record in enumerate(chain[: index + 1])
+        if record.record_type == "resolution"
+        and str(record.payload.get("decision") or "").startswith(
+            _AUTHORIZATION_COMPATIBILITY_PREFIX
+        )
+    ]
+    if (
+        post_indices != [post_index]
+        or progress_indices != [index - 2]
+        or compatibility_indices != [index]
+    ):
+        return None
+
+    prior = _compile_post_fresh_publication_sync(
+        chain, post_index, worktree
+    )
+    scope = _decision_scope(attention)
+    if prior is None or any(
+        _decision_scope(record.payload) != scope
+        for record in chain[post_index : index + 1]
+    ):
+        return None
+    return PostFreshPublicationSyncAuthorization(
+        prior.continuation,
+        latest.record_id,
+        latest.sha256,
+    )
+
+
+def authorized_post_fresh_publication_sync(
+    latest: DecisionRecord, worktree: Path
+) -> PostFreshPublicationSyncAuthorization | None:
+    """Compile the one grant to finish a partially published fresh review."""
+
+    try:
+        chain = list(load_chain(worktree))
+    except EscalationRecordError:
+        return None
+    if not chain or chain[-1].sha256 != latest.sha256:
+        return None
+    index = len(chain) - 1
+    decision = str(latest.payload.get("decision") or "")
+    if decision.startswith(_POST_FRESH_PUBLICATION_PREFIX):
+        return _compile_post_fresh_publication_sync(
+            chain, index, worktree
+        )
+    if decision.startswith(_AUTHORIZATION_COMPATIBILITY_PREFIX):
+        return _compile_fresh_progress_compatibility(
+            chain, index, worktree
+        )
+    return None

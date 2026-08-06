@@ -765,6 +765,37 @@ POST_FRESH_PUBLICATION_DECISION = (
 )
 
 
+FRESH_CHILD_PROGRESS_DECISION = (
+    "Classified as an eligible repository-owned fresh child-round "
+    "lifecycle-progress synchronization failure. Authorize one narrow "
+    "regression-backed repair: accept only the same exact fresh child-round "
+    "identities after monotonic advancement from awaiting-callback into "
+    "verifying, finalizing, or terminal resource-free completion, while "
+    "validating their persisted callback/provider/effect chain, unchanged "
+    "parent identities and succeeded start-provider effects, zero replay "
+    "counters, and no state regression. Preserve the prepared continuation, "
+    "quarantine archive, and all receipts. After a clean exact-HEAD gate, "
+    "authorize exactly one additional supported reconcile attempt. Do not "
+    "relaunch or replace reviewers/providers, replay callbacks or effects, "
+    "signal processes, touch cmux manually, edit gate/store by hand, or create "
+    "any additional fresh lane."
+)
+
+
+AUTHORIZATION_COMPATIBILITY_DECISION = (
+    "Classified as an eligible repository-owned typed authorization-compiler "
+    "compatibility failure. Authorize one narrow regression-backed compiler "
+    "repair that accepts only the exact latest fresh child-round lifecycle-"
+    "progress resolution, proves and preserves its complete chain to the prior "
+    "post-fresh-publication authorization and the still-unused one-additional-"
+    "reconcile grant, and rejects missing, reordered, ambiguous, or broadened "
+    "decisions. After clean relevant and exact-HEAD gates, permit exactly the "
+    "still-unused single supported reconcile. No reviewer/provider relaunch or "
+    "replacement, callback/effect replay, signals, cmux/manual gate-store "
+    "mutation, additional fresh lane, push, publish, tag, release, or reap."
+)
+
+
 def absent_ownership(index: int) -> DurableCleanupOwnership:
     return DurableCleanupOwnership(
         "dead",
@@ -1764,6 +1795,142 @@ with tempfile.TemporaryDirectory(prefix="post-verification-authorization.") as r
         == exact_live.record_id
         and sync_authorization.authorization_record_id == latest.record_id,
     )
+    append_mechanism_decision(
+        fixture,
+        "fresh-child-round-lifecycle-progress",
+        FRESH_CHILD_PROGRESS_DECISION,
+    )
+    progress_resolution = load_chain(fixture.product)[-1]
+    append_mechanism_decision(
+        fixture,
+        "authorization-compiler-compatibility",
+        AUTHORIZATION_COMPATIBILITY_DECISION,
+    )
+    latest = load_chain(fixture.product)[-1]
+    progress_authorization = authorized_post_fresh_publication_sync(
+        latest, fixture.product.resolve()
+    )
+    check(
+        "fresh progress compiler preserves the exact prior grant and latest authorization",
+        progress_authorization is not None
+        and progress_authorization.continuation.authorization_record_id
+        == exact_live.record_id
+        and progress_authorization.authorization_record_id == latest.record_id
+        and progress_authorization.authorization_record_id
+        != progress_resolution.record_id,
+    )
+
+
+def prepare_post_fresh_compiler_fixture(base: Path) -> RecoveryFixture:
+    drift = prepare_supported_close_fixture(base)
+    fixture = drift.recovery
+    retained_review_operation_id = fixture.gate.read()[
+        "active_review_operation_id"
+    ]
+    append_mechanism_decision(
+        fixture,
+        "fresh-operation-binding",
+        fresh_operation_binding_decision(
+            retained_review_operation_id, fixture.task_id
+        ),
+    )
+    append_mechanism_decision(
+        fixture,
+        "post-verification-review-drive",
+        POST_VERIFICATION_DECISION,
+    )
+    append_mechanism_decision(
+        fixture,
+        "exact-live-status-adapter",
+        EXACT_LIVE_STATUS_DECISION,
+    )
+    append_mechanism_decision(
+        fixture,
+        "post-fresh-publication-sync",
+        POST_FRESH_PUBLICATION_DECISION,
+    )
+    return fixture
+
+
+for rejected_label, append_invalid_chain in (
+    (
+        "missing progress decision",
+        lambda fixture: append_mechanism_decision(
+            fixture,
+            "authorization-compiler-compatibility",
+            AUTHORIZATION_COMPATIBILITY_DECISION,
+        ),
+    ),
+    (
+        "reordered progress decision",
+        lambda fixture: (
+            append_mechanism_decision(
+                fixture,
+                "authorization-compiler-before-progress",
+                AUTHORIZATION_COMPATIBILITY_DECISION,
+            ),
+            append_mechanism_decision(
+                fixture,
+                "fresh-child-round-lifecycle-progress",
+                FRESH_CHILD_PROGRESS_DECISION,
+            ),
+            append_mechanism_decision(
+                fixture,
+                "authorization-compiler-compatibility",
+                AUTHORIZATION_COMPATIBILITY_DECISION,
+            ),
+        ),
+    ),
+    (
+        "ambiguous progress decision",
+        lambda fixture: (
+            append_mechanism_decision(
+                fixture,
+                "fresh-child-round-lifecycle-progress-one",
+                FRESH_CHILD_PROGRESS_DECISION,
+            ),
+            append_mechanism_decision(
+                fixture,
+                "fresh-child-round-lifecycle-progress-two",
+                FRESH_CHILD_PROGRESS_DECISION,
+            ),
+            append_mechanism_decision(
+                fixture,
+                "authorization-compiler-compatibility",
+                AUTHORIZATION_COMPATIBILITY_DECISION,
+            ),
+        ),
+    ),
+    (
+        "broadened compatibility decision",
+        lambda fixture: (
+            append_mechanism_decision(
+                fixture,
+                "fresh-child-round-lifecycle-progress",
+                FRESH_CHILD_PROGRESS_DECISION,
+            ),
+            append_mechanism_decision(
+                fixture,
+                "authorization-compiler-compatibility",
+                AUTHORIZATION_COMPATIBILITY_DECISION
+                + " Authorize one additional provider relaunch.",
+            ),
+        ),
+    ),
+):
+    with tempfile.TemporaryDirectory(
+        prefix=f"post-fresh-compiler-{rejected_label.split()[0]}."
+    ) as raw:
+        fixture = prepare_post_fresh_compiler_fixture(Path(raw))
+        append_invalid_chain(fixture)
+        latest = load_chain(fixture.product)[-1]
+        check(
+            f"fresh progress compiler rejects {rejected_label}",
+            authorized_post_fresh_publication_sync(
+                latest, fixture.product.resolve()
+            )
+            is None,
+        )
 
 
 with tempfile.TemporaryDirectory(prefix="supported-close-crash.") as raw:
