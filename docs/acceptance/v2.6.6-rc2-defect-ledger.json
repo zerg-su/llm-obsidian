@@ -2,5 +2,17 @@
   "schema_version": 1,
   "release": "2.6.6-rc2",
   "append_only_during_rc1": true,
-  "findings": []
+  "findings": [
+    {
+      "finding_id": "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING",
+      "observed_at_stage": "RC1 bounded deep implementation review callback ingestion",
+      "subject_head_sha": "b313632e285b13096e4c2692393cf16610aecd2a",
+      "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc1-real-dogfood.json; owner a5db9d4d-5e72-489c-a688-53ff7e074f6f retained two accepted callback receipts while the supported root resume returned dispatch finalizing review recovery failed",
+      "severity": "important",
+      "rc1_relation": "Adjacent recovery-path defect: callbacks were preserved and supported close produced a terminal resource-free inventory, so it does not invalidate the RC1 exact-HEAD or ProviderEvent fixes.",
+      "disposition": "defer-rc2",
+      "suggested_owner": "review callback ingestion and dispatch finalization",
+      "external_effects_observed": false
+    }
+  ]
 }

@@ -145,17 +145,33 @@ for row in rows:
 dogfood = json.loads(
     (
         ROOT
-        / "docs/acceptance/v2.6.4-unattended-missing-submit-dogfood.json"
+        / "docs/acceptance/v2.6.6-rc1-real-dogfood.json"
     ).read_text(encoding="utf-8")
 )
 observations = dogfood["observations"]
 check(
-    "bounded production dogfood receipt has one callback and no resource tail",
-    observations["provider_typed_artifact_count"] == 1
-    and observations["accepted_receipt_count"] == 1
+    "bounded RC1 dogfood preserves both callbacks and has no resource tail",
+    dogfood["subject_head_sha"] == "b313632e285b13096e4c2692393cf16610aecd2a"
+    and observations["provider_typed_artifact_count"] == 2
+    and observations["accepted_receipt_count"] == 2
+    and observations["callback_loss_count"] == 0
     and observations["terminal_resources_owned"] is False
     and observations["manual_callback_write_count"] == 0
     and observations["repeated_review_count"] == 0,
+)
+check(
+    "dogfood terminal inventory is complete and resource-free",
+    len(dogfood["terminal_resource_inventory"]) == 6
+    and all(
+        row["terminal"] and not row["resources_owned"]
+        for row in dogfood["terminal_resource_inventory"]
+    ),
+    dogfood["terminal_resource_inventory"],
+)
+check(
+    "dogfood callback-ingestion defect is explicitly deferred to RC2",
+    dogfood["observed_adjacent_findings"]
+    == ["RC2.REVIEW_CALLBACK_INGESTION_FINALIZING"],
 )
 
 print("\n2.6.6 RC1 integrated E1-E7 trace passed")

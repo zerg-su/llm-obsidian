@@ -66,6 +66,45 @@ for entry in slices:
 
 assert seen_slices == set("ABCDEFG")
 
+dogfood = load("v2.6.6-rc1-real-dogfood.json")
+assert dogfood.get("release") == "2.6.6-rc1"
+dogfood_head = dogfood.get("subject_head_sha")
+assert dogfood_head == "b313632e285b13096e4c2692393cf16610aecd2a"
+assert subprocess.run(
+    ["git", "merge-base", "--is-ancestor", str(dogfood_head), "HEAD"],
+    cwd=ROOT,
+    check=False,
+).returncode == 0
+observations = dogfood.get("observations")
+assert isinstance(observations, dict)
+assert observations == {
+    "provider_typed_artifact_count": 2,
+    "accepted_receipt_count": 2,
+    "callback_loss_count": 0,
+    "manual_callback_write_count": 0,
+    "repeated_review_count": 0,
+    "reviewer_relaunch_count": 0,
+    "terminal_resources_owned": False,
+}
+callback_receipts = dogfood.get("accepted_callback_receipts")
+assert isinstance(callback_receipts, list) and len(callback_receipts) == 2
+for callback in callback_receipts:
+    assert isinstance(callback, dict)
+    assert callback.get("status") == "accepted"
+    assert isinstance(callback.get("callback_id"), str)
+    assert re.fullmatch(r"review-[0-9a-f]{24}", callback["callback_id"])
+    assert isinstance(callback.get("payload_sha256"), str)
+    assert re.fullmatch(r"[0-9a-f]{64}", callback["payload_sha256"])
+terminal_inventory = dogfood.get("terminal_resource_inventory")
+assert isinstance(terminal_inventory, list) and len(terminal_inventory) == 6
+assert all(
+    isinstance(row, dict)
+    and row.get("state") in {"complete", "cancelled"}
+    and row.get("terminal") is True
+    and row.get("resources_owned") is False
+    for row in terminal_inventory
+)
+
 quality_baseline = json.loads(
     (ROOT / "config" / "code-quality-baseline.json").read_text(
         encoding="utf-8"
@@ -158,6 +197,12 @@ assert set(finding_ids) == {
     "eng-receipt-subject-is-parent-commit",
     "OI.E14.outcome-proof-invalid",
     "RC1.L4.dead-adapters-unobserved",
+    "ENG.EXACT_HEAD.STALE_APPROVAL",
+    "ENG.EVENT.STOP_SYNTHESIS",
+    "ENG.E1.INVALID_BASELINE_OID",
+    "OI-E1-BASELINE-SUBJECT",
+    "OI-E7-FRESH-DOGFOOD-MISSING",
+    "OI-E8-EXACT-HEAD-DRIFT",
 }
 for row in finding_rows:
     assert isinstance(row, dict)
@@ -192,6 +237,9 @@ for row in ledger_rows:
         row["subject_head_sha"]
     )
     assert isinstance(row["external_effects_observed"], bool)
+assert {row["finding_id"] for row in ledger_rows} >= {
+    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING"
+}
 
 failed = load("evidence/v2.6.6-rc1/failed-fbf87a4/diagnostic-receipt.json")
 assert failed.get("type") == "diagnostic-only"
@@ -201,12 +249,12 @@ assert failed.get("subject_head_sha") == "fbf87a4e8ef532b43e4d55225c87ad0f39f55b
 assert failed.get("command_id") == "harness-coverage"
 assert failed.get("command_index") == 2
 
-passed = load("evidence/v2.6.6-rc1/replacement-126b5fe/receipt.json")
-assert passed.get("status") == "passed"
-assert passed.get("profile") == "release-final"
-assert passed.get("execution_relation") == "release-candidate"
-assert passed.get("subject_head_sha") == "126b5fecb087a231bd6fbec8ce3f5dfe9235a206"
-commands = passed.get("commands")
+historical_passed = load("evidence/v2.6.6-rc1/replacement-126b5fe/receipt.json")
+assert historical_passed.get("status") == "passed"
+assert historical_passed.get("profile") == "release-final"
+assert historical_passed.get("execution_relation") == "release-candidate"
+assert historical_passed.get("subject_head_sha") == "126b5fecb087a231bd6fbec8ce3f5dfe9235a206"
+commands = historical_passed.get("commands")
 assert isinstance(commands, list) and len(commands) == 15
 assert [row.get("command_id") for row in commands if isinstance(row, dict)] == [
     "full-tests",
@@ -234,5 +282,14 @@ assert coverage_row.get("observations") == {
     "transition_matrix_cases": 4370,
     "weighted_percent": 74.14,
 }
+
+readiness = (ACCEPTANCE / "v2.6.6-rc1-release-readiness.md").read_text(
+    encoding="utf-8"
+)
+assert "superseded historical gate" in readiness
+assert "owner-controlled exact-HEAD sidecar" in readiness
+assert "v2.6.6-rc1-real-dogfood.json" in readiness
+assert "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING" in readiness
+assert "authoritative technical candidate is exact clean HEAD\n`126b5fe" not in readiness
 
 print("2.6.6 RC1 evidence schemas passed")

@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "evidence_id": "E7-rc1-real-dogfood",
+  "release": "2.6.6-rc1",
+  "subject_head_sha": "b313632e285b13096e4c2692393cf16610aecd2a",
+  "stage": "bounded-deep-implementation-review",
+  "owner_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+  "review_attempt_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4",
+  "review_topology": {
+    "runtime": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "xhigh",
+    "purpose": "implementation",
+    "axes": [
+      "openai-intent",
+      "openai-engineering"
+    ]
+  },
+  "observations": {
+    "provider_typed_artifact_count": 2,
+    "accepted_receipt_count": 2,
+    "callback_loss_count": 0,
+    "manual_callback_write_count": 0,
+    "repeated_review_count": 0,
+    "reviewer_relaunch_count": 0,
+    "terminal_resources_owned": false
+  },
+  "accepted_callback_receipts": [
+    {
+      "axis": "openai-intent",
+      "callback_id": "review-db0c3334cfc844ec04e2edb4",
+      "payload_sha256": "db0c3334cfc844ec04e2edb482db0fa03adef94bd47fe0551261b836e7d896be",
+      "status": "accepted"
+    },
+    {
+      "axis": "openai-engineering",
+      "callback_id": "review-7bf9eb4dcd9401c39db1266b",
+      "payload_sha256": "7bf9eb4dcd9401c39db1266b7025db6b575c27a440c21edcdae1d16e95088ba4",
+      "status": "accepted"
+    }
+  ],
+  "terminal_resource_inventory": [
+    {
+      "operation_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4-engineering-eef68b02-round-799f0261",
+      "kind": "review-round",
+      "state": "complete",
+      "revision": 8,
+      "terminal": true,
+      "resources_owned": false
+    },
+    {
+      "operation_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4-engineering-eef68b02",
+      "kind": "deep-review-correctness",
+      "state": "cancelled",
+      "revision": 18,
+      "terminal": true,
+      "resources_owned": false
+    },
+    {
+      "operation_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4-intent-a917e21d-round-799f0261",
+      "kind": "review-round",
+      "state": "complete",
+      "revision": 8,
+      "terminal": true,
+      "resources_owned": false
+    },
+    {
+      "operation_id": "8e904b07-0d2e-5573-9d85-bc4d26c6f2e4-intent-a917e21d",
+      "kind": "deep-review-spec",
+      "state": "cancelled",
+      "revision": 18,
+      "terminal": true,
+      "resources_owned": false
+    },
+    {
+      "operation_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f-verify-0cf137d4f3adc0c4",
+      "kind": "pipeline-verify",
+      "state": "complete",
+      "revision": 11,
+      "terminal": true,
+      "resources_owned": false
+    },
+    {
+      "operation_id": "a5db9d4d-5e72-489c-a688-53ff7e074f6f",
+      "kind": "dispatch",
+      "state": "cancelled",
+      "revision": 17,
+      "terminal": true,
+      "resources_owned": false
+    }
+  ],
+  "review_findings": [
+    "ENG.EXACT_HEAD.STALE_APPROVAL",
+    "ENG.EVENT.STOP_SYNTHESIS",
+    "ENG.E1.INVALID_BASELINE_OID",
+    "OI-E1-BASELINE-SUBJECT",
+    "OI-E7-FRESH-DOGFOOD-MISSING",
+    "OI-E8-EXACT-HEAD-DRIFT"
+  ],
+  "observed_adjacent_findings": [
+    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING"
+  ],
+  "closure": "Both provider callbacks and their accepted receipts remain immutable. Automatic gate ingestion failed during dispatch finalization; supported lifecycle close terminalized every operation and cleared every owned resource without callback replay or reviewer relaunch."
+}
