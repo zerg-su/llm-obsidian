@@ -112,7 +112,12 @@ def await_surface_transport_ready(
     if observation_interval_seconds < 0:
         raise ValueError("surface transport interval cannot be negative")
     for observation in range(observation_limit):
-        if port.read(surface_id).strip():
+        lines = [
+            line.rstrip()
+            for line in port.read(surface_id).splitlines()
+            if line.strip()
+        ]
+        if lines and re.search(r"(?:[%$#>]|❯|›)\s*$", lines[-1]):
             return True
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)

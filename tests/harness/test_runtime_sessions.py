@@ -104,6 +104,9 @@ class FakeCmux:
     def open_split(self, origin_surface: str) -> Surface:
         self.events.append("surface-open")
         self.opens += 1
+        self.sent.clear()
+        self.submit_count = 0
+        self.submits_at_last_send = 0
         check("start anchors the exact origin surface", origin_surface == ORIGIN)
         return Surface(
             SURFACE,
@@ -226,6 +229,22 @@ check(
     )
     and surface_transport_port.reads == 3,
     surface_transport_port.reads,
+)
+
+startup_banner_port = InitialReadyPort(
+    ["Last login: Thu Aug 6", "Last login: Thu Aug 6\nzak@host project %"]
+)
+check(
+    "surface command does not treat a startup banner as a shell prompt",
+    await_surface_transport_ready(
+        startup_banner_port,
+        surface_id=SURFACE,
+        observation_limit=2,
+        observation_interval_seconds=0.01,
+        wait=lambda _seconds: None,
+    )
+    and startup_banner_port.reads == 2,
+    startup_banner_port.reads,
 )
 
 
