@@ -106,7 +106,7 @@ require(
         phrase in tdd
         for phrase in (
             "unknown adapter/runtime mechanism",
-            "prototype",
+            "use the `prototype` skill",
             "production stays unchanged",
             "observed mechanism",
             "red regression at the real seam",
