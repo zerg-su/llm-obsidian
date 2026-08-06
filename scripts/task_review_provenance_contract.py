@@ -291,6 +291,60 @@ def coordinator_provenance_is_exact(
     )
 
 
+def _selector_tail_is_exact(
+    chain: list[DecisionRecord], index: int, root_index: int, worktree: Path
+) -> bool:
+    if root_index < 0 or not provenance_tail_is_exact(chain, root_index, worktree):
+        return False
+    selector = chain[root_index + 1 : index + 1]
+    expected_ids = tuple(row[0] for row in _EXACT_SELECTOR_TAIL)
+    if tuple(record.record_id for record in selector) != expected_ids or any(
+        sum(record.record_id == record_id for record in chain) != 1
+        for record_id in expected_ids
+    ):
+        return False
+    for record, expected in zip(selector, _EXACT_SELECTOR_TAIL, strict=True):
+        if (
+            (
+                record.record_id,
+                record.record_type,
+                record.sha256,
+                record.previous_record_id,
+                record.previous_record_sha256,
+                record.payload.get("category"),
+            )
+            != expected
+        ):
+            return False
+    scope = {
+        key: chain[root_index].payload.get(key)
+        for key in ("worktree", "task_name", "task_surface")
+    }
+    return bool(
+        selector[1].payload.get("decision") == _DEFAULT_BINDING_DECISION
+        and selector[-1].payload.get("status") == "resolved"
+        and selector[-1].payload.get("decision") == _FINAL_SELECTOR_DECISION
+        and str(selector[-1].payload.get("worktree") or "") == str(worktree)
+        and all(
+            {
+                key: record.payload.get(key)
+                for key in ("worktree", "task_name", "task_surface")
+            }
+            == scope
+            for record in selector
+        )
+        and [
+            row_index
+            for row_index, record in enumerate(chain)
+            if record.record_type == "resolution"
+            and str(record.payload.get("decision") or "").startswith(
+                _FINAL_SELECTOR_PREFIX
+            )
+        ]
+        == [index]
+    )
+
+
 def provenance_tail_is_exact(
     chain: list[DecisionRecord], index: int, worktree: Path
 ) -> bool:
@@ -299,58 +353,8 @@ def provenance_tail_is_exact(
     if index < 2:
         return False
     if chain[index].record_id == _EXACT_SELECTOR_TAIL[-1][0]:
-        root_index = index - len(_EXACT_SELECTOR_TAIL)
-        if root_index < 0 or not provenance_tail_is_exact(
-            chain, root_index, worktree
-        ):
-            return False
-        selector = chain[root_index + 1 : index + 1]
-        expected_ids = tuple(row[0] for row in _EXACT_SELECTOR_TAIL)
-        if tuple(record.record_id for record in selector) != expected_ids or any(
-            sum(record.record_id == record_id for record in chain) != 1
-            for record_id in expected_ids
-        ):
-            return False
-        for record, expected in zip(selector, _EXACT_SELECTOR_TAIL, strict=True):
-            if (
-                (
-                    record.record_id,
-                    record.record_type,
-                    record.sha256,
-                    record.previous_record_id,
-                    record.previous_record_sha256,
-                    record.payload.get("category"),
-                )
-                != expected
-            ):
-                return False
-        scope = {
-            key: chain[root_index].payload.get(key)
-            for key in ("worktree", "task_name", "task_surface")
-        }
-        return bool(
-            selector[1].payload.get("decision") == _DEFAULT_BINDING_DECISION
-            and selector[-1].payload.get("status") == "resolved"
-            and selector[-1].payload.get("decision") == _FINAL_SELECTOR_DECISION
-            and str(selector[-1].payload.get("worktree") or "")
-            == str(worktree)
-            and all(
-                {
-                    key: record.payload.get(key)
-                    for key in ("worktree", "task_name", "task_surface")
-                }
-                == scope
-                for record in selector
-            )
-            and [
-                row_index
-                for row_index, record in enumerate(chain)
-                if record.record_type == "resolution"
-                and str(record.payload.get("decision") or "").startswith(
-                    _FINAL_SELECTOR_PREFIX
-                )
-            ]
-            == [index]
+        return _selector_tail_is_exact(
+            chain, index, index - len(_EXACT_SELECTOR_TAIL), worktree
         )
     if chain[index].record_id == _EXACT_CORRECTION_TAIL[-1][0]:
         initial_index = index - len(_EXACT_CORRECTION_TAIL)
