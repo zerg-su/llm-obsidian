@@ -47,6 +47,14 @@
       "red_failure_reason": "AttributeError: LivenessPolicy had no reviewer zero-effect policy and time/screen state still authorized submit recovery.",
       "green_command": "python3 tests/harness/test_event_only_review_effects.py",
       "focused_command": "python3 tests/harness/test_event_only_review_effects.py && python3 tests/harness/test_callback_submit_recovery.py && python3 tests/harness/test_callback_submit_recovery_runtime.py && python3 tests/harness/test_liveness.py && python3 tests/harness/test_provider_events.py && python3 tests/harness/test_delivery_boundary.py && python3 tests/harness/test_harness_control_plane.py && python3 tests/harness/test_review_gate.py && python3 tests/harness/test_runtime_sessions.py && python3 tests/harness/test_exact_head_review_attempt.py && python3 tests/harness/test_suite_registration.py && python3 tests/test_code_quality_audit.py && python3 scripts/code-quality-audit.py --rc1-authority-json && git diff --check"
+    },
+    {
+      "slice_id": "F",
+      "commit_sha": "e0009a8a2b9730467c490162fe11610e0c61ed75",
+      "red_command": "python3 tests/harness/test_split_base_identity.py",
+      "red_failure_reason": "ImportError: dispatch contracts exposed no immutable base-commit resolver and Split evidence exposed no ancestry seam.",
+      "green_command": "python3 tests/harness/test_split_base_identity.py",
+      "focused_command": "python3 tests/harness/test_split_base_identity.py && python3 tests/test_split_components.py && python3 tests/harness/test_split_activation.py && python3 tests/harness/test_split_evidence.py && python3 tests/test_dispatch_runner.py && python3 tests/harness/test_dispatch_runtime.py && python3 tests/test_contract_schemas.py && python3 tests/test_outcome_contract.py && python3 tests/harness/test_suite_registration.py && git diff --check"
     }
   ]
 }
