@@ -390,6 +390,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.6.6 RC3 reproducible evidence and release disposition | [v2.6.6 RC3 release notes](docs/releases/v2.6.6-rc3.md) |
 | v2.6.6 RC2 repair-and-delete polishing | [v2.6.6 RC2 release notes](docs/releases/v2.6.6-rc2.md) |
 | v2.6.6 RC1-fix2 exact cmux cleanup reconciliation | [v2.6.6 RC1-fix2 release notes](docs/releases/v2.6.6-rc1-fix2.md) |
 | v2.6.6 RC1-fix1 dispatch startup and review-skip corrections | [v2.6.6 RC1-fix1 release notes](docs/releases/v2.6.6-rc1-fix1.md) |

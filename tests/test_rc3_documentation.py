@@ -117,4 +117,47 @@ verdict = subprocess.run(
 )
 assert verdict.returncode == 0, verdict.stdout + verdict.stderr
 
+version_carriers = {
+    relative: json.loads(text(relative))
+    for relative in (
+        ".claude-plugin/plugin.json",
+        ".claude-plugin/marketplace.json",
+        ".codex-plugin/plugin.json",
+    )
+}
+assert version_carriers[".claude-plugin/plugin.json"]["version"] == "2.6.6-rc3"
+assert version_carriers[".codex-plugin/plugin.json"]["version"] == "2.6.6-rc3"
+marketplace = version_carriers[".claude-plugin/marketplace.json"]
+assert marketplace["metadata"]["version"] == "2.6.6-rc3"
+assert marketplace["plugins"][0]["version"] == "2.6.6-rc3"
+assert json.loads(text(".agents/plugins/marketplace.json"))["name"] == (
+    "llm-obsidian-codex"
+)
+
+assert "## [2.6.6-rc3] - 2026-08-07" in text("CHANGELOG.md")
+assert "## [2.6.6-rc3] — 2026-08-07" in text("CHANGELOG.ru.md")
+for relative in ("README.md", "README.ru.md"):
+    assert "docs/releases/v2.6.6-rc3.md" in text(relative)
+
+release_notes = text("docs/releases/v2.6.6-rc3.md")
+readiness = text("docs/acceptance/v2.6.6-rc3-release-readiness.md")
+for evidence_number in range(1, 10):
+    assert f"RC3-E{evidence_number}-" in readiness
+for required in (
+    "set rc3_branch task/llm-obsidian-2-6-6-rc3-release",
+    "git merge --ff-only $rc3_branch",
+    "git tag -a $rc3_tag",
+    "gh release create $rc3_tag --prerelease",
+):
+    assert required in readiness
+assert "does not push, tag, publish, install, or merge" in " ".join(
+    release_notes.split()
+)
+
+makefile = text("Makefile")
+assert "test-code-quality:\n" in makefile
+assert "python3 tests/test_rc3_release_evidence.py" in makefile
+assert "test-docs:\n" in makefile
+assert "python3 tests/test_rc3_documentation.py" in makefile
+
 print("RC3 documentation and English-plan contracts passed")

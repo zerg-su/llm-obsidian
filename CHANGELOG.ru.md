@@ -16,6 +16,36 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc3] — 2026-08-07
+
+Этот финальный evidence-polish candidate закрывает оставшиеся замечания RC2,
+не расширяя runtime capability или lifecycle authority.
+
+### Добавлено
+
+- Добавлены exact-tree machine inventory, prospective receipts по каждому
+  slice и typed compiler для candidate-attempt budget и финального release
+  disposition.
+- Добавлены воспроизводимые coverage observations и переносимый allocator
+  scratch-каталогов shell-тестов для ограниченной macOS-среды.
+- Добавлены исполняемая карта RC3 evidence и сфокусированные контракты
+  документации и релиза.
+
+### Изменено
+
+- Нормативные implementation plans по умолчанию пишутся на английском, если
+  пользователь явно не запросил другой язык; user-facing conversation
+  сохраняет язык пользователя.
+- Root, runtime, task, testing, review и русская release-документация приведены
+  в соответствие с Harness/runtime-worker lifecycle, оставшимся после RC2.
+
+### Исправлено
+
+- Каждое выполнение full profile, включая unpublished и test-only попытки,
+  механически расходует лимит из пяти candidate attempts.
+- Machine-readable RC3 evidence отклоняет drift candidate, gate, review,
+  finding, waiver, output и profile.
+
 ## [2.6.6-rc2] — 2026-08-07
 
 Этот polishing candidate исправляет exact ownership callback/evidence и

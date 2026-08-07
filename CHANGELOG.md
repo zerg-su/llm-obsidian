@@ -10,6 +10,35 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc3] - 2026-08-07
+
+This final evidence-polish candidate closes the residual RC2 review findings
+without expanding runtime capability or lifecycle authority.
+
+### Added
+
+- Added exact-tree machine inventory, prospective per-slice receipts, and a
+  typed compiler for candidate-attempt budgets and final release disposition.
+- Added reproducible coverage observations and a portable shell-test scratch
+  allocator for constrained macOS environments.
+- Added an executable RC3 evidence map plus focused documentation and release
+  contracts.
+
+### Changed
+
+- Made normative implementation plans English by default unless the user
+  explicitly requests another language; user-facing conversation remains in
+  the user's language.
+- Aligned root, runtime, task, testing, review, and Russian release guidance
+  with the Harness/runtime-worker lifecycle that remains after RC2 deletion.
+
+### Fixed
+
+- Count every full-profile candidate execution mechanically, including
+  unpublished and test-only attempts, with a hard five-attempt ceiling.
+- Reject candidate, gate, review, finding, waiver, output, or profile drift
+  from machine-readable RC3 evidence.
+
 ## [2.6.6-rc2] - 2026-08-07
 
 This polishing candidate repairs exact callback/evidence ownership and removes

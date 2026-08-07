@@ -105,6 +105,7 @@ test-code-quality:
 	@echo "=== code quality audit unit contracts ==="
 	@python3 tests/test_code_quality_audit.py
 	@python3 tests/test_v266_rc1_evidence.py
+	@python3 tests/test_rc3_release_evidence.py
 	@python3 scripts/code-quality-audit.py --baseline config/code-quality-baseline.json
 
 code-quality-audit: test-code-quality
@@ -194,6 +195,8 @@ test: test-harness test-code-quality test-docs test-task-sessions test-model-rou
 test-docs:
 	@echo "=== test_russian_documentation.py ==="
 	@python3 tests/test_russian_documentation.py
+	@echo "=== test_rc3_documentation.py ==="
+	@python3 tests/test_rc3_documentation.py
 
 eval-smoke:
 	@python3 scripts/agent-evals.py smoke
