@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import json
 import re
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +138,7 @@ def _authority_counts(root: Path, subject_sha: str) -> tuple[int, int, int]:
     )
 
 
-def snapshot(root: Path, subject_sha: str) -> dict[str, Any]:
+def _snapshot(root: Path, subject_sha: str) -> dict[str, Any]:
     subject_sha = _exact_commit(root, subject_sha)
     tree_paths = _tree_paths(root, subject_sha)
     script_paths = tuple(
@@ -158,6 +160,17 @@ def snapshot(root: Path, subject_sha: str) -> dict[str, Any]:
         "writable_authorities": writable,
         "incident_authority_literals": incident_literals,
     }
+
+
+@lru_cache(maxsize=16)
+def _cached_snapshot(root: str, subject_sha: str) -> dict[str, Any]:
+    return _snapshot(Path(root), subject_sha)
+
+
+def snapshot(root: Path, subject_sha: str) -> dict[str, Any]:
+    """Return an isolated copy of the immutable exact-commit snapshot."""
+
+    return copy.deepcopy(_cached_snapshot(str(root.resolve()), subject_sha))
 
 
 def build_inventory(
