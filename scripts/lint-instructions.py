@@ -23,6 +23,7 @@ ENGINEERING_DISCIPLINE_PATTERN = re.compile(
     r"completion\.$",
     re.MULTILINE,
 )
+MARKDOWN_LIST_ITEM = re.compile(r"^\s*(?:[-*+] |\d+[.)] )")
 
 
 def frontmatter(text: str) -> str:
@@ -147,6 +148,44 @@ def failure_repair_issues(
     return issues
 
 
+def _enclosing_markdown_item(text: str, offset: int) -> str:
+    """Return one contract item plus an explicit standalone lead-in block."""
+
+    lines = text.splitlines()
+    line_index = text.count("\n", 0, offset)
+    start = line_index
+    current_is_item = bool(MARKDOWN_LIST_ITEM.match(lines[start]))
+    if not current_is_item:
+        while (
+            start > 0
+            and lines[start - 1].strip()
+            and not MARKDOWN_LIST_ITEM.match(lines[start - 1])
+        ):
+            start -= 1
+        if start > 0 and MARKDOWN_LIST_ITEM.match(lines[start - 1]):
+            # CommonMark lazy continuation: the contract belongs to this item.
+            start -= 1
+        else:
+            prior = start - 1
+            while prior >= 0 and not lines[prior].strip():
+                prior -= 1
+            if prior >= 0:
+                prior_start = prior
+                while prior_start > 0 and lines[prior_start - 1].strip():
+                    prior_start -= 1
+                if not any(
+                    MARKDOWN_LIST_ITEM.match(line)
+                    for line in lines[prior_start : prior + 1]
+                ):
+                    start = prior_start
+    end = line_index + 1
+    while end < len(lines) and lines[end].strip():
+        if MARKDOWN_LIST_ITEM.match(lines[end]):
+            break
+        end += 1
+    return "\n".join(lines[start:end])
+
+
 def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
     """Keep the concise engineering-discipline contract equivalent."""
     issues: list[str] = []
@@ -154,31 +193,7 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
         matches = list(ENGINEERING_DISCIPLINE_PATTERN.finditer(text))
         weakened_context = False
         if len(matches) == 1:
-            match = matches[0]
-            lines = text.splitlines()
-            line_index = text.count("\n", 0, match.start())
-            start = line_index
-            current_is_item = bool(re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[start]))
-            if not current_is_item:
-                while start > 0 and lines[start - 1].strip():
-                    if re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[start - 1]):
-                        break
-                    start -= 1
-            end = line_index + 1
-            while end < len(lines) and lines[end].strip():
-                if re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[end]):
-                    break
-                end += 1
-            logical_item = "\n".join(lines[start:end])
-            prior = start - 1
-            while prior >= 0 and not lines[prior].strip():
-                prior -= 1
-            if prior >= 0 and re.fullmatch(
-                r"\s*(?:optional|ignore(?: this)?|suggestions?\s+only)\s*:?\s*",
-                lines[prior],
-                flags=re.I,
-            ):
-                logical_item = lines[prior] + "\n" + logical_item
+            logical_item = _enclosing_markdown_item(text, matches[0].start())
             weakened_context = bool(
                 re.search(
                     r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",

@@ -76,6 +76,21 @@ discipline = (
     "changes; goal/evidence discipline—local green is not task completion."
 )
 assert module.engineering_discipline_issues(discipline, discipline) == []
+assert module._enclosing_markdown_item(discipline, 0) == discipline
+bullet_contract = f"- {discipline}\n  Continuation without weakening."
+assert module._enclosing_markdown_item(bullet_contract, 2) == bullet_contract
+lazy_contract = f"- Treat the next rule as advisory.\n{discipline}"
+assert module._enclosing_markdown_item(
+    lazy_contract, lazy_contract.index(discipline)
+) == lazy_contract
+standalone_lead_in = f"The rule below is optional.\n\n{discipline}"
+assert module._enclosing_markdown_item(
+    standalone_lead_in, standalone_lead_in.index(discipline)
+) == standalone_lead_in
+sibling_contract = f"- Unrelated behavior is advisory.\n- {discipline}"
+assert module._enclosing_markdown_item(
+    sibling_contract, sibling_contract.index(discipline)
+) == f"- {discipline}"
 for surface in ("AGENTS.md", "CLAUDE.md"):
     for principle in (
         "think before coding",
@@ -129,6 +144,18 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
         sibling if surface == "CLAUDE.md" else discipline,
     )
     assert not any(surface in issue for issue in issues), (surface, sibling, issues)
+    for lead_in in (
+        "This whole section is advisory only and may be ignored.",
+        "The rule below is optional for small changes.",
+        "- Treat the next rule as advisory.",
+    ):
+        separator = "\n" if lead_in.startswith("- ") else "\n\n"
+        drift = lead_in + separator + discipline
+        issues = module.engineering_discipline_issues(
+            drift if surface == "AGENTS.md" else discipline,
+            drift if surface == "CLAUDE.md" else discipline,
+        )
+        assert any(surface in issue for issue in issues), (surface, drift, issues)
 print("OK   cross-surface engineering discipline weakening detected")
 
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")
