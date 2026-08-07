@@ -39,6 +39,7 @@ from task_review_delta_packet import DeltaPacket, build_delta_packet
 from task_review_resolution_bundle import _bounded_input
 from task_review_identity import (
     _current_review_is_quiescent,
+    _zero_effect_attention_is_quiescent,
     _current_runtime_root,
     _gate_root,
     _runtime_root,

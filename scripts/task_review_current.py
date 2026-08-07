@@ -24,6 +24,7 @@ from harness.workflows.review_gate import ReviewPreset
 from model_routing import load_config, routing_from_environment
 from task_review_context import (
     _current_review_is_quiescent,
+    _zero_effect_attention_is_quiescent,
     _current_runtime_root,
     _gate_root,
     _request,
@@ -60,30 +61,6 @@ def _validate_current_checkout(worktree: Path) -> Path:
             "current review requires an exact llm-obsidian checkout root"
         )
     return worktree
-
-
-def _zero_effect_attention_is_quiescent(
-    vault: Path,
-    task_id: str,
-    gate_state: Mapping[str, Any],
-) -> bool:
-    """Recognize an exact pre-provider attempt that created no operation row."""
-
-    attempt = gate_state.get("attempt")
-    terminal = attempt.get("terminal") if isinstance(attempt, Mapping) else None
-    if not (
-        gate_state.get("status") == "attention-required"
-        and gate_state.get("lanes") == []
-        and gate_state.get("round_results") == {}
-        and gate_state.get("final_results") == {}
-        and isinstance(attempt, Mapping)
-        and attempt.get("status") == "terminal"
-        and isinstance(terminal, Mapping)
-        and terminal.get("result") == "attention-required"
-        and terminal.get("lane_results") == []
-    ):
-        return False
-    return not OperationStore(vault / ".vault-meta" / "harness").list(task_id)
 
 
 def _current_policy(

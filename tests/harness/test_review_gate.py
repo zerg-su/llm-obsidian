@@ -86,10 +86,8 @@ from review_resolution import (
 )
 from review_contract import axis_finding_id
 from outcome_contract import extract_from_bytes
-from task_review_current import (
-    _current_review_artifact_root,
-    _zero_effect_attention_is_quiescent,
-)
+from task_review_current import _current_review_artifact_root
+from task_review_identity import _zero_effect_attention_is_quiescent
 
 
 def check(label: str, value: bool) -> None:
@@ -2559,6 +2557,48 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
     os.environ["LLM_OBSIDIAN_SESSION_RUNTIME"] = "codex"
     os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
     os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
+
+    def zero_effect_checkout(name: str) -> Path:
+        checkout = base / name
+        shutil.copytree(
+            product,
+            checkout,
+            ignore=shutil.ignore_patterns(
+                ".git", ".vault-meta", "__pycache__", "*.pyc"
+            ),
+        )
+        subprocess.run(
+            ["git", "init", "-b", "main"],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "review@example.invalid"],
+            cwd=checkout,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Review Gate Test"],
+            cwd=checkout,
+            check=True,
+        )
+        subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return checkout
+
+    class PreStoreFailureRuntime(EffectRecordingRuntime):
+        def start(self, request: object, *, on_surface_opened=None) -> FakeSessionResult:
+            self.started.append(request)
+            raise RuntimeError("pre-provider fixture failure")
+
     try:
         started = task_review_runner.run_current_review(
             product,
@@ -2604,6 +2644,122 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 )
             )["status"]
             == "reviewing",
+        )
+
+        retry_product = zero_effect_checkout("zero-effect-retry")
+        retry_store = OperationStore(retry_product / ".vault-meta/harness")
+        failed_runtime = PreStoreFailureRuntime(retry_store)
+        try:
+            task_review_runner.run_current_review(
+                retry_product,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=base / "zero-effect-retry-scratch",
+                runtime_manager=failed_runtime,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "pre-provider fixture failure"
+        else:
+            raise AssertionError("pre-provider fixture failure was swallowed")
+        first_active = json.loads(
+            (
+                retry_product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )
+        first_task_id = first_active["task_id"]
+        first_gate = json.loads(
+            (
+                retry_product
+                / ".vault-meta/harness/review-data"
+                / first_task_id
+                / first_task_id
+                / "review-gate.json"
+            ).read_text(encoding="utf-8")
+        )
+        check(
+            "writer emits an exact zero-effect attention gate",
+            first_gate["status"] == "attention-required"
+            and first_gate["lanes"] == []
+            and first_gate["round_results"] == {}
+            and first_gate["final_results"] == {}
+            and not retry_store.list(first_task_id),
+        )
+        retry_runtime = EffectRecordingRuntime(retry_store)
+        retried = task_review_runner.run_current_review(
+            retry_product,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=base / "zero-effect-retry-scratch",
+            runtime_manager=retry_runtime,
+        )
+        check(
+            "durable current-review interface supersedes a zero-effect failure",
+            retried["status"] == "reviewing"
+            and retried["task_id"] != first_task_id
+            and len(retry_runtime.started) == 1,
+        )
+
+        retained_product = zero_effect_checkout("zero-effect-retained-row")
+        retained_store = OperationStore(retained_product / ".vault-meta/harness")
+        try:
+            task_review_runner.run_current_review(
+                retained_product,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=base / "zero-effect-retained-row-scratch",
+                runtime_manager=PreStoreFailureRuntime(retained_store),
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "pre-provider fixture failure"
+        else:
+            raise AssertionError("pre-provider fixture failure was swallowed")
+        retained_task_id = json.loads(
+            (
+                retained_product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )["task_id"]
+        retained_store.create(
+            OperationSpec(
+                "22222222-2222-4222-8222-222222222222",
+                "a" * 64,
+                "simple-review-holistic",
+                retained_task_id,
+                RuntimeRoute(
+                    "claude",
+                    "claude-opus-5",
+                    "xhigh",
+                    "reviewer-callback",
+                    "b" * 64,
+                ),
+                "packets/review/manifest.json",
+                "scoped",
+            ),
+            lane_id="c" * 32,
+            run_id="d" * 32,
+        )
+        retained_runtime = EffectRecordingRuntime(retained_store)
+        try:
+            retained_result = task_review_runner.run_current_review(
+                retained_product,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=base / "zero-effect-retained-row-scratch",
+                runtime_manager=retained_runtime,
+            )
+        except task_review_runner.TaskReviewError:
+            retained_result = None
+        retained_active = json.loads(
+            (
+                retained_product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )
+        check(
+            "durable current-review interface keeps any operation row fail closed",
+            retained_active["task_id"] == retained_task_id
+            and not retained_runtime.started
+            and (
+                retained_result is None
+                or retained_result["task_id"] == retained_task_id
+            ),
         )
     finally:
         for name, value in old_environment.items():

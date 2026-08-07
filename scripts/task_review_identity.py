@@ -6,7 +6,7 @@ import hashlib
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from harness.state_machine import TERMINAL
 from harness.store import OperationStore
@@ -154,3 +154,32 @@ def _current_review_is_quiescent(vault: Path, task_id: str) -> bool:
         and row.resources.supervisor_pid == 0
         for row in rows
     )
+
+
+def _zero_effect_attention_is_quiescent(
+    vault: Path,
+    task_id: str,
+    gate_state: Mapping[str, Any],
+) -> bool:
+    """Recognize an exact pre-provider attempt that created no operation row.
+
+    The superseded gate, ledger, and scratch bytes are deliberately retained
+    as derived diagnostics; the next current review starts a new lineage only
+    after this predicate proves that the old lineage owned no durable effect.
+    """
+
+    attempt = gate_state.get("attempt")
+    terminal = attempt.get("terminal") if isinstance(attempt, Mapping) else None
+    if not (
+        gate_state.get("status") == "attention-required"
+        and gate_state.get("lanes") == []
+        and gate_state.get("round_results") == {}
+        and gate_state.get("final_results") == {}
+        and isinstance(attempt, Mapping)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, Mapping)
+        and terminal.get("result") == "attention-required"
+        and terminal.get("lane_results") == []
+    ):
+        return False
+    return not OperationStore(vault / ".vault-meta" / "harness").list(task_id)
