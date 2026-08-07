@@ -74,6 +74,34 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
+def write_scoped_verification(product: Path, summary: Path, head: str) -> None:
+    profile = load_profiles(product / "config/verification-profiles.toml")["scoped"]
+    output_root = product / ".vault-meta/review-evidence"
+    output_root.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for index, _command in enumerate(profile.commands, start=1):
+        output = output_root / f"scoped-{index}.log"
+        payload = f"scoped output {index}\n".encode()
+        output.write_bytes(payload)
+        rows.append(
+            {
+                "command_id": f"scoped-{index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "finished_at": "2026-08-07T00:00:01Z",
+                "head_sha": head,
+                "output_bytes": len(payload),
+                "output_pointer": output.relative_to(product).as_posix(),
+                "output_sha256": hashlib.sha256(payload).hexdigest(),
+                "profile": profile.name,
+                "profile_sha256": profile.sha256,
+                "schema_version": 2,
+                "started_at": "2026-08-07T00:00:00Z",
+            }
+        )
+    summary.write_text(json.dumps(rows, sort_keys=True) + "\n", encoding="utf-8")
+
+
 @dataclass(frozen=True)
 class SessionResult:
     record: object
@@ -1330,8 +1358,13 @@ with tempfile.TemporaryDirectory(prefix="exact-attempt-program.") as raw:
     verification_path = product / "docs/verification.md"
     verification_path.parent.mkdir()
     verification_path.write_text("scoped verification passed\n", encoding="utf-8")
+    profile_path = product / "config/verification-profiles.toml"
+    profile_path.parent.mkdir()
+    profile_path.write_bytes((ROOT / "config/verification-profiles.toml").read_bytes())
     subprocess.run(
-        ["git", "add", "docs/verification.md"], cwd=product, check=True
+        ["git", "add", "docs/verification.md", "config/verification-profiles.toml"],
+        cwd=product,
+        check=True,
     )
     subprocess.run(
         ["git", "commit", "-m", "verification evidence"],
@@ -1346,6 +1379,7 @@ with tempfile.TemporaryDirectory(prefix="exact-attempt-program.") as raw:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    write_scoped_verification(product, verification_path, head)
     boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256="2" * 64,

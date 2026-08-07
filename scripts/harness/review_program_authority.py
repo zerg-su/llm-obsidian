@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import fields
 from pathlib import Path
 from typing import Mapping
 
+import verification_receipt as immutable_verification
 from vault_schema import parse_frontmatter, split_frontmatter
 
+from .contracts import ContractError, VerificationEvidence
 from .review_program_contracts import (
     IDENTIFIER,
     RISK_PURPOSES,
@@ -20,6 +23,7 @@ from .review_program_contracts import (
 from .review_attempt import EXACT_HEAD_REVIEW_PROTOCOL
 from .review_program_results import ReviewBoundaryReceipt
 from .review_program_resolution import resolved_terminal_head
+from .verification import load_profiles, output_binding_valid, valid_for
 from .workflows.review_gate import authorize_task_finalization
 
 
@@ -130,9 +134,80 @@ def _validate_boundary_sources(root: Path, boundary: ReviewBoundaryInput) -> Non
             source /= part
             if source.is_symlink():
                 raise ReviewProgramError(f"trusted {label} is unavailable")
-        _path, raw = _bound_artifact(root, pointer, label)
+        path, raw = _bound_artifact(root, pointer, label)
         if hashlib.sha256(raw).hexdigest() != getattr(boundary, digest_field):
             raise ReviewProgramError(f"trusted {label} digest is stale")
+        if boundary.purpose == "implementation":
+            _validate_implementation_evidence(root, path, boundary)
+
+
+def _validate_implementation_evidence(
+    root: Path,
+    path: Path,
+    boundary: ReviewBoundaryInput,
+) -> None:
+    """Require exact subject/profile/output bytes, not an opaque evidence hash."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReviewProgramError(
+            "trusted implementation verification evidence is invalid"
+        ) from exc
+    if isinstance(value, dict) and value.get("runner") == "verification_receipt.py":
+        profile = value.get("profile")
+        if not isinstance(profile, str):
+            raise ReviewProgramError(
+                "trusted implementation verification profile is invalid"
+            )
+        try:
+            immutable_verification.verify_receipt(
+                path,
+                expected_head=boundary.product_head_sha,
+                expected_profile=profile,
+            )
+        except (OSError, ValueError, immutable_verification.ReceiptError) as exc:
+            raise ReviewProgramError(
+                "trusted implementation verification bundle is invalid"
+            ) from exc
+        return
+    if not isinstance(value, list) or not value:
+        raise ReviewProgramError(
+            "trusted implementation verification evidence is not typed"
+        )
+    try:
+        profiles = load_profiles(root / "config/verification-profiles.toml")
+    except (OSError, ValueError) as exc:
+        raise ReviewProgramError(
+            "trusted implementation verification profiles are unavailable"
+        ) from exc
+    expected_fields = {field.name for field in fields(VerificationEvidence)}
+    evidence: list[VerificationEvidence] = []
+    try:
+        for raw in value:
+            if not isinstance(raw, dict) or set(raw) != expected_fields:
+                raise ContractError("verification evidence fields are not exact")
+            evidence.append(VerificationEvidence(**raw))
+    except (ContractError, TypeError) as exc:
+        raise ReviewProgramError(
+            "trusted implementation verification evidence is invalid"
+        ) from exc
+    profile = profiles.get(evidence[0].profile)
+    if (
+        profile is None
+        or len(evidence) != len(profile.commands)
+        or any(
+            item.command_id != f"{profile.name}-{index}"
+            or not valid_for(
+                item, head=boundary.product_head_sha, profile=profile
+            )
+            or not output_binding_valid(item, pointer_root=root)
+            for index, item in enumerate(evidence, start=1)
+        )
+    ):
+        raise ReviewProgramError(
+            "trusted implementation verification evidence is incomplete"
+        )
 
 
 def _actual_candidate_head(root: Path) -> str:

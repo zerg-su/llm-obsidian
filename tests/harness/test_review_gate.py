@@ -90,6 +90,34 @@ def check(label: str, value: bool) -> None:
     print(f"OK   {label}")
 
 
+def write_scoped_verification(product: Path, summary: Path, head: str) -> None:
+    profile = load_profiles(product / "config/verification-profiles.toml")["scoped"]
+    output_root = product / ".vault-meta/review-evidence"
+    output_root.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for index, _command in enumerate(profile.commands, start=1):
+        output = output_root / f"scoped-{index}.log"
+        payload = f"scoped output {index}\n".encode()
+        output.write_bytes(payload)
+        rows.append(
+            {
+                "command_id": f"scoped-{index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "finished_at": "2026-08-07T00:00:01Z",
+                "head_sha": head,
+                "output_bytes": len(payload),
+                "output_pointer": output.relative_to(product).as_posix(),
+                "output_sha256": hashlib.sha256(payload).hexdigest(),
+                "profile": profile.name,
+                "profile_sha256": profile.sha256,
+                "schema_version": 2,
+                "started_at": "2026-08-07T00:00:00Z",
+            }
+        )
+    summary.write_text(json.dumps(rows, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def quiesce_operations(store: OperationStore, task_id: str) -> None:
     """Release one test review using the same exact terminal procedure."""
 
@@ -1660,6 +1688,10 @@ with tempfile.TemporaryDirectory(prefix="review-program-real-resolution.") as ra
         capture_output=True,
         text=True,
     ).stdout.strip()
+    profile_path = product / "config/verification-profiles.toml"
+    profile_path.parent.mkdir(exist_ok=True)
+    profile_path.write_bytes((ROOT / "config/verification-profiles.toml").read_bytes())
+    write_scoped_verification(product, verification_path, reviewed_head)
     boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256="a" * 64,
@@ -2430,6 +2462,11 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    write_scoped_verification(
+        product,
+        boundary_artifacts["verification"],
+        initial_current_head,
+    )
     current_boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256=extract_from_bytes(
@@ -2838,6 +2875,7 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    write_scoped_verification(product, evidence, reviewed_head)
     boundary = ReviewBoundaryInput(
         purpose="implementation",
         outcome_contract_sha256=extract_from_bytes(plan.read_bytes()).sha256,

@@ -22,6 +22,8 @@ assert CLI_SPEC and CLI_SPEC.loader
 review_program_cli = importlib.util.module_from_spec(CLI_SPEC)
 CLI_SPEC.loader.exec_module(review_program_cli)
 
+import verification_receipt  # noqa: E402
+
 from harness.review_program import (  # noqa: E402
     ReviewBoundaryInput,
     ReviewBoundaryReceipt,
@@ -49,6 +51,7 @@ from harness.workflows.review_gate import review_context_sha256  # noqa: E402
 from harness.workflows.review_gate_contracts import (  # noqa: E402
     _result_from_payload,
 )
+from harness.verification import load_profiles  # noqa: E402
 
 SHA = {
     name: char * 64
@@ -94,6 +97,91 @@ def git(worktree: Path, *args: str) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+def write_release_verification_bundle(
+    worktree: Path,
+    *,
+    head: str,
+    relative: str = ".vault-meta/review-evidence/release-final/receipt.json",
+) -> Path:
+    """Create a complete synthetic bundle with production-shaped identities."""
+
+    receipt = worktree / relative
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    profile = verification_receipt.PROFILES["release-final"]
+    commands = []
+    for index, command in enumerate(profile.commands, start=1):
+        payload = f"bounded output for {command.command_id}\n".encode()
+        pointer = f"{index:02d}-{command.command_id}.log"
+        (receipt.parent / pointer).write_bytes(payload)
+        commands.append(
+            {
+                "argv": list(command.argv),
+                "command_id": command.command_id,
+                "cwd": ".",
+                "exit_code": 0,
+                "finished_at": "2026-08-07T00:00:01Z",
+                "observations": {},
+                "output_bytes": len(payload),
+                "output_pointer": pointer,
+                "output_sha256": hashlib.sha256(payload).hexdigest(),
+                "started_at": "2026-08-07T00:00:00Z",
+            }
+        )
+    value = {
+        "attempt_id": "26600000-0000-4000-8000-000000000001",
+        "commands": commands,
+        "execution_relation": "exact-head-reconstruction",
+        "finished_at": "2026-08-07T00:00:01Z",
+        "profile": profile.name,
+        "profile_sha256": profile.sha256,
+        "runner": "verification_receipt.py",
+        "runner_sha256": hashlib.sha256(
+            (ROOT / "scripts/verification_receipt.py").read_bytes()
+        ).hexdigest(),
+        "schema_version": 1,
+        "started_at": "2026-08-07T00:00:00Z",
+        "status": "passed",
+        "subject_head_sha": head,
+        "subject_tree_sha": git(worktree, "rev-parse", "HEAD^{tree}"),
+    }
+    receipt.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+    return receipt
+
+
+def write_scoped_verification_evidence(
+    worktree: Path,
+    *,
+    head: str,
+    relative: str = ".vault-meta/review-evidence/scoped.json",
+) -> Path:
+    summary = worktree / relative
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    profile = load_profiles(ROOT / "config/verification-profiles.toml")["scoped"]
+    rows = []
+    for index, _command in enumerate(profile.commands, start=1):
+        output = summary.parent / f"scoped-{index}.log"
+        payload = f"scoped output {index}\n".encode()
+        output.write_bytes(payload)
+        rows.append(
+            {
+                "command_id": f"scoped-{index}",
+                "cwd": ".",
+                "exit_code": 0,
+                "finished_at": "2026-08-07T00:00:01Z",
+                "head_sha": head,
+                "output_bytes": len(payload),
+                "output_pointer": output.relative_to(worktree).as_posix(),
+                "output_sha256": hashlib.sha256(payload).hexdigest(),
+                "profile": profile.name,
+                "profile_sha256": profile.sha256,
+                "schema_version": 2,
+                "started_at": "2026-08-07T00:00:00Z",
+            }
+        )
+    summary.write_text(json.dumps(rows, sort_keys=True) + "\n", encoding="utf-8")
+    return summary
 
 
 intent = ReviewBoundaryInput(
@@ -296,6 +384,9 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
         encoding="utf-8",
     )
     cli_sources = {
+        "config/verification-profiles.toml": (
+            ROOT / "config/verification-profiles.toml"
+        ).read_bytes(),
         "docs/design.md": b"approved design\n",
         "docs/capabilities.json": b'{"approved":true}\n',
         "docs/success-evidence.md": b"success evidence\n",
@@ -310,9 +401,12 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
     git(worktree, "init", "-q")
     git(worktree, "config", "user.name", "Review Program Test")
     git(worktree, "config", "user.email", "review-program@example.invalid")
-    git(worktree, "add", "docs", "wiki")
+    git(worktree, "add", "config", "docs", "wiki")
     git(worktree, "commit", "-q", "-m", "review candidate")
     cli_head = git(worktree, "rev-parse", "HEAD")
+    cli_verification = write_scoped_verification_evidence(
+        worktree, head=cli_head
+    )
     plan_sha256 = hashlib.sha256(plan.read_bytes()).hexdigest()
     cli_boundaries = (
         replace(
@@ -331,8 +425,11 @@ with tempfile.TemporaryDirectory(prefix="review-program.") as raw:
             plan_sha256=plan_sha256,
             product_head_sha=cli_head,
             verification_evidence_sha256=hashlib.sha256(
-                cli_sources["docs/verification.md"]
+                cli_verification.read_bytes()
             ).hexdigest(),
+            verification_evidence_path=cli_verification.relative_to(
+                worktree
+            ).as_posix(),
         ),
         replace(
             release,
@@ -1003,11 +1100,61 @@ def write_approved_gate(
             store.transition(operation_id, parent_id, "complete")
 
 
+with tempfile.TemporaryDirectory(prefix="review-program-verification-bundle.") as raw:
+    product = Path(raw) / "product"
+    product.mkdir()
+    git(product, "init", "-q")
+    git(product, "config", "user.name", "Review Program Test")
+    git(product, "config", "user.email", "review-program@example.invalid")
+    marker = product / "product.txt"
+    marker.write_text("candidate\n", encoding="utf-8")
+    git(product, "add", "product.txt")
+    git(product, "commit", "-q", "-m", "candidate")
+    bundle_head = git(product, "rev-parse", "HEAD")
+    bundle_receipt = write_release_verification_bundle(
+        product, head=bundle_head
+    )
+    bundle_boundary = ReviewBoundaryInput(
+        purpose="implementation",
+        outcome_contract_sha256=SHA["outcome"],
+        plan_sha256=SHA["plan"],
+        product_head_sha=bundle_head,
+        verification_evidence_sha256=hashlib.sha256(
+            bundle_receipt.read_bytes()
+        ).hexdigest(),
+        verification_evidence_path=bundle_receipt.relative_to(product).as_posix(),
+    )
+    bundle_operation = "review-authority-verification-bundle"
+    write_approved_gate(product, bundle_boundary, bundle_operation)
+    trusted_review_receipt(product, bundle_boundary, bundle_operation)
+    bundle = json.loads(bundle_receipt.read_text(encoding="utf-8"))
+    first_output = bundle_receipt.parent / bundle["commands"][0]["output_pointer"]
+    original_output = first_output.read_bytes()
+    first_output.unlink()
+    rejected(
+        "implementation authority rejects a missing verification output",
+        lambda: trusted_review_receipt(
+            product, bundle_boundary, bundle_operation
+        ),
+    )
+    first_output.write_bytes(b"tampered output\n")
+    rejected(
+        "implementation authority rejects a tampered verification output",
+        lambda: trusted_review_receipt(
+            product, bundle_boundary, bundle_operation
+        ),
+    )
+    first_output.write_bytes(original_output)
+
+
 with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
     directory = Path(raw)
     worktree = directory / "worktree"
     worktree.mkdir()
     sources = {
+        "config/verification-profiles.toml": (
+            ROOT / "config/verification-profiles.toml"
+        ).read_bytes(),
         "wiki/plan.md": b"approved plan\n",
         "docs/design.md": b"approved design\n",
         "docs/capabilities.json": b'{"approved":true}\n',
@@ -1023,9 +1170,12 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
     git(worktree, "init", "-q")
     git(worktree, "config", "user.name", "Review Program Test")
     git(worktree, "config", "user.email", "review-program@example.invalid")
-    git(worktree, "add", "docs", "wiki")
+    git(worktree, "add", "config", "docs", "wiki")
     git(worktree, "commit", "-q", "-m", "candidate A")
     head_a = git(worktree, "rev-parse", "HEAD")
+    authority_verification = write_scoped_verification_evidence(
+        worktree, head=head_a
+    )
 
     def source_digest(relative: str) -> str:
         return hashlib.sha256((worktree / relative).read_bytes()).hexdigest()
@@ -1048,8 +1198,12 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
             outcome_contract_sha256=SHA["outcome"],
             plan_sha256=plan_digest,
             product_head_sha=head_a,
-            verification_evidence_sha256=source_digest("docs/verification.md"),
-            verification_evidence_path="docs/verification.md",
+            verification_evidence_sha256=hashlib.sha256(
+                authority_verification.read_bytes()
+            ).hexdigest(),
+            verification_evidence_path=authority_verification.relative_to(
+                worktree
+            ).as_posix(),
         ),
         "release": ReviewBoundaryInput(
             purpose="release",
@@ -1203,7 +1357,7 @@ with tempfile.TemporaryDirectory(prefix="review-program-authority.") as raw:
         "intent receipt accepts the exact immediate implementation HEAD",
         git(worktree, "rev-parse", "HEAD") == head_a,
     )
-    verification_source = worktree / "docs/verification.md"
+    verification_source = authority_verification
     verification_bytes = verification_source.read_bytes()
     verification_source.write_bytes(verification_bytes + b"drift")
     rejected(
