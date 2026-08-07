@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -23,6 +24,7 @@ def load_script(name: str):
 
 
 inventory = load_script("rc3_inventory.py")
+slice_receipt = load_script("rc3_slice_receipt.py")
 
 
 def git(*args: str) -> str:
@@ -74,6 +76,107 @@ def test_machine_inventory_recomputes_exact_values_and_rejects_drift() -> None:
         raise AssertionError("mutated inventory must fail closed")
 
 
+def test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2() -> None:
+    subject_sha = git("rev-parse", "HEAD")
+    argv = ["python3", "tests/test_rc3_release_evidence.py"]
+    with tempfile.TemporaryDirectory() as raw:
+        output_root = Path(raw)
+        published = slice_receipt.publish_receipt(
+            ROOT,
+            output_root,
+            slice_id="A",
+            subject_head_sha=subject_sha,
+            argv=argv,
+            profile="focused-red-green",
+            exit_status=0,
+            stdout=b"RC3 release evidence contracts passed\n",
+            stderr=b"",
+        )
+        assert published.status == "published"
+        payload = slice_receipt.load_and_validate(ROOT, published.path)
+        assert payload["subject_head_sha"] == subject_sha
+        assert payload["stdout"] == {
+            "bytes": 38,
+            "sha256": "a3b1325c0907853615f90ae4caae52343dc3c9625fd228af5079bd5b3b3b634b",
+        }
+        assert payload["stderr"]["bytes"] == 0
+
+        repeated = slice_receipt.publish_receipt(
+            ROOT,
+            output_root,
+            slice_id="A",
+            subject_head_sha=subject_sha,
+            argv=argv,
+            profile="focused-red-green",
+            exit_status=0,
+            stdout=b"RC3 release evidence contracts passed\n",
+            stderr=b"",
+        )
+        assert repeated.status == "idempotent" and repeated.path == published.path
+
+        try:
+            slice_receipt.publish_receipt(
+                ROOT,
+                output_root,
+                slice_id="A",
+                subject_head_sha=subject_sha,
+                argv=argv,
+                profile="focused-red-green",
+                exit_status=1,
+                stdout=b"drift\n",
+                stderr=b"changed\n",
+            )
+        except slice_receipt.ReceiptError as exc:
+            assert "receipt identity conflict" in str(exc)
+        else:
+            raise AssertionError("output drift under one execution identity must conflict")
+
+        try:
+            slice_receipt.publish_receipt(
+                ROOT,
+                output_root,
+                slice_id="A",
+                subject_head_sha=BASE_SHA,
+                argv=argv,
+                profile="focused-red-green",
+                exit_status=0,
+                stdout=b"",
+                stderr=b"",
+            )
+        except slice_receipt.ReceiptError as exc:
+            assert "historical RC2 backfill" in str(exc)
+        else:
+            raise AssertionError("RC2 historical receipts must never be reconstructed")
+
+        original_link = slice_receipt._publish_link
+
+        def crash_before_publication(_source: Path, _target: Path) -> None:
+            raise OSError("synthetic crash")
+
+        slice_receipt._publish_link = crash_before_publication
+        try:
+            try:
+                slice_receipt.publish_receipt(
+                    ROOT,
+                    output_root,
+                    slice_id="B",
+                    subject_head_sha=subject_sha,
+                    argv=argv,
+                    profile="focused-red-green",
+                    exit_status=0,
+                    stdout=b"not published",
+                    stderr=b"",
+                )
+            except OSError as exc:
+                assert "synthetic crash" in str(exc)
+            else:
+                raise AssertionError("synthetic publication crash must escape")
+        finally:
+            slice_receipt._publish_link = original_link
+        assert not tuple(output_root.rglob("*.json"))[1:]
+
+
 if __name__ == "__main__":
     test_machine_inventory_recomputes_exact_values_and_rejects_drift()
+    test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2()
     print("RC3 release evidence contracts passed")
