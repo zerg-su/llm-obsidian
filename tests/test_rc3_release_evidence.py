@@ -156,7 +156,7 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             raise AssertionError("ledger must bind actual immutable artifact bytes")
 
         artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
-        for index in range(2, 7):
+        for index in range(2, 8):
             row = store.reserve(
                 attempt_id=f"00000000-0000-4000-8000-{index:012d}",
                 subject_head_sha=subject,
@@ -174,16 +174,16 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             )
         try:
             store.reserve(
-                attempt_id="00000000-0000-4000-8000-000000000007",
+                attempt_id="00000000-0000-4000-8000-000000000008",
                 subject_head_sha=subject,
                 profile_sha256="a" * 64,
                 execution_relation="release-candidate",
                 runner_sha256="b" * 64,
             )
         except ledger_module.AttemptLedgerError as exc:
-            assert "seventh" in str(exc)
+            assert "eighth" in str(exc)
         else:
-            raise AssertionError("seventh authoritative release attempt must fail closed")
+            raise AssertionError("eighth authoritative release attempt must fail closed")
 
 
 def test_release_final_runner_records_success_and_failure_without_caller_rows() -> None:
