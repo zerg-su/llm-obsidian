@@ -66,6 +66,7 @@ from task_review_flow import (  # noqa: E402
     _run_review,
 )
 from outcome_contract import extract_from_bytes  # noqa: E402
+from review_resolution import review_transport_identity_sha256  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -1032,6 +1033,58 @@ with tempfile.TemporaryDirectory(prefix="exact-protocol-selector.") as raw:
         cwd=product,
         check=True,
         capture_output=True,
+    )
+    resolved_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=product, text=True
+    ).strip()
+    boundaries = exact_state["review_notification_evidence"]
+    callbacks = [
+        {
+            "axis": axis,
+            "round_operation_id": boundary["round_operation_id"],
+            "round_run_id": boundary["round_run_id"],
+            "callback_id": boundary["callback_id"],
+            "callback_sha256": boundary["callback_sha256"],
+        }
+        for axis, boundary in sorted(boundaries.items())
+    ]
+    (product / ".task-review-resolution.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": task_id,
+                "reviewed_head_sha": exact_state["attempt"]["identity"][
+                    "exact_head_sha"
+                ],
+                "resolved_head_sha": resolved_head,
+                "review_identity_sha256": review_transport_identity_sha256(
+                    next(
+                        iter(
+                            {
+                                boundary["review_operation_id"]
+                                for boundary in boundaries.values()
+                            }
+                        )
+                    ),
+                    callbacks,
+                ),
+                "resolutions": [
+                    {
+                        "finding_id": material_finding_id,
+                        "disposition": "applied",
+                        "rationale": "The exact selector repair is committed.",
+                        "follow_up": "",
+                    }
+                    for boundary in boundaries.values()
+                    for material_finding_id in boundary[
+                        "material_finding_ids"
+                    ]
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
     second = _run_review(
         meta,

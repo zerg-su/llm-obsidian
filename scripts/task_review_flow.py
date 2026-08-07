@@ -59,6 +59,7 @@ from task_review_shared import (
     StaleRoundCallbackError,
     TaskReviewError,
     _atomic_json,
+    _git,
     _read_json,
 )
 from task_review_verification import _finalizing_resubmit_recovery
@@ -106,15 +107,18 @@ def _resolution_source_state(
     """Recover the exact prior finding boundary across zero-lane restarts."""
 
     attempt = ReviewAttempt.from_mapping(state["attempt"])
-    if attempt.status != "terminal" or attempt.terminal is None:
-        return None
-    if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
-        return state
-    if (
-        attempt.terminal.result
-        != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
-        or attempt.terminal.lane_results
-    ):
+    if attempt.status == "terminal":
+        if attempt.terminal is None:
+            return None
+        if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
+            return state
+        if (
+            attempt.terminal.result
+            != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+            or attempt.terminal.lane_results
+        ):
+            return None
+    elif attempt.identity.cycle <= 1:
         return None
     identity = attempt.identity
     for cycle in range(identity.cycle - 1, 0, -1):
@@ -189,31 +193,37 @@ def _archive_resolution_callbacks(
             or (archive_dir.exists() and not archive_dir.is_dir())
         ):
             raise ReviewAttemptError("review resolution callback path is invalid")
-        if callback.is_file():
-            raw = callback.read_bytes()
+        def matches_boundary(raw: bytes) -> bool:
             try:
                 payload = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise ReviewAttemptError(
-                    "review resolution callback bytes are invalid"
-                ) from exc
-            if (
-                not isinstance(payload, dict)
-                or payload.get("callback_id") != callback_id
-                or payload.get("payload_sha256") != callback_sha256
-                or payload.get("operation_id") != round_operation_id
-                or payload.get("run_id") != round_run_id
-                or payload.get("kind") != "review"
-                or not isinstance(payload.get("payload"), dict)
-                or payload["payload"].get("axis") != axis
-            ):
+            except json.JSONDecodeError:
+                return False
+            return (
+                isinstance(payload, dict)
+                and payload.get("callback_id") == callback_id
+                and payload.get("payload_sha256") == callback_sha256
+                and payload.get("operation_id") == round_operation_id
+                and payload.get("run_id") == round_run_id
+                and payload.get("kind") == "review"
+                and isinstance(payload.get("payload"), dict)
+                and payload["payload"].get("axis") == axis
+            )
+
+        archived_raw = archive.read_bytes() if archive.is_file() else None
+        if archived_raw is not None and not matches_boundary(archived_raw):
+            raise ReviewAttemptError("review resolution callback archive changed")
+        if callback.is_file():
+            raw = callback.read_bytes()
+            if not matches_boundary(raw):
+                if archived_raw is not None:
+                    continue
                 raise ReviewAttemptError(
                     "review resolution callback identity drifted"
                 )
             archive_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             archive_dir.chmod(0o700)
             if archive.exists():
-                if not archive.is_file() or archive.read_bytes() != raw:
+                if archived_raw != raw:
                     raise ReviewAttemptError(
                         "review resolution callback archive changed"
                     )
