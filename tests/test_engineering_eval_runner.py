@@ -139,7 +139,7 @@ live_evidence_path = (
 live_evidence = json.loads(live_evidence_path.read_text(encoding="utf-8"))
 check(
     "RC4 live evidence binds the exact successful coordinator execution",
-    live_evidence["schema_version"] == 1
+    live_evidence["schema_version"] == 2
     and live_evidence["type"] == "rc4-engineering-discipline-live-evidence"
     and live_evidence["evidence_id"]
     == "RC4-E8-agent-discipline-and-skill-quality"
@@ -150,6 +150,61 @@ check(
     and live_evidence["receipt"]["summary"]
     == {"total": 4, "passed": 4, "failed": 0},
 )
+expected_equivalence = {
+    "rc4.ambiguity": (
+        "d6f2b0d7069e729111f1f4b88ffd2a1ec5c296bbcd163b33e7a4e0fa607b85e3",
+        "a749d6ddf7c9e6655e8ce99e4fb80d1a6e51fc4c7990539643462d8acd0b70a5",
+    ),
+    "rc4.overengineering": (
+        "31bac420f3d2b182ef63aae161219167da6bcca1fc16b0b1f0e2637db7bb5d15",
+        "08d07a2a3424849e9c9ca73eb8e6a252e0224ee8abeac26ea53eb9e423e975ce",
+    ),
+    "rc4.unrelated-edits": (
+        "f44d4f075c334c50049a45705f9ad921c0659f4b6756c207c86358c4b5c4330f",
+        "af1615eac1417d4d2846b452e1783a00fed5e3b1672b91d310875b968f5be2c9",
+    ),
+    "rc4.missing-regression-proof": (
+        "25e14d7059175f260bdcbeeb7b68c582b57e4ed6f30a2b6d41ccbe4d0a576599",
+        "3b22823348abf02f0b200c99a4e36084ffa5ec41137d94b4a57121ed2722f73a",
+    ),
+}
+observed_equivalence = {}
+for case in cases:
+    prompt_digest = hashlib.sha256(module.prompt_for(case).encode()).hexdigest()
+    schema_digest = hashlib.sha256(
+        json.dumps(
+            module.output_schema(case), sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    observed_equivalence[case["id"]] = (prompt_digest, schema_digest)
+check(
+    "RC4 no-replay bundle pins equivalent prompt and schema bytes",
+    observed_equivalence == expected_equivalence
+    and {
+        row["id"]: (row["prompt_sha256"], row["schema_sha256"])
+        for row in live_evidence["no_replay_equivalence"]["rows"]
+    }
+    == expected_equivalence,
+)
+expected_records = {
+    "resolution-8474d836d198524bd855d40329e3525a": "46b9a504bd198988efe0e1153d1319d13a8c6e1da2432d999c1ee2b524e7c629",
+    "resolution-cfcdd2f98d3618d079596daf316e9458": "7437c03f933c24f45dc69a00fe78c5055517a86145fed7d6a6edc9be905ba269",
+    "amendment-3fc9872d5e860b05f744ca6aecd56a03": "ad12b3afe84d789df2dd215ff3d5fc3e3e63698be25a9767a3d7fb4c2e4f945f",
+    "amendment-7bd44e3f01f8d84c20ac6f957c52fb08": "1a4edea77dd85352401d5c8d1abf047d052068da8d19e7ebc514b34bbfd1da70",
+    "amendment-8568fbd6114657339f7745d566b7f79d": "7ded610da466f6b1b5cd4ea018198fbca261992366da34d84f4f77555e17cd33",
+}
+check(
+    "RC4 scope and resolution provenance is visible in the product packet",
+    {
+        row["record_id"]: row["record_sha256"]
+        for row in live_evidence["provenance"]["tracked_authorization_materialization"]
+    }
+    == expected_records
+    and all(
+        row["decision"].strip()
+        for row in live_evidence["provenance"]["tracked_authorization_materialization"]
+    ),
+)
 audit = (ROOT / "docs/acceptance/v2.6.6-rc4-skill-audit.md").read_text(
     encoding="utf-8"
 )
@@ -159,7 +214,7 @@ check(
     json.loads(receipt_line) == live_evidence["receipt"]
     and hashlib.sha256(receipt_line.encode()).hexdigest()
     == live_evidence["receipt_line_sha256"]
-    and "c6ca6a9e9848057926e34a1416aa1c9b8cdcd18c78612655b967123e052480c6"
+    and "b10751d8dfab9128fa401814c8cf0b306ab1ac24ea3660f8fa807099dfd8a41e"
     in audit,
 )
 for case in cases:

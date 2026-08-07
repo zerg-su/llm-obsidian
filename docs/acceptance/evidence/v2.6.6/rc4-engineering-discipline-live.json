@@ -1,4 +1,28 @@
 {
+  "command_capture": {
+    "call_id": "call_myFdlY2kAv2dSfGHXzthpceW",
+    "command_event": {
+      "command": "python3 scripts/engineering-eval-runner.py --rc4-aggregate --model terra --effort medium --timeout 240",
+      "cwd": "/Users/zak/Projects/llm-obsidian-swarm",
+      "event_id": "b202717fa61ba4a358d39a0269ba8cdfd404bff08dfc179c6ec2a0cf5296793d",
+      "execution_session": "019fab00-3160-7380-8920-4b20183afb76",
+      "is_error": false,
+      "origin": "agent-executed",
+      "provenance_session": "019fab00-3160-7380-8920-4b20183afb76",
+      "schema_version": 2,
+      "session_id": "019fab00-3160-7380-8920-4b20183afb76",
+      "ts": "2026-08-07T19:41:26"
+    },
+    "session_jsonl_line_call": 158457,
+    "session_jsonl_line_result": 158477,
+    "tool_call_id": "ctc_0204f3187888442b016a760a8db8b88191b0066e108202f25d",
+    "tool_output_call_id": "call_hqo7HSiYTo3pzXN2psMi5adC",
+    "tool_result": {
+      "exit_code": 0,
+      "original_token_count": 180,
+      "receipt_line_sha256": "833b115d6824cd5c062a07730afd35ee7f5fd32a6a2af928efd48b4e92ce780c"
+    }
+  },
   "evidence_id": "RC4-E8-agent-discipline-and-skill-quality",
   "execution": {
     "command": "python3 scripts/engineering-eval-runner.py --rc4-aggregate --model terra --effort medium --timeout 240",
@@ -17,13 +41,67 @@
     "model": "gpt-5.6-terra",
     "timeout_seconds": 240
   },
+  "no_replay_equivalence": {
+    "current_runner_sha256": "322ea2db603e17f5fc43e8aed8b60f813a0a5475774156064c0de8b0290b4bfe",
+    "executed_runner_sha256": "bf10da45946d1415f69ad2b893f0a5b14579e2a1b0f193f88c70e4c538ea16d1",
+    "method": "The executed and current runner modules were loaded independently. For every frozen case, prompt_for(case) and output_schema(case) were byte-compared; the hashes below are identical on both modules. Current changes only freeze those same inputs/profile and harden pre-model transport classification.",
+    "rows": [
+      {
+        "id": "rc4.ambiguity",
+        "prompt_sha256": "d6f2b0d7069e729111f1f4b88ffd2a1ec5c296bbcd163b33e7a4e0fa607b85e3",
+        "schema_sha256": "a749d6ddf7c9e6655e8ce99e4fb80d1a6e51fc4c7990539643462d8acd0b70a5"
+      },
+      {
+        "id": "rc4.overengineering",
+        "prompt_sha256": "31bac420f3d2b182ef63aae161219167da6bcca1fc16b0b1f0e2637db7bb5d15",
+        "schema_sha256": "08d07a2a3424849e9c9ca73eb8e6a252e0224ee8abeac26ea53eb9e423e975ce"
+      },
+      {
+        "id": "rc4.unrelated-edits",
+        "prompt_sha256": "f44d4f075c334c50049a45705f9ad921c0659f4b6756c207c86358c4b5c4330f",
+        "schema_sha256": "af1615eac1417d4d2846b452e1783a00fed5e3b1672b91d310875b968f5be2c9"
+      },
+      {
+        "id": "rc4.missing-regression-proof",
+        "prompt_sha256": "25e14d7059175f260bdcbeeb7b68c582b57e4ed6f30a2b6d41ccbe4d0a576599",
+        "schema_sha256": "3b22823348abf02f0b200c99a4e36084ffa5ec41137d94b4a57121ed2722f73a"
+      }
+    ]
+  },
   "provenance": {
     "adoption_resolution_id": "resolution-cfcdd2f98d3618d079596daf316e9458",
     "adoption_resolution_sha256": "7437c03f933c24f45dc69a00fe78c5055517a86145fed7d6a6edc9be905ba269",
     "authorization_escalation_id": "05c8b9ac-49a6-4328-b716-e707f6d419c4",
     "authorization_resolution_id": "resolution-8474d836d198524bd855d40329e3525a",
     "authorization_resolution_sha256": "46b9a504bd198988efe0e1153d1319d13a8c6e1da2432d999c1ee2b524e7c629",
-    "recovery": "Recovered without replay from the exact command-log event, typed receipt bytes, and immutable authorization/adoption resolution chain."
+    "recovery": "Recovered without replay from the exact command-log event, typed receipt bytes, and immutable authorization/adoption resolution chain.",
+    "tracked_authorization_materialization": [
+      {
+        "decision": "Classified as an eligible repository-owned managed-execution-boundary mechanism failure after the operator explicitly requested continued RC4 repair and restarted on Codex 0.147.0. Preserve both prior typed zero-effect failures and all current owned product bytes. Authorize exactly one coordinator-owned execution of the unchanged registered RC4 aggregate from the current writable coordinator context using model terra, effort medium, timeout 240, with the same four frozen case identities and no provider/model substitution, fallback, permission expansion, assertion weakening, or scenario replay beyond this one replacement aggregate. Preflight must retain accepted_case_receipts=0, completed_model_results=0, and typed_case_output_present=false for both failed attempts. All four exact cases must pass exactly once in one schema-valid receipt; any transport error, invalid or missing output, duplicate/missing identity, non-pass result, or ambiguous effect stops RC4-E8 again. If green, adopt the receipt as RC4-E8 live evidence, commit only the frozen owned files, and resume the child through the normal Harness summary/review lifecycle.",
+        "record_id": "resolution-8474d836d198524bd855d40329e3525a",
+        "record_sha256": "46b9a504bd198988efe0e1153d1319d13a8c6e1da2432d999c1ee2b524e7c629"
+      },
+      {
+        "decision": "Classified as a repository-owned coordinator/child execution-routing defect, not a failed behavioral aggregate. The managed child must not have attempted the coordinator-owned command; its network-allowlist failure occurred before any model result and remains preserved with accepted_case_receipts=0 and completed_model_results=0. Independently, the exactly authorized coordinator-owned registered adapter completed successfully on Codex 0.147.0: all four frozen case identities ran exactly once on gpt-5.6-terra at medium effort and passed 4/4 in one complete schema-valid receipt. That receipt is durably recorded in the owned docs/acceptance/v2.6.6-rc4-skill-audit.md with receipt-line SHA-256 833b115d6824cd5c062a07730afd35ee7f5fd32a6a2af928efd48b4e92ce780c and matching source/manifest digests. Adopt this as the required RC4-E8 live aggregate evidence. No further aggregate, provider/model call, fallback, or permission expansion is authorized. The child may now validate the durable receipt, commit only its frozen owned product files, publish the exact-HEAD achieved summary for RC4-E8, and resume the normal Harness Simple Sol review lifecycle. Preserve all failed transport records and record the coordinator-only decision-routing defect for RC4 integration regression coverage.",
+        "record_id": "resolution-cfcdd2f98d3618d079596daf316e9458",
+        "record_sha256": "7437c03f933c24f45dc69a00fe78c5055517a86145fed7d6a6edc9be905ba269"
+      },
+      {
+        "decision": "Authorize exactly one additional owned product path docs/acceptance/evidence/v2.6.6/rc4-engineering-discipline-live.json to preserve the already-completed coordinator aggregate as independently inspectable immutable evidence. No aggregate replay, provider/model call, fallback, permission expansion, assertion weakening, or unrelated path mutation is authorized. Bind the exact receipt bytes, original product HEAD, runner identity, registered Terra/medium/240 profile, source and scenario digests, execution decision chain, and recovery provenance; then resolve only OE.RC4.RECEIPT_MISSING, ENG.RC4.SOURCE_TOCTOU, and ENG.DISCIPLINE.SUBSTRING with focused regressions.",
+        "record_id": "amendment-3fc9872d5e860b05f744ca6aecd56a03",
+        "record_sha256": "ad12b3afe84d789df2dd215ff3d5fc3e3e63698be25a9767a3d7fb4c2e4f945f"
+      },
+      {
+        "decision": "Resolve only RC4.E8.skill-creator-validation by clarifying the frozen observable: the base Codex skill-creator validator remains authoritative for its standard five frontmatter keys, while LLM Obsidian repository improve-skills is the extension-aware authoritative structural validator for the protected Claude disable-model-invocation key. Do not remove or weaken that key. Add skills/improve-skills/scripts/audit_skills.py and tests/test_improve_skills.py to owned paths; reject unknown top-level keys, accept exactly the base schema plus the protected extension, update only the existing RC4 verdict/audit evidence, and run focused skill/instruction/adapter gates. No skill behavior, trigger, route, provider call, permission, workflow semantic, aggregate replay, push, publish, tag, or release is authorized.",
+        "record_id": "amendment-7bd44e3f01f8d84c20ac6f957c52fb08",
+        "record_sha256": "1a4edea77dd85352401d5c8d1abf047d052068da8d19e7ebc514b34bbfd1da70"
+      },
+      {
+        "decision": "Resolve only repeat-review findings RC4.E8.outcome-drift, RC4.metadata.yaml-bypass, RC4.evidence.unresolved-provenance, RC4.scope.ownership-drift, and RC4.discipline.context-weakening. Adopt the system skill-creator structural contract plus the repository improve-skills protected disable-model-invocation extension as the exact observable contract; the literal upstream validator is not executable here without an unapproved PyYAML dependency and does not accept the required protected extension. Authorize a dependency-free fail-closed canonical frontmatter parser and regressions in skills/improve-skills/scripts/audit_skills.py and tests/test_improve_skills.py; a tracked exact provenance/equivalence bundle and corresponding acceptance checks under docs/acceptance/evidence/v2.6.6 plus updates to docs/acceptance/v2.6.6-rc4-skill-verdicts.json, docs/acceptance/v2.6.6-rc4-skill-audit.md, and docs/acceptance/evidence/v2.6.6/rc4-engineering-discipline-live.json; and a paragraph-context discipline lint repair in scripts/lint-instructions.py and tests/test_instruction_lint.py. Preserve the accepted four-case live result and all prior amendments without provider replay. No new dependency, provider effect, public interface, or unrelated skill behavior is authorized.",
+        "record_id": "amendment-8568fbd6114657339f7745d566b7f79d",
+        "record_sha256": "7ded610da466f6b1b5cd4ea018198fbca261992366da34d84f4f77555e17cd33"
+      }
+    ]
   },
   "receipt": {
     "cases": [
@@ -64,6 +142,6 @@
     "type": "rc4-engineering-discipline-aggregate"
   },
   "receipt_line_sha256": "833b115d6824cd5c062a07730afd35ee7f5fd32a6a2af928efd48b4e92ce780c",
-  "schema_version": 1,
+  "schema_version": 2,
   "type": "rc4-engineering-discipline-live-evidence"
 }

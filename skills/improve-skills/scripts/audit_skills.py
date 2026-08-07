@@ -12,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FRONTMATTER_BOUNDARY = "---"
+MAX_SKILL_NAME_LENGTH = 64
 LOCAL_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 PASS_NAMES = {
     "invocation",
@@ -142,33 +143,64 @@ def split_frontmatter(path: Path) -> tuple[list[str], str]:
     return lines[1:end], "\n".join(lines[end + 1 :]) + "\n"
 
 
-def scalar(frontmatter: list[str], key: str) -> str | None:
-    prefix = f"{key}:"
-    for index, line in enumerate(frontmatter):
-        if not line.startswith(prefix):
+def _yaml_key(raw: str) -> str:
+    token = raw.strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        return token[1:-1]
+    return token
+
+
+def _yaml_string(raw: str, continuations: list[str]) -> str | bool | None:
+    """Parse the small scalar subset allowed by the skill frontmatter contract."""
+
+    value = raw.strip()
+    if value in {">", ">-", ">+", "|", "|-", "|+"}:
+        return " ".join(line.strip() for line in continuations).strip()
+    if not value:
+        return None
+    if value[0] in "\"'":
+        if len(value) < 2 or value[-1] != value[0]:
+            raise ValueError("unterminated quoted frontmatter scalar")
+        return value[1:-1]
+    if value in {"true", "false"}:
+        return value == "true"
+    if re.fullmatch(
+        r"(?:null|~|yes|no|on|off|[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)",
+        value,
+        flags=re.I,
+    ) or value.startswith(("[", "{")):
+        return None
+    return value
+
+
+def parse_frontmatter(frontmatter: list[str]) -> dict[str, str | bool | None]:
+    """Fail closed on duplicate, malformed, or type-drifting top-level YAML."""
+
+    parsed: dict[str, str | bool | None] = {}
+    index = 0
+    while index < len(frontmatter):
+        line = frontmatter[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            index += 1
             continue
-        value = line[len(prefix) :].strip()
-        if value in {">", ">-", "|", "|-"}:
-            folded: list[str] = []
-            for continuation in frontmatter[index + 1 :]:
-                if continuation.startswith((" ", "\t")):
-                    folded.append(continuation.strip())
-                else:
-                    break
-            return " ".join(folded)
-        return value.strip("\"'")
-    return None
-
-
-def frontmatter_keys(frontmatter: list[str]) -> set[str]:
-    """Return top-level keys without treating folded YAML as metadata."""
-
-    return {
-        match.group(1)
-        for line in frontmatter
-        if not line.startswith((" ", "\t"))
-        if (match := re.match(r"^([A-Za-z0-9_-]+)\s*:", line))
-    }
+        if line.startswith((" ", "\t")):
+            raise ValueError("orphaned indented frontmatter line")
+        if ":" not in line:
+            raise ValueError(f"malformed top-level frontmatter line: {line!r}")
+        raw_key, raw_value = line.split(":", 1)
+        key = _yaml_key(raw_key)
+        if not key:
+            raise ValueError("empty top-level frontmatter key")
+        if key in parsed:
+            raise ValueError(f"duplicate top-level frontmatter key: {key}")
+        continuations: list[str] = []
+        cursor = index + 1
+        while cursor < len(frontmatter) and frontmatter[cursor].startswith((" ", "\t")):
+            continuations.append(frontmatter[cursor])
+            cursor += 1
+        parsed[key] = _yaml_string(raw_value, continuations)
+        index = cursor
+    return parsed
 
 
 def strip_code(markdown: str) -> str:
@@ -219,9 +251,15 @@ def audit_skill(path: Path, audit_root: Path = REPO_ROOT) -> dict[str, object]:
         findings.append(Finding("error", "frontmatter", str(exc)))
         return {"skill": path.parent.name, "path": str(path), "findings": [asdict(item) for item in findings]}
 
+    try:
+        metadata = parse_frontmatter(frontmatter)
+    except ValueError as exc:
+        findings.append(Finding("error", "invalid-frontmatter", str(exc)))
+        return {"skill": path.parent.name, "path": str(path), "findings": [asdict(item) for item in findings]}
+
     folder = path.parent.name
     unknown_keys = sorted(
-        frontmatter_keys(frontmatter) - ALLOWED_FRONTMATTER_KEYS
+        set(metadata) - ALLOWED_FRONTMATTER_KEYS
     )
     if unknown_keys:
         findings.append(
@@ -232,9 +270,43 @@ def audit_skill(path: Path, audit_root: Path = REPO_ROOT) -> dict[str, object]:
                 + ", ".join(unknown_keys),
             )
         )
-    name = scalar(frontmatter, "name")
-    description = scalar(frontmatter, "description")
-    claude_explicit = scalar(frontmatter, "disable-model-invocation") == "true"
+    name = metadata.get("name")
+    description = metadata.get("description")
+    extension = metadata.get("disable-model-invocation")
+    if not isinstance(name, str) or not isinstance(description, str):
+        findings.append(
+            Finding(
+                "error",
+                "invalid-frontmatter-value",
+                "name and description must be YAML strings",
+            )
+        )
+    elif (
+        not re.fullmatch(r"[a-z0-9-]+", name)
+        or name.startswith("-")
+        or name.endswith("-")
+        or "--" in name
+        or len(name) > MAX_SKILL_NAME_LENGTH
+        or "<" in description
+        or ">" in description
+        or len(description) > 1024
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "invalid-frontmatter-value",
+                "name/description violate the base skill-creator contract",
+            )
+        )
+    if "disable-model-invocation" in metadata and not isinstance(extension, bool):
+        findings.append(
+            Finding(
+                "error",
+                "invalid-frontmatter-value",
+                "disable-model-invocation must be literal true or false",
+            )
+        )
+    claude_explicit = extension is True
     codex_explicit = codex_explicit_only(path.parent)
 
     if name != folder:

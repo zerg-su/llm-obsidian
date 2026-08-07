@@ -170,6 +170,45 @@ with tempfile.TemporaryDirectory(prefix="improve-skills-test.") as raw:
     print("OK   extension-aware frontmatter and structural drift detected")
 
 
+def audit_frontmatter_fixture(frontmatter: str) -> set[str]:
+    with tempfile.TemporaryDirectory(prefix="improve-skills-frontmatter.") as raw:
+        root = Path(raw)
+        fixture = root / "fixture"
+        fixture.mkdir()
+        (fixture / "SKILL.md").write_text(
+            f"---\n{frontmatter}---\n\n# Fixture\n",
+            encoding="utf-8",
+        )
+        return {
+            finding["code"]
+            for finding in module.audit_skill(fixture / "SKILL.md", root)["findings"]
+        }
+
+
+for malformed in (
+    "name: fixture\ndescription: Valid.\n\"hidden-key\": true\n",
+    "name: fixture\ndescription: Valid.\nhidden.key: true\n",
+):
+    assert "unknown-frontmatter-key" in audit_frontmatter_fixture(malformed)
+
+for malformed in (
+    "name: fixture\nname: fixture\ndescription: Valid.\n",
+    "name: fixture\ndescription: Valid.\nthis is not yaml\n",
+):
+    assert "invalid-frontmatter" in audit_frontmatter_fixture(malformed)
+
+for malformed in (
+    "name: true\ndescription: Valid.\n",
+    "name: fixture\ndescription: 123\n",
+):
+    assert "invalid-frontmatter-value" in audit_frontmatter_fixture(malformed)
+
+assert "invalid-frontmatter-value" in audit_frontmatter_fixture(
+    "name: fixture\ndescription: Valid.\ndisable-model-invocation: yes\n"
+)
+print("OK   canonical frontmatter parser rejects YAML bypasses and type drift")
+
+
 snapshot_check = subprocess.run(
     [sys.executable, str(VERIFY_SCRIPT)],
     cwd=ROOT,

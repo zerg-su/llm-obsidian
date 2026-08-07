@@ -151,7 +151,24 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
     """Keep the concise engineering-discipline contract equivalent."""
     issues: list[str] = []
     for source, text in (("AGENTS.md", agents), ("CLAUDE.md", claude)):
-        if len(ENGINEERING_DISCIPLINE_PATTERN.findall(text)) != 1:
+        matches = list(ENGINEERING_DISCIPLINE_PATTERN.finditer(text))
+        weakened_context = False
+        if len(matches) == 1:
+            preceding = text[: matches[0].start()].splitlines()
+            nearby: list[str] = []
+            for line in reversed(preceding):
+                if line.strip():
+                    nearby.append(line.strip())
+                if len(nearby) == 2:
+                    break
+            weakened_context = bool(
+                re.search(
+                    r"\b(?:optional|ignore|suggestions? only)\b",
+                    " ".join(reversed(nearby)),
+                    flags=re.I,
+                )
+            )
+        if len(matches) != 1 or weakened_context:
             issues.append(
                 f"{source} must contain one exact positive engineering discipline contract"
             )
