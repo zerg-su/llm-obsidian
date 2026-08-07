@@ -4608,8 +4608,13 @@ def _initial_start_worker(
     (cwd / "callbacks").mkdir(parents=True)
     prompt_path = cwd / "prompt.md"
     prompt_path.write_text(f"{INITIAL_ANCHOR}\n", encoding="utf-8")
-    provider = root / f"{name}-provider.py"
-    provider.write_text("import time\ntime.sleep(1.0)\n", encoding="utf-8")
+    # Inline argv: the crash fixture leaves its provider to start after the
+    # temporary root is gone, and a missing script file would print to stderr.
+    provider_argv = (
+        str(Path(sys.executable).resolve()),
+        "-c",
+        "import time; time.sleep(1.0)",
+    )
     store = OperationStore(root / f"{name}-store")
     spec = OperationSpec(
         f"{name}-op",
@@ -4625,7 +4630,7 @@ def _initial_start_worker(
         store.transition(f"owner-{name}", f"{name}-op", state)
     callback = cwd / "callbacks" / "result.json"
     launch = ProcessAdapter().prepare_surface_launch(
-        argv=(str(Path(sys.executable).resolve()), str(provider)),
+        argv=provider_argv,
         cwd=cwd,
         state_root=root / f"{name}-state",
         worker=ROOT / "scripts" / "harness-runtime-worker.py",

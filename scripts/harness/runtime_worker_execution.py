@@ -16,8 +16,12 @@ from .runtime_provider_input import interactive_provider_input
 from .runtime_session_contracts import MAX_PROMPT_BYTES
 from .runtime_session_continuation import (
     _editor_digest,
+    _no_checkpoint,
+    _prompt_anchor,
+    _screen_digest,
     await_initial_input_ready,
     await_initial_input_visible,
+    await_initial_start_acknowledged,
 )
 from .runtime_worker_control import RuntimeWorkerControlMixin
 from .runtime_worker_fix import RuntimeWorkerFixMixin
@@ -157,6 +161,7 @@ class RuntimeWorkerExecution(
         monotonic_clock: Callable[[], float] | None = None,
         sleeper: Callable[[float], None] | None = None,
         fault_observer: Callable[[str], None] | None = None,
+        initial_start_observation_limit: int | None = None,
     ) -> int:
         self.spec_path = spec_path
         self.poll_seconds = poll_seconds
@@ -250,6 +255,11 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
+        initial_start_budget: dict[str, int] = (
+            {}
+            if initial_start_observation_limit is None
+            else {"observation_limit": initial_start_observation_limit}
+        )
         initial_input = self.spec.get("initial_input_pointer")
         if isinstance(initial_input, Path):
             stream: RuntimeProviderEventStream | None = None
@@ -297,7 +307,31 @@ class RuntimeWorkerExecution(
                     raise RuntimeWorkerError(
                         "initial provider input was not visible"
                     )
+                paste_screen_sha256 = _screen_digest(
+                    self.cmux_adapter.read(self.spec["surface_id"])
+                )
                 self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+                # A returned keystroke is transport, not a started turn.  Hold
+                # the reserved send open until the provider crosses a bounded
+                # semantic start boundary; anything else falls into the
+                # ambiguous containment below without a second send.
+                acknowledgement = await_initial_start_acknowledged(
+                    self.cmux_adapter,
+                    surface_id=self.spec["surface_id"],
+                    runtime=self.spec["runtime"],
+                    anchor=_prompt_anchor(delivery_text),
+                    paste_screen_sha256=paste_screen_sha256,
+                    artifact_ready=self.spec["callback_pointer"].is_file,
+                    checkpoint_probe=(
+                        self.checkpoint_probe or _no_checkpoint
+                    ),
+                    **initial_start_budget,
+                )
+                if acknowledgement != "started":
+                    raise RuntimeWorkerError(
+                        "initial provider start was not acknowledged: "
+                        f"{acknowledgement}"
+                    )
                 stream.accept_input()
             except (
                 OSError,

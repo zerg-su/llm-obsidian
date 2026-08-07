@@ -389,11 +389,11 @@ def enforce_callback_deadline(
     return False
 
 
-def run(spec_path: Path, *, poll_seconds: float=0.1, checkpoint_probe: Callable[[str, str], str] | None=None, cmux_adapter: object | None=None, review_launcher: Callable[[Path, Path], None] | None=None, verification_runner: Callable[..., subprocess.CompletedProcess[str]] | None=None, callback_submit_policy: CallbackSubmitPolicy | None=None, clock: Callable[[], float] | None=None, wall_clock: Callable[[], float] | None=None, monotonic_clock: Callable[[], float] | None=None, sleeper: Callable[[float], None] | None=None) -> int:
+def run(spec_path: Path, *, poll_seconds: float=0.1, checkpoint_probe: Callable[[str, str], str] | None=None, cmux_adapter: object | None=None, review_launcher: Callable[[Path, Path], None] | None=None, verification_runner: Callable[..., subprocess.CompletedProcess[str]] | None=None, callback_submit_policy: CallbackSubmitPolicy | None=None, clock: Callable[[], float] | None=None, wall_clock: Callable[[], float] | None=None, monotonic_clock: Callable[[], float] | None=None, sleeper: Callable[[float], None] | None=None, initial_start_observation_limit: int | None=None) -> int:
     from .runtime_worker_execution import RuntimeWorkerExecution
     worker = RuntimeWorkerExecution()
     worker.contain_provider_start_failure = _contain_provider_start_failure
-    return worker.execute(spec_path, poll_seconds=poll_seconds, checkpoint_probe=checkpoint_probe, cmux_adapter=cmux_adapter, review_launcher=review_launcher, verification_runner=verification_runner, callback_submit_policy=callback_submit_policy, clock=clock, wall_clock=wall_clock, monotonic_clock=monotonic_clock, sleeper=sleeper)
+    return worker.execute(spec_path, poll_seconds=poll_seconds, checkpoint_probe=checkpoint_probe, cmux_adapter=cmux_adapter, review_launcher=review_launcher, verification_runner=verification_runner, callback_submit_policy=callback_submit_policy, clock=clock, wall_clock=wall_clock, monotonic_clock=monotonic_clock, sleeper=sleeper, initial_start_observation_limit=initial_start_observation_limit)
 
 
 def _publish_early_failure(spec_path: Path, reason: str) -> None:

@@ -18,10 +18,20 @@ class ContinuationPort(Protocol):
 
 
 ArtifactProbe = Callable[[], bool]
+CheckpointProbe = Callable[[str, str], str]
 OwnershipProbe = Callable[[], bool]
 RetryReservation = Callable[[], bool]
 StageObserver = Callable[[str, int, str, str, str], None]
 Waiter = Callable[[float], None]
+
+
+def _no_artifact() -> bool:
+    return False
+
+
+def _no_checkpoint(surface_id: str, runtime: str) -> str:
+    del surface_id, runtime
+    return ""
 
 
 @dataclass(frozen=True)
@@ -239,6 +249,62 @@ def await_initial_input_visible(
         if observation + 1 < observation_limit:
             wait(observation_interval_seconds)
     return False
+
+
+def await_initial_start_acknowledged(
+    port: ContinuationPort,
+    *,
+    surface_id: str,
+    runtime: str,
+    anchor: str,
+    paste_screen_sha256: str,
+    artifact_ready: ArtifactProbe = _no_artifact,
+    checkpoint_probe: CheckpointProbe = _no_checkpoint,
+    observation_limit: int = 600,
+    observation_interval_seconds: float = 0.05,
+    wait: Waiter = sleep,
+) -> str:
+    """Classify whether the provider semantically started after one submit.
+
+    Delivering ``Enter`` to a surface is a transport fact, not evidence that a
+    turn began.  A provider held behind a rate-limit window keeps repainting a
+    countdown and a spinner while still waiting for its first response, so this
+    observes only signals that cannot be produced by repainting alone: a
+    recognized provider activity transition away from the exact paste screen, a
+    resume checkpoint, or a typed artifact.
+
+    A cleared composer is deliberately *not* a start.  The retained RC4 failure
+    cleared it and never began the task.
+
+    Screen bodies are inspected transiently.  The return value is one bounded
+    token: ``started``, ``still-composing``, ``permission``, ``unknown``, or
+    ``unconfirmed``.  This never sends input.
+    """
+
+    if observation_limit < 1:
+        raise ValueError("initial start observation limit must be positive")
+    if observation_interval_seconds < 0:
+        raise ValueError("initial start observation interval cannot be negative")
+    last_state = ""
+    for observation in range(observation_limit):
+        if artifact_ready():
+            return "started"
+        if checkpoint_probe(surface_id, runtime):
+            return "started"
+        screen = port.read(surface_id)
+        state = classify_continuation_screen(runtime, screen, anchor)
+        if state == "permission":
+            return "permission"
+        if state == "active" and _screen_digest(screen) != paste_screen_sha256:
+            return "started"
+        last_state = state
+        if observation + 1 < observation_limit:
+            wait(observation_interval_seconds)
+    if last_state == "input-ready":
+        return "still-composing"
+    if last_state in {"unknown", "missing"}:
+        return "unknown"
+    return "unconfirmed"
 
 
 def deliver_continuation(
