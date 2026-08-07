@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "python3",
+    "tests/test_rc3_documentation.py"
+  ],
+  "execution_id": "e5e18989db325edf11f945b0f9a28e5e0ea6f81479217e3da535a60bef8671cf",
+  "exit_status": 0,
+  "profile": "focused-docs-skills",
+  "release": "2.6.6-rc3",
+  "schema_version": 1,
+  "slice_id": "E",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stdout": {
+    "bytes": 52,
+    "sha256": "acd8b0abbe019af7386e6f3ffe00eba21017ddc728411025010260c043cf15a1"
+  },
+  "subject_head_sha": "c4cdd17b2f938ab368a2e130e2fa83e59ab0bcc9"
+}
