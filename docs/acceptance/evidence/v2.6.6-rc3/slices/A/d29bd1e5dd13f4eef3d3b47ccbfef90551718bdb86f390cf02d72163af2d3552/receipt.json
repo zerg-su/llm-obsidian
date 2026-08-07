@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "python3",
+    "tests/test_rc3_release_evidence.py"
+  ],
+  "execution_id": "d29bd1e5dd13f4eef3d3b47ccbfef90551718bdb86f390cf02d72163af2d3552",
+  "exit_status": 0,
+  "profile": "focused-red-green",
+  "release": "2.6.6-rc3",
+  "schema_version": 1,
+  "slice_id": "A",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stdout": {
+    "bytes": 38,
+    "sha256": "a3b1325c0907853615f90ae4caae52343dc3c9625fd228af5079bd5b3b3b634b"
+  },
+  "subject_head_sha": "ce47cae3a818fd375c50d7643ce8e10934e87be8"
+}
