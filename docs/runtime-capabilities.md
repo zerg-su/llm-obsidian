@@ -130,7 +130,7 @@ upstream proxy chaining, arbitrary Unix sockets, and SOCKS5/UDP remain disabled.
 This supports local MCP/services and
 task-side review/escalation/reap callbacks without outbound Internet access.
 
-Both Claude and Codex background commands receive a supervisor-generated
+Both Claude and Codex background commands receive a harness-generated
 owner/root-controlled `PATH`. It contains the selected Python runtime plus
 available Homebrew, Git, uv, Docling, cmux, Claude, and Codex directories, so a
 task does not inherit a stale GUI/session path. Unattended executors also receive
@@ -166,7 +166,7 @@ provider, or a hidden interactive session. Arbitrary direct print-mode commands
 remain prohibited; continuable work stays in visible cmux sessions.
 
 Reviewers remain product-read-only but are no longer toolchain-starved. Review
-specs, callbacks, baselines, watchdog state, and results live under exact
+specs, callbacks, baselines, liveness state, and results live under exact
 owner/operation/run identity, so several sessions in one project do not share
 singleton files. Simple review uses one holistic lane. Default Deep uses two
 independent holistic model lanes; single-model Deep and explicit Full reuse the

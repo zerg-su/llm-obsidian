@@ -23,7 +23,7 @@ make test-instruction-lint
 make test-skill-budget
 make test-codex-adapter
 python3 tests/harness/test_custom_pipelines.py
-git diff --check v2.6.2..HEAD
+git diff --check v2.6.6-rc2..HEAD
 make test
 make test-harness-coverage
 python3 scripts/validate-vault.py --summary

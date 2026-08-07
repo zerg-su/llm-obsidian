@@ -23,6 +23,12 @@ plan mode; for a general conversation save, use `/save`.
 
 ### 1. Identify the plan content
 
+Before metadata, apply the normative language and required-plan-shape contract
+from [implementation-plan](../implementation-plan/SKILL.md). If an
+implementation plan fails it without an explicit user language override, stop
+and ask for an amended approved plan; do not silently translate evidence
+identity.
+
 Find the latest coherent plan using its Plan/План heading, steps, goal, risks,
 open questions, or checklist. If none exists, ask for it; if several exist, ask
 which one to save.

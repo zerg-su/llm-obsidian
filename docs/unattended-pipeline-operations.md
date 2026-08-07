@@ -43,8 +43,8 @@ correctness/architecture/security axes. Reviewer sessions are product
 read-only; the executor resolves findings. Verification reuses the exact
 reviewer lane and surface within the configured round bound.
 
-The task writes canonical `.task-summary.json`. Its supervisor validates and
-delivers that value through the internal callback broker. The coordinator owns
+The task writes canonical `.task-summary.json`. The provider worker validates and delivers
+that value through the internal callback broker. The coordinator owns
 the one `reap-runner.py` vault transaction, review archival, plan close,
 validation, task archival, armed exit, and exact terminal cleanup.
 
@@ -59,7 +59,7 @@ effect.
 terminal harness record that retains a pending effect or exact owned resource,
 and unmatched live or uncertain legacy task/review/research state before
 mutation. A canonical same-ID terminal dispatch with settled effects and no
-provider, supervisor, or cmux ownership proves only its matching v3 worktree
+provider-process or cmux ownership proves only its matching v3 worktree
 and active lane-free broker mirrors stale; those mirrors do not block.
 
 Finish or cancel live operations with the installed runtime. Inspect and

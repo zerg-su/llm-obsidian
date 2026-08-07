@@ -10,6 +10,13 @@ architecture returns to `design` or `codebase-design`. Read
 [engineering-quality-contract.md](../../docs/skill-references/engineering-quality-contract.md)
 when module shape or extraction is involved.
 
+Write normative plan prose in English unless the user explicitly requests
+another language. This includes the Outcome Contract, goal, evidence
+identifiers, slice definitions, stop rules, and verification instructions.
+Keep user-facing conversation in the user's language. Return a non-English
+approved Outcome Contract for amendment instead of silently translating its
+evidence identity.
+
 Write vertical, independently reviewable slices. Every slice must name:
 
 - `files/responsibility`: exact owned files or module and one change reason;

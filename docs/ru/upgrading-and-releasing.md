@@ -34,19 +34,33 @@ make test
 make test-harness-coverage
 make acceptance-check
 python3 scripts/validate-vault.py --summary
-git diff --check v2.6.2..HEAD
+git diff --check v2.6.6-rc2..HEAD
 ```
 
-Release candidate включает changelogs, manifests версии 2.6.3, release notes,
-acceptance/readiness ledgers и content-free command receipt
-`.vault-meta/release-evidence/v2.6.3-<short-head>.json` одного HEAD. Receipt
-содержит полный 40-character SHA, команды и exit codes; новый commit делает его
-stale и требует повторного exact-HEAD gate.
+Для `2.6.6-rc3` сначала проверьте code-owned inventory и механический budget:
+
+```bash
+python3 scripts/rc3_inventory.py build --baseline b86a33d779bd8852915a4b875f12ef9a9b7366b3 --candidate "$(git rev-parse HEAD)"
+python3 scripts/rc3_release_disposition.py budget docs/acceptance/v2.6.6-rc3-attempt-ledger.json
+```
+
+Release candidate включает changelogs, version manifests, RC3 release notes,
+machine inventory, prospective slice receipts, две coverage observations,
+attempt ledger и typed final disposition. Exact gate receipt содержит полный
+40-character SHA, profile digest, команды, exit codes и output digests. После
+получения двух review verdicts проверьте concrete disposition:
+
+```bash
+python3 scripts/rc3_release_disposition.py check docs/acceptance/v2.6.6-rc3-release-disposition.json --gate-receipt docs/acceptance/evidence/v2.6.6-rc3/release/receipt.json
+```
+
+Новый product commit делает gate и disposition stale и требует нового
+механически учтённого candidate attempt.
 
 ## Ожидаемый результат и проверка
 
 Все version carriers согласованы; generated adapter check не показывает drift;
-full suite и model-free acceptance зелёные; release readiness перечисляет E1–E7
+full suite и model-free acceptance зелёные; release readiness перечисляет RC3-E1–E9
 и non-goals. В этой задаче terminal state — готовая документация и commits,
 не опубликованный релиз.
 
@@ -58,8 +72,9 @@ full suite и model-free acceptance зелёные; release readiness переч
   duplicate discovery.
 - Upgrade state неизвестен активной operation: harness переводит её в
   `attention-required`; не resume на догадке.
-- Gate красный: release blocked; исправьте exact failure на том же candidate
-  HEAD и повторите affected checks.
+- Gate красный: release blocked; исправление создаёт новый exact HEAD и новый
+  full-profile attempt. Unpublished и test-only попытки также расходуют budget;
+  шестая попытка запрещена.
 - Rollback: вернитесь к зафиксированной версии repository/plugin через
   поддерживаемый installation path; user data/secrets не удаляются.
 

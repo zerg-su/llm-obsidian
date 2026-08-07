@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "implementation-plan",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "RC3-SKILL-EN-01",
+        "steering": "RC3-SKILL-EN-01",
+        "pruning": "pass",
+        "goal_preservation": "RC3-SKILL-EN-01"
+      },
+      "overall_input": "An approved Outcome Contract and design for multi-file implementation planning.",
+      "overall_outcome": "A complete implementation plan that preserves the approved outcome and is executable as owned TDD slices.",
+      "local_subgoal": "Make normative plan language and the required plan sections deterministic without changing planning authority.",
+      "completion_proxies": ["The focused English-plan contract test passes.", "The skill inventory and body budget pass."],
+      "required_outcome_evidence": ["RC3-E8-english-plan-contract", "RC3-E9-release-candidate"],
+      "evidence": "skills/implementation-plan/SKILL.md lacks an English-default rule and an exhaustive normative plan-section list.",
+      "change": "Add one inline English-default rule plus one concise required plan-shape sentence.",
+      "behavior_proof": "Invocation, read-only authority, owned-slice semantics, finalization ceilings, and approval-before-code remain unchanged."
+    },
+    {
+      "skill": "save-plan",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "RC3-SKILL-EN-02",
+        "steering": "RC3-SKILL-EN-02",
+        "pruning": "pass",
+        "goal_preservation": "RC3-SKILL-EN-02"
+      },
+      "overall_input": "The latest coherent approved plan and its exact Outcome Contract from the current conversation.",
+      "overall_outcome": "One canonical pending plan page with exact provenance and no semantic drift.",
+      "local_subgoal": "Reject an implicit non-English normative implementation plan before allocation while preserving explicit user language overrides.",
+      "completion_proxies": ["The focused English-plan contract test passes.", "The verdict audit and vault-writer tests pass."],
+      "required_outcome_evidence": ["RC3-E8-english-plan-contract", "RC3-E9-release-candidate"],
+      "evidence": "skills/save-plan/SKILL.md recognizes Plan/План but does not constrain normative language or require evidence IDs, slices, stop rules, and verification instructions for implementation plans.",
+      "change": "Add one pre-allocation English/default-language and completeness check without changing the exact approved plan or writer path.",
+      "behavior_proof": "Triggers, Outcome Contract identity, metadata allocation, collision handling, and the single vault-write transaction remain unchanged."
+    }
+  ]
+}

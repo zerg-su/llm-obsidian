@@ -30,6 +30,10 @@ Stop: любое изменение CLI behavior требует отдельно
 
 Для multi-file работы вызовите `implementation-plan`; для сохранения approved
 version — `save-plan`. Review плана проверяет intent до product mutation.
+Normative plan prose по умолчанию пишется на английском: Outcome Contract,
+goal, evidence identifiers, slices, stop rules и verification instructions.
+Разговор с пользователем остаётся на его языке; другой язык нормативного плана
+используется только по явному запросу пользователя.
 
 Если работа естественно делится на независимые ownership-зоны, не превращайте
 их в один многодневный task. Сформируйте отдельный approved plan для каждой

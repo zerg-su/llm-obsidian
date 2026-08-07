@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "method": "system-skill-creator",
+  "order": 1,
+  "skills": [
+    {
+      "skill": "implementation-plan",
+      "existing_skill": true,
+      "concrete_examples": [
+        "Plan a multi-file implementation while speaking Russian with the user.",
+        "Plan in another normative language only when the user explicitly requests it."
+      ],
+      "reusable_contents": ["SKILL.md normal-path invariant"],
+      "degree_of_freedom": "low",
+      "progressive_disclosure": "Keep the mandatory language and plan-shape rule inline because every implementation plan needs it.",
+      "protected_behavior": ["read-only planning", "owned TDD slices", "approval before code"],
+      "validation": ["python3 tests/test_rc3_documentation.py", "make test-instruction-lint test-skill-budget test-codex-adapter"]
+    },
+    {
+      "skill": "save-plan",
+      "existing_skill": true,
+      "concrete_examples": [
+        "Save an approved implementation plan whose surrounding conversation is Russian.",
+        "Preserve a non-English normative plan only after an explicit user language request."
+      ],
+      "reusable_contents": ["SKILL.md normal-path invariant"],
+      "degree_of_freedom": "low",
+      "progressive_disclosure": "Keep the language and completeness check in Step 1 before allocation or writes.",
+      "protected_behavior": ["explicit save trigger", "Outcome Contract identity", "single vault-write transaction"],
+      "validation": ["python3 tests/test_rc3_documentation.py", "make test-instruction-lint test-skill-budget test-codex-adapter"]
+    }
+  ]
+}

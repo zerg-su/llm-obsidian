@@ -53,7 +53,7 @@ skills `dispatch`/`review`/`reap` вместо ручной provider/cmux orches
 | `make test-instruction-lint` | Skill/instruction safety contracts |
 | `make test-skill-budget` | Registry/body budget |
 | `make test-codex-adapter` | Generated marketplace parity |
-| `git diff --check v2.6.2..HEAD` | Whitespace/conflict-marker hygiene для всего release range, а не только working tree |
+| `git diff --check v2.6.6-rc2..HEAD` | Whitespace/conflict-marker hygiene для всего RC3 release range, а не только working tree |
 
 ## Git write boundary
 

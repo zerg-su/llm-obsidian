@@ -82,7 +82,7 @@ The canonical state is ordinary Markdown, JSON/TOML contracts, Git history, and 
 5. **Execute.** Claude or Codex works in an isolated Git worktree. Same-model bounded work normally uses an internal agent; an explicit separate window creates a durable visible lane.
 6. **Review.** Simple review uses one selected read-only holistic lane. Default Deep review runs independent Anthropic and OpenAI holistic lanes; each checks both intent/outcome and engineering quality. Explicit single-model Deep instead splits that model into intent and engineering lanes. Full review is explicit-only and runs the four provider-by-responsibility lanes. Verification resumes the exact lane and surface.
 7. **Reap.** A typed final summary, approved review archive, plan hash, result path, and session provenance are validated. One vault transaction writes the result and closes the plan.
-8. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The supervisor closes that exact surface after the agent process exits; it never guesses another tab.
+8. **Exit safely.** `/exit` is armed only after the lifecycle is complete. The lifecycle wrapper requests graceful agent exit and closes that exact surface only after the process exits; it never guesses another tab.
 
 Review approval finishes a **round**, not the whole task. The task remains resumable until final reap. Archived sessions are never silently attached to another task ID.
 
@@ -396,7 +396,7 @@ There is no speculative roadmap in this README. The repository describes what is
 | v2.6.6 RC1 deletion-first lifecycle simplification and sealed Split ancestry | [v2.6.6 RC1 release notes](docs/releases/v2.6.6-rc1.md) |
 | Model inheritance and overrides | [Model routing](docs/model-routing.md) |
 | Claude/Codex capability differences | [Runtime capability matrix](docs/runtime-capabilities.md) |
-| Dispatch, review, watchdog, and close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
+| Dispatch, review, harness liveness, and close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
 | v2.3.0 clean-cut migration | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | v2.4.0 compiled pipeline boundary | [Pipeline composition ADR](docs/decisions/v2.4-pipeline-composition-boundary.md) |

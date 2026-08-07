@@ -94,7 +94,7 @@ LLM Obsidian — одновременно Obsidian-вольт и набор ин
 5. **Выполнить.** Claude или Codex работает в отдельном Git worktree. Ограниченную работу той же моделью по умолчанию берёт внутренний агент; явный запрос отдельного окна создаёт долговременную видимую lane.
 6. **Review.** Simple review использует одну выбранную read-only holistic lane. Default Deep запускает независимые holistic lanes Anthropic и OpenAI; каждая проверяет и intent/outcome, и engineering quality. Явный single-model Deep вместо этого разделяет одну модель на intent и engineering lanes. Full review запускается только явно и использует четыре provider-by-responsibility lanes. Verify возобновляет точную lane и surface.
 7. **Reap.** Проверяются typed summary, approved review archive, hash плана, result path и session provenance. Одна vault-транзакция пишет результат и закрывает plan.
-8. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Supervisor закрывает точную surface после выхода процесса и никогда не угадывает соседнюю вкладку.
+8. **Безопасный exit.** `/exit` разрешается только после завершения lifecycle. Lifecycle wrapper запрашивает graceful exit и закрывает точную surface только после выхода процесса; соседняя вкладка никогда не выбирается по догадке.
 
 Успешный review заканчивает **раунд**, а не всю задачу. Task остаётся возобновляемой до final reap. Архивная сессия никогда автоматически не привязывается к другому task ID.
 
@@ -405,7 +405,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 | Deletion-first упрощение lifecycle и sealed Split ancestry в 2.6.6 RC1 | [Release notes 2.6.6 RC1](docs/releases/v2.6.6-rc1.md) |
 | Model inheritance и overrides | [Model routing](docs/model-routing.md) |
 | Различия Claude/Codex | [Runtime capability matrix](docs/runtime-capabilities.md) |
-| Dispatch, review, watchdog, close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
+| Dispatch, review, harness liveness, close | [Unattended pipeline](docs/unattended-pipeline-operations.md) |
 | Persistent task/model/domain lanes | [Task sessions](docs/task-sessions.md) |
 | Clean-cut migration 2.3.0 | [Runtime harness migration](docs/runtime-harness-migration.md) |
 | Compiled pipeline boundary 2.4.0 | [ADR о композиции pipeline](docs/decisions/v2.4-pipeline-composition-boundary.md) |

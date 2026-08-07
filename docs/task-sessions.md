@@ -53,7 +53,7 @@ resolves the repository, context, exact result title, and user approval; after
 approval it submits one typed request. The operation captures the exact current
 session route, claims the request UUID, creates one branch/worktree/task
 binding, renders and validates task-meta v4, opens one split anchored to the
-caller, launches the supervisor, verifies the surface, and writes the dispatch
+caller, launches the runtime worker, verifies the surface, and writes the dispatch
 log transaction.
 
 The run claim is persistent under `.vault-meta/dispatch-runs/<request-id>.json`.
@@ -127,7 +127,7 @@ new work FIFO; different tasks/models/domains can run concurrently. Enqueue is
 serialized against `reap`, which changes `active -> archiving -> archived`
 before enumerating lanes.
 
-Once a launcher claims a review operation, every pre-supervisor failure
+Once a launcher claims a review operation, every pre-runtime failure
 transitions that exact operation to `failed` before propagating the error. The
 same containment remains for legacy 2.2 `secure-fetch` and `secure-synth`
 records during upgrade recovery. A retry of an already-active operation reports
@@ -153,7 +153,7 @@ directory. Reviewers write only one outbox in their owner-only runtime; the
 trusted relay validates identity, state, mode, baseline, HEAD, and verification
 profile before publishing the canonical callback. This prevents two
 coordinators or reviewer models in one checkout from sharing metadata, results,
-watchdog locks, or close sentinels.
+liveness locks, or close sentinels.
 
 ## Surfaces and resume
 
@@ -197,8 +197,8 @@ metadata remains. Archived tasks are not automatically attached to later work.
 operation, every terminal harness record that retains a pending effect or exact
 owned resource, and unmatched unreaped worktree, legacy review/research, or
 non-archived broker state. One narrow exception applies when a canonical,
-same-ID terminal dispatch proves all effects settled and all provider,
-supervisor, and cmux ownership released: its matching v3 worktree mirror and
+same-ID terminal dispatch proves all effects settled and all provider-process
+and cmux ownership released: its matching v3 worktree mirror and
 active lane-free broker mirror are stale rather than live and do not block.
 
 Finish or cancel live operations with the installed runtime. A terminal record

@@ -276,15 +276,15 @@ required_page_tokens = {
     "testing.md": (
         "make test-harness-coverage",
         "statement-line denominator",
-        "git diff --check v2.6.2..HEAD",
+        "git diff --check v2.6.6-rc2..HEAD",
     ),
     "reference/commands.md": (
         "make test-harness-coverage",
-        "git diff --check v2.6.2..HEAD",
+        "git diff --check v2.6.6-rc2..HEAD",
     ),
     "upgrading-and-releasing.md": (
-        ".vault-meta/release-evidence/v2.6.3-<short-head>.json",
-        "git diff --check v2.6.2..HEAD",
+        "docs/acceptance/evidence/v2.6.6-rc3/release/receipt.json",
+        "git diff --check v2.6.6-rc2..HEAD",
     ),
     "parallel-tasks.md": (
         "автоматического task graph",
