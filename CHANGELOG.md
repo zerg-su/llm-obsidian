@@ -36,7 +36,8 @@ without expanding runtime capability or lifecycle authority.
 ### Fixed
 
 - Count every full-profile candidate execution mechanically, including
-  unpublished and test-only attempts, with a hard five-attempt ceiling.
+  unpublished and test-only attempts, with an operator-authorized hard
+  eight-attempt ceiling and a digest-bound authorization record.
 - Reject candidate, gate, review, finding, waiver, output, or profile drift
   from machine-readable RC3 evidence.
 

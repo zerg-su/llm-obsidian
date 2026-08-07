@@ -16,7 +16,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from rc3_attempt_ledger import AttemptLedgerError, AttemptLedgerStore  # noqa: E402
+from rc3_attempt_ledger import (  # noqa: E402
+    MAX_ATTEMPTS,
+    AttemptLedgerError,
+    AttemptLedgerStore,
+)
 from verification_receipt import ReceiptError, verify_receipt  # noqa: E402
 from harness.ephemeral_provider import (  # noqa: E402
     EphemeralProviderError,
@@ -25,14 +29,12 @@ from harness.ephemeral_provider import (  # noqa: E402
 )
 from harness.verification import load_profiles  # noqa: E402
 from model_routing_config import load_tracked_config  # noqa: E402
+from review_contract import ReviewContractError, validate_finding  # noqa: E402
+from review_contract import VERDICTS as REVIEW_VERDICTS  # noqa: E402
 
 
 SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-MAX_ATTEMPTS = 7
-REVIEW_VERDICTS = frozenset(
-    {"approved", "changes-requested", "blocked", "unavailable"}
-)
 _ROUTING = load_tracked_config(ROOT)
 _INDEPENDENT_ROUTE = _ROUTING.finalization_route("finalization-independent")
 _INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
@@ -198,14 +200,16 @@ def _review_bundle(
     ):
         raise DispositionError("release review receipt identity is invalid")
     findings = payload["findings"]
-    if any(
-        not isinstance(row, dict)
-        or not isinstance(row.get("finding_id"), str)
-        or not row["finding_id"].strip()
-        or row.get("severity") not in {"blocking", "important", "warning", "nit"}
-        for row in findings
-    ):
-        raise DispositionError("release review findings are invalid")
+    try:
+        findings = [
+            validate_finding(row, f"release review findings[{index}]")
+            for index, row in enumerate(findings)
+        ]
+    except ReviewContractError as exc:
+        raise DispositionError("release review findings are invalid") from exc
+    finding_ids = [str(row["finding_id"]) for row in findings]
+    if len(finding_ids) != len(set(finding_ids)):
+        raise DispositionError("release review finding identities are duplicated")
     return {
         "role": role,
         "axis": expected_axis,
@@ -217,7 +221,7 @@ def _review_bundle(
         "verdict": str(payload["verdict"]),
         "profile_sha256": str(profile["sha256"]),
         "receipt_sha256": hashlib.sha256(meta_raw + b"\0" + callback_raw).hexdigest(),
-        "finding_ids": sorted(str(row["finding_id"]) for row in findings),
+        "finding_ids": sorted(finding_ids),
     }
 
 
@@ -249,7 +253,11 @@ def _reviews(spec_path: Path, subject: str) -> list[dict[str, Any]]:
     return sorted(values, key=lambda row: row["role"])
 
 
-def _finding_evidence(path: Path, subject: str) -> dict[str, Any]:
+def _finding_evidence(
+    path: Path,
+    subject: str,
+    expected_finding_ids: set[str],
+) -> dict[str, Any]:
     value, raw = _json(path, "release finding evidence")
     rows = value.get("findings")
     if (
@@ -266,7 +274,7 @@ def _finding_evidence(path: Path, subject: str) -> dict[str, Any]:
         if (
             not isinstance(row, dict)
             or set(row) != {"finding_id", "disposition", "evidence"}
-            or row.get("disposition") != "fixed"
+            or row.get("disposition") not in {"fixed", "accepted-deviation"}
             or not isinstance(row.get("finding_id"), str)
             or not isinstance(row.get("evidence"), str)
             or Path(row["evidence"]).is_absolute()
@@ -278,13 +286,51 @@ def _finding_evidence(path: Path, subject: str) -> dict[str, Any]:
         checked.append(
             {
                 "finding_id": row["finding_id"],
-                "disposition": "fixed",
+                "disposition": str(row["disposition"]),
                 "evidence_sha256": _sha256(evidence_raw),
             }
         )
+    if identities != expected_finding_ids:
+        raise DispositionError("finding dispositions do not match review findings")
     return {
         "receipt_sha256": _sha256(raw),
         "findings": sorted(checked, key=lambda row: row["finding_id"]),
+    }
+
+
+def _accepted_deviations(path: Path, subject: str) -> dict[str, Any]:
+    value, raw = _json(path, "release accepted deviations")
+    rows = value.get("deviations")
+    forbidden = value.get("forbidden")
+    if (
+        set(value)
+        != {"schema_version", "integration_head_sha", "deviations", "forbidden"}
+        or value.get("schema_version") != 1
+        or value.get("integration_head_sha") != subject
+        or not isinstance(rows, list)
+        or not isinstance(forbidden, list)
+        or any(not isinstance(item, str) or not item.strip() for item in forbidden)
+    ):
+        raise DispositionError("release accepted deviations schema is invalid")
+    identities: set[str] = set()
+    checked = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"id", "disposition", "rationale"}
+            or row.get("disposition") not in {"accepted", "operator-authorized"}
+            or not isinstance(row.get("id"), str)
+            or not row["id"].strip()
+            or row["id"] in identities
+            or not isinstance(row.get("rationale"), str)
+            or not row["rationale"].strip()
+        ):
+            raise DispositionError("release accepted deviation is invalid")
+        identities.add(row["id"])
+        checked.append(str(row["id"]))
+    return {
+        "receipt_sha256": _sha256(raw),
+        "deviation_ids": sorted(checked),
     }
 
 
@@ -296,16 +342,29 @@ def compile_disposition(
     attempt_ledger_root: Path,
     review_manifest_path: Path,
     finding_evidence_path: Path,
+    accepted_deviations_path: Path,
 ) -> dict[str, Any]:
     subject = _exact_subject(root, subject_head_sha)
     gate = _gate(gate_receipt_path, subject)
     attempts = _attempts(attempt_ledger_root, gate, subject)
     reviews = _reviews(review_manifest_path, subject)
-    findings = _finding_evidence(finding_evidence_path, subject)
+    review_finding_ids = {
+        finding_id for review in reviews for finding_id in review["finding_ids"]
+    }
+    if sum(len(review["finding_ids"]) for review in reviews) != len(
+        review_finding_ids
+    ):
+        raise DispositionError("release review finding identities are duplicated")
+    findings = _finding_evidence(
+        finding_evidence_path,
+        subject,
+        review_finding_ids,
+    )
+    deviations = _accepted_deviations(accepted_deviations_path, subject)
     blocked = [
         f"review:{row['role']}:{row['verdict']}"
         for row in reviews
-        if row["verdict"] != "approved"
+        if row["verdict"] != "approve"
     ]
     inputs = {
         "subject_head_sha": subject,
@@ -313,6 +372,7 @@ def compile_disposition(
         "attempt_ledger": attempts,
         "reviews": reviews,
         "finding_evidence": findings,
+        "accepted_deviations": deviations,
     }
     result = {
         "schema_version": 1,
@@ -339,6 +399,7 @@ def validate_disposition(
     attempt_ledger_root: Path,
     review_manifest_path: Path,
     finding_evidence_path: Path,
+    accepted_deviations_path: Path,
 ) -> None:
     if not isinstance(payload, dict):
         raise DispositionError("release disposition must be an object")
@@ -349,6 +410,7 @@ def validate_disposition(
         attempt_ledger_root=attempt_ledger_root,
         review_manifest_path=review_manifest_path,
         finding_evidence_path=finding_evidence_path,
+        accepted_deviations_path=accepted_deviations_path,
     )
     if payload != rebuilt:
         raise DispositionError("release disposition bytes do not match compiled evidence")
@@ -371,6 +433,7 @@ def main() -> int:
         command.add_argument("--attempt-ledger-root", type=Path, required=True)
         command.add_argument("--review-manifest", type=Path, required=True)
         command.add_argument("--finding-evidence", type=Path, required=True)
+        command.add_argument("--accepted-deviations", type=Path, required=True)
     compile_cmd.add_argument("--subject-head-sha", required=True)
     args = parser.parse_args()
     try:
@@ -390,6 +453,7 @@ def main() -> int:
                 attempt_ledger_root=args.attempt_ledger_root,
                 review_manifest_path=args.review_manifest,
                 finding_evidence_path=args.finding_evidence,
+                accepted_deviations_path=args.accepted_deviations,
             )
         else:
             validate_disposition(
@@ -399,6 +463,7 @@ def main() -> int:
                 attempt_ledger_root=args.attempt_ledger_root,
                 review_manifest_path=args.review_manifest,
                 finding_evidence_path=args.finding_evidence,
+                accepted_deviations_path=args.accepted_deviations,
             )
             result = {"status": "valid"}
         print(json.dumps(result, indent=2, sort_keys=True))

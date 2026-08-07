@@ -59,7 +59,7 @@ stale. `release-final` запускается только с
 первой команды. После двух release review проверьте concrete disposition:
 
 ```bash
-python3 scripts/rc3_release_disposition.py check "$RC3_EVIDENCE_ROOT/release-disposition.json" --gate-receipt "$RC3_EVIDENCE_ROOT/release/receipt.json" --attempt-ledger-root "$RC3_EVIDENCE_ROOT" --review-manifest "$RC3_EVIDENCE_ROOT/reviews.json" --finding-evidence "$RC3_EVIDENCE_ROOT/findings.json"
+python3 scripts/rc3_release_disposition.py check "$RC3_EVIDENCE_ROOT/release-disposition.json" --gate-receipt "$RC3_EVIDENCE_ROOT/release/receipt.json" --attempt-ledger-root "$RC3_EVIDENCE_ROOT" --review-manifest "$RC3_EVIDENCE_ROOT/reviews.json" --finding-evidence "$RC3_EVIDENCE_ROOT/findings.json" --accepted-deviations "$RC3_EVIDENCE_ROOT/accepted-deviations.json"
 ```
 
 Новый product commit делает gate и disposition stale и требует нового
@@ -82,7 +82,7 @@ full suite и model-free acceptance зелёные; release readiness переч
   `attention-required`; не resume на догадке.
 - Gate красный: release blocked; исправление создаёт новый exact HEAD и новый
   full-profile attempt. Unpublished и test-only попытки также расходуют budget;
-  шестая попытка запрещена.
+  восемь полных попыток разрешены оператором для закрытия RC3; девятая попытка запрещена.
 - Rollback: вернитесь к зафиксированной версии repository/plugin через
   поддерживаемый installation path; user data/secrets не удаляются.
 

@@ -80,6 +80,15 @@ for command in (
     "python3 scripts/rc3_release_disposition.py check",
 ):
     assert command in upgrade
+assert "--accepted-deviations" in upgrade
+assert "восемь полных попыток" in upgrade
+assert "шестая попытка запрещена" not in upgrade
+
+changelogs = text("CHANGELOG.md") + text("CHANGELOG.ru.md")
+assert "eight-attempt ceiling" in changelogs
+assert "восьми candidate" in changelogs
+assert "five-attempt ceiling" not in changelogs
+assert "лимит из пяти candidate attempts" not in changelogs
 
 evidence_contract = text("docs/acceptance/v2.6.6-rc3-evidence-contract.md")
 for number in range(1, 10):

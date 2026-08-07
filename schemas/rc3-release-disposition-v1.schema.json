@@ -9,6 +9,7 @@
     "attempt_ledger",
     "reviews",
     "finding_evidence",
+    "accepted_deviations",
     "input_sha256",
     "outcome",
     "blocked_reasons"
@@ -81,7 +82,7 @@
           "effort": {"type": "string"},
           "review_id": {"type": "string"},
           "callback_id": {"type": "string"},
-          "verdict": {"type": "string", "enum": ["approved", "changes-requested", "blocked", "unavailable"]},
+          "verdict": {"type": "string", "enum": ["approve", "changes-requested", "blocked"]},
           "profile_sha256": {"type": "string"},
           "receipt_sha256": {"type": "string"},
           "finding_ids": {"type": "array", "items": {"type": "string"}}
@@ -101,12 +102,21 @@
             "required": ["finding_id", "disposition", "evidence_sha256"],
             "properties": {
               "finding_id": {"type": "string"},
-              "disposition": {"type": "string", "const": "fixed"},
+              "disposition": {"type": "string", "enum": ["fixed", "accepted-deviation"]},
               "evidence_sha256": {"type": "string"}
             },
             "additionalProperties": false
           }
         }
+      },
+      "additionalProperties": false
+    },
+    "accepted_deviations": {
+      "type": "object",
+      "required": ["receipt_sha256", "deviation_ids"],
+      "properties": {
+        "receipt_sha256": {"type": "string"},
+        "deviation_ids": {"type": "array", "items": {"type": "string"}}
       },
       "additionalProperties": false
     },

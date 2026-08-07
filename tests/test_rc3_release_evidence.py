@@ -156,7 +156,7 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             raise AssertionError("ledger must bind actual immutable artifact bytes")
 
         artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
-        for index in range(2, 8):
+        for index in range(2, 9):
             row = store.reserve(
                 attempt_id=f"00000000-0000-4000-8000-{index:012d}",
                 subject_head_sha=subject,
@@ -174,16 +174,16 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             )
         try:
             store.reserve(
-                attempt_id="00000000-0000-4000-8000-000000000008",
+                attempt_id="00000000-0000-4000-8000-000000000009",
                 subject_head_sha=subject,
                 profile_sha256="a" * 64,
                 execution_relation="release-candidate",
                 runner_sha256="b" * 64,
             )
         except ledger_module.AttemptLedgerError as exc:
-            assert "eighth" in str(exc)
+            assert "ninth" in str(exc)
         else:
-            raise AssertionError("eighth authoritative release attempt must fail closed")
+            raise AssertionError("ninth authoritative release attempt must fail closed")
 
 
 def test_release_final_runner_records_success_and_failure_without_caller_rows() -> None:
@@ -497,7 +497,14 @@ def write_gate_bundle(root: Path, subject: str) -> Path:
     return path
 
 
-def write_review_bundle(root: Path, role: str, subject: str) -> tuple[Path, Path]:
+def write_review_bundle(
+    root: Path,
+    role: str,
+    subject: str,
+    *,
+    verdict: str = "approve",
+    findings: list[dict[str, object]] | None = None,
+) -> tuple[Path, Path]:
     axis = {
         "fable": "anthropic-holistic",
         "independent-configured": "openai-holistic",
@@ -531,8 +538,8 @@ def write_review_bundle(root: Path, role: str, subject: str) -> tuple[Path, Path
         "axis": axis,
         "parent_session_operation_id": f"review-parent-{role}",
         "verification_iteration": 0,
-        "verdict": "approved",
-        "findings": [],
+        "verdict": verdict,
+        "findings": findings or [],
     }
     callback = {
         "schema_version": 1,
@@ -552,6 +559,81 @@ def write_review_bundle(root: Path, role: str, subject: str) -> tuple[Path, Path
         json.dumps(callback, sort_keys=True) + "\n", encoding="utf-8"
     )
     return meta_path, callback_path
+
+
+def write_accepted_deviations(root: Path, subject: str) -> Path:
+    path = root / "accepted-deviations.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "integration_head_sha": subject,
+                "deviations": [
+                    {
+                        "id": "historical-rc2-slice-receipts",
+                        "disposition": "accepted",
+                        "rationale": "Historical RC2 receipts are never reconstructed.",
+                    }
+                ],
+                "forbidden": ["No publication effect."],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_release_review_bundle_uses_canonical_transport_vocabulary() -> None:
+    subject = git("rev-parse", "HEAD")
+    for severity in ("critical", "important", "minor"):
+        with tempfile.TemporaryDirectory(prefix=f"rc3-review-{severity}.") as raw:
+            root = Path(raw)
+            finding = {
+                "finding_id": f"RC3.REVIEW.{severity.upper()}",
+                "severity": severity,
+                "file": "scripts/rc3_release_disposition.py",
+                "line": 1,
+                "summary": "Canonical review finding.",
+                "evidence": "Exact callback evidence.",
+                "recommendation": "Keep canonical transport vocabulary.",
+            }
+            meta, callback = write_review_bundle(
+                root,
+                "fable",
+                subject,
+                verdict="changes-requested",
+                findings=[finding],
+            )
+            compiled = disposition._review_bundle("fable", meta, callback, subject)
+            assert compiled["verdict"] == "changes-requested"
+            assert compiled["finding_ids"] == [finding["finding_id"]]
+
+    with tempfile.TemporaryDirectory(prefix="rc3-review-invalid.") as raw:
+        root = Path(raw)
+        finding = {
+            "finding_id": "RC3.REVIEW.WARNING",
+            "severity": "warning",
+            "file": "scripts/rc3_release_disposition.py",
+            "line": 1,
+            "summary": "Non-canonical severity.",
+            "evidence": "A legacy vocabulary value.",
+            "recommendation": "Reject it.",
+        }
+        meta, callback = write_review_bundle(
+            root,
+            "fable",
+            subject,
+            verdict="changes-requested",
+            findings=[finding],
+        )
+        try:
+            disposition._review_bundle("fable", meta, callback, subject)
+        except disposition.DispositionError as exc:
+            assert "review findings are invalid" in str(exc)
+        else:
+            raise AssertionError("non-canonical finding severity must fail closed")
 
 
 def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
@@ -577,8 +659,22 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
         )
 
         manifest_rows = []
+        expected_finding = {
+            "finding_id": "RC3.REVIEW.MINOR",
+            "severity": "minor",
+            "file": "scripts/rc3_release_disposition.py",
+            "line": 1,
+            "summary": "A fully dispositioned non-blocking review finding.",
+            "evidence": "The finding is bound to exact proof bytes.",
+            "recommendation": "Keep the exact finding-to-proof set complete.",
+        }
         for role in ("fable", "independent-configured"):
-            meta, callback = write_review_bundle(evidence, role, subject)
+            meta, callback = write_review_bundle(
+                evidence,
+                role,
+                subject,
+                findings=[expected_finding] if role == "fable" else [],
+            )
             manifest_rows.append(
                 {
                     "role": role,
@@ -601,6 +697,7 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
         )
         proof = evidence / "focused-tests.log"
         proof.write_text("RC3 focused evidence GREEN\n", encoding="utf-8")
+        accepted_deviations = write_accepted_deviations(evidence, subject)
         findings = evidence / "findings.json"
         findings.write_text(
             json.dumps(
@@ -609,7 +706,7 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
                     "subject_head_sha": subject,
                     "findings": [
                         {
-                            "finding_id": "RC3.E1.EXACT_HEAD_INVENTORY_DRIFT",
+                            "finding_id": "RC3.REVIEW.MINOR",
                             "disposition": "fixed",
                             "evidence": proof.name,
                         }
@@ -627,8 +724,13 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             attempt_ledger_root=evidence,
             review_manifest_path=manifest,
             finding_evidence_path=findings,
+            accepted_deviations_path=accepted_deviations,
         )
         assert compiled["outcome"] == "approved"
+        assert compiled["reviews"][0]["verdict"] == "approve"
+        assert compiled["accepted_deviations"]["deviation_ids"] == [
+            "historical-rc2-slice-receipts"
+        ]
         disposition.validate_disposition(
             ROOT,
             compiled,
@@ -636,7 +738,83 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             attempt_ledger_root=evidence,
             review_manifest_path=manifest,
             finding_evidence_path=findings,
+            accepted_deviations_path=accepted_deviations,
         )
+
+        drifted_deviations = evidence / "drifted-accepted-deviations.json"
+        drifted_payload = json.loads(accepted_deviations.read_text(encoding="utf-8"))
+        drifted_payload["integration_head_sha"] = "0" * 40
+        drifted_deviations.write_text(
+            json.dumps(drifted_payload, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            disposition.compile_disposition(
+                ROOT,
+                subject_head_sha=subject,
+                gate_receipt_path=gate,
+                attempt_ledger_root=evidence,
+                review_manifest_path=manifest,
+                finding_evidence_path=findings,
+                accepted_deviations_path=drifted_deviations,
+            )
+        except disposition.DispositionError as exc:
+            assert "accepted deviations schema" in str(exc)
+        else:
+            raise AssertionError("accepted-deviation subject drift must fail closed")
+
+        missing = evidence / "missing-findings.json"
+        missing.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "subject_head_sha": subject,
+                    "findings": [],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        try:
+            disposition.compile_disposition(
+                ROOT,
+                subject_head_sha=subject,
+                gate_receipt_path=gate,
+                attempt_ledger_root=evidence,
+                review_manifest_path=manifest,
+                finding_evidence_path=missing,
+                accepted_deviations_path=accepted_deviations,
+            )
+        except disposition.DispositionError as exc:
+            assert "finding dispositions do not match review findings" in str(exc)
+        else:
+            raise AssertionError("missing review finding disposition must fail closed")
+
+        extra_payload = json.loads(findings.read_text(encoding="utf-8"))
+        extra_payload["findings"].append(
+            {
+                "finding_id": "RC3.UNRELATED",
+                "disposition": "accepted-deviation",
+                "evidence": proof.name,
+            }
+        )
+        extra = evidence / "extra-findings.json"
+        extra.write_text(json.dumps(extra_payload, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            disposition.compile_disposition(
+                ROOT,
+                subject_head_sha=subject,
+                gate_receipt_path=gate,
+                attempt_ledger_root=evidence,
+                review_manifest_path=manifest,
+                finding_evidence_path=extra,
+                accepted_deviations_path=accepted_deviations,
+            )
+        except disposition.DispositionError as exc:
+            assert "finding dispositions do not match review findings" in str(exc)
+        else:
+            raise AssertionError("unrelated review finding disposition must fail closed")
 
         callback_path = evidence / "fable" / ".review-callback.json"
         callback = json.loads(callback_path.read_text(encoding="utf-8"))
@@ -650,6 +828,7 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
                 attempt_ledger_root=evidence,
                 review_manifest_path=manifest,
                 finding_evidence_path=findings,
+                accepted_deviations_path=accepted_deviations,
             )
         except disposition.DispositionError as exc:
             assert "review receipt identity" in str(exc)
@@ -664,5 +843,6 @@ if __name__ == "__main__":
     test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2()
     test_coverage_comparator_accepts_only_the_narrow_typed_tolerance()
     test_shell_scratch_helper_honors_constrained_tmpdir()
+    test_release_review_bundle_uses_canonical_transport_vocabulary()
     test_release_disposition_binds_actual_gate_reviews_and_findings()
     print("RC3 release evidence contracts passed")

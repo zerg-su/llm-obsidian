@@ -42,7 +42,8 @@
 ### Исправлено
 
 - Каждое выполнение full profile, включая unpublished и test-only попытки,
-  механически расходует лимит из пяти candidate attempts.
+  механически расходует оператором разрешённый лимит из восьми candidate
+  attempts; авторизация расширения входит в итоговый digest.
 - Machine-readable RC3 evidence отклоняет drift candidate, gate, review,
   finding, waiver, output и profile.
 
