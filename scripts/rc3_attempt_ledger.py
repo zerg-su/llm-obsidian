@@ -17,7 +17,9 @@ from typing import Any
 SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 ATTEMPT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
-MAX_ATTEMPTS = 5
+# The operator explicitly authorized one additional RC3 candidate after the
+# fifth attempt exposed only a schema-dialect compatibility defect.
+MAX_ATTEMPTS = 6
 TERMINAL = frozenset({"published", "unpublished", "test-only"})
 
 
@@ -72,7 +74,7 @@ class AttemptLedgerStore:
             raise AttemptLedgerError("attempt ledger schema is invalid")
         rows = value["attempts"]
         if len(rows) > MAX_ATTEMPTS:
-            raise AttemptLedgerError("sixth full-profile attempt has zero authority")
+            raise AttemptLedgerError("seventh full-profile attempt has zero authority")
         ids: set[str] = set()
         for ordinal, row in enumerate(rows, 1):
             if not isinstance(row, dict) or row.get("ordinal") != ordinal:
@@ -171,7 +173,7 @@ class AttemptLedgerStore:
             if any(row["attempt_id"] == attempt_id for row in value["attempts"]):
                 raise AttemptLedgerError("attempt identity already exists")
             if len(value["attempts"]) >= MAX_ATTEMPTS:
-                raise AttemptLedgerError("sixth full-profile attempt has zero authority")
+                raise AttemptLedgerError("seventh full-profile attempt has zero authority")
             row = {
                 "ordinal": len(value["attempts"]) + 1,
                 "attempt_id": attempt_id,

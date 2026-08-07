@@ -28,7 +28,7 @@ from model_routing_config import load_tracked_config  # noqa: E402
 
 SHA = re.compile(r"[0-9a-f]{40,64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 6
 REVIEW_VERDICTS = frozenset(
     {"approved", "changes-requested", "blocked", "unavailable"}
 )
