@@ -89,11 +89,17 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
             weakened if surface == "AGENTS.md" else discipline,
             weakened if surface == "CLAUDE.md" else discipline,
         )
-        assert any(surface in issue and principle in issue for issue in issues), (
+        assert any(surface in issue for issue in issues), (
             surface,
             principle,
             issues,
         )
+for drift in (
+    "Do not think before coding; simplicity first is optional.",
+    discipline + "\n" + discipline,
+    discipline.replace("Engineering discipline:", "Engineering suggestions:"),
+):
+    assert module.engineering_discipline_issues(drift, discipline)
 print("OK   cross-surface engineering discipline weakening detected")
 
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")

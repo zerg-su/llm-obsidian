@@ -54,19 +54,20 @@ RC4_CASE_IDS = (
     "rc4.unrelated-edits",
     "rc4.missing-regression-proof",
 )
+RC4_SCENARIO_MANIFEST_SHA256 = (
+    "07ab7a4b15e3c47627aa46e1ecd48aaac1c18ffb00216db4362170682290f3dc"
+)
+RC4_MODEL = "gpt-5.6-terra"
+RC4_EFFORT = "medium"
+RC4_TIMEOUT = 240.0
+RC4_SOURCE_SHA256 = {
+    "AGENTS.md": "ada22d9cb058b16e55ebf8ee19c330a697b21ad1728b548b158a7459a01a34f3",
+    "CLAUDE.md": "2f8aa275adc95fb1d575a96d659adcd082e80308d32b669904fcfdbedf731600",
+}
 APP_SERVER_EPERM = (
     "failed to initialize in-process app-server client: "
     "Operation not permitted (os error 1)"
 )
-TRANSPORT_FAILURE_FIELDS = {
-    "schema_version",
-    "type",
-    "failure_class",
-    "code",
-    "accepted_case_receipts",
-    "completed_model_results",
-    "typed_case_output_present",
-}
 
 
 class RunnerError(ValueError):
@@ -87,7 +88,7 @@ def transport_failure_record(
     """Classify only the exact output-free nested Codex EPERM signature."""
     if (
         returncode == 0
-        or APP_SERVER_EPERM not in stderr
+        or stderr.strip() not in {APP_SERVER_EPERM, f"Error: {APP_SERVER_EPERM}"}
         or typed_case_output_present
     ):
         return None
@@ -99,25 +100,6 @@ def transport_failure_record(
         "accepted_case_receipts": 0,
         "completed_model_results": 0,
         "typed_case_output_present": False,
-    }
-
-
-def replacement_preflight(record: dict[str, Any]) -> dict[str, Any]:
-    """Authorize one replacement only for an exact zero-result failure record."""
-    if not isinstance(record, dict) or set(record) != TRANSPORT_FAILURE_FIELDS:
-        raise RunnerError("replacement preflight record fields changed")
-    expected = transport_failure_record(
-        returncode=1,
-        stderr=APP_SERVER_EPERM,
-        typed_case_output_present=False,
-    )
-    if record != expected:
-        raise RunnerError("replacement preflight has ambiguous prior effects")
-    return {
-        "schema_version": 1,
-        "replacement_safe": True,
-        "accepted_case_receipts": 0,
-        "completed_model_results": 0,
     }
 
 
@@ -307,6 +289,11 @@ def validate_aggregate_cases(cases: list[dict[str, Any]]) -> None:
     """Reject denominator drift before any model invocation."""
     if tuple(case.get("id") for case in cases) != RC4_CASE_IDS:
         raise RunnerError("RC4 aggregate identities or order changed")
+    manifest_bytes = json.dumps(
+        cases, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    if hashlib.sha256(manifest_bytes).hexdigest() != RC4_SCENARIO_MANIFEST_SHA256:
+        raise RunnerError("RC4 aggregate semantic denominator changed")
     for case in cases:
         if case.get("schema_version") != 1:
             raise RunnerError(f"{case.get('id')}: unsupported schema_version")
@@ -328,6 +315,13 @@ def validate_aggregate_cases(cases: list[dict[str, Any]]) -> None:
         fixture = case.get("fixture_result")
         if not isinstance(fixture, dict) or grade_case(case, fixture):
             raise RunnerError(f"{case.get('id')}: hermetic fixture contradicts assertions")
+
+
+def validate_aggregate_sources() -> None:
+    """Bind the live denominator to the exact governing source principles."""
+    actual = {relative: file_sha256(ROOT / relative) for relative in RC4_SOURCE_SHA256}
+    if actual != RC4_SOURCE_SHA256:
+        raise RunnerError("RC4 aggregate governing sources changed")
 
 
 def grade_case(case: dict[str, Any], result: dict[str, Any]) -> list[str]:
@@ -517,6 +511,9 @@ def aggregate_receipt(
 ) -> dict[str, Any]:
     """Run each frozen case once and emit one deterministic typed receipt."""
     validate_aggregate_cases(cases)
+    validate_aggregate_sources()
+    if (model, effort, timeout) != (RC4_MODEL, RC4_EFFORT, RC4_TIMEOUT):
+        raise RunnerError("RC4 aggregate execution profile changed")
     rows = []
     for case in cases:
         try:
@@ -546,11 +543,8 @@ def aggregate_receipt(
         "type": "rc4-engineering-discipline-aggregate",
         "model": model,
         "effort": effort,
-        "scenario_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "source_sha256": {
-            relative: file_sha256(ROOT / relative)
-            for relative in SOURCES["engineering-discipline"]
-        },
+        "scenario_manifest_sha256": RC4_SCENARIO_MANIFEST_SHA256,
+        "source_sha256": dict(RC4_SOURCE_SHA256),
         "summary": {"total": len(rows), "passed": passed, "failed": len(rows) - passed},
         "cases": rows,
     }

@@ -143,6 +143,61 @@ else:
     raise AssertionError("duplicate RC4 scenario identity must fail closed")
 print("OK   duplicate RC4 scenario identity rejected")
 
+inverted = json.loads(json.dumps(cases))
+inverted[1]["response_contract"]["decision"] = ["direct-change", "add-framework"]
+inverted[1]["assertions"] = [
+    {"kind": "equals", "path": "artifacts.decision", "value": "add-framework"},
+    {"kind": "equals", "path": "artifacts.new_abstraction", "value": True},
+    {"kind": "equals", "path": "artifacts.fallback_added", "value": True},
+]
+inverted[1]["fixture_result"]["artifacts"] = {
+    "decision": "add-framework",
+    "new_abstraction": True,
+    "fallback_added": True,
+}
+try:
+    module.validate_aggregate_cases(inverted)
+except module.RunnerError:
+    pass
+else:
+    raise AssertionError("semantic denominator inversion must fail closed")
+print("OK   semantic denominator inversion rejected by frozen digest")
+
+for profile in (
+    ("gpt-5.6-sol", module.RC4_EFFORT, module.RC4_TIMEOUT),
+    (module.RC4_MODEL, "high", module.RC4_TIMEOUT),
+    (module.RC4_MODEL, module.RC4_EFFORT, 60.0),
+):
+    try:
+        module.aggregate_receipt(cases, model=profile[0], effort=profile[1], timeout=profile[2])
+    except module.RunnerError:
+        pass
+    else:
+        raise AssertionError(f"aggregate profile drift accepted: {profile}")
+print("OK   model, effort, and timeout drift reject before provider execution")
+
+with tempfile.TemporaryDirectory(prefix="engineering-source-drift.") as raw:
+    source_root = Path(raw)
+    for relative in module.RC4_SOURCE_SHA256:
+        source_root.joinpath(relative).write_bytes(ROOT.joinpath(relative).read_bytes())
+    source_root.joinpath("AGENTS.md").write_text(
+        ROOT.joinpath("AGENTS.md").read_text(encoding="utf-8").replace(
+            "simplicity first", "simplicity optional", 1
+        ),
+        encoding="utf-8",
+    )
+    original_root = module.ROOT
+    module.ROOT = source_root
+    try:
+        module.validate_aggregate_sources()
+    except module.RunnerError:
+        pass
+    else:
+        raise AssertionError("governing source weakening must fail closed")
+    finally:
+        module.ROOT = original_root
+print("OK   governing source weakening rejected by frozen digest")
+
 with tempfile.TemporaryDirectory(prefix="engineering-eval-aggregate.") as raw:
     tmp = Path(raw)
     fake_bin = tmp / "bin"
@@ -286,23 +341,20 @@ output.write_text(json.dumps(result), encoding="utf-8")
         },
     )
     check(
-        "typed preflight authorizes only a zero-result replacement",
-        module.replacement_preflight(failure_record)["replacement_safe"] is True,
+        "transport record carries no replay authorization",
+        "replacement_safe" not in failure_record
+        and not hasattr(module, "replacement_preflight"),
     )
-    for field, value in (
-        ("accepted_case_receipts", 1),
-        ("completed_model_results", 1),
-        ("typed_case_output_present", True),
-        ("code", "other"),
-    ):
-        drifted = {**failure_record, field: value}
-        try:
-            module.replacement_preflight(drifted)
-        except module.RunnerError:
-            pass
-        else:
-            raise AssertionError(f"ambiguous replacement preflight accepted {field}")
-    print("OK   replacement preflight rejects ambiguous prior effects")
+
+    check(
+        "mixed diagnostic is not classified as pre-model",
+        module.transport_failure_record(
+            returncode=9,
+            stderr="model completed before wrapper failed\n" + module.APP_SERVER_EPERM,
+            typed_case_output_present=False,
+        )
+        is None,
+    )
 
     env["ENGINEERING_EVAL_EPERM_WITH_OUTPUT"] = "1"
     ambiguous_init = subprocess.run(

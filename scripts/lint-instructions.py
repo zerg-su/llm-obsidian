@@ -13,12 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_WEB_SKILLS = ("research", "wiki-ingest", "wiki-query")
 WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
 LEGACY_PUBLIC_SKILLS = ("reap-send",)
-ENGINEERING_DISCIPLINE_PRINCIPLES = (
-    "think before coding",
-    "simplicity first",
-    "surgical changes",
-    "goal/evidence discipline",
-    "local green is not task completion",
+ENGINEERING_DISCIPLINE_CONTRACT = (
+    "Engineering discipline: think before coding; simplicity first; surgical "
+    "changes; goal/evidence discipline—local green is not task completion."
 )
 
 
@@ -148,11 +145,11 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
     """Keep the concise engineering-discipline contract equivalent."""
     issues: list[str] = []
     for source, text in (("AGENTS.md", agents), ("CLAUDE.md", claude)):
-        for principle in ENGINEERING_DISCIPLINE_PRINCIPLES:
-            if principle not in text:
-                issues.append(
-                    f"{source} missing engineering discipline principle {principle!r}"
-                )
+        normalized = re.sub(r"\s+", " ", text)
+        if normalized.count(ENGINEERING_DISCIPLINE_CONTRACT) != 1:
+            issues.append(
+                f"{source} must contain one exact positive engineering discipline contract"
+            )
     return issues
 
 
