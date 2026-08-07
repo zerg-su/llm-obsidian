@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import tempfile
@@ -27,6 +29,7 @@ def load_script(name: str):
 inventory = load_script("rc3_inventory.py")
 slice_receipt = load_script("rc3_slice_receipt.py")
 coverage = load_script("rc3_coverage.py")
+disposition = load_script("rc3_release_disposition.py")
 
 
 def git(*args: str) -> str:
@@ -274,9 +277,178 @@ def test_shell_scratch_helper_honors_constrained_tmpdir() -> None:
         assert ">/tmp/" not in source
 
 
+def gate_receipt_bytes(subject_head_sha: str) -> bytes:
+    return (
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "passed",
+                "subject_head_sha": subject_head_sha,
+                "profile_sha256": "b" * 64,
+                "commands": [
+                    {
+                        "command_id": "full-tests",
+                        "exit_code": 0,
+                        "output_sha256": "c" * 64,
+                    }
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+
+
+def review(role: str) -> dict[str, str]:
+    return {
+        "role": role,
+        "review_id": f"review-{role}",
+        "verdict": "approved",
+        "receipt_sha256": "d" * 64,
+    }
+
+
+def test_candidate_budget_counts_every_attempt_and_stops_before_six() -> None:
+    subject = git("rev-parse", "HEAD")
+    attempts = [
+        {
+            "attempt_id": f"rc3-attempt-{index}",
+            "classification": classification,
+            "subject_head_sha": subject,
+            "profile_sha256": "b" * 64,
+            "receipt_sha256": f"{index}" * 64,
+            "exit_status": 0 if classification == "published" else 1,
+        }
+        for index, classification in enumerate(
+            ("published", "unpublished", "test-only", "unpublished", "published"),
+            start=1,
+        )
+    ]
+    ledger = {"schema_version": 1, "release": "2.6.6-rc3", "attempts": attempts}
+    assert disposition.evaluate_attempt_budget(ROOT, ledger) == {
+        "schema_version": 1,
+        "maximum_attempts": 5,
+        "attempts_consumed": 5,
+        "attempts_remaining": 0,
+        "state": "exhausted",
+        "next_attempt_ordinal": None,
+        "classification_counts": {
+            "published": 2,
+            "test-only": 1,
+            "unpublished": 2,
+        },
+    }
+    sixth = copy.deepcopy(ledger)
+    sixth["attempts"].append({**attempts[-1], "attempt_id": "rc3-attempt-6"})
+    try:
+        disposition.evaluate_attempt_budget(ROOT, sixth)
+    except disposition.DispositionError as exc:
+        assert "sixth full-profile attempt" in str(exc)
+    else:
+        raise AssertionError("a sixth candidate attempt must have zero authority")
+
+
+def test_release_disposition_binds_gate_reviews_findings_and_waivers() -> None:
+    subject = git("rev-parse", "HEAD")
+    gate = gate_receipt_bytes(subject)
+    ledger = {
+        "schema_version": 1,
+        "release": "2.6.6-rc3",
+        "attempts": [
+            {
+                "attempt_id": "rc3-attempt-1",
+                "classification": "published",
+                "subject_head_sha": subject,
+                "profile_sha256": "b" * 64,
+                "receipt_sha256": hashlib.sha256(gate).hexdigest(),
+                "exit_status": 0,
+            }
+        ],
+    }
+    reviews = [review("fable"), review("independent-configured")]
+    findings = [
+        {
+            "finding_id": "RC2.E1.MACHINE_INVENTORY_MISSING",
+            "disposition": "fixed",
+            "evidence_sha256": "e" * 64,
+        },
+        {
+            "finding_id": "RC2.E3.SLICE_RECEIPTS_MISSING",
+            "disposition": "waived",
+            "waiver_id": "D-266-RC3-RC2-HISTORY",
+        },
+    ]
+    waivers = [
+        {
+            "waiver_id": "D-266-RC3-RC2-HISTORY",
+            "finding_id": "RC2.E3.SLICE_RECEIPTS_MISSING",
+            "approved_by": "approved-plan",
+            "rationale": "RC2 history remains absent; RC3 receipts are prospective only.",
+            "evidence_sha256": "f" * 64,
+        }
+    ]
+    compiled = disposition.compile_disposition(
+        ROOT,
+        subject_head_sha=subject,
+        gate_receipt_bytes=gate,
+        attempt_ledger=ledger,
+        reviews=reviews,
+        findings=findings,
+        waivers=waivers,
+    )
+    assert compiled["outcome"] == "approved"
+    assert compiled == disposition.compile_disposition(
+        ROOT,
+        subject_head_sha=subject,
+        gate_receipt_bytes=gate,
+        attempt_ledger=ledger,
+        reviews=reviews,
+        findings=findings,
+        waivers=waivers,
+    )
+    disposition.validate_disposition(ROOT, compiled, gate_receipt_bytes=gate)
+
+    for changed_gate, changed_reviews, changed_waivers, reason in (
+        (
+            gate_receipt_bytes(BASE_SHA),
+            reviews,
+            waivers,
+            "gate subject does not match candidate HEAD",
+        ),
+        (gate, reviews[:1], waivers, "both configured review roles"),
+        (gate, reviews, [], "waiver coverage is incomplete"),
+    ):
+        try:
+            disposition.compile_disposition(
+                ROOT,
+                subject_head_sha=subject,
+                gate_receipt_bytes=changed_gate,
+                attempt_ledger=ledger,
+                reviews=changed_reviews,
+                findings=findings,
+                waivers=changed_waivers,
+            )
+        except disposition.DispositionError as exc:
+            assert reason in str(exc)
+        else:
+            raise AssertionError(f"release disposition accepted drift: {reason}")
+
+    try:
+        disposition.validate_disposition(
+            ROOT, compiled, gate_receipt_bytes=gate + b"stale"
+        )
+    except disposition.DispositionError as exc:
+        assert "gate receipt digest drift" in str(exc)
+    else:
+        raise AssertionError("stale gate bytes must invalidate the disposition")
+
+
 if __name__ == "__main__":
     test_machine_inventory_recomputes_exact_values_and_rejects_drift()
     test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2()
     test_coverage_comparator_accepts_only_the_narrow_typed_tolerance()
     test_shell_scratch_helper_honors_constrained_tmpdir()
+    test_candidate_budget_counts_every_attempt_and_stops_before_six()
+    test_release_disposition_binds_gate_reviews_findings_and_waivers()
     print("RC3 release evidence contracts passed")

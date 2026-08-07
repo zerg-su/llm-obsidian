@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-obsidian.local/schemas/rc3-release-disposition-v1.schema.json",
+  "title": "LLM Obsidian 2.6.6 RC3 release disposition",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "release",
+    "subject_head_sha",
+    "gate",
+    "attempt_ledger",
+    "reviews",
+    "findings",
+    "waivers",
+    "attempt_budget",
+    "input_sha256",
+    "outcome",
+    "blocked_reasons"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "release": {"const": "2.6.6-rc3"},
+    "subject_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "gate": {
+      "type": "object",
+      "required": ["profile_sha256", "receipt_sha256"],
+      "additionalProperties": false
+    },
+    "attempt_ledger": {"type": "object"},
+    "reviews": {"type": "array", "minItems": 2, "maxItems": 2},
+    "findings": {"type": "array", "minItems": 1},
+    "waivers": {"type": "array"},
+    "attempt_budget": {"type": "object"},
+    "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "outcome": {"enum": ["approved", "blocked"]},
+    "blocked_reasons": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
