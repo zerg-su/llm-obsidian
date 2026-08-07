@@ -28,7 +28,7 @@ from dispatch_custom_contracts import (
     task_pipeline_policy,
 )
 from dispatch_io import DispatchError, atomic_json, atomic_text, utc_now
-from dispatch_setup import render_task_prompt, review_policy
+from dispatch_setup import render_task_prompt, review_policy, review_topology_preview
 
 
 def run_command(
@@ -176,6 +176,7 @@ def write_task_files(
     plan_hash = approved_plan_sha256(request)
     outcome_hash = approved_outcome_contract_sha256(request)
     review = review_policy(request, config)
+    review_topology = review_topology_preview(request, review)
     meta: dict[str, Any] = {
         "version": 4,
         "project_id": identity["project_id"],
@@ -253,6 +254,11 @@ def write_task_files(
         ],
         "suggested_agents": request["suggested_agents"],
     }
+    if review.enabled:
+        meta["review_topology"] = {
+            "payload": review_topology["topology"],
+            "sha256": review_topology["topology_sha256"],
+        }
     if request.get("split") is not None:
         meta["split_policy"] = request["split"]
     if request["executor"]["model"]:

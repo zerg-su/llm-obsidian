@@ -100,13 +100,29 @@ def _request(
     preset, request = _unbound_request(meta, vault, task_id, context)
     if request is None:
         return preset, None
+    frozen = meta.get("review_topology")
+    expected_topology_sha256 = ""
+    expected_topology_payload: Mapping[str, Any] | None = None
+    if isinstance(frozen, Mapping):
+        expected_topology_sha256 = str(frozen.get("sha256") or "")
+        payload = frozen.get("payload")
+        if isinstance(payload, Mapping):
+            expected_topology_payload = payload
+    bound = replace(
+        request,
+        requested_mode=str(meta["review_policy"]["mode"]),
+        topology_sha256=expected_topology_sha256,
+    )
+    if (
+        expected_topology_payload is not None
+        and bound.topology.payload() != expected_topology_payload
+    ):
+        raise TaskReviewError(
+            "review effective topology payload changed from frozen task metadata"
+        )
     return (
         preset,
-        replace(
-            request,
-            requested_mode=str(meta["review_policy"]["mode"]),
-            topology_sha256="",
-        ),
+        bound,
     )
 
 

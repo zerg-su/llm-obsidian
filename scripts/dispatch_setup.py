@@ -436,6 +436,7 @@ def review_topology_preview(
             "session_count": 0,
             "effective_mode": "skip",
             "topology_sha256": "",
+            "topology": None,
             "lanes": [],
         }
     config = load_config(request["vault_root"])
@@ -488,6 +489,7 @@ def review_topology_preview(
         "session_count": len(lanes),
         "effective_mode": topology.mode,
         "topology_sha256": topology.sha256,
+        "topology": topology.payload(),
         "lanes": lanes,
     }
 

@@ -1095,6 +1095,14 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         and len(meta["review_policy"]["verification_profile_sha256"]) == 64
         and meta["review_policy"]["max_verify_iterations"] == 1,
     )
+    frozen_topology = meta.get("review_topology")
+    expected_topology = runner.review_topology_preview(request, review)
+    check(
+        "runner freezes the validated review topology in task metadata",
+        isinstance(frozen_topology, dict)
+        and frozen_topology.get("sha256") == expected_topology["topology_sha256"]
+        and frozen_topology.get("payload") == expected_topology["topology"],
+    )
     check(
         "runner writes the deterministic simple review preset",
         meta["review_policy"]["mode"] == "simple"
@@ -1110,7 +1118,9 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
     )
     check(
         "writer output has exact strict v4 schema parity",
-        set(meta) == set(v4_schema["required"]) | {"finalization_policy"}
+        set(meta)
+        == set(v4_schema["required"])
+        | {"finalization_policy", "review_topology"}
         and set(meta) <= set(v4_schema["properties"])
         and v4_schema["additionalProperties"] is False,
     )
@@ -1131,6 +1141,7 @@ with tempfile.TemporaryDirectory(prefix="dispatch-runner-test.") as raw:
         normalized_meta["version"] == 4
         and normalized_meta["finalization_policy"]
         == meta["finalization_policy"]
+        and normalized_meta["review_topology"] == meta["review_topology"]
         and _exact_head_attempt_enabled(meta)
         and set(meta["review_policy"])
         == {

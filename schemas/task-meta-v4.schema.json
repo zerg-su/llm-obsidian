@@ -207,6 +207,68 @@
         }
       ]
     },
+    "review_topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payload", "sha256"],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "requested_mode",
+            "mode",
+            "cross_model",
+            "max_verify_iterations",
+            "verification_profile",
+            "session_count",
+            "lanes"
+          ],
+          "properties": {
+            "schema_version": {"const": 1},
+            "requested_mode": {"enum": ["simple", "deep", "full"]},
+            "mode": {"enum": ["simple", "deep", "full"]},
+            "cross_model": {"type": "boolean"},
+            "max_verify_iterations": {"type": "integer", "minimum": 0, "maximum": 2},
+            "verification_profile": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "sha256"],
+              "properties": {
+                "name": {"type": "string"},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            },
+            "session_count": {"type": "integer", "minimum": 1, "maximum": 4},
+            "lanes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["axis", "provider", "responsibility", "runtime", "model", "effort", "profile", "routing_sha256"],
+                "properties": {
+                  "axis": {"type": "string"},
+                  "provider": {"enum": ["anthropic", "openai"]},
+                  "responsibility": {"enum": ["holistic", "intent", "engineering"]},
+                  "runtime": {"enum": ["claude", "codex"]},
+                  "model": {"type": "string"},
+                  "effort": {"type": "string"},
+                  "profile": {"enum": ["reviewer-readonly", "reviewer-callback"]},
+                  "routing_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "reap_policy": {
       "type": "object",
       "additionalProperties": false,

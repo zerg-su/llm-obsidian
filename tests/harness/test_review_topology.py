@@ -30,6 +30,7 @@ from harness.workflows.review_gate import ReviewPreset  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import ReviewContext, review_session_specs  # noqa: E402
 from task_review_request import _prompt, _request  # noqa: E402
+from task_review_context import _request as frozen_task_request  # noqa: E402
 from task_review_flow import (  # noqa: E402
     _requires_lane_barrier,
     _should_defer_ready_results,
@@ -435,6 +436,52 @@ check(
         )
     ),
 )
+simple_policy = {
+    "mode": "simple",
+    "cross_model": False,
+    "runtime": "",
+    "model": "",
+    "effort": "",
+    "max_verify_iterations": 1,
+    "verification_profile": profile.name,
+    "verification_profile_sha256": profile.sha256,
+}
+frozen_meta = {
+    "review_policy": simple_policy,
+    "review_topology": {
+        "payload": simple_request.topology.payload(),
+        "sha256": simple_request.topology_sha256,
+    },
+    "routing": {
+        "session": {
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+            "source": "host-confirmed-test",
+        }
+    },
+}
+frozen_runtime = frozen_task_request(
+    frozen_meta, ROOT, "frozen-simple", context
+)[1]
+check(
+    "runtime consumes the topology digest frozen at dispatch",
+    frozen_runtime is not None
+    and frozen_runtime.topology_sha256 == simple_request.topology_sha256
+    and frozen_runtime.topology.payload()
+    == frozen_meta["review_topology"]["payload"],
+)
+drifted_meta = json.loads(json.dumps(frozen_meta))
+drifted_meta["review_topology"]["sha256"] = "0" * 64
+try:
+    frozen_task_request(drifted_meta, ROOT, "frozen-drift", context)
+except ValueError as exc:
+    check(
+        "runtime rejects temporal topology drift before provider effects",
+        "topology" in str(exc),
+    )
+else:
+    check("runtime rejects temporal topology drift before provider effects", False)
 drifted_routes = dict(full_request.axis_routes or {})
 drifted_routes["openai-engineering"] = replace(
     drifted_routes["openai-engineering"], effort="high"

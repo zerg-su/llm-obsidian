@@ -81,6 +81,7 @@ V4_META_FIELDS = V3_META_FIELDS | {
     "finalization_policy",
     "split_policy",
     "base_sha",
+    "review_topology",
 }
 FORBIDDEN_ACTIONS = [
     "push",
@@ -316,6 +317,62 @@ def _validate_review_policy(meta: dict[str, Any], version: int) -> dict[str, Any
     return review
 
 
+def _validate_review_topology(
+    meta: dict[str, Any], version: int, review: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Validate the optional RC4 frozen topology without breaking old v4 tasks."""
+
+    raw = meta.get("review_topology")
+    if raw is None:
+        return None
+    if version != 4 or not isinstance(raw, dict) or set(raw) != {
+        "payload",
+        "sha256",
+    }:
+        raise ContractError(
+            "review_topology requires an exact v4 payload and sha256"
+        )
+    payload = raw.get("payload")
+    digest = raw.get("sha256")
+    if not isinstance(payload, dict) or not isinstance(digest, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", digest
+    ):
+        raise ContractError("review_topology binding is invalid")
+    expected_fields = {
+        "schema_version",
+        "requested_mode",
+        "mode",
+        "cross_model",
+        "max_verify_iterations",
+        "verification_profile",
+        "session_count",
+        "lanes",
+    }
+    if (
+        set(payload) != expected_fields
+        or payload.get("schema_version") != 1
+        or payload.get("requested_mode") != review.get("mode")
+        or payload.get("cross_model") != review.get("cross_model")
+        or payload.get("max_verify_iterations")
+        != review.get("max_verify_iterations")
+        or not isinstance(payload.get("lanes"), list)
+        or payload.get("session_count") != len(payload["lanes"])
+    ):
+        raise ContractError("review_topology payload differs from review_policy")
+    profile = payload.get("verification_profile")
+    if profile != {
+        "name": review.get("verification_profile"),
+        "sha256": review.get("verification_profile_sha256"),
+    }:
+        raise ContractError("review_topology profile differs from review_policy")
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    if hashlib.sha256(canonical).hexdigest() != digest:
+        raise ContractError("review_topology digest does not match its payload")
+    return raw
+
+
 def _validate_finalization_policy(
     meta: dict[str, Any], version: int
 ) -> dict[str, Any] | None:
@@ -511,6 +568,7 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             raise ContractError("plan_file must belong to vault_root/wiki/plans")
 
     review = _validate_review_policy(meta, version)
+    review_topology = _validate_review_topology(meta, version, review)
     finalization = _validate_finalization_policy(meta, version)
     split_policy = _validate_split_policy(meta, version)
     base_sha = _validate_base_sha(meta)
@@ -574,6 +632,8 @@ def normalize(meta: dict[str, Any], *, verify_plan_hash: bool = True) -> dict[st
             version, outcome_digest, base_sha, finalization, split_policy
         )
     )
+    if review_topology is not None:
+        result["review_topology"] = review_topology
     return result
 
 
