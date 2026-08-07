@@ -346,9 +346,11 @@ class CmuxAdapter:
         except json.JSONDecodeError as exc:
             raise CmuxError("cmux identify returned invalid JSON") from exc
         caller = value.get("caller") if isinstance(value, dict) else None
-        if not isinstance(caller, dict):
-            raise CmuxError("cmux identify returned no caller identity")
-        actual = str(caller.get("surface_id") or "")
+        actual = (
+            str(caller.get("surface_id") or "")
+            if isinstance(caller, dict)
+            else ""
+        )
         if not actual:
             index = self.surface_workspaces()
             key = surface_id.casefold()

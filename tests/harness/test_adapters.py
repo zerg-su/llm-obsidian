@@ -242,6 +242,21 @@ check(
 )
 
 
+def closed_surface(
+    command: list[str], **_kwargs: object
+) -> subprocess.CompletedProcess[str]:
+    payload = {"windows": []} if "tree" in command else {}
+    return subprocess.CompletedProcess(
+        command, 0, json.dumps(payload), ""
+    )
+
+
+check(
+    "closed exact surface is missing when identify has no caller",
+    CmuxAdapter(closed_surface).status(surface) == "missing",
+)
+
+
 def workspace_tree(
     command: list[str], **_kwargs: object
 ) -> subprocess.CompletedProcess[str]:
