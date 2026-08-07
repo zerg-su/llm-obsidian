@@ -354,6 +354,20 @@ def _review_recovery_kind(
         return "accepted-exact-callbacks"
     terminal = attempt.get("terminal") if isinstance(attempt, dict) else None
     if (
+        gate.get("status") == "attention-required"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and gate.get("lanes") == []
+        and gate.get("round_results") in ({}, None)
+        and gate.get("final_results") in ({}, None)
+        and gate.get("evidence") in ({}, None)
+        and isinstance(attempt, dict)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, dict)
+        and terminal.get("result") == "attention-required"
+        and terminal.get("lane_results") == []
+    ):
+        return "zero-lane-preflight"
+    if (
         gate.get("status") == "approved"
         and gate.get("execution_protocol") == "exact-head-attempt-v1"
         and isinstance(attempt, dict)
@@ -447,7 +461,8 @@ def _recover_finalizing_review_if_present(
             module,
             (
                 "run_task_review"
-                if recovery_kind == "accepted-exact-callbacks"
+                if recovery_kind
+                in {"accepted-exact-callbacks", "zero-lane-preflight"}
                 else "recover_finalizing_review"
             ),
         )

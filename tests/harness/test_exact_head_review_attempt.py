@@ -686,6 +686,28 @@ with tempfile.TemporaryDirectory(
     )
     missing_response = base / ".task-verification-response.json"
     check(
+        "zero-lane preflight attention routes to exact code-owned recovery",
+        harness_cli._review_recovery_kind(
+            {
+                "status": "attention-required",
+                "execution_protocol": "exact-head-attempt-v1",
+                "lanes": [],
+                "round_results": {},
+                "final_results": {},
+                "evidence": {},
+                "attempt": {
+                    "status": "terminal",
+                    "terminal": {
+                        "result": "attention-required",
+                        "lane_results": [],
+                    },
+                },
+            },
+            missing_response,
+        )
+        == "zero-lane-preflight",
+    )
+    check(
         "two accepted callbacks route before the legacy response precondition",
         harness_cli._review_recovery_kind(
             gate.read(), missing_response

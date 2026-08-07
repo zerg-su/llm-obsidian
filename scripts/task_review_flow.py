@@ -589,7 +589,7 @@ def _run_exact_head_review(
         raise TaskReviewError("enabled review has no request")
 
     cycle = 1
-    zero_lane_recovery = False
+    zero_lane_preflight = False
     if gate_exists:
         prior_state = gate.read()
         prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
@@ -601,7 +601,7 @@ def _run_exact_head_review(
                 attempt_id=prior_attempt.identity.attempt_id,
                 terminal_result=prior_attempt.terminal.result.value,
             )
-            zero_lane_recovery = (
+            zero_lane_preflight = (
                 prior_attempt.terminal.result
                 == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
                 and not prior_attempt.terminal.lane_results
@@ -613,7 +613,7 @@ def _run_exact_head_review(
             )
             if (
                 context.head_sha == prior_attempt.identity.exact_head_sha
-                and not zero_lane_recovery
+                and not zero_lane_preflight
             ):
                 return _receipt(
                     status=prior_attempt.terminal.result.value,
@@ -634,7 +634,7 @@ def _run_exact_head_review(
         request=request,
         cycle=cycle,
     )
-    if zero_lane_recovery:
+    if zero_lane_preflight:
         lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
             meta, task_id, cycle=cycle
         )
