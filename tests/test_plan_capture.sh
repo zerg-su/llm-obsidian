@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d /tmp/plan-capture-test.XXXXXX)"
+source "$ROOT/scripts/test-scratch.sh"
+TMP="$(llm_obsidian_test_scratch_dir plan-capture-test)"
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/.claude/hooks" "$TMP/scripts" "$TMP/wiki" "$TMP/.vault-meta"

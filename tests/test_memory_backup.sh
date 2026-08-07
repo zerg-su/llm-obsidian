@@ -3,7 +3,8 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SANDBOX="$(mktemp -d /tmp/memory-backup-test.XXXXXX)"
+source "$REPO_ROOT/scripts/test-scratch.sh"
+SANDBOX="$(llm_obsidian_test_scratch_dir memory-backup-test)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 pass=0; fail=0; failures=()

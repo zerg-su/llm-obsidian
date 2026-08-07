@@ -12,7 +12,8 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SANDBOX="$(mktemp -d /tmp/vault-scripts-test.XXXXXX)"
+source "$REPO_ROOT/scripts/test-scratch.sh"
+SANDBOX="$(llm_obsidian_test_scratch_dir vault-scripts-test)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 mkdir -p "$SANDBOX/scripts" "$SANDBOX/wiki/plans" "$SANDBOX/wiki/questions" "$SANDBOX/.vault-meta"

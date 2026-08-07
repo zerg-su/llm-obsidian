@@ -4,8 +4,9 @@ set -uo pipefail
 export LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/test-scratch.sh"
 HOOK="$ROOT/.claude/hooks/stop.sh"
-SANDBOX="$(mktemp -d /tmp/stop-hook-test.XXXXXX)"
+SANDBOX="$(llm_obsidian_test_scratch_dir stop-hook-test)"
 REPAIR_HINT='VAULT_REPAIR: Codex `$llm-obsidian:vault-repair`; Claude Code `/vault-repair`; diagnostics `.vault-meta/stop-hook-last.log`.'
 trap 'rm -rf "$SANDBOX"' EXIT
 

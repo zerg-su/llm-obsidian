@@ -3,7 +3,8 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/detect-runtime-test.XXXXXX")"
+source "$ROOT/scripts/test-scratch.sh"
+TMP="$(llm_obsidian_test_scratch_dir detect-runtime-test)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin" "$TMP/home"
 

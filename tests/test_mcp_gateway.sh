@@ -13,8 +13,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/test-scratch.sh"
 GW="$REPO_ROOT/scripts/mcp-gateway"
-SANDBOX="$(mktemp -d /tmp/mcp-gateway-test.XXXXXX)"
+SANDBOX="$(llm_obsidian_test_scratch_dir mcp-gateway-test)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 pass=0; fail=0; failures=()

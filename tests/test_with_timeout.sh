@@ -3,7 +3,10 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/test-scratch.sh"
 WT="$REPO_ROOT/scripts/with-timeout"
+SCRATCH="$(llm_obsidian_test_scratch_dir with-timeout-test)"
+trap 'rm -rf "$SCRATCH"' EXIT
 
 pass=0
 fail=0
@@ -27,24 +30,24 @@ expect_exit() {
 
 echo "== with-timeout =="
 
-out=$("$WT" 2 sh -c 'printf ok' 2>/tmp/with-timeout.err)
+out=$("$WT" 2 sh -c 'printf ok' 2>"$SCRATCH/stderr")
 rc=$?
 expect_exit "passes-command-exit" "$rc" 0
 [[ "$out" == "ok" ]] && ok "passes-command-output" || bad "passes-command-output" "got '$out'"
 
-"$WT" 1 sh -c 'sleep 5' >/tmp/with-timeout.out 2>/tmp/with-timeout.err
+"$WT" 1 sh -c 'sleep 5' >"$SCRATCH/stdout" 2>"$SCRATCH/stderr"
 rc=$?
 expect_exit "times-out" "$rc" 124
 
-"$WT" 1 sh -c 'exit 7' >/tmp/with-timeout.out 2>/tmp/with-timeout.err
+"$WT" 1 sh -c 'exit 7' >"$SCRATCH/stdout" 2>"$SCRATCH/stderr"
 rc=$?
 expect_exit "preserves-exit-code" "$rc" 7
 
-"$WT" 1m sh -c 'exit 0' >/tmp/with-timeout.out 2>/tmp/with-timeout.err
+"$WT" 1m sh -c 'exit 0' >"$SCRATCH/stdout" 2>"$SCRATCH/stderr"
 rc=$?
 expect_exit "accepts-minute-suffix" "$rc" 0
 
-"$WT" nope true >/tmp/with-timeout.out 2>/tmp/with-timeout.err
+"$WT" nope true >"$SCRATCH/stdout" 2>"$SCRATCH/stderr"
 rc=$?
 expect_exit "bad-duration" "$rc" 2
 

@@ -3,9 +3,10 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$(mktemp /tmp/dcg-assets-test.XXXXXX)"
-TMP_DIR="$(mktemp -d /tmp/dcg-assets-test-dir.XXXXXX)"
-trap 'rm -f "$OUT"; rm -rf "$TMP_DIR"' EXIT
+source "$REPO_ROOT/scripts/test-scratch.sh"
+TMP_DIR="$(llm_obsidian_test_scratch_dir dcg-assets-test)"
+OUT="$TMP_DIR/out.txt"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 pass=0; fail=0; failures=()
 ok()  { pass=$((pass+1)); printf '  OK   %s\n' "$1"; }

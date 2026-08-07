@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VAULT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$VAULT_ROOT/scripts/test-scratch.sh"
 ALLOC="$VAULT_ROOT/scripts/allocate-address.sh"
 
 PASS=0
@@ -25,7 +26,7 @@ assert_eq() {
 }
 
 # Create a fresh throwaway vault
-TMP=$(mktemp -d -t ds-test-XXXXXX)
+TMP=$(llm_obsidian_test_scratch_dir ds-test)
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/scripts" "$TMP/wiki"

@@ -3,7 +3,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d /tmp/setup-vault-test.XXXXXX)"
+source "$ROOT/scripts/test-scratch.sh"
+TMP="$(llm_obsidian_test_scratch_dir setup-vault-test)"
 trap 'rm -rf "$TMP"' EXIT
 
 FAKE_BIN="$TMP/fake-bin"

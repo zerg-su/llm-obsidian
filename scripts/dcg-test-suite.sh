@@ -81,8 +81,14 @@ fi
 # regressions in the portable config. Set DCG_TEST_USE_USER_CONFIG=1 to test the
 # machine's live ~/.config/dcg state instead.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/test-scratch.sh"
 if [ "${DCG_TEST_USE_USER_CONFIG:-0}" != "1" ] && [ -f "$REPO_ROOT/config/dcg/config.toml" ]; then
-    DCG_TEST_HOME="${DCG_TEST_HOME:-$(mktemp -d /tmp/dcg-test-home.XXXXXX)}"
+    DCG_TEST_HOME_OWNED=0
+    if [ -z "${DCG_TEST_HOME:-}" ]; then
+        DCG_TEST_HOME="$(llm_obsidian_test_scratch_dir dcg-test-home)"
+        DCG_TEST_HOME_OWNED=1
+    fi
+    trap 'if [ "${DCG_TEST_HOME_OWNED:-0}" = "1" ]; then rm -rf -- "$DCG_TEST_HOME"; fi' EXIT
     mkdir -p "$DCG_TEST_HOME/.config/dcg" "$DCG_TEST_HOME/.local/share/dcg"
     cp "$REPO_ROOT/config/dcg/config.toml" "$DCG_TEST_HOME/.config/dcg/config.toml"
     export HOME="$DCG_TEST_HOME"
