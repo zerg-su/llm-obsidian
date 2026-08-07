@@ -21,6 +21,14 @@ PASS_NAMES = {
     "goal_preservation",
 }
 VERDICTS = {"fix", "no-change", "defer"}
+ALLOWED_FRONTMATTER_KEYS = {
+    "name",
+    "description",
+    "license",
+    "allowed-tools",
+    "metadata",
+    "disable-model-invocation",
+}
 VERDICT_RECORD_FIELDS = {
     "skill",
     "verdict",
@@ -152,6 +160,17 @@ def scalar(frontmatter: list[str], key: str) -> str | None:
     return None
 
 
+def frontmatter_keys(frontmatter: list[str]) -> set[str]:
+    """Return top-level keys without treating folded YAML as metadata."""
+
+    return {
+        match.group(1)
+        for line in frontmatter
+        if not line.startswith((" ", "\t"))
+        if (match := re.match(r"^([A-Za-z0-9_-]+)\s*:", line))
+    }
+
+
 def strip_code(markdown: str) -> str:
     output: list[str] = []
     fenced = False
@@ -201,6 +220,18 @@ def audit_skill(path: Path, audit_root: Path = REPO_ROOT) -> dict[str, object]:
         return {"skill": path.parent.name, "path": str(path), "findings": [asdict(item) for item in findings]}
 
     folder = path.parent.name
+    unknown_keys = sorted(
+        frontmatter_keys(frontmatter) - ALLOWED_FRONTMATTER_KEYS
+    )
+    if unknown_keys:
+        findings.append(
+            Finding(
+                "error",
+                "unknown-frontmatter-key",
+                "unsupported top-level frontmatter keys: "
+                + ", ".join(unknown_keys),
+            )
+        )
     name = scalar(frontmatter, "name")
     description = scalar(frontmatter, "description")
     claude_explicit = scalar(frontmatter, "disable-model-invocation") == "true"

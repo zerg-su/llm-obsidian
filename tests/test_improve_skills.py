@@ -151,6 +151,7 @@ with tempfile.TemporaryDirectory(prefix="improve-skills-test.") as raw:
         "---\n"
         "name: wrong-name\n"
         "description: Broken fixture.\n"
+        "unsupported-frontmatter: true\n"
         "---\n\n"
         "# Bad\n\nTODO: read [missing](references/missing.md).\n",
         encoding="utf-8",
@@ -159,8 +160,14 @@ with tempfile.TemporaryDirectory(prefix="improve-skills-test.") as raw:
     fixture_rows = {row["skill"]: row for row in module.audit_directory(skills)}
     assert fixture_rows["good"]["findings"] == []
     codes = {finding["code"] for finding in fixture_rows["bad"]["findings"]}
-    assert codes == {"name-mismatch", "invocation-parity", "placeholder", "broken-link"}, codes
-    print("OK   name, invocation, placeholder, and reference drift detected")
+    assert codes == {
+        "name-mismatch",
+        "invocation-parity",
+        "unknown-frontmatter-key",
+        "placeholder",
+        "broken-link",
+    }, codes
+    print("OK   extension-aware frontmatter and structural drift detected")
 
 
 snapshot_check = subprocess.run(

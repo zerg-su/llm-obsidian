@@ -15,7 +15,7 @@
       "overall_outcome": "A zero-effect exact Split preview, or when separately authorized, bounded workspace-local waves and deterministic resource-free join without provider replay.",
       "local_subgoal": "Make explicit-only Split discovery informative while preserving preview authority, activation authorization, and the existing harness lifecycle.",
       "completion_proxies": [
-        "The Split package passes the skill-creator structural validation.",
+        "The Split package passes the repository extension-aware structural validation: the base skill-creator key set plus protected disable-model-invocation.",
         "The strict improve-skills inventory and scoped verdict audits pass.",
         "The router negative fixtures and skill budget pass."
       ],
