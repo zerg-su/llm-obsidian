@@ -77,6 +77,7 @@ for command in (
     "python3 scripts/rc3_inventory.py build",
     "--expected-candidate",
     "--attempt-ledger-root",
+    "python3 scripts/rc3_attempt_ledger.py authorize-extension",
     "python3 scripts/rc3_release_disposition.py check",
 ):
     assert command in upgrade

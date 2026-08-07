@@ -124,6 +124,8 @@ def _attempts(ledger_root: Path, gate: dict[str, str], subject: str) -> dict[str
     except AttemptLedgerError as exc:
         raise DispositionError("release attempt ledger is invalid") from exc
     rows = value["attempts"]
+    if value.get("maximum_attempts") != MAX_ATTEMPTS:
+        raise DispositionError("release attempt extension is not authorized")
     if any(row["state"] == "reserved" for row in rows):
         raise DispositionError("release attempt ledger has an unfinished reservation")
     matching = [
@@ -439,11 +441,13 @@ def main() -> int:
     try:
         if args.command == "budget":
             ledger = AttemptLedgerStore(args.attempt_ledger_root).load()
+            maximum = int(ledger["maximum_attempts"])
             result = {
                 "schema_version": 1,
-                "maximum_attempts": MAX_ATTEMPTS,
+                "maximum_attempts": maximum,
                 "attempts_consumed": len(ledger["attempts"]),
-                "attempts_remaining": MAX_ATTEMPTS - len(ledger["attempts"]),
+                "attempts_remaining": maximum - len(ledger["attempts"]),
+                "extension_authorized": maximum == MAX_ATTEMPTS,
             }
         elif args.command == "compile":
             result = compile_disposition(

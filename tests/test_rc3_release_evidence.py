@@ -156,7 +156,7 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             raise AssertionError("ledger must bind actual immutable artifact bytes")
 
         artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
-        for index in range(2, 9):
+        for index in range(2, 8):
             row = store.reserve(
                 attempt_id=f"00000000-0000-4000-8000-{index:012d}",
                 subject_head_sha=subject,
@@ -174,6 +174,39 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             )
         try:
             store.reserve(
+                attempt_id="00000000-0000-4000-8000-000000000008",
+                subject_head_sha=subject,
+                profile_sha256="a" * 64,
+                execution_relation="release-candidate",
+                runner_sha256="b" * 64,
+            )
+        except ledger_module.AttemptLedgerError as exc:
+            assert "authorization" in str(exc)
+        else:
+            raise AssertionError("eighth attempt requires immutable authorization")
+
+        authorization = write_attempt_authorization(root)
+        extended = store.authorize_extension(authorization)
+        assert extended["maximum_attempts"] == 8
+        assert extended["authorizations"][0]["artifact_pointer"] == authorization.name
+
+        eighth = store.reserve(
+            attempt_id="00000000-0000-4000-8000-000000000008",
+            subject_head_sha=subject,
+            profile_sha256="a" * 64,
+            execution_relation="release-candidate",
+            runner_sha256="b" * 64,
+        )
+        eighth_artifact = root / "artifacts" / "attempt-8.json"
+        eighth_artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
+        store.finalize(
+            attempt_id=eighth["attempt_id"],
+            classification="published",
+            exit_status=0,
+            artifact_path=eighth_artifact,
+        )
+        try:
+            store.reserve(
                 attempt_id="00000000-0000-4000-8000-000000000009",
                 subject_head_sha=subject,
                 profile_sha256="a" * 64,
@@ -184,6 +217,14 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             assert "ninth" in str(exc)
         else:
             raise AssertionError("ninth authoritative release attempt must fail closed")
+
+        authorization.write_text('{"tampered":true}\n', encoding="utf-8")
+        try:
+            store.load()
+        except ledger_module.AttemptLedgerError as exc:
+            assert "authorization digest drift" in str(exc)
+        else:
+            raise AssertionError("attempt authorization bytes must be immutable")
 
 
 def test_release_final_runner_records_success_and_failure_without_caller_rows() -> None:
@@ -497,6 +538,34 @@ def write_gate_bundle(root: Path, subject: str) -> Path:
     return path
 
 
+def write_attempt_authorization(root: Path) -> Path:
+    authorization = root / "attempt-authorization.json"
+    authorization.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "release": "2.6.6-rc3",
+                "authorization_id": "rc3-review-closure-attempt-8",
+                "previous_maximum_attempts": 7,
+                "maximum_attempts": 8,
+                "authorized_by": "operator",
+                "finding_ids": [
+                    "RC3.RELEASE_EVIDENCE_ARTIFACTS_ABSENT",
+                    "RC3.RELEASE_REVIEW_SCHEMA_MISMATCH",
+                    "RC3.REVIEW_FINDINGS_NOT_DISPOSITIONED",
+                    "rc3-rel-ceiling-extension-not-artifact-bound",
+                    "rc3-rel-stale-attempt-ceiling-docs",
+                ],
+                "rationale": "One bounded final correction after independent release review.",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return authorization
+
+
 def write_review_bundle(
     root: Path,
     role: str,
@@ -657,6 +726,24 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             exit_status=0,
             artifact_path=gate,
         )
+        for index in range(2, 8):
+            attempt_id = f"00000000-0000-4000-8000-{index:012d}"
+            ledger.reserve(
+                attempt_id=attempt_id,
+                subject_head_sha=subject,
+                profile_sha256=gate_value["profile_sha256"],
+                execution_relation="release-candidate",
+                runner_sha256=gate_value["runner_sha256"],
+            )
+            artifact = evidence / f"attempt-{index}.json"
+            artifact.write_text('{"status":"failed"}\n', encoding="utf-8")
+            ledger.finalize(
+                attempt_id=attempt_id,
+                classification="unpublished",
+                exit_status=1,
+                artifact_path=artifact,
+            )
+        ledger.authorize_extension(write_attempt_authorization(evidence))
 
         manifest_rows = []
         expected_finding = {

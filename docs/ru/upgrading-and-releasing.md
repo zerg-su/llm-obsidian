@@ -50,6 +50,16 @@ python3 scripts/rc3_inventory.py check "$RC3_EVIDENCE_ROOT/machine-inventory.jso
 python3 scripts/rc3_release_disposition.py budget --attempt-ledger-root "$RC3_EVIDENCE_ROOT"
 ```
 
+Если оператор отдельно разрешил восьмую закрывающую попытку, сначала привяжите
+неизменяемый файл авторизации к существующему ledger:
+
+```bash
+python3 scripts/rc3_attempt_ledger.py authorize-extension --root "$RC3_EVIDENCE_ROOT" --artifact "$RC3_EVIDENCE_ROOT/attempt-authorization.json"
+```
+
+Команда сохраняет все семь предыдущих попыток, проверяет точный переход `7 → 8`
+и digest файла авторизации. Без этого перехода восьмая попытка не стартует.
+
 Release candidate включает changelogs, version manifests, RC3 release notes,
 prospective slice receipts и две coverage observations. Exact-head inventory,
 attempt ledger, gate bundle, review callbacks и typed disposition создаются
