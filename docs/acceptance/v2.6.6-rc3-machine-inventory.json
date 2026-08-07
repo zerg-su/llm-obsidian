@@ -1,0 +1,39 @@
+{
+  "baseline": {
+    "classic_paths_present": 0,
+    "classic_production_callers": 0,
+    "commit_sha": "b86a33d779bd8852915a4b875f12ef9a9b7366b3",
+    "incident_authority_literals": 0,
+    "retained_paths_present": 6,
+    "runtime_authority_paths_present": 8,
+    "script_python_files": 253,
+    "script_python_loc": 83676,
+    "tracked_files": 1593,
+    "tree_sha": "97fc92788680761d6711637de24da2ee70b7a529",
+    "writable_authorities": 0
+  },
+  "candidate": {
+    "classic_paths_present": 0,
+    "classic_production_callers": 0,
+    "commit_sha": "38a5cc5abf394b3d9dc60aa06adeb151131236d7",
+    "incident_authority_literals": 0,
+    "retained_paths_present": 6,
+    "runtime_authority_paths_present": 8,
+    "script_python_files": 257,
+    "script_python_loc": 84682,
+    "tracked_files": 1612,
+    "tree_sha": "c78224957190cdfa73538b19432588d77658d50d",
+    "writable_authorities": 0
+  },
+  "counter_scope": "tracked blobs plus scripts/**/*.py physical lines",
+  "dispositions": {
+    "candidate_attempt_budget": "implemented-rc3",
+    "coverage_observation_nondeterminism": "typed-tolerance-rc3",
+    "historical_rc2_slice_receipts": "accepted-deviation-never-backfill",
+    "machine_inventory": "implemented-rc3",
+    "portable_shell_scratch": "implemented-rc3",
+    "prospective_slice_receipts": "implemented-prospective-only-rc3"
+  },
+  "release": "2.6.6-rc3",
+  "schema_version": 1
+}

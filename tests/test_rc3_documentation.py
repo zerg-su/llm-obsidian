@@ -92,6 +92,16 @@ for relative in (
 ):
     assert (ROOT / relative).is_file()
 
+inventory_path = ROOT / "docs/acceptance/v2.6.6-rc3-machine-inventory.json"
+inventory = subprocess.run(
+    ["python3", "scripts/rc3_inventory.py", "check", str(inventory_path)],
+    cwd=ROOT,
+    check=False,
+    capture_output=True,
+    text=True,
+)
+assert inventory.returncode == 0, inventory.stdout + inventory.stderr
+
 method = json.loads(text("docs/acceptance/v2.6.6-rc3-skill-creator-method.json"))
 assert method["order"] == 1
 assert {row["skill"] for row in method["skills"]} == {
