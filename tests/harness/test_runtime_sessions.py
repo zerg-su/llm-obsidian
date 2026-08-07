@@ -4373,6 +4373,7 @@ STUCK_CLAUDE_SCREEN = (
     "❯\n"
 )
 ACTIVE_CLAUDE_SCREEN = "✻ Working…(12s · ↓ 480 tokens · esc to interrupt)\n❯\n"
+ACTIVE_CLAUDE_220_SCREEN = "✽ Roosting… (44s · ↓ 2.3k tokens)\n❯\n"
 ACTIVE_CODEX_SCREEN = "• Working (3s • esc to interrupt)\n›\n"
 CLAUDE_TRUST_SCREEN = (
     "Accessing workspace: /tmp/product\n"
@@ -4466,6 +4467,14 @@ def check_initial_start_accepts_normal_claude() -> None:
         "normal Claude activity acknowledges the initial start",
         state == "started" and port.reads == 2,
         (state, port.reads),
+    )
+    current_state, current_port, _waits = _acknowledge(
+        [STUCK_CLAUDE_SCREEN, ACTIVE_CLAUDE_220_SCREEN]
+    )
+    check(
+        "Claude 2.1.220 spaced activity acknowledges the initial start",
+        current_state == "started" and current_port.reads == 2,
+        (current_state, current_port.reads),
     )
 
 

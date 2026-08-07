@@ -90,7 +90,7 @@ def classify_continuation_screen(runtime: str, screen: str, anchor: str) -> str:
         return "active"
     if runtime == "claude" and any(
         ("tokens" in line or "effort" in line)
-        and ("…(" in line or "...(" in line)
+        and re.search(r"(?:…|\.\.\.)\s*\(", line)
         for line in tail
     ):
         return "active"
