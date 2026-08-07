@@ -16,6 +16,30 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc4] — 2026-08-08
+
+Этот control-plane candidate делает review routing и callback continuation
+детерминированными без нового оркестратора или provider route.
+
+### Добавлено
+
+- Добавлен единый digest effective review topology, общий для validation,
+  finalization и runtime launch.
+- Добавлены machine-checked lifecycle transition certificate и six-part
+  engineering review denominator: quality, implementation, testing,
+  simplification, documentation и security.
+- Добавлены bounded skill-quality evidence и exact release-boundary fixtures.
+
+### Исправлено
+
+- Accepted review callbacks возобновляются инкрементально и ровно один раз
+  после crash prefixes, stale surfaces, changed-HEAD verification и zero-lane
+  preflight.
+- Release evidence привязано к exact plan, Outcome Contract, artifact root,
+  reviewed bytes и candidate HEAD.
+- Initial input считается принятым только после semantic provider activity,
+  включая текущий Claude UI с пробелом перед activity timer.
+
 ## [2.6.6-rc3] — 2026-08-07
 
 Этот финальный evidence-polish candidate закрывает оставшиеся замечания RC2,

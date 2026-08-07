@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc4] - 2026-08-08
+
+This control-plane candidate makes review routing and callback continuation
+deterministic without adding another orchestrator or provider route.
+
+### Added
+
+- Added one canonical effective-review-topology digest shared by validation,
+  finalization, and runtime launch.
+- Added a machine-checked lifecycle transition certificate and a six-part
+  engineering review denominator covering quality, implementation, testing,
+  simplification, documentation, and security.
+- Added bounded skill-quality evidence and exact release-boundary fixtures.
+
+### Fixed
+
+- Resume accepted review callbacks incrementally and exactly once across crash
+  prefixes, stale surfaces, changed-HEAD verification, and zero-lane preflight.
+- Bind release evidence to its exact plan, Outcome Contract, artifact root,
+  reviewed bytes, and candidate HEAD.
+- Require semantic provider activity before recording initial input accepted,
+  including the current Claude spaced activity display.
+
 ## [2.6.6-rc3] - 2026-08-07
 
 This final evidence-polish candidate closes the residual RC2 review findings

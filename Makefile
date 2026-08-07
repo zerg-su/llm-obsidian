@@ -198,6 +198,8 @@ test-docs:
 	@python3 tests/test_russian_documentation.py
 	@echo "=== test_rc3_documentation.py ==="
 	@python3 tests/test_rc3_documentation.py
+	@echo "=== test_rc4_documentation.py ==="
+	@python3 tests/test_rc4_documentation.py
 
 eval-smoke:
 	@python3 scripts/agent-evals.py smoke

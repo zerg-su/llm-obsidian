@@ -146,19 +146,6 @@ verdict = subprocess.run(
 )
 assert verdict.returncode == 0, verdict.stdout + verdict.stderr
 
-version_carriers = {
-    relative: json.loads(text(relative))
-    for relative in (
-        ".claude-plugin/plugin.json",
-        ".claude-plugin/marketplace.json",
-        ".codex-plugin/plugin.json",
-    )
-}
-assert version_carriers[".claude-plugin/plugin.json"]["version"] == "2.6.6-rc3"
-assert version_carriers[".codex-plugin/plugin.json"]["version"] == "2.6.6-rc3"
-marketplace = version_carriers[".claude-plugin/marketplace.json"]
-assert marketplace["metadata"]["version"] == "2.6.6-rc3"
-assert marketplace["plugins"][0]["version"] == "2.6.6-rc3"
 assert json.loads(text(".agents/plugins/marketplace.json"))["name"] == (
     "llm-obsidian-codex"
 )

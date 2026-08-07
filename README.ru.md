@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| v2.6.6 RC4 — детерминированный review control plane | [Release notes v2.6.6 RC4](docs/releases/v2.6.6-rc4.md) |
 | Воспроизводимый evidence и release disposition в 2.6.6 RC3 | [Release notes 2.6.6 RC3](docs/releases/v2.6.6-rc3.md) |
 | Repair-and-delete polishing в 2.6.6 RC2 | [Release notes 2.6.6 RC2](docs/releases/v2.6.6-rc2.md) |
 | Exact cmux cleanup reconciliation в 2.6.6 RC1-fix2 | [Release notes 2.6.6 RC1-fix2](docs/releases/v2.6.6-rc1-fix2.md) |
