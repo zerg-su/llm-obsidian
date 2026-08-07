@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -82,6 +83,19 @@ for command in (
 ):
     assert command in upgrade
 assert "--accepted-deviations" in upgrade
+release_check = next(
+    line
+    for line in upgrade.splitlines()
+    if line.startswith("python3 scripts/rc3_release_disposition.py check ")
+)
+release_check_args = shlex.split(release_check)
+for required in (
+    "--review-boundary",
+    "--plan",
+    "--outcome-evidence",
+    "--accepted-deviations",
+):
+    assert required in release_check_args, required
 assert "восемь полных попыток" in upgrade
 assert "шестая попытка запрещена" not in upgrade
 

@@ -1014,6 +1014,45 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             encoding="utf-8",
         )
 
+        with tempfile.TemporaryDirectory(
+            prefix="rc3-disposition-substitute."
+        ) as substitute_raw:
+            substituted_outcome = Path(substitute_raw) / outcome_evidence.name
+            substituted_outcome.write_bytes(outcome_evidence.read_bytes())
+            assert_rejected(
+                "outcome evidence path",
+                "out-of-root same-suffix outcome evidence was accepted",
+                outcome_evidence_path=substituted_outcome,
+            )
+
+        with tempfile.TemporaryDirectory(
+            prefix="rc3-disposition-symlink."
+        ) as substitute_raw:
+            outside = Path(substitute_raw) / "linked"
+            outside.mkdir()
+            outside_outcome = outside / outcome_evidence.name
+            outside_outcome.write_bytes(outcome_evidence.read_bytes())
+            linked = evidence / "linked"
+            linked.symlink_to(outside, target_is_directory=True)
+            linked_boundary = copy.deepcopy(baseline_boundary)
+            linked_boundary["outcome_evidence_map_path"] = (
+                f"linked/{outcome_evidence.name}"
+            )
+            review_boundary.write_text(
+                json.dumps(linked_boundary, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            assert_rejected(
+                "outcome evidence path",
+                "out-of-root outcome evidence through a symlink component was accepted",
+                outcome_evidence_path=linked / outcome_evidence.name,
+            )
+            linked.unlink()
+        review_boundary.write_text(
+            json.dumps(baseline_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
         exact_inputs = (
             (
                 "plan",

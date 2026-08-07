@@ -69,7 +69,7 @@ stale. `release-final` запускается только с
 первой команды. После двух release review проверьте concrete disposition:
 
 ```bash
-python3 scripts/rc3_release_disposition.py check "$RC3_EVIDENCE_ROOT/release-disposition.json" --gate-receipt "$RC3_EVIDENCE_ROOT/release/receipt.json" --attempt-ledger-root "$RC3_EVIDENCE_ROOT" --review-manifest "$RC3_EVIDENCE_ROOT/reviews.json" --finding-evidence "$RC3_EVIDENCE_ROOT/findings.json" --accepted-deviations "$RC3_EVIDENCE_ROOT/accepted-deviations.json"
+python3 scripts/rc3_release_disposition.py check "$RC3_EVIDENCE_ROOT/release-disposition.json" --gate-receipt "$RC3_EVIDENCE_ROOT/release/receipt.json" --attempt-ledger-root "$RC3_EVIDENCE_ROOT" --review-boundary "$RC3_EVIDENCE_ROOT/review-boundary.json" --plan "$RC3_EVIDENCE_ROOT/approved-plan.md" --outcome-evidence "$RC3_EVIDENCE_ROOT/outcome-evidence.json" --review-manifest "$RC3_EVIDENCE_ROOT/reviews.json" --finding-evidence "$RC3_EVIDENCE_ROOT/findings.json" --accepted-deviations "$RC3_EVIDENCE_ROOT/accepted-deviations.json"
 ```
 
 Новый product commit делает gate и disposition stale и требует нового

@@ -77,8 +77,9 @@ def _exact_subject(root: Path, value: object) -> str:
 
 
 def _bytes(path: Path, label: str) -> bytes:
-    path = path.expanduser().resolve()
-    if path.is_symlink() or not path.is_file():
+    source = path.expanduser()
+    path = source.resolve()
+    if source.is_symlink() or not path.is_file():
         raise DispositionError(f"{label} is unavailable")
     try:
         return path.read_bytes()
@@ -107,15 +108,33 @@ def _canonical_payload_sha256(value: object) -> str:
     ).hexdigest()
 
 
-def _matches_boundary_pointer(path: Path, pointer: str) -> bool:
-    expected = Path(pointer).parts
-    actual = path.expanduser().resolve().parts
-    return len(expected) <= len(actual) and actual[-len(expected) :] == expected
+def _matches_boundary_pointer(root: Path, path: Path, pointer: str) -> bool:
+    root = root.expanduser().resolve()
+    if not root.is_dir() or not pointer or Path(pointer).is_absolute():
+        return False
+    source = root
+    for part in Path(pointer).parts:
+        if part in {"", ".", ".."}:
+            return False
+        source /= part
+        if source.is_symlink():
+            return False
+    expected = source.resolve()
+    supplied = path.expanduser()
+    actual = supplied.resolve()
+    return (
+        expected != root
+        and root in expected.parents
+        and expected.is_file()
+        and not supplied.is_symlink()
+        and actual == expected
+    )
 
 
 def _release_boundary(
     path: Path,
     *,
+    artifact_root: Path,
     subject: str,
     plan_path: Path,
     outcome_evidence_path: Path,
@@ -147,7 +166,9 @@ def _release_boundary(
         outcome_evidence_path, "release outcome evidence"
     )
     if not _matches_boundary_pointer(
-        outcome_evidence_path, boundary.outcome_evidence_map_path
+        artifact_root,
+        outcome_evidence_path,
+        boundary.outcome_evidence_map_path,
     ):
         raise DispositionError(
             "release review boundary outcome evidence path is stale"
@@ -160,7 +181,9 @@ def _release_boundary(
         accepted_deviations_path, "release accepted deviations"
     )
     if not _matches_boundary_pointer(
-        accepted_deviations_path, boundary.accepted_deviations_path
+        artifact_root,
+        accepted_deviations_path,
+        boundary.accepted_deviations_path,
     ):
         raise DispositionError(
             "release review boundary accepted deviations path is stale"
@@ -429,6 +452,7 @@ def compile_disposition(
     subject = _exact_subject(root, subject_head_sha)
     boundary = _release_boundary(
         review_boundary_path,
+        artifact_root=attempt_ledger_root,
         subject=subject,
         plan_path=plan_path,
         outcome_evidence_path=outcome_evidence_path,
