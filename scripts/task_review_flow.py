@@ -59,6 +59,7 @@ from task_review_shared import (
     StaleRoundCallbackError,
     TaskReviewError,
     _atomic_json,
+    _read_json,
 )
 from task_review_verification import _finalizing_resubmit_recovery
 from task_review_replay import _pending_replay_is_safe
@@ -96,6 +97,133 @@ def _pending_gate_replay(
     if pending and initial_state.get("lanes") != []:
         raise TaskReviewError("pending review gate already owns lanes")
     return pending
+
+
+def _resolution_source_state(
+    gate_root: Path,
+    state: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Recover the exact prior finding boundary across zero-lane restarts."""
+
+    attempt = ReviewAttempt.from_mapping(state["attempt"])
+    if attempt.status != "terminal" or attempt.terminal is None:
+        return None
+    if attempt.terminal.result == ReviewAttemptTerminalResult.CHANGES_REQUESTED:
+        return state
+    if (
+        attempt.terminal.result
+        != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+        or attempt.terminal.lane_results
+    ):
+        return None
+    identity = attempt.identity
+    for cycle in range(identity.cycle - 1, 0, -1):
+        pointer = gate_root / "attempts" / f"cycle-{cycle}.json"
+        if not pointer.is_file() or pointer.is_symlink():
+            return None
+        candidate = _read_json(pointer, "review attempt archive")
+        archived = ReviewAttempt.from_mapping(candidate.get("attempt"))
+        archived_identity = archived.identity
+        if (
+            archived_identity.cycle != cycle
+            or archived_identity.finalization_lineage_id
+            != identity.finalization_lineage_id
+            or archived_identity.plan_sha256 != identity.plan_sha256
+            or archived_identity.outcome_sha256 != identity.outcome_sha256
+            or archived_identity.policy != identity.policy
+        ):
+            raise ReviewAttemptError("review attempt archive identity drifted")
+        if archived.status != "terminal" or archived.terminal is None:
+            raise ReviewAttemptError("review attempt archive is not terminal")
+        if (
+            archived.terminal.result
+            == ReviewAttemptTerminalResult.CHANGES_REQUESTED
+        ):
+            if archived_identity.exact_head_sha == identity.exact_head_sha:
+                raise ReviewAttemptError(
+                    "review resolution source did not move the exact HEAD"
+                )
+            return candidate
+        if (
+            archived.terminal.result
+            != ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+            or archived.terminal.lane_results
+        ):
+            return None
+    return None
+
+
+def _archive_resolution_callbacks(
+    runtime_root: Path,
+    state: Mapping[str, Any],
+) -> None:
+    """Preserve accepted callback bytes and free only their exact outboxes."""
+
+    boundaries = state.get("review_notification_evidence")
+    if not isinstance(boundaries, Mapping) or not boundaries:
+        raise ReviewAttemptError("review resolution callbacks are unavailable")
+    for axis, raw_boundary in sorted(boundaries.items()):
+        if not isinstance(axis, str) or not isinstance(raw_boundary, Mapping):
+            raise ReviewAttemptError("review resolution callback is invalid")
+        callback_id = str(raw_boundary.get("callback_id") or "")
+        callback_sha256 = str(raw_boundary.get("callback_sha256") or "")
+        round_operation_id = str(
+            raw_boundary.get("round_operation_id") or ""
+        )
+        round_run_id = str(raw_boundary.get("round_run_id") or "")
+        if (
+            not callback_id
+            or len(callback_sha256) != 64
+            or any(ch not in "0123456789abcdef" for ch in callback_sha256)
+            or not round_operation_id
+            or not round_run_id
+        ):
+            raise ReviewAttemptError("review resolution callback identity is invalid")
+        callback = _callback_path(runtime_root, axis)
+        archive_dir = callback.parent / "accepted"
+        archive = archive_dir / f"{callback_sha256}.review-callback.json"
+        if (
+            archive.is_symlink()
+            or callback.is_symlink()
+            or archive_dir.is_symlink()
+            or (archive_dir.exists() and not archive_dir.is_dir())
+        ):
+            raise ReviewAttemptError("review resolution callback path is invalid")
+        if callback.is_file():
+            raw = callback.read_bytes()
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ReviewAttemptError(
+                    "review resolution callback bytes are invalid"
+                ) from exc
+            if (
+                not isinstance(payload, dict)
+                or payload.get("callback_id") != callback_id
+                or payload.get("payload_sha256") != callback_sha256
+                or payload.get("operation_id") != round_operation_id
+                or payload.get("run_id") != round_run_id
+                or payload.get("kind") != "review"
+                or not isinstance(payload.get("payload"), dict)
+                or payload["payload"].get("axis") != axis
+            ):
+                raise ReviewAttemptError(
+                    "review resolution callback identity drifted"
+                )
+            archive_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            archive_dir.chmod(0o700)
+            if archive.exists():
+                if not archive.is_file() or archive.read_bytes() != raw:
+                    raise ReviewAttemptError(
+                        "review resolution callback archive changed"
+                    )
+                callback.unlink()
+            else:
+                callback.replace(archive)
+        elif not archive.is_file():
+            raise ReviewAttemptError(
+                "review resolution callback bytes are unavailable"
+            )
 
 
 def _start_review(
@@ -585,8 +713,35 @@ def _run_exact_head_review(
                 worktree=worktree,
                 runtime_root=runtime_root,
             )
+    resolution_bundle = None
+    current_head = _git(worktree, "rev-parse", "HEAD")
+    if gate_exists:
+        source_state = _resolution_source_state(gate_root, gate.read())
+        if source_state is not None:
+            source_attempt = ReviewAttempt.from_mapping(
+                source_state["attempt"]
+            )
+            if current_head != source_attempt.identity.exact_head_sha:
+                boundaries = source_state.get("review_notification_evidence")
+                if not isinstance(boundaries, Mapping):
+                    raise ReviewAttemptError(
+                        "review resolution boundary is unavailable"
+                    )
+                resolution_bundle = _resolution_bundle(
+                    worktree,
+                    gate_root,
+                    task_id,
+                    boundaries,
+                    current_head,
+                )
+                _archive_resolution_callbacks(runtime_root, source_state)
     context, context_manifest = _context(
-        meta, vault, worktree, runtime_root, task_id
+        meta,
+        vault,
+        worktree,
+        runtime_root,
+        task_id,
+        resolution_bundle=resolution_bundle,
     )
     preset, request = _request(meta, vault, task_id, context)
     if not preset.enabled:

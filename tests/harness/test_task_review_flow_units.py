@@ -25,6 +25,7 @@ from harness.contracts import (  # noqa: E402
 from harness.store import OperationStore  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
+    ReviewFinding,
     ReviewOperationRequest,
     ReviewResult,
     review_round_envelope,
@@ -34,8 +35,10 @@ from harness.workflows.review_gate import (  # noqa: E402
     ReviewPreset,
 )
 from task_review_flow import (  # noqa: E402
+    _archive_resolution_callbacks,
     _complete_ready_results,
     _ready_result_is_recorded,
+    _resolution_source_state,
     _review_origin_surface,
     _resume_bound_attention,
 )
@@ -76,6 +79,8 @@ check(
     )
     == "wiki-live",
 )
+
+
 check(
     "ordinary review never changes its frozen task origin",
     _review_origin_surface(
@@ -179,6 +184,131 @@ class FakeRuntime:
                 expected_revision=completed.revision,
             )
         return self.store.read(owner_id, operation_id)
+
+
+with tempfile.TemporaryDirectory(prefix="review-resolution-outbox.") as raw:
+    base = Path(raw)
+    runtime_root = base / "runtime"
+    runtime_root.mkdir()
+    product_root = base / "product"
+    product_root.mkdir()
+    store = OperationStore(base / "store")
+    owner_id = "resolution-owner"
+    runtime = FakeRuntime(store, owner_id=owner_id)
+    gate = ReviewGateController(base / "gate", runtime, store)
+    context = ReviewContext(
+        "packets/review/manifest.json",
+        "a" * 40,
+        "scoped",
+        "b" * 64,
+    )
+    preset = ReviewPreset.from_flags()
+    request = ReviewOperationRequest(
+        preset.request("resolution-review", selected_provider="openai"),
+        owner_id,
+        RuntimeRoute(
+            "codex",
+            "gpt-5.6-sol",
+            "xhigh",
+            "reviewer-callback",
+            "c" * 64,
+        ),
+        context,
+    )
+    run = gate.begin_attempt(
+        dispatch_operation_id="resolution-review",
+        finalization_lineage_id="resolution-review",
+        cycle=1,
+        plan_sha256="d" * 64,
+        outcome_sha256="e" * 64,
+        request=request,
+        origin_surface="22222222-bbbb-4bbb-8bbb-222222222222",
+        cwd=runtime_root,
+        product_root=product_root,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks",
+    )
+    lane = run.execution.lanes[0]
+    round_ = run.rounds[lane.axis]
+    callback = _callback_path(runtime_root, lane.axis)
+    callback.parent.mkdir(parents=True, exist_ok=True)
+    callback.write_text(
+        json.dumps(
+            to_dict(
+                review_round_envelope(
+                    round_,
+                    ReviewResult(
+                        lane.axis,
+                        "changes-requested",
+                        (
+                            ReviewFinding(
+                                finding_id="F-resolution",
+                                axis=lane.axis,
+                                severity="important",
+                                summary="Resolution is required.",
+                                evidence="The exact callback must be archived.",
+                                file="product.py",
+                                line=1,
+                                recommendation="Apply the bounded repair.",
+                            ),
+                        ),
+                        0,
+                    ),
+                )
+            ),
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    ready = _collect_ready_results(run, runtime_root, base, base)
+    _complete_ready_results(
+        gate=gate,
+        run=run,
+        ready=ready,
+        preset=preset,
+        context=context,
+        worktree=base,
+        vault=base,
+        runtime_root=runtime_root,
+        exact_attempt=True,
+    )
+    changes_state = gate.read()
+    callback_bytes = callback.read_bytes()
+    _archive_resolution_callbacks(runtime_root, changes_state)
+    boundary = changes_state["review_notification_evidence"][lane.axis]
+    archive = (
+        callback.parent
+        / "accepted"
+        / f"{boundary['callback_sha256']}.review-callback.json"
+    )
+    _archive_resolution_callbacks(runtime_root, changes_state)
+    check(
+        "accepted resolution callback is archived idempotently before retry",
+        not callback.exists()
+        and archive.is_file()
+        and archive.read_bytes() == callback_bytes,
+    )
+    (gate.root / "attempts").mkdir()
+    (gate.root / "attempts" / "cycle-1.json").write_text(
+        json.dumps(changes_state, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    zero_lane = json.loads(json.dumps(changes_state))
+    zero_lane["status"] = "attention-required"
+    zero_lane["attempt"]["identity"]["cycle"] = 2
+    zero_lane["attempt"]["identity"]["exact_head_sha"] = "f" * 40
+    zero_lane["attempt"]["terminal"] = {
+        "schema_version": 1,
+        "result": "attention-required",
+        "exact_head_sha": "f" * 40,
+        "lane_results": [],
+    }
+    zero_lane.pop("review_notification_evidence", None)
+    check(
+        "zero-lane restart recovers the preceding exact finding boundary",
+        _resolution_source_state(gate.root, zero_lane) == changes_state,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="review-flow-recorded.") as raw:
