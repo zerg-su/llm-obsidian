@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SHA = "3f8d02e936af99b49aaf83a466c756799c38736c"
 LEDGER = ROOT / "docs/acceptance/v2.6.6-rc2-defect-ledger.json"
+DEVIATIONS = ROOT / "docs/acceptance/v2.6.6-rc2-accepted-deviations.json"
 CLASSIC = (
     "scripts/cmux_agent_supervisor.py",
     "scripts/cmux_supervisor_policy.py",
@@ -57,6 +58,7 @@ assert ledger["schema_version"] == 2
 assert ledger["release"] == "2.6.6-rc2"
 assert ledger["baseline_subject_sha"] == BASE_SHA
 assert ledger["disposition_kinds"] == [
+    "accepted-deviation-rc2",
     "defer-post-rc2",
     "deleted-rc2",
     "fixed-rc2",
@@ -84,12 +86,32 @@ required = {
     "intent-e9-tdd-skill-verdict-missing": "defer-post-rc2",
     "RC2.CLASSIC_CMUX_CONTOUR": "deleted-rc2",
     "RC2.VAULT_REPAIR": "implemented-rc2",
+    "RC2.REVIEW_APPROVAL_CRASH_GAP": "fixed-rc2",
+    "RC2.IMPLEMENTATION_AUTHORITY_OPAQUE_EVIDENCE": "fixed-rc2",
+    "RC2.EXACT_CANDIDATE_SECRET_CHECK": "implemented-rc2",
+    "RC2.REPLACEMENT_CANDIDATE_CEILING": "accepted-deviation-rc2",
+    "RC2.SWARM_PLAN_STATUS_PROOF": "accepted-deviation-rc2",
 }
 assert {finding: by_id[finding]["disposition"] for finding in required} == required
 assert by_id["RC2.CMUX_PROVIDER_START_HANDSHAKE"]["owner"] == {
     "kind": "component",
     "id": "harness.runtime_provider",
 }
+
+deviations = json.loads(DEVIATIONS.read_text(encoding="utf-8"))
+assert deviations["schema_version"] == 1
+assert deviations["release"] == "2.6.6-rc2"
+assert {row["id"] for row in deviations["deviations"]} == {
+    "D-266-RC2-L4-01",
+    "D-266-RC2-E7-01",
+}
+for row in deviations["deviations"]:
+    assert row["status"] == "accepted"
+    assert row["finding_ids"]
+    assert all(
+        by_id[finding]["disposition"] == "accepted-deviation-rc2"
+        for finding in row["finding_ids"]
+    )
 
 allowlist = ledger["deletion_allowlist"]
 assert allowlist["subject_sha"] == BASE_SHA

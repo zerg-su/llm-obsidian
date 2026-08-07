@@ -20,6 +20,8 @@ the proven-unreachable classic cmux contour without adding orchestration.
 - Added one bounded `vault-repair` skill and exact blocked-Stop handoff for
   Codex and Claude Code, reusing the existing recovery, validation, and scoped
   commit pipeline.
+- Added an exact-candidate secret check for added content and newly tracked
+  secret-container paths to the immutable release profile.
 
 ### Fixed
 
@@ -27,6 +29,10 @@ the proven-unreachable classic cmux contour without adding orchestration.
   parent/descendant drift.
 - Made callback acceptance one public atomic Store transaction and completed
   already-accepted resource-free review dispatches exactly once.
+- Made durable terminal approval resumable after a crash without replaying
+  provider, callback, verification, process, or cmux effects.
+- Required implementation review authority to validate the complete immutable
+  evidence bundle, including every output sidecar, before reviewer launch.
 
 ### Removed
 

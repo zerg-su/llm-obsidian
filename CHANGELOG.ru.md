@@ -25,6 +25,8 @@
 
 - Добавлен один bounded skill `vault-repair` и точный blocked-Stop handoff для
   Codex и Claude Code поверх существующих recovery, validation и scoped commit.
+- В immutable release profile добавлена exact-candidate проверка добавленного
+  содержимого и новых путей secret-container.
 
 ### Исправлено
 
@@ -32,6 +34,10 @@
   parent и descendant отвергается.
 - Callback acceptance стал одной публичной атомарной Store transaction, а уже
   принятый resource-free review dispatch завершается ровно один раз.
+- Durable terminal approval после crash возобновляется без повторения provider,
+  callback, verification, process или cmux effects.
+- Implementation review authority до запуска reviewer проверяет полный
+  immutable evidence bundle, включая каждый output sidecar.
 
 ### Удалено
 

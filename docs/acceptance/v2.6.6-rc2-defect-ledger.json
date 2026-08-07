@@ -4,6 +4,7 @@
   "baseline_subject_sha": "3f8d02e936af99b49aaf83a466c756799c38736c",
   "append_only_during_rc1": true,
   "disposition_kinds": [
+    "accepted-deviation-rc2",
     "defer-post-rc2",
     "deleted-rc2",
     "fixed-rc2",
@@ -323,6 +324,78 @@
       "disposition": "fixed-rc2",
       "owner": {"kind": "governance", "id": "harness.coverage"},
       "rationale": "Add deterministic contract-boundary assertions for unknown schema, negative output size, and legacy digest claims; no floor or production behavior was changed.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.FINAL_REVIEW_BUNDLE_COMPLETENESS",
+      "observed_at_stage": "RC2 final Codex and Fable implementation review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "RC2.E8.release-bundle-incomplete; rc2-e8-boundary-receipt-lacks-sidecar-logs",
+      "severity": "important",
+      "rc1_relation": "The immutable receipt was exact, but the reviewer boundary copied no output sidecars.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.review_program_authority"},
+      "rationale": "Implementation authority now validates a complete immutable receipt bundle or a complete v2 verification set, including exact subject, profile, command inventory, and every persisted output byte.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.REVIEW_APPROVAL_CRASH_GAP",
+      "observed_at_stage": "RC2 final Codex engineering review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "ENG.RC2.RESUME-APPROVAL-CRASH-GAP",
+      "severity": "important",
+      "rc1_relation": "A durable approval followed by a crash could leave the dispatch in finalizing.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.cli"},
+      "rationale": "Recognize the exact terminal approved attempt and idempotently terminalize resource-free ownership from attention-required or finalizing without replaying callback, provider, verification, process, or cmux effects.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.IMPLEMENTATION_AUTHORITY_OPAQUE_EVIDENCE",
+      "observed_at_stage": "RC2 final Codex engineering review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "ENG.RC2.OPAQUE-VERIFICATION-BOUNDARY",
+      "severity": "important",
+      "rc1_relation": "A digest-bound evidence file was not itself parsed by review authority.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "component", "id": "harness.review_program_authority"},
+      "rationale": "Reject parent subjects, unknown profiles, incomplete command sets, missing outputs, changed sizes/digests, and symlink escapes before reviewer authority can start or mint a trusted receipt.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.EXACT_CANDIDATE_SECRET_CHECK",
+      "observed_at_stage": "RC2 final intent review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "RC2.E8.release-bundle-incomplete",
+      "severity": "important",
+      "rc1_relation": "The release-final profile did not emit the secret-check evidence named by RC2-E8.",
+      "disposition": "implemented-rc2",
+      "owner": {"kind": "release", "id": "release-secret-check"},
+      "rationale": "A bounded exact-candidate scan checks only added lines and newly tracked secret-container paths relative to the nearest prior release tag, avoiding historical fixture false positives.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.REPLACEMENT_CANDIDATE_CEILING",
+      "observed_at_stage": "RC2 final Codex and Fable intent review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "RC2.scope.replacement-ceiling-crossed; rc2-e8-replacement-candidate-count-interpretation",
+      "severity": "important",
+      "rc1_relation": "The plan did not define whether failed unpublished gate executions consume the one replacement-candidate budget.",
+      "disposition": "accepted-deviation-rc2",
+      "owner": {"kind": "governance", "id": "D-266-RC2-L4-01"},
+      "rationale": "The coordinator records the literal ambiguity instead of relabeling attempts. The user's repeated instruction to finish RC2 authorizes one bounded post-review repair candidate; future plans count full-profile executions mechanically.",
+      "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.SWARM_PLAN_STATUS_PROOF",
+      "observed_at_stage": "RC2 final Codex intent review",
+      "subject_head_sha": "775c22ec2154d11c9211b07216a9d03ed2138777",
+      "reproducer_or_evidence": "RC2.E7.plan-status-proof-missing",
+      "severity": "important",
+      "rc1_relation": "User-owned Swarm plan status cannot be mutated from the product review checkout.",
+      "disposition": "accepted-deviation-rc2",
+      "owner": {"kind": "release", "id": "D-266-RC2-E7-01"},
+      "rationale": "Product code, version, ledger, and release metadata are terminal. Swarm plan-status bookkeeping remains a coordinator-owned post-handoff vault transaction and is not represented as product evidence.",
       "external_effects_observed": false
     }
   ]

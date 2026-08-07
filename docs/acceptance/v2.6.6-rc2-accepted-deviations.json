@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "release": "2.6.6-rc2",
+  "deviations": [
+    {
+      "id": "D-266-RC2-L4-01",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "replacement-candidate-budget",
+      "finding_ids": [
+        "RC2.REPLACEMENT_CANDIDATE_CEILING"
+      ],
+      "authority": "user-directed-bounded-rc2-completion",
+      "constraint": "RC2 may produce one final post-review repair candidate for the exact confirmed findings. No further hidden fix loop, provider expansion, push, tag, publish, install, or merge is authorized by this deviation.",
+      "remediation": "Future release plans count full-profile executions rather than only published receipts and define explicitly whether test-only repairs consume the candidate budget."
+    },
+    {
+      "id": "D-266-RC2-E7-01",
+      "status": "accepted",
+      "owner": "coordinator",
+      "scope": "user-vault-plan-status",
+      "finding_ids": [
+        "RC2.SWARM_PLAN_STATUS_PROOF"
+      ],
+      "authority": "product-vault-ownership-boundary",
+      "constraint": "The ordinary product candidate does not mutate the user-owned Swarm vault or claim that its plan index is product execution evidence.",
+      "remediation": "After accepted product handoff, update terminal/deferred Swarm plan status through one validated vault-write transaction."
+    }
+  ]
+}
