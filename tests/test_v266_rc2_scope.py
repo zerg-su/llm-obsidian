@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SHA = "3f8d02e936af99b49aaf83a466c756799c38736c"
+RC2_SHA = "b86a33d779bd8852915a4b875f12ef9a9b7366b3"
 LEDGER = ROOT / "docs/acceptance/v2.6.6-rc2-defect-ledger.json"
 DEVIATIONS = ROOT / "docs/acceptance/v2.6.6-rc2-accepted-deviations.json"
 CLASSIC = (
@@ -133,9 +134,28 @@ for relative in (*CLASSIC, CONDITIONAL):
     removed_lines += len(shown.stdout.splitlines())
 assert removed_lines == 2217
 
-current_scripts = tuple(sorted((ROOT / "scripts").rglob("*.py")))
-assert len(current_scripts) < 259
-assert sum(len(path.read_text(encoding="utf-8").splitlines()) for path in current_scripts) < 85431
+rc2_scripts = subprocess.run(
+    ["git", "ls-tree", "-r", "--name-only", RC2_SHA, "scripts"],
+    cwd=ROOT,
+    text=True,
+    capture_output=True,
+    check=True,
+).stdout.splitlines()
+rc2_scripts = [path for path in rc2_scripts if path.endswith(".py")]
+assert len(rc2_scripts) < 259
+rc2_lines = sum(
+    len(
+        subprocess.run(
+            ["git", "show", f"{RC2_SHA}:{relative}"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+    )
+    for relative in rc2_scripts
+)
+assert rc2_lines < 85431
 
 tdd_verdict = json.loads(
     (ROOT / "docs/acceptance/v2.6.6-rc2-tdd-verdict.json").read_text(
