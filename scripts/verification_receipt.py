@@ -453,7 +453,16 @@ def execute_gate(
         raise
 
 
-def verify_receipt(receipt_path: Path) -> dict[str, object]:
+def verify_receipt(
+    receipt_path: Path,
+    *,
+    expected_head: str,
+    expected_profile: str,
+) -> dict[str, object]:
+    if GIT_SHA.fullmatch(expected_head) is None:
+        raise ReceiptError("expected verification subject HEAD is invalid")
+    if expected_profile not in PROFILES:
+        raise ReceiptError("expected verification profile is unknown")
     receipt_path = receipt_path.expanduser().resolve()
     if receipt_path.is_symlink() or not receipt_path.is_file():
         raise ReceiptError("verification receipt is unavailable")
@@ -495,6 +504,10 @@ def verify_receipt(receipt_path: Path) -> dict[str, object]:
     profile = PROFILES.get(str(value.get("profile") or ""))
     if profile is None or value.get("profile_sha256") != profile.sha256:
         raise ReceiptError("verification profile identity changed")
+    if value.get("subject_head_sha") != expected_head:
+        raise ReceiptError("verification receipt subject HEAD is not exact")
+    if value.get("profile") != expected_profile:
+        raise ReceiptError("verification receipt profile is not exact")
     if value.get("runner") != Path(__file__).name or value.get(
         "runner_sha256"
     ) != hashlib.sha256(Path(__file__).read_bytes()).hexdigest():
@@ -549,6 +562,8 @@ def main() -> int:
     )
     verify = sub.add_parser("verify")
     verify.add_argument("--receipt", type=Path, required=True)
+    verify.add_argument("--expected-head", required=True)
+    verify.add_argument("--expected-profile", choices=sorted(PROFILES), required=True)
     args = parser.parse_args()
     try:
         if args.command == "run":
@@ -564,7 +579,11 @@ def main() -> int:
             )
             print(json.dumps(receipt, sort_keys=True))
         else:
-            receipt = verify_receipt(args.receipt)
+            receipt = verify_receipt(
+                args.receipt,
+                expected_head=args.expected_head,
+                expected_profile=args.expected_profile,
+            )
             print(
                 json.dumps(
                     {

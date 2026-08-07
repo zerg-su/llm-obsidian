@@ -134,7 +134,11 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
             expected_head=head,
             execution_relation="release-candidate",
         )
-    verified = receipts.verify_receipt(output / "receipt.json")
+    verified = receipts.verify_receipt(
+        output / "receipt.json",
+        expected_head=head,
+        expected_profile=test_profile.name,
+    )
     assert verified == receipt
     assert verified["attempt_id"] == PASS_ATTEMPT
     assert verified["subject_head_sha"] == head
@@ -149,9 +153,53 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
     print("OK   external staging is invisible to Git until atomic publication")
     print("OK   receipt retains and binds exact command output")
 
+    descendant_subject = root / "descendant-subject"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(subject), str(descendant_subject)],
+        check=True,
+    )
+    git(descendant_subject, "config", "user.name", "Evidence Test")
+    git(descendant_subject, "config", "user.email", "evidence@example.invalid")
+    (descendant_subject / "proof.txt").write_text(
+        "changed descendant\n", encoding="utf-8"
+    )
+    git(descendant_subject, "add", "proof.txt")
+    git(descendant_subject, "commit", "-m", "changed descendant")
+    descendant = git(descendant_subject, "rev-parse", "HEAD")
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", head, descendant],
+        cwd=descendant_subject,
+        check=False,
+    ).returncode == 0
+    try:
+        receipts.verify_receipt(
+            output / "receipt.json",
+            expected_head=descendant,
+            expected_profile=test_profile.name,
+        )
+    except receipts.ReceiptError as exc:
+        assert "subject HEAD" in str(exc)
+    else:
+        raise AssertionError("parent receipt was accepted for a descendant")
+    try:
+        receipts.verify_receipt(
+            output / "receipt.json",
+            expected_head=head,
+            expected_profile="release-final",
+        )
+    except receipts.ReceiptError as exc:
+        assert "profile" in str(exc)
+    else:
+        raise AssertionError("receipt was accepted for a different profile")
+    print("OK   exact subject validation rejects ancestor and profile drift")
+
     (output / "01-proof-output.log").write_text("tampered\n", encoding="utf-8")
     try:
-        receipts.verify_receipt(output / "receipt.json")
+        receipts.verify_receipt(
+            output / "receipt.json",
+            expected_head=head,
+            expected_profile=test_profile.name,
+        )
     except receipts.ReceiptError as exc:
         assert "digest changed" in str(exc)
     else:
