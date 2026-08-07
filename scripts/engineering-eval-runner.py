@@ -57,7 +57,7 @@ RC4_CASE_IDS = (
 RC4_SCENARIO_MANIFEST_SHA256 = (
     "07ab7a4b15e3c47627aa46e1ecd48aaac1c18ffb00216db4362170682290f3dc"
 )
-RC4_MODEL = "gpt-5.6-terra"
+RC4_MODEL = load_config(ROOT).resolve_alias("terra", "codex")["model"]
 RC4_EFFORT = "medium"
 RC4_TIMEOUT = 240.0
 RC4_SOURCE_SHA256 = {
