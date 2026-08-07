@@ -7,9 +7,15 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from harness.contracts import EffectOutcome, OwnedResources
+from harness.contracts import (
+    ContractError as HarnessContractError,
+    EffectOutcome,
+    OwnedResources,
+    VerificationEvidence,
+)
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.store import OperationStore, StoreError
+from harness.verification import output_binding_valid
 from task_review_request import _canonical_sha256
 from task_review_shared import TaskReviewError, _read_json
 
@@ -155,6 +161,9 @@ def _durable_verification_resubmit(
                 "profile",
                 "profile_sha256",
                 "output_pointer",
+                "output_sha256",
+                "output_bytes",
+                "schema_version",
             }
             or not isinstance(row.get("command_id"), str)
             or not row["command_id"]
@@ -167,7 +176,13 @@ def _durable_verification_resubmit(
             raise TaskReviewError(
                 "finalizing review recovery verification evidence is invalid"
             )
-        pointer = Path(str(row.get("output_pointer") or ""))
+        try:
+            typed_evidence = VerificationEvidence(**row)
+        except (HarnessContractError, TypeError):
+            raise TaskReviewError(
+                "finalizing review recovery verification evidence is invalid"
+            ) from None
+        pointer = Path(typed_evidence.output_pointer)
         output = (owner_runtime / pointer).resolve()
         evidence_root = (owner_runtime / "pipeline-verification").resolve()
         if (
@@ -175,6 +190,9 @@ def _durable_verification_resubmit(
             or evidence_root not in output.parents
             or not output.is_file()
             or output.is_symlink()
+            or not output_binding_valid(
+                typed_evidence, pointer_root=owner_runtime
+            )
         ):
             raise TaskReviewError(
                 "finalizing review recovery verification evidence is unavailable"

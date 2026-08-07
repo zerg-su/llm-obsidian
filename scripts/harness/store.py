@@ -184,6 +184,10 @@ class OperationStore:
 
         with self.locked(owner_id):
             record = self.read(owner_id, envelope.operation_id)
+            if envelope.operation_id != record.spec.operation_id:
+                raise StoreError("callback belongs to a different operation")
+            if envelope.run_id != record.run_id:
+                raise StoreError("callback belongs to a different run")
             exact_duplicate = (
                 record.accepted_callback_id == envelope.callback_id
                 and record.accepted_callback_kind == envelope.kind
@@ -193,10 +197,6 @@ class OperationStore:
                 if exact_duplicate:
                     return record, False, False
                 raise StoreError("stale callback writer")
-            if envelope.operation_id != record.spec.operation_id:
-                raise StoreError("callback belongs to a different operation")
-            if envelope.run_id != record.run_id:
-                raise StoreError("callback belongs to a different run")
             if record.accepted_callback_id:
                 if not exact_duplicate:
                     raise StoreError(

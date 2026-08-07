@@ -91,6 +91,20 @@ with tempfile.TemporaryDirectory(prefix="harness-callback.") as raw:
     else:
         check("callback from a different run is rejected", False)
 
+    try:
+        store.accept_callback(
+            "owner-1",
+            wrong_run,
+            expected_revision=after_first.revision - 1,
+            next_state="finalizing",
+            reason=None,
+            now=1.0,
+        )
+    except StoreError:
+        check("stale exact duplicate still rejects a different run", True)
+    else:
+        check("stale exact duplicate still rejects a different run", False)
+
     store.transition("owner-1", "op-1", "exiting")
     store.transition("owner-1", "op-1", "complete")
     terminal_duplicate = broker.accept(envelope)

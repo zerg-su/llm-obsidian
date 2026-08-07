@@ -26,6 +26,7 @@ from harness.git_ops import GitAdapter, GitError
 from harness.verification import (
     compose_commands,
     load_profiles,
+    output_binding_valid,
     run_profile,
     valid_for,
 )
@@ -491,6 +492,24 @@ with tempfile.TemporaryDirectory(dir=ROOT, prefix=".verify-test.") as raw:
         ],
     )
     check("verification evidence binds HEAD and profile", all(valid_for(row, head="c" * 40, profile=profiles["baseline"]) for row in evidence))
+    check(
+        "verification evidence binds the exact persisted output bytes",
+        all(
+            row.schema_version == 2
+            and row.output_sha256
+            and row.output_bytes == len(b"green\n")
+            and output_binding_valid(row, pointer_root=ROOT)
+            for row in evidence
+        ),
+    )
+    first_output = ROOT / evidence[0].output_pointer
+    original_output = first_output.read_bytes()
+    first_output.write_bytes(original_output + b"tampered\n")
+    check(
+        "verification output tamper invalidates the evidence binding",
+        not output_binding_valid(evidence[0], pointer_root=ROOT),
+    )
+    first_output.write_bytes(original_output)
     check("stale HEAD evidence rejected", not valid_for(evidence[0], head="d" * 40, profile=profiles["baseline"]))
     check(
         "failed command evidence is never reusable",

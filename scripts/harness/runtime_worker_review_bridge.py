@@ -21,7 +21,10 @@ from review_contract import ReviewContractError, axis_finding_id
 def _review_drive_failure_code(stderr: str) -> str:
     """Reduce runner stderr to one content-free repository-owned reason code."""
 
-    value = stderr.casefold()
+    value = stderr.casefold().strip()
+    stable_prefix = "task-review-runner:"
+    if value.startswith(stable_prefix):
+        value = value[len(stable_prefix) :].lstrip()
     if "runtime preflight failed" in value:
         return "runtime-preflight-failed"
     if "runtime callback" in value:

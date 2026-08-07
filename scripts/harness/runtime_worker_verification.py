@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from .runtime_worker import *
+from .contracts import ContractError, VerificationEvidence
 from .runtime_worker import (
     _atomic_json,
     _bounded_file_sha256,
@@ -16,6 +17,7 @@ from .runtime_worker import (
     _review_resolution_handoff_ready,
     _submit_failure_requires_attention,
 )
+from .verification import output_binding_valid
 
 
 class RuntimeWorkerVerificationMixin:
@@ -118,14 +120,12 @@ class RuntimeWorkerVerificationMixin:
                 or (not re.fullmatch("[0-9a-f]{40,64}", str(row.get("head_sha") or "")))
             ):
                 raise RuntimeWorkerError("pipeline verification evidence is invalid")
-            pointer = Path(str(row.get("output_pointer") or ""))
-            output = (self.spec_path.parent / pointer).resolve()
-            evidence_root = (self.spec_path.parent / "pipeline-verification").resolve()
-            if (
-                pointer.is_absolute()
-                or evidence_root not in output.parents
-                or (not output.is_file())
-                or output.is_symlink()
+            try:
+                typed_evidence = VerificationEvidence(**row)
+            except (ContractError, TypeError):
+                raise RuntimeWorkerError("pipeline verification evidence is invalid") from None
+            if not output_binding_valid(
+                typed_evidence, pointer_root=self.spec_path.parent
             ):
                 raise RuntimeWorkerError("pipeline verification output is invalid")
             exit_codes.append(int(row["exit_code"]))

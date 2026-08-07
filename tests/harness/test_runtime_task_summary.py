@@ -133,6 +133,20 @@ def assert_review_drive_failure_receipt_is_content_free() -> None:
         and "/private/" not in encoded,
         receipt,
     )
+    generic = _review_drive_failure_receipt(
+        subprocess.CompletedProcess(
+            ("task-review-runner.py", "run"),
+            2,
+            stdout="",
+            stderr="task-review-runner: unexpected nonzero exit",
+        ),
+        drive_sha256="e" * 64,
+    )
+    check(
+        "unrecognized runner failures keep the generic typed reason",
+        generic["reason_code"] == "runner-exit-nonzero",
+        generic,
+    )
 
 
 class FakeCmux:
@@ -2873,6 +2887,11 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
                     "started_at": "1",
                     "finished_at": "2",
                     "output_pointer": output.relative_to(state).as_posix(),
+                    "output_sha256": hashlib.sha256(
+                        output.read_bytes()
+                    ).hexdigest(),
+                    "output_bytes": len(output.read_bytes()),
+                    "schema_version": 2,
                 }
             ],
         }

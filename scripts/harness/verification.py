@@ -97,6 +97,9 @@ def run_profile(
             str(started),
             str(finished),
             pointer.relative_to(pointer_root).as_posix(),
+            hashlib.sha256(bounded).hexdigest(),
+            len(bounded),
+            2,
         )
         evidence.append(item)
         if result.returncode:
@@ -108,8 +111,38 @@ def run_profile(
 
 def valid_for(evidence: VerificationEvidence, *, head: str, profile: VerificationProfile) -> bool:
     return (
-        evidence.exit_code == 0
+        evidence.schema_version == 2
+        and bool(evidence.output_sha256)
+        and evidence.exit_code == 0
         and evidence.head_sha == head
         and evidence.profile == profile.name
         and evidence.profile_sha256 == profile.sha256
+    )
+
+
+def output_binding_valid(
+    evidence: VerificationEvidence, *, pointer_root: Path
+) -> bool:
+    """Validate that v2 evidence still names the exact persisted output bytes."""
+
+    if evidence.schema_version != 2 or not evidence.output_sha256:
+        return False
+    root = pointer_root.resolve()
+    raw = root / evidence.output_pointer
+    candidate = raw.resolve()
+    if root not in candidate.parents or raw.is_symlink():
+        return False
+    current = root
+    for part in Path(evidence.output_pointer).parts[:-1]:
+        current /= part
+        if current.is_symlink():
+            return False
+    try:
+        payload = candidate.read_bytes()
+    except OSError:
+        return False
+    return (
+        candidate.is_file()
+        and len(payload) == evidence.output_bytes
+        and hashlib.sha256(payload).hexdigest() == evidence.output_sha256
     )

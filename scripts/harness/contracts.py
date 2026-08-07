@@ -318,8 +318,13 @@ class VerificationEvidence:
     started_at: str
     finished_at: str
     output_pointer: str
+    output_sha256: str = ""
+    output_bytes: int = 0
+    schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version not in {1, 2}:
+            raise ContractError("unsupported VerificationEvidence schema")
         _identifier(self.profile, "profile")
         _sha256(self.profile_sha256, "profile_sha256")
         if not re.fullmatch(r"[0-9a-f]{40,64}", self.head_sha):
@@ -331,6 +336,12 @@ class VerificationEvidence:
             raise ContractError("exit_code must be an integer")
         if not self.started_at or not self.finished_at:
             raise ContractError("verification timestamps are required")
+        if type(self.output_bytes) is not int or self.output_bytes < 0:
+            raise ContractError("output_bytes must be a non-negative integer")
+        if self.schema_version == 2:
+            _sha256(self.output_sha256, "output_sha256")
+        elif self.output_sha256:
+            raise ContractError("legacy verification evidence cannot bind output")
 
 
 @dataclass(frozen=True)

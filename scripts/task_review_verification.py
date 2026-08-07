@@ -11,13 +11,19 @@ from harness.contracts import (
     ContractError as HarnessContractError,
     EffectOutcome,
     OwnedResources,
+    VerificationEvidence,
     to_dict,
 )
 from harness.custom_pipelines import CustomPipelinePolicy, resolve_custom_executable
 from harness.pipeline_builtins import builtin_registry
 from harness.runtime_worker import _pipeline_verify_identity
 from harness.store import OperationStore, StoreError
-from harness.verification import VerificationError, compose_commands, load_profiles
+from harness.verification import (
+    VerificationError,
+    compose_commands,
+    load_profiles,
+    output_binding_valid,
+)
 from harness.workflows.review import ReviewContext, review_round_envelope
 from harness.workflows.review_gate import ReviewGateController, ReviewGateRun
 from review_resolution import ResolutionError, validate_resolution_evidence
@@ -241,6 +247,9 @@ def _validate_successful_verification_evidence(
                 "profile",
                 "profile_sha256",
                 "output_pointer",
+                "output_sha256",
+                "output_bytes",
+                "schema_version",
             }
             or type(row.get("exit_code")) is not int
             or row.get("exit_code") != 0
@@ -252,13 +261,22 @@ def _validate_successful_verification_evidence(
             raise TaskReviewError(
                 "successful review recovery verification evidence is invalid"
             )
-        pointer = Path(str(row.get("output_pointer") or ""))
+        try:
+            typed_evidence = VerificationEvidence(**row)
+        except (HarnessContractError, TypeError):
+            raise TaskReviewError(
+                "successful review recovery verification evidence is invalid"
+            ) from None
+        pointer = Path(typed_evidence.output_pointer)
         output = (owner_runtime / pointer).resolve()
         if (
             pointer.is_absolute()
             or evidence_root not in output.parents
             or not output.is_file()
             or output.is_symlink()
+            or not output_binding_valid(
+                typed_evidence, pointer_root=owner_runtime
+            )
         ):
             raise TaskReviewError(
                 "successful review recovery verification evidence is unavailable"
