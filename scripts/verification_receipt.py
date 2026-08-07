@@ -326,12 +326,15 @@ def execute_gate(
         raise ReceiptError(str(exc)) from exc
     started_at = _utc_now()
     runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    staging = staging_store.create(attempt_id)
     ledger = None
-    if profile.name == "release-final":
-        if attempt_ledger_root is None:
-            raise ReceiptError("release-final requires an authoritative attempt ledger")
-        ledger = AttemptLedgerStore(attempt_ledger_root)
-        try:
+    ledger_reserved = False
+    commands: list[dict[str, object]] = []
+    try:
+        if profile.name == "release-final":
+            if attempt_ledger_root is None:
+                raise ReceiptError("release-final requires an authoritative attempt ledger")
+            ledger = AttemptLedgerStore(attempt_ledger_root)
             ledger.reserve(
                 attempt_id=attempt_id,
                 subject_head_sha=head,
@@ -339,11 +342,7 @@ def execute_gate(
                 execution_relation=execution_relation,
                 runner_sha256=runner_sha256,
             )
-        except AttemptLedgerError as exc:
-            raise ReceiptError(str(exc)) from exc
-    staging = staging_store.create(attempt_id)
-    commands: list[dict[str, object]] = []
-    try:
+            ledger_reserved = True
         for index, command in enumerate(profile.commands, 1):
             log_name = f"{index:02d}-{command.command_id}.log"
             log_path = staging / log_name
@@ -475,7 +474,7 @@ def execute_gate(
         )
         write_path.chmod(0o644)
         staging_store.publish(staging, output_dir)
-        if ledger is not None:
+        if ledger is not None and ledger_reserved:
             try:
                 ledger.finalize(
                     attempt_id=attempt_id,
@@ -492,7 +491,7 @@ def execute_gate(
         return receipt
     except BaseException as failure:
         staging_store.cleanup(staging)
-        if ledger is not None:
+        if ledger is not None and ledger_reserved:
             diagnostic = diagnostic_root / attempt_id / "diagnostic-receipt.json"
             if not diagnostic.is_file():
                 diagnostic = ledger.root / "artifacts" / f"{attempt_id}.failure.json"

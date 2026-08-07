@@ -166,6 +166,8 @@ class AttemptLedgerStore:
     ) -> dict[str, Any]:
         with self._locked():
             value = self._read()
+            if any(row["state"] == "reserved" for row in value["attempts"]):
+                raise AttemptLedgerError("another release attempt is already reserved")
             if any(row["attempt_id"] == attempt_id for row in value["attempts"]):
                 raise AttemptLedgerError("attempt identity already exists")
             if len(value["attempts"]) >= MAX_ATTEMPTS:

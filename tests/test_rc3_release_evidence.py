@@ -119,6 +119,18 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             runner_sha256="b" * 64,
         )
         assert first["ordinal"] == 1 and first["state"] == "reserved"
+        try:
+            store.reserve(
+                attempt_id="00000000-0000-4000-8000-000000000099",
+                subject_head_sha=subject,
+                profile_sha256="a" * 64,
+                execution_relation="release-candidate",
+                runner_sha256="b" * 64,
+            )
+        except ledger_module.AttemptLedgerError as exc:
+            assert "already reserved" in str(exc)
+        else:
+            raise AssertionError("concurrent release attempts must fail closed")
 
         artifact = root / "artifacts" / "attempt-1.json"
         artifact.parent.mkdir()
