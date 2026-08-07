@@ -10,6 +10,19 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc1-fix2] - 2026-08-07
+
+This interim RC1 patch fixes exact cmux cleanup reconciliation after a provider
+has already exited successfully.
+
+### Fixed
+
+- When `cmux identify` no longer returns a caller for a closed surface, the
+  adapter now confirms absence through the exact cmux tree instead of treating
+  the missing caller object as an adapter error. Completed `request-exit`
+  effects can therefore clear their exact owned resources and let protected
+  research continue to synthesis without replaying fetch or provider effects.
+
 ## [2.6.6-rc1-fix1] - 2026-08-07
 
 This interim RC1 patch fixes four dispatch failures found while dogfooding the

@@ -390,6 +390,7 @@ There is no speculative roadmap in this README. The repository describes what is
 
 | Topic | Document |
 |---|---|
+| v2.6.6 RC1-fix2 exact cmux cleanup reconciliation | [v2.6.6 RC1-fix2 release notes](docs/releases/v2.6.6-rc1-fix2.md) |
 | v2.6.6 RC1-fix1 dispatch startup and review-skip corrections | [v2.6.6 RC1-fix1 release notes](docs/releases/v2.6.6-rc1-fix1.md) |
 | v2.6.6 RC1 deletion-first lifecycle simplification and sealed Split ancestry | [v2.6.6 RC1 release notes](docs/releases/v2.6.6-rc1.md) |
 | Model inheritance and overrides | [Model routing](docs/model-routing.md) |
