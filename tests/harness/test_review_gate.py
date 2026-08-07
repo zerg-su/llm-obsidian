@@ -86,6 +86,7 @@ from review_resolution import (
 )
 from review_contract import axis_finding_id
 from outcome_contract import extract_from_bytes
+from task_review_current import _current_review_artifact_root
 
 
 def check(label: str, value: bool) -> None:
@@ -2686,6 +2687,53 @@ with tempfile.TemporaryDirectory(prefix="current-release-artifacts.") as raw:
             and f"--artifact-root {evidence_root.resolve()}"
             in runtime.started[0].callback_wake,
         )
+        wake_argv = shlex.split(
+            runtime.started[0].callback_wake.split(
+                "Run this exact command: ", 1
+            )[1]
+        )
+        wake_args = task_review_runner.parser().parse_args(wake_argv[2:])
+        resumed = task_review_runner.run_current_review(
+            wake_args.worktree,
+            deep=wake_args.deep,
+            full=wake_args.full,
+            cross_model=wake_args.cross_model,
+            runtime=wake_args.runtime,
+            model=wake_args.model,
+            effort=wake_args.effort,
+            no_review=wake_args.no_review,
+            purpose=wake_args.purpose,
+            boundary_input_file=wake_args.boundary_input,
+            artifact_root=wake_args.artifact_root,
+            plan_file=wake_args.plan,
+            scratch_root=valid[3],
+            runtime_manager=runtime,
+        )
+        check(
+            "release callback wake is an idempotent active-review resume",
+            resumed["status"] == "reviewing"
+            and wake_args.boundary_input.resolve()
+            == (evidence_root / "review-boundary.json").resolve()
+            and wake_args.plan.resolve()
+            == (evidence_root / "approved-plan.md").resolve(),
+        )
+        for ancestor in (product.parent, Path("/")):
+            try:
+                _current_review_artifact_root(
+                    product,
+                    purpose="release",
+                    boundary_input_file=product / "AGENTS.md",
+                    plan_file=product / "README.md",
+                    artifact_root=ancestor,
+                )
+            except task_review_runner.TaskReviewError:
+                rejected = True
+            else:
+                rejected = False
+            check(
+                f"current release review rejects checkout ancestor {ancestor}",
+                rejected,
+            )
         replacement_root = base / "valid" / "replacement-evidence"
         shutil.copytree(evidence_root, replacement_root)
         check(

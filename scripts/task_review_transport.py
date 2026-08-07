@@ -235,7 +235,14 @@ def _callback_wake(
         if value:
             wake_argv.extend((f"--{option}", value))
     purpose = str(raw_policy.get("purpose") or "implementation")
-    boundary_file = str(meta.get("review_boundary_input_file") or "")
+    boundary_file = str(
+        (
+            meta.get("review_boundary_input_source_file")
+            if purpose == "release"
+            else meta.get("review_boundary_input_file")
+        )
+        or ""
+    )
     if purpose != "implementation" or boundary_file:
         wake_argv.extend(("--purpose", purpose))
     if boundary_file:
@@ -243,6 +250,13 @@ def _callback_wake(
     artifact_root = str(meta.get("review_artifact_root") or "")
     if artifact_root:
         wake_argv.extend(("--artifact-root", artifact_root))
+    if purpose == "release":
+        plan_file = str(meta.get("plan_file") or "")
+        if not plan_file:
+            raise TaskReviewError(
+                "current release review callback has no bound plan"
+            )
+        wake_argv.extend(("--plan", plan_file))
     return (
         "Typed current-review callback is ready. Run this exact command: "
         + shlex.join(wake_argv)

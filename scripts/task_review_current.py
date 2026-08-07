@@ -146,6 +146,7 @@ def _current_review_artifact_root(
 ) -> Path | None:
     """Bind release inputs to one explicit owner-controlled external root."""
 
+    worktree = worktree.expanduser().resolve()
     if purpose != "release":
         if artifact_root is not None:
             raise TaskReviewError(
@@ -169,6 +170,7 @@ def _current_review_artifact_root(
         not resolved_root.is_dir()
         or resolved_root == worktree
         or worktree in resolved_root.parents
+        or resolved_root in worktree.parents
     ):
         raise TaskReviewError("current release artifact root is invalid")
     for label, candidate in (
@@ -623,6 +625,10 @@ def run_current_review(
         if artifact_root is not None:
             meta["review_artifact_root"] = str(artifact_root)
         if boundary_input is not None:
+            if purpose == "release" and boundary_input_file is not None:
+                meta["review_boundary_input_source_file"] = str(
+                    boundary_input_file.expanduser().resolve()
+                )
             if plan_compilation is not None:
                 from task_review_plan import materialize_plan_review
 
