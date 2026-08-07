@@ -257,6 +257,34 @@ check(
 )
 
 
+class TransientSurfacePort(InitialReadyPort):
+    def __init__(self) -> None:
+        super().__init__(["zak@host project >"])
+        self.failures = 2
+
+    def read(self, surface_id: str) -> str:
+        if self.failures:
+            self.failures -= 1
+            self.reads += 1
+            raise RuntimeError("surface transport is not readable yet")
+        return super().read(surface_id)
+
+
+transient_surface_port = TransientSurfacePort()
+check(
+    "surface readiness tolerates bounded transient cmux read failures",
+    await_surface_transport_ready(
+        transient_surface_port,
+        surface_id=SURFACE,
+        observation_limit=3,
+        observation_interval_seconds=0.01,
+        wait=lambda _seconds: None,
+    )
+    and transient_surface_port.reads == 3,
+    transient_surface_port.reads,
+)
+
+
 class InitialPromptPort(InitialReadyPort):
     def __init__(self) -> None:
         super().__init__(

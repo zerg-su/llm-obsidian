@@ -190,7 +190,15 @@ class RuntimeSessionLaunchMixin:
             Path(str(getattr(launch, "ready_path"))).parent
             / "surface-transport.json"
         )
+        self._write_json(
+            transport_path,
+            {"schema_version": 1, "status": "awaiting-terminal"},
+        )
         if not await_surface_transport_ready(self.cmux, surface_id=surface_id):
+            self._write_json(
+                transport_path,
+                {"schema_version": 1, "status": "terminal-not-ready"},
+            )
             raise RuntimeSessionError("surface terminal did not become ready")
         self._write_json(
             transport_path,

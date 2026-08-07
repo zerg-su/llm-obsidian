@@ -101,7 +101,7 @@ def await_surface_transport_ready(
     port: ContinuationPort,
     *,
     surface_id: str,
-    observation_limit: int = 100,
+    observation_limit: int = 600,
     observation_interval_seconds: float = 0.05,
     wait: Waiter = sleep,
 ) -> bool:
@@ -112,11 +112,14 @@ def await_surface_transport_ready(
     if observation_interval_seconds < 0:
         raise ValueError("surface transport interval cannot be negative")
     for observation in range(observation_limit):
-        lines = [
-            line.rstrip()
-            for line in port.read(surface_id).splitlines()
-            if line.strip()
-        ]
+        try:
+            screen = port.read(surface_id)
+        except RuntimeError:
+            # A freshly created cmux surface can briefly exist before its
+            # terminal transport is readable.  Treat that as an observation,
+            # not as proof that the launch failed.
+            screen = ""
+        lines = [line.rstrip() for line in screen.splitlines() if line.strip()]
         if lines and re.search(r"(?:[%$#>]|❯|›)\s*$", lines[-1]):
             return True
         if observation + 1 < observation_limit:
