@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import sys
@@ -186,6 +187,62 @@ with tempfile.TemporaryDirectory(prefix="harness-callback.") as raw:
         and sum(result.duplicate for result in concurrent_results) == 1,
     )
 
+    crash_mode = "before"
+
+    def crash_at_callback_publish(boundary: str) -> None:
+        expected = (
+            "operation-record-published:before"
+            if crash_mode == "before"
+            else "operation-record-published"
+        )
+        if boundary == expected:
+            raise RuntimeError(f"crash {crash_mode} callback publication")
+
+    crash_store = OperationStore(
+        Path(raw) / "crash-store", fault_observer=crash_at_callback_publish
+    )
+    crash_spec = OperationSpec(
+        "op-crash", "key-crash", "review", "owner-crash", route,
+        "packet.json", "full",
+    )
+    crash_store.create(crash_spec, lane_id="lane-crash", run_id="run-crash")
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        crash_store.transition("owner-crash", "op-crash", state)
+    crash_envelope = CallbackEnvelope(
+        "cb-crash", "op-crash", "run-crash", "review", payload,
+        hashlib.sha256(encoded).hexdigest(),
+    )
+    try:
+        CallbackBroker(crash_store, "owner-crash").accept(crash_envelope)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("callback publication ignored crash-before")
+    before_record = crash_store.read("owner-crash", "op-crash")
+    check(
+        "crash before callback publication writes neither state nor identity",
+        before_record.state == "awaiting-callback"
+        and not before_record.accepted_callback_id,
+    )
+    crash_mode = "after"
+    try:
+        CallbackBroker(crash_store, "owner-crash").accept(crash_envelope)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("callback publication ignored crash-after")
+    after_record = crash_store.read("owner-crash", "op-crash")
+    duplicate_after_crash = CallbackBroker(
+        OperationStore(Path(raw) / "crash-store"), "owner-crash"
+    ).accept(crash_envelope)
+    check(
+        "crash after callback publication retains one complete idempotent record",
+        after_record.state == "finalizing"
+        and after_record.accepted_callback_id == "cb-crash"
+        and duplicate_after_crash.duplicate
+        and not duplicate_after_crash.accepted,
+    )
+
     expired_parent_spec = OperationSpec(
         "op-expired-parent",
         "key-expired-parent",
@@ -310,6 +367,18 @@ check(
     == AttentionReason.PROCESS_ORPHANED,
 )
 check("unknown ownership never mutates", decide("unknown", "alive").action == "none")
+
+private_callers: list[str] = []
+for source in sorted((ROOT / "scripts" / "harness").rglob("*.py")):
+    if source.name == "store.py":
+        continue
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    if any(
+        isinstance(node, ast.Attribute) and node.attr == "_save_locked"
+        for node in ast.walk(tree)
+    ):
+        private_callers.append(source.relative_to(ROOT).as_posix())
+check("production has no external private Store writer", private_callers == [])
 
 
 class FakeProcess:

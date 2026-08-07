@@ -14,6 +14,7 @@ from typing import Callable, Iterator
 
 from .contracts import (
     AttentionReason,
+    CallbackEnvelope,
     ContractError,
     EffectOutcome,
     OperationRecord,
@@ -23,7 +24,7 @@ from .contracts import (
     operation_record_from_dict,
     to_dict,
 )
-from .state_machine import begin_effect, resolve_effect, transition
+from .state_machine import TERMINAL, begin_effect, resolve_effect, transition
 
 
 class StoreError(RuntimeError):
@@ -156,11 +157,104 @@ class OperationStore:
             or current.run_id != record.run_id
         ):
             raise StoreError("operation identity is immutable")
+        self._observe_durable_boundary("operation-record-published", phase="before")
         self._write(
             self._operation_path(record.spec.owner_id, record.spec.operation_id),
             to_dict(record),
         )
         self._observe_durable_boundary("operation-record-published")
+
+    def accept_callback(
+        self,
+        owner_id: str,
+        envelope: CallbackEnvelope,
+        *,
+        expected_revision: int,
+        next_state: str,
+        reason: AttentionReason | None,
+        deadline_operation_id: str = "",
+        enforce_deadline: bool = False,
+        now: float,
+    ) -> tuple[OperationRecord, bool, bool]:
+        """Atomically publish one callback transition and immutable identity.
+
+        Returns ``(record, accepted, timed_out)``. An exact duplicate is the
+        only stale expected revision accepted as an idempotent no-op.
+        """
+
+        with self.locked(owner_id):
+            record = self.read(owner_id, envelope.operation_id)
+            exact_duplicate = (
+                record.accepted_callback_id == envelope.callback_id
+                and record.accepted_callback_kind == envelope.kind
+                and record.accepted_callback_sha256 == envelope.payload_sha256
+            )
+            if record.revision != expected_revision:
+                if exact_duplicate:
+                    return record, False, False
+                raise StoreError("stale callback writer")
+            if envelope.operation_id != record.spec.operation_id:
+                raise StoreError("callback belongs to a different operation")
+            if envelope.run_id != record.run_id:
+                raise StoreError("callback belongs to a different run")
+            if record.accepted_callback_id:
+                if not exact_duplicate:
+                    raise StoreError(
+                        "operation already accepted a different callback"
+                    )
+                return record, False, False
+            if record.state in TERMINAL:
+                raise StoreError("terminal operation cannot accept a callback")
+
+            deadline_record = record
+            if deadline_operation_id and envelope.kind == "review":
+                deadline_record = self.read(owner_id, deadline_operation_id)
+                if (
+                    deadline_record.lane_id != record.lane_id
+                    or (
+                        deadline_operation_id != envelope.operation_id
+                        and envelope.payload.get("parent_session_operation_id")
+                        != deadline_operation_id
+                    )
+                ):
+                    raise StoreError(
+                        "callback deadline owner mismatches its parent lane"
+                    )
+            if enforce_deadline and deadline_record.state not in TERMINAL:
+                timed_out = (
+                    deadline_record.state == "attention-required"
+                    and deadline_record.attention_reason
+                    == AttentionReason.CALLBACK_TIMEOUT
+                )
+                if (
+                    not timed_out
+                    and deadline_record.deadline_at
+                    and now >= deadline_record.deadline_at
+                ):
+                    timed_out_record, _ = transition(
+                        deadline_record,
+                        "attention-required",
+                        reason=AttentionReason.CALLBACK_TIMEOUT,
+                    )
+                    self._save_locked(
+                        timed_out_record,
+                        expected_revision=deadline_record.revision,
+                    )
+                    timed_out = True
+                if timed_out:
+                    return record, False, True
+            if record.state != "awaiting-callback":
+                raise StoreError("operation is not awaiting a callback")
+
+            updated, _ = transition(record, next_state, reason=reason)
+            updated = replace(
+                updated,
+                accepted_callback_id=envelope.callback_id,
+                accepted_callback_kind=envelope.kind,
+                accepted_callback_sha256=envelope.payload_sha256,
+            )
+            self._save_locked(updated, expected_revision=record.revision)
+            return updated, True, False
 
     def transition(
         self,
