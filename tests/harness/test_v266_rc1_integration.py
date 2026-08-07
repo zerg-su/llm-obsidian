@@ -74,11 +74,17 @@ quality = importlib.util.module_from_spec(quality_spec)
 sys.modules[quality_spec.name] = quality
 quality_spec.loader.exec_module(quality)
 authority = quality.audit_rc1_active_authority(ROOT)
+quality_ceiling = json.loads(
+    (ROOT / "config/code-quality-baseline.json").read_text(encoding="utf-8")
+)["rc1_active_authority"]
 check(
     "active review contour has no writable or incident-pinned authority",
-    authority["writable_authorities"] == []
-    and authority["incident_literals"] == []
-    and int(authority["production_loc"]) < 4663,
+    len(authority["writable_authorities"])
+    <= int(quality_ceiling["final_max_writable_authorities"])
+    and len(authority["incident_literals"])
+    <= int(quality_ceiling["final_max_incident_literals"])
+    and int(authority["production_loc"])
+    <= int(quality_ceiling["final_max_production_loc"]),
     authority,
 )
 

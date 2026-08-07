@@ -213,6 +213,24 @@ for item in baseline_audit["incident_literals"]:
     literal_classes[item["kind"]] = literal_classes.get(item["kind"], 0) + 1
 assert literal_classes == quality_baseline["baseline_incident_literal_classes"]
 
+current_audit_run = subprocess.run(
+    ["python3", "scripts/code-quality-audit.py", "--rc1-authority-json"],
+    cwd=ROOT,
+    check=True,
+    capture_output=True,
+    text=True,
+)
+current_audit = json.loads(current_audit_run.stdout)
+assert current_audit["production_loc"] <= quality_baseline[
+    "final_max_production_loc"
+]
+assert len(current_audit["writable_authorities"]) <= quality_baseline[
+    "final_max_writable_authorities"
+]
+assert len(current_audit["incident_literals"]) <= quality_baseline[
+    "final_max_incident_literals"
+]
+
 forbidden = receipts.get("forbidden_before_integration_green")
 assert isinstance(forbidden, list) and all(
     isinstance(command, str) and command for command in forbidden
@@ -393,7 +411,7 @@ assert "v2.6.6-rc1-real-dogfood.json" in readiness
 assert "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING" in readiness
 assert "authoritative technical candidate is exact clean HEAD\n`126b5fe" not in readiness
 
-release_version = "2.6.6-rc1"
+release_version = "2.6.6-rc2"
 claude_plugin = json.loads(
     (ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8")
 )
@@ -412,7 +430,7 @@ for relative_path in (
     "CHANGELOG.ru.md",
     "README.md",
     "README.ru.md",
-    "docs/releases/v2.6.6-rc1.md",
+    "docs/releases/v2.6.6-rc2.md",
 ):
     assert release_version in (ROOT / relative_path).read_text(encoding="utf-8")
 

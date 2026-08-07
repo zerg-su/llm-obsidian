@@ -16,6 +16,28 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc2] — 2026-08-07
+
+Этот polishing candidate исправляет exact ownership callback/evidence и
+удаляет доказанно недостижимый classic cmux contour без новой orchestration.
+
+### Добавлено
+
+- Добавлен один bounded skill `vault-repair` и точный blocked-Stop handoff для
+  Codex и Claude Code поверх существующих recovery, validation и scoped commit.
+
+### Исправлено
+
+- Release receipts привязаны к exact subject HEAD и profile; drift между
+  parent и descendant отвергается.
+- Callback acceptance стал одной публичной атомарной Store transaction, а уже
+  принятый resource-free review dispatch завершается ровно один раз.
+
+### Удалено
+
+- Удалены семь zero-caller classic supervisor/watchdog/trust-prompt и
+  review-archive compatibility файлов: 2 217 физических строк frozen tree.
+
 ## [2.6.6-rc1-fix2] — 2026-08-07
 
 Этот промежуточный патч RC1 исправляет reconciliation точного cmux cleanup

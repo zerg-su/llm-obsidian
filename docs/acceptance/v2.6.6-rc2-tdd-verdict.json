@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "finding_id": "intent-e9-tdd-skill-verdict-missing",
+  "disposition": "defer-post-rc2",
+  "semantic_skill_change": false,
+  "owner": {
+    "kind": "governance",
+    "id": "skills.tdd"
+  },
+  "evidence": [
+    "tests/test_skill_workstream_b.py",
+    "docs/acceptance/v2.6.6-rc2-defect-ledger.json"
+  ],
+  "rationale": "Existing TDD semantics are green; RC2 adds exact release evidence without changing the skill contract."
+}

@@ -4,10 +4,10 @@
   "baseline_subject_sha": "3f8d02e936af99b49aaf83a466c756799c38736c",
   "append_only_during_rc1": true,
   "disposition_kinds": [
-    "delete-rc2",
     "defer-post-rc2",
-    "fix-rc2",
-    "implement-rc2",
+    "deleted-rc2",
+    "fixed-rc2",
+    "implemented-rc2",
     "not-in-scope"
   ],
   "deletion_allowlist": {
@@ -32,7 +32,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc1-real-dogfood.json",
       "severity": "important",
       "rc1_relation": "Accepted callback receipts were retained but supported root resume did not complete finalization.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "component", "id": "task_review_finalizing"},
       "rationale": "Repair the existing recovery ordering without adding lifecycle state or replay authority.",
       "external_effects_observed": false
@@ -44,7 +44,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc1-accepted-deviations.json",
       "severity": "important",
       "rc1_relation": "RC1 retrospective slice metadata was explicitly not immutable execution proof.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "component", "id": "verification_receipt"},
       "rationale": "Generate and validate exact subject, profile, command, exit, and output identity in one receipt seam.",
       "external_effects_observed": false
@@ -56,7 +56,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc1-accepted-deviations.json",
       "severity": "important",
       "rc1_relation": "Historical A-G receipt claims remain an accepted immutable deviation.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "component", "id": "verification_receipt"},
       "rationale": "Covered prospectively by RC2.SLICE_RECEIPT_PROVENANCE; historical RC1 bytes are not rewritten.",
       "external_effects_observed": false
@@ -68,7 +68,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.5-accepted-review-waiver.md",
       "severity": "important",
       "rc1_relation": "RC1 blocked candidate drift independently while systemic exact-subject proof remained deferred.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "release", "id": "exact_candidate_evidence"},
       "rationale": "RC2 verification and review must mechanically reject a non-exact subject.",
       "external_effects_observed": false
@@ -80,7 +80,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.5-accepted-review-waiver.md",
       "severity": "important",
       "rc1_relation": "Parent receipts were not sufficient proof for changed descendants.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "component", "id": "verification_receipt"},
       "rationale": "Use byte-exact subject identity; ancestry is never approval equivalence.",
       "external_effects_observed": false
@@ -92,7 +92,7 @@
       "reproducer_or_evidence": "scripts/harness/callbacks.py",
       "severity": "important",
       "rc1_relation": "CallbackBroker retained two calls to OperationStore._save_locked.",
-      "disposition": "fix-rc2",
+      "disposition": "fixed-rc2",
       "owner": {"kind": "component", "id": "harness.store"},
       "rationale": "Add one callback-specific public atomic Store transaction; do not introduce a generic transaction framework.",
       "external_effects_observed": false
@@ -125,7 +125,7 @@
       "finding_id": "OI.E4b.ephemeral-unwired",
       "observed_at_stage": "2.6.5 accepted review waiver",
       "subject_head_sha": "4aafb5d783857f6fd6a13cb97bc0a4610bc7e7c5",
-      "reproducer_or_evidence": "docs/acceptance/v2.6.5-accepted-review-waiver.md",
+      "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc2-tdd-verdict.json",
       "severity": "important",
       "rc1_relation": "Production ephemeral execution was an explicit RC1 non-goal.",
       "disposition": "defer-post-rc2",
@@ -188,7 +188,7 @@
       "reproducer_or_evidence": "docs/acceptance/v2.6.6-rc2-active-surface-baseline.md",
       "severity": "important",
       "rc1_relation": "The classic supervisor/watchdog/trust contour is absent from production callers.",
-      "disposition": "delete-rc2",
+      "disposition": "deleted-rc2",
       "owner": {"kind": "component", "id": "runtime_harness_lint"},
       "rationale": "Delete exactly the zero-caller allowlist and keep active Harness adapters.",
       "external_effects_observed": false
@@ -200,7 +200,7 @@
       "reproducer_or_evidence": "scripts/stop-hook.py",
       "severity": "important",
       "rc1_relation": "Blocked Stop lacked one explicit manual recovery handoff.",
-      "disposition": "implement-rc2",
+      "disposition": "implemented-rc2",
       "owner": {"kind": "component", "id": "stop_hook"},
       "rationale": "Compose existing local recovery, repair, validation, and scoped commit mechanisms without network or background model calls.",
       "external_effects_observed": false

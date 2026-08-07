@@ -399,6 +399,7 @@ Acceptance heartbeat хранит только stage/status/counters/timestamps.
 
 | Тема | Документ |
 |---|---|
+| Repair-and-delete polishing в 2.6.6 RC2 | [Release notes 2.6.6 RC2](docs/releases/v2.6.6-rc2.md) |
 | Exact cmux cleanup reconciliation в 2.6.6 RC1-fix2 | [Release notes 2.6.6 RC1-fix2](docs/releases/v2.6.6-rc1-fix2.md) |
 | Исправления запуска dispatch и review-skip в 2.6.6 RC1-fix1 | [Release notes 2.6.6 RC1-fix1](docs/releases/v2.6.6-rc1-fix1.md) |
 | Deletion-first упрощение lifecycle и sealed Split ancestry в 2.6.6 RC1 | [Release notes 2.6.6 RC1](docs/releases/v2.6.6-rc1.md) |

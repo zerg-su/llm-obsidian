@@ -10,6 +10,29 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc2] - 2026-08-07
+
+This polishing candidate repairs exact callback/evidence ownership and removes
+the proven-unreachable classic cmux contour without adding orchestration.
+
+### Added
+
+- Added one bounded `vault-repair` skill and exact blocked-Stop handoff for
+  Codex and Claude Code, reusing the existing recovery, validation, and scoped
+  commit pipeline.
+
+### Fixed
+
+- Bound release receipts to the exact subject HEAD and profile, rejecting
+  parent/descendant drift.
+- Made callback acceptance one public atomic Store transaction and completed
+  already-accepted resource-free review dispatches exactly once.
+
+### Removed
+
+- Removed seven zero-caller classic supervisor, watchdog, trust-prompt, and
+  review-archive compatibility files: 2,217 physical lines in the frozen tree.
+
 ## [2.6.6-rc1-fix2] - 2026-08-07
 
 This interim RC1 patch fixes exact cmux cleanup reconciliation after a provider

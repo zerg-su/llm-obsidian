@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -56,10 +57,10 @@ assert ledger["schema_version"] == 2
 assert ledger["release"] == "2.6.6-rc2"
 assert ledger["baseline_subject_sha"] == BASE_SHA
 assert ledger["disposition_kinds"] == [
-    "delete-rc2",
     "defer-post-rc2",
-    "fix-rc2",
-    "implement-rc2",
+    "deleted-rc2",
+    "fixed-rc2",
+    "implemented-rc2",
     "not-in-scope",
 ]
 
@@ -75,14 +76,14 @@ for row in rows:
     assert isinstance(row["rationale"], str) and row["rationale"]
 
 required = {
-    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING": "fix-rc2",
-    "RC2.SLICE_RECEIPT_PROVENANCE": "fix-rc2",
+    "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING": "fixed-rc2",
+    "RC2.SLICE_RECEIPT_PROVENANCE": "fixed-rc2",
     "RC2.AUTHENTICATED_TURN_COMPLETE_ADAPTER": "defer-post-rc2",
     "RC2.CMUX_PROVIDER_START_HANDSHAKE": "defer-post-rc2",
-    "eng-store-private-writers": "fix-rc2",
+    "eng-store-private-writers": "fixed-rc2",
     "intent-e9-tdd-skill-verdict-missing": "defer-post-rc2",
-    "RC2.CLASSIC_CMUX_CONTOUR": "delete-rc2",
-    "RC2.VAULT_REPAIR": "implement-rc2",
+    "RC2.CLASSIC_CMUX_CONTOUR": "deleted-rc2",
+    "RC2.VAULT_REPAIR": "implemented-rc2",
 }
 assert {finding: by_id[finding]["disposition"] for finding in required} == required
 assert by_id["RC2.CMUX_PROVIDER_START_HANDSHAKE"]["owner"] == {
@@ -97,6 +98,40 @@ assert allowlist["conditional_zero_caller"] == [CONDITIONAL]
 for relative in (*CLASSIC, CONDITIONAL):
     assert not (ROOT / relative).exists()
     assert production_importers(module_name(relative)) == []
+
+removed_lines = 0
+for relative in (*CLASSIC, CONDITIONAL):
+    shown = subprocess.run(
+        ["git", "show", f"{BASE_SHA}:{relative}"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    removed_lines += len(shown.stdout.splitlines())
+assert removed_lines == 2217
+
+current_scripts = tuple(sorted((ROOT / "scripts").rglob("*.py")))
+assert len(current_scripts) < 259
+assert sum(len(path.read_text(encoding="utf-8").splitlines()) for path in current_scripts) < 85431
+
+tdd_verdict = json.loads(
+    (ROOT / "docs/acceptance/v2.6.6-rc2-tdd-verdict.json").read_text(
+        encoding="utf-8"
+    )
+)
+assert tdd_verdict == {
+    "schema_version": 1,
+    "finding_id": "intent-e9-tdd-skill-verdict-missing",
+    "disposition": "defer-post-rc2",
+    "semantic_skill_change": False,
+    "owner": {"kind": "governance", "id": "skills.tdd"},
+    "evidence": [
+        "tests/test_skill_workstream_b.py",
+        "docs/acceptance/v2.6.6-rc2-defect-ledger.json",
+    ],
+    "rationale": "Existing TDD semantics are green; RC2 adds exact release evidence without changing the skill contract.",
+}
 
 for retained in (
     "scripts/cmux_agent_support.py",
