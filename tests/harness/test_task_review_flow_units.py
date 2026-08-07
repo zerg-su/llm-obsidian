@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -12,27 +13,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from harness.callbacks import CallbackBroker  # noqa: E402
 from harness.contracts import (  # noqa: E402
     ContractError,
     OperationRecord,
+    OwnedResources,
     RuntimeRoute,
+    to_dict,
 )
 from harness.store import OperationStore  # noqa: E402
 from harness.workflows.review import (  # noqa: E402
     ReviewContext,
     ReviewOperationRequest,
     ReviewResult,
+    review_round_envelope,
 )
 from harness.workflows.review_gate import (  # noqa: E402
     ReviewGateController,
     ReviewPreset,
 )
 from task_review_flow import (  # noqa: E402
+    _complete_exact_ready_results,
     _ready_result_is_recorded,
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
-from task_review_transport import _write_round_meta  # noqa: E402
+from task_review_transport import (  # noqa: E402
+    _collect_ready_results,
+    _write_round_meta,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -53,10 +62,16 @@ class SessionResult:
 class FakeRuntime:
     """Fake only the provider transport around real gate/store state."""
 
-    def __init__(self, store: OperationStore) -> None:
+    def __init__(
+        self, store: OperationStore, owner_id: str = "flow-owner"
+    ) -> None:
         self.store = store
+        self.owner_id = owner_id
+        self.started = 0
+        self.accepted = 0
 
     def start(self, request: object, *, on_surface_opened=None) -> SessionResult:
+        self.started += 1
         record = self.store.create(
             request.spec,
             lane_id=request.lane_id,
@@ -78,11 +93,46 @@ class FakeRuntime:
 
     def status(self, owner_id: str, operation_id: str) -> SessionResult:
         return SessionResult(
-            self.store.read(owner_id, operation_id), "checkpoint-live"
+            self.store.read(owner_id, operation_id), "checkpoint-1"
         )
 
     def register_callback_target(self, *_args: object) -> None:
         return None
+
+    def accept_callback(self, envelope: object) -> object:
+        self.accepted += 1
+        return CallbackBroker(self.store, self.owner_id).accept(envelope)
+
+    def request_exit(self, owner_id: str, operation_id: str) -> object:
+        record = self.store.read(owner_id, operation_id)
+        if record.state not in {"complete", "failed", "cancelled"}:
+            if record.state in {
+                "created",
+                "preflight",
+                "starting",
+                "attention-required",
+            }:
+                self.store.transition(owner_id, operation_id, "cancelling")
+            elif record.state != "finalizing":
+                self.store.transition(owner_id, operation_id, "finalizing")
+            self.store.transition(owner_id, operation_id, "exiting")
+        return self.store.read(owner_id, operation_id)
+
+    def cleanup(self, owner_id: str, operation_id: str) -> object:
+        record = self.store.read(owner_id, operation_id)
+        if record.state == "exiting":
+            self.store.transition(owner_id, operation_id, "complete")
+        completed = self.store.read(owner_id, operation_id)
+        if completed.resources != OwnedResources():
+            self.store.save(
+                replace(
+                    completed,
+                    resources=OwnedResources(),
+                    revision=completed.revision + 1,
+                ),
+                expected_revision=completed.revision,
+            )
+        return self.store.read(owner_id, operation_id)
 
 
 with tempfile.TemporaryDirectory(prefix="review-flow-recorded.") as raw:
@@ -347,6 +397,130 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         unbound_running_status == "attention-required"
         and unbound_running_state["status"] == "attention-required"
         and gate.read()["status"] == "attention-required",
+    )
+
+
+with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
+    base = Path(raw)
+    runtime_root = base / "runtime"
+    runtime_root.mkdir()
+    product_root = base / "product"
+    product_root.mkdir()
+    store = OperationStore(base / "store")
+    owner_id = "prefix-owner"
+    runtime = FakeRuntime(store, owner_id=owner_id)
+    gate = ReviewGateController(base / "gate", runtime, store)
+    context = ReviewContext(
+        "packets/review/manifest.json",
+        "e" * 40,
+        "scoped",
+        "f" * 64,
+    )
+    preset = ReviewPreset.from_flags(deep=True)
+    policy = preset.request("prefix-review")
+    anthropic = RuntimeRoute(
+        "claude",
+        "claude-opus-5",
+        "xhigh",
+        "reviewer-callback",
+        "1" * 64,
+    )
+    openai = RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "xhigh",
+        "reviewer-callback",
+        "1" * 64,
+    )
+    request = ReviewOperationRequest(
+        policy,
+        owner_id,
+        anthropic,
+        context,
+        axis_routes={
+            "anthropic-holistic": anthropic,
+            "openai-holistic": openai,
+        },
+    )
+    run = gate.begin_attempt(
+        dispatch_operation_id="prefix-review",
+        finalization_lineage_id="prefix-review",
+        cycle=1,
+        plan_sha256="2" * 64,
+        outcome_sha256="3" * 64,
+        request=request,
+        origin_surface="22222222-bbbb-4bbb-8bbb-222222222222",
+        cwd=runtime_root,
+        product_root=product_root,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks",
+    )
+    first_lane, second_lane = run.execution.lanes
+
+    def publish(lane: object) -> None:
+        round_ = run.rounds[lane.axis]
+        callback = _callback_path(runtime_root, lane.axis)
+        callback.parent.mkdir(parents=True, exist_ok=True)
+        callback.write_text(
+            json.dumps(
+                to_dict(
+                    review_round_envelope(
+                        round_, ReviewResult(lane.axis, "approve", (), 0)
+                    )
+                ),
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    publish(first_lane)
+    first_ready = _collect_ready_results(run, runtime_root, base, base)
+    first_decisions = _complete_exact_ready_results(
+        gate=gate,
+        run=run,
+        ready=first_ready,
+        worktree=base,
+        vault=base,
+        runtime_root=runtime_root,
+    )
+    prefix_state = gate.read()
+    check(
+        "the first exact callback is durable before its sibling exists",
+        first_decisions == ("awaiting-axes",)
+        and prefix_state["status"] == "reviewing"
+        and prefix_state["attempt"]["status"] == "awaiting-callback"
+        and set(prefix_state["final_results"]) == {first_lane.axis}
+        and runtime.accepted == 1
+        and runtime.started == 2,
+    )
+
+    recovered = gate.rehydrate_attempt()
+    check(
+        "restart preserves the accepted prefix without reviewer replay",
+        runtime.started == 2
+        and set(gate.read()["final_results"]) == {first_lane.axis},
+    )
+    publish(second_lane)
+    final_ready = _collect_ready_results(recovered, runtime_root, base, base)
+    final_decisions = _complete_exact_ready_results(
+        gate=gate,
+        run=recovered,
+        ready=final_ready,
+        worktree=base,
+        vault=base,
+        runtime_root=runtime_root,
+    )
+    terminal_state = gate.read()
+    check(
+        "the first missing callback terminalizes once after restart",
+        final_decisions == ("approved",)
+        and terminal_state["status"] == "approved"
+        and terminal_state["attempt"]["status"] == "terminal"
+        and set(terminal_state["final_results"])
+        == {first_lane.axis, second_lane.axis}
+        and runtime.accepted == 2
+        and runtime.started == 2,
     )
 
 print("\nAll task review flow unit tests passed.")

@@ -431,6 +431,33 @@ def _complete_ready_results(
             break
 
 
+def _complete_exact_ready_results(
+    *,
+    gate: ReviewGateController,
+    run: ReviewGateRun,
+    ready: list[tuple[object, ReviewRound, ReviewResult]],
+    worktree: Path,
+    vault: Path,
+    runtime_root: Path,
+) -> tuple[str, ...]:
+    """Persist every first-missing exact callback in canonical lane order."""
+
+    state = gate.read()
+    actions: list[str] = []
+    for lane, round_, result in ready:
+        if _ready_result_is_recorded(gate, state, result):
+            continue
+        decision = gate.complete_attempt_round(run, lane, round_, result)
+        _record_accepted_result(
+            worktree, vault, runtime_root, round_, result
+        )
+        actions.append(decision.action)
+        state = gate.read()
+        if decision.action != "awaiting-axes":
+            break
+    return tuple(actions)
+
+
 def _resume_bound_attention(
     gate: ReviewGateController,
     store: OperationStore,
@@ -661,22 +688,14 @@ def _run_exact_head_review(
         raise ReviewAttemptError("review attempt is not at a callback boundary")
     run = gate.rehydrate_attempt()
     ready = _collect_ready_results(run, runtime_root, worktree, vault)
-    if _requires_lane_barrier(preset) and len(ready) != len(
-        run.execution.lanes
-    ):
-        return _receipt(
-            status="reviewing",
-            meta=meta,
-            vault=vault,
-            worktree=worktree,
-            runtime_root=runtime_root,
-            context_manifest=context_manifest,
-            run=run,
-        )
-    for lane, round_, result in ready:
-        decision = gate.complete_attempt_round(run, lane, round_, result)
-        if decision.action != "awaiting-axes":
-            break
+    _complete_exact_ready_results(
+        gate=gate,
+        run=run,
+        ready=ready,
+        worktree=worktree,
+        vault=vault,
+        runtime_root=runtime_root,
+    )
     next_state = gate.read()
     next_status = str(next_state.get("status") or "")
     next_attempt = ReviewAttempt.from_mapping(next_state["attempt"])
