@@ -31,6 +31,14 @@ slice_receipt = load_script("rc3_slice_receipt.py")
 coverage = load_script("rc3_coverage.py")
 disposition = load_script("rc3_release_disposition.py")
 
+from harness.review_program_contracts import ReviewBoundaryInput  # noqa: E402
+from outcome_contract import extract_from_bytes  # noqa: E402
+
+
+RELEASE_FIXTURE = json.loads(
+    (ROOT / "tests/fixtures/rc4/release-evidence.json").read_text(encoding="utf-8")
+)
+
 
 def git(*args: str) -> str:
     return subprocess.run(
@@ -218,6 +226,7 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
         else:
             raise AssertionError("ninth authoritative release attempt must fail closed")
 
+        original_authorization = authorization.read_bytes()
         authorization.write_text('{"tampered":true}\n', encoding="utf-8")
         try:
             store.load()
@@ -225,6 +234,29 @@ def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> 
             assert "authorization digest drift" in str(exc)
         else:
             raise AssertionError("attempt authorization bytes must be immutable")
+        authorization.write_bytes(original_authorization)
+
+        accepted_ledger_bytes = store.path.read_bytes()
+        with tempfile.TemporaryDirectory(prefix="rc4-outside-ledger.") as outside_raw:
+            outside_authorization = Path(outside_raw) / authorization.name
+            outside_authorization.write_bytes(original_authorization)
+            authorization.unlink()
+            authorization.symlink_to(outside_authorization)
+            try:
+                try:
+                    store.load()
+                except ledger_module.AttemptLedgerError as exc:
+                    assert "outside ledger root" in str(exc)
+                else:
+                    raise AssertionError(
+                        RELEASE_FIXTURE["authorization_escape"] + " was accepted"
+                    )
+            finally:
+                authorization.unlink()
+                authorization.write_bytes(original_authorization)
+
+        assert store.load()["maximum_attempts"] == 8
+        assert store.path.read_bytes() == accepted_ledger_bytes
 
 
 def test_release_final_runner_records_success_and_failure_without_caller_rows() -> None:
@@ -571,6 +603,7 @@ def write_review_bundle(
     role: str,
     subject: str,
     *,
+    boundary_input_sha256: str,
     verdict: str = "approve",
     findings: list[dict[str, object]] | None = None,
 ) -> tuple[Path, Path]:
@@ -590,6 +623,7 @@ def write_review_bundle(
         "parent_session_operation_id": f"review-parent-{role}",
         "review_id": f"review-{role}",
         "review_purpose": "release",
+        "review_boundary_input_sha256": boundary_input_sha256,
         "run_id": run,
         "verification_iteration": 0,
         "verification_profile": {
@@ -654,6 +688,36 @@ def write_accepted_deviations(root: Path, subject: str) -> Path:
     return path
 
 
+def write_release_boundary(
+    root: Path,
+    subject: str,
+    *,
+    plan: Path,
+    outcome_evidence: Path,
+    accepted_deviations: Path,
+) -> tuple[Path, ReviewBoundaryInput]:
+    boundary = ReviewBoundaryInput(
+        purpose="release",
+        outcome_contract_sha256=extract_from_bytes(plan.read_bytes()).sha256,
+        plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
+        integration_head_sha=subject,
+        outcome_evidence_map_sha256=hashlib.sha256(
+            outcome_evidence.read_bytes()
+        ).hexdigest(),
+        outcome_evidence_map_path=outcome_evidence.name,
+        accepted_deviations_sha256=hashlib.sha256(
+            accepted_deviations.read_bytes()
+        ).hexdigest(),
+        accepted_deviations_path=accepted_deviations.name,
+    )
+    path = root / "review-boundary.json"
+    path.write_text(
+        json.dumps(boundary.payload(), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path, boundary
+
+
 def test_release_review_bundle_uses_canonical_transport_vocabulary() -> None:
     subject = git("rev-parse", "HEAD")
     for severity in ("critical", "important", "minor"):
@@ -672,10 +736,13 @@ def test_release_review_bundle_uses_canonical_transport_vocabulary() -> None:
                 root,
                 "fable",
                 subject,
+                boundary_input_sha256="9" * 64,
                 verdict="changes-requested",
                 findings=[finding],
             )
-            compiled = disposition._review_bundle("fable", meta, callback, subject)
+            compiled = disposition._review_bundle(
+                "fable", meta, callback, subject, "9" * 64
+            )
             assert compiled["verdict"] == "changes-requested"
             assert compiled["finding_ids"] == [finding["finding_id"]]
 
@@ -694,11 +761,12 @@ def test_release_review_bundle_uses_canonical_transport_vocabulary() -> None:
             root,
             "fable",
             subject,
+            boundary_input_sha256="9" * 64,
             verdict="changes-requested",
             findings=[finding],
         )
         try:
-            disposition._review_bundle("fable", meta, callback, subject)
+            disposition._review_bundle("fable", meta, callback, subject, "9" * 64)
         except disposition.DispositionError as exc:
             assert "review findings are invalid" in str(exc)
         else:
@@ -745,7 +813,6 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             )
         ledger.authorize_extension(write_attempt_authorization(evidence))
 
-        manifest_rows = []
         expected_finding = {
             "finding_id": "RC3.REVIEW.MINOR",
             "severity": "minor",
@@ -755,11 +822,54 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             "evidence": "The finding is bound to exact proof bytes.",
             "recommendation": "Keep the exact finding-to-proof set complete.",
         }
+        plan = evidence / "approved-plan.md"
+        plan.write_text(RELEASE_FIXTURE["plan_markdown"], encoding="utf-8")
+        proof = evidence / "focused-tests.log"
+        proof.write_text("RC3 focused evidence GREEN\n", encoding="utf-8")
+        accepted_deviations = write_accepted_deviations(evidence, subject)
+        outcome_evidence = evidence / "outcome-evidence.json"
+        outcome_evidence_payload = copy.deepcopy(
+            RELEASE_FIXTURE["outcome_evidence_map"]
+        )
+        outcome_evidence_payload["integration_head_sha"] = subject
+        outcome_evidence.write_text(
+            json.dumps(outcome_evidence_payload, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        findings = evidence / "findings.json"
+        findings.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "subject_head_sha": subject,
+                    "findings": [
+                        {
+                            "finding_id": "RC3.REVIEW.MINOR",
+                            "disposition": "fixed",
+                            "evidence": proof.name,
+                        }
+                    ],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        review_boundary, boundary = write_release_boundary(
+            evidence,
+            subject,
+            plan=plan,
+            outcome_evidence=outcome_evidence,
+            accepted_deviations=accepted_deviations,
+        )
+
+        manifest_rows = []
         for role in ("fable", "independent-configured"):
             meta, callback = write_review_bundle(
                 evidence,
                 role,
                 subject,
+                boundary_input_sha256=boundary.input_sha256,
                 findings=[expected_finding] if role == "fable" else [],
             )
             manifest_rows.append(
@@ -782,38 +892,39 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             + "\n",
             encoding="utf-8",
         )
-        proof = evidence / "focused-tests.log"
-        proof.write_text("RC3 focused evidence GREEN\n", encoding="utf-8")
-        accepted_deviations = write_accepted_deviations(evidence, subject)
-        findings = evidence / "findings.json"
-        findings.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "subject_head_sha": subject,
-                    "findings": [
-                        {
-                            "finding_id": "RC3.REVIEW.MINOR",
-                            "disposition": "fixed",
-                            "evidence": proof.name,
-                        }
-                    ],
-                },
-                sort_keys=True,
+
+        compile_inputs = {
+            "subject_head_sha": subject,
+            "gate_receipt_path": gate,
+            "attempt_ledger_root": evidence,
+            "review_boundary_path": review_boundary,
+            "plan_path": plan,
+            "outcome_evidence_path": outcome_evidence,
+            "review_manifest_path": manifest,
+            "finding_evidence_path": findings,
+            "accepted_deviations_path": accepted_deviations,
+        }
+
+        def compile_current(**overrides: object) -> dict[str, object]:
+            return disposition.compile_disposition(
+                ROOT, **{**compile_inputs, **overrides}
             )
-            + "\n",
-            encoding="utf-8",
-        )
-        compiled = disposition.compile_disposition(
-            ROOT,
-            subject_head_sha=subject,
-            gate_receipt_path=gate,
-            attempt_ledger_root=evidence,
-            review_manifest_path=manifest,
-            finding_evidence_path=findings,
-            accepted_deviations_path=accepted_deviations,
-        )
+
+        def assert_rejected(
+            expected_error: str,
+            failure: str,
+            **overrides: object,
+        ) -> None:
+            try:
+                compile_current(**overrides)
+            except disposition.DispositionError as exc:
+                assert expected_error in str(exc)
+            else:
+                raise AssertionError(failure)
+
+        compiled = compile_current()
         assert compiled["outcome"] == "approved"
+        assert compiled["review_boundary_input_sha256"] == boundary.input_sha256
         assert compiled["reviews"][0]["verdict"] == "approve"
         assert compiled["accepted_deviations"]["deviation_ids"] == [
             "historical-rc2-slice-receipts"
@@ -823,10 +934,180 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             compiled,
             gate_receipt_path=gate,
             attempt_ledger_root=evidence,
+            review_boundary_path=review_boundary,
+            plan_path=plan,
+            outcome_evidence_path=outcome_evidence,
             review_manifest_path=manifest,
             finding_evidence_path=findings,
             accepted_deviations_path=accepted_deviations,
         )
+        substituted_disposition = copy.deepcopy(compiled)
+        substituted_disposition["review_boundary_input_sha256"] = "0" * 64
+        try:
+            disposition.validate_disposition(
+                ROOT,
+                substituted_disposition,
+                gate_receipt_path=gate,
+                attempt_ledger_root=evidence,
+                review_boundary_path=review_boundary,
+                plan_path=plan,
+                outcome_evidence_path=outcome_evidence,
+                review_manifest_path=manifest,
+                finding_evidence_path=findings,
+                accepted_deviations_path=accepted_deviations,
+            )
+        except disposition.DispositionError as exc:
+            assert "bytes do not match compiled evidence" in str(exc)
+        else:
+            raise AssertionError("substituted compiled disposition was accepted")
+
+        baseline_boundary = json.loads(review_boundary.read_text(encoding="utf-8"))
+        for field in RELEASE_FIXTURE["required_release_boundary_fields"]:
+            for mutation in ("missing", "empty"):
+                candidate = copy.deepcopy(baseline_boundary)
+                if mutation == "missing":
+                    candidate.pop(field)
+                else:
+                    candidate[field] = ""
+                review_boundary.write_text(
+                    json.dumps(candidate, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                assert_rejected(
+                    "release review boundary",
+                    f"release boundary {field}={mutation} must fail closed",
+                )
+        review_boundary.write_text(
+            json.dumps(baseline_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        stale_head_boundary = copy.deepcopy(baseline_boundary)
+        stale_head_boundary["integration_head_sha"] = "0" * 40
+        review_boundary.write_text(
+            json.dumps(stale_head_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        assert_rejected(
+            "integration HEAD",
+            "release boundary integration HEAD substitution was accepted",
+        )
+        review_boundary.write_text(
+            json.dumps(baseline_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        for field, expected_error in (
+            ("outcome_evidence_map_path", "outcome evidence path"),
+            ("accepted_deviations_path", "accepted deviations path"),
+        ):
+            candidate = copy.deepcopy(baseline_boundary)
+            candidate[field] = f"substituted-{candidate[field]}"
+            review_boundary.write_text(
+                json.dumps(candidate, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            assert_rejected(
+                expected_error,
+                f"release boundary {field} substitution was accepted",
+            )
+        review_boundary.write_text(
+            json.dumps(baseline_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        exact_inputs = (
+            (
+                "plan",
+                plan,
+                "\n<!-- same HEAD, substituted plan bytes -->\n",
+                "plan digest",
+            ),
+            (
+                "outcome_evidence_map",
+                outcome_evidence,
+                " ",
+                "outcome evidence digest",
+            ),
+            (
+                "accepted_deviations",
+                accepted_deviations,
+                " ",
+                "accepted deviations digest",
+            ),
+        )
+        assert [row[0] for row in exact_inputs] == RELEASE_FIXTURE[
+            "same_head_substitutions"
+        ]
+        for _identity, path, suffix, expected_error in exact_inputs:
+            original = path.read_bytes()
+            path.write_bytes(original + suffix.encode())
+            try:
+                assert_rejected(
+                    expected_error,
+                    f"same-HEAD {path.name} substitution was accepted",
+                )
+            finally:
+                path.write_bytes(original)
+
+        original_plan = plan.read_bytes()
+        plan.write_bytes(
+            original_plan.replace(
+                b"Same-HEAD substitutions and escaped authorization artifacts "
+                b"fail closed.",
+                b"Substituted Outcome Contract bytes must fail closed.",
+            )
+        )
+        outcome_drift_boundary = copy.deepcopy(baseline_boundary)
+        outcome_drift_boundary["plan_sha256"] = hashlib.sha256(
+            plan.read_bytes()
+        ).hexdigest()
+        review_boundary.write_text(
+            json.dumps(outcome_drift_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        assert_rejected(
+            "Outcome Contract digest",
+            "Outcome Contract substitution was accepted",
+        )
+        plan.write_bytes(original_plan)
+
+        for path, digest_field in (
+            (outcome_evidence, "outcome_evidence_map_sha256"),
+            (accepted_deviations, "accepted_deviations_sha256"),
+        ):
+            original = path.read_bytes()
+            path.write_bytes(original + b" ")
+            rebound_payload = copy.deepcopy(baseline_boundary)
+            rebound_payload[digest_field] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            review_boundary.write_text(
+                json.dumps(rebound_payload, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            assert_rejected(
+                "review boundary",
+                f"stale same-HEAD review verdicts were reused for {path.name}",
+            )
+            path.write_bytes(original)
+        review_boundary.write_text(
+            json.dumps(baseline_boundary, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        for role in ("fable", "independent-configured"):
+            meta_path = evidence / role / ".review-meta.json"
+            original_meta = meta_path.read_bytes()
+            missing_boundary_meta = json.loads(original_meta)
+            missing_boundary_meta.pop("review_boundary_input_sha256")
+            meta_path.write_text(
+                json.dumps(missing_boundary_meta, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            assert_rejected(
+                "review boundary identity",
+                f"{role} release review metadata omitted its boundary digest",
+            )
+            meta_path.write_bytes(original_meta)
 
         drifted_deviations = evidence / "drifted-accepted-deviations.json"
         drifted_payload = json.loads(accepted_deviations.read_text(encoding="utf-8"))
@@ -835,20 +1116,11 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             json.dumps(drifted_payload, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        try:
-            disposition.compile_disposition(
-                ROOT,
-                subject_head_sha=subject,
-                gate_receipt_path=gate,
-                attempt_ledger_root=evidence,
-                review_manifest_path=manifest,
-                finding_evidence_path=findings,
-                accepted_deviations_path=drifted_deviations,
-            )
-        except disposition.DispositionError as exc:
-            assert "accepted deviations schema" in str(exc)
-        else:
-            raise AssertionError("accepted-deviation subject drift must fail closed")
+        assert_rejected(
+            "accepted deviations path",
+            "accepted-deviation subject drift must fail closed",
+            accepted_deviations_path=drifted_deviations,
+        )
 
         missing = evidence / "missing-findings.json"
         missing.write_text(
@@ -863,20 +1135,11 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
             + "\n",
             encoding="utf-8",
         )
-        try:
-            disposition.compile_disposition(
-                ROOT,
-                subject_head_sha=subject,
-                gate_receipt_path=gate,
-                attempt_ledger_root=evidence,
-                review_manifest_path=manifest,
-                finding_evidence_path=missing,
-                accepted_deviations_path=accepted_deviations,
-            )
-        except disposition.DispositionError as exc:
-            assert "finding dispositions do not match review findings" in str(exc)
-        else:
-            raise AssertionError("missing review finding disposition must fail closed")
+        assert_rejected(
+            "finding dispositions do not match review findings",
+            "missing review finding disposition must fail closed",
+            finding_evidence_path=missing,
+        )
 
         extra_payload = json.loads(findings.read_text(encoding="utf-8"))
         extra_payload["findings"].append(
@@ -888,39 +1151,20 @@ def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
         )
         extra = evidence / "extra-findings.json"
         extra.write_text(json.dumps(extra_payload, sort_keys=True) + "\n", encoding="utf-8")
-        try:
-            disposition.compile_disposition(
-                ROOT,
-                subject_head_sha=subject,
-                gate_receipt_path=gate,
-                attempt_ledger_root=evidence,
-                review_manifest_path=manifest,
-                finding_evidence_path=extra,
-                accepted_deviations_path=accepted_deviations,
-            )
-        except disposition.DispositionError as exc:
-            assert "finding dispositions do not match review findings" in str(exc)
-        else:
-            raise AssertionError("unrelated review finding disposition must fail closed")
+        assert_rejected(
+            "finding dispositions do not match review findings",
+            "unrelated review finding disposition must fail closed",
+            finding_evidence_path=extra,
+        )
 
         callback_path = evidence / "fable" / ".review-callback.json"
         callback = json.loads(callback_path.read_text(encoding="utf-8"))
         callback["payload"]["verdict"] = "changes-requested"
         callback_path.write_text(json.dumps(callback) + "\n", encoding="utf-8")
-        try:
-            disposition.compile_disposition(
-                ROOT,
-                subject_head_sha=subject,
-                gate_receipt_path=gate,
-                attempt_ledger_root=evidence,
-                review_manifest_path=manifest,
-                finding_evidence_path=findings,
-                accepted_deviations_path=accepted_deviations,
-            )
-        except disposition.DispositionError as exc:
-            assert "review receipt identity" in str(exc)
-        else:
-            raise AssertionError("callback payload drift must fail closed")
+        assert_rejected(
+            "review receipt identity",
+            "callback payload drift must fail closed",
+        )
 
 
 if __name__ == "__main__":

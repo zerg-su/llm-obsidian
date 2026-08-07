@@ -5,6 +5,7 @@
     "schema_version",
     "release",
     "subject_head_sha",
+    "review_boundary_input_sha256",
     "gate",
     "attempt_ledger",
     "reviews",
@@ -18,6 +19,7 @@
     "schema_version": {"type": "integer", "const": 1},
     "release": {"type": "string", "const": "2.6.6-rc3"},
     "subject_head_sha": {"type": "string"},
+    "review_boundary_input_sha256": {"type": "string"},
     "gate": {
       "type": "object",
       "required": ["attempt_id", "profile_sha256", "receipt_sha256"],
@@ -71,6 +73,7 @@
           "callback_id",
           "verdict",
           "profile_sha256",
+          "review_boundary_input_sha256",
           "receipt_sha256",
           "finding_ids"
         ],
@@ -84,6 +87,7 @@
           "callback_id": {"type": "string"},
           "verdict": {"type": "string", "enum": ["approve", "changes-requested", "blocked"]},
           "profile_sha256": {"type": "string"},
+          "review_boundary_input_sha256": {"type": "string"},
           "receipt_sha256": {"type": "string"},
           "finding_ids": {"type": "array", "items": {"type": "string"}}
         },

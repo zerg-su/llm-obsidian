@@ -27,8 +27,13 @@ from harness.ephemeral_provider import (  # noqa: E402
     _load_schema,
     validate_output_instance,
 )
+from harness.review_program_contracts import (  # noqa: E402
+    ReviewBoundaryInput,
+    ReviewProgramError,
+)
 from harness.verification import load_profiles  # noqa: E402
 from model_routing_config import load_tracked_config  # noqa: E402
+from outcome_contract import OutcomeContractError, extract_from_bytes  # noqa: E402
 from review_contract import ReviewContractError, validate_finding  # noqa: E402
 from review_contract import VERDICTS as REVIEW_VERDICTS  # noqa: E402
 
@@ -102,6 +107,71 @@ def _canonical_payload_sha256(value: object) -> str:
     ).hexdigest()
 
 
+def _matches_boundary_pointer(path: Path, pointer: str) -> bool:
+    expected = Path(pointer).parts
+    actual = path.expanduser().resolve().parts
+    return len(expected) <= len(actual) and actual[-len(expected) :] == expected
+
+
+def _release_boundary(
+    path: Path,
+    *,
+    subject: str,
+    plan_path: Path,
+    outcome_evidence_path: Path,
+    accepted_deviations_path: Path,
+) -> ReviewBoundaryInput:
+    value, _raw = _json(path, "release review boundary")
+    try:
+        boundary = ReviewBoundaryInput.from_mapping(value)
+    except ReviewProgramError as exc:
+        raise DispositionError("release review boundary is invalid") from exc
+    if boundary.purpose != "release":
+        raise DispositionError("release review boundary purpose is invalid")
+    if boundary.integration_head_sha != subject:
+        raise DispositionError("release review boundary integration HEAD is stale")
+
+    plan_raw = _bytes(plan_path, "release plan")
+    if _sha256(plan_raw) != boundary.plan_sha256:
+        raise DispositionError("release review boundary plan digest is stale")
+    try:
+        outcome_contract = extract_from_bytes(plan_raw)
+    except OutcomeContractError as exc:
+        raise DispositionError("release Outcome Contract is invalid") from exc
+    if outcome_contract.sha256 != boundary.outcome_contract_sha256:
+        raise DispositionError(
+            "release review boundary Outcome Contract digest is stale"
+        )
+
+    outcome_evidence_raw = _bytes(
+        outcome_evidence_path, "release outcome evidence"
+    )
+    if not _matches_boundary_pointer(
+        outcome_evidence_path, boundary.outcome_evidence_map_path
+    ):
+        raise DispositionError(
+            "release review boundary outcome evidence path is stale"
+        )
+    if _sha256(outcome_evidence_raw) != boundary.outcome_evidence_map_sha256:
+        raise DispositionError(
+            "release review boundary outcome evidence digest is stale"
+        )
+    accepted_deviations_raw = _bytes(
+        accepted_deviations_path, "release accepted deviations"
+    )
+    if not _matches_boundary_pointer(
+        accepted_deviations_path, boundary.accepted_deviations_path
+    ):
+        raise DispositionError(
+            "release review boundary accepted deviations path is stale"
+        )
+    if _sha256(accepted_deviations_raw) != boundary.accepted_deviations_sha256:
+        raise DispositionError(
+            "release review boundary accepted deviations digest is stale"
+        )
+    return boundary
+
+
 def _gate(path: Path, subject: str) -> dict[str, str]:
     try:
         value = verify_receipt(
@@ -161,6 +231,7 @@ def _review_bundle(
     meta_path: Path,
     callback_path: Path,
     subject: str,
+    boundary_input_sha256: str,
 ) -> dict[str, Any]:
     expected_axis = ROLE_AXES.get(role)
     if expected_axis is None:
@@ -171,6 +242,8 @@ def _review_bundle(
     profile = meta.get("verification_profile")
     route = meta.get("route")
     expected_route = ROLE_ROUTES[role]
+    if meta.get("review_boundary_input_sha256") != boundary_input_sha256:
+        raise DispositionError("release review boundary identity is invalid")
     if (
         meta.get("schema_version") != 1
         or meta.get("head_sha") != subject
@@ -222,12 +295,15 @@ def _review_bundle(
         "callback_id": str(callback["callback_id"]),
         "verdict": str(payload["verdict"]),
         "profile_sha256": str(profile["sha256"]),
+        "review_boundary_input_sha256": boundary_input_sha256,
         "receipt_sha256": hashlib.sha256(meta_raw + b"\0" + callback_raw).hexdigest(),
         "finding_ids": sorted(finding_ids),
     }
 
 
-def _reviews(spec_path: Path, subject: str) -> list[dict[str, Any]]:
+def _reviews(
+    spec_path: Path, subject: str, boundary_input_sha256: str
+) -> list[dict[str, Any]]:
     spec, _raw = _json(spec_path, "release review manifest")
     rows = spec.get("reviews")
     if (
@@ -248,6 +324,7 @@ def _reviews(spec_path: Path, subject: str) -> list[dict[str, Any]]:
                 base / str(row["meta"]),
                 base / str(row["callback"]),
                 subject,
+                boundary_input_sha256,
             )
         )
     if {row["role"] for row in values} != set(ROLE_AXES):
@@ -342,14 +419,24 @@ def compile_disposition(
     subject_head_sha: str,
     gate_receipt_path: Path,
     attempt_ledger_root: Path,
+    review_boundary_path: Path,
+    plan_path: Path,
+    outcome_evidence_path: Path,
     review_manifest_path: Path,
     finding_evidence_path: Path,
     accepted_deviations_path: Path,
 ) -> dict[str, Any]:
     subject = _exact_subject(root, subject_head_sha)
+    boundary = _release_boundary(
+        review_boundary_path,
+        subject=subject,
+        plan_path=plan_path,
+        outcome_evidence_path=outcome_evidence_path,
+        accepted_deviations_path=accepted_deviations_path,
+    )
     gate = _gate(gate_receipt_path, subject)
     attempts = _attempts(attempt_ledger_root, gate, subject)
-    reviews = _reviews(review_manifest_path, subject)
+    reviews = _reviews(review_manifest_path, subject, boundary.input_sha256)
     review_finding_ids = {
         finding_id for review in reviews for finding_id in review["finding_ids"]
     }
@@ -370,6 +457,7 @@ def compile_disposition(
     ]
     inputs = {
         "subject_head_sha": subject,
+        "review_boundary_input_sha256": boundary.input_sha256,
         "gate": gate,
         "attempt_ledger": attempts,
         "reviews": reviews,
@@ -399,6 +487,9 @@ def validate_disposition(
     *,
     gate_receipt_path: Path,
     attempt_ledger_root: Path,
+    review_boundary_path: Path,
+    plan_path: Path,
+    outcome_evidence_path: Path,
     review_manifest_path: Path,
     finding_evidence_path: Path,
     accepted_deviations_path: Path,
@@ -410,6 +501,9 @@ def validate_disposition(
         subject_head_sha=payload.get("subject_head_sha"),
         gate_receipt_path=gate_receipt_path,
         attempt_ledger_root=attempt_ledger_root,
+        review_boundary_path=review_boundary_path,
+        plan_path=plan_path,
+        outcome_evidence_path=outcome_evidence_path,
         review_manifest_path=review_manifest_path,
         finding_evidence_path=finding_evidence_path,
         accepted_deviations_path=accepted_deviations_path,
@@ -433,6 +527,9 @@ def main() -> int:
     for command in (compile_cmd, check):
         command.add_argument("--gate-receipt", type=Path, required=True)
         command.add_argument("--attempt-ledger-root", type=Path, required=True)
+        command.add_argument("--review-boundary", type=Path, required=True)
+        command.add_argument("--plan", type=Path, required=True)
+        command.add_argument("--outcome-evidence", type=Path, required=True)
         command.add_argument("--review-manifest", type=Path, required=True)
         command.add_argument("--finding-evidence", type=Path, required=True)
         command.add_argument("--accepted-deviations", type=Path, required=True)
@@ -455,6 +552,9 @@ def main() -> int:
                 subject_head_sha=args.subject_head_sha,
                 gate_receipt_path=args.gate_receipt,
                 attempt_ledger_root=args.attempt_ledger_root,
+                review_boundary_path=args.review_boundary,
+                plan_path=args.plan,
+                outcome_evidence_path=args.outcome_evidence,
                 review_manifest_path=args.review_manifest,
                 finding_evidence_path=args.finding_evidence,
                 accepted_deviations_path=args.accepted_deviations,
@@ -465,6 +565,9 @@ def main() -> int:
                 _load(args.disposition),
                 gate_receipt_path=args.gate_receipt,
                 attempt_ledger_root=args.attempt_ledger_root,
+                review_boundary_path=args.review_boundary,
+                plan_path=args.plan,
+                outcome_evidence_path=args.outcome_evidence,
                 review_manifest_path=args.review_manifest,
                 finding_evidence_path=args.finding_evidence,
                 accepted_deviations_path=args.accepted_deviations,

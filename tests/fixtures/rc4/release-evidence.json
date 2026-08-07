@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "plan_markdown": "# RC4 release evidence fixture\n\n## Outcome Contract\n\n```json\n{\"schema_version\":1,\"purpose\":\"Bind release evidence to exact reviewed bytes.\",\"desired_outcome\":\"Same-HEAD substitutions and escaped authorization artifacts fail closed.\",\"success_evidence\":[{\"evidence_id\":\"RC4-E6-release-boundary-binding\",\"observable\":\"The release disposition binds the canonical release review boundary.\"},{\"evidence_id\":\"RC4-E7-evidence-root-containment\",\"observable\":\"Authorization artifacts remain inside the exact ledger root.\"}],\"non_goals\":[\"No provider or release effect.\"]}\n```\n",
+  "required_release_boundary_fields": [
+    "integration_head_sha",
+    "plan_sha256",
+    "outcome_contract_sha256",
+    "outcome_evidence_map_path",
+    "outcome_evidence_map_sha256",
+    "accepted_deviations_path",
+    "accepted_deviations_sha256"
+  ],
+  "outcome_evidence_map": {
+    "schema_version": 1,
+    "evidence": [
+      {
+        "evidence_id": "RC4-E6-release-boundary-binding",
+        "disposition": "established"
+      },
+      {
+        "evidence_id": "RC4-E7-evidence-root-containment",
+        "disposition": "established"
+      }
+    ]
+  },
+  "same_head_substitutions": [
+    "plan",
+    "outcome_evidence_map",
+    "accepted_deviations"
+  ],
+  "authorization_escape": "in-root symlink to byte-identical outside artifact"
+}

@@ -119,8 +119,15 @@ class AttemptLedgerStore:
                 is None
             ):
                 raise AttemptLedgerError("attempt extension authorization is invalid")
-            artifact = self.root / authorization["artifact_pointer"]
-            if not artifact.is_file() or _sha256(artifact) != authorization["artifact_sha256"]:
+            artifact = (self.root / authorization["artifact_pointer"]).resolve()
+            if artifact == self.root or self.root not in artifact.parents:
+                raise AttemptLedgerError(
+                    "attempt authorization is outside ledger root"
+                )
+            if (
+                not artifact.is_file()
+                or _sha256(artifact) != authorization["artifact_sha256"]
+            ):
                 raise AttemptLedgerError("attempt authorization digest drift")
         rows = value["attempts"]
         if len(rows) > maximum:
@@ -318,6 +325,7 @@ class AttemptLedgerStore:
             value["attempts"].append(row)
             self._write(value)
             return copy.deepcopy(row)
+
     def finalize(
         self,
         *,
