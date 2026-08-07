@@ -29,6 +29,7 @@ from harness.contracts import (
     RuntimeRoute,
 )
 from harness.callbacks import CallbackBroker
+import harness.cli as harness_cli
 from harness.cli import main as harness_cli_main
 from harness.store import OperationStore, StoreError
 
@@ -1511,4 +1512,55 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         and bool(unknown_after_close.resources.surface_id)
         and unknown_after_close.attention_reason
         == AttentionReason.CLEANUP_INCOMPLETE,
+    )
+
+    create_cli_operation("op-finalizing-review-cli", state="running")
+    store.transition("owner-cli", "op-finalizing-review-cli", "finalizing")
+    store.transition(
+        "owner-cli",
+        "op-finalizing-review-cli",
+        "attention-required",
+        reason=AttentionReason.ATTENTION_REQUIRED,
+    )
+    recovery_calls: list[str] = []
+    original_recovery = harness_cli._recover_finalizing_review_if_present
+
+    def accepted_review_recovery(
+        _store: OperationStore,
+        _owner: str,
+        operation_id: str,
+        *,
+        runtime_manager: object | None = None,
+    ) -> str:
+        recovery_calls.append(operation_id)
+        assert runtime_manager is None
+        return "approved"
+
+    harness_cli._recover_finalizing_review_if_present = accepted_review_recovery
+    try:
+        first_finalizing = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-finalizing-review-cli",
+            process_adapter=FakeProcess("dead"),
+            cmux_adapter=FakeCmux("missing"),
+        )
+        second_finalizing = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-finalizing-review-cli",
+            process_adapter=FakeProcess("dead"),
+            cmux_adapter=FakeCmux("missing"),
+        )
+    finally:
+        harness_cli._recover_finalizing_review_if_present = original_recovery
+    finalizing_record = store.read(
+        "owner-cli", "op-finalizing-review-cli"
+    )
+    check(
+        "accepted review recovery terminalizes dispatch exactly once",
+        first_finalizing.state == "complete"
+        and second_finalizing.state == "complete"
+        and finalizing_record.state == "complete"
+        and recovery_calls == ["op-finalizing-review-cli"],
     )

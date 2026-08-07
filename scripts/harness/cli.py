@@ -369,7 +369,7 @@ def _recover_finalizing_review_if_present(
     operation_id: str,
     *,
     runtime_manager: object | None = None,
-) -> bool:
+) -> str:
     """Recover one exact accepted review callback without starting a model."""
 
     store_root = store.root.expanduser().resolve()
@@ -383,7 +383,7 @@ def _recover_finalizing_review_if_present(
         / "session.json"
     )
     if not session_path.is_file() or session_path.is_symlink():
-        return False
+        return ""
     try:
         session = json.loads(session_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -400,7 +400,7 @@ def _recover_finalizing_review_if_present(
         session.get("operation_id") != operation_id
         or not worktree.is_absolute()
     ):
-        return False
+        return ""
     gate_path = (
         vault
         / ".vault-meta"
@@ -411,7 +411,7 @@ def _recover_finalizing_review_if_present(
         / "review-gate.json"
     )
     if not gate_path.is_file() or gate_path.is_symlink():
-        return False
+        return ""
     try:
         gate = json.loads(gate_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -420,7 +420,7 @@ def _recover_finalizing_review_if_present(
         ) from exc
     recovery_kind = _review_recovery_kind(gate, response_path)
     if not recovery_kind:
-        return False
+        return ""
     runner_path = Path(__file__).resolve().parents[1] / "task-review-runner.py"
     module_spec = importlib.util.spec_from_file_location(
         "_harness_task_review_recovery",
@@ -459,7 +459,7 @@ def _recover_finalizing_review_if_present(
         raise RuntimeSessionError(
             "dispatch finalizing review recovery did not make bounded progress"
         )
-    return True
+    return str(receipt["status"])
 
 
 def _resume(
@@ -482,12 +482,45 @@ def _resume(
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
     if initial.state == "attention-required":
+        recovery_status = ""
         if initial.spec.kind == "dispatch":
-            _recover_finalizing_review_if_present(
+            recovery_status = _recover_finalizing_review_if_present(
                 store,
                 owner,
                 operation_id,
                 runtime_manager=review_runtime_manager,
+            )
+        if recovery_status == "approved":
+            current = store.read(owner, operation_id)
+            if (
+                current.state != "attention-required"
+                or current.resume_state != "finalizing"
+                or current.pending_effect
+                or _has_owned_resources(current)
+            ):
+                raise RuntimeSessionError(
+                    "approved review recovery cannot terminalize dispatch ownership"
+                )
+            store.transition(owner, operation_id, "finalizing")
+            store.transition(owner, operation_id, "exiting")
+            completed = store.transition(owner, operation_id, "complete")
+            return TransitionResult(
+                operation_id,
+                initial.state,
+                completed.state,
+                completed.revision,
+                True,
+                completed.attention_reason,
+            )
+        if recovery_status:
+            current = store.read(owner, operation_id)
+            return TransitionResult(
+                operation_id,
+                initial.state,
+                current.state,
+                current.revision,
+                current.revision != initial.revision,
+                current.attention_reason,
             )
         if not initial.resume_state:
             return store.transition(owner, operation_id, initial.state)
