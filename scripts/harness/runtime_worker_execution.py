@@ -144,6 +144,109 @@ class RuntimeWorkerExecution(
             if decision.action == "attention":
                 self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
 
+    def _submit_initial_input(
+        self, initial_start_observation_limit: int | None
+    ) -> bool:
+        """Deliver one initial prompt and prove its semantic start boundary."""
+
+        initial_input = self.spec.get("initial_input_pointer")
+        if not isinstance(initial_input, Path):
+            return True
+        initial_start_budget: dict[str, int] = (
+            {}
+            if initial_start_observation_limit is None
+            else {"observation_limit": initial_start_observation_limit}
+        )
+        stream: RuntimeProviderEventStream | None = None
+        try:
+            raw_input = initial_input.read_bytes()
+            if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
+                raise RuntimeWorkerError("initial provider input is invalid")
+            input_text = raw_input.decode("utf-8")
+            delivery_text = interactive_provider_input(
+                self.spec["runtime"], initial_input, input_text
+            )
+            delivery_bytes = delivery_text.encode("utf-8")
+            if not await_initial_input_ready(
+                self.cmux_adapter,
+                surface_id=self.spec["surface_id"],
+                runtime=self.spec["runtime"],
+            ):
+                raise RuntimeWorkerError(
+                    "initial provider editor did not become ready"
+                )
+            stream = self._create_provider_stream(
+                generation=self._initial_generation(),
+                input_sha256=hashlib.sha256(delivery_bytes).hexdigest(),
+            )
+            stream.start()
+            decision = stream.reserve_input()
+            if decision.action != "send":
+                raise RuntimeWorkerError(
+                    "initial provider input was not durably reserved"
+                )
+            before_editor_sha256 = _editor_digest(
+                self.spec["runtime"],
+                self.cmux_adapter.read(self.spec["surface_id"]),
+            )
+            self.cmux_adapter.send(self.spec["surface_id"], delivery_text)
+            if not await_initial_input_visible(
+                self.cmux_adapter,
+                surface_id=self.spec["surface_id"],
+                runtime=self.spec["runtime"],
+                text=delivery_text,
+                before_editor_sha256=before_editor_sha256,
+            ):
+                raise RuntimeWorkerError(
+                    "initial provider input was not visible"
+                )
+            paste_screen_sha256 = _screen_digest(
+                self.cmux_adapter.read(self.spec["surface_id"])
+            )
+            self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+            # A returned keystroke is transport, not a started turn.  Hold the
+            # reserved send until the provider crosses a semantic boundary.
+            acknowledgement = await_initial_start_acknowledged(
+                self.cmux_adapter,
+                surface_id=self.spec["surface_id"],
+                runtime=self.spec["runtime"],
+                anchor=_prompt_anchor(delivery_text),
+                paste_screen_sha256=paste_screen_sha256,
+                artifact_ready=self.spec["callback_pointer"].is_file,
+                checkpoint_probe=self.checkpoint_probe or _no_checkpoint,
+                **initial_start_budget,
+            )
+            if acknowledgement != "started":
+                raise RuntimeWorkerError(
+                    "initial provider start was not acknowledged: "
+                    f"{acknowledgement}"
+                )
+            stream.accept_input()
+            return True
+        except (
+            OSError,
+            UnicodeDecodeError,
+            RuntimeProviderEventError,
+            RuntimeWorkerError,
+        ):
+            try:
+                if stream is not None:
+                    stream.ambiguous_input()
+            except Exception:
+                pass
+            self.contain_provider_start_failure(self.process, self.handle)
+            self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
+            _atomic_json(self.ready, {"schema_version": 1, "status": "failed"})
+            _atomic_json(
+                self.exit_path,
+                {
+                    "schema_version": 1,
+                    "status": "input-unconfirmed",
+                    "exit_code": 2,
+                },
+            )
+            return False
+
     def execute(
         self,
         spec_path: Path,
@@ -255,107 +358,8 @@ class RuntimeWorkerExecution(
                 {"schema_version": 1, "status": "start-failed", "exit_code": 127},
             )
             return 127
-        initial_start_budget: dict[str, int] = (
-            {}
-            if initial_start_observation_limit is None
-            else {"observation_limit": initial_start_observation_limit}
-        )
-        initial_input = self.spec.get("initial_input_pointer")
-        if isinstance(initial_input, Path):
-            stream: RuntimeProviderEventStream | None = None
-            try:
-                raw_input = initial_input.read_bytes()
-                if not raw_input or len(raw_input) > MAX_PROMPT_BYTES:
-                    raise RuntimeWorkerError("initial provider input is invalid")
-                input_text = raw_input.decode("utf-8")
-                delivery_text = interactive_provider_input(
-                    self.spec["runtime"], initial_input, input_text
-                )
-                delivery_bytes = delivery_text.encode("utf-8")
-                if not await_initial_input_ready(
-                    self.cmux_adapter,
-                    surface_id=self.spec["surface_id"],
-                    runtime=self.spec["runtime"],
-                ):
-                    raise RuntimeWorkerError(
-                        "initial provider editor did not become ready"
-                    )
-                stream = self._create_provider_stream(
-                    generation=self._initial_generation(),
-                    input_sha256=hashlib.sha256(delivery_bytes).hexdigest(),
-                )
-                stream.start()
-                decision = stream.reserve_input()
-                if decision.action != "send":
-                    raise RuntimeWorkerError(
-                        "initial provider input was not durably reserved"
-                    )
-                before_editor_sha256 = _editor_digest(
-                    self.spec["runtime"],
-                    self.cmux_adapter.read(self.spec["surface_id"]),
-                )
-                self.cmux_adapter.send(
-                    self.spec["surface_id"], delivery_text
-                )
-                if not await_initial_input_visible(
-                    self.cmux_adapter,
-                    surface_id=self.spec["surface_id"],
-                    runtime=self.spec["runtime"],
-                    text=delivery_text,
-                    before_editor_sha256=before_editor_sha256,
-                ):
-                    raise RuntimeWorkerError(
-                        "initial provider input was not visible"
-                    )
-                paste_screen_sha256 = _screen_digest(
-                    self.cmux_adapter.read(self.spec["surface_id"])
-                )
-                self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
-                # A returned keystroke is transport, not a started turn.  Hold
-                # the reserved send open until the provider crosses a bounded
-                # semantic start boundary; anything else falls into the
-                # ambiguous containment below without a second send.
-                acknowledgement = await_initial_start_acknowledged(
-                    self.cmux_adapter,
-                    surface_id=self.spec["surface_id"],
-                    runtime=self.spec["runtime"],
-                    anchor=_prompt_anchor(delivery_text),
-                    paste_screen_sha256=paste_screen_sha256,
-                    artifact_ready=self.spec["callback_pointer"].is_file,
-                    checkpoint_probe=(
-                        self.checkpoint_probe or _no_checkpoint
-                    ),
-                    **initial_start_budget,
-                )
-                if acknowledgement != "started":
-                    raise RuntimeWorkerError(
-                        "initial provider start was not acknowledged: "
-                        f"{acknowledgement}"
-                    )
-                stream.accept_input()
-            except (
-                OSError,
-                UnicodeDecodeError,
-                RuntimeProviderEventError,
-                RuntimeWorkerError,
-            ):
-                try:
-                    if stream is not None:
-                        stream.ambiguous_input()
-                except Exception:
-                    pass
-                self.contain_provider_start_failure(self.process, self.handle)
-                self.mark_attention(AttentionReason.ATTENTION_REQUIRED)
-                _atomic_json(self.ready, {"schema_version": 1, "status": "failed"})
-                _atomic_json(
-                    self.exit_path,
-                    {
-                        "schema_version": 1,
-                        "status": "input-unconfirmed",
-                        "exit_code": 2,
-                    },
-                )
-                return 2
+        if not self._submit_initial_input(initial_start_observation_limit):
+            return 2
         _atomic_json(
             self.ready,
             {
