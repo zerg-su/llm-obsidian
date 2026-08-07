@@ -62,6 +62,30 @@ def _validate_current_checkout(worktree: Path) -> Path:
     return worktree
 
 
+def _zero_effect_attention_is_quiescent(
+    vault: Path,
+    task_id: str,
+    gate_state: Mapping[str, Any],
+) -> bool:
+    """Recognize an exact pre-provider attempt that created no operation row."""
+
+    attempt = gate_state.get("attempt")
+    terminal = attempt.get("terminal") if isinstance(attempt, Mapping) else None
+    if not (
+        gate_state.get("status") == "attention-required"
+        and gate_state.get("lanes") == []
+        and gate_state.get("round_results") == {}
+        and gate_state.get("final_results") == {}
+        and isinstance(attempt, Mapping)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, Mapping)
+        and terminal.get("result") == "attention-required"
+        and terminal.get("lane_results") == []
+    ):
+        return False
+    return not OperationStore(vault / ".vault-meta" / "harness").list(task_id)
+
+
 def _current_policy(
     *,
     deep: bool,
@@ -390,7 +414,9 @@ def _active_current_review(
             and requested_purpose != "release"
             and (bound_head != current_head or not same_policy)
         )
-        quiescent = _current_review_is_quiescent(vault, task_id)
+        quiescent = _current_review_is_quiescent(
+            vault, task_id
+        ) or _zero_effect_attention_is_quiescent(vault, task_id, gate_state)
         terminal_stale = approved_stale or skipped_stale or (
             status == "stopped"
             and _stopped_release_enters_implementation(

@@ -86,7 +86,10 @@ from review_resolution import (
 )
 from review_contract import axis_finding_id
 from outcome_contract import extract_from_bytes
-from task_review_current import _current_review_artifact_root
+from task_review_current import (
+    _current_review_artifact_root,
+    _zero_effect_attention_is_quiescent,
+)
 
 
 def check(label: str, value: bool) -> None:
@@ -142,6 +145,59 @@ def quiesce_operations(store: OperationStore, task_id: str) -> None:
                 ),
                 expected_revision=cancelled.revision,
             )
+
+
+with tempfile.TemporaryDirectory(prefix="current-zero-effect-attention.") as raw:
+    zero_effect_vault = Path(raw)
+    zero_effect_task = "11111111-1111-4111-8111-111111111111"
+    zero_effect_gate = {
+        "status": "attention-required",
+        "lanes": [],
+        "round_results": {},
+        "final_results": {},
+        "attempt": {
+            "status": "terminal",
+            "terminal": {
+                "result": "attention-required",
+                "lane_results": [],
+            },
+        },
+    }
+    check(
+        "current review supersedes an exact zero-row pre-provider attention gate",
+        _zero_effect_attention_is_quiescent(
+            zero_effect_vault, zero_effect_task, zero_effect_gate
+        ),
+    )
+    zero_effect_store = OperationStore(
+        zero_effect_vault / ".vault-meta/harness"
+    )
+    zero_effect_operation = "22222222-2222-4222-8222-222222222222"
+    zero_effect_store.create(
+        OperationSpec(
+            zero_effect_operation,
+            "a" * 64,
+            "simple-review-holistic",
+            zero_effect_task,
+            RuntimeRoute(
+                "claude",
+                "claude-opus-5",
+                "xhigh",
+                "reviewer-callback",
+                "b" * 64,
+            ),
+            "packets/review/manifest.json",
+            "scoped",
+        ),
+        lane_id="c" * 32,
+        run_id="d" * 32,
+    )
+    check(
+        "current review keeps any persisted operation row fail closed",
+        not _zero_effect_attention_is_quiescent(
+            zero_effect_vault, zero_effect_task, zero_effect_gate
+        ),
+    )
 
 
 def write_trusted_current_approval(
