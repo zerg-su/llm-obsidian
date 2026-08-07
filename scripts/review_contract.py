@@ -8,7 +8,8 @@ import hashlib
 import json
 import re
 import zlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -43,6 +44,168 @@ FINDING_DETAIL_LIMIT = 4000
 
 class ReviewContractError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class EffectiveReviewLane:
+    """One exact provider route bound to one public review responsibility."""
+
+    axis: str
+    provider: str
+    responsibility: str
+    runtime: str
+    model: str
+    effort: str
+    profile: str
+    routing_sha256: str
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "axis": self.axis,
+            "provider": self.provider,
+            "responsibility": self.responsibility,
+            "runtime": self.runtime,
+            "model": self.model,
+            "effort": self.effort,
+            "profile": self.profile,
+            "routing_sha256": self.routing_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class EffectiveReviewTopology:
+    """Canonical effect-free review topology shared by every call site."""
+
+    mode: str
+    cross_model: bool
+    max_verify_iterations: int
+    verification_profile: str
+    verification_profile_sha256: str
+    lanes: tuple[EffectiveReviewLane, ...]
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "mode": self.mode,
+            "cross_model": self.cross_model,
+            "max_verify_iterations": self.max_verify_iterations,
+            "verification_profile": {
+                "name": self.verification_profile,
+                "sha256": self.verification_profile_sha256,
+            },
+            "session_count": len(self.lanes),
+            "lanes": [lane.payload() for lane in self.lanes],
+        }
+
+    @property
+    def sha256(self) -> str:
+        raw = json.dumps(
+            self.payload(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(raw).hexdigest()
+
+
+def _route_value(route: object, field: str) -> object:
+    if isinstance(route, Mapping):
+        if field == "routing_sha256":
+            return route.get(field) or route.get("config_sha256")
+        return route.get(field)
+    return getattr(route, field, None)
+
+
+def compile_effective_review_topology(
+    *,
+    mode: str,
+    cross_model: bool,
+    max_verify_iterations: int,
+    verification_profile: str,
+    verification_profile_sha256: str,
+    routes: Mapping[str, object],
+    selected_provider: str = "",
+) -> EffectiveReviewTopology:
+    """Compile exact axes and routes once without starting a provider effect."""
+
+    if type(cross_model) is not bool:
+        raise ReviewContractError("review cross_model must be boolean")
+    if (
+        type(max_verify_iterations) is not int
+        or mode not in VERIFY_BUDGETS
+        or not 0 <= max_verify_iterations <= VERIFY_BUDGETS[mode]
+    ):
+        raise ReviewContractError("review verification budget is invalid")
+    if not isinstance(verification_profile, str) or not IDENTIFIER_RE.fullmatch(
+        verification_profile
+    ):
+        raise ReviewContractError("review verification profile is invalid")
+    if not isinstance(verification_profile_sha256, str) or re.fullmatch(
+        r"[0-9a-f]{64}", verification_profile_sha256
+    ) is None:
+        raise ReviewContractError(
+            "review verification profile digest is invalid"
+        )
+    try:
+        axes = compile_review_axes(
+            mode, selected_provider=selected_provider
+        )
+    except ValueError as exc:
+        raise ReviewContractError(str(exc)) from exc
+    expected_providers = {review_axis_provider(axis) for axis in axes}
+    if set(routes) != expected_providers:
+        raise ReviewContractError(
+            "review routes must cover every exact topology provider"
+        )
+    lanes: list[EffectiveReviewLane] = []
+    for axis in axes:
+        provider = review_axis_provider(axis)
+        route = routes[provider]
+        runtime = _route_value(route, "runtime")
+        model = _route_value(route, "model")
+        effort = _route_value(route, "effort")
+        profile = _route_value(route, "profile")
+        routing_sha256 = _route_value(route, "routing_sha256")
+        if (
+            not all(
+                isinstance(value, str) and value
+                for value in (
+                    runtime,
+                    model,
+                    effort,
+                    profile,
+                    routing_sha256,
+                )
+            )
+            or runtime != review_provider_runtime(provider)
+            or IDENTIFIER_RE.fullmatch(model) is None
+            or IDENTIFIER_RE.fullmatch(effort) is None
+            or profile not in {"reviewer-readonly", "reviewer-callback"}
+            or re.fullmatch(r"[0-9a-f]{64}", routing_sha256) is None
+        ):
+            raise ReviewContractError(
+                f"review route for {provider} is invalid"
+            )
+        lanes.append(
+            EffectiveReviewLane(
+                axis=axis,
+                provider=provider,
+                responsibility=review_axis_responsibility(axis),
+                runtime=runtime,
+                model=model,
+                effort=effort,
+                profile=profile,
+                routing_sha256=routing_sha256,
+            )
+        )
+    return EffectiveReviewTopology(
+        mode=mode,
+        cross_model=cross_model,
+        max_verify_iterations=max_verify_iterations,
+        verification_profile=verification_profile,
+        verification_profile_sha256=verification_profile_sha256,
+        lanes=tuple(lanes),
+    )
 
 
 def review_provider_runtime(provider: str) -> str:

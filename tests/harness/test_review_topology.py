@@ -17,6 +17,7 @@ from review_contract import (  # noqa: E402
     MODES,
     REVIEW_PARENT_KINDS,
     VERIFY_BUDGETS,
+    compile_effective_review_topology,
     compile_review_axes,
     review_axis_provider,
     review_axis_responsibility,
@@ -114,6 +115,77 @@ check(
 check(
     "full reuses the deep verification budget",
     VERIFY_BUDGETS["full"] == VERIFY_BUDGETS["deep"] == 2,
+)
+
+simple_effective = compile_effective_review_topology(
+    mode="simple",
+    cross_model=False,
+    max_verify_iterations=1,
+    verification_profile="scoped",
+    verification_profile_sha256="8" * 64,
+    routes={
+        "openai": {
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "xhigh",
+            "profile": "reviewer-callback",
+            "routing_sha256": "9" * 64,
+        }
+    },
+    selected_provider="openai",
+)
+expected_simple_payload = {
+    "schema_version": 1,
+    "mode": "simple",
+    "cross_model": False,
+    "max_verify_iterations": 1,
+    "verification_profile": {
+        "name": "scoped",
+        "sha256": "8" * 64,
+    },
+    "session_count": 1,
+    "lanes": [
+        {
+            "axis": "openai-holistic",
+            "provider": "openai",
+            "responsibility": "holistic",
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "xhigh",
+            "profile": "reviewer-callback",
+            "routing_sha256": "9" * 64,
+        }
+    ],
+}
+expected_simple_sha256 = hashlib.sha256(
+    json.dumps(
+        expected_simple_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+).hexdigest()
+check(
+    "effective topology serializes one exact canonical value",
+    simple_effective.payload() == expected_simple_payload
+    and simple_effective.sha256 == expected_simple_sha256,
+)
+changed_effort = compile_effective_review_topology(
+    mode="simple",
+    cross_model=False,
+    max_verify_iterations=1,
+    verification_profile="scoped",
+    verification_profile_sha256="8" * 64,
+    routes={
+        "openai": {
+            **expected_simple_payload["lanes"][0],
+            "effort": "high",
+        }
+    },
+    selected_provider="openai",
+)
+check(
+    "any concrete route mutation changes the effective topology digest",
+    changed_effort.sha256 != simple_effective.sha256,
 )
 check(
     "responsibility is derived from the exact lane identity",
