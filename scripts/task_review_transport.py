@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from harness.contracts import to_dict
 from harness.store import OperationStore
 from harness.workflows.review import ReviewContext, ReviewResult, ReviewRound
 from harness.workflows.review_gate import ReviewGateController, ReviewGateRun
@@ -61,6 +62,7 @@ def _write_round_meta(
                 "name": context.verification_profile,
                 "sha256": context.verification_profile_sha256,
             },
+            "route": to_dict(round_.spec.route),
         },
     )
     _emit_round_telemetry(

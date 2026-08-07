@@ -32,6 +32,7 @@ from task_review_flow import (  # noqa: E402
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
+from task_review_transport import _write_round_meta  # noqa: E402
 
 
 def check(label: str, value: bool) -> None:
@@ -155,8 +156,33 @@ with tempfile.TemporaryDirectory(prefix="review-flow-units.") as raw:
         callback_root="callbacks",
     )
     lane = run.execution.lanes[0]
+    _write_round_meta(
+        runtime_root=runtime_root,
+        vault=product_root,
+        worktree=product_root,
+        task_id="flow-review",
+        depth="simple",
+        context=context,
+        lane_operation_id=lane.operation_id,
+        round_=run.rounds[lane.axis],
+    )
+    round_meta = __import__("json").loads(
+        (runtime_root / "callbacks" / lane.axis / ".review-meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check(
+        "purpose-bound round metadata preserves the exact configured route",
+        round_meta["route"] == {
+            "runtime": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "high",
+            "profile": "reviewer-callback",
+            "routing_sha256": "f" * 64,
+        },
+    )
     callback = _callback_path(runtime_root, lane.axis)
-    callback.parent.mkdir(parents=True)
+    callback.parent.mkdir(parents=True, exist_ok=True)
     callback.write_text("{}\n", encoding="utf-8")
     gate._replace(status="attention-required")
     base_state = gate.read()

@@ -516,7 +516,10 @@ def write_review_bundle(root: Path, role: str, subject: str) -> tuple[Path, Path
         "review_purpose": "release",
         "run_id": run,
         "verification_iteration": 0,
-        "verification_profile": {"name": "release-final", "sha256": "e" * 64},
+        "verification_profile": {
+            "name": disposition._REVIEW_PROFILE.name,
+            "sha256": disposition._REVIEW_PROFILE.sha256,
+        },
         "route": {
             "runtime": "claude" if role == "fable" else "codex",
             "model": "fable" if role == "fable" else "gpt-5.6-sol",

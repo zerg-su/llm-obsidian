@@ -23,6 +23,7 @@ from harness.ephemeral_provider import (  # noqa: E402
     _load_schema,
     validate_output_instance,
 )
+from harness.verification import load_profiles  # noqa: E402
 from model_routing_config import load_tracked_config  # noqa: E402
 
 
@@ -35,6 +36,9 @@ REVIEW_VERDICTS = frozenset(
 _ROUTING = load_tracked_config(ROOT)
 _INDEPENDENT_ROUTE = _ROUTING.finalization_route("finalization-independent")
 _INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
+_REVIEW_PROFILE = load_profiles(ROOT / "config/verification-profiles.toml")[
+    "scoped"
+]
 ROLE_AXES = {
     _INDEPENDENT_ROLE: "anthropic-holistic",
     "independent-configured": "openai-holistic",
@@ -169,8 +173,8 @@ def _review_bundle(
         or meta.get("axis") != expected_axis
         or meta.get("review_purpose") != "release"
         or not isinstance(profile, dict)
-        or profile.get("name") != "release-final"
-        or DIGEST.fullmatch(str(profile.get("sha256") or "")) is None
+        or profile.get("name") != _REVIEW_PROFILE.name
+        or profile.get("sha256") != _REVIEW_PROFILE.sha256
         or not isinstance(route, dict)
         or route.get("runtime") != expected_route["runtime"]
         or route.get("model") != expected_route["model"]
