@@ -1,0 +1,69 @@
+{
+  "evidence_id": "RC4-E8-agent-discipline-and-skill-quality",
+  "execution": {
+    "command": "python3 scripts/engineering-eval-runner.py --rc4-aggregate --model terra --effort medium --timeout 240",
+    "command_log_event_id": "b202717fa61ba4a358d39a0269ba8cdfd404bff08dfc179c6ec2a0cf5296793d",
+    "cwd": "/Users/zak/Projects/llm-obsidian-swarm",
+    "executed_at": "2026-08-07T19:41:26+03:00",
+    "execution_session": "019fab00-3160-7380-8920-4b20183afb76",
+    "product_head_sha": "338ceec30c72c5afd34c78042a8b57a02fcdd99c",
+    "product_worktree": "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc4-skill-quality",
+    "runner_path": "scripts/engineering-eval-runner.py",
+    "runner_sha256": "bf10da45946d1415f69ad2b893f0a5b14579e2a1b0f193f88c70e4c538ea16d1",
+    "runtime_version": "codex 0.147.0"
+  },
+  "profile": {
+    "effort": "medium",
+    "model": "gpt-5.6-terra",
+    "timeout_seconds": 240
+  },
+  "provenance": {
+    "adoption_resolution_id": "resolution-cfcdd2f98d3618d079596daf316e9458",
+    "adoption_resolution_sha256": "7437c03f933c24f45dc69a00fe78c5055517a86145fed7d6a6edc9be905ba269",
+    "authorization_escalation_id": "05c8b9ac-49a6-4328-b716-e707f6d419c4",
+    "authorization_resolution_id": "resolution-8474d836d198524bd855d40329e3525a",
+    "authorization_resolution_sha256": "46b9a504bd198988efe0e1153d1319d13a8c6e1da2432d999c1ee2b524e7c629",
+    "recovery": "Recovered without replay from the exact command-log event, typed receipt bytes, and immutable authorization/adoption resolution chain."
+  },
+  "receipt": {
+    "cases": [
+      {
+        "failures": [],
+        "id": "rc4.ambiguity",
+        "status": "pass"
+      },
+      {
+        "failures": [],
+        "id": "rc4.overengineering",
+        "status": "pass"
+      },
+      {
+        "failures": [],
+        "id": "rc4.unrelated-edits",
+        "status": "pass"
+      },
+      {
+        "failures": [],
+        "id": "rc4.missing-regression-proof",
+        "status": "pass"
+      }
+    ],
+    "effort": "medium",
+    "model": "gpt-5.6-terra",
+    "scenario_manifest_sha256": "07ab7a4b15e3c47627aa46e1ecd48aaac1c18ffb00216db4362170682290f3dc",
+    "schema_version": 1,
+    "source_sha256": {
+      "AGENTS.md": "ada22d9cb058b16e55ebf8ee19c330a697b21ad1728b548b158a7459a01a34f3",
+      "CLAUDE.md": "2f8aa275adc95fb1d575a96d659adcd082e80308d32b669904fcfdbedf731600"
+    },
+    "summary": {
+      "failed": 0,
+      "passed": 4,
+      "total": 4
+    },
+    "type": "rc4-engineering-discipline-aggregate"
+  },
+  "receipt_line_sha256": "833b115d6824cd5c062a07730afd35ee7f5fd32a6a2af928efd48b4e92ce780c",
+  "schema_version": 1,
+  "type": "rc4-engineering-discipline-live-evidence"
+}

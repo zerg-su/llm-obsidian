@@ -17,6 +17,12 @@ ENGINEERING_DISCIPLINE_CONTRACT = (
     "Engineering discipline: think before coding; simplicity first; surgical "
     "changes; goal/evidence discipline—local green is not task completion."
 )
+ENGINEERING_DISCIPLINE_PATTERN = re.compile(
+    r"^(?:- )?Engineering discipline: think before coding; simplicity first; "
+    r"surgical changes;(?: |\n)goal/evidence discipline—local green is not task "
+    r"completion\.$",
+    re.MULTILINE,
+)
 
 
 def frontmatter(text: str) -> str:
@@ -145,8 +151,7 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
     """Keep the concise engineering-discipline contract equivalent."""
     issues: list[str] = []
     for source, text in (("AGENTS.md", agents), ("CLAUDE.md", claude)):
-        normalized = re.sub(r"\s+", " ", text)
-        if normalized.count(ENGINEERING_DISCIPLINE_CONTRACT) != 1:
+        if len(ENGINEERING_DISCIPLINE_PATTERN.findall(text)) != 1:
             issues.append(
                 f"{source} must contain one exact positive engineering discipline contract"
             )

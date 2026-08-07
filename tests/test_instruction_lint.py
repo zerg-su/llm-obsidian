@@ -100,6 +100,17 @@ for drift in (
     discipline.replace("Engineering discipline:", "Engineering suggestions:"),
 ):
     assert module.engineering_discipline_issues(drift, discipline)
+for surface in ("AGENTS.md", "CLAUDE.md"):
+    for drift in (
+        f"Optional {discipline}",
+        f"Ignore this: {discipline}",
+        f"{discipline} Unless inconvenient.",
+    ):
+        issues = module.engineering_discipline_issues(
+            drift if surface == "AGENTS.md" else discipline,
+            drift if surface == "CLAUDE.md" else discipline,
+        )
+        assert any(surface in issue for issue in issues), (surface, drift, issues)
 print("OK   cross-surface engineering discipline weakening detected")
 
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import importlib.util
 import os
@@ -126,6 +127,41 @@ check(
     and len(cases) == len(EXPECTED_RC4_CASES),
 )
 module.validate_aggregate_cases(cases)
+
+live_evidence_path = (
+    ROOT
+    / "docs"
+    / "acceptance"
+    / "evidence"
+    / "v2.6.6"
+    / "rc4-engineering-discipline-live.json"
+)
+live_evidence = json.loads(live_evidence_path.read_text(encoding="utf-8"))
+check(
+    "RC4 live evidence binds the exact successful coordinator execution",
+    live_evidence["schema_version"] == 1
+    and live_evidence["type"] == "rc4-engineering-discipline-live-evidence"
+    and live_evidence["evidence_id"]
+    == "RC4-E8-agent-discipline-and-skill-quality"
+    and live_evidence["execution"]["product_head_sha"]
+    == "338ceec30c72c5afd34c78042a8b57a02fcdd99c"
+    and live_evidence["execution"]["command_log_event_id"]
+    == "b202717fa61ba4a358d39a0269ba8cdfd404bff08dfc179c6ec2a0cf5296793d"
+    and live_evidence["receipt"]["summary"]
+    == {"total": 4, "passed": 4, "failed": 0},
+)
+audit = (ROOT / "docs/acceptance/v2.6.6-rc4-skill-audit.md").read_text(
+    encoding="utf-8"
+)
+receipt_line = audit.split("```json\n", 1)[1].split("\n```", 1)[0] + "\n"
+check(
+    "RC4 live evidence preserves the exact typed receipt bytes",
+    json.loads(receipt_line) == live_evidence["receipt"]
+    and hashlib.sha256(receipt_line.encode()).hexdigest()
+    == live_evidence["receipt_line_sha256"]
+    and "c6ca6a9e9848057926e34a1416aa1c9b8cdcd18c78612655b967123e052480c6"
+    in audit,
+)
 for case in cases:
     fixture = case["fixture_result"]
     check(f"{case['id']} fixture passes", module.grade_case(case, fixture) == [])
@@ -197,6 +233,48 @@ with tempfile.TemporaryDirectory(prefix="engineering-source-drift.") as raw:
     finally:
         module.ROOT = original_root
 print("OK   governing source weakening rejected by frozen digest")
+
+with tempfile.TemporaryDirectory(prefix="engineering-source-snapshot.") as raw:
+    source_root = Path(raw)
+    for relative in module.RC4_SOURCE_SHA256:
+        source_root.joinpath(relative).write_bytes(ROOT.joinpath(relative).read_bytes())
+    original_root = module.ROOT
+    original_run = module.run
+    prompts = []
+
+    def snapshot_run(case, *, model, effort, timeout, source_snapshot=None):
+        if not prompts:
+            source_root.joinpath("AGENTS.md").write_text(
+                source_root.joinpath("AGENTS.md").read_text(encoding="utf-8").replace(
+                    "simplicity first", "simplicity optional", 1
+                ),
+                encoding="utf-8",
+            )
+        prompts.append(module.prompt_for(case, source_snapshot=source_snapshot))
+        return case["fixture_result"]
+
+    module.ROOT = source_root
+    module.run = snapshot_run
+    try:
+        snapshot_receipt = module.aggregate_receipt(
+            cases,
+            model=module.RC4_MODEL,
+            effort=module.RC4_EFFORT,
+            timeout=module.RC4_TIMEOUT,
+        )
+    finally:
+        module.run = original_run
+        module.ROOT = original_root
+    check(
+        "aggregate prompts use one immutable governing-source snapshot",
+        len(prompts) == 4
+        and all("simplicity first" in prompt for prompt in prompts)
+        and all("simplicity optional" not in prompt for prompt in prompts),
+    )
+    check(
+        "aggregate receipt hashes the captured governing-source bytes",
+        snapshot_receipt["source_sha256"] == module.RC4_SOURCE_SHA256,
+    )
 
 with tempfile.TemporaryDirectory(prefix="engineering-eval-aggregate.") as raw:
     tmp = Path(raw)

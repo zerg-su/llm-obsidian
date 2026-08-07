@@ -317,11 +317,30 @@ def validate_aggregate_cases(cases: list[dict[str, Any]]) -> None:
             raise RunnerError(f"{case.get('id')}: hermetic fixture contradicts assertions")
 
 
-def validate_aggregate_sources() -> None:
+def validate_aggregate_sources(
+    source_snapshot: dict[str, bytes] | None = None,
+) -> None:
     """Bind the live denominator to the exact governing source principles."""
-    actual = {relative: file_sha256(ROOT / relative) for relative in RC4_SOURCE_SHA256}
+    snapshot = source_snapshot or {
+        relative: (ROOT / relative).read_bytes() for relative in RC4_SOURCE_SHA256
+    }
+    if set(snapshot) != set(RC4_SOURCE_SHA256):
+        raise RunnerError("RC4 aggregate governing source snapshot is incomplete")
+    actual = {
+        relative: hashlib.sha256(snapshot[relative]).hexdigest()
+        for relative in RC4_SOURCE_SHA256
+    }
     if actual != RC4_SOURCE_SHA256:
         raise RunnerError("RC4 aggregate governing sources changed")
+
+
+def capture_aggregate_sources() -> dict[str, bytes]:
+    """Capture and validate one immutable source snapshot before provider work."""
+    snapshot = {
+        relative: (ROOT / relative).read_bytes() for relative in RC4_SOURCE_SHA256
+    }
+    validate_aggregate_sources(snapshot)
+    return snapshot
 
 
 def grade_case(case: dict[str, Any], result: dict[str, Any]) -> list[str]:
@@ -362,15 +381,35 @@ def artifact_fields(case: dict[str, Any]) -> tuple[str, ...]:
     return tuple(sorted(fields))
 
 
-def source_bundle(capability: str) -> str:
+def source_bundle(
+    capability: str,
+    *,
+    source_snapshot: dict[str, bytes] | None = None,
+) -> str:
     sections = []
     for relative in SOURCES[capability]:
-        path = ROOT / relative
-        sections.append(f"## {relative}\n\n{path.read_text(encoding='utf-8').strip()}")
+        if source_snapshot is None:
+            raw = (ROOT / relative).read_bytes()
+        else:
+            try:
+                raw = source_snapshot[relative]
+            except KeyError as exc:
+                raise RunnerError(
+                    f"governing source snapshot is missing {relative}"
+                ) from exc
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RunnerError(f"governing source {relative} is not UTF-8") from exc
+        sections.append(f"## {relative}\n\n{text.strip()}")
     return "\n\n".join(sections)
 
 
-def prompt_for(case: dict[str, Any]) -> str:
+def prompt_for(
+    case: dict[str, Any],
+    *,
+    source_snapshot: dict[str, bytes] | None = None,
+) -> str:
     fields = artifact_fields(case)
     vocabulary = case.get("response_contract", {})
     vocabulary_text = (
@@ -395,7 +434,7 @@ def prompt_for(case: dict[str, Any]) -> str:
         f"{json.dumps(case['input'], ensure_ascii=False, indent=2)}\n"
         f"{vocabulary_text}\n"
         "Authoritative local contracts:\n\n"
-        f"{source_bundle(case['capability'])}\n"
+        f"{source_bundle(case['capability'], source_snapshot=source_snapshot)}\n"
     )
 
 
@@ -435,7 +474,14 @@ def output_schema(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run(case: dict[str, Any], *, model: str, effort: str, timeout: float) -> dict[str, Any]:
+def run(
+    case: dict[str, Any],
+    *,
+    model: str,
+    effort: str,
+    timeout: float,
+    source_snapshot: dict[str, bytes] | None = None,
+) -> dict[str, Any]:
     codex = shutil.which("codex")
     if codex is None:
         raise RunnerError("codex executable is unavailable")
@@ -468,7 +514,7 @@ def run(case: dict[str, Any], *, model: str, effort: str, timeout: float) -> dic
             str(output_path),
             "--cd",
             str(ROOT),
-            prompt_for(case),
+            prompt_for(case, source_snapshot=source_snapshot),
         ]
         proc = subprocess.run(command, text=True, capture_output=True)
         if proc.returncode != 0:
@@ -511,13 +557,19 @@ def aggregate_receipt(
 ) -> dict[str, Any]:
     """Run each frozen case once and emit one deterministic typed receipt."""
     validate_aggregate_cases(cases)
-    validate_aggregate_sources()
+    source_snapshot = capture_aggregate_sources()
     if (model, effort, timeout) != (RC4_MODEL, RC4_EFFORT, RC4_TIMEOUT):
         raise RunnerError("RC4 aggregate execution profile changed")
     rows = []
     for case in cases:
         try:
-            result = run(case, model=model, effort=effort, timeout=timeout)
+            result = run(
+                case,
+                model=model,
+                effort=effort,
+                timeout=timeout,
+                source_snapshot=source_snapshot,
+            )
         except TransportInitializationFailure as exc:
             raise TransportInitializationFailure(
                 {
@@ -544,7 +596,10 @@ def aggregate_receipt(
         "model": model,
         "effort": effort,
         "scenario_manifest_sha256": RC4_SCENARIO_MANIFEST_SHA256,
-        "source_sha256": dict(RC4_SOURCE_SHA256),
+        "source_sha256": {
+            relative: hashlib.sha256(source_snapshot[relative]).hexdigest()
+            for relative in RC4_SOURCE_SHA256
+        },
         "summary": {"total": len(rows), "passed": passed, "failed": len(rows) - passed},
         "cases": rows,
     }
