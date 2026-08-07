@@ -1,0 +1,56 @@
+{
+  "comparison": {
+    "accepted": true,
+    "covered_line_delta": 0,
+    "executable_line_delta": 0,
+    "maximum_counter_delta": 2,
+    "mode": "exact",
+    "schema_version": 1
+  },
+  "observations": [
+    {
+      "covered_lines": 16855,
+      "critical_floor_results": {
+        "scripts.harness.callbacks": {"floor": 87.0, "passed": true, "percent": 95.9},
+        "scripts.harness.contracts": {"floor": 98.0, "passed": true, "percent": 98.7},
+        "scripts.harness.liveness": {"floor": 86.0, "passed": true, "percent": 86.6},
+        "scripts.harness.pipeline_builtins": {"floor": 93.0, "passed": true, "percent": 93.1},
+        "scripts.harness.pipelines": {"floor": 84.0, "passed": true, "percent": 84.8},
+        "scripts.harness.runtime_sessions": {"floor": 74.0, "passed": true, "percent": 78.5},
+        "scripts.harness.runtime_worker": {"floor": 71.0, "passed": true, "percent": 83.9},
+        "scripts.harness.state_machine": {"floor": 97.0, "passed": true, "percent": 97.4},
+        "scripts.harness.store": {"floor": 94.0, "passed": true, "percent": 94.5},
+        "scripts.harness.workflows.review_gate": {"floor": 81.0, "passed": true, "percent": 83.1}
+      },
+      "executable_lines": 22751,
+      "profile_sha256": "f6ef913dd650a07fe27f5ad446fea074967e8f781caf1ef9bbc4c269245fb28b",
+      "schema_version": 1,
+      "subject_head_sha": "b841f0491d583bcf12bb828fcc71416593142c9b",
+      "transition_matrix_cases": 4370,
+      "weighted_percent": 74.08
+    },
+    {
+      "covered_lines": 16855,
+      "critical_floor_results": {
+        "scripts.harness.callbacks": {"floor": 87.0, "passed": true, "percent": 95.9},
+        "scripts.harness.contracts": {"floor": 98.0, "passed": true, "percent": 98.7},
+        "scripts.harness.liveness": {"floor": 86.0, "passed": true, "percent": 86.6},
+        "scripts.harness.pipeline_builtins": {"floor": 93.0, "passed": true, "percent": 93.1},
+        "scripts.harness.pipelines": {"floor": 84.0, "passed": true, "percent": 84.8},
+        "scripts.harness.runtime_sessions": {"floor": 74.0, "passed": true, "percent": 78.5},
+        "scripts.harness.runtime_worker": {"floor": 71.0, "passed": true, "percent": 83.9},
+        "scripts.harness.state_machine": {"floor": 97.0, "passed": true, "percent": 97.4},
+        "scripts.harness.store": {"floor": 94.0, "passed": true, "percent": 94.5},
+        "scripts.harness.workflows.review_gate": {"floor": 81.0, "passed": true, "percent": 83.1}
+      },
+      "executable_lines": 22751,
+      "profile_sha256": "f6ef913dd650a07fe27f5ad446fea074967e8f781caf1ef9bbc4c269245fb28b",
+      "schema_version": 1,
+      "subject_head_sha": "b841f0491d583bcf12bb828fcc71416593142c9b",
+      "transition_matrix_cases": 4370,
+      "weighted_percent": 74.08
+    }
+  ],
+  "release": "2.6.6-rc3",
+  "schema_version": 1
+}
