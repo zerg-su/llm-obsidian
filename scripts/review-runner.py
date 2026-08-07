@@ -464,6 +464,7 @@ def main(
                     "name": context.verification_profile,
                     "sha256": context.verification_profile_sha256,
                 },
+                "route": to_dict(record.spec.route),
             }
             _atomic_json(callback_dir / ".review-meta.json", meta)
             prepared[axis] = {

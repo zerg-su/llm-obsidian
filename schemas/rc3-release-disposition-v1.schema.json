@@ -62,6 +62,9 @@
         "required": [
           "role",
           "axis",
+          "runtime",
+          "model",
+          "effort",
           "review_id",
           "callback_id",
           "verdict",
@@ -72,6 +75,9 @@
         "properties": {
           "role": {"type": "string", "enum": ["fable", "independent-configured"]},
           "axis": {"type": "string", "enum": ["anthropic-holistic", "openai-holistic"]},
+          "runtime": {"type": "string", "enum": ["claude", "codex"]},
+          "model": {"type": "string"},
+          "effort": {"type": "string"},
           "review_id": {"type": "string"},
           "callback_id": {"type": "string"},
           "verdict": {"type": "string", "enum": ["approved", "changes-requested", "blocked", "unavailable"]},

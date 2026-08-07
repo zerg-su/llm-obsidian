@@ -23,6 +23,7 @@ from harness.ephemeral_provider import (  # noqa: E402
     _load_schema,
     validate_output_instance,
 )
+from model_routing_config import load_tracked_config  # noqa: E402
 
 
 SHA = re.compile(r"[0-9a-f]{40,64}\Z")
@@ -34,6 +35,11 @@ REVIEW_VERDICTS = frozenset(
 ROLE_AXES = {
     "fable": "anthropic-holistic",
     "independent-configured": "openai-holistic",
+}
+_ROUTING = load_tracked_config(ROOT)
+ROLE_ROUTES = {
+    "fable": _ROUTING.resolve_alias("fable", "claude"),
+    "independent-configured": _ROUTING.reviewer_default("codex", "simple"),
 }
 SCHEMA_PATH = ROOT / "schemas/rc3-release-disposition-v1.schema.json"
 
@@ -153,6 +159,8 @@ def _review_bundle(
     callback, callback_raw = _json(callback_path, "release review callback")
     payload = callback.get("payload")
     profile = meta.get("verification_profile")
+    route = meta.get("route")
+    expected_route = ROLE_ROUTES[role]
     if (
         meta.get("schema_version") != 1
         or meta.get("head_sha") != subject
@@ -161,6 +169,11 @@ def _review_bundle(
         or not isinstance(profile, dict)
         or profile.get("name") != "release-final"
         or DIGEST.fullmatch(str(profile.get("sha256") or "")) is None
+        or not isinstance(route, dict)
+        or route.get("runtime") != expected_route["runtime"]
+        or route.get("model") != expected_route["model"]
+        or not isinstance(route.get("effort"), str)
+        or not route["effort"]
         or callback.get("schema_version") != 1
         or callback.get("kind") != "review"
         or callback.get("operation_id") != meta.get("operation_id")
@@ -190,6 +203,9 @@ def _review_bundle(
     return {
         "role": role,
         "axis": expected_axis,
+        "runtime": str(route["runtime"]),
+        "model": str(route["model"]),
+        "effort": str(route["effort"]),
         "review_id": str(meta.get("review_id") or ""),
         "callback_id": str(callback["callback_id"]),
         "verdict": str(payload["verdict"]),
