@@ -178,11 +178,11 @@
       "token_estimate": 1148
     },
     "save": {
-      "body_bytes": 11970,
+      "body_bytes": 11968,
       "body_lines": 240,
-      "closure_bytes": 11970,
-      "closure_token_estimate": 2993,
-      "token_estimate": 2993
+      "closure_bytes": 11968,
+      "closure_token_estimate": 2992,
+      "token_estimate": 2992
     },
     "save-plan": {
       "body_bytes": 4866,
@@ -211,6 +211,13 @@
       "closure_bytes": 1497,
       "closure_token_estimate": 375,
       "token_estimate": 375
+    },
+    "vault-repair": {
+      "body_bytes": 1784,
+      "body_lines": 39,
+      "closure_bytes": 1784,
+      "closure_token_estimate": 446,
+      "token_estimate": 446
     },
     "wiki": {
       "body_bytes": 3083,

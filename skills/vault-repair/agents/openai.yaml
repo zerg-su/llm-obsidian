@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vault Repair"
+  short_description: "Repair a blocked vault pipeline safely"
+  default_prompt: "Use $vault-repair to diagnose and repair the blocked vault pipeline."

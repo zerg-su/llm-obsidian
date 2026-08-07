@@ -2,7 +2,7 @@
 type: meta
 title: "daily-pipeline-guide"
 created: 2026-07-05
-updated: 2026-08-02
+updated: 2026-08-07
 tags:
   - meta
   - guide
@@ -30,6 +30,7 @@ sessions:
 - **wiki-ingest** — `ingest <путь|URL>`: источник → 8-15 связанных типизированных страниц.
 - **wiki-query** — «что ты знаешь про X?»: поиск с цитатами (режимы quick/standard/deep).
 - **wiki-lint** — health-check: орфаны, мёртвые ссылки, frontmatter-гэпы, dupes (tiling).
+- **vault-repair** — один bounded recovery/validation/Stop pass после `COMMIT_BLOCKED`; Claude: `/vault-repair`, Codex: `$llm-obsidian:vault-repair`.
 - **wiki-fold** — роллап разросшегося log.md в фолд-страницы (DragonScale M1).
 - **save** — зафиксировать вывод текущего разговора страницей + bookkeeping.
 - **save-plan** — зафайлить план из разговора в `wiki/plans/` без исполнения.

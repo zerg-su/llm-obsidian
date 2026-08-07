@@ -100,4 +100,20 @@ assert "internal callback broker" in task_prompt
 assert module.legacy_skill_issues(ROOT) == []
 print("OK   task summary delegates to the internal callback broker")
 
+vault_repair = (ROOT / "skills/vault-repair/SKILL.md").read_text(encoding="utf-8")
+assert "TODO" not in vault_repair
+for required in (
+    "$llm-obsidian:vault-repair",
+    "/vault-repair",
+    ".vault-meta/stop-hook-last.log",
+    "python3 scripts/vault-write.py --recover",
+    "python3 scripts/validate-vault.py --summary",
+    "LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1 ./.claude/hooks/stop.sh",
+    "one repair attempt",
+):
+    assert required in vault_repair, required
+for forbidden in ("git reset", "git stash", "git add .", "curl ", "wget "):
+    assert forbidden not in vault_repair, forbidden
+print("OK   vault repair stays bounded and reuses the Stop pipeline")
+
 print("\nAll instruction lint tests passed.")

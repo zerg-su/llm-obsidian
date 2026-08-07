@@ -6,6 +6,7 @@ export LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOK="$ROOT/.claude/hooks/stop.sh"
 SANDBOX="$(mktemp -d /tmp/stop-hook-test.XXXXXX)"
+REPAIR_HINT='VAULT_REPAIR: Codex `$llm-obsidian:vault-repair`; Claude Code `/vault-repair`; diagnostics `.vault-meta/stop-hook-last.log`.'
 trap 'rm -rf "$SANDBOX"' EXIT
 
 pass=0; fail=0; failures=()
@@ -145,6 +146,8 @@ out=$(run_hook); rc=$?
 [[ -s "$SANDBOX/.vault-meta/bm25/index.json" ]] && ok "sh-bm25-created" || bad "sh-bm25-created" "index missing"
 [[ -s "$SANDBOX/.vault-meta/retrieval/index.json" ]] && ok "sh-section-index-created" || bad "sh-section-index-created" "section index missing"
 printf '%s' "$out" | grep -q 'DENSE_DEFERRED' && ok "sh-dense-deferred" || bad "sh-dense-deferred" "no deferred notice"
+printf '%s' "$out" | grep -Fq "$REPAIR_HINT" \
+  && bad "sh-happy-no-repair-handoff" "clean Stop advertised repair" || ok "sh-happy-no-repair-handoff"
 [[ -s "$SANDBOX/.vault-meta/dense-refresh.pending.json" ]] && ok "sh-dense-retry-marker" || bad "sh-dense-retry-marker" "marker missing"
 [[ -s "$SANDBOX/.vault-meta/retrieval-quality.pending.json" ]] && ok "sh-retrieval-quality-pending" || bad "sh-retrieval-quality-pending" "quality marker missing"
 
@@ -272,6 +275,8 @@ EOF
     && ok "sh-${control}-no-commit" || bad "sh-${control}-no-commit" "unexpected commit"
   printf '%s' "$out" | grep -q 'COMMIT_BLOCKED' \
     && ok "sh-${control}-blocked" || bad "sh-${control}-blocked" "failure not surfaced"
+  printf '%s' "$out" | grep -Fq "$REPAIR_HINT" \
+    && ok "sh-${control}-repair-handoff" || bad "sh-${control}-repair-handoff" "manual repair command missing"
   python3 - "$SANDBOX/wiki/seed.md" "$probe" <<'PY'
 import sys
 from pathlib import Path
@@ -421,6 +426,8 @@ printf '%s' "$out" | grep -q 'reindex timed out after 1s' \
   && ok "sh-required-timeout-phase" || bad "sh-required-timeout-phase" "phase-specific timeout missing"
 printf '%s' "$out" | grep -q 'python3 scripts/reindex.py --quiet --folder-indexes' \
   && ok "sh-required-timeout-hint" || bad "sh-required-timeout-hint" "repair command missing"
+printf '%s' "$out" | grep -Fq "$REPAIR_HINT" \
+  && ok "sh-required-timeout-repair-handoff" || bad "sh-required-timeout-repair-handoff" "manual repair command missing"
 [[ "$(commit_count)" == "$before" ]] && ok "sh-required-timeout-no-commit" || bad "sh-required-timeout-no-commit" "commit after required timeout"
 mv "$SANDBOX/scripts/reindex.real.py" "$SANDBOX/scripts/reindex.py"
 
@@ -433,6 +440,8 @@ printf '\n[[Missing Target]]\n' >> "$SANDBOX/wiki/seed.md"
 before=$(commit_count)
 out=$(run_hook); rc=$?
 printf '%s' "$out" | grep -q 'COMMIT_BLOCKED' && ok "sh-schema-block-hint" || bad "sh-schema-block-hint" "no block notice"
+printf '%s' "$out" | grep -Fq "$REPAIR_HINT" \
+  && ok "sh-schema-block-repair-handoff" || bad "sh-schema-block-repair-handoff" "manual repair command missing"
 [[ "$(commit_count)" == "$before" ]] && ok "sh-schema-block-no-commit" || bad "sh-schema-block-no-commit" "invalid vault committed"
 git -C "$SANDBOX" status --short wiki/seed.md | grep -q . && ok "sh-schema-block-leaves-dirty" || bad "sh-schema-block-leaves-dirty" "change disappeared"
 perl -0pi -e 's/\n\[\[Missing Target\]\]\n/\n/' "$SANDBOX/wiki/seed.md"

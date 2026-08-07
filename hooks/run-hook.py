@@ -146,8 +146,9 @@ def surface_stop_blockers(output: str, returncode: int) -> None:
                 "systemMessage": (
                     "llm-obsidian turn-end pipeline did not commit the vault:\n"
                     f"{detail}\n"
-                    "Vault writes stay dirty until this is repaired "
-                    "(full output: .vault-meta/stop-hook-last.log)."
+                    "Repair with Codex `$llm-obsidian:vault-repair` or Claude "
+                    "Code `/vault-repair`. Vault writes stay dirty until this "
+                    "is repaired (full output: .vault-meta/stop-hook-last.log)."
                 ),
             }
         )

@@ -201,7 +201,10 @@ def publish(state_root, **kwargs):
         result.returncode == 0
         and blocked_output["continue"] is True
         and "COMMIT_BLOCKED" in blocked_output["systemMessage"]
-        and "VAULT_LINT_FAIL" in blocked_output["systemMessage"],
+        and "VAULT_LINT_FAIL" in blocked_output["systemMessage"]
+        and "$llm-obsidian:vault-repair" in blocked_output["systemMessage"]
+        and "/vault-repair" in blocked_output["systemMessage"]
+        and ".vault-meta/stop-hook-last.log" in blocked_output["systemMessage"],
         result.stdout,
     )
     check(

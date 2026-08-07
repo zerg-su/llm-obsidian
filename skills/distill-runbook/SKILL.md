@@ -3,7 +3,7 @@ name: distill-runbook
 metadata:
   version: 1.0.0
 description: >-
-  Distill this session's shell commands (.vault-meta/command-log.jsonl, PostToolUse capture) into a human-executable runbook in wiki/runbooks/ — AI-outage resilience: процедуры живут как copy-paste bash без ИИ. Triggers: distill runbook, runbook from session, сделай ранбук из сессии, ранбук из команд, сохрани команды сессии, дистиллируй ранбук.
+  Distill captured session commands into a human-executable wiki runbook for AI-outage resilience. Triggers: distill runbook, runbook from session, сделай или дистиллируй ранбук из команд сессии.
 allowed-tools: Read Grep Glob Bash Write Edit AskUserQuestion
 ---
 

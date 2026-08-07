@@ -425,6 +425,14 @@ def repairable_validation_failure(validation: subprocess.CompletedProcess[str]) 
     )
 
 
+def repair_handoff() -> str:
+    """Return the exact cross-host manual repair entrypoint for blocked Stop."""
+    return (
+        "VAULT_REPAIR: Codex `$llm-obsidian:vault-repair`; Claude Code "
+        "`/vault-repair`; diagnostics `.vault-meta/stop-hook-last.log`."
+    )
+
+
 def attempt_wikilink_repair(
     validation: subprocess.CompletedProcess[str],
     *,
@@ -674,6 +682,9 @@ def main() -> int:
             blocked = True
             timings.setdefault("commit", 0.0)
             emit(f"COMMIT_BLOCKED: required turn-end phase failed: {exc}")
+
+        if blocked:
+            emit(repair_handoff())
 
         rotate(ROOT / ".vault-meta/router-hits.jsonl")
         rotate(ROOT / ".vault-meta/command-log.jsonl")
