@@ -15,6 +15,7 @@ from harness.review_attempt import (
     LEGACY_CROSS_HEAD_RESUME_DISABLED,
     ReviewAttempt,
     ReviewAttemptError,
+    ReviewAttemptTerminalResult,
 )
 from harness.runtime_sessions import RuntimeSessionManager
 from harness.state_machine import TERMINAL
@@ -588,8 +589,10 @@ def _run_exact_head_review(
         raise TaskReviewError("enabled review has no request")
 
     cycle = 1
+    zero_lane_recovery = False
     if gate_exists:
-        prior_attempt = ReviewAttempt.from_mapping(gate.read()["attempt"])
+        prior_state = gate.read()
+        prior_attempt = ReviewAttempt.from_mapping(prior_state["attempt"])
         cycle = prior_attempt.identity.cycle
         if prior_attempt.status == "terminal":
             assert prior_attempt.terminal is not None
@@ -598,7 +601,20 @@ def _run_exact_head_review(
                 attempt_id=prior_attempt.identity.attempt_id,
                 terminal_result=prior_attempt.terminal.result.value,
             )
-            if context.head_sha == prior_attempt.identity.exact_head_sha:
+            zero_lane_recovery = (
+                prior_attempt.terminal.result
+                == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+                and not prior_attempt.terminal.lane_results
+                and prior_state.get("status") == "attention-required"
+                and prior_state.get("lanes") == []
+                and prior_state.get("round_results") in ({}, None)
+                and prior_state.get("final_results") in ({}, None)
+                and prior_state.get("evidence") in ({}, None)
+            )
+            if (
+                context.head_sha == prior_attempt.identity.exact_head_sha
+                and not zero_lane_recovery
+            ):
                 return _receipt(
                     status=prior_attempt.terminal.result.value,
                     meta=meta,
@@ -618,9 +634,29 @@ def _run_exact_head_review(
         request=request,
         cycle=cycle,
     )
-    if not gate_exists or (
-        ReviewAttempt.from_mapping(gate.read()["attempt"]).status == "terminal"
-    ):
+    if zero_lane_recovery:
+        lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
+            meta, task_id, cycle=cycle
+        )
+        gate.reopen_zero_lane_preflight_attempt(
+            dispatch_operation_id=task_id,
+            identity=compile_review_attempt_identity(
+                request=request,
+                finalization_lineage_id=lineage,
+                cycle=cycle,
+                plan_sha256=plan_sha256,
+                outcome_sha256=outcome_sha256,
+            ),
+            request=request,
+            product_root=worktree,
+            callback_paths={
+                axis: _callback_path(runtime_root, axis)
+                for axis in request.policy.axes
+            },
+        )
+    if not gate_exists or ReviewAttempt.from_mapping(
+        gate.read()["attempt"]
+    ).status in {"pending", "terminal"}:
         return _start_exact_head_review(
             meta=meta,
             vault=vault,

@@ -75,6 +75,9 @@ from harness.workflows.review_gate import (
     review_context_sha256,
 )
 from harness.workflows.review_gate_contracts import _result_from_payload
+from harness.workflows.review_gate_attempt import (
+    compile_review_attempt_identity,
+)
 from review_resolution import (
     FindingResolution,
     ReviewResolutionEvidence,
@@ -3053,6 +3056,113 @@ with tempfile.TemporaryDirectory(prefix="review-iteration-facade.") as raw:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
+    base = Path(raw)
+    scratch = base / "scratch"
+    scratch.mkdir()
+    store = OperationStore(base / "store")
+
+    class PreflightFailureRuntime(FakeRuntime):
+        fail_once = True
+
+        def start(self, request: object, *, on_surface_opened=None) -> object:
+            if self.fail_once:
+                self.fail_once = False
+                raise RuntimeSessionError("runtime preflight failed")
+            return super().start(
+                request, on_surface_opened=on_surface_opened
+            )
+
+    failed_runtime = PreflightFailureRuntime(store)
+    gate = ReviewGateController(base / "gate", failed_runtime, store)
+    failed_request = request_for(
+        "review-zero-lane-cycle-1", context=context
+    )
+    try:
+        gate.begin_attempt(
+            dispatch_operation_id="review-zero-lane-dispatch",
+            finalization_lineage_id="review-zero-lane-lineage",
+            cycle=1,
+            plan_sha256="1" * 64,
+            outcome_sha256="2" * 64,
+            request=failed_request,
+            origin_surface="11111111-1111-4111-8111-111111111111",
+            cwd=scratch,
+            product_root=ROOT,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks/review-zero-lane",
+        )
+    except RuntimeSessionError:
+        pass
+    else:
+        raise AssertionError("preflight fixture did not fail")
+    failed_state = gate.read()
+    replacement = request_for(
+        "review-zero-lane-cycle-2", context=context
+    )
+    replacement_identity = compile_review_attempt_identity(
+        request=replacement,
+        finalization_lineage_id="review-zero-lane-lineage",
+        cycle=2,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+    )
+    reopened = gate.reopen_zero_lane_preflight_attempt(
+        dispatch_operation_id="review-zero-lane-dispatch",
+        identity=replacement_identity,
+        request=replacement,
+        product_root=ROOT,
+        callback_paths={
+            axis: scratch / "callbacks" / axis / ".review-callback.json"
+            for axis in failed_request.policy.axes
+        },
+    )
+    replayed = gate.reopen_zero_lane_preflight_attempt(
+        dispatch_operation_id="review-zero-lane-dispatch",
+        identity=replacement_identity,
+        request=replacement,
+        product_root=ROOT,
+        callback_paths={
+            axis: scratch / "callbacks" / axis / ".review-callback.json"
+            for axis in failed_request.policy.axes
+        },
+    )
+    recovered_state = gate.read()
+    check(
+        "terminal zero-lane preflight recovery installs one replay-safe pending attempt",
+        failed_state["status"] == "attention-required"
+        and failed_state["lanes"] == []
+        and failed_state["round_results"] == {}
+        and failed_state["final_results"] == {}
+        and not store.list("owner-1")
+        and reopened == replayed
+        and reopened.status == "pending"
+        and recovered_state["status"] == "pending"
+        and recovered_state["attempt"]["identity"]["cycle"] == 2
+        and not failed_runtime.started,
+    )
+    recovered_run = gate.begin_attempt(
+        dispatch_operation_id="review-zero-lane-dispatch",
+        finalization_lineage_id="review-zero-lane-lineage",
+        cycle=2,
+        plan_sha256="1" * 64,
+        outcome_sha256="2" * 64,
+        request=replacement,
+        origin_surface="11111111-1111-4111-8111-111111111111",
+        cwd=scratch,
+        product_root=ROOT,
+        prompt_pointer="prompts/review.md",
+        callback_root="callbacks/review-zero-lane",
+    )
+    check(
+        "recovered zero-lane preflight starts exactly one fresh bound lane",
+        len(recovered_run.execution.lanes) == 1
+        and len(failed_runtime.started) == 1
+        and gate.read()["status"] == "reviewing"
+        and gate.read()["attempt"]["status"] == "awaiting-callback",
+    )
 
 
 if regression_failures:
