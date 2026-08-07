@@ -155,23 +155,34 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
         weakened_context = False
         if len(matches) == 1:
             match = matches[0]
-            prior_boundary = text.rfind("\n\n", 0, match.start())
-            paragraph_start = 0 if prior_boundary < 0 else prior_boundary + 2
-            paragraph_end = text.find("\n\n", match.end())
-            if paragraph_end < 0:
-                paragraph_end = len(text)
-            paragraph = text[paragraph_start:paragraph_end]
-            preceding = text[: match.start()].splitlines()
-            nearby: list[str] = []
-            for line in reversed(preceding):
-                if line.strip():
-                    nearby.append(line.strip())
-                if len(nearby) == 2:
+            lines = text.splitlines()
+            line_index = text.count("\n", 0, match.start())
+            start = line_index
+            current_is_item = bool(re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[start]))
+            if not current_is_item:
+                while start > 0 and lines[start - 1].strip():
+                    if re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[start - 1]):
+                        break
+                    start -= 1
+            end = line_index + 1
+            while end < len(lines) and lines[end].strip():
+                if re.match(r"^\s*(?:[-*+] |\d+[.)] )", lines[end]):
                     break
+                end += 1
+            logical_item = "\n".join(lines[start:end])
+            prior = start - 1
+            while prior >= 0 and not lines[prior].strip():
+                prior -= 1
+            if prior >= 0 and re.fullmatch(
+                r"\s*(?:optional|ignore(?: this)?|suggestions?\s+only)\s*:?\s*",
+                lines[prior],
+                flags=re.I,
+            ):
+                logical_item = lines[prior] + "\n" + logical_item
             weakened_context = bool(
                 re.search(
                     r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",
-                    paragraph + " " + " ".join(reversed(nearby)),
+                    logical_item,
                     flags=re.I,
                 )
             )

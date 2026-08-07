@@ -123,6 +123,12 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
             drift if surface == "CLAUDE.md" else discipline,
         )
         assert any(surface in issue for issue in issues), (surface, drift, issues)
+    sibling = f"- Unrelated behavior is advisory unless requested.\n- {discipline}"
+    issues = module.engineering_discipline_issues(
+        sibling if surface == "AGENTS.md" else discipline,
+        sibling if surface == "CLAUDE.md" else discipline,
+    )
+    assert not any(surface in issue for issue in issues), (surface, sibling, issues)
 print("OK   cross-surface engineering discipline weakening detected")
 
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")

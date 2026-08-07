@@ -165,10 +165,14 @@ def _yaml_string(raw: str, continuations: list[str]) -> str | bool | None:
     """Parse the small scalar subset allowed by the skill frontmatter contract."""
 
     value = raw.strip()
-    if value in {">", ">-", ">+", "|", "|-", "|+"}:
-        return " ".join(line.strip() for line in continuations).strip()
     if not value:
         return None
+    if value in {">", ">-", ">+", "|", "|-", "|+"}:
+        return " ".join(line.strip() for line in continuations).strip()
+    if continuations:
+        raise ValueError(
+            "frontmatter scalar continuations require an explicit block marker"
+        )
     if value[0] == '"':
         try:
             decoded = json.loads(value)

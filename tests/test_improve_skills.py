@@ -194,30 +194,38 @@ for malformed in (
 for malformed in (
     "name: fixture\nname: fixture\ndescription: Valid.\n",
     "name: fixture\ndescription: Valid.\nthis is not yaml\n",
+    "name: fixture\n  hidden suffix\ndescription: Valid.\n",
+    "name: fixture\ndescription: Valid.\n  hidden protected key: true\n",
+    "name: fixture\ndescription: Valid.\n  " + ("x" * 2000) + "\n",
 ):
     assert "invalid-frontmatter" in audit_frontmatter_fixture(malformed)
 
-for malformed in (
-    "name: true\ndescription: Valid.\n",
-    "name: True\ndescription: Valid.\n",
-    "name: fixture\ndescription: 123\n",
-    "name: fixture\ndescription: 0x10\n",
-    "name: fixture\ndescription: 2026-08-07\n",
-    "name: fixture\ndescription: .inf\n",
-    'name: fixture\ndescription: "\\u003cscript\\u003e"\n',
-    'name: fixture\ndescription: "\\x3cscript\\x3e"\n',
-    "name: fixture\ndescription: valid: true\n",
-    "name: fixture\ndescription: valid # hidden comment\n",
-    "name: fixture\ndescription: !tag valid\n",
-):
-    assert audit_frontmatter_fixture(malformed) & {
+typed_frontmatter_fixtures = (
+    ("name: true\ndescription: Valid.\n", "invalid-frontmatter-value"),
+    ("name: True\ndescription: Valid.\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: 123\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: 0x10\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: 2026-08-07\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: .inf\n", "invalid-frontmatter"),
+    ('name: fixture\ndescription: "\\u003cscript\\u003e"\n', "invalid-frontmatter-value"),
+    ('name: fixture\ndescription: "\\x3cscript\\x3e"\n', "invalid-frontmatter"),
+    ("name: fixture\ndescription: valid: true\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: valid # hidden comment\n", "invalid-frontmatter"),
+    ("name: fixture\ndescription: !tag valid\n", "invalid-frontmatter"),
+    (
+        "name: fixture\ndescription: Valid.\ndisable-model-invocation: yes\n",
         "invalid-frontmatter",
-        "invalid-frontmatter-value",
-    }
-
-assert audit_frontmatter_fixture(
-    "name: fixture\ndescription: Valid.\ndisable-model-invocation: yes\n"
-) & {"invalid-frontmatter", "invalid-frontmatter-value"}
+    ),
+)
+for malformed, expected_code in typed_frontmatter_fixtures:
+    codes = audit_frontmatter_fixture(malformed)
+    assert expected_code in codes, (malformed, expected_code, codes)
+    unexpected_code = (
+        "invalid-frontmatter-value"
+        if expected_code == "invalid-frontmatter"
+        else "invalid-frontmatter"
+    )
+    assert unexpected_code not in codes, (malformed, expected_code, codes)
 print("OK   canonical frontmatter parser rejects YAML bypasses and type drift")
 
 
