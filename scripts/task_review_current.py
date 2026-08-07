@@ -423,9 +423,11 @@ def _active_current_review(
         # treat the zero-effect pointer as live ownership forever.  Supersede
         # it only when the exact owner has no operation rows; any persisted
         # row remains fail-closed and requires normal lifecycle recovery.
-        terminal_stale = not OperationStore(
-            vault / ".vault-meta" / "harness"
-        ).list(task_id)
+        if OperationStore(vault / ".vault-meta" / "harness").list(task_id):
+            raise TaskReviewError(
+                "current review ownership exists before gate materialization"
+            )
+        terminal_stale = True
     if terminal_stale:
         return None
     if not same_policy:

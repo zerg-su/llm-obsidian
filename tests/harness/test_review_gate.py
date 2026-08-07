@@ -2761,6 +2761,125 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
                 or retained_result["task_id"] == retained_task_id
             ),
         )
+
+        import task_review_current as current_review_module
+
+        def interrupted_before_gate(name: str) -> tuple[Path, Path, str]:
+            interrupted_product = zero_effect_checkout(name)
+            interrupted_scratch = base / f"{name}-scratch"
+            original_run_review = current_review_module._run_review
+
+            def fail_before_gate(*args: object, **kwargs: object) -> object:
+                raise RuntimeError("before-gate fixture failure")
+
+            current_review_module._run_review = fail_before_gate
+            try:
+                task_review_runner.run_current_review(
+                    interrupted_product,
+                    origin_surface="33333333-3333-4333-8333-333333333333",
+                    scratch_root=interrupted_scratch,
+                    runtime_manager=EffectRecordingRuntime(
+                        OperationStore(
+                            interrupted_product / ".vault-meta/harness"
+                        )
+                    ),
+                )
+            except RuntimeError as exc:
+                assert str(exc) == "before-gate fixture failure"
+            else:
+                raise AssertionError("before-gate fixture failure was swallowed")
+            finally:
+                current_review_module._run_review = original_run_review
+            interrupted_task_id = json.loads(
+                (
+                    interrupted_product
+                    / ".vault-meta/harness/current-review/active.json"
+                ).read_text(encoding="utf-8")
+            )["task_id"]
+            interrupted_gate = (
+                interrupted_product
+                / ".vault-meta/harness/review-data"
+                / interrupted_task_id
+                / interrupted_task_id
+                / "review-gate.json"
+            )
+            check(
+                f"{name} stops after its active pointer and before its gate",
+                not interrupted_gate.exists(),
+            )
+            return interrupted_product, interrupted_scratch, interrupted_task_id
+
+        missing_gate_product, missing_gate_scratch, missing_gate_task_id = (
+            interrupted_before_gate("zero-effect-missing-gate")
+        )
+        missing_gate_store = OperationStore(
+            missing_gate_product / ".vault-meta/harness"
+        )
+        missing_gate_runtime = EffectRecordingRuntime(missing_gate_store)
+        missing_gate_retry = task_review_runner.run_current_review(
+            missing_gate_product,
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=missing_gate_scratch,
+            runtime_manager=missing_gate_runtime,
+        )
+        check(
+            "zero-effect active pointer without a gate is superseded safely",
+            not missing_gate_store.list(missing_gate_task_id)
+            and missing_gate_retry["status"] == "reviewing"
+            and missing_gate_retry["task_id"] != missing_gate_task_id
+            and len(missing_gate_runtime.started) == 1,
+        )
+
+        owned_gate_product, owned_gate_scratch, owned_gate_task_id = (
+            interrupted_before_gate("owned-missing-gate")
+        )
+        owned_gate_store = OperationStore(
+            owned_gate_product / ".vault-meta/harness"
+        )
+        owned_gate_store.create(
+            OperationSpec(
+                "44444444-4444-4444-8444-444444444444",
+                "e" * 64,
+                "simple-review-holistic",
+                owned_gate_task_id,
+                RuntimeRoute(
+                    "claude",
+                    "claude-opus-5",
+                    "xhigh",
+                    "reviewer-callback",
+                    "f" * 64,
+                ),
+                "packets/review/manifest.json",
+                "scoped",
+            ),
+            lane_id="1" * 32,
+            run_id="2" * 32,
+        )
+        owned_gate_runtime = EffectRecordingRuntime(owned_gate_store)
+        try:
+            owned_gate_result = task_review_runner.run_current_review(
+                owned_gate_product,
+                origin_surface="33333333-3333-4333-8333-333333333333",
+                scratch_root=owned_gate_scratch,
+                runtime_manager=owned_gate_runtime,
+            )
+        except task_review_runner.TaskReviewError:
+            owned_gate_result = None
+        owned_gate_active = json.loads(
+            (
+                owned_gate_product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )
+        check(
+            "active pointer without a gate retains any operation row fail closed",
+            owned_gate_active["task_id"] == owned_gate_task_id
+            and not owned_gate_runtime.started
+            and (
+                owned_gate_result is None
+                or owned_gate_result["task_id"] == owned_gate_task_id
+            ),
+        )
     finally:
         for name, value in old_environment.items():
             if value is None:
