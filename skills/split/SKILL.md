@@ -1,6 +1,6 @@
 ---
 name: split
-description: Fan.
+description: Explicit-only governed SplitManifest preview; use $split --dispatch only for approved harness activation.
 disable-model-invocation: true
 allowed-tools: Read Bash
 ---

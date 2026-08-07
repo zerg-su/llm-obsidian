@@ -71,6 +71,31 @@ assert any("runtime-capabilities.md" in issue for issue in issues)
 assert any("feedback_no_claude_p_headless.md" in issue for issue in issues)
 print("OK   finalization and ephemeral policy drift detected")
 
+discipline = (
+    "Engineering discipline: think before coding; simplicity first; surgical "
+    "changes; goal/evidence discipline—local green is not task completion."
+)
+assert module.engineering_discipline_issues(discipline, discipline) == []
+for surface in ("AGENTS.md", "CLAUDE.md"):
+    for principle in (
+        "think before coding",
+        "simplicity first",
+        "surgical changes",
+        "goal/evidence discipline",
+        "local green is not task completion",
+    ):
+        weakened = discipline.replace(principle, "weakened")
+        issues = module.engineering_discipline_issues(
+            weakened if surface == "AGENTS.md" else discipline,
+            weakened if surface == "CLAUDE.md" else discipline,
+        )
+        assert any(surface in issue and principle in issue for issue in issues), (
+            surface,
+            principle,
+            issues,
+        )
+print("OK   cross-surface engineering discipline weakening detected")
+
 defuddle = (ROOT / "skills" / "defuddle" / "SKILL.md").read_text(encoding="utf-8")
 assert "manual fallback" in defuddle
 assert "never describe raw" in defuddle

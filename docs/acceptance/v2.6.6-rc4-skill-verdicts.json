@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "split",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "RC4-SPLIT-METADATA-01",
+        "hierarchy": "pass",
+        "steering": "pass",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An approved plan, exact parent Outcome Contract, registered child pipelines, frozen budgets, and an explicit preview-only or --dispatch invocation.",
+      "overall_outcome": "A zero-effect exact Split preview, or when separately authorized, bounded workspace-local waves and deterministic resource-free join without provider replay.",
+      "local_subgoal": "Make explicit-only Split discovery informative while preserving preview authority, activation authorization, and the existing harness lifecycle.",
+      "completion_proxies": [
+        "The Split package passes the skill-creator structural validation.",
+        "The strict improve-skills inventory and scoped verdict audits pass.",
+        "The router negative fixtures and skill budget pass."
+      ],
+      "required_outcome_evidence": [
+        "RC4-E8-agent-discipline-and-skill-quality"
+      ],
+      "evidence": "At base 7033413afc9dc7666f4a2a76de33c088dbfcbfef, skills/split/SKILL.md used the four-byte description 'Fan.' while its body and skills/split/agents/openai.yaml defined an explicit-only governed preview and separately authorized --dispatch path.",
+      "change": "Replace only the low-information frontmatter description with a concise capability and strong-intent trigger; retain all body instructions and Codex invocation policy.",
+      "behavior_proof": "disable-model-invocation remains true, policy.allow_implicit_invocation remains false, allowed-tools remain Read and Bash, ordinary split requests remain router-negative, and preview, activation, wave, join, permission, and completion semantics are byte-identical."
+    }
+  ]
+}

@@ -9,6 +9,7 @@ skill contracts, and permits no product writes or interactive approvals.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -25,6 +26,10 @@ from model_routing import RoutingError, load_config
 
 TIMEOUT = ROOT / "scripts" / "with-timeout"
 SOURCES = {
+    "engineering-discipline": (
+        "AGENTS.md",
+        "CLAUDE.md",
+    ),
     "codebase-design": (
         "skills/codebase-design/SKILL.md",
         "docs/skill-references/engineering-quality-contract.md",
@@ -43,10 +48,241 @@ SOURCES = {
         "docs/skill-references/engineering-quality-contract.md",
     ),
 }
+RC4_CASE_IDS = (
+    "rc4.ambiguity",
+    "rc4.overengineering",
+    "rc4.unrelated-edits",
+    "rc4.missing-regression-proof",
+)
+APP_SERVER_EPERM = (
+    "failed to initialize in-process app-server client: "
+    "Operation not permitted (os error 1)"
+)
+TRANSPORT_FAILURE_FIELDS = {
+    "schema_version",
+    "type",
+    "failure_class",
+    "code",
+    "accepted_case_receipts",
+    "completed_model_results",
+    "typed_case_output_present",
+}
 
 
 class RunnerError(ValueError):
     """The pressure case or local runner boundary is invalid."""
+
+
+class TransportInitializationFailure(RunnerError):
+    """A typed failure known to precede any model result."""
+
+    def __init__(self, record: dict[str, Any]):
+        self.record = record
+        super().__init__(json.dumps(record, sort_keys=True))
+
+
+def transport_failure_record(
+    *, returncode: int, stderr: str, typed_case_output_present: bool
+) -> dict[str, Any] | None:
+    """Classify only the exact output-free nested Codex EPERM signature."""
+    if (
+        returncode == 0
+        or APP_SERVER_EPERM not in stderr
+        or typed_case_output_present
+    ):
+        return None
+    return {
+        "schema_version": 1,
+        "type": "engineering-eval-transport-failure",
+        "failure_class": "pre-model-transport-initialization",
+        "code": "nested-codex-app-server-eperm",
+        "accepted_case_receipts": 0,
+        "completed_model_results": 0,
+        "typed_case_output_present": False,
+    }
+
+
+def replacement_preflight(record: dict[str, Any]) -> dict[str, Any]:
+    """Authorize one replacement only for an exact zero-result failure record."""
+    if not isinstance(record, dict) or set(record) != TRANSPORT_FAILURE_FIELDS:
+        raise RunnerError("replacement preflight record fields changed")
+    expected = transport_failure_record(
+        returncode=1,
+        stderr=APP_SERVER_EPERM,
+        typed_case_output_present=False,
+    )
+    if record != expected:
+        raise RunnerError("replacement preflight has ambiguous prior effects")
+    return {
+        "schema_version": 1,
+        "replacement_safe": True,
+        "accepted_case_receipts": 0,
+        "completed_model_results": 0,
+    }
+
+
+def rc4_cases() -> list[dict[str, Any]]:
+    """Return the frozen RC4 pressure denominator in execution order."""
+    return [
+        {
+            "schema_version": 1,
+            "id": "rc4.ambiguity",
+            "capability": "engineering-discipline",
+            "input": {
+                "scenario": (
+                    "A request says to add retention support, but the repository has "
+                    "two independently shipped retention paths with incompatible "
+                    "storage and deletion behavior. Local evidence does not identify "
+                    "which path the request covers."
+                )
+            },
+            "response_contract": {
+                "decision": ["implement-first-path", "implement-both", "clarify"]
+            },
+            "assertions": [
+                {"kind": "equals", "path": "artifacts.decision", "value": "clarify"},
+                {
+                    "kind": "equals",
+                    "path": "artifacts.assumptions_surfaced",
+                    "value": True,
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.coding_started",
+                    "value": False,
+                },
+            ],
+            "fixture_result": {
+                "output": "Surface the material ambiguity before implementation.",
+                "artifacts": {
+                    "decision": "clarify",
+                    "assumptions_surfaced": True,
+                    "coding_started": False,
+                },
+            },
+        },
+        {
+            "schema_version": 1,
+            "id": "rc4.overengineering",
+            "capability": "engineering-discipline",
+            "input": {
+                "scenario": (
+                    "A bounded command needs one additional validated scalar option. "
+                    "The current parser and handler each have one implementation. A "
+                    "proposal adds a plugin registry, factory, retry policy, and fallback "
+                    "provider before adding the option."
+                )
+            },
+            "response_contract": {
+                "decision": ["direct-change", "add-framework", "stop-insufficient-evidence"]
+            },
+            "assertions": [
+                {
+                    "kind": "equals",
+                    "path": "artifacts.decision",
+                    "value": "direct-change",
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.new_abstraction",
+                    "value": False,
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.fallback_added",
+                    "value": False,
+                },
+            ],
+            "fixture_result": {
+                "output": "Make the direct bounded change.",
+                "artifacts": {
+                    "decision": "direct-change",
+                    "new_abstraction": False,
+                    "fallback_added": False,
+                },
+            },
+        },
+        {
+            "schema_version": 1,
+            "id": "rc4.unrelated-edits",
+            "capability": "engineering-discipline",
+            "input": {
+                "scenario": (
+                    "Fix one reproduced parser regression in a dirty worktree. A nearby "
+                    "formatter module has unrelated user edits and an old naming issue "
+                    "that is not involved in the regression."
+                )
+            },
+            "response_contract": {
+                "decision": ["requested-only", "include-cleanup", "rewrite-module"]
+            },
+            "assertions": [
+                {
+                    "kind": "equals",
+                    "path": "artifacts.decision",
+                    "value": "requested-only",
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.unrelated_edit",
+                    "value": False,
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.dirty_work_preserved",
+                    "value": True,
+                },
+            ],
+            "fixture_result": {
+                "output": "Keep the patch surgical and preserve unrelated work.",
+                "artifacts": {
+                    "decision": "requested-only",
+                    "unrelated_edit": False,
+                    "dirty_work_preserved": True,
+                },
+            },
+        },
+        {
+            "schema_version": 1,
+            "id": "rc4.missing-regression-proof",
+            "capability": "engineering-discipline",
+            "input": {
+                "scenario": (
+                    "A bug fix looks correct and an existing happy-path test passes, but "
+                    "no test reproduces the reported failure and the declared outcome "
+                    "requires regression evidence before completion."
+                )
+            },
+            "response_contract": {
+                "outcome_claim": ["achieved", "withhold"]
+            },
+            "assertions": [
+                {
+                    "kind": "equals",
+                    "path": "artifacts.outcome_claim",
+                    "value": "withhold",
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.regression_test_required",
+                    "value": True,
+                },
+                {
+                    "kind": "equals",
+                    "path": "artifacts.local_green_is_completion",
+                    "value": False,
+                },
+            ],
+            "fixture_result": {
+                "output": "Add regression proof and withhold the outcome claim.",
+                "artifacts": {
+                    "outcome_claim": "withhold",
+                    "regression_test_required": True,
+                    "local_green_is_completion": False,
+                },
+            },
+        },
+    ]
 
 
 def load_case() -> dict[str, Any]:
@@ -65,6 +301,56 @@ def load_case() -> dict[str, Any]:
     if not isinstance(assertions, list) or not assertions:
         raise RunnerError("case assertions are required for response-field derivation")
     return value
+
+
+def validate_aggregate_cases(cases: list[dict[str, Any]]) -> None:
+    """Reject denominator drift before any model invocation."""
+    if tuple(case.get("id") for case in cases) != RC4_CASE_IDS:
+        raise RunnerError("RC4 aggregate identities or order changed")
+    for case in cases:
+        if case.get("schema_version") != 1:
+            raise RunnerError(f"{case.get('id')}: unsupported schema_version")
+        if case.get("capability") != "engineering-discipline":
+            raise RunnerError(f"{case.get('id')}: capability changed")
+        if not isinstance(case.get("input"), dict) or not isinstance(
+            case["input"].get("scenario"), str
+        ):
+            raise RunnerError(f"{case.get('id')}: scenario is required")
+        fields = set(artifact_fields(case))
+        vocabulary = case.get("response_contract", {})
+        if not isinstance(vocabulary, dict) or not set(vocabulary).issubset(fields):
+            raise RunnerError(f"{case.get('id')}: response contract changed")
+        for field, choices in vocabulary.items():
+            if not isinstance(choices, list) or len(choices) < 2 or len(
+                {json.dumps(choice, sort_keys=True) for choice in choices}
+            ) != len(choices):
+                raise RunnerError(f"{case.get('id')}: invalid choices for {field}")
+        fixture = case.get("fixture_result")
+        if not isinstance(fixture, dict) or grade_case(case, fixture):
+            raise RunnerError(f"{case.get('id')}: hermetic fixture contradicts assertions")
+
+
+def grade_case(case: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    """Grade the bounded equality-only RC4 contract."""
+    failures: list[str] = []
+    artifacts = result.get("artifacts") if isinstance(result, dict) else None
+    if not isinstance(artifacts, dict):
+        return ["artifacts: missing"]
+    for assertion in case["assertions"]:
+        if assertion.get("kind") != "equals":
+            failures.append(f"{assertion.get('path')}: unsupported assertion")
+            continue
+        field = assertion["path"].split(".", 1)[1]
+        expected = assertion.get("value")
+        if field not in artifacts:
+            failures.append(f"artifacts.{field}: missing")
+            continue
+        actual = artifacts[field]
+        if type(actual) is not type(expected) or actual != expected:
+            failures.append(
+                f"artifacts.{field}: expected {expected!r}, got {actual!r}"
+            )
+    return failures
 
 
 def artifact_fields(case: dict[str, Any]) -> tuple[str, ...]:
@@ -192,6 +478,14 @@ def run(case: dict[str, Any], *, model: str, effort: str, timeout: float) -> dic
         ]
         proc = subprocess.run(command, text=True, capture_output=True)
         if proc.returncode != 0:
+            typed_output_present = output_path.is_file() and output_path.stat().st_size > 0
+            failure = transport_failure_record(
+                returncode=proc.returncode,
+                stderr=proc.stderr,
+                typed_case_output_present=typed_output_present,
+            )
+            if failure is not None:
+                raise TransportInitializationFailure(failure)
             detail_lines = proc.stderr.strip().splitlines()[-12:]
             detail = " | ".join(line.strip() for line in detail_lines if line.strip())
             raise RunnerError(
@@ -214,22 +508,82 @@ def run(case: dict[str, Any], *, model: str, effort: str, timeout: float) -> dic
     return result
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def aggregate_receipt(
+    cases: list[dict[str, Any]], *, model: str, effort: str, timeout: float
+) -> dict[str, Any]:
+    """Run each frozen case once and emit one deterministic typed receipt."""
+    validate_aggregate_cases(cases)
+    rows = []
+    for case in cases:
+        try:
+            result = run(case, model=model, effort=effort, timeout=timeout)
+        except TransportInitializationFailure as exc:
+            raise TransportInitializationFailure(
+                {
+                    **exc.record,
+                    "accepted_case_receipts": len(rows),
+                    "completed_model_results": len(rows),
+                }
+            ) from exc
+        failures = grade_case(case, result)
+        rows.append(
+            {
+                "id": case["id"],
+                "status": "fail" if failures else "pass",
+                "failures": failures,
+            }
+        )
+    passed = sum(row["status"] == "pass" for row in rows)
+    manifest_bytes = json.dumps(
+        cases, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return {
+        "schema_version": 1,
+        "type": "rc4-engineering-discipline-aggregate",
+        "model": model,
+        "effort": effort,
+        "scenario_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "source_sha256": {
+            relative: file_sha256(ROOT / relative)
+            for relative in SOURCES["engineering-discipline"]
+        },
+        "summary": {"total": len(rows), "passed": passed, "failed": len(rows) - passed},
+        "cases": rows,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="terra")
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--timeout", type=float, default=240.0)
+    parser.add_argument(
+        "--rc4-aggregate",
+        action="store_true",
+        help="run the frozen four-case RC4 engineering-discipline aggregate once",
+    )
     args = parser.parse_args()
     try:
         if args.timeout <= 0:
             raise RunnerError("timeout must be positive")
         model = load_config(ROOT).resolve_alias(args.model, "codex")["model"]
-        case = load_case()
-        result = run(case, model=model, effort=args.effort, timeout=args.timeout)
+        if args.rc4_aggregate:
+            result = aggregate_receipt(
+                rc4_cases(), model=model, effort=args.effort, timeout=args.timeout
+            )
+        else:
+            case = load_case()
+            result = run(case, model=model, effort=args.effort, timeout=args.timeout)
     except (RoutingError, RunnerError) as exc:
         print(f"engineering-eval-runner: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if args.rc4_aggregate and result["summary"]["failed"]:
+        return 1
     return 0
 
 

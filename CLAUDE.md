@@ -121,7 +121,7 @@ D-265-EPH-01 разрешает `claude -p` только внутри registered
 
 - **Pre-flight**: write-skill перед действием задаёт до 3 уточняющих вопросов (только по пунктам, которые не резолвятся из prompt'а). Read-only скиллы — auto-skip.
 - **Failure-to-repair**: если repository-owned script/hook/skill/contract не выполняет документированное поведение, сначала contain + read-only diagnosis. Координатор чинит без дополнительного вопроса только repo-owned, локальный, воспроизводимый, обратимый дефект в уже согласованном scope, без пересечения с чужим dirty work и без новых permissions/dependencies/security/public API/migration/destructive/external effects; иначе один раз спрашивает пользователя. Затем: минимальный fix → regression test → relevant suite → повтор failed stage → продолжение с последней safe boundary без повтора внешнего эффекта. Фоновая задача сама решение не принимает: поднимает `mechanism-failure` и ждёт coordinator resolution. Stop hook остаётся fail-closed. Полный контракт: `docs/skill-references/failure-repair-contract.md`.
-- **Код-дисциплина**: think before coding; simplicity first; surgical changes; goal-driven (без «полезного попутно»).
+- Engineering discipline: think before coding; simplicity first; surgical changes; goal/evidence discipline—local green is not task completion.
 - **Sub-agent задачи** — контрактом: objective + границы (in/out) + формат результата + источники.
 
 ## Как пользоваться

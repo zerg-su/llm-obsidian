@@ -111,6 +111,27 @@ run_case "fp-codebase-book" 'what is the cover design of the codebase book?'    
 run_case "fp-plan-definition" 'what does implementation plan mean?'                    'EMPTY'
 run_case "fp-tdd-definition" 'what does TDD stand for?'                                'EMPTY'
 run_case "fp-prototype-car" 'show me a prototype car design'                           'EMPTY'
+run_case "fp-split-prose" 'split this paragraph into three bullets'                   'EMPTY'
+run_case "fp-split-files" 'split this large CSV file by date'                         'EMPTY'
+
+echo "== explicit-only Split metadata =="
+python3 - "$REPO_ROOT/skills/split/SKILL.md" "$REPO_ROOT/skills/split/agents/openai.yaml" <<'PY'
+import pathlib, re, sys
+skill = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+metadata = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
+frontmatter = skill.split("---", 2)[1]
+match = re.search(r"(?m)^description:\s*(.+)$", frontmatter)
+assert match and "governed SplitManifest preview" in match.group(1)
+assert "explicit" in match.group(1).lower() and "--dispatch" in match.group(1)
+assert "disable-model-invocation: true" in frontmatter
+assert "allow_implicit_invocation: false" in metadata
+assert "Use $split" in metadata and "$split --dispatch" in metadata
+PY
+if [[ $? -eq 0 ]]; then
+  pass=$((pass + 1)); printf '  OK   split-explicit-metadata\n'
+else
+  fail=$((fail + 1)); failures+=("split-explicit-metadata"); printf '  FAIL split-explicit-metadata\n'
+fi
 
 echo "== mute env-var =="
 run_case "mute-dispatch"    'запусти параллельную задачу'                             'EMPTY' 'SKILL_ROUTER_MUTE=1 '

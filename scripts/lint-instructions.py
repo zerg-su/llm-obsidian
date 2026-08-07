@@ -13,6 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_WEB_SKILLS = ("research", "wiki-ingest", "wiki-query")
 WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
 LEGACY_PUBLIC_SKILLS = ("reap-send",)
+ENGINEERING_DISCIPLINE_PRINCIPLES = (
+    "think before coding",
+    "simplicity first",
+    "surgical changes",
+    "goal/evidence discipline",
+    "local green is not task completion",
+)
 
 
 def frontmatter(text: str) -> str:
@@ -137,6 +144,18 @@ def failure_repair_issues(
     return issues
 
 
+def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
+    """Keep the concise engineering-discipline contract equivalent."""
+    issues: list[str] = []
+    for source, text in (("AGENTS.md", agents), ("CLAUDE.md", claude)):
+        for principle in ENGINEERING_DISCIPLINE_PRINCIPLES:
+            if principle not in text:
+                issues.append(
+                    f"{source} missing engineering discipline principle {principle!r}"
+                )
+    return issues
+
+
 def finalization_parity_issues(
     implementation_plan: str,
     dispatch: str,
@@ -221,14 +240,17 @@ def finalization_parity_issues(
 
 def check_repo(root: Path) -> list[str]:
     issues: list[str] = []
+    claude = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+    issues.extend(engineering_discipline_issues(agents, claude))
     repair_reference_path = root / "docs" / "skill-references" / "failure-repair-contract.md"
     repair_reference = repair_reference_path.read_text(encoding="utf-8") if repair_reference_path.is_file() else ""
     if not repair_reference:
         issues.append("missing docs/skill-references/failure-repair-contract.md")
     issues.extend(
         failure_repair_issues(
-            (root / "CLAUDE.md").read_text(encoding="utf-8"),
-            (root / "AGENTS.md").read_text(encoding="utf-8"),
+            claude,
+            agents,
             (root / "skills" / "dispatch" / "references" / "task-prompt-template.md").read_text(encoding="utf-8"),
             (root / "scripts" / "task_escalation.py").read_text(encoding="utf-8"),
             repair_reference,
@@ -256,8 +278,8 @@ def check_repo(root: Path) -> list[str]:
             (root / "skills" / "implementation-plan" / "SKILL.md").read_text(encoding="utf-8"),
             (root / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8"),
             (root / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8"),
-            (root / "AGENTS.md").read_text(encoding="utf-8"),
-            (root / "CLAUDE.md").read_text(encoding="utf-8"),
+            agents,
+            claude,
             (root / "docs" / "runtime-capabilities.md").read_text(encoding="utf-8"),
             memory_path.read_text(encoding="utf-8") if memory_path.is_file() else "",
         )

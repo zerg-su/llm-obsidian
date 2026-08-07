@@ -65,6 +65,9 @@ stale or belong to a different live thread.
 7. Validation: `scripts/validate-vault.py --summary` (caps, frontmatter,
    plans lifecycle). Tests: `make test` (hermetic, no network).
 
+Engineering discipline: think before coding; simplicity first; surgical changes;
+goal/evidence discipline—local green is not task completion.
+
 ## Failure-to-repair
 
 If a repository-owned script, hook, skill, instruction, schema, callback, or
