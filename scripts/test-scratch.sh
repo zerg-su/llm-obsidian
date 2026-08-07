@@ -12,6 +12,9 @@ llm_obsidian_test_scratch_dir() {
     esac
     if [ -n "${TMPDIR:-}" ]; then
         root="$TMPDIR"
+        while [ "$root" != "/" ] && [ "${root%/}" != "$root" ]; do
+            root="${root%/}"
+        done
     else
         root="$(python3 -c 'import tempfile; print(tempfile.gettempdir())')" || return
     fi

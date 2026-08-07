@@ -238,16 +238,17 @@ def test_shell_scratch_helper_honors_constrained_tmpdir() -> None:
         constrained = Path(raw) / "reviewer scratch"
         constrained.mkdir()
         env = os.environ.copy()
-        env["TMPDIR"] = str(constrained)
+        env["TMPDIR"] = f"{constrained}/"
         result = subprocess.run(
             [
                 "bash",
                 "-c",
                 'source "$1"; scratch=$(llm_obsidian_test_scratch_dir rc3-contract); '
-                'case "$scratch" in "$TMPDIR"/*) ;; *) exit 91 ;; esac; '
-                'test -d "$scratch"; rm -rf "$scratch"',
+                'case "$scratch" in "$2"/*) ;; *) exit 91 ;; esac; '
+                'test -d "$scratch"; printf "%s" "$scratch"; rm -rf "$scratch"',
                 "bash",
                 str(helper),
+                str(constrained),
             ],
             cwd=ROOT,
             env=env,
@@ -255,6 +256,7 @@ def test_shell_scratch_helper_honors_constrained_tmpdir() -> None:
             text=True,
         )
         assert result.returncode == 0, result.stderr
+        assert f"{constrained}//" not in result.stdout
 
     hardcoded_scratch = (
         "tests/test_allocate_address.sh",
