@@ -36,6 +36,7 @@ from harness.workflows.review_gate import (  # noqa: E402
 from task_review_flow import (  # noqa: E402
     _complete_ready_results,
     _ready_result_is_recorded,
+    _review_origin_surface,
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
@@ -50,6 +51,40 @@ def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+class SurfaceProbe:
+    def __init__(self, states: dict[str, str]) -> None:
+        self.states = states
+
+    def status(self, surface_id: str) -> str:
+        return self.states.get(surface_id, "unknown")
+
+
+class SurfaceRuntime:
+    def __init__(self, states: dict[str, str]) -> None:
+        self.cmux = SurfaceProbe(states)
+
+
+surface_meta = {"task_surface": "task-old", "wiki_surface": "wiki-live"}
+check(
+    "effect-free retry anchors to the live coordinator after task surface loss",
+    _review_origin_surface(
+        surface_meta,
+        SurfaceRuntime({"task-old": "dead", "wiki-live": "alive"}),
+        allow_fallback=True,
+    )
+    == "wiki-live",
+)
+check(
+    "ordinary review never changes its frozen task origin",
+    _review_origin_surface(
+        surface_meta,
+        SurfaceRuntime({"task-old": "dead", "wiki-live": "alive"}),
+        allow_fallback=False,
+    )
+    == "task-old",
+)
 
 
 @dataclass(frozen=True)

@@ -258,6 +258,26 @@ def _attempt_binding(
         raise TaskReviewError(str(exc)) from exc
 
 
+def _review_origin_surface(
+    meta: Mapping[str, Any], runtime: object, *, allow_fallback: bool
+) -> str:
+    """Use the live coordinator surface only after an effect-free task loss."""
+
+    task_surface = str(meta.get("task_surface") or "")
+    wiki_surface = str(meta.get("wiki_surface") or "")
+    status = getattr(getattr(runtime, "cmux", None), "status", None)
+    if not allow_fallback or not callable(status) or not wiki_surface:
+        return task_surface
+    try:
+        return (
+            wiki_surface
+            if status(task_surface) != "alive" and status(wiki_surface) == "alive"
+            else task_surface
+        )
+    except Exception:
+        return task_surface
+
+
 def _start_exact_head_review(
     *,
     meta: Mapping[str, Any],
@@ -271,6 +291,7 @@ def _start_exact_head_review(
     request: ReviewOperationRequest | None,
     gate: ReviewGateController,
     cycle: int,
+    origin_surface: str,
 ) -> dict[str, Any]:
     if not preset.enabled:
         raise TaskReviewError(
@@ -317,7 +338,7 @@ def _start_exact_head_review(
         plan_sha256=plan_sha256,
         outcome_sha256=outcome_sha256,
         request=request,
-        origin_surface=str(meta.get("task_surface") or ""),
+        origin_surface=origin_surface,
         cwd=runtime_root,
         product_root=worktree,
         prompt_pointer=prompt_pointers[request.policy.axes[0]],
@@ -657,6 +678,9 @@ def _run_exact_head_review(
             request=request,
             gate=gate,
             cycle=cycle,
+            origin_surface=_review_origin_surface(
+                meta, runtime, allow_fallback=zero_lane_preflight
+            ),
         )
 
     state = gate.read()
