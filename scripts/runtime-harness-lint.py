@@ -17,10 +17,6 @@ RUNTIME_BINARY_ENV = {
     "CLAUDE_BINARY": "claude",
     "CODEX_BINARY": "codex",
 }
-NON_PRODUCTION_MIGRATION_SOURCES = {
-    "scripts/cmux_supervisor_contracts.py",
-    "scripts/cmux_agent_supervisor.py",
-}
 SHELL_CALL = re.compile(r"(?m)^[^#\n]*(?:^|[;&|(\"])\s*(cmux|claude|codex)\s+")
 GENERATED_RUNTIME_ARGV = re.compile(
     r"""\[\s*["'](cmux|claude|codex)["']\s*,"""
@@ -187,10 +183,7 @@ def inventory(root: Path = ROOT) -> dict[str, list[str]]:
             if not path.is_file() or path.suffix not in {".py", ".sh"}:
                 continue
             relative = path.relative_to(root).as_posix()
-            if (
-                "scripts/harness/adapters" in path.as_posix()
-                or relative in NON_PRODUCTION_MIGRATION_SOURCES
-            ):
+            if "scripts/harness/adapters" in path.as_posix():
                 continue
             effects = python_effects(path) if path.suffix == ".py" else {
                 match.group(1) for match in SHELL_CALL.finditer(path.read_text(encoding="utf-8"))

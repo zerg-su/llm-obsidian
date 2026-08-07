@@ -326,38 +326,35 @@ def check_repo(root: Path) -> list[str]:
     review = (root / "scripts" / "review-runner.py").read_text(encoding="utf-8")
     review += "\n" + (root / "scripts" / "harness" / "adapters" / "claude.py").read_text(encoding="utf-8")
     review += "\n" + (root / "scripts" / "harness" / "adapters" / "codex.py").read_text(encoding="utf-8")
-    supervisor = (root / "scripts" / "cmux_agent_supervisor.py").read_text(encoding="utf-8")
-    review_contract = review + "\n" + supervisor
     if "--permission-mode auto" in review:
         issues.append("review launcher regressed to Claude auto permissions")
     for required in (
-        '"workspace-write"', "review_runtime_dir", "review-outbox-relay",
-        'require_option(argv, "--disable", "hooks")',
-        "reviewer_codex_config_values", "trusted_runtime_path",
-        "Codex reviewer command must not request additional writable roots",
+        '"reviewer-callback": ("workspace-write", "never")',
+        "REVIEWER_CONFIG",
+        '"sandbox_workspace_write.network_access=false"',
+        '"sandbox_workspace_write.writable_roots=[]"',
+        "validate_reviewer_sandbox_command",
+        '"--ask-for-approval"',
+        "review runtime scratch must be disjoint from the product worktree",
     ):
-        if required not in review_contract:
-            issues.append(f"Codex reviewer missing isolated relay invariant {required!r}")
+        if required not in review:
+            issues.append(f"Codex reviewer missing isolated session invariant {required!r}")
     for required in (
-        '"--permission-mode", "dontAsk"', 'CLAUDE_REVIEW_TOOL_SURFACE = "Read,Glob,Grep,Write,Bash"',
-        "Edit(./.review-outbox.json)", "Write(./.review-outbox.json)",
-        "run_review_relay", "reviewer_uses_supervised_relay",
+        '"reviewer-callback": "dontAsk"',
+        "reviewer_sandbox_settings",
+        "review sandbox tool surface drifted",
+        '"--strict-mcp-config"',
+        '"--disable-slash-commands"',
+        "hand-write the generated callback",
     ):
-        if required not in review_contract:
-            issues.append(f"Claude reviewer missing unattended read-only invariant {required!r}")
+        if required not in review:
+            issues.append(f"Claude reviewer missing unattended callback invariant {required!r}")
     for forbidden in (
         "Bash(python3 */", "Bash(bash */", "Bash(git diff *)", "Bash(git -C *",
         "Bash(python3 *send_review.py",
     ):
-        if forbidden in supervisor:
+        if forbidden in review:
             issues.append(f"Claude reviewer has a broad shell wildcard {forbidden!r}")
-    for required in (
-        "Bash(python3 tests/test_*.py)",
-        "Bash(bash tests/test_*.sh)",
-        "Bash(python3 scripts/lint-instructions.py)",
-    ):
-        if required not in supervisor:
-            issues.append(f"Claude reviewer missing bounded diagnostic {required!r}")
     dispatch_text = (root / "skills" / "dispatch" / "SKILL.md").read_text(encoding="utf-8")
     reap_text = (root / "skills" / "reap" / "SKILL.md").read_text(encoding="utf-8")
     for required in (
@@ -376,14 +373,27 @@ def check_repo(root: Path) -> list[str]:
     ):
         if required not in dispatch_text:
             issues.append(f"Codex dispatch missing unattended approval invariant {required!r}")
+    active_runtime = "\n".join(
+        (root / path).read_text(encoding="utf-8")
+        for path in (
+            "scripts/harness/adapters/cmux.py",
+            "scripts/harness/adapters/codex.py",
+            "scripts/harness/adapters/process.py",
+            "scripts/harness/runtime_session_cleanup.py",
+            "scripts/harness/supervisor.py",
+        )
+    )
     for required in (
-        "cmux_task_watchdog.py", "cmux_surface_lifecycle.py", "subprocess.run(argv",
-        "trusted_runtime_path", "task_dcg_config",
+        "task_codex_config_values",
+        "subprocess.run",
+        "request_exit",
+        "begin_effect",
+        "resolve_effect",
     ):
-        if required not in supervisor:
-            issues.append(f"cmux supervisor missing lifecycle invariant {required!r}")
-    if "shell=True" in supervisor:
-        issues.append("cmux supervisor must not execute agent commands through a shell")
+        if required not in active_runtime:
+            issues.append(f"active harness missing lifecycle invariant {required!r}")
+    if "shell=True" in active_runtime:
+        issues.append("active harness must not execute agent commands through a shell")
     task_prompt = (root / "skills" / "dispatch" / "references" / "task-prompt-template.md").read_text(encoding="utf-8")
     for required in ("task_escalation.py", "Treat `.task-meta.json` as read-only", "Never push, deploy, publish", "it never sends you input"):
         if required not in task_prompt:

@@ -184,36 +184,10 @@ with tempfile.TemporaryDirectory(prefix="review-finalization.") as raw:
         "typed skip is exposed without an archive requirement",
         task_review_status(meta, worktree).status == "skipped",
     )
-    (worktree / ".task-meta.json").write_text(
-        json.dumps(meta) + "\n", encoding="utf-8"
-    )
-    archive = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "archive_task_reviews.py"),
-            "--worktree",
-            str(worktree),
-            "--vault-root",
-            str(vault),
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    archived = json.loads(archive.stdout)
     check(
-        "public archive path uses typed skip with zero legacy markers",
-        archive.returncode == 0
-        and archived["status"] == "archived"
-        and archived["markers"] == []
-        and archived["failed_operations"] == [],
-    )
-    check(
-        "v3 archive implementation no longer reads TaskSessionStore",
-        "TaskSessionStore"
-        not in (
-            ROOT / "scripts" / "archive_task_reviews.py"
-        ).read_text(encoding="utf-8"),
+        "typed skip needs no compatibility archive wrapper",
+        not (ROOT / "scripts" / "archive_task_reviews.py").exists()
+        and not (gate / ".review-archive.json").exists(),
     )
 
     (worktree / "product.txt").write_text("two\n", encoding="utf-8")

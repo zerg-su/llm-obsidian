@@ -95,7 +95,17 @@ assert allowlist["subject_sha"] == BASE_SHA
 assert allowlist["required_zero_caller"] == list(CLASSIC)
 assert allowlist["conditional_zero_caller"] == [CONDITIONAL]
 for relative in (*CLASSIC, CONDITIONAL):
-    assert (ROOT / relative).is_file()
+    assert not (ROOT / relative).exists()
     assert production_importers(module_name(relative)) == []
+
+for retained in (
+    "scripts/cmux_agent_support.py",
+    "scripts/cmux_surface_lifecycle.py",
+    "scripts/cmux_workspace_lifecycle.py",
+    "scripts/task_sessions.py",
+    "scripts/harness/adapters/cmux.py",
+    "scripts/harness/runtime_sessions.py",
+):
+    assert (ROOT / retained).is_file()
 
 print("RC2 frozen scope and deletion topology contracts passed")

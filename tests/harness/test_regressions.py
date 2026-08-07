@@ -34,8 +34,8 @@ BEHAVIORAL_OWNERS = {
         "near-match receives no input",
     ),
     "close-before-process-exit": (
-        "tests/test_task_lifecycle.py",
-        "task cannot close before final reap",
+        "tests/harness/test_runtime_sessions.py",
+        "exit requests the exact PGID before surface close",
     ),
     "codex-trust-footer-drift": (
         "tests/harness/test_release_blocker_runtime.py",
