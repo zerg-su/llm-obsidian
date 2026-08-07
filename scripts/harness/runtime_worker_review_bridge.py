@@ -15,6 +15,7 @@ from .runtime_worker import (
     _research_input_provenance,
     _review_resolution_handoff_ready,
 )
+from .runtime_callback_io import publish_callback_wake
 from review_contract import ReviewContractError, axis_finding_id
 
 
@@ -698,8 +699,21 @@ class RuntimeWorkerReviewBridgeMixin:
         message = f"Typed review findings are ready in {packet_path.name}. Resolve every material finding in {resolution_path.name} as applied, rejected, or out-of-scope; include bounded rationale, and a durable follow-up pointer for out-of-scope. Commit a new HEAD and set resolved_head_sha; for a material fork use the task_escalation.py raise contract. Do not launch review. Refresh .task-summary.json after the commit so it covers the final HEAD. Remain available for same-session verification."
         if len(message.encode()) > 4096:
             raise RuntimeWorkerError("review resolution notification is too large")
-        self.cmux_adapter.send(self.spec["surface_id"], message)
-        self.cmux_adapter.send_key(self.spec["surface_id"], "Enter")
+        wake_spec = {
+            "origin_surface": self.spec["surface_id"],
+            "callback_wake": message,
+        }
+        wake_root = self.spec_path.parent / "review-resolution-wake"
+        wake_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not publish_callback_wake(
+            wake_spec,
+            wake_root,
+            packet_sha256,
+            self.cmux_adapter,
+        ):
+            raise RuntimeWorkerError(
+                "review resolution notification effect is uncertain"
+            )
         _atomic_json(
             notify_path,
             {

@@ -111,19 +111,46 @@ def _request(
     bound = replace(
         request,
         requested_mode=str(meta["review_policy"]["mode"]),
-        topology_sha256=expected_topology_sha256,
     )
+    # Explicit task routes are already final here.  Default finalization routes
+    # are selected only when the exact-HEAD attempt is reserved, so their
+    # frozen topology must be checked after that binding instead of against the
+    # provisional session route.
     if (
         expected_topology_payload is not None
-        and bound.topology.payload() != expected_topology_payload
+        and bound.topology.payload() == expected_topology_payload
     ):
-        raise TaskReviewError(
-            "review effective topology payload changed from frozen task metadata"
-        )
+        if bound.topology.sha256 != expected_topology_sha256:
+            raise TaskReviewError(
+                "review effective topology digest changed from frozen task metadata"
+            )
+        bound = replace(bound, topology_sha256=expected_topology_sha256)
     return (
         preset,
         bound,
     )
+
+
+def _assert_frozen_topology(
+    meta: Mapping[str, Any], request: ReviewOperationRequest
+) -> None:
+    """Validate the frozen topology after finalization route selection."""
+
+    frozen = meta.get("review_topology")
+    if not isinstance(frozen, Mapping):
+        return
+    expected_sha256 = str(frozen.get("sha256") or "")
+    expected_payload = frozen.get("payload")
+    topology = request.topology
+    if (
+        not isinstance(expected_payload, Mapping)
+        or expected_sha256 != topology.sha256
+        or expected_payload != topology.payload()
+        or request.topology_sha256 != expected_sha256
+    ):
+        raise TaskReviewError(
+            "review effective topology changed from frozen task metadata"
+        )
 
 
 def _bounded_review_diff(raw: bytes) -> bytes:

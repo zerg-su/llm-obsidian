@@ -346,6 +346,69 @@ def assert_summary_refresh_notification_replays_without_effect(root: Path) -> No
     )
 
 
+def assert_review_resolution_notification_crashes_fail_closed(root: Path) -> None:
+    """A crash after either cmux effect cannot replay the resolution packet."""
+
+    class PartialResolutionCmux:
+        def __init__(self, fail_after: str) -> None:
+            self.fail_after = fail_after
+            self.events: list[tuple[str, str]] = []
+
+        def send(self, surface_id: str, _message: str) -> None:
+            self.events.append(("send", surface_id))
+            if self.fail_after == "send":
+                raise RuntimeError("crash after review resolution paste")
+
+        def send_key(self, surface_id: str, _key: str) -> None:
+            self.events.append(("key", surface_id))
+            if self.fail_after == "key":
+                raise RuntimeError("crash after review resolution Enter")
+
+    for fail_after, expected in (
+        ("send", [("send", CHILD)]),
+        ("key", [("send", CHILD), ("key", CHILD)]),
+    ):
+        state = root / f"review-resolution-{fail_after}"
+        state.mkdir()
+        cmux = PartialResolutionCmux(fail_after)
+        worker = SimpleNamespace(
+            spec_path=state / "runtime.json",
+            spec={"operation_id": TASK, "surface_id": CHILD},
+            digest="d" * 64,
+            cmux_adapter=cmux,
+        )
+        packet = {"reviewed_head_sha": "a" * 40}
+        notify_path = state / "pipeline-review-resolution-notify.json"
+
+        for attempt in range(2):
+            notified = RuntimeWorkerReviewBridgeMixin.load_review_notification(
+                worker, notify_path
+            )
+            try:
+                RuntimeWorkerReviewBridgeMixin.send_review_resolution_notification(
+                    worker,
+                    packet=packet,
+                    packet_path=Path(".task-review.json"),
+                    resolution_path=Path(".task-review-resolution.json"),
+                    notify_path=notify_path,
+                    notified=notified,
+                )
+            except Exception as exc:
+                assert "uncertain" in str(exc)
+            else:
+                raise AssertionError(
+                    "ambiguous review resolution effect must fail closed"
+                )
+            assert cmux.events == expected, (fail_after, attempt, cmux.events)
+        marker = json.loads(
+            (state / "review-resolution-wake" / "callback-wake.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert marker["status"] == "effect-uncertain", marker
+    print("OK   review resolution cmux crash windows never replay effects")
+
+
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
@@ -1138,6 +1201,7 @@ with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
     assert_review_drive_failure_receipt_is_content_free()
     assert_summary_refresh_notification_replays_without_effect(root)
+    assert_review_resolution_notification_crashes_fail_closed(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()
     reviewed_head = "a" * 40

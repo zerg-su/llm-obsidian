@@ -38,6 +38,7 @@ from harness.workflows.review_gate_attempt import (
 from review_resolution import MATERIAL_SEVERITIES
 from review_telemetry import emit_review_event
 from task_review_context import (
+    _assert_frozen_topology,
     _callback_path,
     _context,
     _envelope,
@@ -668,6 +669,7 @@ def _run_exact_head_review(
         request=request,
         cycle=cycle,
     )
+    _assert_frozen_topology(meta, request)
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]
     ).status == "terminal":

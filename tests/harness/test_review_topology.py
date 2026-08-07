@@ -26,11 +26,20 @@ from review_contract import (  # noqa: E402
     review_runtime_provider,
 )
 from harness.status_segment import CONTROLLER_KINDS  # noqa: E402
+from harness.finalization_policy import (  # noqa: E402
+    FinalizationPolicy,
+    compile_finalization_routes,
+)
 from harness.workflows.review_gate import ReviewPreset  # noqa: E402
 from harness.verification import load_profiles  # noqa: E402
 from harness.workflows.review import ReviewContext, review_session_specs  # noqa: E402
 from task_review_request import _prompt, _request  # noqa: E402
-from task_review_context import _request as frozen_task_request  # noqa: E402
+from task_review_context import (  # noqa: E402
+    _assert_frozen_topology,
+    _request as frozen_task_request,
+)
+from task_review_finalization_attempt import _bind_routes  # noqa: E402
+from model_routing import load_config  # noqa: E402
 from task_review_flow import (  # noqa: E402
     _requires_lane_barrier,
     _should_defer_ready_results,
@@ -470,6 +479,82 @@ check(
     and frozen_runtime.topology_sha256 == simple_request.topology_sha256
     and frozen_runtime.topology.payload()
     == frozen_meta["review_topology"]["payload"],
+)
+
+
+def finalization_bound_frozen_request(
+    label: str,
+    policy: dict[str, object],
+) -> object:
+    config = load_config(ROOT)
+    decision = compile_finalization_routes(
+        config=config,
+        policy=FinalizationPolicy(),
+        cycle_number=1,
+        independent_permitted=True,
+        availability=None,
+        explicit_runtime=str(policy["runtime"]),
+        explicit_model=str(policy["model"]),
+        explicit_effort=str(policy["effort"]),
+        required_mode=str(policy["mode"]),
+        now_epoch=0,
+    )
+    routes = {
+        review_runtime_provider(route.runtime): {
+            "runtime": route.runtime,
+            "model": route.model,
+            "effort": route.effort,
+            "profile": "reviewer-callback",
+            "routing_sha256": config.fingerprint,
+        }
+        for route in decision.routes
+    }
+    frozen = compile_effective_review_topology(
+        mode=str(policy["mode"]),
+        cross_model=bool(policy["cross_model"]),
+        max_verify_iterations=int(policy["max_verify_iterations"]),
+        verification_profile=str(policy["verification_profile"]),
+        verification_profile_sha256=str(
+            policy["verification_profile_sha256"]
+        ),
+        routes=routes,
+    )
+    meta = {
+        "review_policy": policy,
+        "review_topology": {
+            "payload": frozen.payload(),
+            "sha256": frozen.sha256,
+        },
+        "routing": frozen_meta["routing"],
+    }
+    request = frozen_task_request(meta, ROOT, label, context)[1]
+    assert request is not None
+    bound = _bind_routes(
+        request,
+        attempt_id=f"{label}-attempt",
+        routes=decision,
+        routing_sha256=config.fingerprint,
+    )
+    _assert_frozen_topology(meta, bound)
+    return bound
+
+
+deep_finalization = finalization_bound_frozen_request(
+    "frozen-default-deep",
+    {**simple_policy, "mode": "deep"},
+)
+cross_simple_finalization = finalization_bound_frozen_request(
+    "frozen-cross-simple",
+    {**simple_policy, "cross_model": True},
+)
+check(
+    "generated default Deep metadata equals finalization-bound runtime topology",
+    deep_finalization.policy.axes
+    == ("openai-intent", "openai-engineering"),
+)
+check(
+    "generated cross-model Simple metadata equals finalization-bound runtime topology",
+    cross_simple_finalization.policy.axes == ("openai-holistic",),
 )
 drifted_meta = json.loads(json.dumps(frozen_meta))
 drifted_meta["review_topology"]["sha256"] = "0" * 64
