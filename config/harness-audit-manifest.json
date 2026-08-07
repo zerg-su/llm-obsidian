@@ -64,6 +64,7 @@
     "tests/test_reap_runner.py",
     "tests/test_split_components.py",
     "tests/test_task_lifecycle.py",
+    "tests/test_v266_rc2_scope.py",
     "tests/test_task_sessions.py",
     "tests/test_workstream_c_review_reap.py"
   ],

@@ -15,9 +15,9 @@ ACCEPTANCE = ROOT / "docs" / "acceptance"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
-def load(name: str) -> dict[str, object]:
+def load(name: str, *, schema_version: int = 1) -> dict[str, object]:
     value = json.loads((ACCEPTANCE / name).read_text(encoding="utf-8"))
-    assert isinstance(value, dict) and value.get("schema_version") == 1
+    assert isinstance(value, dict) and value.get("schema_version") == schema_version
     return value
 
 
@@ -310,8 +310,9 @@ assert "not independently generated immutable RED/GREEN receipts" in str(
 )
 assert "RC2.SLICE_RECEIPT_PROVENANCE" in str(deviation.get("remediation"))
 
-ledger = load("v2.6.6-rc2-defect-ledger.json")
+ledger = load("v2.6.6-rc2-defect-ledger.json", schema_version=2)
 assert ledger.get("release") == "2.6.6-rc2"
+assert ledger.get("schema_version") == 2
 ledger_rows = ledger.get("findings")
 assert isinstance(ledger_rows, list)
 required = {
@@ -322,20 +323,23 @@ required = {
     "severity",
     "rc1_relation",
     "disposition",
-    "suggested_owner",
+    "owner",
+    "rationale",
     "external_effects_observed",
 }
 for row in ledger_rows:
     assert isinstance(row, dict) and set(row) == required
-    assert row["disposition"] == "defer-rc2"
+    assert row["disposition"] in ledger["disposition_kinds"]
     assert isinstance(row["subject_head_sha"], str) and SHA.fullmatch(
         row["subject_head_sha"]
     )
+    assert isinstance(row["owner"], dict) and row["owner"].get("id")
     assert isinstance(row["external_effects_observed"], bool)
 assert {row["finding_id"] for row in ledger_rows} >= {
     "RC2.REVIEW_CALLBACK_INGESTION_FINALIZING",
     "RC2.SLICE_RECEIPT_PROVENANCE",
     "RC2.AUTHENTICATED_TURN_COMPLETE_ADAPTER",
+    "RC2.CMUX_PROVIDER_START_HANDSHAKE",
 }
 
 failed = load("evidence/v2.6.6-rc1/failed-fbf87a4/diagnostic-receipt.json")
