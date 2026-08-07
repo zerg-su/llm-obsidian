@@ -27,7 +27,7 @@ from harness.contracts import (
 )
 from harness.prompts import classify
 from harness.reconciliation import decide, reconcile
-from harness.store import OperationStore
+from harness.store import OperationStore, StoreError
 from harness.supervisor import (
     OperationSupervisor,
     RetryBudget,
@@ -186,6 +186,84 @@ with tempfile.TemporaryDirectory(prefix="harness-callback.") as raw:
         sum(result.accepted for result in concurrent_results) == 1
         and sum(result.duplicate for result in concurrent_results) == 1,
     )
+
+    stale_spec = OperationSpec(
+        "op-stale", "key-stale", "review", "owner-1", route,
+        "packet.json", "full",
+    )
+    store.create(stale_spec, lane_id="lane-stale", run_id="run-stale")
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-1", "op-stale", state)
+    stale_envelope = CallbackEnvelope(
+        "cb-stale", "op-stale", "run-stale", "review", payload,
+        hashlib.sha256(encoded).hexdigest(),
+    )
+    stale_record = store.read("owner-1", "op-stale")
+    try:
+        store.accept_callback(
+            "owner-1",
+            stale_envelope,
+            expected_revision=stale_record.revision - 1,
+            next_state="finalizing",
+            reason=None,
+            now=1.0,
+        )
+    except StoreError:
+        check("stale callback transaction is rejected under the public seam", True)
+    else:
+        check("stale callback transaction is rejected under the public seam", False)
+
+    mismatched_child_spec = OperationSpec(
+        "op-mismatched-child", "key-mismatched-child", "review-round", "owner-1",
+        route, "packet.json", "full",
+    )
+    store.create(
+        mismatched_child_spec,
+        lane_id="lane-child",
+        run_id="run-mismatched-child",
+    )
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition("owner-1", "op-mismatched-child", state)
+    mismatched_parent_spec = OperationSpec(
+        "op-mismatched-parent", "key-mismatched-parent", "review", "owner-1",
+        route, "packet.json", "full",
+    )
+    store.create(
+        mismatched_parent_spec,
+        lane_id="lane-other",
+        run_id="run-mismatched-parent",
+    )
+    mismatch_payload = {
+        **payload,
+        "parent_session_operation_id": "op-mismatched-parent",
+    }
+    mismatch_encoded = json.dumps(
+        mismatch_payload, sort_keys=True, separators=(",", ":")
+    ).encode()
+    mismatch_envelope = CallbackEnvelope(
+        "cb-mismatched-parent",
+        "op-mismatched-child",
+        "run-mismatched-child",
+        "review",
+        mismatch_payload,
+        hashlib.sha256(mismatch_encoded).hexdigest(),
+    )
+    mismatch_record = store.read("owner-1", "op-mismatched-child")
+    try:
+        store.accept_callback(
+            "owner-1",
+            mismatch_envelope,
+            expected_revision=mismatch_record.revision,
+            next_state="finalizing",
+            reason=None,
+            deadline_operation_id="op-mismatched-parent",
+            enforce_deadline=True,
+            now=1.0,
+        )
+    except StoreError:
+        check("review callback rejects a mismatched deadline owner lane", True)
+    else:
+        check("review callback rejects a mismatched deadline owner lane", False)
 
     crash_mode = "before"
 

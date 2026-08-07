@@ -216,6 +216,18 @@
       "owner": {"kind": "release", "id": "2.7"},
       "rationale": "No scheduler, project space, autonomous decomposition, or task frontier is added in RC2.",
       "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.COVERAGE_REHOME_AFTER_DELETION",
+      "observed_at_stage": "RC2 first exact-candidate release profile",
+      "subject_head_sha": "cc904862369e14ccf7aaec19ecf01fe7b229f1e9",
+      "reproducer_or_evidence": "make test-harness-coverage",
+      "severity": "important",
+      "rc1_relation": "Removing the classic lifecycle monolith also removed the only trace import for task escalation and exposed two uncovered public Store rejection branches.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "governance", "id": "harness.coverage"},
+      "rationale": "Rehome exact active-owner assertions and public callback rejection tests; do not restore deleted compatibility code or lower coverage floors.",
+      "external_effects_observed": false
     }
   ]
 }

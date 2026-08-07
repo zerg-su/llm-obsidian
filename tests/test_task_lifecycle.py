@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from cmux_surface_lifecycle import prepared_reap_plan  # noqa: E402
 from harness.prompts import classify  # noqa: E402
+import task_escalation  # noqa: E402
 
 
 REMOVED = (
@@ -38,6 +39,10 @@ RETAINED = (
 
 assert all(not (ROOT / "scripts" / path).exists() for path in REMOVED)
 assert all((ROOT / "scripts" / path).is_file() for path in RETAINED)
+assert (
+    task_escalation.MECHANISM_REPAIR_POLICY
+    == "classify-and-auto-repair-if-eligible"
+)
 
 shared_plan = "---\nstatus: pending\n---\n# Shared plan\n"
 assert prepared_reap_plan(
