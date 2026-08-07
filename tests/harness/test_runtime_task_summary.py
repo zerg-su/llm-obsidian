@@ -43,7 +43,10 @@ from harness.runtime_worker import (
     _review_resolution_handoff_ready,
     run as run_worker,
 )
-from harness.runtime_worker_review_bridge import RuntimeWorkerReviewBridgeMixin
+from harness.runtime_worker_review_bridge import (
+    RuntimeWorkerReviewBridgeMixin,
+    _review_drive_failure_receipt,
+)
 from harness.store import OperationStore
 from harness.supervisor import OperationSupervisor
 from harness.verification import load_profiles
@@ -101,6 +104,35 @@ def check(label: str, value: bool, detail: object = "") -> None:
     if not value:
         raise AssertionError(f"{label}: {detail}")
     print(f"OK   {label}")
+
+
+def assert_review_drive_failure_receipt_is_content_free() -> None:
+    raw_error = (
+        "task-review-runner: runtime preflight failed: capability-mismatch "
+        "for /private/sensitive/review-prompt.md"
+    )
+    receipt = _review_drive_failure_receipt(
+        subprocess.CompletedProcess(
+            ("task-review-runner.py", "run"),
+            3,
+            stdout="",
+            stderr=raw_error,
+        ),
+        drive_sha256="d" * 64,
+    )
+    encoded = json.dumps(receipt, sort_keys=True)
+    check(
+        "failed automatic review keeps only a typed content-free reason",
+        receipt["reason_code"] == "runtime-preflight-failed"
+        and receipt["returncode"] == 3
+        and receipt["drive_sha256"] == "d" * 64
+        and receipt["stdout_sha256"] == hashlib.sha256(b"").hexdigest()
+        and receipt["stderr_sha256"]
+        == hashlib.sha256(raw_error.encode()).hexdigest()
+        and raw_error not in encoded
+        and "/private/" not in encoded,
+        receipt,
+    )
 
 
 class FakeCmux:
@@ -1090,6 +1122,7 @@ def run_case(
 
 with tempfile.TemporaryDirectory(prefix="runtime-task-summary.") as raw:
     root = Path(raw)
+    assert_review_drive_failure_receipt_is_content_free()
     assert_summary_refresh_notification_replays_without_effect(root)
     handoff = root / "resolution-handoff"
     handoff.mkdir()

@@ -18,6 +18,43 @@ from .runtime_worker import (
 from review_contract import ReviewContractError, axis_finding_id
 
 
+def _review_drive_failure_code(stderr: str) -> str:
+    """Reduce runner stderr to one content-free repository-owned reason code."""
+
+    value = stderr.casefold()
+    if "runtime preflight failed" in value:
+        return "runtime-preflight-failed"
+    if "runtime callback" in value:
+        return "runtime-callback-contract"
+    if "runtime prompt" in value:
+        return "runtime-prompt-contract"
+    if "routing" in value or "model" in value:
+        return "runtime-route-contract"
+    if "surface" in value or "cmux" in value:
+        return "runtime-surface-contract"
+    if "review" in value:
+        return "review-contract-rejected"
+    return "runner-exit-nonzero"
+
+
+def _review_drive_failure_receipt(
+    result: subprocess.CompletedProcess[str], *, drive_sha256: str
+) -> dict[str, object]:
+    """Describe a failed runner without persisting prompts or error text."""
+
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    return {
+        "schema_version": 1,
+        "status": "review-drive-failed",
+        "reason_code": _review_drive_failure_code(stderr),
+        "returncode": result.returncode,
+        "drive_sha256": drive_sha256,
+        "stdout_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
+    }
+
+
 def publish_review_resolution_transport(
     *,
     gate_state: dict[str, object],
@@ -355,6 +392,12 @@ class RuntimeWorkerReviewBridgeMixin:
                     timeout=10,
                 )
                 if launched.returncode != 0:
+                    self.write_immutable_json(
+                        self.spec_path.parent / "review-drive-failure.json",
+                        _review_drive_failure_receipt(
+                            launched, drive_sha256=input_sha256
+                        ),
+                    )
                     raise RuntimeWorkerError("automatic task review drive failed")
         except (OSError, RuntimeWorkerError, subprocess.TimeoutExpired):
             self.summary_attention(
