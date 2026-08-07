@@ -25,6 +25,7 @@ from model_routing import load_config, routing_from_environment
 from task_review_context import (
     _current_review_is_quiescent,
     _zero_effect_attention_is_quiescent,
+    _zero_effect_attention_shape,
     _current_runtime_root,
     _gate_root,
     _request,
@@ -391,9 +392,18 @@ def _active_current_review(
             and requested_purpose != "release"
             and (bound_head != current_head or not same_policy)
         )
-        quiescent = _current_review_is_quiescent(
-            vault, task_id
-        ) or _zero_effect_attention_is_quiescent(vault, task_id, gate_state)
+        operation_quiescent = _current_review_is_quiescent(vault, task_id)
+        zero_effect_quiescent = _zero_effect_attention_is_quiescent(
+            vault, task_id, gate_state
+        )
+        quiescent = operation_quiescent or zero_effect_quiescent
+        if (
+            _zero_effect_attention_shape(gate_state)
+            and not quiescent
+        ):
+            raise TaskReviewError(
+                "zero-effect current review retains operation ownership"
+            )
         terminal_stale = approved_stale or skipped_stale or (
             status == "stopped"
             and _stopped_release_enters_implementation(

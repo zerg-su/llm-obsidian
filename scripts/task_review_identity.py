@@ -156,6 +156,24 @@ def _current_review_is_quiescent(vault: Path, task_id: str) -> bool:
     )
 
 
+def _zero_effect_attention_shape(gate_state: Mapping[str, Any]) -> bool:
+    """Recognize the exact pre-provider terminal gate shape."""
+
+    attempt = gate_state.get("attempt")
+    terminal = attempt.get("terminal") if isinstance(attempt, Mapping) else None
+    return bool(
+        gate_state.get("status") == "attention-required"
+        and gate_state.get("lanes") == []
+        and gate_state.get("round_results") == {}
+        and gate_state.get("final_results") == {}
+        and isinstance(attempt, Mapping)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, Mapping)
+        and terminal.get("result") == "attention-required"
+        and terminal.get("lane_results") == []
+    )
+
+
 def _zero_effect_attention_is_quiescent(
     vault: Path,
     task_id: str,
@@ -168,18 +186,6 @@ def _zero_effect_attention_is_quiescent(
     after this predicate proves that the old lineage owned no durable effect.
     """
 
-    attempt = gate_state.get("attempt")
-    terminal = attempt.get("terminal") if isinstance(attempt, Mapping) else None
-    if not (
-        gate_state.get("status") == "attention-required"
-        and gate_state.get("lanes") == []
-        and gate_state.get("round_results") == {}
-        and gate_state.get("final_results") == {}
-        and isinstance(attempt, Mapping)
-        and attempt.get("status") == "terminal"
-        and isinstance(terminal, Mapping)
-        and terminal.get("result") == "attention-required"
-        and terminal.get("lane_results") == []
-    ):
+    if not _zero_effect_attention_shape(gate_state):
         return False
     return not OperationStore(vault / ".vault-meta" / "harness").list(task_id)
