@@ -300,6 +300,18 @@
       "owner": {"kind": "release", "id": "readiness"},
       "rationale": "Refresh the reproducible snapshot after the bounded review fixes; executable scope tests remain authoritative.",
       "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.VAULT_REPAIR_SKILL_BUDGET",
+      "observed_at_stage": "RC2 replacement-candidate full gate",
+      "subject_head_sha": "c717d5ef124884c3e745719c87731f1a4c4346e4",
+      "reproducer_or_evidence": "test-skill-budget: vault-repair body and closure exceeded the frozen baseline",
+      "severity": "important",
+      "rc1_relation": "The exact-SHA reporting clarification initially expanded the installed skill beyond its approved body budget.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "governance", "id": "skills.vault-repair"},
+      "rationale": "Compress the same approved behavior below the frozen baseline rather than increasing the registry or body budget.",
+      "external_effects_observed": false
     }
   ]
 }
