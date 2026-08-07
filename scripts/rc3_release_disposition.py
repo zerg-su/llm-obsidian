@@ -8,17 +8,22 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from model_routing_config import load_config  # noqa: E402
+
+
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ATTEMPTS = 5
 ATTEMPT_CLASSIFICATIONS = frozenset({"published", "unpublished", "test-only"})
-REVIEW_ROLES = frozenset({"fable", "independent-configured"})
+DEEP_REVIEW_ROLE = str(load_config(ROOT).reviewer_default("claude", "deep")["model"])
+REVIEW_ROLES = frozenset({DEEP_REVIEW_ROLE, "independent-configured"})
 REVIEW_VERDICTS = frozenset({"approved", "changes-requested", "blocked", "unavailable"})
 
 
