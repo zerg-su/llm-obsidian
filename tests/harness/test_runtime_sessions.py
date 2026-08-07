@@ -60,10 +60,24 @@ from harness.runtime_sessions import (
 from harness.runtime_session_contracts import continuation_effect_id
 from harness.runtime_session_continuation import (
     _editor_digest,
+    _screen_digest,
     await_initial_input_ready,
     await_initial_input_visible,
     await_surface_transport_ready,
 )
+
+try:
+    from harness.runtime_session_continuation import (
+        await_initial_start_acknowledged,
+    )
+except ImportError:
+    # Red before the RC4-E11 repair.  Reporting the absence per fixture keeps
+    # every initial-input regression visible instead of collapsing the whole
+    # module into one import error.
+    def await_initial_start_acknowledged(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError(
+            "await_initial_start_acknowledged is not implemented"
+        )
 from harness.runtime_provider_input import interactive_provider_input
 from harness.runtime_worker import (
     load_spec as load_runtime_spec,
@@ -4340,3 +4354,456 @@ check(
     "cross-process cleanup never signals without the guardian",
     not unguarded_signal.called,
 )
+
+
+# --- RC4-E11: initial-input semantic start acknowledgement --------------------
+#
+# A transport-level acknowledgement (send_key("Enter") returned) is not
+# evidence that an interactive provider began the task.  These fixtures pin the
+# boundary reproduced by dispatch d6a91c45-a4b1-4cec-9e2d-fd6562565e4f: a Claude
+# surface that repaints only a rate-limit countdown and a spinner while still
+# showing "waiting for first response" must never yield a durable
+# `input-accepted`.
+
+
+INITIAL_ANCHOR = "Implement the exact RC4 addendum"
+STUCK_CLAUDE_SCREEN = (
+    "waiting for first response\n"
+    "✳ Resuming in 41s (approaching usage limit)\n"
+    "❯\n"
+)
+ACTIVE_CLAUDE_SCREEN = "✻ Working…(12s · ↓ 480 tokens · esc to interrupt)\n❯\n"
+ACTIVE_CODEX_SCREEN = "• Working (3s • esc to interrupt)\n›\n"
+CLAUDE_TRUST_SCREEN = (
+    "Accessing workspace: /tmp/product\n"
+    "Quick safety check: Is this a project you created or one you trust?\n"
+    "1. Yes, I trust this\n"
+    "Enter to confirm · Esc to cancel\n"
+)
+
+
+class StartAckPort:
+    """Replay an exact post-submit screen sequence for one surface."""
+
+    def __init__(self, screens: list[str]) -> None:
+        self.screens = list(screens)
+        self.reads = 0
+        self.sent: list[tuple[str, str]] = []
+        self.keys: list[tuple[str, str]] = []
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        self.reads += 1
+        if len(self.screens) > 1:
+            return self.screens.pop(0)
+        return self.screens[0] if self.screens else ""
+
+    def send(self, surface_id: str, text: str) -> None:
+        self.sent.append((surface_id, text))
+
+    def send_key(self, surface_id: str, key: str) -> None:
+        self.keys.append((surface_id, key))
+
+
+def _acknowledge(
+    screens: list[str],
+    *,
+    runtime: str = "claude",
+    paste_screen: str = "",
+    artifact_ready=lambda: False,
+    checkpoint_probe=lambda _surface, _runtime: "",
+    observation_limit: int = 6,
+) -> tuple[str, StartAckPort, list[float]]:
+    port = StartAckPort(screens)
+    waits: list[float] = []
+    state = await_initial_start_acknowledged(
+        port,
+        surface_id=SURFACE,
+        runtime=runtime,
+        anchor=INITIAL_ANCHOR,
+        paste_screen_sha256=_screen_digest(
+            paste_screen or f"❯ {INITIAL_ANCHOR}\n"
+        ),
+        artifact_ready=artifact_ready,
+        checkpoint_probe=checkpoint_probe,
+        observation_limit=observation_limit,
+        observation_interval_seconds=0.0,
+        wait=waits.append,
+    )
+    return state, port, waits
+
+
+def check_initial_start_rejects_false_repaint() -> None:
+    """A rate-limit countdown and spinner are not provider progress."""
+
+    repaints = [
+        "waiting for first response\n"
+        f"{glyph} Resuming in {60 - index}s (approaching usage limit)\n"
+        "❯\n"
+        for index, glyph in enumerate("·✢✳∗·✢")
+    ]
+    state, port, _waits = _acknowledge(repaints)
+    check(
+        "false repaint never becomes an initial provider start",
+        state == "unconfirmed" and port.reads == 6 and not port.keys,
+        (state, port.reads, port.keys),
+    )
+    stuck, _port, _waits = _acknowledge([STUCK_CLAUDE_SCREEN])
+    check(
+        "a static first-response wait stays unconfirmed",
+        stuck == "unconfirmed",
+        stuck,
+    )
+
+
+def check_initial_start_accepts_normal_claude() -> None:
+    """A recognized Claude activity transition is a semantic start."""
+
+    state, port, _waits = _acknowledge(
+        [STUCK_CLAUDE_SCREEN, ACTIVE_CLAUDE_SCREEN]
+    )
+    check(
+        "normal Claude activity acknowledges the initial start",
+        state == "started" and port.reads == 2,
+        (state, port.reads),
+    )
+
+
+def check_initial_start_accepts_normal_codex() -> None:
+    """A recognized Codex activity transition is a semantic start."""
+
+    state, port, _waits = _acknowledge(
+        ["›\n", ACTIVE_CODEX_SCREEN],
+        runtime="codex",
+        paste_screen=f"› {INITIAL_ANCHOR}\n",
+    )
+    check(
+        "normal Codex activity acknowledges the initial start",
+        state == "started" and port.reads == 2,
+        (state, port.reads),
+    )
+
+
+def check_initial_start_reports_bounded_states() -> None:
+    """Every non-started outcome stays inside the typed bounded set."""
+
+    permission, permission_port, _waits = _acknowledge([CLAUDE_TRUST_SCREEN])
+    check(
+        "a native permission dialog returns immediately as permission",
+        permission == "permission" and permission_port.reads == 1,
+        (permission, permission_port.reads),
+    )
+    composing, _port, _waits = _acknowledge([f"❯ {INITIAL_ANCHOR}\n"])
+    check(
+        "an unchanged composer reports still-composing",
+        composing == "still-composing",
+        composing,
+    )
+    unknown, _port, _waits = _acknowledge(["some unrecognized banner\n"])
+    check(
+        "an unrecognized surface reports unknown",
+        unknown == "unknown",
+        unknown,
+    )
+    artifact, artifact_port, _waits = _acknowledge(
+        [STUCK_CLAUDE_SCREEN], artifact_ready=lambda: True
+    )
+    check(
+        "a typed artifact acknowledges the start without a screen transition",
+        artifact == "started" and artifact_port.reads == 0,
+        (artifact, artifact_port.reads),
+    )
+    checkpoint, _port, _waits = _acknowledge(
+        [STUCK_CLAUDE_SCREEN],
+        checkpoint_probe=lambda _surface, _runtime: "checkpoint-start",
+    )
+    check(
+        "a provider checkpoint acknowledges the start",
+        checkpoint == "started",
+        checkpoint,
+    )
+    identical, _port, _waits = _acknowledge(
+        [ACTIVE_CLAUDE_SCREEN], paste_screen=ACTIVE_CLAUDE_SCREEN
+    )
+    check(
+        "an activity screen identical to the paste screen is not a start",
+        identical == "unconfirmed",
+        identical,
+    )
+
+
+def check_initial_start_observes_within_budget() -> None:
+    """The acknowledgement is bounded and never sends provider input."""
+
+    state, port, waits = _acknowledge(
+        [STUCK_CLAUDE_SCREEN], observation_limit=3
+    )
+    check(
+        "initial start acknowledgement stays inside its exact budget",
+        state == "unconfirmed"
+        and port.reads == 3
+        and len(waits) == 2
+        and not port.sent
+        and not port.keys,
+        (state, port.reads, waits, port.sent, port.keys),
+    )
+    for limit, interval in ((0, 0.05), (1, -0.1)):
+        try:
+            await_initial_start_acknowledged(
+                StartAckPort([STUCK_CLAUDE_SCREEN]),
+                surface_id=SURFACE,
+                runtime="claude",
+                anchor=INITIAL_ANCHOR,
+                paste_screen_sha256=_screen_digest(STUCK_CLAUDE_SCREEN),
+                observation_limit=limit,
+                observation_interval_seconds=interval,
+                wait=lambda _seconds: None,
+            )
+        except ValueError:
+            continue
+        raise AssertionError(
+            f"initial start budget accepted {limit}/{interval}"
+        )
+    check("initial start acknowledgement rejects an invalid budget", True)
+
+
+class SurfaceVanished(RuntimeError):
+    """The exact crash boundary: the surface dies between Enter and the ack."""
+
+
+class InitialStartWorkerCmux(FakeCmux):
+    """A Claude surface whose post-submit behaviour is scripted exactly."""
+
+    def __init__(self, post_submit: list[str], *, fail_after_enter: bool = False) -> None:
+        super().__init__([])
+        self.post_submit = list(post_submit)
+        self.fail_after_enter = fail_after_enter
+        self.post_submit_reads = 0
+        self.checkpoint = ""
+
+    def read(self, surface_id: str) -> str:
+        assert surface_id == SURFACE
+        if not self.sent:
+            return "❯\n"
+        self.transport_visible = True
+        prompt = self.sent[-1][1]
+        anchor = next(
+            (" ".join(line.split()) for line in prompt.splitlines() if line.strip()),
+            "",
+        )
+        if self.submit_count == self.submits_at_last_send:
+            return f"❯ {anchor}\n"
+        if self.fail_after_enter:
+            raise SurfaceVanished("surface transport vanished after submit")
+        self.post_submit_reads += 1
+        if len(self.post_submit) > 1:
+            return self.post_submit.pop(0)
+        return self.post_submit[0]
+
+
+def _initial_start_worker(
+    root: Path, name: str, cmux: FakeCmux, *, limit: int = 4
+) -> tuple[int | None, SurfaceLaunch, OperationStore, Path]:
+    cwd = root / f"{name}-product"
+    (cwd / "callbacks").mkdir(parents=True)
+    prompt_path = cwd / "prompt.md"
+    prompt_path.write_text(f"{INITIAL_ANCHOR}\n", encoding="utf-8")
+    provider = root / f"{name}-provider.py"
+    provider.write_text("import time\ntime.sleep(1.0)\n", encoding="utf-8")
+    store = OperationStore(root / f"{name}-store")
+    spec = OperationSpec(
+        f"{name}-op",
+        f"{name}-key",
+        "runtime-lifecycle",
+        f"owner-{name}",
+        RuntimeRoute("claude", "claude-opus-5", "high", "executor", "c" * 64),
+        "packets/runtime.json",
+        "scoped",
+    )
+    store.create(spec, lane_id=f"lane-{name}", run_id=f"run-{name}")
+    for state in ("preflight", "starting", "running", "awaiting-callback"):
+        store.transition(f"owner-{name}", f"{name}-op", state)
+    callback = cwd / "callbacks" / "result.json"
+    launch = ProcessAdapter().prepare_surface_launch(
+        argv=(str(Path(sys.executable).resolve()), str(provider)),
+        cwd=cwd,
+        state_root=root / f"{name}-state",
+        worker=ROOT / "scripts" / "harness-runtime-worker.py",
+        callback_pointer=callback,
+        store_root=store.root,
+        owner_id=f"owner-{name}",
+        operation_id=f"{name}-op",
+        run_id=f"run-{name}",
+        surface_id=SURFACE,
+        runtime="claude",
+        initial_input_pointer=prompt_path,
+    )
+    ProcessAdapter._write_json(
+        launch.spec_path.parent / "session.json",
+        {
+            "schema_version": 1,
+            "operation_id": f"{name}-op",
+            "run_id": f"run-{name}",
+            "workspace_id": WORKSPACE,
+        },
+    )
+    outcome: list[int] = []
+    failure: list[BaseException] = []
+
+    def drive() -> None:
+        try:
+            outcome.append(
+                run_runtime_worker(
+                    launch.spec_path,
+                    poll_seconds=0.02,
+                    checkpoint_probe=lambda _surface, _runtime: cmux.checkpoint,
+                    cmux_adapter=cmux,
+                    initial_start_observation_limit=limit,
+                )
+            )
+        except BaseException as exc:  # noqa: BLE001 - crash boundary fixture
+            failure.append(exc)
+
+    thread = threading.Thread(target=drive)
+    thread.start()
+    thread.join(timeout=30)
+    for exc in failure:
+        # Only the scripted crash boundary may escape the worker; anything
+        # else is a real defect and must surface as its own red reason.
+        if not isinstance(exc, SurfaceVanished):
+            raise exc
+    return (outcome[0] if outcome else None), launch, store, callback
+
+
+def _initial_start_delivery(launch: SurfaceLaunch) -> tuple[list[str], dict]:
+    generation = launch.spec_path.parent / "provider-events" / "generation-1"
+    kinds = [
+        json.loads(path.read_text(encoding="utf-8"))["kind"]
+        for path in sorted((generation / "events").glob("*.json"))
+    ]
+    state = json.loads(
+        (generation / "delivery" / "delivery-state.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return kinds, state
+
+
+def check_worker_contains_unconfirmed_initial_start() -> None:
+    """The exact retained RC4 D shape must not publish a delivery receipt."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = InitialStartWorkerCmux([STUCK_CLAUDE_SCREEN])
+        code, launch, store, callback = _initial_start_worker(
+            root, "stuck", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        exit_record = json.loads(launch.exit_path.read_text(encoding="utf-8"))
+        record = store.read("owner-stuck", "stuck-op")
+        check(
+            "an unconfirmed initial start publishes no input-accepted",
+            "input-accepted" not in kinds
+            and kinds == ["provider-started"]
+            and not callback.is_file(),
+            (kinds, callback.is_file()),
+        )
+        check(
+            "an unconfirmed initial start settles the reserved send as ambiguous",
+            delivery["send_status"] == "ambiguous"
+            and delivery["send_attempts"] == 1,
+            delivery,
+        )
+        check(
+            "an unconfirmed initial start fails closed into existing containment",
+            code == 2
+            and exit_record["status"] == "input-unconfirmed"
+            and record.state == "attention-required",
+            (code, exit_record, record.state),
+        )
+        check(
+            "an unconfirmed initial start never replays the provider input",
+            len(cmux.sent) == 1
+            and cmux.submit_count == 1
+            and cmux.post_submit_reads >= 1,
+            (cmux.sent, cmux.submit_count, cmux.post_submit_reads),
+        )
+
+
+def check_worker_accepts_acknowledged_initial_start() -> None:
+    """A provider that visibly starts still yields exactly one acceptance."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = InitialStartWorkerCmux(
+            [STUCK_CLAUDE_SCREEN, ACTIVE_CLAUDE_SCREEN]
+        )
+        code, launch, _store, _callback = _initial_start_worker(
+            root, "started", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        check(
+            "an acknowledged initial start publishes exactly one input-accepted",
+            kinds.count("input-accepted") == 1
+            and kinds[:2] == ["provider-started", "input-accepted"]
+            and delivery["send_status"] == "accepted"
+            and delivery["send_attempts"] == 1,
+            (kinds, delivery),
+        )
+        check(
+            "an acknowledged initial start sends exactly one prompt and Enter",
+            len(cmux.sent) == 1 and cmux.submit_count == 1 and code == 0,
+            (cmux.sent, cmux.submit_count, code),
+        )
+
+
+def check_worker_crash_after_enter_stays_replay_free() -> None:
+    """A crash between Enter and acknowledgement stays ambiguous, never accepted."""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cmux = InitialStartWorkerCmux([STUCK_CLAUDE_SCREEN], fail_after_enter=True)
+        _code, launch, _store, _callback = _initial_start_worker(
+            root, "crash", cmux
+        )
+        kinds, delivery = _initial_start_delivery(launch)
+        check(
+            "a crash after Enter never records a durable acceptance",
+            "input-accepted" not in kinds
+            and delivery["send_status"] in {"reserved", "ambiguous"}
+            and delivery["send_attempts"] == 1,
+            (kinds, delivery),
+        )
+        check(
+            "a crash after Enter leaves exactly one unreplayable send",
+            len(cmux.sent) == 1 and cmux.submit_count == 1,
+            (cmux.sent, cmux.submit_count),
+        )
+
+
+_INITIAL_START_FIXTURES = (
+    check_initial_start_rejects_false_repaint,
+    check_initial_start_accepts_normal_claude,
+    check_initial_start_accepts_normal_codex,
+    check_initial_start_reports_bounded_states,
+    check_initial_start_observes_within_budget,
+    check_worker_contains_unconfirmed_initial_start,
+    check_worker_accepts_acknowledged_initial_start,
+    check_worker_crash_after_enter_stays_replay_free,
+)
+
+_initial_start_failures: list[str] = []
+for _fixture in _INITIAL_START_FIXTURES:
+    try:
+        _fixture()
+    except AssertionError as _exc:
+        _initial_start_failures.append(f"{_fixture.__name__}: {_exc}")
+    except Exception as _exc:  # noqa: BLE001 - report every red fixture once
+        _initial_start_failures.append(
+            f"{_fixture.__name__}: {type(_exc).__name__}: {_exc}"
+        )
+if _initial_start_failures:
+    raise AssertionError(
+        "RC4-E11 initial-input regressions failed:\n  "
+        + "\n  ".join(_initial_start_failures)
+    )
