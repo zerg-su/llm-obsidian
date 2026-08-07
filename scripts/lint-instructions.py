@@ -24,6 +24,20 @@ ENGINEERING_DISCIPLINE_PATTERN = re.compile(
     re.MULTILINE,
 )
 MARKDOWN_LIST_ITEM = re.compile(r"^\s*(?:[-*+] |\d+[.)] )")
+ENGINEERING_WEAKENING = re.compile(
+    r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",
+    flags=re.I,
+)
+EXPLICIT_WEAKENING_LEAD_IN = re.compile(
+    r"(?:"
+    r"^\s*(?:[-*+]\s+)?(?:optional|ignore(?: this)?|suggestions?\s+only)\s*:?\s*$"
+    r"|\b(?:this (?:whole )?section|the (?:rule|contract) below|"
+    r"the next (?:rule|contract)|following (?:rule|contract)|"
+    r"treat\b.*\b(?:rule|contract))\b.*"
+    r"\b(?:optional|ignore|advisory|suggestions?\s+only|unless)\b"
+    r")",
+    flags=re.I | re.S,
+)
 
 
 def frontmatter(text: str) -> str:
@@ -149,7 +163,7 @@ def failure_repair_issues(
 
 
 def _enclosing_markdown_item(text: str, offset: int) -> str:
-    """Return one contract item plus an explicit standalone lead-in block."""
+    """Return one contract item and only an explicit weakening lead-in."""
 
     lines = text.splitlines()
     line_index = text.count("\n", 0, offset)
@@ -162,28 +176,49 @@ def _enclosing_markdown_item(text: str, offset: int) -> str:
             and not MARKDOWN_LIST_ITEM.match(lines[start - 1])
         ):
             start -= 1
-        if start > 0 and MARKDOWN_LIST_ITEM.match(lines[start - 1]):
-            # CommonMark lazy continuation: the contract belongs to this item.
-            start -= 1
-        else:
-            prior = start - 1
-            while prior >= 0 and not lines[prior].strip():
-                prior -= 1
-            if prior >= 0:
-                prior_start = prior
-                while prior_start > 0 and lines[prior_start - 1].strip():
-                    prior_start -= 1
-                if not any(
-                    MARKDOWN_LIST_ITEM.match(line)
-                    for line in lines[prior_start : prior + 1]
-                ):
-                    start = prior_start
     end = line_index + 1
     while end < len(lines) and lines[end].strip():
         if MARKDOWN_LIST_ITEM.match(lines[end]):
             break
         end += 1
-    return "\n".join(lines[start:end])
+    item = "\n".join(lines[start:end])
+
+    # A contract may be either the next sibling or the lazy continuation of an
+    # immediately preceding item.  Include that item only when it explicitly
+    # scopes the following rule; generic advisory prose in a sibling is not a
+    # weakening of this contract.
+    prior_item_end = start
+    prior_item_start = prior_item_end - 1
+    while prior_item_start >= 0 and lines[prior_item_start].strip():
+        if MARKDOWN_LIST_ITEM.match(lines[prior_item_start]):
+            candidate = "\n".join(lines[prior_item_start:prior_item_end])
+            if EXPLICIT_WEAKENING_LEAD_IN.search(candidate):
+                return candidate + "\n" + item
+            break
+        prior_item_start -= 1
+
+    # A standalone lead-in can scope a complete list rather than only its
+    # first item, so inspect the prose block immediately before that list.
+    lead_anchor = start
+    if current_is_item:
+        while lead_anchor > 0 and lines[lead_anchor - 1].strip():
+            previous = lines[lead_anchor - 1]
+            if MARKDOWN_LIST_ITEM.match(previous) or previous[:1].isspace():
+                lead_anchor -= 1
+                continue
+            break
+    prior = lead_anchor - 1
+    while prior >= 0 and not lines[prior].strip():
+        prior -= 1
+    if prior < 0:
+        return item
+    prior_start = prior
+    while prior_start > 0 and lines[prior_start - 1].strip():
+        prior_start -= 1
+    candidate = "\n".join(lines[prior_start : prior + 1])
+    if EXPLICIT_WEAKENING_LEAD_IN.search(candidate):
+        return candidate + "\n" + item
+    return item
 
 
 def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
@@ -194,16 +229,14 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
         weakened_context = False
         if len(matches) == 1:
             logical_item = _enclosing_markdown_item(text, matches[0].start())
-            weakened_context = bool(
-                re.search(
-                    r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",
-                    logical_item,
-                    flags=re.I,
-                )
-            )
-        if len(matches) != 1 or weakened_context:
+            weakened_context = bool(ENGINEERING_WEAKENING.search(logical_item))
+        if len(matches) != 1:
             issues.append(
                 f"{source} must contain one exact positive engineering discipline contract"
+            )
+        elif weakened_context:
+            issues.append(
+                f"{source} engineering discipline contract is weakened by its item or lead-in"
             )
     return issues
 
