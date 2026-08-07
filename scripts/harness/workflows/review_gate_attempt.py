@@ -94,87 +94,6 @@ def compile_review_attempt_identity(
 class ReviewGateAttemptMixin:
     """Own the new one-HEAD path without invoking legacy continuation code."""
 
-    def _attempt_initial_state(
-        self,
-        *,
-        dispatch_operation_id: str,
-        request: ReviewOperationRequest,
-        product_root: Path,
-        identity: ReviewAttemptIdentity,
-    ) -> tuple[ReviewAttempt, dict[str, object]]:
-        """Compile the exact pending projection shared by start and recovery."""
-
-        preset = ReviewPreset(
-            depth=request.policy.depth,
-            cross_model=request.policy.cross_model,
-            runtime=request.policy.runtime,
-            model=request.policy.model,
-            effort=request.policy.effort,
-        )
-        expected_budget = (
-            0
-            if request.policy.purpose == "release"
-            else min(
-                VERIFY_BUDGETS[request.requested_mode],
-                1 if request.policy.purpose == "intent" else 2,
-            )
-        )
-        if request.policy.max_verify_iterations != expected_budget:
-            raise ReviewAttemptError(
-                "automatic review must use the deterministic preset budget"
-            )
-        attempt = ReviewAttempt.pending(identity)
-        return attempt, {
-            "schema_version": 1,
-            "execution_protocol": EXACT_HEAD_REVIEW_PROTOCOL,
-            "dispatch_operation_id": dispatch_operation_id,
-            "owner_id": request.owner_id,
-            "status": "pending",
-            "policy": self._policy(
-                preset,
-                purpose=request.policy.purpose,
-                max_verify_iterations=request.policy.max_verify_iterations,
-            ),
-            "product_root": str(product_root),
-            "active_review_operation_id": request.policy.operation_id,
-            "context": self._context(request.context),
-            "topology": request.topology.payload(),
-            "topology_sha256": request.topology_sha256,
-            "lanes": [],
-            "round_results": {},
-            "final_results": {},
-            "evidence": {},
-            "attempt": attempt.payload(),
-        }
-
-    def _archive_attempt_state(
-        self, state: Mapping[str, object], *, cycle: int
-    ) -> None:
-        """Persist one immutable superseded attempt projection."""
-
-        archive = self.root / "attempts" / f"cycle-{cycle}.json"
-        archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        archive.parent.chmod(0o700)
-        encoded = (
-            json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n"
-        ).encode()
-        try:
-            descriptor = os.open(
-                archive,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
-        except FileExistsError:
-            if archive.read_bytes() != encoded:
-                raise ReviewAttemptError(
-                    "archived review attempt changed"
-                ) from None
-        else:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
-
     def _attempt(self) -> ReviewAttempt:
         raw = self.read().get("attempt")
         if not isinstance(raw, Mapping):
@@ -219,12 +138,44 @@ class ReviewGateAttemptMixin:
         product_root: Path,
         identity: ReviewAttemptIdentity,
     ) -> ReviewAttempt:
-        attempt, initial = self._attempt_initial_state(
-            dispatch_operation_id=dispatch_operation_id,
-            request=request,
-            product_root=product_root,
-            identity=identity,
+        preset = ReviewPreset(
+            depth=request.policy.depth,
+            cross_model=request.policy.cross_model,
+            runtime=request.policy.runtime, model=request.policy.model,
+            effort=request.policy.effort,
         )
+        expected_budget = (
+            0
+            if request.policy.purpose == "release"
+            else min(VERIFY_BUDGETS[request.requested_mode],
+                     1 if request.policy.purpose == "intent" else 2)
+        )
+        if request.policy.max_verify_iterations != expected_budget:
+            raise ReviewAttemptError(
+                "automatic review must use the deterministic preset budget"
+            )
+        attempt = ReviewAttempt.pending(identity)
+        initial = {
+            "schema_version": 1,
+            "execution_protocol": EXACT_HEAD_REVIEW_PROTOCOL,
+            "dispatch_operation_id": dispatch_operation_id,
+            "owner_id": request.owner_id,
+            "status": "pending",
+            "policy": self._policy(
+                preset,
+                purpose=request.policy.purpose,
+                max_verify_iterations=request.policy.max_verify_iterations,
+            ),
+            "product_root": str(product_root),
+            "active_review_operation_id": request.policy.operation_id,
+            "context": self._context(request.context),
+            "topology": request.topology.payload(), "topology_sha256": request.topology_sha256,
+            "lanes": [],
+            "round_results": {},
+            "final_results": {},
+            "evidence": {},
+            "attempt": attempt.payload(),
+        }
         with self._locked():
             if self.state_path.exists():
                 current = _read_json(self.state_path)
@@ -237,20 +188,73 @@ class ReviewGateAttemptMixin:
                 if existing.status == "terminal" and identity.cycle == (
                     existing.identity.cycle + 1
                 ):
+                    terminal = existing.terminal
+                    same_head_preflight = (
+                        terminal is not None
+                        and terminal.result
+                        == ReviewAttemptTerminalResult.ATTENTION_REQUIRED
+                        and not terminal.lane_results
+                        and existing.identity.exact_head_sha == identity.exact_head_sha
+                        and current.get("status") == "attention-required"
+                        and current.get("active_review_operation_id")
+                        == existing.identity.attempt_id
+                        and current.get("dispatch_operation_id") == dispatch_operation_id
+                        and current.get("product_root") == str(product_root)
+                        and current.get("lanes") == []
+                        and all(current.get(field) in ({}, None) for field in (
+                            "round_results", "final_results", "evidence",
+                            "resolution_evidence", "continuation_effects",
+                            "review_notification_evidence", "awaiting_resolution",
+                            "finalizing_recovery",
+                        ))
+                        and not any(
+                            self.round_store._operation_path(
+                                lane.owner_id, lane.operation_id
+                            ).exists()
+                            for lane in existing.identity.lanes
+                        )
+                    )
                     if (
-                        existing.terminal is None
+                        terminal is None
                         or existing.identity.finalization_lineage_id
                         != identity.finalization_lineage_id
                         or existing.identity.plan_sha256 != identity.plan_sha256
                         or existing.identity.outcome_sha256 != identity.outcome_sha256
-                        or existing.identity.exact_head_sha == identity.exact_head_sha
+                        or (existing.identity.exact_head_sha == identity.exact_head_sha
+                            and not same_head_preflight)
                     ):
                         raise ReviewAttemptError(
                             "next review attempt lacks a changed-HEAD terminal boundary"
                         )
-                    self._archive_attempt_state(
-                        current, cycle=existing.identity.cycle
+                    archive = self.root / "attempts" / (
+                        f"cycle-{existing.identity.cycle}.json"
                     )
+                    archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    archive.parent.chmod(0o700)
+                    encoded = (
+                        json.dumps(
+                            current,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    ).encode()
+                    try:
+                        descriptor = os.open(
+                            archive,
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                            0o600,
+                        )
+                    except FileExistsError:
+                        if archive.read_bytes() != encoded:
+                            raise ReviewAttemptError(
+                                "archived review attempt changed"
+                            ) from None
+                    else:
+                        with os.fdopen(descriptor, "wb") as handle:
+                            handle.write(encoded)
+                            handle.flush()
+                            os.fsync(handle.fileno())
                     _atomic_json(self.state_path, initial)
                     return attempt
                 existing.assert_identity(identity)

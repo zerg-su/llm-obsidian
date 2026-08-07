@@ -3109,25 +3109,17 @@ with tempfile.TemporaryDirectory(prefix="review-zero-lane-preflight.") as raw:
         plan_sha256="1" * 64,
         outcome_sha256="2" * 64,
     )
-    reopened = gate.reopen_zero_lane_preflight_attempt(
+    reopened = gate._initialize_attempt(
         dispatch_operation_id="review-zero-lane-dispatch",
         identity=replacement_identity,
         request=replacement,
         product_root=ROOT,
-        callback_paths={
-            axis: scratch / "callbacks" / axis / ".review-callback.json"
-            for axis in failed_request.policy.axes
-        },
     )
-    replayed = gate.reopen_zero_lane_preflight_attempt(
+    replayed = gate._initialize_attempt(
         dispatch_operation_id="review-zero-lane-dispatch",
         identity=replacement_identity,
         request=replacement,
         product_root=ROOT,
-        callback_paths={
-            axis: scratch / "callbacks" / axis / ".review-callback.json"
-            for axis in failed_request.policy.axes
-        },
     )
     recovered_state = gate.read()
     check(

@@ -624,6 +624,14 @@ def _run_exact_head_review(
                     context_manifest=context_manifest,
                     run=None,
                 )
+            if zero_lane_preflight and any(
+                path.exists() or path.is_symlink()
+                for path in (_callback_path(runtime_root, axis)
+                             for axis in request.policy.axes)
+            ):
+                raise ReviewAttemptError(
+                    "zero-lane review preflight found a callback artifact"
+                )
             cycle += 1
 
     request, ledger = reserve_exact_head_attempt(
@@ -634,29 +642,9 @@ def _run_exact_head_review(
         request=request,
         cycle=cycle,
     )
-    if zero_lane_preflight:
-        lineage, cycle, plan_sha256, outcome_sha256 = _attempt_binding(
-            meta, task_id, cycle=cycle
-        )
-        gate.reopen_zero_lane_preflight_attempt(
-            dispatch_operation_id=task_id,
-            identity=compile_review_attempt_identity(
-                request=request,
-                finalization_lineage_id=lineage,
-                cycle=cycle,
-                plan_sha256=plan_sha256,
-                outcome_sha256=outcome_sha256,
-            ),
-            request=request,
-            product_root=worktree,
-            callback_paths={
-                axis: _callback_path(runtime_root, axis)
-                for axis in request.policy.axes
-            },
-        )
     if not gate_exists or ReviewAttempt.from_mapping(
         gate.read()["attempt"]
-    ).status in {"pending", "terminal"}:
+    ).status == "terminal":
         return _start_exact_head_review(
             meta=meta,
             vault=vault,
