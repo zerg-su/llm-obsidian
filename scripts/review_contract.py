@@ -199,7 +199,6 @@ def compile_effective_review_topology(
                     routing_sha256,
                 )
             )
-            or runtime != review_provider_runtime(provider)
             or IDENTIFIER_RE.fullmatch(model) is None
             or IDENTIFIER_RE.fullmatch(effort) is None
             or profile not in {"reviewer-readonly", "reviewer-callback"}

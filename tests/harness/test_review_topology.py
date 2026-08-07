@@ -189,6 +189,26 @@ check(
     "any concrete route mutation changes the effective topology digest",
     changed_effort.sha256 != simple_effective.sha256,
 )
+caller_routed = compile_effective_review_topology(
+    mode="simple",
+    cross_model=False,
+    max_verify_iterations=1,
+    verification_profile="scoped",
+    verification_profile_sha256="8" * 64,
+    routes={
+        "openai": {
+            **expected_simple_payload["lanes"][0],
+            "runtime": "claude",
+            "model": "fable",
+        }
+    },
+    selected_provider="openai",
+)
+check(
+    "caller-supplied logical route is digest-bound without runtime inference",
+    caller_routed.lanes[0].runtime == "claude"
+    and caller_routed.sha256 != simple_effective.sha256,
+)
 adaptive_routes = {
     "anthropic": {
         "runtime": "claude",
