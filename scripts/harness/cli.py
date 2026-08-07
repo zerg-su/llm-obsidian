@@ -352,6 +352,16 @@ def _review_recovery_kind(
         and attempt.get("status") == "awaiting-callback"
     ):
         return "accepted-exact-callbacks"
+    terminal = attempt.get("terminal") if isinstance(attempt, dict) else None
+    if (
+        gate.get("status") == "approved"
+        and gate.get("execution_protocol") == "exact-head-attempt-v1"
+        and isinstance(attempt, dict)
+        and attempt.get("status") == "terminal"
+        and isinstance(terminal, dict)
+        and terminal.get("result") == "approved"
+    ):
+        return "accepted-exact-callbacks"
     if not response_path.is_file():
         return ""
     if gate.get("status") in {
@@ -481,27 +491,33 @@ def _resume(
             operation_id,
             reason=AttentionReason.ATTENTION_REQUIRED,
         )
-    if initial.state == "attention-required":
-        recovery_status = ""
-        if initial.spec.kind == "dispatch":
-            recovery_status = _recover_finalizing_review_if_present(
-                store,
-                owner,
-                operation_id,
-                runtime_manager=review_runtime_manager,
-            )
+    recovery_status = ""
+    if (
+        initial.spec.kind == "dispatch"
+        and initial.state in {"attention-required", "finalizing"}
+    ):
+        recovery_status = _recover_finalizing_review_if_present(
+            store,
+            owner,
+            operation_id,
+            runtime_manager=review_runtime_manager,
+        )
         if recovery_status == "approved":
             current = store.read(owner, operation_id)
             if (
-                current.state != "attention-required"
-                or current.resume_state != "finalizing"
+                current.state not in {"attention-required", "finalizing"}
+                or (
+                    current.state == "attention-required"
+                    and current.resume_state != "finalizing"
+                )
                 or current.pending_effect
                 or _has_owned_resources(current)
             ):
                 raise RuntimeSessionError(
                     "approved review recovery cannot terminalize dispatch ownership"
                 )
-            store.transition(owner, operation_id, "finalizing")
+            if current.state == "attention-required":
+                store.transition(owner, operation_id, "finalizing")
             store.transition(owner, operation_id, "exiting")
             completed = store.transition(owner, operation_id, "complete")
             return TransitionResult(
@@ -522,6 +538,7 @@ def _resume(
                 current.revision != initial.revision,
                 current.attention_reason,
             )
+    if initial.state == "attention-required":
         if not initial.resume_state:
             return store.transition(owner, operation_id, initial.state)
         store.transition(owner, operation_id, initial.resume_state)

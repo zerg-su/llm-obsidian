@@ -1522,6 +1522,25 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "attention-required",
         reason=AttentionReason.ATTENTION_REQUIRED,
     )
+    create_cli_operation("op-approved-finalizing-review-cli", state="running")
+    store.transition(
+        "owner-cli", "op-approved-finalizing-review-cli", "finalizing"
+    )
+    check(
+        "terminal exact approval selects callback-free recovery",
+        harness_cli._review_recovery_kind(
+            {
+                "status": "approved",
+                "execution_protocol": "exact-head-attempt-v1",
+                "attempt": {
+                    "status": "terminal",
+                    "terminal": {"result": "approved"},
+                },
+            },
+            ROOT / "missing-verification-response.json",
+        )
+        == "accepted-exact-callbacks",
+    )
     recovery_calls: list[str] = []
     original_recovery = harness_cli._recover_finalizing_review_if_present
 
@@ -1545,6 +1564,13 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
             process_adapter=FakeProcess("dead"),
             cmux_adapter=FakeCmux("missing"),
         )
+        resumed_durable_finalizing = harness_cli._resume(
+            store,
+            "owner-cli",
+            "op-approved-finalizing-review-cli",
+            process_adapter=FakeProcess("dead"),
+            cmux_adapter=FakeCmux("missing"),
+        )
         second_finalizing = harness_cli._resume(
             store,
             "owner-cli",
@@ -1561,6 +1587,8 @@ with tempfile.TemporaryDirectory(prefix="harness-store.") as raw:
         "accepted review recovery terminalizes dispatch exactly once",
         first_finalizing.state == "complete"
         and second_finalizing.state == "complete"
+        and resumed_durable_finalizing.state == "complete"
         and finalizing_record.state == "complete"
-        and recovery_calls == ["op-finalizing-review-cli"],
+        and recovery_calls
+        == ["op-finalizing-review-cli", "op-approved-finalizing-review-cli"],
     )
