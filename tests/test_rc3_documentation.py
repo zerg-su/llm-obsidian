@@ -75,7 +75,8 @@ assert "launches the runtime worker" in documentation["docs/task-sessions.md"]
 upgrade = text("docs/ru/upgrading-and-releasing.md")
 for command in (
     "python3 scripts/rc3_inventory.py build",
-    "python3 scripts/rc3_release_disposition.py budget",
+    "--expected-candidate",
+    "--attempt-ledger-root",
     "python3 scripts/rc3_release_disposition.py check",
 ):
     assert command in upgrade
@@ -92,15 +93,9 @@ for relative in (
 ):
     assert (ROOT / relative).is_file()
 
-inventory_path = ROOT / "docs/acceptance/v2.6.6-rc3-machine-inventory.json"
-inventory = subprocess.run(
-    ["python3", "scripts/rc3_inventory.py", "check", str(inventory_path)],
-    cwd=ROOT,
-    check=False,
-    capture_output=True,
-    text=True,
-)
-assert inventory.returncode == 0, inventory.stdout + inventory.stderr
+assert not (ROOT / "docs/acceptance/v2.6.6-rc3-machine-inventory.json").exists()
+assert "external sidecar" in evidence_contract
+assert "not stored in the candidate tree" in evidence_contract
 
 method = json.loads(text("docs/acceptance/v2.6.6-rc3-skill-creator-method.json"))
 assert method["order"] == 1

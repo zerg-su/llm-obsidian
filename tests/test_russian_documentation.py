@@ -283,7 +283,9 @@ required_page_tokens = {
         "git diff --check v2.6.6-rc2..HEAD",
     ),
     "upgrading-and-releasing.md": (
-        "docs/acceptance/evidence/v2.6.6-rc3/release/receipt.json",
+        "$RC3_EVIDENCE_ROOT/release/receipt.json",
+        "--attempt-ledger-root",
+        "--expected-candidate",
         "git diff --check v2.6.6-rc2..HEAD",
     ),
     "parallel-tasks.md": (

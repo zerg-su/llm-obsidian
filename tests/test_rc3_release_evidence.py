@@ -54,7 +54,12 @@ def independent_script_counts(subject_sha: str) -> tuple[int, int]:
 
 def test_machine_inventory_recomputes_exact_values_and_rejects_drift() -> None:
     payload = inventory.build_inventory(ROOT, BASE_SHA, BASE_SHA)
-    inventory.validate_inventory(ROOT, payload)
+    inventory.validate_inventory(
+        ROOT,
+        payload,
+        expected_baseline_sha=BASE_SHA,
+        expected_candidate_sha=BASE_SHA,
+    )
 
     expected_files, expected_loc = independent_script_counts(BASE_SHA)
     candidate = payload["candidate"]
@@ -74,11 +79,166 @@ def test_machine_inventory_recomputes_exact_values_and_rejects_drift() -> None:
     tampered = copy.deepcopy(payload)
     tampered["candidate"]["script_python_loc"] += 1
     try:
-        inventory.validate_inventory(ROOT, tampered)
+        inventory.validate_inventory(
+            ROOT,
+            tampered,
+            expected_baseline_sha=BASE_SHA,
+            expected_candidate_sha=BASE_SHA,
+        )
     except inventory.InventoryError as exc:
         assert "candidate counters drift" in str(exc)
     else:
         raise AssertionError("mutated inventory must fail closed")
+
+    stale = copy.deepcopy(payload)
+    stale["candidate"] = inventory.snapshot(ROOT, git("rev-parse", "HEAD"))
+    try:
+        inventory.validate_inventory(
+            ROOT,
+            stale,
+            expected_baseline_sha=BASE_SHA,
+            expected_candidate_sha=BASE_SHA,
+        )
+    except inventory.InventoryError as exc:
+        assert "candidate subject drift" in str(exc)
+    else:
+        raise AssertionError("embedded candidate identity must not be authoritative")
+
+
+def test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound() -> None:
+    ledger_module = load_script("rc3_attempt_ledger.py")
+    subject = git("rev-parse", "HEAD")
+    with tempfile.TemporaryDirectory(prefix="rc3-attempt-ledger.") as raw:
+        root = Path(raw)
+        store = ledger_module.AttemptLedgerStore(root)
+        first = store.reserve(
+            attempt_id="00000000-0000-4000-8000-000000000001",
+            subject_head_sha=subject,
+            profile_sha256="a" * 64,
+            execution_relation="release-candidate",
+            runner_sha256="b" * 64,
+        )
+        assert first["ordinal"] == 1 and first["state"] == "reserved"
+
+        artifact = root / "artifacts" / "attempt-1.json"
+        artifact.parent.mkdir()
+        artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
+        completed = store.finalize(
+            attempt_id=first["attempt_id"],
+            classification="published",
+            exit_status=0,
+            artifact_path=artifact,
+        )
+        assert completed["state"] == "published"
+        assert completed["artifact_sha256"] == hashlib.sha256(
+            artifact.read_bytes()
+        ).hexdigest()
+        assert store.load()["attempts"] == [completed]
+
+        artifact.write_text('{"status":"tampered"}\n', encoding="utf-8")
+        try:
+            store.load()
+        except ledger_module.AttemptLedgerError as exc:
+            assert "artifact digest drift" in str(exc)
+        else:
+            raise AssertionError("ledger must bind actual immutable artifact bytes")
+
+        artifact.write_text('{"status":"passed"}\n', encoding="utf-8")
+        for index in range(2, 6):
+            row = store.reserve(
+                attempt_id=f"00000000-0000-4000-8000-{index:012d}",
+                subject_head_sha=subject,
+                profile_sha256="a" * 64,
+                execution_relation="release-candidate",
+                runner_sha256="b" * 64,
+            )
+            failed = root / "artifacts" / f"attempt-{index}.json"
+            failed.write_text('{"status":"failed"}\n', encoding="utf-8")
+            store.finalize(
+                attempt_id=row["attempt_id"],
+                classification="unpublished",
+                exit_status=1,
+                artifact_path=failed,
+            )
+        try:
+            store.reserve(
+                attempt_id="00000000-0000-4000-8000-000000000006",
+                subject_head_sha=subject,
+                profile_sha256="a" * 64,
+                execution_relation="release-candidate",
+                runner_sha256="b" * 64,
+            )
+        except ledger_module.AttemptLedgerError as exc:
+            assert "sixth" in str(exc)
+        else:
+            raise AssertionError("sixth authoritative release attempt must fail closed")
+
+
+def test_release_final_runner_records_success_and_failure_without_caller_rows() -> None:
+    verification = load_script("verification_receipt.py")
+    subject = git("rev-parse", "HEAD")
+    with tempfile.TemporaryDirectory(prefix="rc3-runner-ledger.") as raw:
+        root = Path(raw)
+        ledger_root = root / "ledger"
+        staging = root / "staging"
+        diagnostics = ledger_root / "diagnostics"
+        profile = verification.GateProfile(
+            "release-final",
+            (
+                verification.GateCommand(
+                    "proof",
+                    ("python3", "-c", "print('bounded proof')"),
+                ),
+            ),
+        )
+        passed = ledger_root / "attempts" / "passed"
+        passed.parent.mkdir(parents=True)
+        verification.execute_gate(
+            profile,
+            root=ROOT,
+            output_dir=passed,
+            diagnostic_root=diagnostics,
+            staging_root=staging,
+            attempt_id="10000000-0000-4000-8000-000000000001",
+            expected_head=subject,
+            execution_relation="release-candidate",
+            attempt_ledger_root=ledger_root,
+        )
+        rows = load_script("rc3_attempt_ledger.py").AttemptLedgerStore(
+            ledger_root
+        ).load()["attempts"]
+        assert len(rows) == 1 and rows[0]["state"] == "published"
+        assert rows[0]["artifact_pointer"] == "attempts/passed/receipt.json"
+
+        failing = verification.GateProfile(
+            "release-final",
+            (
+                verification.GateCommand(
+                    "failure",
+                    ("python3", "-c", "raise SystemExit(7)"),
+                ),
+            ),
+        )
+        try:
+            verification.execute_gate(
+                failing,
+                root=ROOT,
+                output_dir=ledger_root / "attempts" / "failed",
+                diagnostic_root=diagnostics,
+                staging_root=staging,
+                attempt_id="10000000-0000-4000-8000-000000000002",
+                expected_head=subject,
+                execution_relation="release-candidate",
+                attempt_ledger_root=ledger_root,
+            )
+        except verification.ReceiptError as exc:
+            assert "exited 7" in str(exc)
+        else:
+            raise AssertionError("failed release-final attempt was accepted")
+        rows = load_script("rc3_attempt_ledger.py").AttemptLedgerStore(
+            ledger_root
+        ).load()["attempts"]
+        assert [row["state"] for row in rows] == ["published", "unpublished"]
 
 
 def test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2() -> None:
@@ -279,178 +439,210 @@ def test_shell_scratch_helper_honors_constrained_tmpdir() -> None:
         assert ">/tmp/" not in source
 
 
-def gate_receipt_bytes(subject_head_sha: str) -> bytes:
-    return (
-        json.dumps(
+def write_gate_bundle(root: Path, subject: str) -> Path:
+    verification = load_script("verification_receipt.py")
+    profile = verification.PROFILES["release-final"]
+    bundle = root / "gate"
+    bundle.mkdir()
+    commands = []
+    for index, command in enumerate(profile.commands, 1):
+        name = f"{index:02d}-{command.command_id}.log"
+        output = bundle / name
+        output.write_bytes(b"")
+        commands.append(
             {
-                "schema_version": 1,
-                "status": "passed",
-                "subject_head_sha": subject_head_sha,
-                "profile_sha256": "b" * 64,
-                "commands": [
-                    {
-                        "command_id": "full-tests",
-                        "exit_code": 0,
-                        "output_sha256": "c" * 64,
-                    }
-                ],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n"
-    ).encode()
-
-
-def review(role: str) -> dict[str, str]:
-    return {
-        "role": role,
-        "review_id": f"review-{role}",
-        "verdict": "approved",
-        "receipt_sha256": "d" * 64,
-    }
-
-
-def test_candidate_budget_counts_every_attempt_and_stops_before_six() -> None:
-    subject = git("rev-parse", "HEAD")
-    attempts = [
-        {
-            "attempt_id": f"rc3-attempt-{index}",
-            "classification": classification,
-            "subject_head_sha": subject,
-            "profile_sha256": "b" * 64,
-            "receipt_sha256": f"{index}" * 64,
-            "exit_status": 0 if classification == "published" else 1,
-        }
-        for index, classification in enumerate(
-            ("published", "unpublished", "test-only", "unpublished", "published"),
-            start=1,
-        )
-    ]
-    ledger = {"schema_version": 1, "release": "2.6.6-rc3", "attempts": attempts}
-    assert disposition.evaluate_attempt_budget(ROOT, ledger) == {
-        "schema_version": 1,
-        "maximum_attempts": 5,
-        "attempts_consumed": 5,
-        "attempts_remaining": 0,
-        "state": "exhausted",
-        "next_attempt_ordinal": None,
-        "classification_counts": {
-            "published": 2,
-            "test-only": 1,
-            "unpublished": 2,
-        },
-    }
-    sixth = copy.deepcopy(ledger)
-    sixth["attempts"].append({**attempts[-1], "attempt_id": "rc3-attempt-6"})
-    try:
-        disposition.evaluate_attempt_budget(ROOT, sixth)
-    except disposition.DispositionError as exc:
-        assert "sixth full-profile attempt" in str(exc)
-    else:
-        raise AssertionError("a sixth candidate attempt must have zero authority")
-
-
-def test_release_disposition_binds_gate_reviews_findings_and_waivers() -> None:
-    subject = git("rev-parse", "HEAD")
-    gate = gate_receipt_bytes(subject)
-    ledger = {
-        "schema_version": 1,
-        "release": "2.6.6-rc3",
-        "attempts": [
-            {
-                "attempt_id": "rc3-attempt-1",
-                "classification": "published",
-                "subject_head_sha": subject,
-                "profile_sha256": "b" * 64,
-                "receipt_sha256": hashlib.sha256(gate).hexdigest(),
-                "exit_status": 0,
+                "command_id": command.command_id,
+                "argv": list(command.argv),
+                "cwd": ".",
+                "exit_code": 0,
+                "started_at": "2026-08-07T00:00:00Z",
+                "finished_at": "2026-08-07T00:00:00Z",
+                "output_pointer": name,
+                "output_sha256": hashlib.sha256(b"").hexdigest(),
+                "output_bytes": 0,
+                "observations": {},
             }
-        ],
+        )
+    receipt = {
+        "schema_version": 1,
+        "attempt_id": "00000000-0000-4000-8000-000000000001",
+        "profile": "release-final",
+        "profile_sha256": profile.sha256,
+        "subject_head_sha": subject,
+        "subject_tree_sha": git("rev-parse", f"{subject}^{{tree}}"),
+        "execution_relation": "release-candidate",
+        "started_at": "2026-08-07T00:00:00Z",
+        "finished_at": "2026-08-07T00:00:00Z",
+        "runner": "verification_receipt.py",
+        "runner_sha256": hashlib.sha256(
+            (ROOT / "scripts/verification_receipt.py").read_bytes()
+        ).hexdigest(),
+        "commands": commands,
+        "status": "passed",
     }
-    reviews = [review("fable"), review("independent-configured")]
-    findings = [
-        {
-            "finding_id": "RC2.E1.MACHINE_INVENTORY_MISSING",
-            "disposition": "fixed",
-            "evidence_sha256": "e" * 64,
-        },
-        {
-            "finding_id": "RC2.E3.SLICE_RECEIPTS_MISSING",
-            "disposition": "waived",
-            "waiver_id": "D-266-RC3-RC2-HISTORY",
-        },
-    ]
-    waivers = [
-        {
-            "waiver_id": "D-266-RC3-RC2-HISTORY",
-            "finding_id": "RC2.E3.SLICE_RECEIPTS_MISSING",
-            "approved_by": "approved-plan",
-            "rationale": "RC2 history remains absent; RC3 receipts are prospective only.",
-            "evidence_sha256": "f" * 64,
-        }
-    ]
-    compiled = disposition.compile_disposition(
-        ROOT,
-        subject_head_sha=subject,
-        gate_receipt_bytes=gate,
-        attempt_ledger=ledger,
-        reviews=reviews,
-        findings=findings,
-        waivers=waivers,
-    )
-    assert compiled["outcome"] == "approved"
-    assert compiled == disposition.compile_disposition(
-        ROOT,
-        subject_head_sha=subject,
-        gate_receipt_bytes=gate,
-        attempt_ledger=ledger,
-        reviews=reviews,
-        findings=findings,
-        waivers=waivers,
-    )
-    disposition.validate_disposition(ROOT, compiled, gate_receipt_bytes=gate)
+    path = bundle / "receipt.json"
+    path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+    return path
 
-    for changed_gate, changed_reviews, changed_waivers, reason in (
-        (
-            gate_receipt_bytes(BASE_SHA),
-            reviews,
-            waivers,
-            "gate subject does not match candidate HEAD",
-        ),
-        (gate, reviews[:1], waivers, "both configured review roles"),
-        (gate, reviews, [], "waiver coverage is incomplete"),
-    ):
+
+def write_review_bundle(root: Path, role: str, subject: str) -> tuple[Path, Path]:
+    axis = {
+        "fable": "anthropic-holistic",
+        "independent-configured": "openai-holistic",
+    }[role]
+    directory = root / role
+    directory.mkdir()
+    operation = f"review-operation-{role}"
+    run = f"review-run-{role}"
+    meta = {
+        "schema_version": 1,
+        "axis": axis,
+        "head_sha": subject,
+        "operation_id": operation,
+        "parent_session_operation_id": f"review-parent-{role}",
+        "review_id": f"review-{role}",
+        "review_purpose": "release",
+        "run_id": run,
+        "verification_iteration": 0,
+        "verification_profile": {"name": "release-final", "sha256": "e" * 64},
+    }
+    payload = {
+        "schema_version": 1,
+        "axis": axis,
+        "parent_session_operation_id": f"review-parent-{role}",
+        "verification_iteration": 0,
+        "verdict": "approved",
+        "findings": [],
+    }
+    callback = {
+        "schema_version": 1,
+        "callback_id": f"callback-{role}",
+        "kind": "review",
+        "operation_id": operation,
+        "run_id": run,
+        "payload": payload,
+        "payload_sha256": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
+    meta_path = directory / ".review-meta.json"
+    callback_path = directory / ".review-callback.json"
+    meta_path.write_text(json.dumps(meta, sort_keys=True) + "\n", encoding="utf-8")
+    callback_path.write_text(
+        json.dumps(callback, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return meta_path, callback_path
+
+
+def test_release_disposition_binds_actual_gate_reviews_and_findings() -> None:
+    subject = git("rev-parse", "HEAD")
+    ledger_module = load_script("rc3_attempt_ledger.py")
+    with tempfile.TemporaryDirectory(prefix="rc3-disposition.") as raw:
+        evidence = Path(raw)
+        gate = write_gate_bundle(evidence, subject)
+        gate_value = json.loads(gate.read_text(encoding="utf-8"))
+        ledger = ledger_module.AttemptLedgerStore(evidence)
+        ledger.reserve(
+            attempt_id=gate_value["attempt_id"],
+            subject_head_sha=subject,
+            profile_sha256=gate_value["profile_sha256"],
+            execution_relation="release-candidate",
+            runner_sha256=gate_value["runner_sha256"],
+        )
+        ledger.finalize(
+            attempt_id=gate_value["attempt_id"],
+            classification="published",
+            exit_status=0,
+            artifact_path=gate,
+        )
+
+        manifest_rows = []
+        for role in ("fable", "independent-configured"):
+            meta, callback = write_review_bundle(evidence, role, subject)
+            manifest_rows.append(
+                {
+                    "role": role,
+                    "meta": meta.relative_to(evidence).as_posix(),
+                    "callback": callback.relative_to(evidence).as_posix(),
+                }
+            )
+        manifest = evidence / "reviews.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "subject_head_sha": subject,
+                    "reviews": manifest_rows,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        proof = evidence / "focused-tests.log"
+        proof.write_text("RC3 focused evidence GREEN\n", encoding="utf-8")
+        findings = evidence / "findings.json"
+        findings.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "subject_head_sha": subject,
+                    "findings": [
+                        {
+                            "finding_id": "RC3.E1.EXACT_HEAD_INVENTORY_DRIFT",
+                            "disposition": "fixed",
+                            "evidence": proof.name,
+                        }
+                    ],
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        compiled = disposition.compile_disposition(
+            ROOT,
+            subject_head_sha=subject,
+            gate_receipt_path=gate,
+            attempt_ledger_root=evidence,
+            review_manifest_path=manifest,
+            finding_evidence_path=findings,
+        )
+        assert compiled["outcome"] == "approved"
+        disposition.validate_disposition(
+            ROOT,
+            compiled,
+            gate_receipt_path=gate,
+            attempt_ledger_root=evidence,
+            review_manifest_path=manifest,
+            finding_evidence_path=findings,
+        )
+
+        callback_path = evidence / "fable" / ".review-callback.json"
+        callback = json.loads(callback_path.read_text(encoding="utf-8"))
+        callback["payload"]["verdict"] = "changes-requested"
+        callback_path.write_text(json.dumps(callback) + "\n", encoding="utf-8")
         try:
             disposition.compile_disposition(
                 ROOT,
                 subject_head_sha=subject,
-                gate_receipt_bytes=changed_gate,
-                attempt_ledger=ledger,
-                reviews=changed_reviews,
-                findings=findings,
-                waivers=changed_waivers,
+                gate_receipt_path=gate,
+                attempt_ledger_root=evidence,
+                review_manifest_path=manifest,
+                finding_evidence_path=findings,
             )
         except disposition.DispositionError as exc:
-            assert reason in str(exc)
+            assert "review receipt identity" in str(exc)
         else:
-            raise AssertionError(f"release disposition accepted drift: {reason}")
-
-    try:
-        disposition.validate_disposition(
-            ROOT, compiled, gate_receipt_bytes=gate + b"stale"
-        )
-    except disposition.DispositionError as exc:
-        assert "gate receipt digest drift" in str(exc)
-    else:
-        raise AssertionError("stale gate bytes must invalidate the disposition")
+            raise AssertionError("callback payload drift must fail closed")
 
 
 if __name__ == "__main__":
     test_machine_inventory_recomputes_exact_values_and_rejects_drift()
+    test_release_attempt_ledger_is_append_only_gap_free_and_artifact_bound()
+    test_release_final_runner_records_success_and_failure_without_caller_rows()
     test_prospective_slice_receipts_are_immutable_and_never_backfill_rc2()
     test_coverage_comparator_accepts_only_the_narrow_typed_tolerance()
     test_shell_scratch_helper_honors_constrained_tmpdir()
-    test_candidate_budget_counts_every_attempt_and_stops_before_six()
-    test_release_disposition_binds_gate_reviews_findings_and_waivers()
+    test_release_disposition_binds_actual_gate_reviews_and_findings()
     print("RC3 release evidence contracts passed")

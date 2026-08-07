@@ -23,9 +23,9 @@
 
 ### Добавлено
 
-- Добавлены exact-tree machine inventory, prospective receipts по каждому
-  slice и typed compiler для candidate-attempt budget и финального release
-  disposition.
+- Добавлены внешние post-commit exact-tree inventory sidecar, prospective
+  receipts по каждому slice, append-only attempt ledger и typed compiler над
+  реальными gate/review/finding bytes.
 - Добавлены воспроизводимые coverage observations и переносимый allocator
   scratch-каталогов shell-тестов для ограниченной macOS-среды.
 - Добавлены исполняемая карта RC3 evidence и сфокусированные контракты

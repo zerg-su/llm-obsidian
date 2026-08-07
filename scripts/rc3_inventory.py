@@ -186,7 +186,13 @@ def build_inventory(
     }
 
 
-def validate_inventory(root: Path, payload: object) -> None:
+def validate_inventory(
+    root: Path,
+    payload: object,
+    *,
+    expected_baseline_sha: str,
+    expected_candidate_sha: str,
+) -> None:
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         raise InventoryError("inventory schema is invalid")
     if payload.get("release") != "2.6.6-rc3" or payload.get("dispositions") != DISPOSITIONS:
@@ -195,6 +201,12 @@ def validate_inventory(root: Path, payload: object) -> None:
     candidate = payload.get("candidate")
     if not isinstance(baseline, dict) or not isinstance(candidate, dict):
         raise InventoryError("inventory subjects are missing")
+    expected_baseline = _exact_commit(root, expected_baseline_sha)
+    expected_candidate = _exact_commit(root, expected_candidate_sha)
+    if baseline.get("commit_sha") != expected_baseline:
+        raise InventoryError("inventory baseline subject drift")
+    if candidate.get("commit_sha") != expected_candidate:
+        raise InventoryError("inventory candidate subject drift")
     if baseline != snapshot(root, baseline.get("commit_sha")):
         raise InventoryError("baseline counters drift")
     if candidate != snapshot(root, candidate.get("commit_sha")):
@@ -209,6 +221,8 @@ def main() -> int:
     build.add_argument("--candidate", required=True)
     check = subparsers.add_parser("check")
     check.add_argument("path", type=Path)
+    check.add_argument("--expected-baseline", required=True)
+    check.add_argument("--expected-candidate", required=True)
     args = parser.parse_args()
     try:
         if args.command == "build":
@@ -216,7 +230,12 @@ def main() -> int:
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
             payload = json.loads(args.path.read_text(encoding="utf-8"))
-            validate_inventory(ROOT, payload)
+            validate_inventory(
+                ROOT,
+                payload,
+                expected_baseline_sha=args.expected_baseline,
+                expected_candidate_sha=args.expected_candidate,
+            )
             print("RC3 machine inventory: valid")
     except (InventoryError, OSError, json.JSONDecodeError, SyntaxError) as exc:
         print(f"RC3 machine inventory: {exc}")

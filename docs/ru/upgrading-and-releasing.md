@@ -37,21 +37,29 @@ python3 scripts/validate-vault.py --summary
 git diff --check v2.6.6-rc2..HEAD
 ```
 
-Для `2.6.6-rc3` сначала проверьте code-owned inventory и механический budget:
+Для `2.6.6-rc3` используйте один owner-controlled evidence root вне checkout.
+Он не меняет exact HEAD, который проверяет. Сначала создайте и проверьте
+inventory sidecar, передав ожидаемый HEAD независимо от содержимого sidecar:
 
 ```bash
-python3 scripts/rc3_inventory.py build --baseline b86a33d779bd8852915a4b875f12ef9a9b7366b3 --candidate "$(git rev-parse HEAD)"
-python3 scripts/rc3_release_disposition.py budget docs/acceptance/v2.6.6-rc3-attempt-ledger.json
+RC3_EVIDENCE_ROOT=/private/tmp/llm-obsidian-2.6.6-rc3-evidence
+mkdir -p "$RC3_EVIDENCE_ROOT"
+RC3_HEAD=$(git rev-parse HEAD)
+python3 scripts/rc3_inventory.py build --baseline b86a33d779bd8852915a4b875f12ef9a9b7366b3 --candidate "$RC3_HEAD" > "$RC3_EVIDENCE_ROOT/machine-inventory.json"
+python3 scripts/rc3_inventory.py check "$RC3_EVIDENCE_ROOT/machine-inventory.json" --expected-baseline b86a33d779bd8852915a4b875f12ef9a9b7366b3 --expected-candidate "$RC3_HEAD"
+python3 scripts/rc3_release_disposition.py budget --attempt-ledger-root "$RC3_EVIDENCE_ROOT"
 ```
 
 Release candidate включает changelogs, version manifests, RC3 release notes,
-machine inventory, prospective slice receipts, две coverage observations,
-attempt ledger и typed final disposition. Exact gate receipt содержит полный
-40-character SHA, profile digest, команды, exit codes и output digests. После
-получения двух review verdicts проверьте concrete disposition:
+prospective slice receipts и две coverage observations. Exact-head inventory,
+attempt ledger, gate bundle, review callbacks и typed disposition создаются
+после commit во внешнем evidence root. Поэтому они не делают проверяемый HEAD
+stale. `release-final` запускается только с
+`--attempt-ledger-root "$RC3_EVIDENCE_ROOT"`; runner резервирует попытку до
+первой команды. После двух release review проверьте concrete disposition:
 
 ```bash
-python3 scripts/rc3_release_disposition.py check docs/acceptance/v2.6.6-rc3-release-disposition.json --gate-receipt docs/acceptance/evidence/v2.6.6-rc3/release/receipt.json
+python3 scripts/rc3_release_disposition.py check "$RC3_EVIDENCE_ROOT/release-disposition.json" --gate-receipt "$RC3_EVIDENCE_ROOT/release/receipt.json" --attempt-ledger-root "$RC3_EVIDENCE_ROOT" --review-manifest "$RC3_EVIDENCE_ROOT/reviews.json" --finding-evidence "$RC3_EVIDENCE_ROOT/findings.json"
 ```
 
 Новый product commit делает gate и disposition stale и требует нового

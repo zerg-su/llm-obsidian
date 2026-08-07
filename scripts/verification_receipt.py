@@ -25,6 +25,7 @@ from verification_staging import (
     ExternalPublicationStaging,
     VerificationStagingError,
 )
+from rc3_attempt_ledger import AttemptLedgerError, AttemptLedgerStore
 
 
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -274,6 +275,7 @@ def execute_gate(
     attempt_id: str,
     expected_head: str,
     execution_relation: str,
+    attempt_ledger_root: Path | None = None,
 ) -> dict[str, object]:
     """Run every command before atomically publishing any evidence bytes."""
 
@@ -324,6 +326,21 @@ def execute_gate(
         raise ReceiptError(str(exc)) from exc
     started_at = _utc_now()
     runner_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    ledger = None
+    if profile.name == "release-final":
+        if attempt_ledger_root is None:
+            raise ReceiptError("release-final requires an authoritative attempt ledger")
+        ledger = AttemptLedgerStore(attempt_ledger_root)
+        try:
+            ledger.reserve(
+                attempt_id=attempt_id,
+                subject_head_sha=head,
+                profile_sha256=profile.sha256,
+                execution_relation=execution_relation,
+                runner_sha256=runner_sha256,
+            )
+        except AttemptLedgerError as exc:
+            raise ReceiptError(str(exc)) from exc
     staging = staging_store.create(attempt_id)
     commands: list[dict[str, object]] = []
     try:
@@ -458,9 +475,57 @@ def execute_gate(
         )
         write_path.chmod(0o644)
         staging_store.publish(staging, output_dir)
+        if ledger is not None:
+            try:
+                ledger.finalize(
+                    attempt_id=attempt_id,
+                    classification=(
+                        "published"
+                        if execution_relation == "release-candidate"
+                        else "test-only"
+                    ),
+                    exit_status=0,
+                    artifact_path=output_dir / "receipt.json",
+                )
+            except AttemptLedgerError as exc:
+                raise ReceiptError("release attempt ledger finalization failed") from exc
         return receipt
-    except BaseException:
+    except BaseException as failure:
         staging_store.cleanup(staging)
+        if ledger is not None:
+            diagnostic = diagnostic_root / attempt_id / "diagnostic-receipt.json"
+            if not diagnostic.is_file():
+                diagnostic = ledger.root / "artifacts" / f"{attempt_id}.failure.json"
+                diagnostic.parent.mkdir(parents=True, exist_ok=True)
+                diagnostic.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "type": "release-attempt-failure",
+                            "attempt_id": attempt_id,
+                            "subject_head_sha": head,
+                            "profile_sha256": profile.sha256,
+                            "failure_type": type(failure).__name__,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            try:
+                ledger.finalize(
+                    attempt_id=attempt_id,
+                    classification=(
+                        "test-only"
+                        if execution_relation == "exact-head-reconstruction"
+                        else "unpublished"
+                    ),
+                    exit_status=1,
+                    artifact_path=diagnostic,
+                )
+            except AttemptLedgerError as exc:
+                raise ReceiptError("release attempt ledger failure was not retained") from exc
         raise
 
 
@@ -571,6 +636,7 @@ def main() -> int:
         choices=("exact-head-reconstruction", "release-candidate"),
         required=True,
     )
+    run.add_argument("--attempt-ledger-root", type=Path)
     verify = sub.add_parser("verify")
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--expected-head", required=True)
@@ -587,6 +653,7 @@ def main() -> int:
                 attempt_id=args.attempt_id,
                 expected_head=args.expected_head,
                 execution_relation=args.execution_relation,
+                attempt_ledger_root=args.attempt_ledger_root,
             )
             print(json.dumps(receipt, sort_keys=True))
         else:

@@ -17,8 +17,9 @@ without expanding runtime capability or lifecycle authority.
 
 ### Added
 
-- Added exact-tree machine inventory, prospective per-slice receipts, and a
-  typed compiler for candidate-attempt budgets and final release disposition.
+- Added post-commit exact-tree inventory sidecars, prospective per-slice
+  receipts, an append-only attempt ledger, and a typed compiler over actual
+  gate/review/finding bytes.
 - Added reproducible coverage observations and a portable shell-test scratch
   allocator for constrained macOS environments.
 - Added an executable RC3 evidence map plus focused documentation and release
