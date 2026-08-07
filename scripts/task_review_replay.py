@@ -11,6 +11,34 @@ from harness.workflows.review import (
     runtime_status_is_live,
 )
 from harness.workflows.review_gate import ReviewGateController
+from task_review_shared import TaskReviewError
+
+
+def _pending_gate_replay(
+    gate: ReviewGateController, store: OperationStore, task_id: str
+) -> bool:
+    """Resume only an unbound zero-lane gate owned by its live dispatch."""
+    if not gate.state_path.exists():
+        return False
+    initial_state = gate.read()
+    if (
+        initial_state.get("status") == "attention-required"
+        and initial_state.get("lanes") == []
+    ):
+        try:
+            dispatch_record = store.read(task_id, task_id)
+        except StoreError:
+            dispatch_record = None
+        if dispatch_record is not None and dispatch_record.state not in {
+            "attention-required",
+            *TERMINAL,
+        }:
+            gate.resume_unbound_attention()
+            initial_state = gate.read()
+    pending = initial_state.get("status") == "pending"
+    if pending and initial_state.get("lanes") != []:
+        raise TaskReviewError("pending review gate already owns lanes")
+    return pending
 
 
 def _pending_replay_is_safe(
