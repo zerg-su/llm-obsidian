@@ -397,8 +397,8 @@ def _complete_ready_results(
     worktree: Path,
     vault: Path,
     runtime_root: Path,
-    already_awaiting: bool = False,
-) -> None:
+    already_awaiting: bool = False, exact_attempt: bool = False,
+) -> tuple[str, ...]:
     has_material = any(
         result.verdict == "changes-requested"
         and any(
@@ -415,45 +415,24 @@ def _complete_ready_results(
     )
     ordered = (
         ready
-        if defer_resolution or context.purpose != "release"
+        if exact_attempt or defer_resolution or context.purpose != "release"
         else sorted(ready, key=lambda item: item[2].verdict != "approve")
     )
+    actions: list[str] = []
     for lane, round_, result in ordered:
+        if exact_attempt and _ready_result_is_recorded(gate, gate.read(), result):
+            continue
         decision = (
-            gate.defer_round_for_resolution(run, lane, round_, result)
+            gate.complete_attempt_round(run, lane, round_, result)
+            if exact_attempt
+            else gate.defer_round_for_resolution(run, lane, round_, result)
             if defer_resolution
             else gate.complete_round(run, lane, round_, result)
         )
-        _record_accepted_result(
-            worktree, vault, runtime_root, round_, result
-        )
-        if decision.action == "attention-required":
-            break
-
-
-def _complete_exact_ready_results(
-    *,
-    gate: ReviewGateController,
-    run: ReviewGateRun,
-    ready: list[tuple[object, ReviewRound, ReviewResult]],
-    worktree: Path,
-    vault: Path,
-    runtime_root: Path,
-) -> tuple[str, ...]:
-    """Persist every first-missing exact callback in canonical lane order."""
-
-    state = gate.read()
-    actions: list[str] = []
-    for lane, round_, result in ready:
-        if _ready_result_is_recorded(gate, state, result):
-            continue
-        decision = gate.complete_attempt_round(run, lane, round_, result)
-        _record_accepted_result(
-            worktree, vault, runtime_root, round_, result
-        )
+        _record_accepted_result(worktree, vault, runtime_root, round_, result)
         actions.append(decision.action)
-        state = gate.read()
-        if decision.action != "awaiting-axes":
+        if (decision.action != "awaiting-axes" if exact_attempt
+                else decision.action == "attention-required"):
             break
     return tuple(actions)
 
@@ -688,13 +667,16 @@ def _run_exact_head_review(
         raise ReviewAttemptError("review attempt is not at a callback boundary")
     run = gate.rehydrate_attempt()
     ready = _collect_ready_results(run, runtime_root, worktree, vault)
-    _complete_exact_ready_results(
+    _complete_ready_results(
         gate=gate,
         run=run,
         ready=ready,
+        preset=preset,
+        context=context,
         worktree=worktree,
         vault=vault,
         runtime_root=runtime_root,
+        exact_attempt=True,
     )
     next_state = gate.read()
     next_status = str(next_state.get("status") or "")

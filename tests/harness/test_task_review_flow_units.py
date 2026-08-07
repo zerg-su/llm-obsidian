@@ -34,7 +34,7 @@ from harness.workflows.review_gate import (  # noqa: E402
     ReviewPreset,
 )
 from task_review_flow import (  # noqa: E402
-    _complete_exact_ready_results,
+    _complete_ready_results,
     _ready_result_is_recorded,
     _resume_bound_attention,
 )
@@ -487,13 +487,16 @@ with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
 
     publish(first_lane)
     first_ready = _collect_ready_results(run, runtime_root, base, base)
-    first_decisions = _complete_exact_ready_results(
+    first_decisions = _complete_ready_results(
         gate=gate,
         run=run,
         ready=first_ready,
+        preset=preset,
+        context=context,
         worktree=base,
         vault=base,
         runtime_root=runtime_root,
+        exact_attempt=True,
     )
     prefix_state = gate.read()
     check(
@@ -514,13 +517,16 @@ with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
     )
     publish(second_lane)
     final_ready = _collect_ready_results(recovered, runtime_root, base, base)
-    final_decisions = _complete_exact_ready_results(
+    final_decisions = _complete_ready_results(
         gate=gate,
         run=recovered,
         ready=final_ready,
+        preset=preset,
+        context=context,
         worktree=base,
         vault=base,
         runtime_root=runtime_root,
+        exact_attempt=True,
     )
     terminal_state = gate.read()
     check(
@@ -683,13 +689,18 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
             ready = _collect_ready_results(
                 recovered, runtime_root, base, base
             )
-            decisions = _complete_exact_ready_results(
+            decisions = _complete_ready_results(
                 gate=gate,
                 run=recovered,
                 ready=ready,
+                preset=ReviewPreset.from_flags(
+                    deep=mode == "deep", full=mode == "full"
+                ),
+                context=context,
                 worktree=base,
                 vault=base,
                 runtime_root=runtime_root,
+                exact_attempt=True,
             )
             state = gate.read()
             terminal = prefix == expected_lanes
@@ -716,13 +727,18 @@ for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
             duplicate_ready = _collect_ready_results(
                 recovered, runtime_root, base, base
             )
-            duplicate_decisions = _complete_exact_ready_results(
+            duplicate_decisions = _complete_ready_results(
                 gate=gate,
                 run=recovered,
                 ready=duplicate_ready,
+                preset=ReviewPreset.from_flags(
+                    deep=mode == "deep", full=mode == "full"
+                ),
+                context=context,
                 worktree=base,
                 vault=base,
                 runtime_root=runtime_root,
+                exact_attempt=True,
             )
             check(
                 f"{mode} duplicate prefix {prefix} performs zero effects",
