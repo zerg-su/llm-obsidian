@@ -16,6 +16,22 @@
 внутренними контрольными точками и вошли в следующие публичные релизы; тегов и
 пакетов с этими номерами не выпускалось.
 
+## [2.6.6-rc1-fix1] — 2026-08-07
+
+Этот промежуточный патч RC1 исправляет четыре сбоя dispatch, обнаруженные при
+dogfood packaged-релиза. Scope lifecycle и orchestration RC1 не расширяется.
+
+### Исправлено
+
+- Codex resume жёстко привязан к task worktree, поэтому native-диалог выбора
+  текущей папки не может перенаправить unattended continuation.
+- При сбое до доставки input сохраняются bounded provider-start diagnostics и
+  receipts этапов transport.
+- Harness ждёт готовности свежего cmux terminal перед отправкой команды и
+  переносит временные пустые или malformed чтения surface.
+- Exact-HEAD `review.mode=skip` завершается через code-owned review path без
+  создания reviewer/provider effects.
+
 ## [2.6.6-rc1] — 2026-08-07
 
 Этот release candidate упрощает lifecycle по принципу deletion-first. Он

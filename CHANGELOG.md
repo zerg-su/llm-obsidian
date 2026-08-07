@@ -10,6 +10,22 @@ Only public releases are listed. Versions 2.0.5, 2.1.1, and 2.4.0 were internal
 checkpoints folded into the following public releases; no public tags or
 packages were published for them.
 
+## [2.6.6-rc1-fix1] - 2026-08-07
+
+This interim RC1 patch fixes four dispatch failures found while dogfooding the
+packaged release. It does not broaden the RC1 lifecycle or orchestration scope.
+
+### Fixed
+
+- Pinned Codex resume launches to the task worktree so a native current-folder
+  chooser cannot redirect an unattended continuation.
+- Preserved bounded provider-start diagnostics and transport-stage receipts
+  when a launch fails before input delivery.
+- Waited for a fresh cmux terminal to become readable before sending the task
+  command, tolerating transient empty and malformed surface reads.
+- Made exact-HEAD `review.mode=skip` terminalize through the code-owned review
+  path without creating reviewer or provider effects.
+
 ## [2.6.6-rc1] - 2026-08-07
 
 This release candidate is a deletion-first lifecycle simplification. It removes
