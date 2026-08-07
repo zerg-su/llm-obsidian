@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "manifest_sha256",
+    "denominator_source",
+    "denominator_source_sha256",
+    "exact_head_sha",
+    "excluded_transports",
+    "states",
+    "events",
+    "edges",
+    "forbidden",
+    "cases",
+    "verdict"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "manifest_id": {
+      "type": "string",
+      "const": "lifecycle-transition-v1"
+    },
+    "manifest_sha256": {
+      "type": "string"
+    },
+    "denominator_source": {
+      "type": "string",
+      "const": "scripts/harness/state_machine.py"
+    },
+    "denominator_source_sha256": {
+      "type": "string"
+    },
+    "exact_head_sha": {
+      "type": "string"
+    },
+    "excluded_transports": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["research"]
+      }
+    },
+    "states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declared",
+        "production",
+        "missing",
+        "extra",
+        "terminal_declared",
+        "terminal_production"
+      ],
+      "properties": {
+        "declared": {
+          "type": "integer"
+        },
+        "production": {
+          "type": "integer"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "terminal_declared": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "terminal_production": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "production", "missing", "extra"],
+      "properties": {
+        "declared": {
+          "type": "integer"
+        },
+        "production": {
+          "type": "integer"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "production",
+        "visited",
+        "missing",
+        "extra",
+        "unclassified",
+        "unvisited"
+      ],
+      "properties": {
+        "supported": {
+          "type": "integer"
+        },
+        "production": {
+          "type": "integer"
+        },
+        "visited": {
+          "type": "integer"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unclassified": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unvisited": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "forbidden": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declared",
+        "rejected",
+        "accepted",
+        "closure_pairs",
+        "closure_rejected",
+        "closure_accepted"
+      ],
+      "properties": {
+        "declared": {
+          "type": "integer"
+        },
+        "rejected": {
+          "type": "integer"
+        },
+        "accepted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "closure_pairs": {
+          "type": "integer"
+        },
+        "closure_rejected": {
+          "type": "integer"
+        },
+        "closure_accepted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "witness",
+          "edges_visited",
+          "production_paths",
+          "observations",
+          "passed"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "callback-order",
+              "changes-requested",
+              "cleanup",
+              "crash-point",
+              "finalization",
+              "fix-loop",
+              "release-disposition"
+            ]
+          },
+          "witness": {
+            "type": "string"
+          },
+          "edges_visited": {
+            "type": "integer"
+          },
+          "production_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observations": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["complete", "incomplete"]
+    }
+  }
+}

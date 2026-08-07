@@ -1,0 +1,810 @@
+{
+  "cases": [
+    {
+      "case_id": "approval",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "finalizing",
+          "exiting",
+          "complete"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "finalizing"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "finalizing"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "verifying"
+        ]
+      ],
+      "witness": "review-approve-route"
+    },
+    {
+      "case_id": "callback-order",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "finalizing"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "running"
+        ]
+      ],
+      "witness": "callback-one-shot-order"
+    },
+    {
+      "case_id": "changes-requested",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "running"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "verifying",
+          "running"
+        ]
+      ],
+      "witness": "review-changes-requested-route"
+    },
+    {
+      "case_id": "cleanup",
+      "paths": [
+        [
+          "created",
+          "cancelling",
+          "exiting",
+          "cancelled"
+        ],
+        [
+          "created",
+          "preflight",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "finalizing",
+          "cancelling"
+        ]
+      ],
+      "witness": "exact-surface-cleanup"
+    },
+    {
+      "case_id": "crash-point",
+      "paths": [
+        [
+          "created",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "finalizing",
+          "failed"
+        ],
+        [
+          "created",
+          "cancelling",
+          "failed"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "finalizing",
+          "exiting",
+          "failed"
+        ],
+        [
+          "created",
+          "attention-required",
+          "failed"
+        ]
+      ],
+      "witness": "durable-transition-crash-point"
+    },
+    {
+      "case_id": "finalization",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "finalizing",
+          "exiting",
+          "complete"
+        ]
+      ],
+      "witness": "summary-two-read-stability"
+    },
+    {
+      "case_id": "fix-loop",
+      "paths": [
+        [
+          "created",
+          "attention-required",
+          "created"
+        ],
+        [
+          "created",
+          "preflight",
+          "attention-required",
+          "preflight"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "attention-required",
+          "starting"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "attention-required",
+          "running"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "attention-required",
+          "awaiting-callback"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "attention-required",
+          "verifying"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "finalizing",
+          "attention-required",
+          "finalizing"
+        ],
+        [
+          "created",
+          "cancelling",
+          "attention-required",
+          "cancelling"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "finalizing",
+          "exiting",
+          "attention-required",
+          "exiting"
+        ]
+      ],
+      "witness": "review-blocked-attention-route"
+    },
+    {
+      "case_id": "release-disposition",
+      "paths": [
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "awaiting-callback",
+          "verifying",
+          "finalizing",
+          "exiting",
+          "complete"
+        ],
+        [
+          "created",
+          "cancelling",
+          "exiting",
+          "cancelled"
+        ],
+        [
+          "created",
+          "preflight",
+          "starting",
+          "running",
+          "failed"
+        ]
+      ],
+      "witness": "release-disposition-classification"
+    }
+  ],
+  "denominator_source": "scripts/harness/state_machine.py",
+  "edge_classes": [
+    "admission",
+    "attention",
+    "cancellation",
+    "cleanup",
+    "execution",
+    "failure",
+    "finalization",
+    "recovery"
+  ],
+  "events": {
+    "attention_reasons": [
+      "attention-required",
+      "callback-invalid",
+      "callback-timeout",
+      "capability-mismatch",
+      "cleanup-incomplete",
+      "continuation-submit-unconfirmed",
+      "contract-drift",
+      "process-orphaned",
+      "process-start-failed",
+      "prompt-unknown",
+      "retry-exhausted",
+      "runtime-unavailable",
+      "surface-lost",
+      "surface-open-failed",
+      "verification-failed"
+    ],
+    "callback_kinds": [
+      "research",
+      "result",
+      "review",
+      "wiki-summary"
+    ],
+    "entry_point_actions": [
+      "advance-clock",
+      "close",
+      "crash-at",
+      "publish-callback",
+      "publish-error-latch",
+      "publish-liveness",
+      "publish-provider-event",
+      "publish-resolution",
+      "publish-summary",
+      "queue-callback",
+      "rearm-review-drive",
+      "rearm-worker-tick",
+      "reconcile",
+      "reject-cross-head-continuation",
+      "reserve-effect",
+      "resolve-effect",
+      "resource-disappears",
+      "restart-worker",
+      "start-worker",
+      "worker-tick"
+    ],
+    "provider_event_kinds": [
+      "event-gap",
+      "process-exited",
+      "resource-closed",
+      "result-published",
+      "turn-stopped"
+    ],
+    "review_verdicts": [
+      "approve",
+      "blocked",
+      "changes-requested"
+    ]
+  },
+  "excluded_transports": [
+    "research"
+  ],
+  "forbidden_edges": [
+    {
+      "from": "awaiting-callback",
+      "reason": "a callback wait never rewinds admission",
+      "to": "starting"
+    },
+    {
+      "from": "cancelled",
+      "reason": "a cancelled operation is never resurrected",
+      "to": "running"
+    },
+    {
+      "from": "cancelling",
+      "reason": "cancellation never skips the resource-free exit",
+      "to": "cancelled"
+    },
+    {
+      "from": "cancelling",
+      "reason": "a cancelled operation never reports success",
+      "to": "complete"
+    },
+    {
+      "from": "complete",
+      "reason": "a complete operation never re-enters cleanup",
+      "to": "exiting"
+    },
+    {
+      "from": "complete",
+      "reason": "a complete operation is never resurrected",
+      "to": "running"
+    },
+    {
+      "from": "created",
+      "reason": "admission never reaches a released terminal",
+      "to": "complete"
+    },
+    {
+      "from": "created",
+      "reason": "admission never skips preflight and start",
+      "to": "running"
+    },
+    {
+      "from": "exiting",
+      "reason": "a resource-free exit never resumes execution",
+      "to": "running"
+    },
+    {
+      "from": "failed",
+      "reason": "a failed operation never re-enters attention",
+      "to": "attention-required"
+    },
+    {
+      "from": "failed",
+      "reason": "a failed operation is never resurrected",
+      "to": "running"
+    },
+    {
+      "from": "finalizing",
+      "reason": "release never skips the resource-free exit",
+      "to": "complete"
+    },
+    {
+      "from": "finalizing",
+      "reason": "finalization never rewinds verification",
+      "to": "verifying"
+    },
+    {
+      "from": "preflight",
+      "reason": "admission never skips the start boundary",
+      "to": "running"
+    },
+    {
+      "from": "running",
+      "reason": "release never skips finalization and cleanup",
+      "to": "complete"
+    },
+    {
+      "from": "verifying",
+      "reason": "release never skips finalization and cleanup",
+      "to": "complete"
+    }
+  ],
+  "manifest_id": "lifecycle-transition-v1",
+  "schema_version": 1,
+  "states": [
+    {
+      "role": "attention",
+      "state": "attention-required"
+    },
+    {
+      "role": "active",
+      "state": "awaiting-callback"
+    },
+    {
+      "role": "terminal",
+      "state": "cancelled"
+    },
+    {
+      "role": "active",
+      "state": "cancelling"
+    },
+    {
+      "role": "terminal",
+      "state": "complete"
+    },
+    {
+      "role": "initial",
+      "state": "created"
+    },
+    {
+      "role": "active",
+      "state": "exiting"
+    },
+    {
+      "role": "terminal",
+      "state": "failed"
+    },
+    {
+      "role": "active",
+      "state": "finalizing"
+    },
+    {
+      "role": "active",
+      "state": "preflight"
+    },
+    {
+      "role": "active",
+      "state": "running"
+    },
+    {
+      "role": "active",
+      "state": "starting"
+    },
+    {
+      "role": "active",
+      "state": "verifying"
+    }
+  ],
+  "supported_edges": [
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "awaiting-callback"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "created"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "exiting"
+    },
+    {
+      "edge_class": "failure",
+      "from": "attention-required",
+      "to": "failed"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "finalizing"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "preflight"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "running"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "starting"
+    },
+    {
+      "edge_class": "recovery",
+      "from": "attention-required",
+      "to": "verifying"
+    },
+    {
+      "edge_class": "attention",
+      "from": "awaiting-callback",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "awaiting-callback",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "awaiting-callback",
+      "to": "failed"
+    },
+    {
+      "edge_class": "finalization",
+      "from": "awaiting-callback",
+      "to": "finalizing"
+    },
+    {
+      "edge_class": "execution",
+      "from": "awaiting-callback",
+      "to": "running"
+    },
+    {
+      "edge_class": "execution",
+      "from": "awaiting-callback",
+      "to": "verifying"
+    },
+    {
+      "edge_class": "attention",
+      "from": "cancelling",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cleanup",
+      "from": "cancelling",
+      "to": "exiting"
+    },
+    {
+      "edge_class": "failure",
+      "from": "cancelling",
+      "to": "failed"
+    },
+    {
+      "edge_class": "attention",
+      "from": "created",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "created",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "created",
+      "to": "failed"
+    },
+    {
+      "edge_class": "admission",
+      "from": "created",
+      "to": "preflight"
+    },
+    {
+      "edge_class": "attention",
+      "from": "exiting",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "exiting",
+      "to": "cancelled"
+    },
+    {
+      "edge_class": "cleanup",
+      "from": "exiting",
+      "to": "complete"
+    },
+    {
+      "edge_class": "failure",
+      "from": "exiting",
+      "to": "failed"
+    },
+    {
+      "edge_class": "attention",
+      "from": "finalizing",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "finalizing",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "finalization",
+      "from": "finalizing",
+      "to": "exiting"
+    },
+    {
+      "edge_class": "failure",
+      "from": "finalizing",
+      "to": "failed"
+    },
+    {
+      "edge_class": "attention",
+      "from": "preflight",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "preflight",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "preflight",
+      "to": "failed"
+    },
+    {
+      "edge_class": "admission",
+      "from": "preflight",
+      "to": "starting"
+    },
+    {
+      "edge_class": "attention",
+      "from": "running",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "execution",
+      "from": "running",
+      "to": "awaiting-callback"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "running",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "running",
+      "to": "failed"
+    },
+    {
+      "edge_class": "finalization",
+      "from": "running",
+      "to": "finalizing"
+    },
+    {
+      "edge_class": "execution",
+      "from": "running",
+      "to": "verifying"
+    },
+    {
+      "edge_class": "attention",
+      "from": "starting",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "starting",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "starting",
+      "to": "failed"
+    },
+    {
+      "edge_class": "admission",
+      "from": "starting",
+      "to": "running"
+    },
+    {
+      "edge_class": "attention",
+      "from": "verifying",
+      "to": "attention-required"
+    },
+    {
+      "edge_class": "cancellation",
+      "from": "verifying",
+      "to": "cancelling"
+    },
+    {
+      "edge_class": "failure",
+      "from": "verifying",
+      "to": "failed"
+    },
+    {
+      "edge_class": "finalization",
+      "from": "verifying",
+      "to": "finalizing"
+    },
+    {
+      "edge_class": "execution",
+      "from": "verifying",
+      "to": "running"
+    }
+  ]
+}
