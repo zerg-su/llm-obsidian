@@ -25,6 +25,30 @@
       "evidence": "At base 7033413afc9dc7666f4a2a76de33c088dbfcbfef, skills/split/SKILL.md used the four-byte description 'Fan.' while its body and skills/split/agents/openai.yaml defined an explicit-only governed preview and separately authorized --dispatch path.",
       "change": "Replace only the low-information frontmatter description with a concise capability and strong-intent trigger; retain all body instructions and Codex invocation policy.",
       "behavior_proof": "disable-model-invocation remains true, policy.allow_implicit_invocation remains false, allowed-tools remain Read and Bash, ordinary split requests remain router-negative, and preview, activation, wave, join, permission, and completion semantics are byte-identical."
+    },
+    {
+      "skill": "improve-skills",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "RC4-IMPROVE-SKILLS-01",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "An explicit bounded skill-quality audit or requested skill edit plus the repository-specific skill inventory and protected behavior.",
+      "overall_outcome": "Predictable skill improvements that preserve workflow semantics, runtime metadata, authorization boundaries, and declared outcome evidence.",
+      "local_subgoal": "Keep step 3 concise while retaining the objects of its preservation and rewrite-avoidance instructions.",
+      "completion_proxies": [
+        "The improve-skills body remains within its frozen byte and token budget.",
+        "The scoped verdict audit and instruction lint pass."
+      ],
+      "required_outcome_evidence": [
+        "RC4-E8-agent-discipline-and-skill-quality"
+      ],
+      "evidence": "Opus review found that step 3 had lost the explicit frontmatter preservation obligation and then the object of comparison from 'Prefer a sharp criterion/pointer.', making the latter sentence behaviorally incomplete.",
+      "change": "Preserve repo-specific frontmatter/runtime metadata explicitly and restore 'over a rewrite' while compressing adjacent prose without changing action order or authorization.",
+      "behavior_proof": "Invocation metadata, tools, five-pass workflow, verdict schema, authorization boundary, validation commands, and completion criteria remain unchanged; only the two incomplete steering sentences are restored within the frozen budget."
     }
   ]
 }

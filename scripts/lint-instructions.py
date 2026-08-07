@@ -13,10 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PROTECTED_WEB_SKILLS = ("research", "wiki-ingest", "wiki-query")
 WRITER_REQUIRED_SKILLS = ("agenda", "daily", "journal")
 LEGACY_PUBLIC_SKILLS = ("reap-send",)
-ENGINEERING_DISCIPLINE_CONTRACT = (
-    "Engineering discipline: think before coding; simplicity first; surgical "
-    "changes; goal/evidence discipline—local green is not task completion."
-)
 ENGINEERING_DISCIPLINE_PATTERN = re.compile(
     r"^(?:- )?Engineering discipline: think before coding; simplicity first; "
     r"surgical changes;(?: |\n)goal/evidence discipline—local green is not task "
@@ -24,19 +20,19 @@ ENGINEERING_DISCIPLINE_PATTERN = re.compile(
     re.MULTILINE,
 )
 MARKDOWN_LIST_ITEM = re.compile(r"^\s*(?:[-*+] |\d+[.)] )")
+ENGINEERING_WEAKENING_TERMS = r"optional|ignore|suggestions?\s+only|advisory"
 ENGINEERING_WEAKENING = re.compile(
-    r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",
+    rf"\b(?:{ENGINEERING_WEAKENING_TERMS}|unless)\b",
     flags=re.I,
 )
-EXPLICIT_WEAKENING_LEAD_IN = re.compile(
-    r"(?:"
-    r"^\s*(?:[-*+]\s+)?(?:optional|ignore(?: this)?|suggestions?\s+only)\s*:?\s*$"
-    r"|\b(?:this (?:whole )?section|the (?:rule|contract) below|"
-    r"the next (?:rule|contract)|following (?:rule|contract)|"
-    r"treat\b.*\b(?:rule|contract))\b.*"
-    r"\b(?:optional|ignore|advisory|suggestions?\s+only|unless)\b"
-    r")",
-    flags=re.I | re.S,
+STANDALONE_ENGINEERING_WEAKENING = re.compile(
+    rf"\b(?:{ENGINEERING_WEAKENING_TERMS})\b", flags=re.I
+)
+ENGINEERING_LEAD_IN_SCOPE = re.compile(
+    r"\b(?:this (?:whole )?section|everything below|"
+    r"(?:the|this|these|following|next) (?:rules?|contracts?)(?: below)?|"
+    r"(?:rules?|contracts?) below|treat[^\n]*(?:rules?|contracts?))\b",
+    flags=re.I,
 )
 
 
@@ -162,8 +158,28 @@ def failure_repair_issues(
     return issues
 
 
-def _enclosing_markdown_item(text: str, offset: int) -> str:
-    """Return one contract item and only an explicit weakening lead-in."""
+def _explicit_weakening_lead_in(candidate: str) -> bool:
+    for raw_line in candidate.splitlines():
+        line = MARKDOWN_LIST_ITEM.sub("", raw_line, count=1).strip()
+        bare = line.rstrip(".: ").casefold()
+        if bare in {
+            "optional",
+            "ignore",
+            "ignore this",
+            "suggestion only",
+            "suggestions only",
+        }:
+            return True
+        if (
+            ENGINEERING_LEAD_IN_SCOPE.search(line)
+            and ENGINEERING_WEAKENING.search(line)
+        ):
+            return True
+    return False
+
+
+def _engineering_discipline_is_weakened(text: str, offset: int) -> bool:
+    """Decide weakening from one bounded contract item and lead-in."""
 
     lines = text.splitlines()
     line_index = text.count("\n", 0, offset)
@@ -182,6 +198,8 @@ def _enclosing_markdown_item(text: str, offset: int) -> str:
             break
         end += 1
     item = "\n".join(lines[start:end])
+    if ENGINEERING_WEAKENING.search(item):
+        return True
 
     # A contract may be either the next sibling or the lazy continuation of an
     # immediately preceding item.  Include that item only when it explicitly
@@ -192,8 +210,8 @@ def _enclosing_markdown_item(text: str, offset: int) -> str:
     while prior_item_start >= 0 and lines[prior_item_start].strip():
         if MARKDOWN_LIST_ITEM.match(lines[prior_item_start]):
             candidate = "\n".join(lines[prior_item_start:prior_item_end])
-            if EXPLICIT_WEAKENING_LEAD_IN.search(candidate):
-                return candidate + "\n" + item
+            if _explicit_weakening_lead_in(candidate):
+                return True
             break
         prior_item_start -= 1
 
@@ -211,14 +229,14 @@ def _enclosing_markdown_item(text: str, offset: int) -> str:
     while prior >= 0 and not lines[prior].strip():
         prior -= 1
     if prior < 0:
-        return item
+        return False
     prior_start = prior
     while prior_start > 0 and lines[prior_start - 1].strip():
         prior_start -= 1
     candidate = "\n".join(lines[prior_start : prior + 1])
-    if EXPLICIT_WEAKENING_LEAD_IN.search(candidate):
-        return candidate + "\n" + item
-    return item
+    if any(MARKDOWN_LIST_ITEM.match(line) for line in candidate.splitlines()):
+        return False
+    return bool(STANDALONE_ENGINEERING_WEAKENING.search(candidate))
 
 
 def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
@@ -228,8 +246,9 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
         matches = list(ENGINEERING_DISCIPLINE_PATTERN.finditer(text))
         weakened_context = False
         if len(matches) == 1:
-            logical_item = _enclosing_markdown_item(text, matches[0].start())
-            weakened_context = bool(ENGINEERING_WEAKENING.search(logical_item))
+            weakened_context = _engineering_discipline_is_weakened(
+                text, matches[0].start()
+            )
         if len(matches) != 1:
             issues.append(
                 f"{source} must contain one exact positive engineering discipline contract"
