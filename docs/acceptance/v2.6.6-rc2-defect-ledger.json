@@ -312,6 +312,18 @@
       "owner": {"kind": "governance", "id": "skills.vault-repair"},
       "rationale": "Compress the same approved behavior below the frozen baseline rather than increasing the registry or body budget.",
       "external_effects_observed": false
+    },
+    {
+      "finding_id": "RC2.VERIFICATION_EVIDENCE_COVERAGE_REHOME",
+      "observed_at_stage": "RC2 replacement-candidate harness coverage gate",
+      "subject_head_sha": "06fbfa25de9e2cfa8cef4ee290b3142d032a8f46",
+      "reproducer_or_evidence": "scripts.harness.contracts 97.7 percent below its 98.0 percent critical floor",
+      "severity": "important",
+      "rc1_relation": "The v2 output-binding contract added three fail-closed branches not yet exercised by the critical-floor denominator.",
+      "disposition": "fixed-rc2",
+      "owner": {"kind": "governance", "id": "harness.coverage"},
+      "rationale": "Add deterministic contract-boundary assertions for unknown schema, negative output size, and legacy digest claims; no floor or production behavior was changed.",
+      "external_effects_observed": false
     }
   ]
 }

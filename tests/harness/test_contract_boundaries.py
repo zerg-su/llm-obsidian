@@ -211,6 +211,18 @@ for label, call in (
         lambda: replace(valid_evidence, finished_at=""),
     ),
     (
+        "verification evidence rejects unknown schema versions",
+        lambda: replace(valid_evidence, schema_version=3),
+    ),
+    (
+        "verification evidence rejects negative output sizes",
+        lambda: replace(valid_evidence, output_bytes=-1),
+    ),
+    (
+        "legacy verification evidence cannot claim an output digest",
+        lambda: replace(valid_evidence, output_sha256=DIGEST),
+    ),
+    (
         "transition results reject negative revisions",
         lambda: TransitionResult(
             SPEC.operation_id, "running", "finalizing", -1, True
