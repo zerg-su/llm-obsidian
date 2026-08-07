@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
-import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from harness.callbacks import CallbackBroker  # noqa: E402
 from harness.contracts import (  # noqa: E402
+    CapabilityReport,
     ContractError,
     OperationRecord,
     OwnedResources,
@@ -38,6 +39,7 @@ from task_review_flow import (  # noqa: E402
     _resume_bound_attention,
 )
 from task_review_request import _callback_path  # noqa: E402
+from task_review_shared import StaleRoundCallbackError  # noqa: E402
 from task_review_transport import (  # noqa: E402
     _collect_ready_results,
     _write_round_meta,
@@ -90,6 +92,15 @@ class FakeRuntime:
         if on_surface_opened is not None:
             on_surface_opened(result)
         return result
+
+    def preflight_routes(
+        self,
+        requests: tuple[tuple[RuntimeRoute, Path, str], ...],
+    ) -> tuple[CapabilityReport, ...]:
+        return tuple(
+            CapabilityReport(route, True, ("provider:profile-valid",))
+            for route, _callback_dir, _origin_surface in requests
+        )
 
     def status(self, owner_id: str, operation_id: str) -> SessionResult:
         return SessionResult(
@@ -522,5 +533,210 @@ with tempfile.TemporaryDirectory(prefix="review-prefix-ingestion.") as raw:
         and runtime.accepted == 2
         and runtime.started == 2,
     )
+
+
+def prefix_request(
+    *,
+    mode: str,
+    operation_id: str,
+    owner_id: str,
+    context: ReviewContext,
+) -> ReviewOperationRequest:
+    anthropic = RuntimeRoute(
+        "claude",
+        "claude-opus-5",
+        "xhigh",
+        "reviewer-callback",
+        "4" * 64,
+    )
+    openai = RuntimeRoute(
+        "codex",
+        "gpt-5.6-sol",
+        "xhigh",
+        "reviewer-callback",
+        "5" * 64,
+    )
+    preset = ReviewPreset.from_flags(
+        deep=mode == "deep", full=mode == "full"
+    )
+    policy = preset.request(
+        operation_id,
+        selected_provider="openai" if mode != "full" else "",
+    )
+    if mode == "full":
+        axis_routes = {
+            "anthropic-intent": anthropic,
+            "anthropic-engineering": anthropic,
+            "openai-intent": openai,
+            "openai-engineering": openai,
+        }
+        return ReviewOperationRequest(
+            policy,
+            owner_id,
+            anthropic,
+            context,
+            axis_routes=axis_routes,
+        )
+    return ReviewOperationRequest(policy, owner_id, openai, context)
+
+
+for mode, expected_lanes in (("simple", 1), ("deep", 2), ("full", 4)):
+    with tempfile.TemporaryDirectory(
+        prefix=f"review-{mode}-prefix-matrix."
+    ) as raw:
+        base = Path(raw)
+        runtime_root = base / "runtime"
+        runtime_root.mkdir()
+        product_root = base / "product"
+        product_root.mkdir()
+        store = OperationStore(base / "store")
+        owner_id = f"{mode}-prefix-owner"
+        runtime = FakeRuntime(store, owner_id=owner_id)
+        gate = ReviewGateController(base / "gate", runtime, store)
+        context = ReviewContext(
+            "packets/review/manifest.json",
+            "6" * 40,
+            "scoped",
+            "7" * 64,
+        )
+        operation_id = f"{mode}-prefix-review"
+        request = prefix_request(
+            mode=mode,
+            operation_id=operation_id,
+            owner_id=owner_id,
+            context=context,
+        )
+        run = gate.begin_attempt(
+            dispatch_operation_id=operation_id,
+            finalization_lineage_id=operation_id,
+            cycle=1,
+            plan_sha256="8" * 64,
+            outcome_sha256="9" * 64,
+            request=request,
+            origin_surface="22222222-bbbb-4bbb-8bbb-222222222222",
+            cwd=runtime_root,
+            product_root=product_root,
+            prompt_pointer="prompts/review.md",
+            callback_root="callbacks",
+        )
+        lanes = run.execution.lanes
+        check(
+            f"{mode} prefix matrix starts every reviewer exactly once",
+            len(lanes) == expected_lanes
+            and runtime.started == expected_lanes
+            and runtime.accepted == 0,
+        )
+
+        initial = gate.rehydrate_attempt()
+        check(
+            f"{mode} zero-prefix restart performs no reviewer replay",
+            runtime.started == expected_lanes
+            and not gate.read()["final_results"],
+        )
+
+        foreign_lane = lanes[0]
+        foreign_round = initial.rounds[foreign_lane.axis]
+        foreign_path = _callback_path(runtime_root, foreign_lane.axis)
+        foreign_path.parent.mkdir(parents=True, exist_ok=True)
+        foreign_payload = to_dict(
+            review_round_envelope(
+                foreign_round,
+                ReviewResult(foreign_lane.axis, "approve", (), 0),
+            )
+        )
+        foreign_payload["operation_id"] = "foreign-operation"
+        foreign_path.write_text(
+            json.dumps(foreign_payload, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            _collect_ready_results(initial, runtime_root, base, base)
+        except StaleRoundCallbackError:
+            foreign_rejected = True
+        else:
+            foreign_rejected = False
+        check(
+            f"{mode} foreign callback rejects before durable mutation",
+            foreign_rejected
+            and runtime.accepted == 0
+            and not gate.read()["final_results"],
+        )
+        foreign_path.unlink()
+
+        recovered = initial
+        for prefix, lane in enumerate(lanes, start=1):
+            round_ = recovered.rounds[lane.axis]
+            callback = _callback_path(runtime_root, lane.axis)
+            callback.parent.mkdir(parents=True, exist_ok=True)
+            callback.write_text(
+                json.dumps(
+                    to_dict(
+                        review_round_envelope(
+                            round_, ReviewResult(lane.axis, "approve", (), 0)
+                        )
+                    ),
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            ready = _collect_ready_results(
+                recovered, runtime_root, base, base
+            )
+            decisions = _complete_exact_ready_results(
+                gate=gate,
+                run=recovered,
+                ready=ready,
+                worktree=base,
+                vault=base,
+                runtime_root=runtime_root,
+            )
+            state = gate.read()
+            terminal = prefix == expected_lanes
+            check(
+                f"{mode} accepted prefix {prefix} is durable and exact",
+                decisions
+                == (("approved",) if terminal else ("awaiting-axes",))
+                and len(state["final_results"]) == prefix
+                and runtime.accepted == prefix
+                and runtime.started == expected_lanes
+                and state["status"]
+                == ("approved" if terminal else "reviewing"),
+            )
+            parent = store.read(lane.owner_id, lane.operation_id)
+            child = store.read(round_.owner_id, round_.operation_id)
+            check(
+                f"{mode} accepted prefix {prefix} releases exact resources",
+                parent.state == "complete"
+                and parent.resources == OwnedResources()
+                and child.state == "complete"
+                and child.resources == OwnedResources(),
+            )
+
+            duplicate_ready = _collect_ready_results(
+                recovered, runtime_root, base, base
+            )
+            duplicate_decisions = _complete_exact_ready_results(
+                gate=gate,
+                run=recovered,
+                ready=duplicate_ready,
+                worktree=base,
+                vault=base,
+                runtime_root=runtime_root,
+            )
+            check(
+                f"{mode} duplicate prefix {prefix} performs zero effects",
+                duplicate_decisions == ()
+                and runtime.accepted == prefix
+                and runtime.started == expected_lanes,
+            )
+            if not terminal:
+                recovered = gate.rehydrate_attempt()
+                check(
+                    f"{mode} restart after prefix {prefix} resumes first missing",
+                    len(gate.read()["final_results"]) == prefix
+                    and runtime.accepted == prefix
+                    and runtime.started == expected_lanes,
+                )
 
 print("\nAll task review flow unit tests passed.")
