@@ -154,7 +154,14 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
         matches = list(ENGINEERING_DISCIPLINE_PATTERN.finditer(text))
         weakened_context = False
         if len(matches) == 1:
-            preceding = text[: matches[0].start()].splitlines()
+            match = matches[0]
+            prior_boundary = text.rfind("\n\n", 0, match.start())
+            paragraph_start = 0 if prior_boundary < 0 else prior_boundary + 2
+            paragraph_end = text.find("\n\n", match.end())
+            if paragraph_end < 0:
+                paragraph_end = len(text)
+            paragraph = text[paragraph_start:paragraph_end]
+            preceding = text[: match.start()].splitlines()
             nearby: list[str] = []
             for line in reversed(preceding):
                 if line.strip():
@@ -163,8 +170,8 @@ def engineering_discipline_issues(agents: str, claude: str) -> list[str]:
                     break
             weakened_context = bool(
                 re.search(
-                    r"\b(?:optional|ignore|suggestions? only)\b",
-                    " ".join(reversed(nearby)),
+                    r"\b(?:optional|ignore|suggestions?\s+only|unless|advisory)\b",
+                    paragraph + " " + " ".join(reversed(nearby)),
                     flags=re.I,
                 )
             )

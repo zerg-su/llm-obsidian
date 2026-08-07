@@ -1,6 +1,7 @@
 {
   "command_capture": {
     "call_id": "call_myFdlY2kAv2dSfGHXzthpceW",
+    "exec_workdir": "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc4-skill-quality",
     "command_event": {
       "command": "python3 scripts/engineering-eval-runner.py --rc4-aggregate --model terra --effort medium --timeout 240",
       "cwd": "/Users/zak/Projects/llm-obsidian-swarm",
@@ -27,7 +28,7 @@
   "execution": {
     "command": "python3 scripts/engineering-eval-runner.py --rc4-aggregate --model terra --effort medium --timeout 240",
     "command_log_event_id": "b202717fa61ba4a358d39a0269ba8cdfd404bff08dfc179c6ec2a0cf5296793d",
-    "cwd": "/Users/zak/Projects/llm-obsidian-swarm",
+    "cwd": "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc4-skill-quality",
     "executed_at": "2026-08-07T19:41:26+03:00",
     "execution_session": "019fab00-3160-7380-8920-4b20183afb76",
     "product_head_sha": "338ceec30c72c5afd34c78042a8b57a02fcdd99c",

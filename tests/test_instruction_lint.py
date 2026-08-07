@@ -115,6 +115,8 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
         f"Optional:\n{discipline}",
         f"Ignore this:\n{discipline}",
         f"Suggestions only:\n\n{discipline}",
+        f"Optional policy context.\nStill the same paragraph.\nThird line.\n{discipline}",
+        f"{discipline}\nThis contract is optional.",
     ):
         issues = module.engineering_discipline_issues(
             drift if surface == "AGENTS.md" else discipline,

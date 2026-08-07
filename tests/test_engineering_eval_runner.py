@@ -150,6 +150,15 @@ check(
     and live_evidence["receipt"]["summary"]
     == {"total": 4, "passed": 4, "failed": 0},
 )
+check(
+    "RC4 live evidence distinguishes command-log and execution working directories",
+    live_evidence["command_capture"]["command_event"]["cwd"]
+    == "/Users/zak/Projects/llm-obsidian-swarm"
+    and live_evidence["execution"]["cwd"]
+    == "/Users/zak/Projects/worktrees/llm-obsidian-2-6-6-rc4-skill-quality"
+    and live_evidence["command_capture"]["exec_workdir"]
+    == live_evidence["execution"]["cwd"],
+)
 expected_equivalence = {
     "rc4.ambiguity": (
         "d6f2b0d7069e729111f1f4b88ffd2a1ec5c296bbcd163b33e7a4e0fa607b85e3",
@@ -214,7 +223,7 @@ check(
     json.loads(receipt_line) == live_evidence["receipt"]
     and hashlib.sha256(receipt_line.encode()).hexdigest()
     == live_evidence["receipt_line_sha256"]
-    and "b10751d8dfab9128fa401814c8cf0b306ab1ac24ea3660f8fa807099dfd8a41e"
+    and "6df616c7f71b86b4a074ad013cabd29311f1eed9213ef08ced04651fed47d986"
     in audit,
 )
 for case in cases:

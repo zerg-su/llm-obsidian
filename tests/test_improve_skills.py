@@ -199,13 +199,25 @@ for malformed in (
 
 for malformed in (
     "name: true\ndescription: Valid.\n",
+    "name: True\ndescription: Valid.\n",
     "name: fixture\ndescription: 123\n",
+    "name: fixture\ndescription: 0x10\n",
+    "name: fixture\ndescription: 2026-08-07\n",
+    "name: fixture\ndescription: .inf\n",
+    'name: fixture\ndescription: "\\u003cscript\\u003e"\n',
+    'name: fixture\ndescription: "\\x3cscript\\x3e"\n',
+    "name: fixture\ndescription: valid: true\n",
+    "name: fixture\ndescription: valid # hidden comment\n",
+    "name: fixture\ndescription: !tag valid\n",
 ):
-    assert "invalid-frontmatter-value" in audit_frontmatter_fixture(malformed)
+    assert audit_frontmatter_fixture(malformed) & {
+        "invalid-frontmatter",
+        "invalid-frontmatter-value",
+    }
 
-assert "invalid-frontmatter-value" in audit_frontmatter_fixture(
+assert audit_frontmatter_fixture(
     "name: fixture\ndescription: Valid.\ndisable-model-invocation: yes\n"
-)
+) & {"invalid-frontmatter", "invalid-frontmatter-value"}
 print("OK   canonical frontmatter parser rejects YAML bypasses and type drift")
 
 

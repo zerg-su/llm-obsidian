@@ -145,8 +145,19 @@ def split_frontmatter(path: Path) -> tuple[list[str], str]:
 
 def _yaml_key(raw: str) -> str:
     token = raw.strip()
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
-        return token[1:-1]
+    if len(token) >= 2 and token[0] == token[-1] == '"':
+        try:
+            decoded = json.loads(token)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid quoted frontmatter key") from exc
+        if not isinstance(decoded, str):
+            raise ValueError("invalid quoted frontmatter key")
+        return decoded
+    if len(token) >= 2 and token[0] == token[-1] == "'":
+        inner = token[1:-1]
+        if "'" in inner.replace("''", ""):
+            raise ValueError("invalid quoted frontmatter key")
+        return inner.replace("''", "'")
     return token
 
 
@@ -158,18 +169,41 @@ def _yaml_string(raw: str, continuations: list[str]) -> str | bool | None:
         return " ".join(line.strip() for line in continuations).strip()
     if not value:
         return None
-    if value[0] in "\"'":
-        if len(value) < 2 or value[-1] != value[0]:
+    if value[0] == '"':
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("unsupported quoted frontmatter scalar") from exc
+        if not isinstance(decoded, str):
+            raise ValueError("quoted frontmatter scalar must be text")
+        return decoded
+    if value[0] == "'":
+        if len(value) < 2 or value[-1] != "'":
             raise ValueError("unterminated quoted frontmatter scalar")
-        return value[1:-1]
+        inner = value[1:-1]
+        if "'" in inner.replace("''", ""):
+            raise ValueError("unsupported quoted frontmatter scalar")
+        return inner.replace("''", "'")
     if value in {"true", "false"}:
         return value == "true"
-    if re.fullmatch(
-        r"(?:null|~|yes|no|on|off|[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)",
+    implicit_typed = re.fullmatch(
+        r"(?:null|~|true|false|yes|no|on|off|"
+        r"[-+]?\.(?:inf|nan)|"
+        r"[-+]?(?:0b[01_]+|0o[0-7_]+|0x[0-9a-f_]+)|"
+        r"[-+]?(?:\d[\d_]*(?:\.\d[\d_]*)?|\.\d[\d_]*)"
+        r"(?:e[-+]?\d+)?|"
+        r"\d{4}-\d{1,2}-\d{1,2}(?:[tT ]\S+)?|"
+        r"\d+(?::\d+)+(?:\.\d+)?)",
         value,
         flags=re.I,
-    ) or value.startswith(("[", "{")):
-        return None
+    )
+    if (
+        implicit_typed
+        or value.startswith(("[", "{", "!", "&", "*", "@", "`", "-", "?", ":", "%"))
+        or re.search(r":\s|\s#|(?:^|\s)[!&*](?:\S|$)", value)
+        or "\t" in value
+    ):
+        raise ValueError("unsupported or implicitly typed frontmatter scalar")
     return value
 
 
