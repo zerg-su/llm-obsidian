@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -2549,6 +2550,175 @@ with tempfile.TemporaryDirectory(prefix="current-review-runner.") as raw:
         )
     finally:
         for name, value in old_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+with tempfile.TemporaryDirectory(prefix="current-release-artifacts.") as raw:
+    base = Path(raw)
+
+    def release_fixture(
+        name: str,
+        *,
+        outcome_path: str = "outcome-evidence.json",
+        deviations_path: str = "accepted-deviations.json",
+        symlink_outcome_dir: bool = False,
+        symlink_deviations: bool = False,
+    ) -> tuple[Path, Path, Path, Path]:
+        product = base / name / "checkout"
+        evidence_root = base / name / "evidence"
+        scratch = base / name / "scratch"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--no-local", str(ROOT), str(product)],
+            check=True,
+        )
+        evidence_root.mkdir(parents=True)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=product,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        plan = evidence_root / "approved-plan.md"
+        plan.write_text(
+            """# Release plan
+
+```json
+{"schema_version":1,"desired_outcome":"Bind one external release evidence root.","success_evidence":[{"evidence_id":"release-root","observable":"The exact external artifacts enter review."}],"non_goals":["No release effect."]}
+```
+""",
+            encoding="utf-8",
+        )
+        outcome = evidence_root / outcome_path
+        if symlink_outcome_dir:
+            foreign_root = base / name / "foreign"
+            foreign_root.mkdir(parents=True)
+            (foreign_root / outcome.name).write_text(
+                '{"release-root":"established"}\n', encoding="utf-8"
+            )
+            outcome.parent.symlink_to(foreign_root, target_is_directory=True)
+        else:
+            outcome.parent.mkdir(parents=True, exist_ok=True)
+            outcome.write_text(
+                '{"release-root":"established"}\n', encoding="utf-8"
+            )
+        deviations_target = evidence_root / "real-deviations.json"
+        deviations_target.write_text('{"deviations":[]}\n', encoding="utf-8")
+        deviations = evidence_root / deviations_path
+        deviations.parent.mkdir(parents=True, exist_ok=True)
+        if symlink_deviations:
+            deviations.symlink_to(deviations_target)
+        else:
+            deviations.write_bytes(deviations_target.read_bytes())
+        boundary = ReviewBoundaryInput(
+            purpose="release",
+            outcome_contract_sha256=extract_from_bytes(plan.read_bytes()).sha256,
+            plan_sha256=hashlib.sha256(plan.read_bytes()).hexdigest(),
+            integration_head_sha=head,
+            outcome_evidence_map_sha256=hashlib.sha256(outcome.read_bytes()).hexdigest(),
+            outcome_evidence_map_path=outcome_path,
+            accepted_deviations_sha256=hashlib.sha256(deviations.read_bytes()).hexdigest(),
+            accepted_deviations_path=deviations_path,
+        )
+        boundary_path = evidence_root / "review-boundary.json"
+        boundary_path.write_text(
+            json.dumps(boundary.payload(), sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return product, evidence_root, boundary_path, scratch
+
+    def start_release(
+        fixture: tuple[Path, Path, Path, Path],
+    ) -> tuple[dict[str, object], EffectRecordingRuntime]:
+        product, evidence_root, boundary_path, scratch = fixture
+        runtime = EffectRecordingRuntime(
+            OperationStore(product / ".vault-meta/harness")
+        )
+        started = task_review_runner.run_current_review(
+            product,
+            purpose="release",
+            boundary_input_file=boundary_path,
+            artifact_root=evidence_root,
+            plan_file=evidence_root / "approved-plan.md",
+            origin_surface="33333333-3333-4333-8333-333333333333",
+            scratch_root=scratch,
+            runtime_manager=runtime,
+        )
+        return started, runtime
+
+    def release_rejected(
+        fixture: tuple[Path, Path, Path, Path],
+    ) -> bool:
+        try:
+            start_release(fixture)
+        except task_review_runner.TaskReviewError:
+            return True
+        return False
+
+    saved_route = {
+        name: os.environ.get(name)
+        for name in (
+            "LLM_OBSIDIAN_SESSION_RUNTIME",
+            "LLM_OBSIDIAN_SESSION_MODEL",
+            "LLM_OBSIDIAN_SESSION_EFFORT",
+        )
+    }
+    os.environ["LLM_OBSIDIAN_SESSION_RUNTIME"] = "codex"
+    os.environ["LLM_OBSIDIAN_SESSION_MODEL"] = "gpt-5.6-sol"
+    os.environ["LLM_OBSIDIAN_SESSION_EFFORT"] = "high"
+    try:
+        valid = release_fixture("valid")
+        product, evidence_root, _boundary_path, _scratch = valid
+        started, runtime = start_release(valid)
+        active = json.loads(
+            (
+                product
+                / ".vault-meta/harness/current-review/active.json"
+            ).read_text(encoding="utf-8")
+        )
+        check(
+            "current release review binds one external artifact root",
+            started["status"] == "reviewing"
+            and active["review_artifact_root"] == str(evidence_root.resolve())
+            and len(runtime.started) == 1
+            and f"--artifact-root {evidence_root.resolve()}"
+            in runtime.started[0].callback_wake,
+        )
+        replacement_root = base / "valid" / "replacement-evidence"
+        shutil.copytree(evidence_root, replacement_root)
+        check(
+            "current release review rejects artifact-root drift on resume",
+            release_rejected(
+                (
+                    product,
+                    replacement_root,
+                    replacement_root / "review-boundary.json",
+                    valid[3],
+                )
+            ),
+        )
+
+        check(
+            "current release review rejects an out-of-root outcome artifact",
+            release_rejected(
+                release_fixture(
+                    "escaped",
+                    outcome_path="outcome-link/outcome-evidence.json",
+                    symlink_outcome_dir=True,
+                )
+            ),
+        )
+
+        check(
+            "current release review rejects a symlinked deviations artifact",
+            release_rejected(
+                release_fixture("linked", symlink_deviations=True)
+            ),
+        )
+    finally:
+        for name, value in saved_route.items():
             if value is None:
                 os.environ.pop(name, None)
             else:

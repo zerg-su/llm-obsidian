@@ -136,6 +136,70 @@ def _same_requested_policy(
     )
 
 
+def _current_review_artifact_root(
+    worktree: Path,
+    *,
+    purpose: str,
+    boundary_input_file: Path | None,
+    plan_file: Path | None,
+    artifact_root: Path | None,
+) -> Path | None:
+    """Bind release inputs to one explicit owner-controlled external root."""
+
+    if purpose != "release":
+        if artifact_root is not None:
+            raise TaskReviewError(
+                "--artifact-root only applies to current release review"
+            )
+        return None
+    if artifact_root is None:
+        raise TaskReviewError(
+            "current release review requires --artifact-root"
+        )
+    raw_root = artifact_root.expanduser()
+    if not raw_root.is_absolute() or raw_root.is_symlink():
+        raise TaskReviewError("current release artifact root is invalid")
+    try:
+        resolved_root = raw_root.resolve(strict=True)
+    except OSError as exc:
+        raise TaskReviewError(
+            "current release artifact root is unavailable"
+        ) from exc
+    if (
+        not resolved_root.is_dir()
+        or resolved_root == worktree
+        or worktree in resolved_root.parents
+    ):
+        raise TaskReviewError("current release artifact root is invalid")
+    for label, candidate in (
+        ("boundary input", boundary_input_file),
+        ("plan", plan_file),
+    ):
+        if candidate is None:
+            raise TaskReviewError(
+                f"current release review requires an exact {label}"
+            )
+        raw_candidate = candidate.expanduser()
+        if raw_candidate.is_symlink():
+            raise TaskReviewError(
+                f"current release {label} is outside its artifact root"
+            )
+        try:
+            resolved_candidate = raw_candidate.resolve(strict=True)
+        except OSError as exc:
+            raise TaskReviewError(
+                f"current release {label} is unavailable"
+            ) from exc
+        if (
+            not resolved_candidate.is_file()
+            or resolved_root not in resolved_candidate.parents
+        ):
+            raise TaskReviewError(
+                f"current release {label} is outside its artifact root"
+            )
+    return resolved_root
+
+
 def _stopped_release_enters_implementation(
     stored: Mapping[str, Any] | object,
     requested: Mapping[str, Any],
@@ -233,6 +297,7 @@ def _active_current_review(
     plan_base_sha: str,
     plan_head_sha: str,
     scratch_root: Path | None,
+    artifact_root: Path | None,
 ) -> dict[str, Any] | None:
     if not active_path.is_file() or active_path.is_symlink():
         return None
@@ -362,6 +427,12 @@ def _active_current_review(
         raise TaskReviewError(
             "an active current review uses another preset or override"
         )
+    stored_artifact_root = str(candidate.get("review_artifact_root") or "")
+    requested_artifact_root = str(artifact_root) if artifact_root else ""
+    if stored_artifact_root != requested_artifact_root:
+        raise TaskReviewError(
+            "an active current review uses another artifact root"
+        )
     if plan_file is not None and (
         Path(str(candidate.get("plan_file") or "")).resolve()
         != plan_file.expanduser().resolve()
@@ -386,6 +457,7 @@ def run_current_review(
     no_review: bool = False,
     purpose: str = "implementation",
     boundary_input_file: Path | None = None,
+    artifact_root: Path | None = None,
     plan_file: Path | None = None,
     origin_surface: str = "",
     scratch_root: Path | None = None,
@@ -396,6 +468,13 @@ def run_current_review(
     plan_head_sha: str = "",
 ) -> dict[str, Any]:
     worktree = _validate_current_checkout(worktree)
+    artifact_root = _current_review_artifact_root(
+        worktree,
+        purpose=purpose,
+        boundary_input_file=boundary_input_file,
+        plan_file=plan_file,
+        artifact_root=artifact_root,
+    )
     if plan_compilation is not None:
         from task_review_plan import GIT_OID
 
@@ -458,6 +537,7 @@ def run_current_review(
         plan_base_sha=plan_base_sha,
         plan_head_sha=plan_head_sha,
         scratch_root=scratch_root,
+        artifact_root=artifact_root,
     )
 
     if meta is None:
@@ -540,6 +620,8 @@ def run_current_review(
                 "execution": "ephemeral",
             },
         }
+        if artifact_root is not None:
+            meta["review_artifact_root"] = str(artifact_root)
         if boundary_input is not None:
             if plan_compilation is not None:
                 from task_review_plan import materialize_plan_review

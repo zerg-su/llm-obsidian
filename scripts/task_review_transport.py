@@ -240,6 +240,9 @@ def _callback_wake(
         wake_argv.extend(("--purpose", purpose))
     if boundary_file:
         wake_argv.extend(("--boundary-input", boundary_file))
+    artifact_root = str(meta.get("review_artifact_root") or "")
+    if artifact_root:
+        wake_argv.extend(("--artifact-root", artifact_root))
     return (
         "Typed current-review callback is ready. Run this exact command: "
         + shlex.join(wake_argv)

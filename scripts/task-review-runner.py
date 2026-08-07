@@ -265,6 +265,7 @@ def run_current_review(
     no_review: bool = False,
     purpose: str = "implementation",
     boundary_input_file: Path | None = None,
+    artifact_root: Path | None = None,
     plan_file: Path | None = None,
     origin_surface: str = "",
     scratch_root: Path | None = None,
@@ -281,6 +282,7 @@ def run_current_review(
         no_review=no_review,
         purpose=purpose,
         boundary_input_file=boundary_input_file,
+        artifact_root=artifact_root,
         plan_file=plan_file,
         origin_surface=origin_surface,
         scratch_root=scratch_root,
@@ -343,6 +345,7 @@ def parser() -> argparse.ArgumentParser:
         "--purpose", choices=REVIEW_PURPOSES, default="implementation"
     )
     current.add_argument("--boundary-input", type=Path)
+    current.add_argument("--artifact-root", type=Path)
     current.add_argument("--plan", type=Path)
     current.add_argument("--origin-surface", default="")
     plan = sub.add_parser("plan")
@@ -393,6 +396,7 @@ def main(
                 no_review=args.no_review,
                 purpose=args.purpose,
                 boundary_input_file=args.boundary_input,
+                artifact_root=args.artifact_root,
                 plan_file=args.plan,
                 origin_surface=args.origin_surface,
                 runtime_manager=runtime_manager,

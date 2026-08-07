@@ -449,6 +449,27 @@ def _delta_inputs(
         )
     return tuple(inputs)
 
+
+def _bound_review_artifact_root(
+    meta: Mapping[str, Any],
+) -> Path | None:
+    """Revalidate the immutable external root stored by current review."""
+
+    raw = str(meta.get("review_artifact_root") or "")
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.is_symlink():
+        raise TaskReviewError("review artifact root is invalid")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise TaskReviewError("review artifact root is unavailable") from exc
+    if not resolved.is_dir():
+        raise TaskReviewError("review artifact root is invalid")
+    return resolved
+
+
 def _context(
     meta: Mapping[str, Any],
     vault: Path,
@@ -466,6 +487,7 @@ def _context(
     plan = Path(str(meta["plan_file"])).expanduser().resolve()
     plan_review = meta.get("plan_review")
     plan_artifact_root: Path | None = None
+    review_artifact_root = _bound_review_artifact_root(meta)
     plan_review_inputs: list[ContextInput] = []
     packet_metadata = {
         "task_id": task_id,
@@ -613,7 +635,7 @@ def _context(
                 plan,
                 boundary,
                 pointer_root=runtime_root / "pointers",
-                artifact_root=plan_artifact_root,
+                artifact_root=plan_artifact_root or review_artifact_root,
                 artifact_head=(
                     boundary_head
                     if exact_resolution_rebind and plan_artifact_root is None
