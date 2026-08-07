@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "python3",
+    "tests/test_rc3_documentation.py"
+  ],
+  "execution_id": "5a89a872006395ad3ba8dbc2476b202409fec9ed92fd1ffd497a6c3c162d6df3",
+  "exit_status": 0,
+  "profile": "slice-f-focused-green",
+  "release": "2.6.6-rc3",
+  "schema_version": 1,
+  "slice_id": "F",
+  "stderr": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stdout": {
+    "bytes": 52,
+    "sha256": "acd8b0abbe019af7386e6f3ffe00eba21017ddc728411025010260c043cf15a1"
+  },
+  "subject_head_sha": "0bc3fffb8979bb26db57335d78d7dfe5520ce1f7"
+}
