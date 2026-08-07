@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "subject_head_sha": "7033413afc9dc7666f4a2a76de33c088dbfcbfef",
+  "fixture": "tests/fixtures/rc4/review-control-plane.json",
+  "scope": "rc4-control-plane",
+  "evidence_ids": [
+    "RC4-E1-effective-topology",
+    "RC4-E2-topology-matrix",
+    "RC4-E3-automatic-callback-continuation",
+    "RC4-E4-restart-and-partial-ingestion"
+  ],
+  "baseline_defects": [
+    {
+      "case_id": "preview-runtime-topology-drift",
+      "status": "reproduced",
+      "effect_count": 0
+    },
+    {
+      "case_id": "callback-prefix-not-durable",
+      "status": "reproduced",
+      "effect_count": 0
+    }
+  ],
+  "non_goals_preserved": [
+    "no-new-review-topology",
+    "no-provider-or-model-fallback",
+    "no-new-lifecycle-owner",
+    "no-watchdog-or-scheduler",
+    "no-public-pipeline-dsl-change"
+  ]
+}

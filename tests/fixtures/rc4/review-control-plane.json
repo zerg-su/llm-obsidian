@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "product_base_sha": "7033413afc9dc7666f4a2a76de33c088dbfcbfef",
+  "cases_sha256": "cb3374167eba612eddbc4c0c838a02327817dab01d607ed5be8e9a85923dd4e4",
+  "cases": [
+    {
+      "case_id": "preview-runtime-topology-drift",
+      "evidence_ids": [
+        "RC4-E1-effective-topology",
+        "RC4-E2-topology-matrix"
+      ],
+      "review_policy": {
+        "mode": "deep",
+        "cross_model": false,
+        "runtime": "",
+        "model": "",
+        "effort": "xhigh"
+      },
+      "finalization_cycle": 1,
+      "validation_lanes": [
+        "anthropic-holistic",
+        "openai-holistic"
+      ],
+      "runtime_lanes": [
+        "openai-intent",
+        "openai-engineering"
+      ],
+      "expected_rejection_stage": "pre-provider-topology-binding",
+      "provider_effect_count": 0,
+      "model_effect_count": 0,
+      "cmux_effect_count": 0
+    },
+    {
+      "case_id": "callback-prefix-not-durable",
+      "evidence_ids": [
+        "RC4-E3-automatic-callback-continuation",
+        "RC4-E4-restart-and-partial-ingestion"
+      ],
+      "required_axes": [
+        "anthropic-holistic",
+        "openai-holistic"
+      ],
+      "published_callback_prefixes": [
+        [],
+        [
+          "anthropic-holistic"
+        ],
+        [
+          "anthropic-holistic",
+          "openai-holistic"
+        ]
+      ],
+      "baseline_accepted_prefix_counts": [
+        0,
+        0,
+        2
+      ],
+      "required_accepted_prefix_counts": [
+        0,
+        1,
+        2
+      ],
+      "provider_replay_count": 0,
+      "reviewer_replay_count": 0,
+      "coordinator_poll_count": 0
+    }
+  ]
+}

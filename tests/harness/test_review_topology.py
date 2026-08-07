@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -36,6 +38,47 @@ def check(label: str, value: bool) -> None:
     if not value:
         raise AssertionError(label)
     print(f"OK   {label}")
+
+
+fixture_path = ROOT / "tests/fixtures/rc4/review-control-plane.json"
+fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+fixture_cases = fixture.get("cases")
+fixture_cases_sha256 = hashlib.sha256(
+    json.dumps(
+        fixture_cases,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+).hexdigest()
+check(
+    "RC4 control-plane baseline fixture is exact and content-bound",
+    fixture.get("schema_version") == 1
+    and fixture.get("product_base_sha")
+    == "7033413afc9dc7666f4a2a76de33c088dbfcbfef"
+    and fixture.get("cases_sha256") == fixture_cases_sha256
+    and isinstance(fixture_cases, list)
+    and {item.get("case_id") for item in fixture_cases}
+    == {
+        "preview-runtime-topology-drift",
+        "callback-prefix-not-durable",
+    },
+)
+check(
+    "RC4 baseline premises perform zero provider, model, cmux, or replay effects",
+    all(
+        item.get(field, 0) == 0
+        for item in fixture_cases
+        for field in (
+            "provider_effect_count",
+            "model_effect_count",
+            "cmux_effect_count",
+            "provider_replay_count",
+            "reviewer_replay_count",
+            "coordinator_poll_count",
+        )
+    ),
+)
 
 
 check("full is an explicit review mode", MODES == {"simple", "deep", "full"})
