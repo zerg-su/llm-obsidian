@@ -4,6 +4,36 @@ This technology-agnostic baseline applies when repository standards are silent.
 Repository-specific standards override heuristics, but must not erase the
 approved Outcome Contract or evidence requirements.
 
+## Review denominator
+
+Every holistic or engineering review covers all six sections below and reports
+each one explicitly, including when it is clean; silence is not coverage. This
+list is the denominator, not a severity cap, and adds no lane, model call, or
+loop.
+
+1. **Quality** — logic and edge cases, including boundary, empty, duplicate, and
+   overflow inputs; error and resource behavior across failure paths, timeouts,
+   retries, and released handles, locks, processes, and temporary state; races
+   and data integrity across concurrent writers, partial writes, ordering, and
+   durable-state invariants.
+2. **Implementation** — implementation completeness and wiring: every declared
+   behavior is reachable from a real caller, configured, and registered, with no
+   stub, unreachable branch, or unreferenced new module left behind.
+3. **Testing** — test branches and integration/concurrency/time/cleanup
+   independence: each branch this change adds has a test that fails for the
+   intended reason, and tests do not depend on execution order, wall-clock or
+   timezone behavior, shared mutable temporary state, or another test's cleanup.
+4. **Simplification** — branch-added overengineering: indirection, options,
+   parameters, configuration, or abstractions this branch introduces without a
+   present caller or proven variation.
+5. **Documentation** — missing or stale README, instructions, help text,
+   changelog, and plan documentation for the behavior this branch changed.
+6. **Security** — injection and secret leakage: untrusted input reaching shell,
+   SQL, path, or template evaluation, and credentials or tokens reaching logs,
+   errors, prompts, or committed files.
+
+The sections below are the heuristics these checks draw on.
+
 ## Module shape
 
 - Give each file or internal module one coherent responsibility and change

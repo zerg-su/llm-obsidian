@@ -151,6 +151,54 @@ require(
     ),
 )
 require(
+    "review binds the whole six-part engineering denominator without new topology",
+    all(
+        phrase in review
+        for phrase in (
+            "engineering-quality-contract.md",
+            "whole six-section review denominator",
+            "even when a section is clean",
+        )
+    )
+    and "no hidden lane, model call, severity cap" in review
+    # The six section names stay single-sourced in the contract, not restated here.
+    and "simplification, documentation" not in review,
+)
+require(
+    "quality contract states the six-part review denominator and its explicit checks",
+    all(
+        phrase in quality
+        for phrase in (
+            "review denominator",
+            "logic and edge cases",
+            "error and resource behavior",
+            "races and data integrity",
+            "implementation completeness and wiring",
+            "test branches",
+            "integration/concurrency/time/cleanup independence",
+            "branch-added overengineering",
+            "injection and secret leakage",
+        )
+    )
+    and all(
+        f"**{section}**".casefold() in quality
+        for section in (
+            "Quality",
+            "Implementation",
+            "Testing",
+            "Simplification",
+            "Documentation",
+            "Security",
+        )
+    ),
+)
+require(
+    "quality contract keeps documentation staleness inside the denominator",
+    "readme" in quality
+    and "changelog" in quality
+    and "plan documentation" in quality,
+)
+require(
     "improve-skills has an explicit exhaustive capability-gap audit mode",
     "capability-gap-model.md" in improve
     and "explicit capability-integration audit" in improve

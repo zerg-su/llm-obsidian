@@ -255,6 +255,11 @@ def _prompt(
             f"`{worktree / 'docs/skill-references/engineering-quality-contract.md'}`."
         ),
         (
+            "Cover its Review denominator in full and report each section "
+            "explicitly, including when it is clean: Quality, Implementation, "
+            "Testing, Simplification, Documentation, and Security."
+        ),
+        (
             "Repository-specific standards override its heuristics, but their "
             "absence never suppresses engineering-quality judgment."
         ),

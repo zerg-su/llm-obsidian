@@ -51,15 +51,13 @@ Plans use `plan --plan <repo-plan>` (never legacy `current --plan`): it selects
 
 Implementer summaries/reports are claims. Holistic/intent lanes first classify
 each success-evidence item `established`, `missing`, or `contradicted` from
-inspection and check non-goals for scope creep. Holistic/engineering lanes apply
-`docs/skill-references/engineering-quality-contract.md`; repository-specific
-standards override its heuristics. Transport, clean diffs, and local green are
-not outcome proof. Add
-no hidden lane, model call, severity cap, reranking, vote, average, or loop.
-
-For engineering review, read
+inspection and check non-goals for scope creep. Holistic/engineering lanes read
 [`engineering-quality-contract.md`](../../docs/skill-references/engineering-quality-contract.md)
-completely. Verify findings against code; rejection requires technical evidence.
+completely and report its whole six-section review denominator, even when a
+section is clean; repository-specific standards override its heuristics.
+Transport, clean diffs, and local green are not outcome proof. Verify findings
+against code; rejection requires technical evidence. Add no hidden lane, model
+call, severity cap, reranking, vote, average, or loop.
 
 ## Flow
 

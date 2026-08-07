@@ -20,6 +20,8 @@ from harness.workflows.prototype import (
     run_prototype,
 )
 from harness.git_ops import ConflictEvidence, GitAdapter, GitError, GitSnapshot
+from harness.workflows.review import ReviewContext
+from task_review_request import _prompt
 
 
 def check(label: str, value: bool) -> None:
@@ -241,4 +243,144 @@ check(
     and applied.continued
     and conflict_git.staged == ("src/main.py",)
     and conflict_git.continued == "rebase",
+)
+
+DENOMINATOR_SECTIONS = (
+    "Quality",
+    "Implementation",
+    "Testing",
+    "Simplification",
+    "Documentation",
+    "Security",
+)
+DENOMINATOR_CHECKS = (
+    "logic and edge cases",
+    "error and resource behavior",
+    "races and data integrity",
+    "implementation completeness and wiring",
+    "test branches",
+    "integration/concurrency/time/cleanup independence",
+    "branch-added overengineering",
+    "injection and secret leakage",
+)
+contract_path = ROOT / "docs/skill-references/engineering-quality-contract.md"
+contract_text = contract_path.read_text(encoding="utf-8")
+contract_flat = " ".join(contract_text.split())
+check(
+    "engineering contract owns exactly one authoritative review denominator",
+    contract_text.count("## Review denominator") == 1,
+)
+check(
+    "review denominator names each of the six sections exactly once",
+    all(contract_text.count(f"**{section}**") == 1 for section in DENOMINATOR_SECTIONS),
+)
+for phrase in DENOMINATOR_CHECKS:
+    check(
+        f"review denominator explicitly checks {phrase}",
+        phrase in contract_flat,
+    )
+check(
+    "review denominator stays a coverage floor and adds no topology",
+    "not a severity cap" in contract_flat
+    and "adds no lane, model call, or loop" in contract_flat,
+)
+
+DENOMINATOR_INSTRUCTION = (
+    "Cover its Review denominator in full and report each section explicitly, "
+    "including when it is clean: Quality, Implementation, Testing, "
+    "Simplification, Documentation, and Security."
+)
+prompt_context = ReviewContext(
+    "packets/review/manifest.json",
+    "b" * 40,
+    "scoped",
+    "c" * 64,
+    implementer_summary_sha256="d" * 64,
+)
+with tempfile.TemporaryDirectory(prefix="review-denominator-prompts.") as raw:
+    prompt_root = Path(raw)
+    prompts: dict[tuple[str, bool], str] = {}
+    for axis in ("anthropic-holistic", "openai-engineering", "anthropic-intent"):
+        for verification in (False, True):
+            pointer = _prompt(
+                vault=ROOT,
+                worktree=ROOT,
+                runtime_root=prompt_root,
+                context=prompt_context,
+                axis=axis,
+                verification=verification,
+            )
+            prompts[(axis, verification)] = (prompt_root / pointer).read_text(
+                encoding="utf-8"
+            )
+
+for axis in ("anthropic-holistic", "openai-engineering"):
+    for verification in (False, True):
+        prompt = prompts[(axis, verification)]
+        flat = " ".join(prompt.split())
+        check(
+            f"{axis} verification={verification} binds the authoritative rubric file",
+            str(contract_path) in prompt,
+        )
+        check(
+            f"{axis} verification={verification} binds the whole six-part denominator",
+            DENOMINATOR_INSTRUCTION in flat,
+        )
+        check(
+            f"{axis} verification={verification} keeps repository overrides authoritative",
+            "Repository-specific standards override" in prompt,
+        )
+
+for verification in (False, True):
+    intent_prompt = prompts[("anthropic-intent", verification)]
+    check(
+        f"intent verification={verification} stays outcome-only without the denominator",
+        "Review denominator" not in intent_prompt
+        and str(contract_path) not in intent_prompt
+        and "Classify every declared success-evidence item" in intent_prompt,
+    )
+
+def prompt_sections(text: str) -> tuple[str, ...]:
+    """Sections a review prompt actually demands, in prompt order."""
+    listed = " ".join(text.split()).split("including when it is clean: ", 1)
+    if len(listed) != 2:
+        return ()
+    return tuple(
+        section.strip()
+        for section in listed[1]
+        .split(".", 1)[0]
+        .replace(" and ", " ")
+        .split(", ")
+    )
+
+
+def bound_to_rubric(text: str) -> bool:
+    """The prompt demands exactly the sections the rubric defines."""
+    sections = prompt_sections(text)
+    return bool(sections) and all(
+        f"**{section}**" in contract_text for section in sections
+    )
+
+
+check(
+    "prompt denominator sections match the rubric sections exactly",
+    prompt_sections(prompts[("anthropic-holistic", False)]) == DENOMINATOR_SECTIONS,
+)
+check(
+    "no prompt section drifts away from a rubric heading",
+    bound_to_rubric(prompts[("anthropic-holistic", False)]),
+)
+check(
+    "a prompt section with no rubric heading is rejected as drift",
+    not bound_to_rubric(
+        prompts[("anthropic-holistic", False)].replace(
+            "Simplification", "Observability"
+        )
+    ),
+)
+check(
+    "a prompt that drops the denominator entirely is rejected as drift",
+    not bound_to_rubric(
+        prompts[("anthropic-holistic", False)].replace(DENOMINATOR_INSTRUCTION, "")
+    ),
 )
