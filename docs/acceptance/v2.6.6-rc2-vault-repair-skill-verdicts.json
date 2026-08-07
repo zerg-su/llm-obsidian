@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "skill": "vault-repair",
+      "verdict": "fix",
+      "passes": {
+        "invocation": "pass",
+        "hierarchy": "pass",
+        "steering": "success-report-under-specified",
+        "pruning": "pass",
+        "goal_preservation": "pass"
+      },
+      "overall_input": "A blocked Stop pipeline, its content-free diagnostic, and the current vault Git state.",
+      "overall_outcome": "One bounded local recovery attempt that either reports the exact resulting commit, reports no-change, or stops with the unchanged fail-closed diagnostic.",
+      "local_subgoal": "Repair only the repository-owned vault transaction and make the result auditable without introducing another writer or retry loop.",
+      "completion_proxies": [
+        "The validator is green.",
+        "The Stop hook exits successfully.",
+        "The worktree looks clean."
+      ],
+      "required_outcome_evidence": [
+        "The pre/post HEAD comparison reports the exact new commit SHA or the explicit no-change outcome, while a remaining COMMIT_BLOCKED state preserves the exact dirty paths."
+      ],
+      "evidence": "skills/vault-repair/SKILL.md; tests/test_instruction_lint.py; docs/acceptance/v2.6.6-rc2-vault-repair-skill-verdicts.json",
+      "change": "Record HEAD before repair and require the post-repair report to distinguish an exact committed SHA from no-change.",
+      "behavior_proof": "The skill still delegates writes to vault-write.py and the existing Stop owner, performs one attempt, remains offline, and does not broaden staging or cleanup authority."
+    }
+  ]
+}

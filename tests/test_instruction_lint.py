@@ -109,6 +109,8 @@ for required in (
     "python3 scripts/vault-write.py --recover",
     "python3 scripts/validate-vault.py --summary",
     "LLM_OBSIDIAN_ALLOW_CLAUDE_HOOKS=1 ./.claude/hooks/stop.sh",
+    "git rev-parse HEAD",
+    "no-change",
     "one repair attempt",
 ):
     assert required in vault_repair, required
