@@ -32,13 +32,15 @@ MAX_ATTEMPTS = 5
 REVIEW_VERDICTS = frozenset(
     {"approved", "changes-requested", "blocked", "unavailable"}
 )
+_ROUTING = load_tracked_config(ROOT)
+_INDEPENDENT_ROUTE = _ROUTING.finalization_route("finalization-independent")
+_INDEPENDENT_ROLE = _INDEPENDENT_ROUTE["model"]
 ROLE_AXES = {
-    "fable": "anthropic-holistic",
+    _INDEPENDENT_ROLE: "anthropic-holistic",
     "independent-configured": "openai-holistic",
 }
-_ROUTING = load_tracked_config(ROOT)
 ROLE_ROUTES = {
-    "fable": _ROUTING.resolve_alias("fable", "claude"),
+    _INDEPENDENT_ROLE: _INDEPENDENT_ROUTE,
     "independent-configured": _ROUTING.reviewer_default("codex", "simple"),
 }
 SCHEMA_PATH = ROOT / "schemas/rc3-release-disposition-v1.schema.json"
