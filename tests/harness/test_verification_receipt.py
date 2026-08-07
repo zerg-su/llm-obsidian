@@ -358,6 +358,17 @@ with tempfile.TemporaryDirectory(prefix="verification-receipt.") as raw:
         "mcp-sync-config",
         "codex-mcp-sync",
     )
+    release_ids = tuple(
+        item.command_id for item in receipts.PROFILES["release-final"].commands
+    )
+    assert release_ids[-5:] == (
+        "release-secret-check",
+        "harness-status",
+        "harness-doctor",
+        "diff-check",
+        "clean-status",
+    )
+    print("OK   release-final includes exact-candidate secret evidence")
     bootstrap_profile = receipts.GateProfile(
         "test-stability-bootstrap",
         (

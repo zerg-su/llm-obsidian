@@ -156,6 +156,17 @@ PROFILES = {
                 ("scripts/mcp-gateway/mcp-gateway.sh", "codex-sync", "--check"),
             ),
             GateCommand(
+                "release-secret-check",
+                (
+                    "python3",
+                    "scripts/release-secret-check.py",
+                    "--root",
+                    ".",
+                    "--base",
+                    "nearest-tag",
+                ),
+            ),
+            GateCommand(
                 "harness-status",
                 ("python3", "scripts/harness-cli.py", "--json", "status"),
                 "resource-free",
