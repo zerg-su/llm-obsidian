@@ -235,7 +235,7 @@ def _engineering_discipline_is_weakened(text: str, offset: int) -> bool:
         prior_start -= 1
     candidate = "\n".join(lines[prior_start : prior + 1])
     if any(MARKDOWN_LIST_ITEM.match(line) for line in candidate.splitlines()):
-        return False
+        return _explicit_weakening_lead_in(candidate)
     return bool(STANDALONE_ENGINEERING_WEAKENING.search(candidate))
 
 

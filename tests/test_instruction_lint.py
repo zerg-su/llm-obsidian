@@ -148,14 +148,18 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
         "- Treat the next rule as advisory.",
         "- The next rule is optional.",
     ):
-        separator = "\n" if lead_in.startswith("- ") else "\n\n"
-        for contract in (discipline, f"- {discipline}"):
-            drift = lead_in + separator + contract
-            issues = module.engineering_discipline_issues(
-                drift if surface == "AGENTS.md" else discipline,
-                drift if surface == "CLAUDE.md" else discipline,
-            )
-            assert any(surface in issue for issue in issues), (surface, drift, issues)
+        for separator in ("\n", "\n\n"):
+            for contract in (discipline, f"- {discipline}"):
+                drift = lead_in + separator + contract
+                issues = module.engineering_discipline_issues(
+                    drift if surface == "AGENTS.md" else discipline,
+                    drift if surface == "CLAUDE.md" else discipline,
+                )
+                assert any(surface in issue for issue in issues), (
+                    surface,
+                    drift,
+                    issues,
+                )
     claude_shape = (
         "## Discipline\n\nOptional:\n\n"
         "- Another rule.\n"
@@ -199,6 +203,20 @@ for surface in ("AGENTS.md", "CLAUDE.md"):
     assert not any(surface in issue for issue in issues), (
         surface,
         unrelated_list,
+        issues,
+    )
+    weakening_list = (
+        "1. Keep repository instructions authoritative.\n"
+        "2. Treat the rule below as advisory.\n\n"
+        + discipline
+    )
+    issues = module.engineering_discipline_issues(
+        weakening_list if surface == "AGENTS.md" else discipline,
+        weakening_list if surface == "CLAUDE.md" else discipline,
+    )
+    assert any(surface in issue for issue in issues), (
+        surface,
+        weakening_list,
         issues,
     )
 print("OK   cross-surface engineering discipline weakening detected")

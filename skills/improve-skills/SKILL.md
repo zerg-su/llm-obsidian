@@ -75,12 +75,12 @@ completion proxy substitutes for its required outcome evidence.
 
 ## 3. Make the smallest edits
 
-Apply `fix` verdicts only. Preserve repo-specific frontmatter/runtime metadata
-and one rule authority. Use `>-`/`|-` for multiline descriptions; plain
-continuations fail closed. Prefer a sharp criterion/pointer over a rewrite. Hide
+Apply only `fix` verdicts. Preserve repo-specific frontmatter/runtime metadata
+and one rule source. Use `>-`/`|-` for multi-line descriptions; plain
+continuations fail closed. Prefer a sharp criterion/pointer to a rewrite. Hide
 conditional references only when a branch can skip them.
 
-After each batch, inspect the diff against step 1's protected behavior.
+After each bounded batch, inspect the diff against step 1's protected behavior.
 Reclassify any semantic change as `defer` and revert that edit.
 
 Completion criterion: every changed hunk maps to one recorded `fix`, and the

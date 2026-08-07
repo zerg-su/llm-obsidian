@@ -47,8 +47,8 @@
         "RC4-E8-agent-discipline-and-skill-quality"
       ],
       "evidence": "Opus review found that step 3 had lost the explicit frontmatter preservation obligation and then the object of comparison from 'Prefer a sharp criterion/pointer.', making the latter sentence behaviorally incomplete.",
-      "change": "Preserve repo-specific frontmatter/runtime metadata explicitly and restore 'over a rewrite' while compressing adjacent prose without changing action order or authorization.",
-      "behavior_proof": "Invocation metadata, tools, five-pass workflow, verdict schema, authorization boundary, validation commands, and completion criteria remain unchanged; only the two incomplete steering sentences are restored within the frozen budget."
+      "change": "Preserve repo-specific frontmatter/runtime metadata, a single rule source, the comparison to a rewrite, and bounded-batch inspection while staying inside the frozen body budget.",
+      "behavior_proof": "Invocation metadata, tools, five-pass workflow, verdict schema, authorization boundary, validation commands, and completion criteria remain unchanged. Step 3 retains apply-only ordering, repo-specific frontmatter/runtime metadata, one rule source, fail-closed multi-line markers, comparison to a rewrite, conditional-reference scope, and bounded-batch inspection."
     }
   ]
 }
